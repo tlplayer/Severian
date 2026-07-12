@@ -9,6 +9,7 @@ front end:
 - `compiler/ast`: source-level syntax tree nodes.
 - `docs/language`: living language notes.
 - `docs/examples`: example `.sev` programs that should become compiler fixtures.
+- `docs/examples/14-packages`: placeholder Cargo-like package layout.
 
 ## Design Center
 
@@ -22,6 +23,8 @@ The intended feel is:
 - Rust safety through ownership inference, explicit escape hatches, and
   recoverable errors as values.
 - Go practicality through direct concurrency primitives and simple tooling.
+- Cargo-style official packaging through `sev`, with one standard manifest,
+  build, test, doc, and publish workflow.
 
 ## Example
 

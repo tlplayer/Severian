@@ -29,6 +29,11 @@ paths while staying Sevarian-first:
 | `09-systems-unsafe` | Pointers, unsafe blocks, and isolated low-level code. |
 | `10-numerics-mlir` | Tensor-style code that should lower cleanly to MLIR. |
 | `11-testing` | Function-attached and constructor-attached tests. |
+| `12-enums-aliases` | Placeholder enum and type alias syntax. |
+| `13-method-mutation` | Placeholder method mutation contracts. |
+| `14-packages` | Cargo-like official package layout and manifest. |
+| `15-test-modes` | Placeholder `example:`, `bench:`, and property tests. |
+| `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
 
 For now these are syntax fixtures that define the language target. Once the
 compiler driver exists, each file should be compiled by automated tests, starting

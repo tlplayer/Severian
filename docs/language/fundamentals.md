@@ -278,3 +278,6 @@ The folders are ordered so the compiler can grow in passes:
    constraints.
 3. `08-concurrency` through `10-numerics-mlir` layer in Go-style concurrency,
    systems boundaries, and MLIR-oriented numeric kernels.
+4. `12-enums-aliases` onward hold placeholders for features we want to revisit:
+   enums, aliases, method mutation contracts, Cargo-like packaging, richer test
+   modes, and compiler-stage fixture organization.
