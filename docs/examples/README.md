@@ -23,7 +23,7 @@ paths while staying Sevarian-first:
 | `03-collections-iteration` | Lists, tuples, maps, sets, ranges, iteration. |
 | `04-classes-traits` | Value classes, methods, traits, trait composition. |
 | `05-ownership-borrowing` | Inferred ownership plus explicit borrow/clone/move. |
-| `06-results-patterns` | `Result`, `Option`, `?`, `present`, `absent`, and exhaustive switching. |
+| `06-results-patterns` | `Result`, `Option`, `?=`, `present`, `absent`, and exhaustive switching. |
 | `07-generics-constraints` | Type parameters and trait-bounded abstractions. |
 | `08-concurrency` | `async`, `await`, tasks, and safe shared state shapes. |
 | `09-systems-unsafe` | Pointers, unsafe blocks, and isolated low-level code. |

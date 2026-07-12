@@ -178,6 +178,7 @@ pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
     Assert(AssertStmt),
+    TryBind(TryBindStmt),
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
@@ -195,6 +196,7 @@ impl Stmt {
             Stmt::Let(node) => node.span,
             Stmt::Assign(node) => node.span,
             Stmt::Assert(node) => node.span,
+            Stmt::TryBind(node) => node.span,
             Stmt::Return(node) => node.span,
             Stmt::If(node) => node.span,
             Stmt::While(node) => node.span,
@@ -235,6 +237,14 @@ pub struct AssertStmt {
     pub span: Span,
     pub condition: Expr,
     pub message: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryBindStmt {
+    pub span: Span,
+    pub name: Ident,
+    pub ty: Option<Type>,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -317,7 +327,6 @@ pub enum Expr {
     Await(AwaitExpr),
     Async(AsyncExpr),
     Ownership(OwnershipExpr),
-    Try(TryExpr),
 }
 
 impl Expr {
@@ -338,7 +347,6 @@ impl Expr {
             Expr::Await(node) => node.span,
             Expr::Async(node) => node.span,
             Expr::Ownership(node) => node.span,
-            Expr::Try(node) => node.span,
         }
     }
 }
@@ -459,12 +467,6 @@ pub struct OwnershipExpr {
     pub span: Span,
     pub value: Box<Expr>,
     pub op: OwnershipOp,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TryExpr {
-    pub span: Span,
-    pub value: Box<Expr>,
 }
 
 //

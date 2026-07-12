@@ -2,8 +2,8 @@
 
 The AST models source syntax after parsing and before semantic analysis. It keeps
 the shape of the user's program intact: names, spans, indentation-derived blocks,
-patterns, explicit type annotations, and expressions such as `async`, `await`,
-`?`, `.borrow()`, `.clone()`, and `.move()`.
+patterns, explicit type annotations, and statements such as `?=`, plus
+expressions such as `async`, `await`, `.borrow()`, `.clone()`, and `.move()`.
 
 ## Principles
 
@@ -31,8 +31,8 @@ patterns, explicit type annotations, and expressions such as `async`, `await`,
   unsafe blocks, break, continue, and expression statements.
 - Function and constructor declarations can carry attached `test:` blocks.
 - Expressions for literals, identifiers, calls, members, collections, indexing,
-  conditionals, switches, lambdas, math operators, concurrency, ownership, and
-  error propagation.
+  conditionals, switches, lambdas, math operators, concurrency, and ownership.
+  `?=` is represented as a try-bind statement for error propagation.
 - Patterns for wildcard, literals, identifiers, tuples, lists, constructors, and
   alternatives.
 - Types for named paths, collections, functions, results, options, futures, and

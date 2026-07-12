@@ -1,5 +1,5 @@
 def fetch(url: string) -> Result[string, IOError]:
-    body = http.get(url)?
+    body ?= http.get(url)
     return ok(body)
 
 test:

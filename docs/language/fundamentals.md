@@ -180,11 +180,11 @@ which is either `ok(value)` or `failure(error)`.
 
 ```sev
 def load(path: Path) -> Result[string, IOError]:
-    data = read(path)?
+    data ?= read(path)
     return ok(data)
 ```
 
-`?` unwraps the `ok(...)` value and returns early from the current function when
+`?=` binds the `ok(...)` value and returns early from the current function when
 it sees a `failure(...)` outcome.
 
 ```sev
