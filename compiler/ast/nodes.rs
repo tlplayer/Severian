@@ -8,7 +8,6 @@ pub struct Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    Const(ConstDecl),
     Function(FunctionDecl),
     Class(ClassDecl),
     Trait(TraitDecl),
@@ -19,7 +18,6 @@ pub enum Item {
 impl Item {
     pub fn span(&self) -> Span {
         match self {
-            Item::Const(node) => node.span,
             Item::Function(node) => node.span,
             Item::Class(node) => node.span,
             Item::Trait(node) => node.span,
@@ -86,14 +84,6 @@ pub struct ImportName {
     pub span: Span,
     pub name: Ident,
     pub alias: Option<Ident>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConstDecl {
-    pub span: Span,
-    pub name: Ident,
-    pub ty: Option<Type>,
-    pub value: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -559,6 +549,10 @@ pub enum Type {
         span: Span,
         elements: Vec<Type>,
     },
+    Union {
+        span: Span,
+        alternatives: Vec<Type>,
+    },
     Map {
         span: Span,
         key: Box<Type>,
@@ -599,6 +593,7 @@ impl Type {
             Type::Named(node) => node.span,
             Type::List { span, .. }
             | Type::Tuple { span, .. }
+            | Type::Union { span, .. }
             | Type::Map { span, .. }
             | Type::Set { span, .. }
             | Type::Result { span, .. }

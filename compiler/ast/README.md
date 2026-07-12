@@ -10,8 +10,9 @@ patterns, explicit type annotations, and expressions such as `async`, `await`,
 - Every AST node that can produce diagnostics carries a `Span`.
 - The AST records syntax, not inferred meaning. Ownership, lifetimes, overload
   resolution, and type inference belong in later compiler phases.
-- Type annotations use `name: Type` surface syntax for bindings, parameters,
-  fields, constants, and extern declarations.
+- Valued declarations use one concrete prefix type, such as `int count = 0`.
+  Uninitialized fields and parameters use `name: Type`; parameters can accept
+  alternatives with union types such as `value: string | int | float`.
 - Decorators such as `@math(X)` are recorded on declarations so later phases can
   opt functions into domain-specific symbol packs, syntax, and checks.
 - Python-like syntax should remain visible as blocks, declarations, calls,

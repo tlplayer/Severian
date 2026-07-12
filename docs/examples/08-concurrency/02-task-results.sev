@@ -1,4 +1,4 @@
-def fetch(url: str) -> Result[str, IOError]:
+def fetch(url: string) -> Result[string, IOError]:
     body = http.get(url)?
     return ok(body)
 

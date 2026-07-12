@@ -1,5 +1,5 @@
-const MaxRetries: int = 3
-const Pi: float = 3.1415926
+int MaxRetries = 3
+float Pi = 3.1415926
 
 def main():
     print(MaxRetries)

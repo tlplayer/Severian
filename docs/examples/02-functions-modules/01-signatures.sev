@@ -1,7 +1,7 @@
 def scale(value: float, factor: float = 1.0) -> float:
     return value * factor
 
-def describe(label: str, value: float) -> str:
+def describe(label: string, value: float) -> string:
     return f"{label}: {value}"
 
 def main():

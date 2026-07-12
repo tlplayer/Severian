@@ -19,24 +19,24 @@ Use `:=` when the binding itself changes over time: counters, builders,
 accumulators, state machines, and buffers. It does not mean dynamically typed;
 types are still inferred or checked statically.
 
-Plain `=` bindings are already constant in the everyday local sense, so Sevarian
-does not need `const` just to prevent reassignment.
-
-`const` is reserved for named compile-time values, usually at module scope.
+Plain `=` bindings are stable and cannot be reassigned. `:=` is the explicit
+form for changeable bindings.
 
 ```sev
-const MaxRetries: int = 3
-const Pi: float = 3.1415926
+int MaxRetries = 3
+float Pi = 3.1415926
 ```
 
 Explicit types are available where they clarify public APIs or interop.
-Sevarian uses annotation syntax so the name stays first and richer type
-information can grow to the right.
+Valued declarations use one concrete type before the name.
 
 ```sev
-width: int = 1920
-height: int = 1080
+int width = 1920
+int height = 1080
 ```
+
+Uninitialized fields use `name: Type`, because class schemas tend to evolve and
+the name is the stable part of the declaration.
 
 ## Control Flow
 
@@ -55,7 +55,8 @@ the setup live only inside the loop condition and body.
 ## Functions
 
 Functions use Python-like `def` syntax with optional return annotations.
-Parameters use the same `name: Type` annotation style as bindings.
+Parameters use `name: Type`, which keeps the parameter name fixed while richer
+accepted input types grow to the right.
 
 ```sev
 def add(a: int, b: int) -> int:
@@ -63,6 +64,13 @@ def add(a: int, b: int) -> int:
 
 test:
     assert(add(1, 2) == 3)
+```
+
+Use `|` for accepted type alternatives.
+
+```sev
+def parse(value: string | int | float) -> float:
+    return float(value)
 ```
 
 Tests can be attached directly to functions. They compile with the function and
@@ -151,7 +159,7 @@ Optional values represent presence or absence without null. A function returning
 `Option[T]` returns either `present(value)` or `absent`.
 
 ```sev
-def find_name(id: int) -> Option[str]:
+def find_name(id: int) -> Option[string]:
     if id == 1:
         return present("ada")
 
@@ -171,7 +179,7 @@ Recoverable errors are values. A fallible function returns a `Result[T, E]`,
 which is either `ok(value)` or `failure(error)`.
 
 ```sev
-def load(path: Path) -> Result[String, IOError]:
+def load(path: Path) -> Result[string, IOError]:
     data = read(path)?
     return ok(data)
 ```
@@ -251,7 +259,7 @@ The same idea can reserve words for non-math domains.
 import regex
 
 @regex(match)
-def has_slug(text: str) -> bool:
+def has_slug(text: string) -> bool:
     return match text with r"[a-z]+-[0-9]+"
 ```
 

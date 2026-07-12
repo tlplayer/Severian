@@ -1,13 +1,13 @@
 trait Named:
-    name() -> str
+    name() -> string
 
 trait Drawable:
     draw()
 
 class Button: Named, Drawable
-    label: str
+    label: string
 
-    def name() -> str:
+    def name() -> string:
         return label
 
     def draw():

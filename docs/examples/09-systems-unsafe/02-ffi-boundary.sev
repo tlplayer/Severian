@@ -1,6 +1,6 @@
 extern def c_strlen(text: ptr[u8]) -> usize
 
-def strlen(text: str) -> usize:
+def strlen(text: string) -> usize:
     bytes = text.utf8()
 
     unsafe:

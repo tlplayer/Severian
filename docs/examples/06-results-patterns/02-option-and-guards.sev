@@ -1,4 +1,4 @@
-def find_name(id: int) -> Option[str]:
+def find_name(id: int) -> Option[string]:
     if id == 1:
         return present("ada")
 
