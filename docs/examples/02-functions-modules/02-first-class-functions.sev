@@ -4,6 +4,9 @@ def add(a: int, b: int) -> int:
 def apply(op: fn[int, int, int], left: int, right: int) -> int:
     return op(left, right)
 
+test:
+    assert(apply(add, 20, 22) == 42)
+
 def main():
     result = apply(add, 20, 22)
     print(result)

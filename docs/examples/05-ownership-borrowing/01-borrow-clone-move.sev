@@ -1,10 +1,13 @@
-def sum(list[int] values) -> int:
+def sum(values: list[int]) -> int:
     total := 0
 
     for value in values:
         total += value
 
     return total
+
+test:
+    assert(sum([1, 2, 3, 4]) == 10)
 
 def main():
     numbers = [1, 2, 3, 4]

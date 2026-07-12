@@ -99,10 +99,19 @@ pub struct ConstDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
     pub span: Span,
+    pub decorators: Vec<Decorator>,
     pub name: Ident,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Block,
+    pub tests: Vec<TestBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decorator {
+    pub span: Span,
+    pub name: TypePath,
+    pub args: Vec<CallArg>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,9 +125,11 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDecl {
     pub span: Span,
+    pub decorators: Vec<Decorator>,
     pub name: Ident,
     pub traits: Vec<Type>,
     pub fields: Vec<Field>,
+    pub constructors: Vec<ConstructorDecl>,
     pub methods: Vec<FunctionDecl>,
 }
 
@@ -135,6 +146,23 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub methods: Vec<TraitMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstructorDecl {
+    pub span: Span,
+    pub decorators: Vec<Decorator>,
+    pub name: Ident,
+    pub params: Vec<Parameter>,
+    pub body: Block,
+    pub tests: Vec<TestBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestBlock {
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub body: Block,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,11 +187,12 @@ pub struct Block {
 pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
+    Assert(AssertStmt),
     Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
     For(ForStmt),
-    Match(MatchStmt),
+    Switch(SwitchStmt),
     Unsafe(UnsafeBlock),
     Expr(Expr),
     Break(Span),
@@ -175,11 +204,12 @@ impl Stmt {
         match self {
             Stmt::Let(node) => node.span,
             Stmt::Assign(node) => node.span,
+            Stmt::Assert(node) => node.span,
             Stmt::Return(node) => node.span,
             Stmt::If(node) => node.span,
             Stmt::While(node) => node.span,
             Stmt::For(node) => node.span,
-            Stmt::Match(node) => node.span,
+            Stmt::Switch(node) => node.span,
             Stmt::Unsafe(node) => node.span,
             Stmt::Expr(node) => node.span(),
             Stmt::Break(span) | Stmt::Continue(span) => *span,
@@ -208,6 +238,13 @@ pub struct AssignStmt {
     pub target: Expr,
     pub op: AssignOp,
     pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssertStmt {
+    pub span: Span,
+    pub condition: Expr,
+    pub message: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,14 +284,14 @@ pub struct ForStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchStmt {
+pub struct SwitchStmt {
     pub span: Span,
     pub value: Expr,
-    pub arms: Vec<MatchArm>,
+    pub arms: Vec<SwitchArm>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchArm {
+pub struct SwitchArm {
     pub span: Span,
     pub pattern: Pattern,
     pub guard: Option<Expr>,
@@ -285,10 +322,10 @@ pub enum Expr {
     Set(CollectionExpr),
     Index(IndexExpr),
     If(IfExpr),
-    Match(MatchExpr),
+    Switch(SwitchExpr),
     Lambda(LambdaExpr),
     Await(AwaitExpr),
-    Spawn(SpawnExpr),
+    Async(AsyncExpr),
     Ownership(OwnershipExpr),
     Try(TryExpr),
 }
@@ -306,10 +343,10 @@ impl Expr {
             Expr::Map(node) => node.span,
             Expr::Index(node) => node.span,
             Expr::If(node) => node.span,
-            Expr::Match(node) => node.span,
+            Expr::Switch(node) => node.span,
             Expr::Lambda(node) => node.span,
             Expr::Await(node) => node.span,
-            Expr::Spawn(node) => node.span,
+            Expr::Async(node) => node.span,
             Expr::Ownership(node) => node.span,
             Expr::Try(node) => node.span,
         }
@@ -387,14 +424,14 @@ pub struct IfExpr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchExpr {
+pub struct SwitchExpr {
     pub span: Span,
     pub value: Box<Expr>,
-    pub arms: Vec<MatchExprArm>,
+    pub arms: Vec<SwitchExprArm>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchExprArm {
+pub struct SwitchExprArm {
     pub span: Span,
     pub pattern: Pattern,
     pub guard: Option<Expr>,
@@ -422,7 +459,7 @@ pub struct AwaitExpr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SpawnExpr {
+pub struct AsyncExpr {
     pub span: Span,
     pub value: Box<Expr>,
 }
@@ -608,6 +645,7 @@ pub enum BinaryOp {
     Div,
     Mod,
     MatMul,
+    Cross,
     Equal,
     NotEqual,
     Less,

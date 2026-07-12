@@ -3,7 +3,7 @@ class Point:
     y: int
 
 def describe(point: Point):
-    match point:
+    switch point:
         Point(0, 0):
             print("origin")
 

@@ -1,15 +1,18 @@
+import math
+
 def worker(id: int) -> int:
     return id * 2
 
+@math(X)
 def main():
-    first = spawn worker(10)
-    second = spawn worker(20)
+    first = async worker(10)
+    second = async worker(20)
 
     a = await first
     b = await second
 
-    x = rand(1024, 1024)
-    y = x @ x
+    x = matrix.rand(1024, 1024)
+    y = x X x
 
     print(a + b)
     print(y.shape)

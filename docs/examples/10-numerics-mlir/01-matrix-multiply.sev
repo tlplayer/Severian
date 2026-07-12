@@ -1,5 +1,8 @@
+import math
+
+@math(X)
 def main():
-    x = rand(1024, 1024)
-    y = x @ x
+    x = matrix.rand(1024, 1024)
+    y = x X x
 
     print(y.shape)

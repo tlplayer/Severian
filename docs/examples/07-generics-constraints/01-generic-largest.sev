@@ -3,7 +3,7 @@ trait Ordered:
 
 def largest[T: Ordered](values: list[T]) -> Option[T]:
     if values.len() == 0:
-        return None
+        return absent
 
     best := values[0]
 
@@ -11,7 +11,15 @@ def largest[T: Ordered](values: list[T]) -> Option[T]:
         if best.less_than(value):
             best = value
 
-    return Some(best)
+    return present(best)
+
+test:
+    switch largest([3, 9, 2]):
+        present value:
+            assert(value == 9)
+
+        absent:
+            assert(false, "expected largest value")
 
 def main():
     result = largest([3, 9, 2])

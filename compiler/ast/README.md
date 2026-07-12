@@ -2,7 +2,7 @@
 
 The AST models source syntax after parsing and before semantic analysis. It keeps
 the shape of the user's program intact: names, spans, indentation-derived blocks,
-patterns, explicit type annotations, and expressions such as `spawn`, `await`,
+patterns, explicit type annotations, and expressions such as `async`, `await`,
 `?`, `.borrow()`, `.clone()`, and `.move()`.
 
 ## Principles
@@ -12,21 +12,26 @@ patterns, explicit type annotations, and expressions such as `spawn`, `await`,
   resolution, and type inference belong in later compiler phases.
 - Type annotations use `name: Type` surface syntax for bindings, parameters,
   fields, constants, and extern declarations.
+- Decorators such as `@math(X)` are recorded on declarations so later phases can
+  opt functions into domain-specific symbol packs, syntax, and checks.
 - Python-like syntax should remain visible as blocks, declarations, calls,
   members, and collection literals.
 - Rust-like safety hooks are represented explicitly through result types,
   patterns, unsafe blocks, and ownership operations.
-- Go-like concurrency starts as simple `spawn` and `await` expressions.
+- Concurrent calls are explicit: ordinary calls block, `async` starts work
+  without blocking, and `await` joins a task handle.
 
 ## Current Coverage
 
-- Modules, `import`, `from ... import ...`, functions, classes, traits, fields,
-  and trait methods.
+- Modules, `import`, `from ... import ...`, functions, classes, constructors,
+  traits, fields, and trait methods.
 - Statements for stable `=` bindings, changeable `:=` bindings, assignment,
-  returns, loops, `while condition with setup` clauses, matches, unsafe blocks,
-  break, continue, and expression statements.
+  assertions, returns, loops, `while condition with setup` clauses, switches,
+  unsafe blocks, break, continue, and expression statements.
+- Function and constructor declarations can carry attached `test:` blocks.
 - Expressions for literals, identifiers, calls, members, collections, indexing,
-  conditionals, matches, lambdas, concurrency, ownership, and error propagation.
+  conditionals, switches, lambdas, math operators, concurrency, ownership, and
+  error propagation.
 - Patterns for wildcard, literals, identifiers, tuples, lists, constructors, and
   alternatives.
 - Types for named paths, collections, functions, results, options, futures, and

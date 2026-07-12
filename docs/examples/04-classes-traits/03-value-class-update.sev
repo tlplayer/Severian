@@ -5,6 +5,13 @@ class Point:
     def translated(dx: float, dy: float) -> Point:
         return Point(x + dx, y + dy)
 
+test:
+    start = Point(1.0, 2.0)
+    next = start.translated(3.0, 4.0)
+
+    assert(next.x == 4.0)
+    assert(next.y == 6.0)
+
 def main():
     start = Point(1.0, 2.0)
     next = start.translated(3.0, 4.0)

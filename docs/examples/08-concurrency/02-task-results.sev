@@ -1,14 +1,25 @@
 def fetch(url: str) -> Result[str, IOError]:
     body = http.get(url)?
-    return Ok(body)
+    return ok(body)
 
-def main():
-    task = spawn fetch("https://example.test")
+test:
+    task = async fetch("https://example.test")
     result = await task
 
-    match result:
-        Ok(body):
+    switch result:
+        ok body:
+            assert(body != "")
+
+        failure error:
+            assert(false, error)
+
+def main():
+    task = async fetch("https://example.test")
+    result = await task
+
+    switch result:
+        ok body:
             print(body)
 
-        Err(err):
-            print(err)
+        failure error:
+            print(error)

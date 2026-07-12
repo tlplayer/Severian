@@ -8,7 +8,7 @@ paths while staying Sevarian-first:
 
 - Go contributes the habit of small runnable programs, packages, generics, and
   direct concurrency.
-- Rust contributes ownership, borrowing, traits, pattern matching, results, and
+- Rust contributes ownership, borrowing, traits, pattern switching, results, and
   fearless concurrency.
 - Python contributes readable indentation, rich collections, modules, classes,
   and a gentle flow from simple expressions to larger programs.
@@ -23,11 +23,12 @@ paths while staying Sevarian-first:
 | `03-collections-iteration` | Lists, tuples, maps, sets, ranges, iteration. |
 | `04-classes-traits` | Value classes, methods, traits, trait composition. |
 | `05-ownership-borrowing` | Inferred ownership plus explicit borrow/clone/move. |
-| `06-results-patterns` | `Result`, `Option`, `?`, and exhaustive matching. |
+| `06-results-patterns` | `Result`, `Option`, `?`, `present`, `absent`, and exhaustive switching. |
 | `07-generics-constraints` | Type parameters and trait-bounded abstractions. |
-| `08-concurrency` | `spawn`, `await`, tasks, and safe shared state shapes. |
+| `08-concurrency` | `async`, `await`, tasks, and safe shared state shapes. |
 | `09-systems-unsafe` | Pointers, unsafe blocks, and isolated low-level code. |
 | `10-numerics-mlir` | Tensor-style code that should lower cleanly to MLIR. |
+| `11-testing` | Function-attached and constructor-attached tests. |
 
 For now these are syntax fixtures that define the language target. Once the
 compiler driver exists, each file should be compiled by automated tests, starting
