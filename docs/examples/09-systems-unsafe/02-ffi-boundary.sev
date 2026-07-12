@@ -1,0 +1,10 @@
+extern def c_strlen(text: ptr[u8]) -> usize
+
+def strlen(text: str) -> usize:
+    bytes = text.utf8()
+
+    unsafe:
+        return c_strlen(bytes.ptr())
+
+def main():
+    print(strlen("sevarian"))

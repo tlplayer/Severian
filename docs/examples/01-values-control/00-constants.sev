@@ -1,0 +1,6 @@
+const MaxRetries: int = 3
+const Pi: float = 3.1415926
+
+def main():
+    print(MaxRetries)
+    print(Pi)

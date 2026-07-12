@@ -1,59 +1,146 @@
-// compiler/ast/src/nodes.rs
+// compiler/ast/nodes.rs
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Module {
+    pub span: Span,
     pub items: Vec<Item>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    Const(ConstDecl),
     Function(FunctionDecl),
     Class(ClassDecl),
     Trait(TraitDecl),
+    Import(ImportDecl),
     Statement(Stmt),
+}
+
+impl Item {
+    pub fn span(&self) -> Span {
+        match self {
+            Item::Const(node) => node.span,
+            Item::Function(node) => node.span,
+            Item::Class(node) => node.span,
+            Item::Trait(node) => node.span,
+            Item::Import(node) => node.span,
+            Item::Statement(node) => node.span(),
+        }
+    }
+}
+
+//
+// ===== Source locations =====
+//
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn empty(at: usize) -> Self {
+        Self { start: at, end: at }
+    }
+
+    pub const fn dummy() -> Self {
+        Self { start: 0, end: 0 }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ident {
+    pub span: Span,
+    pub name: String,
 }
 
 //
 // ===== Declarations =====
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDecl {
+    pub span: Span,
+    pub kind: ImportKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    Module {
+        path: Vec<Ident>,
+        alias: Option<Ident>,
+    },
+    From {
+        module: Vec<Ident>,
+        names: Vec<ImportName>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportName {
+    pub span: Span,
+    pub name: Ident,
+    pub alias: Option<Ident>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstDecl {
+    pub span: Span,
+    pub name: Ident,
+    pub ty: Option<Type>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
-    pub name: String,
+    pub span: Span,
+    pub name: Ident,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Block,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
-    pub name: String,
+    pub span: Span,
+    pub name: Ident,
     pub ty: Option<Type>,
+    pub default: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClassDecl {
-    pub name: String,
-    pub traits: Vec<String>,
+    pub span: Span,
+    pub name: Ident,
+    pub traits: Vec<Type>,
     pub fields: Vec<Field>,
     pub methods: Vec<FunctionDecl>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Field {
-    pub name: String,
+    pub span: Span,
+    pub name: Ident,
     pub ty: Option<Type>,
+    pub default: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraitDecl {
-    pub name: String,
+    pub span: Span,
+    pub name: Ident,
     pub methods: Vec<TraitMethod>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraitMethod {
-    pub name: String,
+    pub span: Span,
+    pub name: Ident,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
 }
@@ -62,45 +149,121 @@ pub struct TraitMethod {
 // ===== Statements =====
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
+    pub span: Span,
     pub statements: Vec<Stmt>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let(LetStmt),
     Assign(AssignStmt),
-    Return(Option<Expr>),
+    Return(ReturnStmt),
     If(IfStmt),
     While(WhileStmt),
+    For(ForStmt),
+    Match(MatchStmt),
+    Unsafe(UnsafeBlock),
     Expr(Expr),
+    Break(Span),
+    Continue(Span),
 }
 
-#[derive(Debug, Clone)]
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Let(node) => node.span,
+            Stmt::Assign(node) => node.span,
+            Stmt::Return(node) => node.span,
+            Stmt::If(node) => node.span,
+            Stmt::While(node) => node.span,
+            Stmt::For(node) => node.span,
+            Stmt::Match(node) => node.span,
+            Stmt::Unsafe(node) => node.span,
+            Stmt::Expr(node) => node.span(),
+            Stmt::Break(span) | Stmt::Continue(span) => *span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LetStmt {
-    pub mutable: bool,
-    pub name: String,
+    pub span: Span,
+    pub kind: LetKind,
+    pub name: Ident,
     pub ty: Option<Type>,
-    pub value: Expr,
+    pub value: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LetKind {
+    Stable,
+    Changeable,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignStmt {
+    pub span: Span,
     pub target: Expr,
+    pub op: AssignOp,
     pub value: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReturnStmt {
+    pub span: Span,
+    pub value: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
+    pub span: Span,
     pub condition: Expr,
     pub then_block: Block,
-    pub else_block: Option<Block>,
+    pub else_branch: Option<ElseBranch>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ElseBranch {
+    If(Box<IfStmt>),
+    Block(Block),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
+    pub span: Span,
+    pub setup: Option<Box<Stmt>>,
     pub condition: Expr,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForStmt {
+    pub span: Span,
+    pub pattern: Pattern,
+    pub iterable: Expr,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchStmt {
+    pub span: Span,
+    pub value: Expr,
+    pub arms: Vec<MatchArm>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub span: Span,
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnsafeBlock {
+    pub span: Span,
     pub body: Block,
 }
 
@@ -108,122 +271,362 @@ pub struct WhileStmt {
 // ===== Expressions =====
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Literal),
-    Identifier(String),
-
+    Identifier(Ident),
     Binary(BinaryExpr),
     Unary(UnaryExpr),
-
     Call(CallExpr),
-
     Member(MemberExpr),
-
-    List(Vec<Expr>),
-    Tuple(Vec<Expr>),
-
+    List(CollectionExpr),
+    Tuple(CollectionExpr),
+    Map(MapExpr),
+    Set(CollectionExpr),
     Index(IndexExpr),
+    If(IfExpr),
+    Match(MatchExpr),
+    Lambda(LambdaExpr),
+    Await(AwaitExpr),
+    Spawn(SpawnExpr),
+    Ownership(OwnershipExpr),
+    Try(TryExpr),
 }
 
-#[derive(Debug, Clone)]
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Literal(node) => node.span(),
+            Expr::Identifier(node) => node.span,
+            Expr::Binary(node) => node.span,
+            Expr::Unary(node) => node.span,
+            Expr::Call(node) => node.span,
+            Expr::Member(node) => node.span,
+            Expr::List(node) | Expr::Tuple(node) | Expr::Set(node) => node.span,
+            Expr::Map(node) => node.span,
+            Expr::Index(node) => node.span,
+            Expr::If(node) => node.span,
+            Expr::Match(node) => node.span,
+            Expr::Lambda(node) => node.span,
+            Expr::Await(node) => node.span,
+            Expr::Spawn(node) => node.span,
+            Expr::Ownership(node) => node.span,
+            Expr::Try(node) => node.span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinaryExpr {
+    pub span: Span,
     pub left: Box<Expr>,
     pub op: BinaryOp,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnaryExpr {
+    pub span: Span,
     pub op: UnaryOp,
     pub expr: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CallExpr {
+    pub span: Span,
     pub callee: Box<Expr>,
-    pub args: Vec<Expr>,
+    pub args: Vec<CallArg>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallArg {
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemberExpr {
+    pub span: Span,
     pub object: Box<Expr>,
-    pub member: String,
+    pub member: Ident,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionExpr {
+    pub span: Span,
+    pub elements: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapExpr {
+    pub span: Span,
+    pub entries: Vec<MapEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapEntry {
+    pub span: Span,
+    pub key: Expr,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndexExpr {
+    pub span: Span,
     pub object: Box<Expr>,
     pub index: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IfExpr {
+    pub span: Span,
+    pub condition: Box<Expr>,
+    pub then_expr: Box<Expr>,
+    pub else_expr: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+    pub arms: Vec<MatchExprArm>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchExprArm {
+    pub span: Span,
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaExpr {
+    pub span: Span,
+    pub params: Vec<Parameter>,
+    pub return_type: Option<Type>,
+    pub body: LambdaBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LambdaBody {
+    Expr(Box<Expr>),
+    Block(Block),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AwaitExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnershipExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+    pub op: OwnershipOp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+}
+
+//
+// ===== Patterns =====
+//
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Wildcard(Span),
+    Literal(Literal),
+    Identifier(Ident),
+    Tuple {
+        span: Span,
+        elements: Vec<Pattern>,
+    },
+    List {
+        span: Span,
+        elements: Vec<Pattern>,
+    },
+    Constructor {
+        span: Span,
+        name: Type,
+        fields: Vec<Pattern>,
+    },
+    Or {
+        span: Span,
+        alternatives: Vec<Pattern>,
+    },
+}
+
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard(span) => *span,
+            Pattern::Literal(node) => node.span(),
+            Pattern::Identifier(node) => node.span,
+            Pattern::Tuple { span, .. }
+            | Pattern::List { span, .. }
+            | Pattern::Constructor { span, .. }
+            | Pattern::Or { span, .. } => *span,
+        }
+    }
 }
 
 //
 // ===== Literals =====
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
-    Integer(i64),
-    Float(f64),
-    Boolean(bool),
-    String(String),
-    Null,
+    Integer { span: Span, value: i64 },
+    Float { span: Span, value: f64 },
+    Boolean { span: Span, value: bool },
+    String { span: Span, value: String },
+    Null { span: Span },
+}
+
+impl Literal {
+    pub fn span(&self) -> Span {
+        match self {
+            Literal::Integer { span, .. }
+            | Literal::Float { span, .. }
+            | Literal::Boolean { span, .. }
+            | Literal::String { span, .. }
+            | Literal::Null { span } => *span,
+        }
+    }
 }
 
 //
 // ===== Types =====
 //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    Named(String),
-    List(Box<Type>),
-    Tuple(Vec<Type>),
+    Named(TypePath),
+    List {
+        span: Span,
+        element: Box<Type>,
+    },
+    Tuple {
+        span: Span,
+        elements: Vec<Type>,
+    },
+    Map {
+        span: Span,
+        key: Box<Type>,
+        value: Box<Type>,
+    },
+    Set {
+        span: Span,
+        element: Box<Type>,
+    },
+    Result {
+        span: Span,
+        ok: Box<Type>,
+        err: Box<Type>,
+    },
+    Option {
+        span: Span,
+        some: Box<Type>,
+    },
     Function {
+        span: Span,
         params: Vec<Type>,
         returns: Box<Type>,
     },
+    Future {
+        span: Span,
+        output: Box<Type>,
+    },
+    Reference {
+        span: Span,
+        mutable: bool,
+        inner: Box<Type>,
+    },
+}
+
+impl Type {
+    pub fn span(&self) -> Span {
+        match self {
+            Type::Named(node) => node.span,
+            Type::List { span, .. }
+            | Type::Tuple { span, .. }
+            | Type::Map { span, .. }
+            | Type::Set { span, .. }
+            | Type::Result { span, .. }
+            | Type::Option { span, .. }
+            | Type::Function { span, .. }
+            | Type::Future { span, .. }
+            | Type::Reference { span, .. } => *span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypePath {
+    pub span: Span,
+    pub segments: Vec<Ident>,
+    pub args: Vec<TypeArg>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeArg {
+    pub span: Span,
+    pub ty: Box<Type>,
 }
 
 //
 // ===== Operators =====
 //
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignOp {
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
     Mul,
     Div,
     Mod,
-
+    MatMul,
     Equal,
     NotEqual,
-
     Less,
     LessEqual,
     Greater,
     GreaterEqual,
-
     And,
     Or,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Negate,
     Not,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-
-pub struct BinaryExpr {
-    pub span: Span,
-    pub left: Box<Expr>,
-    pub op: BinaryOp,
-    pub right: Box<Expr>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnershipOp {
+    Borrow,
+    Clone,
+    Move,
 }

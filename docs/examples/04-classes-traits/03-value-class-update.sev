@@ -1,0 +1,13 @@
+class Point:
+    x: float
+    y: float
+
+    def translated(dx: float, dy: float) -> Point:
+        return Point(x + dx, y + dy)
+
+def main():
+    start = Point(1.0, 2.0)
+    next = start.translated(3.0, 4.0)
+
+    print(next.x)
+    print(next.y)

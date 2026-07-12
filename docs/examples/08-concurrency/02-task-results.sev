@@ -1,0 +1,14 @@
+def fetch(url: str) -> Result[str, IOError]:
+    body = http.get(url)?
+    return Ok(body)
+
+def main():
+    task = spawn fetch("https://example.test")
+    result = await task
+
+    match result:
+        Ok(body):
+            print(body)
+
+        Err(err):
+            print(err)

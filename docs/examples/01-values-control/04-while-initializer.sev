@@ -1,0 +1,7 @@
+def main():
+    while count < 3 with count := 0:
+        print(count)
+        count += 1
+
+    done = true
+    print(done)

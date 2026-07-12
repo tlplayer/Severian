@@ -1,0 +1,8 @@
+def work(value: int) -> int:
+    return value * 2
+
+def main():
+    first = spawn work(10)
+    second = spawn work(21)
+
+    print(await first + await second)

@@ -1,0 +1,18 @@
+def find_name(id: int) -> Option[str]:
+    if id == 1:
+        return Some("ada")
+
+    return None
+
+def main():
+    name = find_name(1)
+
+    match name:
+        Some(value) if value != "":
+            print(value)
+
+        Some(_):
+            print("blank")
+
+        None:
+            print("missing")

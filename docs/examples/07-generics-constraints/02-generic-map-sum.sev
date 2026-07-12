@@ -1,0 +1,15 @@
+trait Number:
+    zero() -> Self
+    add(other: Self) -> Self
+
+def sum_values[K: Hash + Equal, V: Number](values: map[K, V]) -> V:
+    total := V.zero()
+
+    for _, value in values:
+        total = total.add(value)
+
+    return total
+
+def main():
+    counts = {"first": 34, "second": 8}
+    print(sum_values(counts))

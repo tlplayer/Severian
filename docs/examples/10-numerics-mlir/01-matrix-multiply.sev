@@ -1,0 +1,5 @@
+def main():
+    x = rand(1024, 1024)
+    y = x @ x
+
+    print(y.shape)

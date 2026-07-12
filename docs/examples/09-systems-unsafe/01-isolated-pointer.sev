@@ -1,0 +1,11 @@
+def byte_at(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
+    if index < 0 or index >= bytes.len():
+        return Err(BoundsError(index))
+
+    unsafe:
+        ptr = bytes.ptr()
+        return Ok(ptr[index])
+
+def main():
+    result = byte_at([65, 66, 67], 1)
+    print(result)

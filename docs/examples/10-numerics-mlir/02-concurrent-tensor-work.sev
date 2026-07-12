@@ -1,0 +1,15 @@
+def worker(id: int) -> int:
+    return id * 2
+
+def main():
+    first = spawn worker(10)
+    second = spawn worker(20)
+
+    a = await first
+    b = await second
+
+    x = rand(1024, 1024)
+    y = x @ x
+
+    print(a + b)
+    print(y.shape)

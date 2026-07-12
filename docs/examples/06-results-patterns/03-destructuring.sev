@@ -1,0 +1,15 @@
+class Point:
+    x: int
+    y: int
+
+def describe(point: Point):
+    match point:
+        Point(0, 0):
+            print("origin")
+
+        Point(x, 0):
+            print("x axis")
+            print(x)
+
+        Point(x, y):
+            print(x + y)

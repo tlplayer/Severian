@@ -1,0 +1,16 @@
+class Buffer:
+    bytes: list[u8]
+
+    def push(self, byte: u8):
+        bytes.append(byte)
+
+def freeze(buffer: Buffer) -> Buffer:
+    owned = buffer.move()
+    return owned
+
+def main():
+    buffer := Buffer([])
+    buffer.push(65)
+
+    frozen = freeze(buffer)
+    print(frozen.bytes)

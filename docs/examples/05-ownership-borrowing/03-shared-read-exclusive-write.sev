@@ -1,0 +1,18 @@
+def total(values: list[int]) -> int:
+    view = values.borrow()
+    sum := 0
+
+    for value in view:
+        sum += value
+
+    return sum
+
+def push_value(values: list[int], value: int):
+    values.append(value)
+
+def main():
+    values := [1, 2, 3]
+    print(total(values))
+
+    push_value(values, 4)
+    print(total(values))

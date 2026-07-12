@@ -1,0 +1,13 @@
+def load(path: Path) -> Result[String, IOError]:
+    data = read(path)?
+    return Ok(data)
+
+def main():
+    result = load("settings.toml")
+
+    match result:
+        Ok(data):
+            print(data)
+
+        Err(err):
+            print(err)

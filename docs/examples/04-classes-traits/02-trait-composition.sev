@@ -1,0 +1,21 @@
+trait Named:
+    name() -> str
+
+trait Drawable:
+    draw()
+
+class Button: Named, Drawable
+    label: str
+
+    def name() -> str:
+        return label
+
+    def draw():
+        print(label)
+
+def render(item: Drawable):
+    item.draw()
+
+def main():
+    button = Button("Save")
+    render(button)

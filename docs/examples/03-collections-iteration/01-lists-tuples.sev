@@ -1,0 +1,9 @@
+def main():
+    names = ["ada", "grace", "katherine"]
+    origin = (0.0, 0.0)
+
+    first = names[0]
+    x = origin[0]
+
+    print(first)
+    print(x)

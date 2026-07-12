@@ -1,0 +1,10 @@
+def main():
+    while count < 3 with count := 0:
+        print(count)
+        count += 1
+
+    for value in range(0, 4):
+        if value % 2 == 0:
+            print("even")
+        else:
+            print("odd")

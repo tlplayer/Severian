@@ -1,0 +1,17 @@
+def sum(list[int] values) -> int:
+    total := 0
+
+    for value in values:
+        total += value
+
+    return total
+
+def main():
+    numbers = [1, 2, 3, 4]
+
+    view = numbers.borrow()
+    copied = numbers.clone()
+    owned = copied.move()
+
+    print(sum(view))
+    print(sum(owned))
