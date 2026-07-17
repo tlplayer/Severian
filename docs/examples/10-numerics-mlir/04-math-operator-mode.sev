@@ -1,0 +1,19 @@
+import math
+
+@math(X, *)
+def transform(a: Matrix[f32], b: Matrix[f32], scale: f32) -> Matrix[f32]:
+    product = a X b
+    return product * scale
+
+test:
+    a = matrix.eye(4)
+    b = matrix.eye(4)
+
+    assert(transform(a, b, 0.5) == matrix.scale(matrix.eye(4), 0.5))
+
+def main():
+    a = matrix.eye(4)
+    b = matrix.rand(4, 4)
+
+    result = transform(a, b, 0.5)
+    print(result)

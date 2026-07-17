@@ -1,0 +1,6 @@
+def reverse_twice(values: list[int]) -> list[int]:
+    return values.reversed().reversed()
+
+property "reverse twice preserves values":
+    values = generate.list[int]()
+    assert(reverse_twice(values) == values)

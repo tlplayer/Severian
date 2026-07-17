@@ -1,0 +1,14 @@
+class X:
+    value: int
+
+    def X(x: int, y: int):
+        value = x + y
+
+    test:
+        assert(X(20, 22).value == 42)
+
+    def X(x: int):
+        value = x
+
+    test:
+        assert(X(42).value == 42)

@@ -1,0 +1,8 @@
+type Number = int | float
+type UserId = string
+
+def scale(value: Number, factor: Number) -> float:
+    return float(value) * float(factor)
+
+test:
+    assert(scale(4, 2.5) == 10.0)

@@ -1,0 +1,9 @@
+def raw_driver_call() -> int:
+    return 42
+
+def main():
+    unsafe:
+        task = async raw_driver_call()
+        result = await task
+
+    print(result)

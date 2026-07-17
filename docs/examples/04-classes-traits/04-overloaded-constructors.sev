@@ -1,0 +1,15 @@
+class X:
+    value: int
+
+    def X(x: int, y: int):
+        value = x + y
+
+    def X(x: int):
+        value = x
+
+def main():
+    from_sum = X(20, 22)
+    direct = X(42)
+
+    print(from_sum.value)
+    print(direct.value)

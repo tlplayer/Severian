@@ -1,0 +1,32 @@
+def parse_count(text: string) -> Result[int, ParseError]:
+    if text == "":
+        return failure(ParseError("empty count"))
+
+    value ?= int.parse(text)
+    return ok(value)
+
+test "valid count":
+    switch parse_count("42"):
+        ok count:
+            assert(count == 42)
+
+        failure error:
+            assert(false, error)
+
+test "empty count":
+    switch parse_count(""):
+        ok _:
+            assert(false, "expected failure")
+
+        failure reason:
+            assert(reason.message == "empty count")
+
+def main():
+    result = parse_count("42")
+
+    switch result:
+        ok count:
+            print(count)
+
+        failure reason:
+            print(reason)

@@ -1,0 +1,13 @@
+class Counter:
+    value: int
+
+    def Counter():
+        value = 0
+
+    def inc():
+        value += 1
+
+test:
+    counter = Counter()
+    counter.inc()
+    assert(counter.value == 1)

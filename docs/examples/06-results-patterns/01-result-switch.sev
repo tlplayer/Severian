@@ -1,0 +1,23 @@
+def load(path: Path) -> Result[string, IOError]:
+    data ?= read(path)
+    return ok(data)
+
+test "propagates loaded data":
+    result = load("settings.toml")
+
+    switch result:
+        ok data:
+            assert(data != "")
+
+        failure error:
+            assert(false, error)
+
+def main():
+    result = load("settings.toml")
+
+    switch result:
+        ok data:
+            print(data)
+
+        failure error:
+            print(error)

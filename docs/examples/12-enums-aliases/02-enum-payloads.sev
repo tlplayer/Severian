@@ -1,0 +1,16 @@
+enum Shape:
+    circle(radius: float)
+    rectangle(width: float, height: float)
+
+@math(*)
+def area(shape: Shape) -> float:
+    switch shape:
+        circle radius:
+            return 3.1415926 * radius * radius
+
+        rectangle width height:
+            return width * height
+
+test:
+    assert(area(circle(2.0)) > 12.5)
+    assert(area(rectangle(3.0, 4.0)) == 12.0)

@@ -1,0 +1,14 @@
+import math
+import probability
+
+@math(X)
+@probability(P)
+def expected_projection(weights: Matrix[f32], samples: Matrix[f32]) -> f32:
+    projected = weights X samples
+    return P(projected > 0.5)
+
+def main():
+    weights = matrix.rand(4, 4)
+    samples = matrix.rand(4, 4)
+
+    print(expected_projection(weights, samples))

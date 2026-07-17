@@ -1,0 +1,12 @@
+def x() -> int:
+    return 0
+
+test:
+    assert(x() == 0)
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+test:
+    assert(add(1, 2) == 3)
+    assert(add(20, 22) == 42)

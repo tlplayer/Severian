@@ -1,0 +1,7 @@
+import math
+
+@math(X)
+def main():
+    a = matrix.eye(4)
+    b = matrix.eye(4)
+    print(a X b)

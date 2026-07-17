@@ -1,0 +1,5 @@
+from geometry import Point
+
+def main():
+    point = Point(3.0, 4.0)
+    print(point.magnitude())
