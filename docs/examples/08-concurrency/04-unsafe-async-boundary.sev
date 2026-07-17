@@ -2,8 +2,8 @@ def raw_driver_call() -> int:
     return 42
 
 def main():
+    # Runtime ownership is explicit even when the task is awaited here.
     unsafe:
-        task = async raw_driver_call()
-        result = await task
+        task = async raw_driver_call() with runtime
 
-    print(result)
+    print(await task)

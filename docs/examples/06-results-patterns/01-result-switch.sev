@@ -1,6 +1,6 @@
 def load(path: Path) -> Result[string, IOError]:
     data ?= read(path)
-    return ok(data)
+    return data
 
 test "propagates loaded data":
     result = load("settings.toml")

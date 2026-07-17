@@ -1,0 +1,10 @@
+def refresh_cache():
+    print("cache refreshed")
+
+def main():
+    '''
+    This task is intentionally owned by the runtime. Main does not wait for it,
+    so its work must own its inputs, return unit, and handle its own failures.
+    '''
+    unsafe:
+        async refresh_cache() with runtime

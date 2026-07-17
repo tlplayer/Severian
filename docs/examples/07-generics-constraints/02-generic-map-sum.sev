@@ -2,8 +2,8 @@ trait Number:
     zero() -> Self
     add(other: Self) -> Self
 
-def sum_values[K: Hash + Equal, V: Number](values: map[K, V]) -> V:
-    total := V.zero()
+def sum_values[key: Hash + Equal, value: Number](values: map[key, value]) -> value:
+    total := value.zero()
 
     for _, value in values:
         total = total.add(value)

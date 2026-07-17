@@ -1,5 +1,0 @@
-def refresh() -> Result[unit, IOError]:
-    return ok(())
-
-def main():
-    async refresh()

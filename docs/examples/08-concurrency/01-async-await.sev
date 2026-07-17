@@ -2,11 +2,12 @@ def work(value: int) -> int:
     return value * 2
 
 test:
-    task = async work(21)
+    task = async work(21) with self
     assert(await task == 42)
 
 def main():
-    first = async work(10)
-    second = async work(21)
+    # Tasks owned by self cannot outlive main.
+    first = async work(10) with self
+    second = async work(21) with self
 
     print(await first + await second)

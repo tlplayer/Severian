@@ -14,5 +14,5 @@ def count_all(list[int] values) -> int:
     return counter.value
 
 def main():
-    task = async count_all([1, -2, 3])
+    task = async count_all([1, -2, 3]) with self
     print(await task)

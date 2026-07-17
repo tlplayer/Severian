@@ -3,7 +3,7 @@ def parse_count(text: string) -> Result[int, ParseError]:
         return failure(ParseError("empty count"))
 
     value ?= int.parse(text)
-    return ok(value)
+    return value
 
 test "valid count":
     switch parse_count("42"):

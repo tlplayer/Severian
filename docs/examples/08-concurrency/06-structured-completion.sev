@@ -1,0 +1,12 @@
+def refresh_cache():
+    print("cache refreshed")
+
+def main():
+    '''
+    Work owned by self may run concurrently, but main cannot finish until the
+    work completes. No task handle or manual await is needed for unit work.
+    '''
+    async refresh_cache() with self
+
+    print("main continues")
+    # Leaving main automatically waits for refresh_cache.

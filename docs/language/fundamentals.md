@@ -156,7 +156,7 @@ owned = numbers.move()
 ## Optional Values
 
 Optional values represent presence or absence without null. A function returning
-`Option[T]` returns either `present(value)` or `absent`.
+`Option[type]` returns either `present(value)` or `absent`.
 
 ```sev
 def find_name(id: int) -> Option[string]:
@@ -175,17 +175,25 @@ switch find_name(1):
 
 ## Errors
 
-Recoverable errors are values. A fallible function returns a `Result[T, E]`,
-which is either `ok(value)` or `failure(error)`.
+Recoverable errors are values. A fallible function returns a
+`Result[type, exception]`, which contains either a successful value or a failure
+exception.
 
 ```sev
 def load(path: Path) -> Result[string, IOError]:
     data ?= read(path)
-    return ok(data)
+    return data
 ```
 
-`?=` binds the `ok(...)` value and returns early from the current function when
-it sees a `failure(...)` outcome.
+`?=` requires a binding name. It binds the successful value and returns early
+from the current function when it receives a failure outcome. It is invalid to
+write `?=` without storing that value. Return an exact `Result` directly when no
+successful value needs to be stored.
+
+Inside a function returning `Result[type, exception]`, returning a value of
+`type` produces the successful result. Returning an expression that already has
+the exact declared `Result` type forwards it unchanged. A bare `return` produces
+a successful `unit` result when the declared success type is `unit`.
 
 ```sev
 switch result:

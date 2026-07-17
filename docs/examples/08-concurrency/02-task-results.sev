@@ -1,9 +1,9 @@
 def fetch(url: string) -> Result[string, IOError]:
     body ?= http.get(url)
-    return ok(body)
+    return body
 
 test:
-    task = async fetch("https://example.test")
+    task = async fetch("https://example.test") with self
     result = await task
 
     switch result:
@@ -13,13 +13,5 @@ test:
         failure error:
             assert(false, error)
 
-def main():
-    task = async fetch("https://example.test")
-    result = await task
-
-    switch result:
-        ok body:
-            print(body)
-
-        failure error:
-            print(error)
+def main() -> Result[string, IOError]:
+    return async fetch("https://example.test") with self

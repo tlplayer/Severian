@@ -32,7 +32,8 @@ expressions such as `async`, `await`, `.borrow()`, `.clone()`, and `.move()`.
 - Function and constructor declarations can carry attached `test:` blocks.
 - Expressions for literals, identifiers, calls, members, collections, indexing,
   conditionals, switches, lambdas, math operators, concurrency, and ownership.
-  `?=` is represented as a try-bind statement for error propagation.
+  `name ?= expression` is represented as a try-bind statement for error
+  propagation; the binding name is required.
 - Patterns for wildcard, literals, identifiers, tuples, lists, constructors, and
   alternatives.
 - Types for named paths, collections, functions, results, options, futures, and

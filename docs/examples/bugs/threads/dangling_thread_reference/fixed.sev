@@ -1,7 +1,0 @@
-def launch() -> Task[unit]:
-    values = [1, 2, 3]
-    worker = async print(values.move()[0])
-    return worker
-
-def main():
-    await launch()
