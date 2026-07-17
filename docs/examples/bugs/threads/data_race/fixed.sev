@@ -1,0 +1,7 @@
+def main():
+    counter := atomic.int(0)
+    left = async counter.fetch_add(1)
+    right = async counter.fetch_add(1)
+    await left
+    await right
+    assert(counter.load() == 2)

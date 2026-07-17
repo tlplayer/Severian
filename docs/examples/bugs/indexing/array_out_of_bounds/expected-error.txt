@@ -1,0 +1,4 @@
+E0401
+invalid.sev:3:18
+3
+An index known to be outside a fixed-length collection is rejected at compile time.

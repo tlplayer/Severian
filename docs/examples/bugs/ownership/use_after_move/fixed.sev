@@ -1,0 +1,7 @@
+def send(payload: list[u8]):
+    print(payload.len())
+
+def main():
+    packet = [1, 2, 3]
+    outbound = packet.move()
+    send(outbound)

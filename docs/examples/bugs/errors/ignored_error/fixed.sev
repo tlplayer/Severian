@@ -1,0 +1,6 @@
+def save(path: string) -> Result[unit, IOError]:
+    return file.write(path, "state")
+
+def main() -> Result[unit, IOError]:
+    ?= save("state.txt")
+    return ok(())

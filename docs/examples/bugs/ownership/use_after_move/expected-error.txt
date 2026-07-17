@@ -1,0 +1,4 @@
+E0301
+invalid.sev:8:11
+packet
+A binding cannot be read after ownership has moved to another binding.

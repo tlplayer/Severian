@@ -1,0 +1,4 @@
+def main():
+    u8 byte = 255
+    next = byte + 1
+    print(next)

@@ -1,0 +1,9 @@
+class Counter:
+    value: int
+
+def main():
+    counter := Counter(0)
+    left = async counter.value += 1
+    right = async counter.value += 1
+    await left
+    await right

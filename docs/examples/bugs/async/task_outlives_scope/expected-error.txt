@@ -1,0 +1,4 @@
+E0702
+invalid.sev:6:22
+input.borrow()
+An escaping task must own every captured value or finish inside its creator's scope.

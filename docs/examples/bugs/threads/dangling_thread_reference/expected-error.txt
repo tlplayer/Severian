@@ -1,0 +1,4 @@
+E0602
+invalid.sev:4:26
+view
+A task that can outlive its scope cannot capture a borrowed local value.

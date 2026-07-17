@@ -1,0 +1,4 @@
+E0601
+invalid.sev:6:18
+counter
+Mutable state captured by concurrent tasks must be uniquely owned or synchronized.

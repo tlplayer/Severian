@@ -1,0 +1,7 @@
+def refresh() -> Result[unit, IOError]:
+    return ok(())
+
+def main() -> Result[unit, IOError]:
+    task = async refresh()
+    ?= await task
+    return ok(())

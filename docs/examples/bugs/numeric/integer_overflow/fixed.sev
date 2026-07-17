@@ -1,0 +1,10 @@
+def main():
+    byte: u8 = 255
+    wrapped = byte.wrapping_add(1)
+    capped = byte.saturating_add(1)
+    value, overflowed = byte.overflowing_add(1)
+
+    assert(wrapped == 0)
+    assert(capped == 255)
+    assert(value == 0)
+    assert(overflowed)

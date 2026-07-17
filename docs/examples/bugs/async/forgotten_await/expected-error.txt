@@ -1,0 +1,4 @@
+E0701
+invalid.sev:5:5
+async refresh()
+A task value must be awaited, returned, or explicitly detached with an error policy.

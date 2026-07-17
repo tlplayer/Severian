@@ -1,0 +1,10 @@
+def sum(values: list[int]) -> int:
+    return values[0] + values[1]
+
+def start() -> Task[int]:
+    input = [40, 2]
+    task = async sum(input.move())
+    return task
+
+def main():
+    print(await start())

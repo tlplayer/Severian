@@ -1,0 +1,3 @@
+def main():
+    colors = ["red", "green", "blue"]
+    print(colors[3])

@@ -34,6 +34,7 @@ paths while staying Sevarian-first:
 | `14-packages` | Cargo-like official package layout and manifest. |
 | `15-test-modes` | Placeholder `example:`, `bench:`, and property tests. |
 | `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
+| `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the
 compiler driver exists, each file should be compiled by automated tests, starting
@@ -45,5 +46,7 @@ Suggested fixture pipeline:
 tools/check_docs_examples.sh
 ```
 
-By default the script runs `sev check` for every `.sev` file in this directory.
+By default the script runs `sev check` for every valid `.sev` file in this
+directory, and verifies that every `bugs/**/invalid.sev` fixture fails at its
+documented source location.
 Set `SEV=/path/to/sev` to use a locally built compiler driver.

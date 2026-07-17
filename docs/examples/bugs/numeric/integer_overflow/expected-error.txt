@@ -1,0 +1,4 @@
+E0501
+invalid.sev:3:12
+byte + 1
+Checked integer arithmetic cannot produce a value outside the destination type.
