@@ -1,9 +1,9 @@
 def byte_at(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
-    if index < 0 or index >= bytes.len():
+    if index < 0 or index >= size(bytes):
         return failure(BoundsError(index))
 
     unsafe:
-        ptr = bytes.ptr()
+        ptr = &bytes
         return ptr[index]
 
 test "in bounds":

@@ -4,7 +4,7 @@ def strlen(text: string) -> usize:
     bytes = text.utf8()
 
     unsafe:
-        return c_strlen(bytes.ptr())
+        return c_strlen(&bytes)
 
 def main():
     print(strlen("sevarian"))

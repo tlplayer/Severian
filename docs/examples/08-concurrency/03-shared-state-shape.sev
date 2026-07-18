@@ -1,7 +1,7 @@
 class Counter:
     value: int
 
-    def inc(self):
+    def inc():
         value += 1
 
 def count_all(list[int] values) -> int:

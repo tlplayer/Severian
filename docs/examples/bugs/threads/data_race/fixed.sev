@@ -1,7 +1,13 @@
+class Counter:
+    v: atomic int = 0
+
+    def increment():
+        v += 1
+
 def main():
-    counter := atomic.int(0)
-    left = async counter.fetch_add(1)
-    right = async counter.fetch_add(1)
-    await left
-    await right
-    assert(counter.load() == 2)
+    counter := Counter()
+    left = async counter.increment() with self
+    right = async counter.increment() with self
+
+    await right, left
+    assert(counter.v.load() == 2)

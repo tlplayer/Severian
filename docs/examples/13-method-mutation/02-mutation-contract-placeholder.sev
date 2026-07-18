@@ -8,4 +8,4 @@ class Buffer:
 test:
     buffer = Buffer([])
     buffer.push(65)
-    assert(buffer.bytes.len() == 1)
+    assert(size(buffer.bytes) == 1)

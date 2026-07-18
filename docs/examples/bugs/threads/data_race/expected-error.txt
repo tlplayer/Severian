@@ -1,4 +1,4 @@
 E0601
-invalid.sev:6:18
+invalid.sev:9:18
 counter
-Mutable state captured by concurrent tasks must be uniquely owned or synchronized.
+Mutable raw values cannot cross a task boundary; freeze, make atomic, or guard with a mutex.

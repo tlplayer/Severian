@@ -28,6 +28,7 @@ invariant line is human-facing documentation and must remain one sentence.
 | Indexing | `off_by_one_range` | compile-time and runtime |
 | Numeric | `integer_overflow` | runtime by default; explicit library operations |
 | Threads | `data_race` | compile-time |
+| Threads | `async_mutation_without_lock` | compile-time |
 | Errors | `ignored_error` | compile-time |
 
 The syntax in these fixtures is a language commitment. If implementation needs

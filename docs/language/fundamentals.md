@@ -88,6 +88,19 @@ A `test:` block attaches to the immediately preceding function or constructor at
 the same indentation level. Inside a class, an indented `test:` block attaches to
 the constructor or method before it.
 
+Property tests use the reserved `generate` term to produce cases of one type.
+Generation is an iterable language form, not a function call.
+
+```sev
+property "reverse twice preserves values":
+    for values in generate list(int) with minimum_size=1, maximum_size=100:
+        assert(values.reversed().reversed() == values)
+```
+
+`minimum_size` and `maximum_size` are inclusive element-count bounds measured by
+`size(values)`, not byte bounds measured by `values.size()`. The property runner
+controls the case count, random seed, distribution, and shrinking.
+
 ## Imports
 
 Sevarian uses Python-style imports.
@@ -136,8 +149,43 @@ class X:
 ```
 
 Inside a constructor, assigning to a declared field initializes that field on the
-new instance. This keeps construction compact without requiring `self.x = x`
-boilerplate.
+new instance. Methods and constructors access their current object's fields by
+name without an explicit receiver parameter. `self` names the current execution
+context, not a class instance.
+
+## Counts, Bytes, And Midpoints
+
+`size(values)` returns the number of elements in a collection. `values.size()`
+returns the number of bytes in the object. Sevarian does not provide `.len()`.
+
+```sev
+values = [10, 20, 30]
+
+count = size(values)
+bytes = values.size()
+middle = values.mid()
+```
+
+`values.mid()` is the collection's midpoint primitive.
+
+### Shape-Safety Hypothesis
+
+Index-based iteration borrows the collection's shape for the loop. Safe code may
+replace elements, but it cannot resize the collection while that shape is live.
+
+```sev
+for index in indices(values):
+    values[index] += 1
+```
+
+Operations such as `pop`, `remove`, `clear`, and resizing are rejected inside
+that loop. An `unsafe` region may override the shape restriction, but indexing
+remains bounds-checked. Removing a bounds check is a separate unsafe operation.
+
+Frozen collections preserve both their contents and shape. Fixed arrays preserve
+their shape while allowing element mutation. Resizable collections retain runtime
+bounds checks whenever the compiler cannot prove an index belongs to their
+current `indices(values)` set.
 
 ## Ownership
 
@@ -213,18 +261,80 @@ Calls block by default. `async` starts work without blocking the current task an
 returns a handle that can be joined with `await`.
 
 ```sev
-worker = async fetch(url)
+worker = async fetch(url) with self
 body = await worker
 ```
 
-The compiler is responsible for proving safe access to shared state for async
-work. Code that intentionally bypasses those guards must live inside an explicit
-`unsafe:` block.
+Every task names its lifetime owner. A task declared `with self` cannot outlive
+the current execution. A task declared `with runtime` is runtime-owned and must
+be created inside an explicit `unsafe:` block.
+
+Arguments passed to an async call are frozen by default. The child may read
+them, but it cannot mutate the caller's values. Frozen arguments need no lock.
+Code must explicitly request non-frozen access, and mutable access across the
+task boundary requires a lock.
+
+`with self and lock` transfers the lock capability to the child for the call.
+The parent does not retain the lock while it waits. When several children need
+the same mutable value, the lock serializes their access.
+
+```sev
+class Account:
+    balance: int
+    status: string
+
+    def Account():
+        balance = 0
+        status = "surplus"
+
+    def increment(amount: int):
+        balance += amount
+        status = "debt" if balance < 0 else "surplus"
+
+    def decrement(amount: int):
+        balance -= amount
+        status = "debt" if balance < 0 else "surplus"
+
+def main():
+    account := Account()
+    credit = async account.increment(10) with self and lock
+    debit = async account.decrement(15) with self and lock
+
+    await credit, debit
+```
+
+The lock protects the relationship between `balance` and `status`, not the
+integer operations alone. Each child completes both field updates before the
+other child may mutate the account. Calling either mutable method asynchronously
+with only `with self` is rejected.
+
+Use a lexical lock when several synchronous operations must form one exclusive
+critical section:
+
+```sev
+with lock:
+    increment(10)
+    record_transaction("credit")
+```
+
+Mutable raw values otherwise cannot cross a task boundary. Frozen values permit
+shared reads. Atomic values permit synchronized scalar mutation. Mutex locks
+guard larger mutable state.
+
+```sev
+counter := atomic int 0
+left = async counter += 1 with self
+right = async counter += 1 with self
+
+await left
+await right
+```
 
 ```sev
 unsafe:
-    worker = async raw_driver_call()
-    result = await worker
+    worker = async raw_driver_call() with runtime
+
+result = await worker
 ```
 
 ## Math Mode

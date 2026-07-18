@@ -1,4 +1,4 @@
 E0402
 invalid.sev:3:14
-[0:values.len()]
-An inclusive range ending at a collection length includes one invalid index.
+[0:size(values)]
+An inclusive range ending at a collection's element count includes one invalid index.

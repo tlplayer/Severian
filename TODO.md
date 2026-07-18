@@ -32,6 +32,7 @@ End result: integer overflow never wraps silently.
 Fixture: `docs/examples/bugs/indexing/array_out_of_bounds/invalid.sev`
 
 - [ ] Distinguish fixed arrays from dynamic lists.
+- [ ] Reevaluate shape borrowing after compiler and runtime experience.
 - [ ] Define checked indexing and optional lookup.
 - [ ] Specify and test static and runtime bounds checks.
 - [ ] Move the rule into the collection language documentation.
@@ -44,12 +45,12 @@ End result: provably invalid indices are rejected and dynamic indices are checke
 Fixture: `docs/examples/bugs/indexing/off_by_one_range/invalid.sev`
 
 - [ ] Choose the final exclusive and inclusive range syntax.
-- [ ] Define collection-derived index iteration.
+- [x] Use `indices(values)` for collection-derived index iteration.
 - [ ] Specify and test invalid collection-bound ranges.
 - [ ] Move the rule into the range language documentation.
 - [ ] Remove `docs/examples/bugs/indexing/off_by_one_range`.
 
-End result: the normal collection index range cannot include `len()`.
+End result: the normal collection index range cannot include `size(values)`.
 
 ## 5. Use after move
 
@@ -80,8 +81,8 @@ End result: mutation cannot overlap a live conflicting borrow.
 Fixture: `docs/examples/bugs/threads/data_race/invalid.sev`
 
 - [ ] Define task capture access rules.
-- [ ] Define which types are safe to share across tasks.
-- [ ] Define standard atomic and mutex capabilities.
+- [x] Require captured values to be frozen, atomic, or mutex-guarded.
+- [ ] Define the operations provided by atomic values.
 - [ ] Specify and test shared-mutation diagnostics.
 - [ ] Merge the rule into ownership and concurrency documentation.
 - [ ] Remove `docs/examples/bugs/threads/data_race`.

@@ -1,9 +1,9 @@
 def lower_bound(values: list[int], target: int) -> int:
     low := 0
-    high := values.len()
+    high := size(values)
 
     while low < high:
-        middle = low + (high - low) / 2
+        middle = low + (high - low) // 2
         if values[middle] < target:
             low = middle + 1
         else:
@@ -13,7 +13,7 @@ def lower_bound(values: list[int], target: int) -> int:
 
 def main():
     values = [10, 20, 30]
-    for i in [0:values.len()):
+    for i in indices(values):
         print(values[i])
 
     assert(lower_bound(values, 20) == 1)

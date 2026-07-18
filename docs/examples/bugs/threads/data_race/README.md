@@ -1,8 +1,9 @@
 # Data race
 
 Tasks may run on CPU worker threads or accelerator submission threads; scheduling
-does not weaken ownership. A mutable capture is rejected unless it is transferred
-to one task or wrapped in a capability such as `atomic` or `mutex`.
+does not weaken ownership. Mutable raw values cannot cross a task boundary. A
+captured value must be frozen, atomic, or guarded by a mutex.
 
-Mitigation: **compile-time** through task-sendability and ownership checks;
-**library-level** synchronization provides the permitted shared-state shape.
+Mitigation: **compile-time** through task-capture checks. Frozen values permit
+shared reads; atomic values permit synchronized scalar mutation; mutexes guard
+larger mutable state.

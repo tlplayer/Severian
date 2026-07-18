@@ -1,0 +1,10 @@
+def increment(values: list(int)):
+    for index in indices(values):
+        values[index] += 1
+
+        # values.pop() is rejected because the loop borrows the shape of values.
+
+def main():
+    values := [10, 20, 30]
+    increment(values)
+    print(values)

@@ -2,7 +2,7 @@
 
 Ranges state endpoint ownership in the delimiters: `[a:b]` is inclusive,
 `[a:b)` excludes the end, `(a:b]` excludes the start, and `(a:b)` excludes both.
-Iteration over collection indices normally uses `[0:length)`; it is the same
-half-open interval used by binary-search bounds.
+Index-based collection iteration uses `indices(values)` so the collection owns
+the bounds.
 
 Mitigation: **compile-time** when bounds are proved and **runtime** otherwise.

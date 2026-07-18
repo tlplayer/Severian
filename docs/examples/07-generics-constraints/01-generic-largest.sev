@@ -2,7 +2,7 @@ trait Ordered:
     less_than(other: Self) -> bool
 
 def largest[type: Ordered](values: list[type]) -> Option[type]:
-    if values.len() == 0:
+    if size(values) == 0:
         return absent
 
     best := values[0]

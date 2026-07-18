@@ -1,0 +1,22 @@
+class Account:
+    balance: int
+    status: string
+
+    def Account():
+        balance = 0
+        status = "surplus"
+
+    def increment(amount: int):
+        balance += amount
+        status = "debt" if balance < 0 else "surplus"
+
+    def decrement(amount: int):
+        balance -= amount
+        status = "debt" if balance < 0 else "surplus"
+
+def main():
+    account := Account()
+    credit = async account.increment(10) with self
+    debit = async account.decrement(15) with self
+
+    await credit, debit

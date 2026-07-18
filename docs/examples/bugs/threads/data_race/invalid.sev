@@ -1,9 +1,12 @@
 class Counter:
     value: int
 
+    def increment():
+        value += 1
+
 def main():
     counter := Counter(0)
-    left = async counter.value += 1
-    right = async counter.value += 1
+    left = async counter.increment() with self
+    right = async counter.increment() with self
     await left
     await right

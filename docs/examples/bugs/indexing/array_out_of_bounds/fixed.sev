@@ -1,14 +1,3 @@
-def color_at(colors: list[string], index: int) -> Option[string]:
-    if index < 0 or index >= colors.len():
-        return absent
-
-    return present(colors[index])
-
 def main():
     colors = ["red", "green", "blue"]
-    switch color_at(colors, 2):
-        present color:
-            print(color)
-
-        absent:
-            print("missing")
+    print(colors[2])

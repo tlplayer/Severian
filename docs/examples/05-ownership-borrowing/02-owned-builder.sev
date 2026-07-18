@@ -1,7 +1,7 @@
 class Buffer:
     bytes: list[u8]
 
-    def push(self, byte: u8):
+    def push(byte: u8):
         bytes.append(byte)
 
 def freeze(buffer: Buffer) -> Buffer:
