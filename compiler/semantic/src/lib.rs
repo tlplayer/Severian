@@ -33,6 +33,13 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
             });
         };
 
+        if !is_lower_camel_case(&function.name.name) {
+            return Err(SemanticError {
+                span: function.name.span,
+                message: format!("function `{}` must use lowerCamelCase", function.name.name),
+            });
+        }
+
         if !function.params.is_empty() || function.return_type.is_some() {
             return Err(SemanticError {
                 span: function.span,
@@ -60,6 +67,11 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
     }
 
     Ok(program)
+}
+
+fn is_lower_camel_case(name: &str) -> bool {
+    name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 fn analyze_statement(statement: &Stmt) -> Result<Instruction, SemanticError> {

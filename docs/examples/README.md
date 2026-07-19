@@ -34,6 +34,7 @@ paths while staying Severian-first:
 | `14-packages` | Cargo-like official package layout and manifest. |
 | `15-test-modes` | Placeholder `example:`, `bench:`, and property tests. |
 | `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
+| `17-servers` | TCP request/response, channel-based chat, and map/reduce services. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the

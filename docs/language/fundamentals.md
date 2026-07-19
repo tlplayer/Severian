@@ -43,6 +43,20 @@ Class-like types use PascalCase, including `Result`, `Option`, `Channel`, and
 lowercase. Parameterized types follow Python's square-bracket convention.
 Parentheses are reserved for calls and runtime construction.
 
+### Naming
+
+Severian uses casing to make a name's role visible without extra punctuation.
+
+- Classes, traits, and enums use `UpperCamelCase`: `ChatEvent`, `TcpConnection`.
+- Enum variants use `UpperCamelCase`: `Join`, `Say`, `Leave`.
+- Functions and methods use `lowerCamelCase`: `runHub`, `readLine`.
+- Variables, parameters, and fields use `snake_case`: `client_id`, `next_job_id`.
+- Primitive types remain lowercase: `int`, `float`, `string`.
+
+The linter reports names that do not follow the convention. A variant arm may
+omit its field list; the fields declared by that variant are then bound under
+their declared names for the arm's scope.
+
 ## Control Flow
 
 `while` keeps the condition next to the keyword. A scoped setup clause can follow
@@ -213,6 +227,17 @@ copy = clone numbers
 owned = move copy
 ```
 
+Parameter declarations contain names and types, not ownership modes. Parameters
+are viewed by default. A call may use `view`, `borrow`, `clone`, or `move` on an
+argument when the ownership operation must be explicit.
+
+```sev
+def update(values: list[int]):
+    values.push(4)
+
+update(borrow numbers)
+```
+
 ## Optional Values
 
 Optional values represent presence or absence without null. A function returning
@@ -267,6 +292,35 @@ switch result:
 Severian uses `switch` for structural branching. The word `match` is reserved
 for domain syntax, such as regex helpers imported by a decorator.
 
+## Function Contracts
+
+A function may declare entry requirements in a `with { ... }` suffix. Within
+those contract braces only, every comma-separated requirement must hold, so a
+comma is equivalent to `and`. `and` may be written explicitly. There is no
+contract shorthand for `or`; alternatives must use the `or` keyword. This rule
+does not change the meaning of commas in calls, tuples, collection literals, or
+any other Severian construct.
+
+```sev
+def runJob(job_id: int, connection: network.TcpConnection) with {
+    0 <= job_id <= 1000,
+    connection != invalid,
+    with connection,
+}:
+    process(job_id, connection)
+```
+
+This contract is equivalent to requiring the first two expressions with
+`and`, plus the `connection` capability. A caller must supply that capability
+explicitly with `runJob(job_id, connection) with connection`. A missing or
+incorrect capability is a compile-time error. A value requirement that can be
+proved false is also a compile-time error; a requirement depending on runtime
+data is checked once at function entry.
+
+The capability belongs in the function contract and call suffix. Wrapping the
+function's entire body in `with connection:` when the contract already requires
+that capability is a compile-time error.
+
 ## Concurrency
 
 Calls block by default. `async` starts work without blocking the current task and
@@ -288,18 +342,21 @@ message = await messages
 
 Use `switch` when one task must receive from whichever of several channels is
 ready. Exactly one ready arm commits; the other channel receives remain
-untouched.
+untouched. The word after `from` names the source channel. An uppercase pattern
+such as `Job from jobs:` destructures the received value and binds its declared
+fields; a lowercase pattern such as `message from messages:` binds the entire
+value under that name.
 
 The optional `while` condition repeats selection without adding another indented
 block. Its `with` setup runs once and remains scoped to the switch.
 
 ```sev
 switch messages and commands while received < 2 with received := 0:
-    commands as command:
+    command from commands:
         await handle(command) with runtime and lock
         received += 1
 
-    messages as message:
+    message from messages:
         process(message)
         received += 1
 
@@ -313,8 +370,18 @@ be created inside an explicit `unsafe:` block.
 
 Arguments passed to an async call are frozen by default. The child may read
 them, but it cannot mutate the caller's values. Frozen arguments need no lock.
-Code must explicitly request non-frozen access, and mutable access across the
-task boundary requires a lock.
+Code requests scoped access to a captured binding by naming it after the task
+owner. The parent cannot perform a conflicting operation on that binding until
+the child completes.
+
+```sev
+task = async do(x) with self and x
+```
+
+Here `x` remains owned by the surrounding scope, `self` owns the task, and the
+borrow checker keeps the task's access to `x` within both lifetimes. Explicit
+`clone x` and `move x` arguments remain available when the child needs an
+independent value or permanent ownership transfer.
 
 `with self and lock` transfers the lock capability to the child for the call.
 The parent does not retain the lock while it waits. When several children need

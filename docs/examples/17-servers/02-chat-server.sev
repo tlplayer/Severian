@@ -1,0 +1,83 @@
+import log
+import network
+
+enum ChatEvent:
+    Join(client_id: int, outbound: Channel[string])
+    Say(client_id: int, text: string)
+    Leave(client_id: int)
+
+def broadcast(clients: map[int, Channel[string]], text: string):
+    for _, outbound in clients:
+        async send clone text with outbound
+
+def runHub(events: Channel[ChatEvent]):
+    clients := {}
+
+    switch events while running with running := true:
+        Join from events:
+            clients[client_id] = move outbound
+            broadcast(view clients, "client " + string(client_id) + " joined")
+
+        Say from events:
+            broadcast(view clients, string(client_id) + ": " + text)
+
+        Leave from events:
+            clients.remove(client_id)
+            broadcast(view clients, "client " + string(client_id) + " left")
+
+        fail error:
+            log.error("chat event channel collapsed", error)
+            running = false
+
+def writeClient(writer: network.TcpWriter, outbound: Channel[string]):
+    switch outbound while connected with connected := true:
+        message from outbound:
+            switch await writer.writeLine(message):
+                ok _:
+                    log.info("chat message delivered")
+
+                failure _:
+                    connected = false
+
+        fail _:
+            connected = false
+
+def readClient(
+    client_id: int,
+    reader: network.TcpReader,
+    events: Channel[ChatEvent],
+):
+    switch await reader.readLine() while true:
+        ok message:
+            await send Say(client_id, move message) with events
+
+        failure _:
+            await send Leave(client_id) with events
+            return
+
+def serveClient(
+    client_id: int,
+    connection: network.TcpConnection,
+    events: Channel[ChatEvent],
+):
+    reader, writer = connection.split()
+    outbound = Channel[string] with Buffer(64)
+
+    await send Join(client_id, clone outbound) with events
+    writing = async writeClient(writer, outbound) with self and writer and outbound
+    reading = async readClient(client_id, reader, clone events) with self and reader
+
+    await reading, writing
+
+def main() -> Result[unit, IOError]:
+    listener ?= network.listen("127.0.0.1:7000")
+    events = Channel[ChatEvent] with Buffer(256)
+    hub = async runHub(clone events) with self
+
+    with listener:
+        while true with next_client_id := 1:
+            connection ?= await listener.accept()
+            async serveClient(next_client_id, connection, clone events) with self and connection
+            next_client_id += 1
+
+    await hub

@@ -21,3 +21,10 @@ fn rejects_unknown_functions() {
     let error = analyze(&ast).unwrap_err();
     assert_eq!(error.message, "unknown function `write`");
 }
+
+#[test]
+fn rejects_snake_case_function_names() {
+    let ast = parse(&lex("def bad_name():\n    print(\"hello\")\n").unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert_eq!(error.message, "function `bad_name` must use lowerCamelCase");
+}

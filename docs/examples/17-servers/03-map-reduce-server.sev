@@ -1,0 +1,107 @@
+import json
+import log
+import network
+
+class MapTask:
+    job_id: int
+    values: list[int]
+
+class Partial:
+    job_id: int
+    total: int
+
+class Job:
+    id: int
+    values: list[int]
+    reply: Channel[int]
+
+def mapValues(values: list[int]) -> int:
+    total := 0
+    for value in values:
+        total += value * value
+    return total
+
+def mapWorker(
+    tasks: Channel[MapTask],
+    partials: Channel[Partial],
+):
+    switch tasks while running with running := true:
+        MapTask from tasks:
+            total = mapValues(view values)
+            await send Partial(job_id, total) with partials
+
+        fail error:
+            log.error("map queue collapsed", error)
+            running = false
+
+def coordinate(
+    jobs: Channel[Job],
+    tasks: Channel[MapTask],
+    partials: Channel[Partial],
+):
+    switch jobs while running with running := true:
+        Job from jobs:
+            chunks = values.chunks(1024)
+            part_count = size(chunks)
+
+            for chunk in chunks:
+                await send MapTask(id, move chunk) with tasks
+
+            reduced := 0
+            for _ in range(0, part_count):
+                partial = await partials
+                assert(partial.job_id == id)
+                reduced += partial.total
+
+            await send reduced with reply
+
+        fail error:
+            log.error("job queue collapsed", error)
+            running = false
+
+def runJob(
+    job_id: int,
+    connection: network.TcpConnection,
+    jobs: Channel[Job],
+) -> Result[unit, IOError | JsonError] with {
+    0 <= job_id <= 1000,
+    connection != invalid,
+    64 <= size(jobs.buffer),
+    with connection,
+}:
+    request ?= await connection.readLine()
+    values ?= json.decode[list[int]](request)
+    reply = Channel[int] with Buffer(1)
+
+    await send Job(job_id, move values, clone reply) with jobs
+    result = await reply
+    return await connection.writeLine(json.encode(result))
+
+def serveJob(
+    job_id: int,
+    connection: network.TcpConnection,
+    jobs: Channel[Job],
+):
+    switch await runJob(job_id, connection, clone jobs) with connection:
+        ok _:
+            log.info("map/reduce job completed")
+
+        failure error:
+            log.error("map/reduce job failed", error)
+
+def main() -> Result[unit, IOError]:
+    listener ?= network.listen("127.0.0.1:9000")
+    jobs = Channel[Job] with Buffer(128)
+    tasks = Channel[MapTask] with Buffer(256)
+    partials = Channel[Partial] with Buffer(256)
+
+    for _ in range(0, 8):
+        async mapWorker(clone tasks, clone partials) with self
+
+    async coordinate(clone jobs, clone tasks, clone partials) with self
+
+    with listener:
+        while true with next_job_id := 1:
+            connection ?= await listener.accept()
+            async serveJob(next_job_id, connection, clone jobs) with self and connection
+            next_job_id += 1

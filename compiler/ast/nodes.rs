@@ -295,6 +295,7 @@ pub struct SwitchStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwitchArm {
     pub span: Span,
+    pub source: Option<Expr>,
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: Block,
@@ -466,6 +467,14 @@ pub struct AwaitExpr {
 pub struct AsyncExpr {
     pub span: Span,
     pub value: Box<Expr>,
+    pub owner: TaskOwner,
+    pub captures: Vec<Ident>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOwner {
+    SelfOwned,
+    Runtime,
 }
 
 #[derive(Debug, Clone, PartialEq)]

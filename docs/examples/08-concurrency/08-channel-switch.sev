@@ -12,11 +12,11 @@ def main():
     command_producer = async send "refresh" with commands
 
     switch messages and commands while received < 2 with received := 0:
-        commands as command:
+        command from commands:
             await handle(command) with runtime and lock
             received += 1
 
-        messages as message:
+        message from messages:
             process(message)
             received += 1
 

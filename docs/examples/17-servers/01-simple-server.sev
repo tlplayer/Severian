@@ -1,0 +1,21 @@
+import log
+import network
+
+def respond(connection: network.TcpConnection) -> Result[unit, IOError]:
+    request ?= await connection.readLine()
+    return await connection.writeLine("hello from severian: " + request)
+
+def serve(connection: network.TcpConnection):
+    switch await respond(borrow connection) with connection:
+            ok _:
+                log.info("request completed")
+
+            failure error:
+                log.error("request failed", error)
+
+def main() -> Result[unit, IOError]:
+    listener ?= network.listen("127.0.0.1:8080")
+
+    while true with listener:
+        connection ?= await listener.accept()
+            async serve(connection) with self and connection
