@@ -147,6 +147,33 @@ from math import sqrt
 from io import print as write
 ```
 
+Imports select names; they do not install packages. Package identity, versions,
+sources, and dependency resolution belong to `Severian.toml`. A package uses the
+standard Cargo-style layout:
+
+```text
+Severian.toml
+Severian.lock
+src/lib.sev
+src/main.sev
+tests/
+examples/
+```
+
+```toml
+[package]
+name = "geometry-app"
+version = "0.1.0"
+edition = "2026"
+
+[dependencies]
+geometry = { version = "0.1.0", path = "../geometry" }
+```
+
+`from geometry import Point` resolves `geometry` from the current package, the
+standard library, or a dependency selected by the manifest and lockfile. Source
+files do not contain a separate `package` declaration.
+
 ## Classes And Traits
 
 Classes are value types by default. Traits describe capabilities, not inheritance
@@ -494,6 +521,9 @@ def expected(weights: Matrix[f32], samples: Matrix[f32]) -> f32:
 Outside decorated functions, those spellings are not silently reinterpreted. Each
 decorator gives the compiler a link to the library or domain that owns the
 symbols, their type rules, and their lowering behavior.
+
+The decorator package must first be imported. Decorators are retained as typed
+compiler metadata; they are not runtime Python-style function wrappers.
 
 The same idea can reserve words for non-math domains.
 

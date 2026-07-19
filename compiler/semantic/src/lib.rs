@@ -8,10 +8,9 @@ use severian_ast::{
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
     Expression, Function, Global, Instruction, MatchPattern, Parameter, Program,
-    SwitchArm as HirSwitchArm, Test,
-    TestMode as HirTestMode, UnaryOp, ValueType,
+    SwitchArm as HirSwitchArm, Test, TestMode as HirTestMode, UnaryOp, ValueType,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +226,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
     let mut classes = Vec::new();
     for item in &module.items {
         let Item::Class(class) = item else { continue };
+        let class_decorators = lower_decorators(&class.decorators, &imported_modules)?;
         let fields = class
             .fields
             .iter()
@@ -251,10 +251,12 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
             .collect::<Result<Vec<_>, SemanticError>>()?;
         let mut constructors = Vec::new();
         for constructor in &class.constructors {
+            lower_decorators(&constructor.decorators, &imported_modules)?;
             constructors.push(lower_class_function(
                 &class.name.name,
                 &fields,
                 &constructor.name.name,
+                &constructor.decorators,
                 &constructor.params,
                 &constructor.body,
                 &constructor.tests,
@@ -266,6 +268,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         }
         let mut methods = Vec::new();
         for method in &class.methods {
+            lower_decorators(&method.decorators, &imported_modules)?;
             let returns = method
                 .return_type
                 .as_ref()
@@ -276,6 +279,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                 &class.name.name,
                 &fields,
                 &method.name.name,
+                &method.decorators,
                 &method.params,
                 &method.body,
                 &method.tests,
@@ -287,6 +291,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         }
         classes.push(Class {
             name: class.name.name.clone(),
+            decorators: class_decorators,
             fields,
             field_defaults,
             constructors,
@@ -305,6 +310,7 @@ fn lower_class_function(
     class_name: &str,
     fields: &[String],
     name: &str,
+    source_decorators: &[severian_ast::Decorator],
     source_params: &[severian_ast::Parameter],
     body: &Block,
     source_tests: &[severian_ast::TestBlock],
@@ -378,7 +384,7 @@ fn lower_class_function(
     }
     Ok(Function {
         name: name.into(),
-        decorators: decorator_metadata(&function.decorators),
+        decorators: decorator_metadata(source_decorators),
         params,
         return_type,
         instructions,

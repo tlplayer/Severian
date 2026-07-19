@@ -64,6 +64,31 @@ fn parses_integration_tests_with_output_assertions() {
 }
 
 #[test]
+fn parses_imported_decorator_symbol_packs() {
+    let source = concat!(
+        "import math\n",
+        "\n",
+        "@math(X, *, ^)\n",
+        "def transform(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let tokens = severian_lexer::lex(source).unwrap();
+    let module = severian_parser::parse(&tokens).unwrap();
+    let severian_ast::Item::Function(function) = &module.items[1] else {
+        panic!("expected decorated function");
+    };
+    assert_eq!(function.decorators[0].name.segments[0].name, "math");
+    assert_eq!(
+        function.decorators[0]
+            .symbols
+            .iter()
+            .map(|symbol| symbol.spelling.as_str())
+            .collect::<Vec<_>>(),
+        ["X", "*", "^"]
+    );
+}
+
+#[test]
 fn rejects_chaos_injection_patterns_outside_tests() {
     let source = concat!(
         "def read():\n",

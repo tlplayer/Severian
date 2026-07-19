@@ -2,8 +2,8 @@
 
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
-    CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, ElseBranch,
-    Decorator, DecoratorSymbol, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionDecl, Ident,
+    CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, Decorator,
+    DecoratorSymbol, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionDecl, Ident,
     IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item, LetKind, LetStmt,
     ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr,
     OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner,
@@ -57,8 +57,10 @@ impl Parser<'_> {
                 let decorators = self.parse_decorators()?;
                 if self.at(&TokenKind::Def) {
                     Item::Function(self.parse_function_with_decorators(decorators)?)
+                } else if self.at(&TokenKind::Class) {
+                    Item::Class(self.parse_class_with_decorators(decorators)?)
                 } else {
-                    return Err(self.error("decorators currently require a function"));
+                    return Err(self.error("decorators require a function or class"));
                 }
             } else if self.at(&TokenKind::Def) {
                 Item::Function(self.parse_function()?)
@@ -177,6 +179,13 @@ impl Parser<'_> {
     }
 
     fn parse_class(&mut self) -> Result<ClassDecl, ParseError> {
+        self.parse_class_with_decorators(Vec::new())
+    }
+
+    fn parse_class_with_decorators(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<ClassDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Class, "`class`")?.span.start;
         let name = self.expect_identifier("class name")?;
         let mut traits = Vec::new();
@@ -194,8 +203,13 @@ impl Parser<'_> {
         let mut constructors = Vec::new();
         let mut methods = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            if self.at(&TokenKind::Def) {
-                let function = self.parse_function()?;
+            if self.at(&TokenKind::Def) || self.at(&TokenKind::At) {
+                let function = if self.at(&TokenKind::At) {
+                    let decorators = self.parse_decorators()?;
+                    self.parse_function_with_decorators(decorators)?
+                } else {
+                    self.parse_function()?
+                };
                 if function.name.name == name.name {
                     constructors.push(ConstructorDecl {
                         span: function.span,
@@ -247,7 +261,7 @@ impl Parser<'_> {
         }
         Ok(ClassDecl {
             span: Span::new(start, end),
-            decorators: Vec::new(),
+            decorators,
             name,
             traits,
             fields,

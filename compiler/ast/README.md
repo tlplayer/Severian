@@ -14,8 +14,9 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 - Valued declarations use one concrete prefix type, such as `int count = 0`.
   Uninitialized fields and parameters use `name: Type`; parameters can accept
   alternatives with union types such as `value: string | int | float`.
-- Decorators such as `@math(X)` are recorded on declarations so later phases can
-  opt functions into domain-specific symbol packs, syntax, and checks.
+- Decorators such as `@math(X, *)` are recorded as a package path plus an
+  explicit symbol pack so later phases can resolve domain-specific syntax and
+  checks.
 - Python-like syntax should remain visible as blocks, declarations, calls,
   members, and collection literals.
 - Rust-like safety hooks are represented explicitly through result types,

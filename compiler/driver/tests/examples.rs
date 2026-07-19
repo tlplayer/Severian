@@ -100,3 +100,15 @@ fn compiles_and_classifies_the_test_gallery() {
     assert!(modes.contains(&TestMode::Chaos));
     assert!(modes.contains(&TestMode::Integration));
 }
+
+#[test]
+fn resolves_path_dependencies_from_severian_manifests() {
+    let root = examples_root().join("14-packages");
+    let library = compile_path(&root.join("geometry/src/lib.sev")).unwrap();
+    assert_eq!(run_tests(&library.hir, |_| {}).unwrap(), 1);
+
+    let application = compile_path(&root.join("app/src/main.sev")).unwrap();
+    let mut output = Vec::new();
+    run(&application.hir, |line| output.push(line.to_owned())).unwrap();
+    assert_eq!(output, ["5"]);
+}

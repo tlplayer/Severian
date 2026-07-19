@@ -31,6 +31,7 @@ impl Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Class {
     pub name: String,
+    pub decorators: Vec<Decorator>,
     pub fields: Vec<String>,
     pub field_defaults: Vec<Option<Expression>>,
     pub constructors: Vec<Function>,
