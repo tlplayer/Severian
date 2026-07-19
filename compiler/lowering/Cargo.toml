@@ -1,0 +1,10 @@
+[package]
+name = "severian-lowering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+severian-hir = { path = "../hir" }
+severian-mlir = { path = "../mlir" }
+

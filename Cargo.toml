@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "compiler/ast",
+    "compiler/driver",
+    "compiler/hir",
+    "compiler/lexer",
+    "compiler/lowering",
+    "compiler/mlir",
+    "compiler/ownership",
+    "compiler/parser",
+    "compiler/semantic",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+

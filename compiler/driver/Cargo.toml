@@ -1,0 +1,20 @@
+[package]
+name = "severian-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sev"
+path = "src/main.rs"
+
+[dependencies]
+severian-ast = { path = "../ast" }
+severian-hir = { path = "../hir" }
+severian-lexer = { path = "../lexer" }
+severian-lowering = { path = "../lowering" }
+severian-mlir = { path = "../mlir" }
+severian-ownership = { path = "../ownership" }
+severian-parser = { path = "../parser" }
+severian-semantic = { path = "../semantic" }
+

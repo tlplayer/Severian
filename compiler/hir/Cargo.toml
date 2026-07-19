@@ -1,0 +1,6 @@
+[package]
+name = "severian-hir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+

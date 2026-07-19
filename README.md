@@ -35,6 +35,23 @@ def add(a: int, b: int) -> int:
 print(add(1, 2))
 ```
 
+## First Compiler Slice
+
+The compiler currently accepts the first fixture, `01-hello.sev`, through the
+complete lexer, parser, AST, semantic, HIR, ownership, lowering, and driver
+pipeline.
+
+```sh
+cargo run -p severian-driver --bin sev -- check docs/examples/00-getting-started/01-hello.sev
+cargo run -p severian-driver --bin sev -- compile docs/examples/00-getting-started/01-hello.sev
+cargo run -p severian-driver --bin sev -- run docs/examples/00-getting-started/01-hello.sev
+```
+
+`compile` verifies the emitted MLIR, translates its LLVM dialect to LLVM IR, and
+links a native executable named `a.out` by default. Use `-o executable` to choose
+another path. `emit-mlir` prints the intermediate MLIR for inspection, while
+`run` executes the validated HIR for a fast development loop.
+
 ## Example Fixtures
 
 Every source snippet in the language docs should have a matching file under
