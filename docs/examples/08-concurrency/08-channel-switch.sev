@@ -1,0 +1,29 @@
+def process(message: string):
+    print("message:", message)
+
+def handle(command: string):
+    print("command:", command)
+
+def main():
+    messages = Channel[string] with Buffer(16)
+    commands = Channel[string] with Buffer(16)
+
+    message_producer = async send "hello" with messages
+    command_producer = async send "refresh" with commands
+
+    received := 0
+
+    while received < 2:
+        switch messages and commands:
+            commands as command:
+                await handle(command) with runtime and lock
+                received += 1
+
+            messages as message:
+                process(message)
+                received += 1
+
+            fail error:
+                panic("Channels collapsed", error)
+
+    await message_producer, command_producer

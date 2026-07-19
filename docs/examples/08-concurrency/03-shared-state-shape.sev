@@ -4,7 +4,7 @@ class Counter:
     def inc():
         value += 1
 
-def count_all(list[int] values) -> int:
+def count_all(values: list[int]) -> int:
     counter := Counter(0)
 
     for value in values:

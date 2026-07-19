@@ -3,7 +3,7 @@
 The AST models source syntax after parsing and before semantic analysis. It keeps
 the shape of the user's program intact: names, spans, indentation-derived blocks,
 patterns, explicit type annotations, and statements such as `?=`, plus
-expressions such as `async`, `await`, `.borrow()`, `.clone()`, and `.move()`.
+expressions such as `async`, `await`, `view`, `borrow`, `clone`, and `move`.
 
 ## Principles
 
@@ -18,7 +18,7 @@ expressions such as `async`, `await`, `.borrow()`, `.clone()`, and `.move()`.
 - Python-like syntax should remain visible as blocks, declarations, calls,
   members, and collection literals.
 - Rust-like safety hooks are represented explicitly through result types,
-  patterns, unsafe blocks, and ownership operations.
+  patterns, unsafe blocks, and prefix-keyword ownership operations.
 - Concurrent calls are explicit: ordinary calls block, `async` starts work
   without blocking, and `await` joins a task handle.
 

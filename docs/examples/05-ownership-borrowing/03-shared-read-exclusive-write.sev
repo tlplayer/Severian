@@ -1,14 +1,15 @@
 def total(values: list[int]) -> int:
-    view = values.borrow()
+    values_view = view values
     sum := 0
 
-    for value in view:
+    for value in values_view:
         sum += value
 
     return sum
 
 def push_value(values: list[int], value: int):
-    values.append(value)
+    writable = borrow values
+    writable.append(value)
 
 def main():
     values := [1, 2, 3]

@@ -1,5 +1,5 @@
 def main():
     values := [1, 2, 3]
-    view = values.borrow()
+    values_view = view values
     values.push(4)
-    print(view[0])
+    print(values_view[0])

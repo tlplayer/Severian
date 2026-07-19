@@ -38,6 +38,11 @@ int height = 1080
 Uninitialized fields use `name: Type`, because class schemas tend to evolve and
 the name is the stable part of the declaration.
 
+Class-like types use PascalCase, including `Result`, `Option`, `Channel`, and
+`Buffer`. Ubiquitous primitives such as `int`, `float`, and `string` remain
+lowercase. Parameterized types follow Python's square-bracket convention.
+Parentheses are reserved for calls and runtime construction.
+
 ## Control Flow
 
 `while` keeps the condition next to the keyword. A scoped setup clause can follow
@@ -93,7 +98,7 @@ Generation is an iterable language form, not a function call.
 
 ```sev
 property "reverse twice preserves values":
-    for values in generate list(int) with minimum_size=1, maximum_size=100:
+    for values in generate list[int] with minimum_size=1, maximum_size=100:
         assert(values.reversed().reversed() == values)
 ```
 
@@ -189,16 +194,23 @@ current `indices(values)` set.
 
 ## Ownership
 
-The compiler infers borrows, moves, and copies whenever it can. Explicit
-ownership operations remain available when the program needs to say what it
-means.
+The compiler infers borrows, moves, and copies whenever it can. The reserved
+prefix keywords `view`, `borrow`, `clone`, and `move` make an ownership operation
+explicit when the program needs to say what it means. `view` creates a shared
+read-only borrow, `borrow` creates an exclusive mutable borrow, `clone` creates
+an independent owner, and `move` transfers ownership.
 
 ```sev
-numbers = [1, 2, 3]
+numbers := [1, 2, 3]
 
-view = numbers.borrow()
-copy = numbers.clone()
-owned = numbers.move()
+values_view = view numbers
+print(values_view[0])
+
+writable = borrow numbers
+writable.push(4)
+
+copy = clone numbers
+owned = move copy
 ```
 
 ## Optional Values
@@ -263,6 +275,34 @@ returns a handle that can be joined with `await`.
 ```sev
 worker = async fetch(url) with self
 body = await worker
+```
+
+Channels use the PascalCase `Channel` class and an explicit buffering policy.
+Receiving is an ordinary `await` on the channel.
+
+```sev
+messages = Channel[string] with Buffer(16)
+producer = async send "hello" with messages
+message = await messages
+```
+
+Use `switch` when one task must receive from whichever of several channels is
+ready. Exactly one ready arm commits; the other channel receives remain
+untouched.
+
+```sev
+switch messages and commands:
+    commands as command:
+        await handle(command) with runtime and lock
+
+    messages as message:
+        process(message)
+
+    default:
+        print("nothing ready")
+
+    fail error:
+        panic("Channels collapsed", error)
 ```
 
 Every task names its lifetime owner. A task declared `with self` cannot outlive

@@ -3,6 +3,6 @@ def send(payload: list[u8]):
 
 def main():
     packet = [1, 2, 3]
-    outbound = packet.move()
+    outbound = move packet
     send(outbound)
     print(size(packet))

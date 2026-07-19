@@ -1,4 +1,4 @@
-def increment(values: list(int)):
+def increment(values: list[int]): #You can also do values: borrow list[int] for being explicit
     for index in indices(values):
         values[index] += 1
 

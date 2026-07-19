@@ -22,10 +22,10 @@ paths while staying Severian-first:
 | `02-functions-modules` | Function signatures, defaults, imports, modules. |
 | `03-collections-iteration` | Lists, tuples, maps, sets, ranges, iteration. |
 | `04-classes-traits` | Value classes, methods, traits, trait composition. |
-| `05-ownership-borrowing` | Inferred ownership plus explicit borrow/clone/move. |
+| `05-ownership-borrowing` | Inferred ownership plus explicit view/borrow/clone/move keywords. |
 | `06-results-patterns` | `Result`, `Option`, `?=`, `present`, `absent`, and exhaustive switching. |
 | `07-generics-constraints` | Type parameters and trait-bounded abstractions. |
-| `08-concurrency` | `async`, `await`, tasks, and safe shared state shapes. |
+| `08-concurrency` | `async`, `await`, bounded channels, channel switches, tasks, and safe shared state shapes. |
 | `09-systems-unsafe` | Pointers, unsafe blocks, and isolated low-level code. |
 | `10-numerics-mlir` | Tensor-style code that should lower cleanly to MLIR. |
 | `11-testing` | Function-attached and constructor-attached tests. |

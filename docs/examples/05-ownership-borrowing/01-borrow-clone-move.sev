@@ -12,9 +12,9 @@ test:
 def main():
     numbers = [1, 2, 3, 4]
 
-    view = numbers.borrow()
-    copied = numbers.clone()
-    owned = copied.move()
+    numbers_view = view numbers
+    copied = clone numbers
+    owned = move copied
 
-    print(sum(view))
+    print(sum(numbers_view))
     print(sum(owned))

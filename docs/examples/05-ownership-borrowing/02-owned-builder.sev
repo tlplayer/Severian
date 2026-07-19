@@ -5,7 +5,7 @@ class Buffer:
         bytes.append(byte)
 
 def freeze(buffer: Buffer) -> Buffer:
-    owned = buffer.move()
+    owned = move buffer
     return owned
 
 def main():
