@@ -11,19 +11,16 @@ def main():
     message_producer = async send "hello" with messages
     command_producer = async send "refresh" with commands
 
-    received := 0
+    switch messages and commands while received < 2 with received := 0:
+        commands as command:
+            await handle(command) with runtime and lock
+            received += 1
 
-    while received < 2:
-        switch messages and commands:
-            commands as command:
-                await handle(command) with runtime and lock
-                received += 1
+        messages as message:
+            process(message)
+            received += 1
 
-            messages as message:
-                process(message)
-                received += 1
-
-            fail error:
-                panic("Channels collapsed", error)
+        fail error:
+            panic("Channels collapsed", error)
 
     await message_producer, command_producer

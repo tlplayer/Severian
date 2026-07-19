@@ -286,7 +286,9 @@ pub struct ForStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwitchStmt {
     pub span: Span,
-    pub value: Expr,
+    pub values: Vec<Expr>,
+    pub repeat_condition: Option<Expr>,
+    pub setup: Option<Box<Stmt>>,
     pub arms: Vec<SwitchArm>,
 }
 
@@ -326,6 +328,8 @@ pub enum Expr {
     Lambda(LambdaExpr),
     Await(AwaitExpr),
     Async(AsyncExpr),
+    Channel(ChannelExpr),
+    Send(SendExpr),
     Ownership(OwnershipExpr),
 }
 
@@ -346,6 +350,8 @@ impl Expr {
             Expr::Lambda(node) => node.span,
             Expr::Await(node) => node.span,
             Expr::Async(node) => node.span,
+            Expr::Channel(node) => node.span,
+            Expr::Send(node) => node.span,
             Expr::Ownership(node) => node.span,
         }
     }
@@ -460,6 +466,20 @@ pub struct AwaitExpr {
 pub struct AsyncExpr {
     pub span: Span,
     pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelExpr {
+    pub span: Span,
+    pub element_type: Type,
+    pub capacity: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SendExpr {
+    pub span: Span,
+    pub value: Box<Expr>,
+    pub channel: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

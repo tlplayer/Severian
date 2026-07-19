@@ -277,7 +277,7 @@ worker = async fetch(url) with self
 body = await worker
 ```
 
-Channels use the PascalCase `Channel` class and an explicit buffering policy.
+Channels use the PascalCase `Channel` class and an explicit `Buffer` policy.
 Receiving is an ordinary `await` on the channel.
 
 ```sev
@@ -290,16 +290,18 @@ Use `switch` when one task must receive from whichever of several channels is
 ready. Exactly one ready arm commits; the other channel receives remain
 untouched.
 
+The optional `while` condition repeats selection without adding another indented
+block. Its `with` setup runs once and remains scoped to the switch.
+
 ```sev
-switch messages and commands:
+switch messages and commands while received < 2 with received := 0:
     commands as command:
         await handle(command) with runtime and lock
+        received += 1
 
     messages as message:
         process(message)
-
-    default:
-        print("nothing ready")
+        received += 1
 
     fail error:
         panic("Channels collapsed", error)

@@ -3,7 +3,8 @@
 The AST models source syntax after parsing and before semantic analysis. It keeps
 the shape of the user's program intact: names, spans, indentation-derived blocks,
 patterns, explicit type annotations, and statements such as `?=`, plus
-expressions such as `async`, `await`, `view`, `borrow`, `clone`, and `move`.
+expressions such as `async`, `await`, channel creation and sending, `view`,
+`borrow`, `clone`, and `move`.
 
 ## Principles
 
@@ -27,8 +28,9 @@ expressions such as `async`, `await`, `view`, `borrow`, `clone`, and `move`.
 - Modules, `import`, `from ... import ...`, functions, classes, constructors,
   traits, fields, and trait methods.
 - Statements for stable `=` bindings, changeable `:=` bindings, assignment,
-  assertions, returns, loops, `while condition with setup` clauses, switches,
-  unsafe blocks, break, continue, and expression statements.
+  assertions, returns, loops, `while condition with setup` clauses, ordinary
+  switches, repeating multi-channel switches, unsafe blocks, break, continue,
+  and expression statements.
 - Function and constructor declarations can carry attached `test:` blocks.
 - Expressions for literals, identifiers, calls, members, collections, indexing,
   conditionals, switches, lambdas, math operators, concurrency, and ownership.
