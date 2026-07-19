@@ -1,4 +1,4 @@
-extern def c_strlen(text: ptr[u8]) -> usize
+extern def c_strlen(text: pointer[u8]) -> usize
 
 def strlen(text: string) -> usize:
     bytes = text.utf8()
