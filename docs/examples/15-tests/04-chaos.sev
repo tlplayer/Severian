@@ -1,29 +1,42 @@
-def read() -> Result[list[int], IOError]:
+def read() -> Result[list[int], IOError] | None:
     # A real implementation reaches a system-call chaos point here.
     return [65, 66, 67]
 
-test with chaos "read failures":
-    result = read()
+test with chaos "read results":
+    chaos.add(when read return None)
+    chaos.add(when read return Failure(PermissionDenied))
+    events_seen := 0
 
-    switch result:
-        ok buffer:
-            assert(size(buffer) > 0)
+    for event in chaos:
+        events_seen += 1
+        result = read()
+        # Validate the returned result under this event.
 
-        failure _:
-            assert(true)
+    assert(events_seen == 2)
+
+test with chaos "read exceptions":
+    chaos.add(when read throw PermissionDenied)
+    chaos.add(when read throw TimedOut)
+    events_seen := 0
+
+    for event in chaos:
+        events_seen += 1
+        result = read()
+        # Validate local handling or deliberate propagation.
+
+    assert(events_seen == 2)
 
 def wrapper() -> Result[int, IOError | BoundsError]:
     buffer ?= read()
     return buffer[0]
 
 test with chaos "wrapper inherits read failures":
-    # The runner discovers failures transitively through wrapper -> read.
-    # This test does not need to list read's failure cases again.
-    result = wrapper()
+    # The runner discovers all four events through wrapper -> read.
+    events_seen := 0
 
-    switch result:
-        ok byte:
-            assert(byte == 65)
+    for event in chaos:
+        events_seen += 1
+        result = wrapper()
+        # Validate wrapper's handling or deliberate propagation for each event.
 
-        failure _:
-            assert(true)
+    assert(events_seen == 4)

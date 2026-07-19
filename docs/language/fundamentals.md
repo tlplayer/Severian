@@ -127,9 +127,13 @@ test with property and chaos "generated input failures":
 
 The property runner controls case generation, random seeds, distributions, and
 shrinking. The chaos runner derives a function's complete reachable failure
-surface from the call graph, including failures introduced by callees. It
-injects one failure at a time by default. Compatible modes compose explicitly
-with `and`; commas do not combine test modes.
+surface from the call graph, including failures introduced by callees. Tests add
+returned values with `chaos.add(when function return value)` and thrown
+exceptions with `chaos.add(when function throw error)`. This injection pattern
+is valid inside any test and forbidden outside test scope. The runner injects
+one event at a time by default, and handled events remain in the transitive
+catalog. Compatible modes compose explicitly with `and`; commas do not combine
+test modes.
 
 ## Imports
 

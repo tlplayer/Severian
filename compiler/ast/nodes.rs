@@ -341,6 +341,7 @@ pub enum Expr {
     Channel(ChannelExpr),
     Send(SendExpr),
     Ownership(OwnershipExpr),
+    ChaosRule(ChaosRuleExpr),
 }
 
 impl Expr {
@@ -364,6 +365,7 @@ impl Expr {
             Expr::Channel(node) => node.span,
             Expr::Send(node) => node.span,
             Expr::Ownership(node) => node.span,
+            Expr::ChaosRule(node) => node.span,
         }
     }
 }
@@ -515,6 +517,20 @@ pub struct OwnershipExpr {
     pub span: Span,
     pub value: Box<Expr>,
     pub op: OwnershipOp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChaosRuleExpr {
+    pub span: Span,
+    pub function: Box<Expr>,
+    pub action: ChaosAction,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChaosAction {
+    Return,
+    Throw,
 }
 
 //

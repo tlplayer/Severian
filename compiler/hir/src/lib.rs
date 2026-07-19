@@ -192,6 +192,11 @@ pub enum Expression {
         value: Box<Expression>,
         channel: Box<Expression>,
     },
+    ChaosRule {
+        function: String,
+        action: ChaosAction,
+        value: Box<Expression>,
+    },
     ListComprehension {
         element: Box<Expression>,
         variable: String,
@@ -215,6 +220,12 @@ pub enum Expression {
         callee: Box<Expression>,
         args: Vec<Expression>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChaosAction {
+    Return,
+    Throw,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

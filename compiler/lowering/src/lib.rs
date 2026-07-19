@@ -268,7 +268,8 @@ impl LowerContext<'_> {
             | Expression::Task(_)
             | Expression::Await(_)
             | Expression::Channel(_)
-            | Expression::Send { .. } => {
+            | Expression::Send { .. }
+            | Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                 (result, ValueType::Any)
@@ -594,6 +595,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
             collect_expression_strings(value, strings);
             collect_expression_strings(channel, strings);
         }
+        Expression::ChaosRule { value, .. } => collect_expression_strings(value, strings),
         _ => {}
     }
 }

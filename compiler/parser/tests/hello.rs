@@ -32,3 +32,36 @@ fn rejects_a_missing_function_body() {
     let error = parse(&tokens).unwrap_err();
     assert!(error.message.contains("indented function body"));
 }
+
+#[test]
+fn accepts_chaos_injection_patterns_in_any_test_block() {
+    let source = concat!(
+        "def read():\n",
+        "    return None\n",
+        "\n",
+        "test:\n",
+        "    chaos.add(when read return None)\n",
+        "\n",
+        "test with chaos \"throws\":\n",
+        "    chaos.add(when read throw TimedOut)\n",
+    );
+
+    parse(&lex(source).unwrap()).unwrap();
+}
+
+#[test]
+fn rejects_chaos_injection_patterns_outside_tests() {
+    let source = concat!(
+        "def read():\n",
+        "    return None\n",
+        "\n",
+        "def main():\n",
+        "    chaos.add(when read return None)\n",
+    );
+
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "chaos injection patterns are only valid inside tests"
+    );
+}

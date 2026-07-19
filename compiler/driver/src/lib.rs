@@ -2,11 +2,12 @@
 
 use severian_ast::Span;
 use severian_hir::{
-    AssignmentOp, BinaryOp, Expression, Instruction, MatchPattern, Program, UnaryOp,
+    AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
+    Test, TestMode, UnaryOp,
 };
 use severian_mlir::Module;
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +29,7 @@ pub enum CompileError {
     },
     Ownership(String),
     Execution(String),
+    ChaosThrow(String),
 }
 
 impl fmt::Display for CompileError {
@@ -45,6 +47,7 @@ impl fmt::Display for CompileError {
             ),
             CompileError::Ownership(message) => write!(formatter, "ownership error: {message}"),
             CompileError::Execution(message) => write!(formatter, "execution error: {message}"),
+            CompileError::ChaosThrow(message) => write!(formatter, "injected throw: {message}"),
         }
     }
 }
@@ -141,7 +144,7 @@ pub fn run(program: &Program, mut write_line: impl FnMut(&str)) -> Result<(), Co
         span: Span::default(),
         message: "program must define `main`".into(),
     })?;
-    execute_function(program, "main", Vec::new(), &mut write_line)?;
+    execute_function(program, "main", Vec::new(), None, &mut write_line)?;
     Ok(())
 }
 
@@ -157,7 +160,7 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
                 }
             });
             let mut output = ignore_output;
-            let mut variables = initial_variables(program, &mut output)?;
+            let mut variables = test_variables(program, function, test, &mut output)?;
             execute_instructions(program, &test.instructions, &mut variables, &mut output)
                 .map_err(|error| {
                     CompileError::Execution(format!("test `{label}` failed: {error}"))
@@ -177,7 +180,7 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
                     }
                 });
                 let mut output = ignore_output;
-                let mut variables = initial_variables(program, &mut output)?;
+                let mut variables = test_variables(program, function, test, &mut output)?;
                 execute_instructions(program, &test.instructions, &mut variables, &mut output)
                     .map_err(|error| {
                         CompileError::Execution(format!("test `{label}` failed: {error}"))
@@ -192,6 +195,206 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
 
 fn ignore_output(_: &str) {}
 
+fn test_variables(
+    program: &Program,
+    function: &Function,
+    test: &Test,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<HashMap<String, Value>, CompileError> {
+    let mut variables = initial_variables(program, write_line)?;
+    let mut events = Vec::new();
+    if test.modes.contains(&TestMode::Chaos) {
+        for dependency in reachable_dependencies(program, function) {
+            for dependency_test in &dependency.tests {
+                let mut rules = Vec::new();
+                collect_chaos_rules(&dependency_test.instructions, &mut rules);
+                for rule in rules {
+                    events.push(evaluate(program, &rule, &variables, write_line)?);
+                }
+            }
+        }
+    }
+    variables.insert("chaos".into(), Value::List(Rc::new(RefCell::new(events))));
+    Ok(variables)
+}
+
+fn reachable_dependencies<'program>(
+    program: &'program Program,
+    root: &Function,
+) -> Vec<&'program Function> {
+    let mut pending = Vec::new();
+    collect_called_functions(&root.instructions, &mut pending);
+    let mut visited = HashSet::new();
+    let mut dependencies = Vec::new();
+    while let Some(name) = pending.pop() {
+        if name == root.name || !visited.insert(name.clone()) {
+            continue;
+        }
+        let Some(function) = program
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+        else {
+            continue;
+        };
+        collect_called_functions(&function.instructions, &mut pending);
+        dependencies.push(function);
+    }
+    dependencies
+}
+
+fn collect_called_functions(instructions: &[Instruction], calls: &mut Vec<String>) {
+    walk_instructions(instructions, &mut |expression| {
+        if let Expression::Call { function, .. } = expression {
+            calls.push(function.clone());
+        }
+    });
+}
+
+fn collect_chaos_rules(instructions: &[Instruction], rules: &mut Vec<Expression>) {
+    walk_instructions(instructions, &mut |expression| {
+        if matches!(expression, Expression::ChaosRule { .. }) {
+            rules.push(expression.clone());
+        }
+    });
+}
+
+fn walk_instructions<'expression>(
+    instructions: &'expression [Instruction],
+    visit: &mut impl FnMut(&'expression Expression),
+) {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { value, .. }
+            | Instruction::TryLet { value, .. }
+            | Instruction::Assign { value, .. }
+            | Instruction::Print(value)
+            | Instruction::Assert(value)
+            | Instruction::Evaluate(value) => walk_expression(value, visit),
+            Instruction::Return(Some(value)) => walk_expression(value, visit),
+            Instruction::Return(None) => {}
+            Instruction::If {
+                condition,
+                then_instructions,
+                else_instructions,
+            } => {
+                walk_expression(condition, visit);
+                walk_instructions(then_instructions, visit);
+                walk_instructions(else_instructions, visit);
+            }
+            Instruction::While {
+                setup,
+                condition,
+                instructions,
+            } => {
+                if let Some(setup) = setup {
+                    walk_instructions(std::slice::from_ref(setup), visit);
+                }
+                walk_expression(condition, visit);
+                walk_instructions(instructions, visit);
+            }
+            Instruction::For {
+                iterable,
+                instructions,
+                ..
+            } => {
+                walk_expression(iterable, visit);
+                walk_instructions(instructions, visit);
+            }
+            Instruction::Switch { value, arms } => {
+                walk_expression(value, visit);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        walk_expression(guard, visit);
+                    }
+                    walk_instructions(&arm.instructions, visit);
+                }
+            }
+        }
+    }
+}
+
+fn walk_expression<'expression>(
+    expression: &'expression Expression,
+    visit: &mut impl FnMut(&'expression Expression),
+) {
+    visit(expression);
+    match expression {
+        Expression::List(values)
+        | Expression::Tuple(values)
+        | Expression::Set(values)
+        | Expression::PrintArgs(values)
+        | Expression::Construct { args: values, .. }
+        | Expression::Variant { fields: values, .. } => {
+            for value in values {
+                walk_expression(value, visit);
+            }
+        }
+        Expression::Map(entries) => {
+            for (key, value) in entries {
+                walk_expression(key, visit);
+                walk_expression(value, visit);
+            }
+        }
+        Expression::Index { object, index } => {
+            walk_expression(object, visit);
+            walk_expression(index, visit);
+        }
+        Expression::Member { object, .. }
+        | Expression::Unary {
+            expression: object, ..
+        }
+        | Expression::Task(object)
+        | Expression::Await(object)
+        | Expression::Channel(object)
+        | Expression::ChaosRule { value: object, .. } => walk_expression(object, visit),
+        Expression::MethodCall { object, args, .. } => {
+            walk_expression(object, visit);
+            for arg in args {
+                walk_expression(arg, visit);
+            }
+        }
+        Expression::Send { value, channel } => {
+            walk_expression(value, visit);
+            walk_expression(channel, visit);
+        }
+        Expression::ListComprehension {
+            element,
+            iterable,
+            condition,
+            ..
+        } => {
+            walk_expression(element, visit);
+            walk_expression(iterable, visit);
+            if let Some(condition) = condition {
+                walk_expression(condition, visit);
+            }
+        }
+        Expression::Call { args, .. } => {
+            for arg in args {
+                walk_expression(arg, visit);
+            }
+        }
+        Expression::CallValue { callee, args } => {
+            walk_expression(callee, visit);
+            for arg in args {
+                walk_expression(arg, visit);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            walk_expression(left, visit);
+            walk_expression(right, visit);
+        }
+        Expression::Integer(_)
+        | Expression::Float(_)
+        | Expression::Boolean(_)
+        | Expression::String(_)
+        | Expression::Variable(_)
+        | Expression::Function(_)
+        | Expression::Format(_) => {}
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
     Int(i64),
@@ -204,9 +407,18 @@ enum Value {
     Map(Rc<RefCell<Vec<(Value, Value)>>>),
     Set(Vec<Value>),
     Object(Rc<RefCell<ObjectValue>>),
-    Variant { name: String, fields: Vec<Value> },
+    Variant {
+        name: String,
+        fields: Vec<Value>,
+    },
     Task(Box<Value>),
     Channel(Rc<RefCell<VecDeque<Value>>>),
+    ChaosRule {
+        function: String,
+        action: ChaosAction,
+        value: Box<Value>,
+        hit: Rc<Cell<bool>>,
+    },
     Unit,
 }
 
@@ -220,6 +432,7 @@ fn execute_function(
     program: &Program,
     name: &str,
     args: Vec<Value>,
+    chaos_event: Option<Value>,
     write_line: &mut dyn FnMut(&str),
 ) -> Result<Value, CompileError> {
     let function = program
@@ -228,6 +441,9 @@ fn execute_function(
         .find(|function| function.name == name)
         .ok_or_else(|| CompileError::Execution(format!("unknown function `{name}`")))?;
     let mut variables = initial_variables(program, write_line)?;
+    if let Some(event) = chaos_event {
+        variables.insert("__chaos_event".into(), event);
+    }
     variables.extend(
         function
             .params
@@ -347,15 +563,43 @@ fn execute_instructions(
             } => {
                 let values = iterable_values(evaluate(program, iterable, variables, write_line)?)?;
                 for value in values {
+                    let active_hit = if let Value::ChaosRule { hit, .. } = &value {
+                        hit.set(false);
+                        variables.insert("__chaos_event".into(), value.clone());
+                        Some(hit.clone())
+                    } else {
+                        None
+                    };
                     let mut bindings = HashMap::new();
                     if !match_pattern(program, &value, pattern, &mut bindings) {
                         return Err(CompileError::Execution("for pattern did not match".into()));
                     }
                     variables.extend(bindings);
-                    if let Some(value) =
-                        execute_instructions(program, instructions, variables, write_line)?
-                    {
-                        return Ok(Some(value));
+                    let result: Result<(), CompileError> =
+                        match execute_instructions(program, instructions, variables, write_line) {
+                            Ok(Some(value)) => return Ok(Some(value)),
+                            Ok(None) => Ok(()),
+                            Err(CompileError::ChaosThrow(_))
+                                if matches!(
+                                    variables.get("__chaos_event"),
+                                    Some(Value::ChaosRule {
+                                        action: ChaosAction::Throw,
+                                        ..
+                                    })
+                                ) =>
+                            {
+                                Ok(())
+                            }
+                            Err(error) => return Err(error),
+                        };
+                    result?;
+                    if active_hit.as_ref().is_some_and(|hit| !hit.get()) {
+                        return Err(CompileError::Execution(
+                            "chaos event did not reach its target function".into(),
+                        ));
+                    }
+                    if active_hit.is_some() {
+                        variables.remove("__chaos_event");
                     }
                 }
             }
@@ -568,6 +812,16 @@ fn evaluate(
             channel.borrow_mut().push_back(value);
             Ok(Value::Unit)
         }
+        Expression::ChaosRule {
+            function,
+            action,
+            value,
+        } => Ok(Value::ChaosRule {
+            function: function.clone(),
+            action: *action,
+            value: Box::new(evaluate(program, value, variables, write_line)?),
+            hit: Rc::new(Cell::new(false)),
+        }),
         Expression::Variable(name) => variables
             .get(name)
             .cloned()
@@ -620,7 +874,23 @@ fn evaluate(
                 .iter()
                 .map(|arg| evaluate(program, arg, variables, write_line))
                 .collect::<Result<Vec<_>, _>>()?;
-            execute_call(program, function, args, write_line)
+            let chaos_event = variables.get("__chaos_event").cloned();
+            if let Some(Value::ChaosRule {
+                function: target,
+                action,
+                value,
+                hit,
+            }) = &chaos_event
+            {
+                if target == function {
+                    hit.set(true);
+                    return match action {
+                        ChaosAction::Return => Ok((**value).clone()),
+                        ChaosAction::Throw => Err(CompileError::ChaosThrow(display_value(value))),
+                    };
+                }
+            }
+            execute_call(program, function, args, chaos_event, write_line)
         }
         Expression::CallValue { callee, args } => {
             let Value::Function(function) = evaluate(program, callee, variables, write_line)?
@@ -628,7 +898,13 @@ fn evaluate(
                 return Err(CompileError::Execution("value is not callable".into()));
             };
             let args = evaluate_all(program, args, variables, write_line)?;
-            execute_function(program, &function, args, write_line)
+            execute_function(
+                program,
+                &function,
+                args,
+                variables.get("__chaos_event").cloned(),
+                write_line,
+            )
         }
         Expression::Binary { left, op, right } => {
             let left = evaluate(program, left, variables, write_line)?;
@@ -654,6 +930,7 @@ fn execute_call(
     program: &Program,
     function: &str,
     args: Vec<Value>,
+    chaos_event: Option<Value>,
     write_line: &mut dyn FnMut(&str),
 ) -> Result<Value, CompileError> {
     if program
@@ -661,7 +938,7 @@ fn execute_call(
         .iter()
         .any(|candidate| candidate.name == function)
     {
-        return execute_function(program, function, args, write_line);
+        return execute_function(program, function, args, chaos_event, write_line);
     }
     match function {
         "print" => {
@@ -729,7 +1006,7 @@ fn execute_call(
             _ => Err(CompileError::Execution("size expects a collection".into())),
         },
         "Number.zero" => Ok(Value::Int(0)),
-        _ => execute_function(program, function, args, write_line),
+        _ => execute_function(program, function, args, chaos_event, write_line),
     }
 }
 
@@ -786,7 +1063,7 @@ fn execute_method(
     write_line: &mut dyn FnMut(&str),
 ) -> Result<Value, CompileError> {
     match (&object, method) {
-        (Value::List(values), "append") => {
+        (Value::List(values), "append" | "add") => {
             let [value] = args.as_slice() else {
                 return Err(CompileError::Execution(
                     "append expects one argument".into(),
@@ -1080,6 +1357,18 @@ fn display_value(value: &Value) -> String {
         }
         Value::Task(_) => "<task>".into(),
         Value::Channel(_) => "<channel>".into(),
+        Value::ChaosRule {
+            function,
+            action,
+            value,
+            ..
+        } => {
+            let action = match action {
+                ChaosAction::Return => "return",
+                ChaosAction::Throw => "throw",
+            };
+            format!("when {function} {action} {}", display_value(value))
+        }
         Value::Unit => "unit".into(),
     }
 }

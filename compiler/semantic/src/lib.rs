@@ -6,9 +6,9 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, Class, Expression, Function, Global, Instruction, MatchPattern,
-    Parameter, Program, SwitchArm as HirSwitchArm, Test, TestMode as HirTestMode, UnaryOp,
-    ValueType,
+    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Expression, Function, Global,
+    Instruction, MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, Test,
+    TestMode as HirTestMode, UnaryOp, ValueType,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -181,6 +181,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         let mut tests = Vec::new();
         for test in &function.tests {
             let mut test_scope = global_scope.clone();
+            add_test_bindings(&mut test_scope);
             tests.push(Test {
                 name: test.name.as_ref().map(|name| name.name.clone()),
                 modes: lower_test_modes(&test.modes),
@@ -322,6 +323,7 @@ fn lower_class_function(
     let mut tests = Vec::new();
     for test in source_tests {
         let mut test_scope = global_scope.clone();
+        add_test_bindings(&mut test_scope);
         tests.push(Test {
             name: test.name.as_ref().map(|name| name.name.clone()),
             modes: lower_test_modes(&test.modes),
@@ -672,6 +674,27 @@ fn lower_expression(
                     },
                     ValueType::Option,
                 ))
+            } else if identifier.name == "None" {
+                Ok((
+                    Expression::Variant {
+                        name: "None".into(),
+                        fields: Vec::new(),
+                    },
+                    ValueType::Option,
+                ))
+            } else if identifier
+                .name
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_uppercase)
+            {
+                Ok((
+                    Expression::Variant {
+                        name: identifier.name.clone(),
+                        fields: Vec::new(),
+                    },
+                    ValueType::Any,
+                ))
             } else {
                 Err(error(
                     identifier.span,
@@ -846,11 +869,50 @@ fn lower_expression(
                 | AstOwnershipOp::Move => Ok((value, ty)),
             }
         }
+        Expr::ChaosRule(rule) => {
+            let (function, return_type) =
+                lower_expression(&rule.function, scope, signatures, aliases)?;
+            let Expression::Function(function) = function else {
+                return Err(error(
+                    rule.function.span(),
+                    "chaos injection target must be a function",
+                ));
+            };
+            let (value, value_type) = lower_expression(&rule.value, scope, signatures, aliases)?;
+            if rule.action == severian_ast::ChaosAction::Return {
+                let declared_return = signatures
+                    .get(&function)
+                    .map_or(return_type, |signature| signature.returns);
+                compatible(rule.value.span(), value_type, declared_return)?;
+            }
+            Ok((
+                Expression::ChaosRule {
+                    function,
+                    action: match rule.action {
+                        severian_ast::ChaosAction::Return => HirChaosAction::Return,
+                        severian_ast::ChaosAction::Throw => HirChaosAction::Throw,
+                    },
+                    value: Box::new(value),
+                },
+                ValueType::Any,
+            ))
+        }
         _ => Err(error(
             expression.span(),
             "expression is not supported in this compiler slice yet",
         )),
     }
+}
+
+fn add_test_bindings(scope: &mut HashMap<String, Binding>) {
+    scope.insert(
+        "chaos".into(),
+        Binding {
+            ty: ValueType::Any,
+            mutable: false,
+            field: false,
+        },
+    );
 }
 
 fn lower_call(

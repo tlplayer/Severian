@@ -2,12 +2,12 @@
 
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
-    CallExpr, ClassDecl, CollectionExpr, ConstructorDecl, ElseBranch, Expr, Field, ForStmt,
-    FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item, LetKind,
-    LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr,
-    OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner,
-    TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp,
-    UnsafeBlock, WhileStmt,
+    CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, ElseBranch,
+    Expr, Field, ForStmt, FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName,
+    IndexExpr, Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr,
+    MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt,
+    SwitchArm, SwitchStmt, TaskOwner, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg,
+    TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -31,12 +31,18 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
-    Parser { tokens, current: 0 }.parse_module()
+    Parser {
+        tokens,
+        current: 0,
+        test_depth: 0,
+    }
+    .parse_module()
 }
 
 struct Parser<'tokens> {
     tokens: &'tokens [Token],
     current: usize,
+    test_depth: usize,
 }
 
 impl Parser<'_> {
@@ -373,7 +379,10 @@ impl Parser<'_> {
         self.expect_simple(TokenKind::Colon, "`:` after test")?;
         self.expect_simple(TokenKind::Newline, "newline after test header")?;
         self.expect_simple(TokenKind::Indent, "indented test body")?;
-        let body = self.parse_block()?;
+        self.test_depth += 1;
+        let body = self.parse_block();
+        self.test_depth -= 1;
+        let body = body?;
         let end = self
             .expect_simple(TokenKind::Dedent, "end of test body")?
             .span
@@ -1025,6 +1034,29 @@ impl Parser<'_> {
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let token = self.advance().clone();
         match token.kind {
+            TokenKind::When => {
+                if self.test_depth == 0 {
+                    return Err(ParseError {
+                        span: token.span,
+                        message: "chaos injection patterns are only valid inside tests".into(),
+                    });
+                }
+                let function = self.parse_postfix()?;
+                let action = if self.take_simple(&TokenKind::Return).is_some() {
+                    ChaosAction::Return
+                } else if self.take_simple(&TokenKind::Throw).is_some() {
+                    ChaosAction::Throw
+                } else {
+                    return Err(self.error("expected `return` or `throw` in chaos pattern"));
+                };
+                let value = self.parse_expression()?;
+                Ok(Expr::ChaosRule(ChaosRuleExpr {
+                    span: Span::new(token.span.start, value.span().end),
+                    function: Box::new(function),
+                    action,
+                    value: Box::new(value),
+                }))
+            }
             TokenKind::Identifier(name)
                 if name == "Channel" && self.at(&TokenKind::LeftBracket) =>
             {

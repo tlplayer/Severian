@@ -72,7 +72,7 @@ fn compiles_and_classifies_the_test_gallery() {
         }
     }
 
-    assert_eq!(tests, 7);
+    assert_eq!(tests, 8);
     assert!(modes.contains(&TestMode::Property));
     assert!(modes.contains(&TestMode::Bench));
     assert!(modes.contains(&TestMode::Chaos));

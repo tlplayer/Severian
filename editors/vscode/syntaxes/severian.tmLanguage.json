@@ -148,7 +148,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|else|while|for|in|switch|return|break|continue|fail|unsafe)\\b",
+          "match": "\\b(if|else|while|for|in|switch|when|return|throw|break|continue|fail|unsafe)\\b",
           "name": "keyword.control.severian"
         },
         {

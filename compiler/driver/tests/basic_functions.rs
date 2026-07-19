@@ -36,6 +36,36 @@ fn reports_a_failed_severian_assertion() {
 }
 
 #[test]
+fn runs_return_and_throw_chaos_events() {
+    let source = concat!(
+        "def read() -> Result[list[int], IOError] | None:\n",
+        "    return [65]\n",
+        "\n",
+        "test with chaos \"read results\":\n",
+        "    chaos.add(when read return None)\n",
+        "    chaos.add(when read return Failure(PermissionDenied))\n",
+        "    for event in chaos:\n",
+        "        result = read()\n",
+        "\n",
+        "test with chaos \"read exceptions\":\n",
+        "    chaos.add(when read throw PermissionDenied)\n",
+        "    chaos.add(when read throw TimedOut)\n",
+        "    for event in chaos:\n",
+        "        result = read()\n",
+    );
+    let compilation = compile_source(source).unwrap();
+    let mut report = Vec::new();
+
+    let passed = run_tests(&compilation.hir, |line| report.push(line.to_owned())).unwrap();
+
+    assert_eq!(passed, 2);
+    assert_eq!(
+        report,
+        ["test read results ... ok", "test read exceptions ... ok"]
+    );
+}
+
+#[test]
 fn compiles_basic_functions_to_a_native_executable() {
     let compilation = compile_path(&fixture()).unwrap();
     let output_path = std::env::temp_dir().join(format!("severian-basic-{}", std::process::id()));

@@ -38,3 +38,19 @@ fn rejects_a_typed_function_that_does_not_return_on_every_path() {
     let error = analyze(&ast).unwrap_err();
     assert_eq!(error.message, "function `choose` must return a value");
 }
+
+#[test]
+fn type_checks_injected_return_values() {
+    let source = concat!(
+        "def read() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "test:\n",
+        "    chaos.add(when read return \"not an int\")\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+
+    let error = analyze(&ast).unwrap_err();
+
+    assert_eq!(error.message, "expected Int, found String");
+}
