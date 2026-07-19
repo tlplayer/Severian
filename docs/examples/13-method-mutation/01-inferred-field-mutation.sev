@@ -2,7 +2,7 @@ class Counter:
     value: int
 
     def Counter():
-        value = 0
+        value := 0
 
     def inc():
         value += 1

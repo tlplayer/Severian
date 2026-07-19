@@ -1,6 +1,6 @@
 def reverse_twice(values: list[int]) -> list[int]:
     return values.reversed().reversed()
 
-property "reverse twice preserves values":
+test "reverse twice preserves values":
     for values in generate list[int] with minimum_size=1, maximum_size=100:
         assert(reverse_twice(values) == values)

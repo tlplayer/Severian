@@ -1,11 +1,11 @@
 class Buffer:
     bytes: list[u8]
 
-    # Placeholder: decide whether this needs a mutation marker.
+    # [] is a mutable value by default
     def push(byte: u8):
         bytes.append(byte)
 
 test:
-    buffer = Buffer([])
+    buffer = Buffer()
     buffer.push(65)
     assert(size(buffer.bytes) == 1)
