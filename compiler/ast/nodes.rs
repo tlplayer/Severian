@@ -11,6 +11,7 @@ pub enum Item {
     Function(FunctionDecl),
     Class(ClassDecl),
     Trait(TraitDecl),
+    Enum(EnumDecl),
     Import(ImportDecl),
     Statement(Stmt),
 }
@@ -21,6 +22,7 @@ impl Item {
             Item::Function(node) => node.span,
             Item::Class(node) => node.span,
             Item::Trait(node) => node.span,
+            Item::Enum(node) => node.span,
             Item::Import(node) => node.span,
             Item::Statement(node) => node.span(),
         }
@@ -101,7 +103,13 @@ pub struct FunctionDecl {
 pub struct Decorator {
     pub span: Span,
     pub name: TypePath,
-    pub args: Vec<CallArg>,
+    pub symbols: Vec<DecoratorSymbol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecoratorSymbol {
+    pub span: Span,
+    pub spelling: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +147,20 @@ pub struct TraitDecl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EnumDecl {
+    pub span: Span,
+    pub name: Ident,
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariant {
+    pub span: Span,
+    pub name: Ident,
+    pub fields: Vec<Parameter>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConstructorDecl {
     pub span: Span,
     pub decorators: Vec<Decorator>,
@@ -161,6 +183,7 @@ pub enum TestMode {
     Property,
     Bench,
     Chaos,
+    Integration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -730,4 +753,5 @@ pub enum OwnershipOp {
     Borrow,
     Clone,
     Move,
+    AddressOf,
 }

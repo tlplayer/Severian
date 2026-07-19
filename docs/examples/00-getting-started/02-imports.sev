@@ -4,3 +4,7 @@ from io import print as write
 def main():
     distance = sqrt(9.0)
     write(distance)
+
+test with integration "imported output":
+    main()
+    assert("3" in stdout)

@@ -1,6 +1,5 @@
-use severian_driver::{compile_native, compile_path, compile_source, run, run_tests};
+use severian_driver::{compile_path, compile_source, run, run_tests};
 use std::path::PathBuf;
-use std::process::Command;
 
 fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -63,16 +62,4 @@ fn runs_return_and_throw_chaos_events() {
         report,
         ["test read results ... ok", "test read exceptions ... ok"]
     );
-}
-
-#[test]
-fn compiles_basic_functions_to_a_native_executable() {
-    let compilation = compile_path(&fixture()).unwrap();
-    let output_path = std::env::temp_dir().join(format!("severian-basic-{}", std::process::id()));
-    compile_native(&compilation, &output_path).unwrap();
-
-    let output = Command::new(&output_path).output().unwrap();
-    assert!(output.status.success());
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), "large\n");
-    std::fs::remove_file(output_path).unwrap();
 }

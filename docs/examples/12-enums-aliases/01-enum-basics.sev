@@ -1,18 +1,18 @@
 enum Color:
-    red
-    green
-    blue
+    Red
+    Green
+    Blue
 
 def name(color: Color) -> string:
     switch color:
-        red:
+        Red:
             return "red"
 
-        green:
+        Green:
             return "green"
 
-        blue:
+        Blue:
             return "blue"
 
 test:
-    assert(name(red) == "red")
+    assert(name(Red) == "red")

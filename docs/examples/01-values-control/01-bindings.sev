@@ -6,3 +6,7 @@ def main():
 
     ready = score == 42 and name != ""
     print(ready)
+
+test with integration "binding output":
+    main()
+    assert("true" in stdout)

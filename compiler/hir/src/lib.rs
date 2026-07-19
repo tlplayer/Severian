@@ -32,6 +32,7 @@ impl Program {
 pub struct Class {
     pub name: String,
     pub fields: Vec<String>,
+    pub field_defaults: Vec<Option<Expression>>,
     pub constructors: Vec<Function>,
     pub methods: Vec<Function>,
 }
@@ -45,10 +46,17 @@ pub struct Global {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub decorators: Vec<Decorator>,
     pub params: Vec<Parameter>,
     pub return_type: ValueType,
     pub instructions: Vec<Instruction>,
     pub tests: Vec<Test>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decorator {
+    pub package: String,
+    pub symbols: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +78,7 @@ pub enum TestMode {
     Property,
     Bench,
     Chaos,
+    Integration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,11 +135,18 @@ pub enum Instruction {
         value: Expression,
         arms: Vec<SwitchArm>,
     },
+    ChannelSwitch {
+        channels: Vec<Expression>,
+        setup: Option<Box<Instruction>>,
+        repeat_condition: Option<Expression>,
+        arms: Vec<SwitchArm>,
+    },
     Evaluate(Expression),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchArm {
+    pub source: Option<Expression>,
     pub pattern: MatchPattern,
     pub guard: Option<Expression>,
     pub instructions: Vec<Instruction>,

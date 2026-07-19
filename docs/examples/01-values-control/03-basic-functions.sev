@@ -14,3 +14,7 @@ def main():
         print("large")
     else:
         print("small")
+
+test with integration "function output":
+    main()
+    assert("large" in stdout)

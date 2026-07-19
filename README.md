@@ -57,3 +57,13 @@ another path. `emit-mlir` prints the intermediate MLIR for inspection, while
 Every source snippet in the language docs should have a matching file under
 `docs/examples`. Once the parser and driver exist, those files should be compiled
 as part of the test suite.
+
+Run the ordered compile-and-test harness with:
+
+```sh
+tools/check_docs_examples.sh
+```
+
+Add `--native` to also invoke the MLIR/LLVM native compiler for every accepted
+example containing `main()`. Successful executables mirror the source tree under
+`bin/examples`.

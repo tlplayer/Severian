@@ -1,0 +1,11 @@
+[package]
+name = "geometry-app"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "geometry-app"
+path = "src/main.sev"
+
+[dependencies]
+geometry = { path = "../geometry", version = "0.1.0" }

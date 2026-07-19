@@ -58,6 +58,7 @@ pub enum TokenKind {
     Comma,
     Dot,
     Pipe,
+    Ampersand,
     Arrow,
     Equal,
     ChangeableEqual,
@@ -78,6 +79,8 @@ pub enum TokenKind {
     LessEqual,
     Greater,
     GreaterEqual,
+    At,
+    Caret,
     Newline,
     Indent,
     Dedent,
@@ -216,6 +219,9 @@ impl<'source> Lexer<'source> {
                 b',' => self.push_simple(TokenKind::Comma, base, &mut index),
                 b'.' => self.push_simple(TokenKind::Dot, base, &mut index),
                 b'|' => self.push_simple(TokenKind::Pipe, base, &mut index),
+                b'&' => self.push_simple(TokenKind::Ampersand, base, &mut index),
+                b'@' => self.push_simple(TokenKind::At, base, &mut index),
+                b'^' => self.push_simple(TokenKind::Caret, base, &mut index),
                 b'+' if bytes.get(index + 1) == Some(&b'=') => {
                     self.push_double(TokenKind::AddEqual, base, &mut index)
                 }

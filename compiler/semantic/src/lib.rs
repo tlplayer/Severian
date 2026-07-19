@@ -6,8 +6,9 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Expression, Function, Global,
-    Instruction, MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, Test,
+    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
+    Expression, Function, Global, Instruction, MatchPattern, Parameter, Program,
+    SwitchArm as HirSwitchArm, Test,
     TestMode as HirTestMode, UnaryOp, ValueType,
 };
 use std::collections::HashMap;
@@ -53,7 +54,27 @@ struct Binding {
 
 pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
     let mut aliases = collect_imports(module);
+    let imported_modules = collect_imported_modules(module);
     for item in &module.items {
+        if let Item::Enum(enumeration) = item {
+            if !is_upper_camel_case(&enumeration.name.name) {
+                return Err(error(
+                    enumeration.name.span,
+                    format!("enum `{}` must use UpperCamelCase", enumeration.name.name),
+                ));
+            }
+            for variant in &enumeration.variants {
+                if !is_upper_camel_case(&variant.name.name) {
+                    return Err(error(
+                        variant.name.span,
+                        format!(
+                            "enum variant `{}` must use UpperCamelCase",
+                            variant.name.name
+                        ),
+                    ));
+                }
+            }
+        }
         if let Item::Class(class) = item {
             aliases.insert(
                 class.name.name.clone(),
@@ -181,7 +202,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         let mut tests = Vec::new();
         for test in &function.tests {
             let mut test_scope = global_scope.clone();
-            add_test_bindings(&mut test_scope);
+            add_test_bindings(&mut test_scope, &test.modes);
             tests.push(Test {
                 name: test.name.as_ref().map(|name| name.name.clone()),
                 modes: lower_test_modes(&test.modes),
@@ -196,6 +217,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         }
         functions.push(Function {
             name: function.name.name.clone(),
+            decorators: lower_decorators(&function.decorators, &imported_modules)?,
             params,
             return_type: signature.returns,
             instructions,
@@ -210,6 +232,23 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
             .iter()
             .map(|field| field.name.name.clone())
             .collect::<Vec<_>>();
+        let field_defaults = class
+            .fields
+            .iter()
+            .map(|field| {
+                if let Some(default) = &field.default {
+                    return lower_expression(default, &global_scope, &signatures, &aliases)
+                        .map(|(default, _)| Some(default));
+                }
+                let default = match field.ty.as_ref().map(lower_type).transpose()? {
+                    Some(ValueType::List) => Some(Expression::List(Vec::new())),
+                    Some(ValueType::Map) => Some(Expression::Map(Vec::new())),
+                    Some(ValueType::Set) => Some(Expression::Set(Vec::new())),
+                    _ => None,
+                };
+                Ok(default)
+            })
+            .collect::<Result<Vec<_>, SemanticError>>()?;
         let mut constructors = Vec::new();
         for constructor in &class.constructors {
             constructors.push(lower_class_function(
@@ -249,6 +288,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         classes.push(Class {
             name: class.name.name.clone(),
             fields,
+            field_defaults,
             constructors,
             methods,
         });
@@ -323,7 +363,7 @@ fn lower_class_function(
     let mut tests = Vec::new();
     for test in source_tests {
         let mut test_scope = global_scope.clone();
-        add_test_bindings(&mut test_scope);
+        add_test_bindings(&mut test_scope, &test.modes);
         tests.push(Test {
             name: test.name.as_ref().map(|name| name.name.clone()),
             modes: lower_test_modes(&test.modes),
@@ -338,6 +378,7 @@ fn lower_class_function(
     }
     Ok(Function {
         name: name.into(),
+        decorators: decorator_metadata(&function.decorators),
         params,
         return_type,
         instructions,
@@ -362,6 +403,73 @@ fn collect_imports(module: &Module) -> HashMap<String, String> {
         }
     }
     aliases
+}
+
+fn collect_imported_modules(module: &Module) -> HashSet<String> {
+    module
+        .items
+        .iter()
+        .filter_map(|item| {
+            let Item::Import(import) = item else {
+                return None;
+            };
+            let ImportKind::Module { path, alias } = &import.kind else {
+                return None;
+            };
+            Some(
+                alias
+                    .as_ref()
+                    .unwrap_or_else(|| path.first().unwrap())
+                    .name
+                    .clone(),
+            )
+        })
+        .collect()
+}
+
+fn lower_decorators(
+    decorators: &[severian_ast::Decorator],
+    imported_modules: &HashSet<String>,
+) -> Result<Vec<HirDecorator>, SemanticError> {
+    for decorator in decorators {
+        let root = &decorator.name.segments.first().unwrap().name;
+        if !imported_modules.contains(root) {
+            return Err(error(
+                decorator.name.span,
+                format!("decorator package `{root}` must be imported"),
+            ));
+        }
+        let mut seen = HashSet::new();
+        for symbol in &decorator.symbols {
+            if !seen.insert(&symbol.spelling) {
+                return Err(error(
+                    symbol.span,
+                    format!("duplicate decorator symbol `{}`", symbol.spelling),
+                ));
+            }
+        }
+    }
+    Ok(decorator_metadata(decorators))
+}
+
+fn decorator_metadata(decorators: &[severian_ast::Decorator]) -> Vec<HirDecorator> {
+    decorators
+        .iter()
+        .map(|decorator| HirDecorator {
+            package: decorator
+                .name
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+            symbols: decorator
+                .symbols
+                .iter()
+                .map(|symbol| symbol.spelling.clone())
+                .collect(),
+        })
+        .collect()
 }
 
 fn lower_block(
@@ -590,17 +698,45 @@ fn lower_block(
                 });
             }
             Stmt::Switch(statement) => {
-                if statement.values.len() != 1 {
-                    return Err(error(
-                        statement.span,
-                        "only single-value switches are supported yet",
-                    ));
-                }
-                let value = lower_expression(&statement.values[0], scope, signatures, aliases)?.0;
+                let setup = statement
+                    .setup
+                    .as_ref()
+                    .map(|setup| {
+                        let lowered = lower_block(
+                            &Block {
+                                span: setup.span(),
+                                statements: vec![(**setup).clone()],
+                            },
+                            scope,
+                            return_type,
+                            signatures,
+                            aliases,
+                        )?;
+                        Ok(Box::new(lowered.into_iter().next().unwrap()))
+                    })
+                    .transpose()?;
+                let repeat_condition = statement
+                    .repeat_condition
+                    .as_ref()
+                    .map(|condition| {
+                        let (condition, ty) =
+                            lower_expression(condition, scope, signatures, aliases)?;
+                        compatible(statement.span, ty, ValueType::Bool)?;
+                        Ok(condition)
+                    })
+                    .transpose()?;
                 let mut arms = Vec::new();
                 for arm in &statement.arms {
                     let mut arm_scope = scope.clone();
                     let pattern = lower_pattern(&arm.pattern, &mut arm_scope)?;
+                    let source = arm
+                        .source
+                        .as_ref()
+                        .map(|source| {
+                            lower_expression(source, &arm_scope, signatures, aliases)
+                                .map(|(source, _)| source)
+                        })
+                        .transpose()?;
                     let guard = arm
                         .guard
                         .as_ref()
@@ -612,12 +748,36 @@ fn lower_block(
                     let arm_instructions =
                         lower_block(&arm.body, &mut arm_scope, return_type, signatures, aliases)?;
                     arms.push(HirSwitchArm {
+                        source,
                         pattern,
                         guard,
                         instructions: arm_instructions,
                     });
                 }
-                instructions.push(Instruction::Switch { value, arms });
+                if statement.values.len() == 1
+                    && statement.repeat_condition.is_none()
+                    && statement.setup.is_none()
+                    && statement.arms.iter().all(|arm| arm.source.is_none())
+                {
+                    let value =
+                        lower_expression(&statement.values[0], scope, signatures, aliases)?.0;
+                    instructions.push(Instruction::Switch { value, arms });
+                } else {
+                    let channels = statement
+                        .values
+                        .iter()
+                        .map(|channel| {
+                            lower_expression(channel, scope, signatures, aliases)
+                                .map(|(channel, _)| channel)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    instructions.push(Instruction::ChannelSwitch {
+                        channels,
+                        setup,
+                        repeat_condition,
+                        arms,
+                    });
+                }
             }
             Stmt::Unsafe(block) => {
                 instructions.extend(lower_block(
@@ -866,7 +1026,8 @@ fn lower_expression(
                 AstOwnershipOp::View
                 | AstOwnershipOp::Borrow
                 | AstOwnershipOp::Clone
-                | AstOwnershipOp::Move => Ok((value, ty)),
+                | AstOwnershipOp::Move
+                | AstOwnershipOp::AddressOf => Ok((value, ty)),
             }
         }
         Expr::ChaosRule(rule) => {
@@ -904,7 +1065,7 @@ fn lower_expression(
     }
 }
 
-fn add_test_bindings(scope: &mut HashMap<String, Binding>) {
+fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast::TestMode]) {
     scope.insert(
         "chaos".into(),
         Binding {
@@ -913,6 +1074,18 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>) {
             field: false,
         },
     );
+    if modes.contains(&severian_ast::TestMode::Integration) {
+        for name in ["stdout", "stderr"] {
+            scope.insert(
+                name.into(),
+                Binding {
+                    ty: ValueType::String,
+                    mutable: false,
+                    field: false,
+                },
+            );
+        }
+    }
 }
 
 fn lower_call(
@@ -1018,6 +1191,7 @@ fn lower_call(
     }
     let builtin = match canonical {
         "print" | "io.print" => Some(("print", ValueType::Unit)),
+        "panic" => Some(("panic", ValueType::Unit)),
         "sqrt" | "math.sqrt" => Some(("sqrt", ValueType::Float)),
         "float" => Some(("float", ValueType::Float)),
         "range" => Some(("range", ValueType::List)),
@@ -1249,12 +1423,20 @@ fn always_returns(instructions: &[Instruction]) -> bool {
             else_instructions,
             ..
         } => always_returns(then_instructions) && always_returns(else_instructions),
+        Instruction::Switch { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|arm| always_returns(&arm.instructions))
+        }
         _ => false,
     })
 }
 
 fn is_lower_camel_case(name: &str) -> bool {
     name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+fn is_upper_camel_case(name: &str) -> bool {
+    name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
         && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
@@ -1269,6 +1451,7 @@ fn lower_test_modes(modes: &[severian_ast::TestMode]) -> Vec<HirTestMode> {
             severian_ast::TestMode::Property => HirTestMode::Property,
             severian_ast::TestMode::Bench => HirTestMode::Bench,
             severian_ast::TestMode::Chaos => HirTestMode::Chaos,
+            severian_ast::TestMode::Integration => HirTestMode::Integration,
         })
         .collect()
 }

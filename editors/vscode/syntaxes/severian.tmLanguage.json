@@ -168,7 +168,7 @@
     "ownership": {
       "patterns": [
         {
-          "match": "\\b(view|borrow|clone|move)\\b",
+          "match": "\\b(view|borrow|clone|move)\\b|&",
           "name": "storage.modifier.ownership.severian"
         }
       ]

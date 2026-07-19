@@ -1,4 +1,4 @@
-use severian_driver::{compile_native, compile_path, run, run_tests};
+use severian_driver::{compile_native, compile_path, run, run_integration_tests, run_tests};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -38,11 +38,25 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             run(&compilation.hir, |line| println!("{line}")).map_err(|error| error.to_string())?;
         }
-        "test" if args.len() == 2 => {
+        "test" if args.len() == 2 || args.len() == 3 => {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
-            let passed = run_tests(&compilation.hir, |line| println!("{line}"))
-                .map_err(|error| error.to_string())?;
+            let mode = args.get(2).map(String::as_str);
+            if !matches!(
+                mode,
+                None | Some("--integration") | Some("--integration-only")
+            ) {
+                return Err(usage());
+            }
+            let mut passed = 0;
+            if mode != Some("--integration-only") {
+                passed += run_tests(&compilation.hir, |line| println!("{line}"))
+                    .map_err(|error| error.to_string())?;
+            }
+            if matches!(mode, Some("--integration") | Some("--integration-only")) {
+                passed += run_integration_tests(&compilation, |line| println!("{line}"))
+                    .map_err(|error| error.to_string())?;
+            }
             println!("{passed} passed");
         }
         "help" | "--help" | "-h" => println!("{}", usage()),
@@ -53,5 +67,10 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: sev <check|emit-mlir|compile|run|test> <source.sev> [ -o executable ]".into()
+    concat!(
+        "usage: sev <check|emit-mlir|compile|run|test> <source.sev> [options]\n",
+        "  compile options: -o executable\n",
+        "  test options: --integration | --integration-only"
+    )
+    .into()
 }

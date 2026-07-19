@@ -1,2 +1,6 @@
 def main():
     print("hello, severian")
+
+test with integration "hello output":
+    main()
+    assert("hello, severian" in stdout)

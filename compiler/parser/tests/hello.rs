@@ -50,6 +50,20 @@ fn accepts_chaos_injection_patterns_in_any_test_block() {
 }
 
 #[test]
+fn parses_integration_tests_with_output_assertions() {
+    let source = concat!(
+        "def main():\n",
+        "    print(\"hello\")\n",
+        "\n",
+        "test with integration \"native output\":\n",
+        "    main()\n",
+        "    assert(\"hello\" in stdout)\n",
+    );
+    let tokens = severian_lexer::lex(source).unwrap();
+    severian_parser::parse(&tokens).unwrap();
+}
+
+#[test]
 fn rejects_chaos_injection_patterns_outside_tests() {
     let source = concat!(
         "def read():\n",
@@ -64,4 +78,23 @@ fn rejects_chaos_injection_patterns_outside_tests() {
         error.message,
         "chaos injection patterns are only valid inside tests"
     );
+}
+
+#[test]
+fn restricts_address_of_to_unsafe_blocks() {
+    let valid = concat!(
+        "def first(values: list[int]) -> int:\n",
+        "    unsafe:\n",
+        "        pointer = &values\n",
+        "        return pointer[0]\n",
+    );
+    parse(&lex(valid).unwrap()).unwrap();
+
+    let invalid = concat!(
+        "def first(values: list[int]) -> int:\n",
+        "    pointer = &values\n",
+        "    return pointer[0]\n",
+    );
+    let error = parse(&lex(invalid).unwrap()).unwrap_err();
+    assert_eq!(error.message, "address-of is only valid inside `unsafe`");
 }

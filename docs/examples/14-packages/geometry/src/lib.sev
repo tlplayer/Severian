@@ -1,6 +1,4 @@
-package geometry
-
-import math
+from math import sqrt
 
 class Point:
     x: float
@@ -10,9 +8,8 @@ class Point:
         x = x0
         y = y0
 
-    @math(*)
     def magnitude() -> float:
-        return math.sqrt(x*x + y*y)
+        return sqrt(x * x + y * y)
 
 test:
     assert(Point(3.0, 4.0).magnitude() == 5.0)

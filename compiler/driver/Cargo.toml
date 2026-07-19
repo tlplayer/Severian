@@ -17,4 +17,4 @@ severian-mlir = { path = "../mlir" }
 severian-ownership = { path = "../ownership" }
 severian-parser = { path = "../parser" }
 severian-semantic = { path = "../semantic" }
-
+toml = "1.1.3"

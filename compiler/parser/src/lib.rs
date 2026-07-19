@@ -3,11 +3,12 @@
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
     CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, ElseBranch,
-    Expr, Field, ForStmt, FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName,
-    IndexExpr, Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr,
-    MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt,
-    SwitchArm, SwitchStmt, TaskOwner, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg,
-    TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt,
+    Decorator, DecoratorSymbol, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionDecl, Ident,
+    IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item, LetKind, LetStmt,
+    ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr,
+    OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner,
+    TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp,
+    UnsafeBlock, WhileStmt,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -35,6 +36,7 @@ pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
         tokens,
         current: 0,
         test_depth: 0,
+        unsafe_depth: 0,
     }
     .parse_module()
 }
@@ -43,6 +45,7 @@ struct Parser<'tokens> {
     tokens: &'tokens [Token],
     current: usize,
     test_depth: usize,
+    unsafe_depth: usize,
 }
 
 impl Parser<'_> {
@@ -50,12 +53,21 @@ impl Parser<'_> {
         let start = self.peek().span.start;
         let mut items = Vec::new();
         while !self.at(&TokenKind::Eof) {
-            let item = if self.at(&TokenKind::Def) {
+            let item = if self.at(&TokenKind::At) {
+                let decorators = self.parse_decorators()?;
+                if self.at(&TokenKind::Def) {
+                    Item::Function(self.parse_function_with_decorators(decorators)?)
+                } else {
+                    return Err(self.error("decorators currently require a function"));
+                }
+            } else if self.at(&TokenKind::Def) {
                 Item::Function(self.parse_function()?)
             } else if self.at(&TokenKind::Class) {
                 Item::Class(self.parse_class()?)
             } else if self.at(&TokenKind::Trait) {
                 Item::Trait(self.parse_trait()?)
+            } else if self.at(&TokenKind::Enum) {
+                Item::Enum(self.parse_enum()?)
             } else if self.at(&TokenKind::Import) || self.at(&TokenKind::From) {
                 Item::Import(self.parse_import()?)
             } else if matches!(self.peek().kind, TokenKind::Identifier(_))
@@ -71,6 +83,58 @@ impl Parser<'_> {
         Ok(Module {
             span: Span::new(start, self.peek().span.end),
             items,
+        })
+    }
+
+    fn parse_enum(&mut self) -> Result<EnumDecl, ParseError> {
+        let start = self.expect_simple(TokenKind::Enum, "`enum`")?.span.start;
+        let name = self.expect_identifier("enum name")?;
+        self.expect_simple(TokenKind::Colon, "`:` after enum name")?;
+        self.expect_simple(TokenKind::Newline, "newline after enum header")?;
+        self.expect_simple(TokenKind::Indent, "indented enum variants")?;
+        let mut variants = Vec::new();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let variant = self.expect_identifier("enum variant")?;
+            let variant_start = variant.span.start;
+            let mut fields = Vec::new();
+            if self.take_simple(&TokenKind::LeftParen).is_some() {
+                if !self.at(&TokenKind::RightParen) {
+                    loop {
+                        let field_start = self.peek().span.start;
+                        let field_name = self.expect_identifier("variant field")?;
+                        self.expect_simple(TokenKind::Colon, "`:` after variant field")?;
+                        let ty = self.parse_type()?;
+                        fields.push(Parameter {
+                            span: Span::new(field_start, ty.span().end),
+                            name: field_name,
+                            ty: Some(ty),
+                            default: None,
+                        });
+                        if self.take_simple(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                self.expect_simple(TokenKind::RightParen, "`)` after enum variant")?;
+            }
+            let end = self
+                .expect_simple(TokenKind::Newline, "newline after enum variant")?
+                .span
+                .end;
+            variants.push(EnumVariant {
+                span: Span::new(variant_start, end),
+                name: variant,
+                fields,
+            });
+        }
+        let end = self
+            .expect_simple(TokenKind::Dedent, "end of enum")?
+            .span
+            .end;
+        Ok(EnumDecl {
+            span: Span::new(start, end),
+            name,
+            variants,
         })
     }
 
@@ -265,6 +329,13 @@ impl Parser<'_> {
     }
 
     fn parse_function(&mut self) -> Result<FunctionDecl, ParseError> {
+        self.parse_function_with_decorators(Vec::new())
+    }
+
+    fn parse_function_with_decorators(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<FunctionDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Def, "`def`")?.span.start;
         let name = self.expect_identifier("function name")?;
         if self.take_simple(&TokenKind::LeftBracket).is_some() {
@@ -304,13 +375,67 @@ impl Parser<'_> {
         }
         Ok(FunctionDecl {
             span: Span::new(start, end),
-            decorators: Vec::new(),
+            decorators,
             name,
             params,
             return_type,
             body,
             tests,
         })
+    }
+
+    fn parse_decorators(&mut self) -> Result<Vec<Decorator>, ParseError> {
+        let mut decorators = Vec::new();
+        while self.at(&TokenKind::At) {
+            let start = self.expect_simple(TokenKind::At, "`@`")?.span.start;
+            let segments = self.parse_path()?;
+            let name_start = segments.first().unwrap().span.start;
+            let name_end = segments.last().unwrap().span.end;
+            self.expect_simple(TokenKind::LeftParen, "`(` after decorator name")?;
+            let mut symbols = Vec::new();
+            if !self.at(&TokenKind::RightParen) {
+                loop {
+                    let token = self.advance().clone();
+                    let spelling = match token.kind {
+                        TokenKind::Identifier(value) => value,
+                        TokenKind::Star => "*".into(),
+                        TokenKind::Caret => "^".into(),
+                        TokenKind::Plus => "+".into(),
+                        TokenKind::Minus => "-".into(),
+                        TokenKind::Slash => "/".into(),
+                        TokenKind::Percent => "%".into(),
+                        _ => {
+                            return Err(ParseError {
+                                span: token.span,
+                                message: "expected decorator symbol".into(),
+                            })
+                        }
+                    };
+                    symbols.push(DecoratorSymbol {
+                        span: token.span,
+                        spelling,
+                    });
+                    if self.take_simple(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+            }
+            let end = self
+                .expect_simple(TokenKind::RightParen, "`)` after decorator symbols")?
+                .span
+                .end;
+            self.expect_simple(TokenKind::Newline, "newline after decorator")?;
+            decorators.push(Decorator {
+                span: Span::new(start, end),
+                name: TypePath {
+                    span: Span::new(name_start, name_end),
+                    segments,
+                    args: Vec::new(),
+                },
+                symbols,
+            });
+        }
+        Ok(decorators)
     }
 
     fn parse_parameters(&mut self) -> Result<Vec<Parameter>, ParseError> {
@@ -355,6 +480,7 @@ impl Parser<'_> {
                     "property" => TestMode::Property,
                     "bench" => TestMode::Bench,
                     "chaos" => TestMode::Chaos,
+                    "integration" => TestMode::Integration,
                     _ => {
                         return Err(ParseError {
                             span: mode.span,
@@ -471,7 +597,10 @@ impl Parser<'_> {
         if self.at(&TokenKind::Unsafe) {
             let start = self.advance().span.start;
             self.expect_simple(TokenKind::Colon, "`:` after unsafe")?;
-            let body = self.parse_suite("unsafe")?;
+            self.unsafe_depth += 1;
+            let body = self.parse_suite("unsafe");
+            self.unsafe_depth -= 1;
+            let body = body?;
             return Ok(Stmt::Unsafe(UnsafeBlock {
                 span: Span::new(start, body.span.end),
                 body,
@@ -670,7 +799,30 @@ impl Parser<'_> {
             .expect_simple(TokenKind::Switch, "`switch`")?
             .span
             .start;
-        let value = self.parse_expression()?;
+        let mut values = vec![self.parse_equality()?];
+        while self.take_simple(&TokenKind::And).is_some() {
+            values.push(self.parse_equality()?);
+        }
+        let repeat_condition = if self.take_simple(&TokenKind::While).is_some() {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        let setup = if self.take_simple(&TokenKind::With).is_some() {
+            let name = self.expect_identifier("switch setup binding")?;
+            let setup_start = name.span.start;
+            self.expect_simple(TokenKind::ChangeableEqual, "`:=` in switch setup")?;
+            let value = self.parse_expression()?;
+            Some(Box::new(Stmt::Let(LetStmt {
+                span: Span::new(setup_start, value.span().end),
+                kind: LetKind::Changeable,
+                name,
+                ty: None,
+                value: Some(value),
+            })))
+        } else {
+            None
+        };
         self.expect_simple(TokenKind::Colon, "`:` after switch value")?;
         self.expect_simple(TokenKind::Newline, "newline after switch header")?;
         self.expect_simple(TokenKind::Indent, "indented switch arms")?;
@@ -678,6 +830,11 @@ impl Parser<'_> {
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let arm_start = self.peek().span.start;
             let pattern = self.parse_pattern()?;
+            let source = if self.take_simple(&TokenKind::From).is_some() {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
             let guard = if self.take_simple(&TokenKind::If).is_some() {
                 Some(self.parse_expression()?)
             } else {
@@ -687,7 +844,7 @@ impl Parser<'_> {
             let body = self.parse_suite("switch arm")?;
             arms.push(SwitchArm {
                 span: Span::new(arm_start, body.span.end),
-                source: None,
+                source,
                 pattern,
                 guard,
                 body,
@@ -699,9 +856,9 @@ impl Parser<'_> {
             .end;
         Ok(SwitchStmt {
             span: Span::new(start, end),
-            values: vec![value],
-            repeat_condition: None,
-            setup: None,
+            values,
+            repeat_condition,
+            setup,
             arms,
         })
     }
@@ -874,7 +1031,27 @@ impl Parser<'_> {
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         if self.at(&TokenKind::Await) {
             let start = self.advance().span.start;
-            let value = self.parse_unary()?;
+            let first = self.parse_unary()?;
+            let mut values = vec![first];
+            while self.take_simple(&TokenKind::Comma).is_some() {
+                values.push(self.parse_unary()?);
+            }
+            let mut end = values.last().unwrap().span().end;
+            if self.take_simple(&TokenKind::With).is_some() {
+                let capability = self.expect_identifier("await capability")?;
+                end = capability.span.end;
+                while self.take_simple(&TokenKind::And).is_some() {
+                    end = self.expect_identifier("await capability")?.span.end;
+                }
+            }
+            let value = if values.len() == 1 {
+                values.pop().unwrap()
+            } else {
+                Expr::Tuple(CollectionExpr {
+                    span: Span::new(start, end),
+                    elements: values,
+                })
+            };
             let end = value.span().end;
             return Ok(Expr::Await(AwaitExpr {
                 span: Span::new(start, end),
@@ -942,6 +1119,11 @@ impl Parser<'_> {
                 Some(OwnershipOp::Clone)
             } else if self.at(&TokenKind::Move) {
                 Some(OwnershipOp::Move)
+            } else if self.at(&TokenKind::Ampersand) {
+                if self.unsafe_depth == 0 {
+                    return Err(self.error("address-of is only valid inside `unsafe`"));
+                }
+                Some(OwnershipOp::AddressOf)
             } else {
                 None
             };

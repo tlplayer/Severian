@@ -4,3 +4,8 @@ float Pi = 3.1415926
 def main():
     print(MaxRetries)
     print(Pi)
+
+test with integration "constant output":
+    main()
+    assert("3" in stdout)
+    assert("3.1415926" in stdout)

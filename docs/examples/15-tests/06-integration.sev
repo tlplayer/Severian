@@ -1,0 +1,7 @@
+def main():
+    print("hello from integration")
+
+test with integration "captures native output":
+    main()
+    assert("hello from integration" in stdout)
+    assert(stderr == "")

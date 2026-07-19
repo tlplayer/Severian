@@ -25,12 +25,29 @@ pub fn lower(program: &Program) -> Module {
         )
         .unwrap();
     }
-    if !strings.is_empty() {
-        output.push_str("  llvm.func @puts(!llvm.ptr) -> i32\n\n");
-    }
+    output.push_str(concat!(
+        "  llvm.mlir.global internal constant @__sev_fmt_int(\"%ld\\0A\\00\")\n",
+        "  llvm.mlir.global internal constant @__sev_fmt_float(\"%.15g\\0A\\00\")\n",
+        "  llvm.mlir.global internal constant @__sev_bool_true(\"true\\00\")\n",
+        "  llvm.mlir.global internal constant @__sev_bool_false(\"false\\00\")\n",
+        "  llvm.func @puts(!llvm.ptr) -> i32\n",
+        "  llvm.func @printf(!llvm.ptr, ...) -> i32\n\n",
+        "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
+    ));
 
+    let function_returns = program
+        .functions
+        .iter()
+        .map(|function| (function.name.clone(), function.return_type))
+        .collect::<HashMap<_, _>>();
     for function in &program.functions {
-        lower_function(function, &program.globals, &strings, &mut output);
+        lower_function(
+            function,
+            &program.globals,
+            &strings,
+            &function_returns,
+            &mut output,
+        );
     }
     output.push_str("}\n");
     Module::new(output)
@@ -40,6 +57,7 @@ fn lower_function(
     function: &Function,
     globals: &[severian_hir::Global],
     strings: &[String],
+    function_returns: &HashMap<String, ValueType>,
     output: &mut String,
 ) {
     let is_main = function.name == "main";
@@ -61,6 +79,7 @@ fn lower_function(
     let mut context = LowerContext {
         output,
         strings,
+        function_returns,
         variables: function
             .params
             .iter()
@@ -96,6 +115,7 @@ fn lower_function(
 struct LowerContext<'a> {
     output: &'a mut String,
     strings: &'a [String],
+    function_returns: &'a HashMap<String, ValueType>,
     variables: HashMap<String, (String, ValueType)>,
     next_value: usize,
     next_block: usize,
@@ -132,13 +152,48 @@ impl LowerContext<'_> {
                 }
                 Instruction::Print(value) => {
                     let (value, ty) = self.lower_expression(value);
-                    if ty == ValueType::String {
-                        let status = self.fresh_value();
-                        writeln!(
-                            self.output,
-                            "    {status} = llvm.call @puts({value}) : (!llvm.ptr) -> i32"
-                        )
-                        .unwrap();
+                    match ty {
+                        ValueType::String => {
+                            let status = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {status} = llvm.call @puts({value}) : (!llvm.ptr) -> i32"
+                            )
+                            .unwrap();
+                        }
+                        ValueType::Int => {
+                            self.lower_formatted_print("@__sev_fmt_int", &value, ValueType::Int)
+                        }
+                        ValueType::Float => {
+                            self.lower_formatted_print("@__sev_fmt_float", &value, ValueType::Float)
+                        }
+                        ValueType::Bool => {
+                            let true_value = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {true_value} = llvm.mlir.addressof @__sev_bool_true : !llvm.ptr"
+                            )
+                            .unwrap();
+                            let false_value = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {false_value} = llvm.mlir.addressof @__sev_bool_false : !llvm.ptr"
+                            )
+                            .unwrap();
+                            let text = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {text} = llvm.select {value}, {true_value}, {false_value} : i1, !llvm.ptr"
+                            )
+                            .unwrap();
+                            let status = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {status} = llvm.call @puts({text}) : (!llvm.ptr) -> i32"
+                            )
+                            .unwrap();
+                        }
+                        _ => {}
                     }
                 }
                 Instruction::Evaluate(expression) => {
@@ -198,13 +253,23 @@ impl LowerContext<'_> {
                         self.terminated = true;
                     }
                 }
-                Instruction::While { setup, .. } => {
+                Instruction::While {
+                    setup,
+                    condition,
+                    instructions,
+                } => {
                     if let Some(setup) = setup {
                         self.lower_instructions(std::slice::from_ref(setup));
                     }
+                    self.lower_while(condition, instructions);
                 }
-                Instruction::For { .. } => {}
+                Instruction::For {
+                    pattern,
+                    iterable,
+                    instructions,
+                } => self.lower_for(pattern, iterable, instructions),
                 Instruction::Switch { .. } => {}
+                Instruction::ChannelSwitch { .. } => {}
             }
         }
     }
@@ -225,7 +290,7 @@ impl LowerContext<'_> {
                 let value = f64::from_bits(*bits);
                 writeln!(
                     self.output,
-                    "    {result} = llvm.mlir.constant({value:e} : f64) : f64"
+                    "    {result} = llvm.mlir.constant({value:.17e} : f64) : f64"
                 )
                 .unwrap();
                 (result, ValueType::Float)
@@ -339,7 +404,6 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let result = self.fresh_value();
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -350,12 +414,36 @@ impl LowerContext<'_> {
                     .map(|(_, ty)| mlir_type(*ty))
                     .collect::<Vec<_>>()
                     .join(", ");
+                let return_type = match function.as_str() {
+                    "sqrt" | "float" => ValueType::Float,
+                    "size" => ValueType::Int,
+                    _ => self
+                        .function_returns
+                        .get(function)
+                        .copied()
+                        .unwrap_or(ValueType::Int),
+                };
+                let symbol = if function == "sqrt" {
+                    "llvm.sqrt.f64"
+                } else {
+                    function
+                };
+                if return_type == ValueType::Unit {
+                    writeln!(
+                        self.output,
+                        "    llvm.call @{symbol}({values}) : ({types}) -> ()"
+                    )
+                    .unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
+                let result = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call @{function}({values}) : ({types}) -> i64"
+                    "    {result} = llvm.call @{symbol}({values}) : ({types}) -> {}",
+                    mlir_type(return_type)
                 )
                 .unwrap();
-                (result, ValueType::Int)
+                (result, return_type)
             }
             Expression::CallValue { .. } => {
                 let result = self.fresh_value();
@@ -381,6 +469,19 @@ impl LowerContext<'_> {
         (right, _): (String, ValueType),
     ) -> (String, ValueType) {
         let result = self.fresh_value();
+        if matches!(op, BinaryOp::And | BinaryOp::Or) {
+            let operation = if op == BinaryOp::And {
+                "llvm.and"
+            } else {
+                "llvm.or"
+            };
+            writeln!(
+                self.output,
+                "    {result} = {operation} {left}, {right} : i1"
+            )
+            .unwrap();
+            return (result, ValueType::Bool);
+        }
         let (operation, result_type) = match op {
             BinaryOp::Add => (
                 if operand_type == ValueType::Float {
@@ -430,7 +531,7 @@ impl LowerContext<'_> {
                     BinaryOp::LessEqual => "sle",
                     BinaryOp::Greater => "sgt",
                     BinaryOp::GreaterEqual => "sge",
-                    BinaryOp::And | BinaryOp::Or | BinaryOp::In => {
+                    BinaryOp::In => {
                         writeln!(
                             self.output,
                             "    {result} = llvm.mlir.constant(0 : i1) : i1"
@@ -462,6 +563,167 @@ impl LowerContext<'_> {
         let value = format!("%v{}", self.next_value);
         self.next_value += 1;
         value
+    }
+
+    fn lower_formatted_print(&mut self, format: &str, value: &str, ty: ValueType) {
+        let format_value = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {format_value} = llvm.mlir.addressof {format} : !llvm.ptr"
+        )
+        .unwrap();
+        let status = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {status} = llvm.call @printf({format_value}, {value}) vararg(!llvm.func<i32 (!llvm.ptr, ...)>) : (!llvm.ptr, {}) -> i32",
+            mlir_type(ty)
+        )
+        .unwrap();
+    }
+
+    fn lower_while(&mut self, condition: &Expression, instructions: &[Instruction]) {
+        let mut carried = self
+            .variables
+            .iter()
+            .map(|(name, (value, ty))| (name.clone(), value.clone(), *ty))
+            .collect::<Vec<_>>();
+        carried.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let header = self.fresh_block();
+        let body = self.fresh_block();
+        let exit = self.fresh_block();
+        let initial_values = carried
+            .iter()
+            .map(|(_, value, ty)| format!("{value} : {}", mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if initial_values.is_empty() {
+            writeln!(self.output, "    llvm.br ^bb{header}").unwrap();
+        } else {
+            writeln!(self.output, "    llvm.br ^bb{header}({initial_values})").unwrap();
+        }
+
+        let header_values = carried
+            .iter()
+            .map(|(name, _, ty)| (name.clone(), self.fresh_value(), *ty))
+            .collect::<Vec<_>>();
+        let header_arguments = header_values
+            .iter()
+            .map(|(_, value, ty)| format!("{value}: {}", mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if header_arguments.is_empty() {
+            writeln!(self.output, "  ^bb{header}:").unwrap();
+        } else {
+            writeln!(self.output, "  ^bb{header}({header_arguments}):").unwrap();
+        }
+        for (name, value, ty) in &header_values {
+            self.variables.insert(name.clone(), (value.clone(), *ty));
+        }
+        let (condition, _) = self.lower_expression(condition);
+        writeln!(
+            self.output,
+            "    llvm.cond_br {condition}, ^bb{body}, ^bb{exit}"
+        )
+        .unwrap();
+
+        writeln!(self.output, "  ^bb{body}:").unwrap();
+        self.terminated = false;
+        self.lower_instructions(instructions);
+        if !self.terminated {
+            let next_values = carried
+                .iter()
+                .map(|(name, _, ty)| {
+                    let (value, _) = self.variables.get(name).unwrap();
+                    format!("{value} : {}", mlir_type(*ty))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            if next_values.is_empty() {
+                writeln!(self.output, "    llvm.br ^bb{header}").unwrap();
+            } else {
+                writeln!(self.output, "    llvm.br ^bb{header}({next_values})").unwrap();
+            }
+        }
+
+        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        for (name, value, ty) in header_values {
+            self.variables.insert(name, (value, ty));
+        }
+        self.terminated = false;
+    }
+
+    fn lower_for(
+        &mut self,
+        pattern: &severian_hir::MatchPattern,
+        iterable: &Expression,
+        instructions: &[Instruction],
+    ) {
+        let severian_hir::MatchPattern::Bind(name) = pattern else {
+            return;
+        };
+        let Expression::Call { function, args } = iterable else {
+            return;
+        };
+        if function != "range" || !(1..=2).contains(&args.len()) {
+            return;
+        }
+
+        let (start, end) = if args.len() == 1 {
+            let start = self.fresh_value();
+            writeln!(
+                self.output,
+                "    {start} = llvm.mlir.constant(0 : i64) : i64"
+            )
+            .unwrap();
+            (start, self.lower_expression(&args[0]).0)
+        } else {
+            (
+                self.lower_expression(&args[0]).0,
+                self.lower_expression(&args[1]).0,
+            )
+        };
+
+        let previous_binding = self.variables.remove(name);
+        let header = self.fresh_block();
+        let body = self.fresh_block();
+        let exit = self.fresh_block();
+        writeln!(self.output, "    llvm.br ^bb{header}({start} : i64)").unwrap();
+
+        let index = self.fresh_value();
+        writeln!(self.output, "  ^bb{header}({index}: i64):").unwrap();
+        let condition = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {condition} = llvm.icmp \"slt\" {index}, {end} : i64"
+        )
+        .unwrap();
+        writeln!(
+            self.output,
+            "    llvm.cond_br {condition}, ^bb{body}, ^bb{exit}"
+        )
+        .unwrap();
+
+        writeln!(self.output, "  ^bb{body}:").unwrap();
+        self.variables
+            .insert(name.clone(), (index.clone(), ValueType::Int));
+        self.terminated = false;
+        self.lower_instructions(instructions);
+        if !self.terminated {
+            let one = self.fresh_value();
+            writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i64) : i64").unwrap();
+            let next = self.fresh_value();
+            writeln!(self.output, "    {next} = llvm.add {index}, {one} : i64").unwrap();
+            writeln!(self.output, "    llvm.br ^bb{header}({next} : i64)").unwrap();
+        }
+
+        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        if let Some(previous_binding) = previous_binding {
+            self.variables.insert(name.clone(), previous_binding);
+        } else {
+            self.variables.remove(name);
+        }
+        self.terminated = false;
     }
 
     fn fresh_block(&mut self) -> usize {
@@ -513,6 +775,34 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
             Instruction::Switch { value, arms } => {
                 collect_expression_strings(value, strings);
                 for arm in arms {
+                    if let Some(source) = &arm.source {
+                        collect_expression_strings(source, strings);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        collect_expression_strings(guard, strings);
+                    }
+                    collect_strings(&arm.instructions, strings);
+                }
+            }
+            Instruction::ChannelSwitch {
+                channels,
+                setup,
+                repeat_condition,
+                arms,
+            } => {
+                for channel in channels {
+                    collect_expression_strings(channel, strings);
+                }
+                if let Some(setup) = setup {
+                    collect_strings(std::slice::from_ref(setup), strings);
+                }
+                if let Some(condition) = repeat_condition {
+                    collect_expression_strings(condition, strings);
+                }
+                for arm in arms {
+                    if let Some(source) = &arm.source {
+                        collect_expression_strings(source, strings);
+                    }
                     if let Some(guard) = &arm.guard {
                         collect_expression_strings(guard, strings);
                     }

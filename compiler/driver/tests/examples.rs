@@ -1,4 +1,4 @@
-use severian_driver::{compile_path, run_tests};
+use severian_driver::{compile_path, run, run_tests};
 use severian_hir::TestMode;
 use std::path::{Path, PathBuf};
 
@@ -47,11 +47,33 @@ fn compiles_and_tests_implemented_example_directories() {
 }
 
 #[test]
-fn compiles_the_supported_concurrency_examples() {
+fn compiles_all_concurrency_examples() {
     let directory = examples_root().join("08-concurrency");
-    for fixture in severian_files(&directory).into_iter().take(7) {
+    for fixture in severian_files(&directory) {
         compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
     }
+}
+
+#[test]
+fn runs_channel_switches_generated_defaults_and_unsafe_addressing() {
+    let root = examples_root();
+
+    let channel_switch = compile_path(&root.join("08-concurrency/08-channel-switch.sev")).unwrap();
+    let mut output = Vec::new();
+    run(&channel_switch.hir, |line| output.push(line.to_owned())).unwrap();
+    assert_eq!(output, ["message: hello", "command: refresh"]);
+
+    let generated_defaults =
+        compile_path(&root.join("13-method-mutation/02-mutation-contract-placeholder.sev"))
+            .unwrap();
+    assert_eq!(run_tests(&generated_defaults.hir, |_| {}).unwrap(), 1);
+
+    let unsafe_addressing =
+        compile_path(&root.join("09-systems-unsafe/01-isolated-pointer.sev")).unwrap();
+    assert_eq!(run_tests(&unsafe_addressing.hir, |_| {}).unwrap(), 2);
+
+    let enum_basics = compile_path(&root.join("12-enums-aliases/01-enum-basics.sev")).unwrap();
+    assert_eq!(run_tests(&enum_basics.hir, |_| {}).unwrap(), 1);
 }
 
 #[test]
@@ -76,4 +98,5 @@ fn compiles_and_classifies_the_test_gallery() {
     assert!(modes.contains(&TestMode::Property));
     assert!(modes.contains(&TestMode::Bench));
     assert!(modes.contains(&TestMode::Chaos));
+    assert!(modes.contains(&TestMode::Integration));
 }

@@ -28,6 +28,7 @@ pub enum CompileError {
         message: String,
     },
     Ownership(String),
+    Package(String),
     Execution(String),
     ChaosThrow(String),
 }
@@ -46,6 +47,7 @@ impl fmt::Display for CompileError {
                 span.start, span.end
             ),
             CompileError::Ownership(message) => write!(formatter, "ownership error: {message}"),
+            CompileError::Package(message) => write!(formatter, "package error: {message}"),
             CompileError::Execution(message) => write!(formatter, "execution error: {message}"),
             CompileError::ChaosThrow(message) => write!(formatter, "injected throw: {message}"),
         }
@@ -83,7 +85,104 @@ pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
-    compile_source(&std::fs::read_to_string(path)?)
+    let source = std::fs::read_to_string(path)?;
+    let Some(manifest_path) = find_manifest(path) else {
+        return compile_source(&source);
+    };
+    let dependency_sources = load_path_dependencies(&manifest_path)?;
+    if dependency_sources.is_empty() {
+        return compile_source(&source);
+    }
+    let mut package_source = dependency_sources.join("\n");
+    package_source.push('\n');
+    package_source.push_str(&source);
+    compile_source(&package_source)
+}
+
+fn find_manifest(source: &Path) -> Option<PathBuf> {
+    source
+        .parent()?
+        .ancestors()
+        .map(|directory| directory.join("Severian.toml"))
+        .find(|candidate| candidate.is_file())
+}
+
+fn load_path_dependencies(manifest_path: &Path) -> Result<Vec<String>, CompileError> {
+    let mut visited = HashSet::new();
+    let mut sources = Vec::new();
+    load_manifest_dependencies(manifest_path, &mut visited, &mut sources)?;
+    Ok(sources)
+}
+
+fn load_manifest_dependencies(
+    manifest_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    sources: &mut Vec<String>,
+) -> Result<(), CompileError> {
+    let manifest = parse_manifest(manifest_path)?;
+    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
+        return Ok(());
+    };
+    let manifest_directory = manifest_path.parent().unwrap();
+    for (dependency_name, dependency) in dependencies {
+        let Some(path) = dependency
+            .as_table()
+            .and_then(|table| table.get("path"))
+            .and_then(toml::Value::as_str)
+        else {
+            continue;
+        };
+        let dependency_directory = manifest_directory.join(path);
+        let dependency_manifest = dependency_directory.join("Severian.toml");
+        let canonical_manifest = dependency_manifest.canonicalize().map_err(|error| {
+            CompileError::Package(format!(
+                "dependency `{dependency_name}` has invalid path `{}`: {error}",
+                dependency_directory.display()
+            ))
+        })?;
+        if !visited.insert(canonical_manifest.clone()) {
+            continue;
+        }
+        let dependency_package = parse_manifest(&canonical_manifest)?;
+        let declared_name = dependency_package
+            .get("package")
+            .and_then(toml::Value::as_table)
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| {
+                CompileError::Package(format!(
+                    "{} is missing `package.name`",
+                    canonical_manifest.display()
+                ))
+            })?;
+        if declared_name != dependency_name {
+            return Err(CompileError::Package(format!(
+                "dependency `{dependency_name}` resolves to package `{declared_name}`"
+            )));
+        }
+        load_manifest_dependencies(&canonical_manifest, visited, sources)?;
+        let library_path = dependency_package
+            .get("lib")
+            .and_then(toml::Value::as_table)
+            .and_then(|library| library.get("path"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("src/lib.sev");
+        let source_path = canonical_manifest.parent().unwrap().join(library_path);
+        sources.push(std::fs::read_to_string(&source_path).map_err(|error| {
+            CompileError::Package(format!(
+                "could not read library for `{dependency_name}` at {}: {error}",
+                source_path.display()
+            ))
+        })?);
+    }
+    Ok(())
+}
+
+fn parse_manifest(path: &Path) -> Result<toml::Value, CompileError> {
+    let source = std::fs::read_to_string(path)?;
+    toml::from_str::<toml::Value>(&source).map_err(|error| {
+        CompileError::Package(format!("invalid manifest {}: {error}", path.display()))
+    })
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
@@ -152,6 +251,9 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
     let mut passed = 0;
     for function in &program.functions {
         for (index, test) in function.tests.iter().enumerate() {
+            if test.modes.contains(&TestMode::Integration) {
+                continue;
+            }
             let label = test.name.clone().unwrap_or_else(|| {
                 if function.tests.len() == 1 {
                     function.name.clone()
@@ -172,6 +274,9 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
     for class in &program.classes {
         for function in class.methods.iter().chain(&class.constructors) {
             for (index, test) in function.tests.iter().enumerate() {
+                if test.modes.contains(&TestMode::Integration) {
+                    continue;
+                }
                 let label = test.name.clone().unwrap_or_else(|| {
                     if function.tests.len() == 1 {
                         format!("{}.{}", class.name, function.name)
@@ -191,6 +296,94 @@ pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usiz
         }
     }
     Ok(passed)
+}
+
+pub fn run_integration_tests(
+    compilation: &Compilation,
+    mut report: impl FnMut(&str),
+) -> Result<usize, CompileError> {
+    let has_integration_tests = compilation.hir.functions.iter().any(|function| {
+        function
+            .tests
+            .iter()
+            .any(|test| test.modes.contains(&TestMode::Integration))
+    });
+    if !has_integration_tests {
+        return Ok(0);
+    }
+    let executable = std::env::temp_dir().join(format!(
+        "severian-integration-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time must follow the Unix epoch")
+            .as_nanos()
+    ));
+    compile_native(compilation, &executable)?;
+    let result = run_integration_tests_with_executable(compilation, &executable, &mut report);
+    let _ = std::fs::remove_file(executable);
+    result
+}
+
+fn run_integration_tests_with_executable(
+    compilation: &Compilation,
+    executable: &Path,
+    report: &mut dyn FnMut(&str),
+) -> Result<usize, CompileError> {
+    let mut passed = 0;
+    for function in &compilation.hir.functions {
+        for (index, test) in function.tests.iter().enumerate() {
+            if !test.modes.contains(&TestMode::Integration) {
+                continue;
+            }
+            let label = test.name.clone().unwrap_or_else(|| {
+                if function.tests.len() == 1 {
+                    function.name.clone()
+                } else {
+                    format!("{} #{}", function.name, index + 1)
+                }
+            });
+            let output = Command::new("timeout").arg("5").arg(executable).output()?;
+            if !output.status.success() {
+                return Err(CompileError::Execution(format!(
+                    "integration test `{label}` native program exited with {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                )));
+            }
+            let mut ignored = ignore_output;
+            let mut variables = test_variables(&compilation.hir, function, test, &mut ignored)?;
+            variables.insert(
+                "stdout".into(),
+                Value::String(String::from_utf8_lossy(&output.stdout).into_owned()),
+            );
+            variables.insert(
+                "stderr".into(),
+                Value::String(String::from_utf8_lossy(&output.stderr).into_owned()),
+            );
+            let assertions = test
+                .instructions
+                .iter()
+                .filter(|instruction| !is_direct_main_call(instruction))
+                .cloned()
+                .collect::<Vec<_>>();
+            execute_instructions(&compilation.hir, &assertions, &mut variables, &mut ignored)
+                .map_err(|error| {
+                    CompileError::Execution(format!("integration test `{label}` failed: {error}"))
+                })?;
+            report(&format!("test with integration {label} ... ok"));
+            passed += 1;
+        }
+    }
+    Ok(passed)
+}
+
+fn is_direct_main_call(instruction: &Instruction) -> bool {
+    matches!(
+        instruction,
+        Instruction::Evaluate(Expression::Call { function, args })
+            if function == "main" && args.is_empty()
+    )
 }
 
 fn ignore_output(_: &str) {}
@@ -304,6 +497,34 @@ fn walk_instructions<'expression>(
             Instruction::Switch { value, arms } => {
                 walk_expression(value, visit);
                 for arm in arms {
+                    if let Some(source) = &arm.source {
+                        walk_expression(source, visit);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        walk_expression(guard, visit);
+                    }
+                    walk_instructions(&arm.instructions, visit);
+                }
+            }
+            Instruction::ChannelSwitch {
+                channels,
+                setup,
+                repeat_condition,
+                arms,
+            } => {
+                for channel in channels {
+                    walk_expression(channel, visit);
+                }
+                if let Some(setup) = setup {
+                    walk_instructions(std::slice::from_ref(setup), visit);
+                }
+                if let Some(condition) = repeat_condition {
+                    walk_expression(condition, visit);
+                }
+                for arm in arms {
+                    if let Some(source) = &arm.source {
+                        walk_expression(source, visit);
+                    }
                     if let Some(guard) = &arm.guard {
                         walk_expression(guard, visit);
                     }
@@ -633,6 +854,91 @@ fn execute_instructions(
                     return Err(CompileError::Execution("non-exhaustive switch".into()));
                 }
             }
+            Instruction::ChannelSwitch {
+                channels,
+                setup,
+                repeat_condition,
+                arms,
+            } => {
+                if let Some(setup) = setup {
+                    execute_instructions(
+                        program,
+                        std::slice::from_ref(setup),
+                        variables,
+                        write_line,
+                    )?;
+                }
+                loop {
+                    if let Some(condition) = repeat_condition {
+                        if !truthy(&evaluate(program, condition, variables, write_line)?)? {
+                            break;
+                        }
+                    }
+
+                    let mut selected = None;
+                    for channel_expression in channels {
+                        let Value::Channel(channel) =
+                            evaluate(program, channel_expression, variables, write_line)?
+                        else {
+                            return Err(CompileError::Execution(
+                                "channel switch source is not a channel".into(),
+                            ));
+                        };
+                        let received = channel.borrow_mut().pop_front();
+                        if let Some(value) = received {
+                            selected = arms
+                                .iter()
+                                .find(|arm| arm.source.as_ref() == Some(channel_expression))
+                                .map(|arm| (arm, value));
+                            break;
+                        }
+                    }
+
+                    let (arm, value) = if let Some(selected) = selected {
+                        selected
+                    } else if let Some(arm) = arms.iter().find(|arm| arm.source.is_none()) {
+                        (
+                            arm,
+                            Value::Variant {
+                                name: "fail".into(),
+                                fields: vec![Value::String("all channels are empty".into())],
+                            },
+                        )
+                    } else {
+                        return Err(CompileError::Execution(
+                            "all selected channels are empty".into(),
+                        ));
+                    };
+
+                    let mut bindings = HashMap::new();
+                    if !match_pattern(program, &value, &arm.pattern, &mut bindings) {
+                        return Err(CompileError::Execution(
+                            "channel switch pattern did not match".into(),
+                        ));
+                    }
+                    let bound_names = bindings.keys().cloned().collect::<Vec<_>>();
+                    variables.extend(bindings);
+                    if let Some(guard) = &arm.guard {
+                        if !truthy(&evaluate(program, guard, variables, write_line)?)? {
+                            return Err(CompileError::Execution(
+                                "channel switch guard rejected the received value".into(),
+                            ));
+                        }
+                    }
+                    if let Some(value) =
+                        execute_instructions(program, &arm.instructions, variables, write_line)?
+                    {
+                        return Ok(Some(value));
+                    }
+                    for name in bound_names {
+                        variables.remove(&name);
+                    }
+
+                    if repeat_condition.is_none() {
+                        break;
+                    }
+                }
+            }
             Instruction::Evaluate(expression) => {
                 evaluate(program, expression, variables, write_line)?;
             }
@@ -945,6 +1251,9 @@ fn execute_call(
             write_line(&display_value(args.first().unwrap_or(&Value::Unit)));
             Ok(Value::Unit)
         }
+        "panic" => Err(CompileError::Execution(
+            args.iter().map(display_value).collect::<Vec<_>>().join(" "),
+        )),
         "sqrt" => match args.as_slice() {
             [Value::Float(value)] => Ok(Value::Float(f64::from_bits(*value).sqrt().to_bits())),
             _ => Err(CompileError::Execution("sqrt expects a float".into())),
@@ -1023,23 +1332,38 @@ fn construct(
         .ok_or_else(|| CompileError::Execution(format!("unknown class `{class_name}`")))?;
     let object = Rc::new(RefCell::new(ObjectValue {
         class: class.name.clone(),
-        fields: class
-            .fields
-            .iter()
-            .map(|field| (field.clone(), Value::Unit))
-            .collect(),
+        fields: HashMap::new(),
     }));
     if class.constructors.is_empty() {
-        if args.len() != class.fields.len() {
+        if args.is_empty() && class.field_defaults.iter().all(Option::is_some) {
+            for (field, default) in class.fields.iter().zip(&class.field_defaults) {
+                let value = evaluate(
+                    program,
+                    default.as_ref().expect("all defaults were checked"),
+                    &HashMap::new(),
+                    write_line,
+                )?;
+                object.borrow_mut().fields.insert(field.clone(), value);
+            }
+        } else if args.len() == class.fields.len() {
+            for (field, value) in class.fields.iter().zip(args) {
+                object.borrow_mut().fields.insert(field.clone(), value);
+            }
+        } else {
             return Err(CompileError::Execution(format!(
-                "`{class_name}` expects {} arguments",
-                class.fields.len()
+                "`{class_name}` expects {} arguments or generated field defaults",
+                class.fields.len(),
             )));
         }
-        for (field, value) in class.fields.iter().zip(args) {
+    } else {
+        for (field, default) in class.fields.iter().zip(&class.field_defaults) {
+            let value = if let Some(default) = default {
+                evaluate(program, default, &HashMap::new(), write_line)?
+            } else {
+                Value::Unit
+            };
             object.borrow_mut().fields.insert(field.clone(), value);
         }
-    } else {
         let constructor = class
             .constructors
             .iter()
@@ -1175,6 +1499,9 @@ fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, Com
         }
         (Value::String(left), BinaryOp::Add, Value::String(right)) => {
             Ok(Value::String(left + &right))
+        }
+        (Value::String(needle), BinaryOp::In, Value::String(haystack)) => {
+            Ok(Value::Bool(haystack.contains(&needle)))
         }
         (left, BinaryOp::Equal, right) => Ok(Value::Bool(left == right)),
         (left, BinaryOp::NotEqual, right) => Ok(Value::Bool(left != right)),

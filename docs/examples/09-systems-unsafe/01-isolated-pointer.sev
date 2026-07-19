@@ -1,4 +1,4 @@
-def byte_at(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
+def byteAt(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
     if index < 0 or index >= size(bytes):
         return failure(BoundsError(index))
 
@@ -7,7 +7,7 @@ def byte_at(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
         return ptr[index]
 
 test "in bounds":
-    switch byte_at([65, 66, 67], 1):
+    switch byteAt([65, 66, 67], 1):
         ok byte:
             assert(byte == 66)
 
@@ -15,7 +15,7 @@ test "in bounds":
             assert(false, error)
 
 test "out of bounds":
-    switch byte_at([65], 4):
+    switch byteAt([65], 4):
         ok _:
             assert(false, "expected bounds failure")
 
@@ -23,5 +23,5 @@ test "out of bounds":
             assert(true)
 
 def main():
-    result = byte_at([65, 66, 67], 1)
+    result = byteAt([65, 66, 67], 1)
     print(result)

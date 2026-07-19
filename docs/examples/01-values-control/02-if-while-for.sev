@@ -8,3 +8,11 @@ def main():
             print("even")
         else:
             print("odd")
+
+test with integration "control flow output":
+    main()
+    assert("0" in stdout)
+    assert("1" in stdout)
+    assert("2" in stdout)
+    assert("even" in stdout)
+    assert("odd" in stdout)
