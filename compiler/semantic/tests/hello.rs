@@ -1,4 +1,4 @@
-use severian_hir::Instruction;
+use severian_hir::{Expression, Instruction};
 use severian_lexer::lex;
 use severian_parser::parse;
 use severian_semantic::analyze;
@@ -11,7 +11,9 @@ fn resolves_print_and_lowers_hello_to_hir() {
 
     assert_eq!(
         hir.main().unwrap().instructions,
-        vec![Instruction::Print("hello, severian".into())]
+        vec![Instruction::Print(Expression::String(
+            "hello, severian".into()
+        ))]
     );
 }
 
@@ -27,4 +29,12 @@ fn rejects_snake_case_function_names() {
     let ast = parse(&lex("def bad_name():\n    print(\"hello\")\n").unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
     assert_eq!(error.message, "function `bad_name` must use lowerCamelCase");
+}
+
+#[test]
+fn rejects_a_typed_function_that_does_not_return_on_every_path() {
+    let source = "def choose(ready: bool) -> int:\n    if ready:\n        return 1\n";
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert_eq!(error.message, "function `choose` must return a value");
 }

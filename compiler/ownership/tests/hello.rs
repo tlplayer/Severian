@@ -1,11 +1,14 @@
-use severian_hir::{Function, Instruction, Program};
+use severian_hir::{Expression, Function, Instruction, Program, ValueType};
 
 #[test]
 fn accepts_owned_string_literals() {
     let program = Program {
         functions: vec![Function {
             name: "main".into(),
-            instructions: vec![Instruction::Print("hello".into())],
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Print(Expression::String("hello".into()))],
+            tests: vec![],
         }],
     };
 

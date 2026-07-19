@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
 use severian_ast::Span;
-use severian_hir::{Instruction, Program};
+use severian_hir::{BinaryOp, Expression, Instruction, Program};
 use severian_mlir::Module;
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -22,6 +23,7 @@ pub enum CompileError {
         message: String,
     },
     Ownership(String),
+    Execution(String),
 }
 
 impl fmt::Display for CompileError {
@@ -38,6 +40,7 @@ impl fmt::Display for CompileError {
                 span.start, span.end
             ),
             CompileError::Ownership(message) => write!(formatter, "ownership error: {message}"),
+            CompileError::Execution(message) => write!(formatter, "execution error: {message}"),
         }
     }
 }
@@ -129,18 +132,189 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
 }
 
 pub fn run(program: &Program, mut write_line: impl FnMut(&str)) -> Result<(), CompileError> {
-    let main = program.main().ok_or_else(|| CompileError::Frontend {
+    program.main().ok_or_else(|| CompileError::Frontend {
         stage: "semantic",
         span: Span::default(),
         message: "program must define `main`".into(),
     })?;
+    execute_function(program, "main", Vec::new(), &mut write_line)?;
+    Ok(())
+}
 
-    for instruction in &main.instructions {
-        match instruction {
-            Instruction::Print(value) => write_line(value),
+pub fn run_tests(program: &Program, mut report: impl FnMut(&str)) -> Result<usize, CompileError> {
+    let mut passed = 0;
+    for function in &program.functions {
+        for (index, test) in function.tests.iter().enumerate() {
+            let label = test.name.clone().unwrap_or_else(|| {
+                if function.tests.len() == 1 {
+                    function.name.clone()
+                } else {
+                    format!("{} #{}", function.name, index + 1)
+                }
+            });
+            let mut output = ignore_output;
+            execute_instructions(
+                program,
+                &test.instructions,
+                &mut HashMap::new(),
+                &mut output,
+            )
+            .map_err(|error| CompileError::Execution(format!("test `{label}` failed: {error}")))?;
+            report(&format!("test {label} ... ok"));
+            passed += 1;
         }
     }
-    Ok(())
+    Ok(passed)
+}
+
+fn ignore_output(_: &str) {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Value {
+    Int(i64),
+    Bool(bool),
+    String(String),
+    Unit,
+}
+
+fn execute_function(
+    program: &Program,
+    name: &str,
+    args: Vec<Value>,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<Value, CompileError> {
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == name)
+        .ok_or_else(|| CompileError::Execution(format!("unknown function `{name}`")))?;
+    let mut variables = function
+        .params
+        .iter()
+        .zip(args)
+        .map(|(param, value)| (param.name.clone(), value))
+        .collect();
+    Ok(
+        execute_instructions(program, &function.instructions, &mut variables, write_line)?
+            .unwrap_or(Value::Unit),
+    )
+}
+
+fn execute_instructions(
+    program: &Program,
+    instructions: &[Instruction],
+    variables: &mut HashMap<String, Value>,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<Option<Value>, CompileError> {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { name, value } => {
+                let value = evaluate(program, value, variables, write_line)?;
+                variables.insert(name.clone(), value);
+            }
+            Instruction::Print(expression) => {
+                let value = evaluate(program, expression, variables, write_line)?;
+                write_line(&display_value(&value));
+            }
+            Instruction::Assert(expression) => {
+                if evaluate(program, expression, variables, write_line)? != Value::Bool(true) {
+                    return Err(CompileError::Execution("assertion failed".into()));
+                }
+            }
+            Instruction::Return(value) => {
+                return value
+                    .as_ref()
+                    .map(|value| evaluate(program, value, variables, write_line))
+                    .transpose()
+                    .map(|value| Some(value.unwrap_or(Value::Unit)));
+            }
+            Instruction::If {
+                condition,
+                then_instructions,
+                else_instructions,
+            } => {
+                let branch = match evaluate(program, condition, variables, write_line)? {
+                    Value::Bool(true) => then_instructions,
+                    Value::Bool(false) => else_instructions,
+                    _ => {
+                        return Err(CompileError::Execution(
+                            "if condition is not boolean".into(),
+                        ))
+                    }
+                };
+                if let Some(value) = execute_instructions(program, branch, variables, write_line)? {
+                    return Ok(Some(value));
+                }
+            }
+            Instruction::Evaluate(expression) => {
+                evaluate(program, expression, variables, write_line)?;
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn evaluate(
+    program: &Program,
+    expression: &Expression,
+    variables: &HashMap<String, Value>,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<Value, CompileError> {
+    match expression {
+        Expression::Integer(value) => Ok(Value::Int(*value)),
+        Expression::Boolean(value) => Ok(Value::Bool(*value)),
+        Expression::String(value) => Ok(Value::String(value.clone())),
+        Expression::Variable(name) => variables
+            .get(name)
+            .cloned()
+            .ok_or_else(|| CompileError::Execution(format!("unknown binding `{name}`"))),
+        Expression::Call { function, args } => {
+            let args = args
+                .iter()
+                .map(|arg| evaluate(program, arg, variables, write_line))
+                .collect::<Result<Vec<_>, _>>()?;
+            execute_function(program, function, args, write_line)
+        }
+        Expression::Binary { left, op, right } => {
+            let left = evaluate(program, left, variables, write_line)?;
+            let right = evaluate(program, right, variables, write_line)?;
+            evaluate_binary(left, *op, right)
+        }
+    }
+}
+
+fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, CompileError> {
+    match (left, op, right) {
+        (Value::Int(left), BinaryOp::Add, Value::Int(right)) => Ok(Value::Int(left + right)),
+        (Value::Int(left), BinaryOp::Sub, Value::Int(right)) => Ok(Value::Int(left - right)),
+        (Value::Int(left), BinaryOp::Mul, Value::Int(right)) => Ok(Value::Int(left * right)),
+        (Value::Int(_), BinaryOp::Div, Value::Int(0))
+        | (Value::Int(_), BinaryOp::Mod, Value::Int(0)) => {
+            Err(CompileError::Execution("division by zero".into()))
+        }
+        (Value::Int(left), BinaryOp::Div, Value::Int(right)) => Ok(Value::Int(left / right)),
+        (Value::Int(left), BinaryOp::Mod, Value::Int(right)) => Ok(Value::Int(left % right)),
+        (left, BinaryOp::Equal, right) => Ok(Value::Bool(left == right)),
+        (left, BinaryOp::NotEqual, right) => Ok(Value::Bool(left != right)),
+        (Value::Int(left), BinaryOp::Less, Value::Int(right)) => Ok(Value::Bool(left < right)),
+        (Value::Int(left), BinaryOp::LessEqual, Value::Int(right)) => {
+            Ok(Value::Bool(left <= right))
+        }
+        (Value::Int(left), BinaryOp::Greater, Value::Int(right)) => Ok(Value::Bool(left > right)),
+        (Value::Int(left), BinaryOp::GreaterEqual, Value::Int(right)) => {
+            Ok(Value::Bool(left >= right))
+        }
+        _ => Err(CompileError::Execution("invalid binary operation".into())),
+    }
+}
+
+fn display_value(value: &Value) -> String {
+    match value {
+        Value::Int(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Unit => "unit".into(),
+    }
 }
 
 fn find_tool(candidates: &[&str]) -> Option<PathBuf> {

@@ -12,12 +12,33 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     Def,
+    Test,
+    If,
+    Else,
+    Return,
+    Assert,
+    True,
+    False,
     Identifier(String),
+    Integer(i64),
     String(String),
     LeftParen,
     RightParen,
     Colon,
     Comma,
+    Arrow,
+    Equal,
+    EqualEqual,
+    NotEqual,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     Newline,
     Indent,
     Dedent,
@@ -147,7 +168,42 @@ impl<'source> Lexer<'source> {
                 b')' => self.push_simple(TokenKind::RightParen, base, &mut index),
                 b':' => self.push_simple(TokenKind::Colon, base, &mut index),
                 b',' => self.push_simple(TokenKind::Comma, base, &mut index),
+                b'+' => self.push_simple(TokenKind::Plus, base, &mut index),
+                b'*' => self.push_simple(TokenKind::Star, base, &mut index),
+                b'/' => self.push_simple(TokenKind::Slash, base, &mut index),
+                b'%' => self.push_simple(TokenKind::Percent, base, &mut index),
+                b'-' if bytes.get(index + 1) == Some(&b'>') => {
+                    self.push_double(TokenKind::Arrow, base, &mut index)
+                }
+                b'-' => self.push_simple(TokenKind::Minus, base, &mut index),
+                b'=' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::EqualEqual, base, &mut index)
+                }
+                b'=' => self.push_simple(TokenKind::Equal, base, &mut index),
+                b'!' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::NotEqual, base, &mut index)
+                }
+                b'<' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::LessEqual, base, &mut index)
+                }
+                b'<' => self.push_simple(TokenKind::Less, base, &mut index),
+                b'>' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::GreaterEqual, base, &mut index)
+                }
+                b'>' => self.push_simple(TokenKind::Greater, base, &mut index),
                 b'"' => index = self.lex_string(line, base, index)?,
+                byte if byte.is_ascii_digit() => {
+                    let start = index;
+                    index += 1;
+                    while index < bytes.len() && bytes[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                    let value = line[start..index].parse().expect("digits form an integer");
+                    self.tokens.push(Token {
+                        kind: TokenKind::Integer(value),
+                        span: Span::new(base + start, base + index),
+                    });
+                }
                 byte if is_identifier_start(byte) => {
                     let start = index;
                     index += 1;
@@ -155,10 +211,16 @@ impl<'source> Lexer<'source> {
                         index += 1;
                     }
                     let value = &line[start..index];
-                    let kind = if value == "def" {
-                        TokenKind::Def
-                    } else {
-                        TokenKind::Identifier(value.into())
+                    let kind = match value {
+                        "def" => TokenKind::Def,
+                        "test" => TokenKind::Test,
+                        "if" => TokenKind::If,
+                        "else" => TokenKind::Else,
+                        "return" => TokenKind::Return,
+                        "assert" => TokenKind::Assert,
+                        "true" => TokenKind::True,
+                        "false" => TokenKind::False,
+                        _ => TokenKind::Identifier(value.into()),
                     };
                     self.tokens.push(Token {
                         kind,
@@ -186,6 +248,14 @@ impl<'source> Lexer<'source> {
             span: Span::new(base + *index, base + *index + 1),
         });
         *index += 1;
+    }
+
+    fn push_double(&mut self, kind: TokenKind, base: usize, index: &mut usize) {
+        self.tokens.push(Token {
+            kind,
+            span: Span::new(base + *index, base + *index + 2),
+        });
+        *index += 2;
     }
 
     fn lex_string(&mut self, line: &str, base: usize, start: usize) -> Result<usize, LexError> {

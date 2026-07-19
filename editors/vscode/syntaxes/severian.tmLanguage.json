@@ -1,0 +1,234 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Severian",
+  "scopeName": "source.severian",
+  "fileTypes": [
+    "sev"
+  ],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#function-declarations" },
+    { "include": "#type-declarations" },
+    { "include": "#tests" },
+    { "include": "#imports" },
+    { "include": "#keywords" },
+    { "include": "#ownership" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#function-calls" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.severian",
+          "begin": "#",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.severian" }
+          },
+          "end": "$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.regexp.severian",
+          "begin": "\\br\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.severian" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.severian" }
+          }
+        },
+        {
+          "name": "string.quoted.double.severian",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.severian" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.severian" }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.severian",
+              "match": "\\\\(?:[nrt\"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]+\\})"
+            }
+          ]
+        }
+      ]
+    },
+    "function-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(def)\\s+([A-Z][A-Za-z0-9]*)",
+          "captures": {
+            "1": { "name": "storage.type.function.severian" },
+            "2": { "name": "entity.name.function.constructor.severian" }
+          }
+        },
+        {
+          "begin": "\\b(def)\\s+([a-z][A-Za-z0-9]*)\\s*(\\()",
+          "beginCaptures": {
+            "1": { "name": "storage.type.function.severian" },
+            "2": { "name": "entity.name.function.severian" },
+            "3": { "name": "punctuation.definition.parameters.begin.severian" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.parameters.end.severian" }
+          },
+          "patterns": [
+            { "include": "#comments" },
+            {
+              "match": "\\b([a-z_][A-Za-z0-9_]*)\\b(?=\\s*:)",
+              "name": "variable.parameter.severian"
+            },
+            { "include": "#types" },
+            { "include": "#constants" },
+            { "include": "#numbers" },
+            { "include": "#strings" },
+            { "include": "#punctuation" }
+          ]
+        }
+      ]
+    },
+    "type-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(class|trait|enum|type)\\s+([A-Z][A-Za-z0-9]*)",
+          "captures": {
+            "1": { "name": "storage.type.severian" },
+            "2": { "name": "entity.name.type.severian" }
+          }
+        }
+      ]
+    },
+    "tests": {
+      "patterns": [
+        {
+          "match": "^\\s*(test|example|bench)\\b(?:\\s+(\"(?:\\\\.|[^\"])*\"))?",
+          "captures": {
+            "1": { "name": "keyword.other.test.severian" },
+            "2": { "name": "string.quoted.double.severian" }
+          }
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "^\\s*(import|from)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.import.severian" }
+          }
+        },
+        {
+          "match": "\\bas\\b",
+          "name": "keyword.control.import.severian"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(if|else|while|for|in|switch|return|break|continue|fail|unsafe)\\b",
+          "name": "keyword.control.severian"
+        },
+        {
+          "match": "\\b(async|await|send)\\b",
+          "name": "keyword.control.flow.severian"
+        },
+        {
+          "match": "\\b(with|from)\\b",
+          "name": "keyword.control.resource.severian"
+        },
+        {
+          "match": "\\b(and|or|not)\\b",
+          "name": "keyword.operator.logical.severian"
+        }
+      ]
+    },
+    "ownership": {
+      "patterns": [
+        {
+          "match": "\\b(view|borrow|clone|move)\\b",
+          "name": "storage.modifier.ownership.severian"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "match": "\\b(true|false|absent|invalid)\\b",
+          "name": "constant.language.severian"
+        },
+        {
+          "match": "\\b(self|runtime)\\b",
+          "name": "variable.language.severian"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z0-9_])(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|(?:\\d+\\.\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?|\\d+(?:[eE][+-]?\\d+)?)(?:[iu](?:8|16|32|64)|f(?:16|32|64))?\\b",
+          "name": "constant.numeric.severian"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "match": "\\b(int|float|string|bool|unit|u8|u16|u32|u64|i8|i16|i32|i64|f16|f32|f64|list|map|set)\\b",
+          "name": "storage.type.primitive.severian"
+        },
+        {
+          "match": "\\b[A-Z][A-Za-z0-9]*\\b",
+          "name": "support.type.severian"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "match": "\\b(assert|panic|print|range|size)\\b(?=\\s*\\(?)",
+          "name": "support.function.builtin.severian"
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "match": "\\b[a-z_][A-Za-z0-9_]*\\b(?=\\s*\\()",
+          "name": "entity.name.function.call.severian"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "\\?=|:=|==|!=|<=|>=|->|\\+=|-=|\\*=|/=|%=|[=+\\-*/%<>|]",
+          "name": "keyword.operator.severian"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "match": "[()\\[\\]{},.:]",
+          "name": "punctuation.separator.severian"
+        }
+      ]
+    }
+  }
+}

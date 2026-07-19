@@ -1,0 +1,40 @@
+{
+  "name": "severian-language",
+  "displayName": "Severian Language",
+  "description": "Syntax highlighting and editor behavior for the Severian programming language.",
+  "version": "0.1.0",
+  "publisher": "severian",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "severian",
+    "sev"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "severian",
+        "aliases": [
+          "Severian",
+          "severian"
+        ],
+        "extensions": [
+          ".sev"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "severian",
+        "scopeName": "source.severian",
+        "path": "./syntaxes/severian.tmLanguage.json"
+      }
+    ]
+  }
+}

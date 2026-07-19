@@ -1,4 +1,4 @@
-use severian_driver::{compile_native, compile_path, run};
+use severian_driver::{compile_native, compile_path, run, run_tests};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -38,6 +38,13 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             run(&compilation.hir, |line| println!("{line}")).map_err(|error| error.to_string())?;
         }
+        "test" if args.len() == 2 => {
+            let compilation =
+                compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
+            let passed = run_tests(&compilation.hir, |line| println!("{line}"))
+                .map_err(|error| error.to_string())?;
+            println!("{passed} passed");
+        }
         "help" | "--help" | "-h" => println!("{}", usage()),
         _ => return Err(usage()),
     }
@@ -46,5 +53,5 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: sev <check|emit-mlir|compile|run> <source.sev> [ -o executable ]".into()
+    "usage: sev <check|emit-mlir|compile|run|test> <source.sev> [ -o executable ]".into()
 }

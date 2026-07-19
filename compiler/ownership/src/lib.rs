@@ -9,13 +9,26 @@ use severian_hir::{Instruction, Program};
 /// views, and borrows here without changing the driver pipeline.
 pub fn check(program: &Program) -> Result<(), OwnershipError> {
     for function in &program.functions {
-        for instruction in &function.instructions {
-            match instruction {
-                Instruction::Print(_) => {}
-            }
+        check_instructions(&function.instructions);
+        for test in &function.tests {
+            check_instructions(&test.instructions);
         }
     }
     Ok(())
+}
+
+fn check_instructions(instructions: &[Instruction]) {
+    for instruction in instructions {
+        if let Instruction::If {
+            then_instructions,
+            else_instructions,
+            ..
+        } = instruction
+        {
+            check_instructions(then_instructions);
+            check_instructions(else_instructions);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
