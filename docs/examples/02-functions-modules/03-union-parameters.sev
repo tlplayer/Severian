@@ -1,10 +1,10 @@
-def to_float(value: string | int | float) -> float:
+def toFloat(value: string | int | float) -> float:
     return float(value)
 
 test:
-    assert(to_float("4.5") == 4.5)
-    assert(to_float(4) == 4.0)
-    assert(to_float(4.5) == 4.5)
+    assert(toFloat("4.5") == 4.5)
+    assert(toFloat(4) == 4.0)
+    assert(toFloat(4.5) == 4.5)
 
 def main():
-    print(to_float("4.5"))
+    print(toFloat("4.5"))

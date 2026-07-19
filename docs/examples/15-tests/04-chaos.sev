@@ -1,0 +1,29 @@
+def read() -> Result[list[int], IOError]:
+    # A real implementation reaches a system-call chaos point here.
+    return [65, 66, 67]
+
+test with chaos "read failures":
+    result = read()
+
+    switch result:
+        ok buffer:
+            assert(size(buffer) > 0)
+
+        failure _:
+            assert(true)
+
+def wrapper() -> Result[int, IOError | BoundsError]:
+    buffer ?= read()
+    return buffer[0]
+
+test with chaos "wrapper inherits read failures":
+    # The runner discovers failures transitively through wrapper -> read.
+    # This test does not need to list read's failure cases again.
+    result = wrapper()
+
+    switch result:
+        ok byte:
+            assert(byte == 65)
+
+        failure _:
+            assert(true)

@@ -2,7 +2,7 @@ trait Number:
     zero() -> Self
     add(other: Self) -> Self
 
-def sum_values[key: Hash + Equal, value: Number](values: map[key, value]) -> value:
+def sumValues[key: Hash + Equal, value: Number](values: map[key, value]) -> value:
     total := value.zero()
 
     for _, value in values:
@@ -12,4 +12,4 @@ def sum_values[key: Hash + Equal, value: Number](values: map[key, value]) -> val
 
 def main():
     counts = {"first": 34, "second": 8}
-    print(sum_values(counts))
+    print(sumValues(counts))

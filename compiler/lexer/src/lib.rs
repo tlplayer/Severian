@@ -12,22 +12,59 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     Def,
+    Class,
+    Trait,
+    Enum,
     Test,
     If,
     Else,
     Return,
     Assert,
+    Switch,
+    View,
+    Borrow,
+    Clone,
+    Move,
+    Async,
+    Await,
+    Send,
+    Unsafe,
+    Import,
+    From,
+    As,
+    While,
+    For,
+    In,
+    With,
+    And,
+    Or,
+    Not,
     True,
     False,
     Identifier(String),
     Integer(i64),
+    Float(u64),
     String(String),
+    FormattedString(String),
     LeftParen,
     RightParen,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
     Colon,
     Comma,
+    Dot,
+    Pipe,
     Arrow,
     Equal,
+    ChangeableEqual,
+    AddEqual,
+    SubEqual,
+    MulEqual,
+    DivEqual,
+    ModEqual,
+    TryEqual,
     EqualEqual,
     NotEqual,
     Plus,
@@ -166,14 +203,41 @@ impl<'source> Lexer<'source> {
                 b'#' => break,
                 b'(' => self.push_simple(TokenKind::LeftParen, base, &mut index),
                 b')' => self.push_simple(TokenKind::RightParen, base, &mut index),
+                b'[' => self.push_simple(TokenKind::LeftBracket, base, &mut index),
+                b']' => self.push_simple(TokenKind::RightBracket, base, &mut index),
+                b'{' => self.push_simple(TokenKind::LeftBrace, base, &mut index),
+                b'}' => self.push_simple(TokenKind::RightBrace, base, &mut index),
+                b':' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::ChangeableEqual, base, &mut index)
+                }
                 b':' => self.push_simple(TokenKind::Colon, base, &mut index),
                 b',' => self.push_simple(TokenKind::Comma, base, &mut index),
+                b'.' => self.push_simple(TokenKind::Dot, base, &mut index),
+                b'|' => self.push_simple(TokenKind::Pipe, base, &mut index),
+                b'+' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::AddEqual, base, &mut index)
+                }
                 b'+' => self.push_simple(TokenKind::Plus, base, &mut index),
+                b'*' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::MulEqual, base, &mut index)
+                }
                 b'*' => self.push_simple(TokenKind::Star, base, &mut index),
+                b'/' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::DivEqual, base, &mut index)
+                }
                 b'/' => self.push_simple(TokenKind::Slash, base, &mut index),
+                b'%' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::ModEqual, base, &mut index)
+                }
                 b'%' => self.push_simple(TokenKind::Percent, base, &mut index),
+                b'?' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::TryEqual, base, &mut index)
+                }
                 b'-' if bytes.get(index + 1) == Some(&b'>') => {
                     self.push_double(TokenKind::Arrow, base, &mut index)
+                }
+                b'-' if bytes.get(index + 1) == Some(&b'=') => {
+                    self.push_double(TokenKind::SubEqual, base, &mut index)
                 }
                 b'-' => self.push_simple(TokenKind::Minus, base, &mut index),
                 b'=' if bytes.get(index + 1) == Some(&b'=') => {
@@ -192,15 +256,32 @@ impl<'source> Lexer<'source> {
                 }
                 b'>' => self.push_simple(TokenKind::Greater, base, &mut index),
                 b'"' => index = self.lex_string(line, base, index)?,
+                b'f' if bytes.get(index + 1) == Some(&b'"') => {
+                    index = self.lex_formatted_string(line, base, index)?
+                }
                 byte if byte.is_ascii_digit() => {
                     let start = index;
                     index += 1;
                     while index < bytes.len() && bytes[index].is_ascii_digit() {
                         index += 1;
                     }
-                    let value = line[start..index].parse().expect("digits form an integer");
+                    let is_float = bytes.get(index) == Some(&b'.')
+                        && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+                    if is_float {
+                        index += 1;
+                        while index < bytes.len() && bytes[index].is_ascii_digit() {
+                            index += 1;
+                        }
+                    }
+                    let text = &line[start..index];
                     self.tokens.push(Token {
-                        kind: TokenKind::Integer(value),
+                        kind: if is_float {
+                            TokenKind::Float(
+                                text.parse::<f64>().expect("digits form a float").to_bits(),
+                            )
+                        } else {
+                            TokenKind::Integer(text.parse().expect("digits form an integer"))
+                        },
                         span: Span::new(base + start, base + index),
                     });
                 }
@@ -213,11 +294,33 @@ impl<'source> Lexer<'source> {
                     let value = &line[start..index];
                     let kind = match value {
                         "def" => TokenKind::Def,
+                        "class" => TokenKind::Class,
+                        "trait" => TokenKind::Trait,
+                        "enum" => TokenKind::Enum,
                         "test" => TokenKind::Test,
                         "if" => TokenKind::If,
                         "else" => TokenKind::Else,
                         "return" => TokenKind::Return,
                         "assert" => TokenKind::Assert,
+                        "switch" => TokenKind::Switch,
+                        "view" => TokenKind::View,
+                        "borrow" => TokenKind::Borrow,
+                        "clone" => TokenKind::Clone,
+                        "move" => TokenKind::Move,
+                        "async" => TokenKind::Async,
+                        "await" => TokenKind::Await,
+                        "send" => TokenKind::Send,
+                        "unsafe" => TokenKind::Unsafe,
+                        "import" => TokenKind::Import,
+                        "from" => TokenKind::From,
+                        "as" => TokenKind::As,
+                        "while" => TokenKind::While,
+                        "for" => TokenKind::For,
+                        "in" => TokenKind::In,
+                        "with" => TokenKind::With,
+                        "and" => TokenKind::And,
+                        "or" => TokenKind::Or,
+                        "not" => TokenKind::Not,
                         "true" => TokenKind::True,
                         "false" => TokenKind::False,
                         _ => TokenKind::Identifier(value.into()),
@@ -306,6 +409,27 @@ impl<'source> Lexer<'source> {
             span: Span::new(base + start, base + line.len()),
             message: "unterminated string literal".into(),
         })
+    }
+
+    fn lex_formatted_string(
+        &mut self,
+        line: &str,
+        base: usize,
+        start: usize,
+    ) -> Result<usize, LexError> {
+        let content_start = start + 2;
+        let Some(relative_end) = line[content_start..].find('"') else {
+            return Err(LexError {
+                span: Span::new(base + start, base + line.len()),
+                message: "unterminated formatted string literal".into(),
+            });
+        };
+        let end = content_start + relative_end + 1;
+        self.tokens.push(Token {
+            kind: TokenKind::FormattedString(line[content_start..end - 1].into()),
+            span: Span::new(base + start, base + end),
+        });
+        Ok(end)
     }
 }
 

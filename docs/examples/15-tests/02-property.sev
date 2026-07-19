@@ -1,0 +1,8 @@
+def reverseTwice(values: list[int]) -> list[int]:
+    return values.reversed().reversed()
+
+test with property "reverse twice preserves values":
+    # The property runner replaces this representative input with generated lists
+    # and shrinks any failing input to its smallest reproducing case.
+    values = [1, 2, 3, 4]
+    assert(reverseTwice(values) == values)

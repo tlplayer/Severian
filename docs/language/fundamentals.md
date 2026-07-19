@@ -107,18 +107,29 @@ A `test:` block attaches to the immediately preceding function or constructor at
 the same indentation level. Inside a class, an indented `test:` block attaches to
 the constructor or method before it.
 
-Property tests use the reserved `generate` term to produce cases of one type.
-Generation is an iterable language form, not a function call.
+Specialized tests place their modes before the optional name. `test` remains the
+only test declaration.
 
 ```sev
-property "reverse twice preserves values":
-    for values in generate list[int] with minimum_size=1, maximum_size=100:
-        assert(values.reversed().reversed() == values)
+test with property "reverse twice preserves values":
+    values = [1, 2, 3]
+    assert(values.reversed().reversed() == values)
+
+test with bench "parser throughput":
+    assert(parse("42") == 42)
+
+test with chaos "read failures":
+    assert(read() != absent)
+
+test with property and chaos "generated input failures":
+    assert(validate([1, 2, 3]))
 ```
 
-`minimum_size` and `maximum_size` are inclusive element-count bounds measured by
-`size(values)`, not byte bounds measured by `values.size()`. The property runner
-controls the case count, random seed, distribution, and shrinking.
+The property runner controls case generation, random seeds, distributions, and
+shrinking. The chaos runner derives a function's complete reachable failure
+surface from the call graph, including failures introduced by callees. It
+injects one failure at a time by default. Compatible modes compose explicitly
+with `and`; commas do not combine test modes.
 
 ## Imports
 
@@ -505,6 +516,6 @@ The folders are ordered so the compiler can grow in passes:
    constraints.
 3. `08-concurrency` through `10-numerics-mlir` layer in Go-style concurrency,
    systems boundaries, and MLIR-oriented numeric kernels.
-4. `12-enums-aliases` onward hold placeholders for features we want to revisit:
-   enums, aliases, method mutation contracts, Cargo-like packaging, richer test
-   modes, and compiler-stage fixture organization.
+4. `12-enums-aliases` onward cover evolving features: enums, aliases, method
+   mutation contracts, Cargo-like packaging, specialized tests, and
+   compiler-stage fixture organization.

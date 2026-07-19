@@ -3,6 +3,8 @@ use severian_hir::{Expression, Function, Instruction, Program, ValueType};
 #[test]
 fn accepts_owned_string_literals() {
     let program = Program {
+        globals: vec![],
+        classes: vec![],
         functions: vec![Function {
             name: "main".into(),
             params: vec![],

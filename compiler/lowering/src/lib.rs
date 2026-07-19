@@ -1,12 +1,17 @@
 #![forbid(unsafe_code)]
 
-use severian_hir::{BinaryOp, Expression, Function, Instruction, Program, ValueType};
+use severian_hir::{
+    AssignmentOp, BinaryOp, Expression, Function, Instruction, Program, UnaryOp, ValueType,
+};
 use severian_mlir::Module;
 use std::collections::HashMap;
 use std::fmt::Write;
 
 pub fn lower(program: &Program) -> Module {
     let mut strings = Vec::new();
+    for global in &program.globals {
+        collect_expression_strings(&global.value, &mut strings);
+    }
     for function in &program.functions {
         collect_strings(&function.instructions, &mut strings);
     }
@@ -25,13 +30,18 @@ pub fn lower(program: &Program) -> Module {
     }
 
     for function in &program.functions {
-        lower_function(function, &strings, &mut output);
+        lower_function(function, &program.globals, &strings, &mut output);
     }
     output.push_str("}\n");
     Module::new(output)
 }
 
-fn lower_function(function: &Function, strings: &[String], output: &mut String) {
+fn lower_function(
+    function: &Function,
+    globals: &[severian_hir::Global],
+    strings: &[String],
+    output: &mut String,
+) {
     let is_main = function.name == "main";
     write!(output, "  llvm.func @{}(", function.name).unwrap();
     for (index, param) in function.params.iter().enumerate() {
@@ -62,6 +72,10 @@ fn lower_function(function: &Function, strings: &[String], output: &mut String) 
         terminated: false,
         is_main,
     };
+    for global in globals {
+        let value = context.lower_expression(&global.value);
+        context.variables.insert(global.name.clone(), value);
+    }
     context.lower_instructions(&function.instructions);
     if !context.terminated {
         if is_main {
@@ -99,6 +113,22 @@ impl LowerContext<'_> {
                 Instruction::Let { name, value } => {
                     let lowered = self.lower_expression(value);
                     self.variables.insert(name.clone(), lowered);
+                }
+                Instruction::TryLet { name, value } => {
+                    let lowered = self.lower_expression(value);
+                    self.variables.insert(name.clone(), lowered);
+                }
+                Instruction::Assign { target, op, value } => {
+                    if let Expression::Variable(name) = target {
+                        let right = self.lower_expression(value);
+                        let lowered = if *op == AssignmentOp::Assign {
+                            right
+                        } else {
+                            let left = self.variables.get(name).cloned().unwrap_or(right.clone());
+                            self.lower_binary_values(left, assignment_binary(*op), right)
+                        };
+                        self.variables.insert(name.clone(), lowered);
+                    }
                 }
                 Instruction::Print(value) => {
                     let (value, ty) = self.lower_expression(value);
@@ -168,6 +198,13 @@ impl LowerContext<'_> {
                         self.terminated = true;
                     }
                 }
+                Instruction::While { setup, .. } => {
+                    if let Some(setup) = setup {
+                        self.lower_instructions(std::slice::from_ref(setup));
+                    }
+                }
+                Instruction::For { .. } => {}
+                Instruction::Switch { .. } => {}
             }
         }
     }
@@ -182,6 +219,16 @@ impl LowerContext<'_> {
                 )
                 .unwrap();
                 (result, ValueType::Int)
+            }
+            Expression::Float(bits) => {
+                let result = self.fresh_value();
+                let value = f64::from_bits(*bits);
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant({value:e} : f64) : f64"
+                )
+                .unwrap();
+                (result, ValueType::Float)
             }
             Expression::Boolean(value) => {
                 let result = self.fresh_value();
@@ -208,6 +255,84 @@ impl LowerContext<'_> {
                 (result, ValueType::String)
             }
             Expression::Variable(name) => self.variables.get(name).cloned().unwrap(),
+            Expression::Function(_)
+            | Expression::List(_)
+            | Expression::Tuple(_)
+            | Expression::Map(_)
+            | Expression::Set(_)
+            | Expression::ListComprehension { .. }
+            | Expression::PrintArgs(_)
+            | Expression::Construct { .. }
+            | Expression::Member { .. }
+            | Expression::MethodCall { .. }
+            | Expression::Task(_)
+            | Expression::Await(_)
+            | Expression::Channel(_)
+            | Expression::Send { .. } => {
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Variant { .. } => {
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Index { .. } => {
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Format(value) => {
+                let index = self
+                    .strings
+                    .iter()
+                    .position(|candidate| candidate == value)
+                    .unwrap();
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
+                )
+                .unwrap();
+                (result, ValueType::String)
+            }
+            Expression::Unary { op, expression } => {
+                let (value, ty) = self.lower_expression(expression);
+                match op {
+                    UnaryOp::Negate if ty == ValueType::Float => {
+                        let zero = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {zero} = llvm.mlir.constant(0.0 : f64) : f64"
+                        )
+                        .unwrap();
+                        self.lower_binary_values((zero, ty), BinaryOp::Sub, (value, ty))
+                    }
+                    UnaryOp::Negate => {
+                        let zero = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                        )
+                        .unwrap();
+                        self.lower_binary_values((zero, ty), BinaryOp::Sub, (value, ty))
+                    }
+                    UnaryOp::Not => {
+                        let one = self.fresh_value();
+                        writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1")
+                            .unwrap();
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.xor {value}, {one} : i1")
+                            .unwrap();
+                        (result, ValueType::Bool)
+                    }
+                }
+            }
             Expression::Call { function, args } => {
                 let args = args
                     .iter()
@@ -231,43 +356,105 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, ValueType::Int)
             }
-            Expression::Binary { left, op, right } => {
-                let (left, operand_type) = self.lower_expression(left);
-                let (right, _) = self.lower_expression(right);
+            Expression::CallValue { .. } => {
                 let result = self.fresh_value();
-                let (operation, result_type) = match op {
-                    BinaryOp::Add => ("llvm.add", ValueType::Int),
-                    BinaryOp::Sub => ("llvm.sub", ValueType::Int),
-                    BinaryOp::Mul => ("llvm.mul", ValueType::Int),
-                    BinaryOp::Div => ("llvm.sdiv", ValueType::Int),
-                    BinaryOp::Mod => ("llvm.srem", ValueType::Int),
-                    comparison => {
-                        let predicate = match comparison {
-                            BinaryOp::Equal => "eq",
-                            BinaryOp::NotEqual => "ne",
-                            BinaryOp::Less => "slt",
-                            BinaryOp::LessEqual => "sle",
-                            BinaryOp::Greater => "sgt",
-                            BinaryOp::GreaterEqual => "sge",
-                            _ => unreachable!(),
-                        };
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Binary { left, op, right } => {
+                let left = self.lower_expression(left);
+                let right = self.lower_expression(right);
+                self.lower_binary_values(left, *op, right)
+            }
+        }
+    }
+
+    fn lower_binary_values(
+        &mut self,
+        (left, operand_type): (String, ValueType),
+        op: BinaryOp,
+        (right, _): (String, ValueType),
+    ) -> (String, ValueType) {
+        let result = self.fresh_value();
+        let (operation, result_type) = match op {
+            BinaryOp::Add => (
+                if operand_type == ValueType::Float {
+                    "llvm.fadd"
+                } else {
+                    "llvm.add"
+                },
+                operand_type,
+            ),
+            BinaryOp::Sub => (
+                if operand_type == ValueType::Float {
+                    "llvm.fsub"
+                } else {
+                    "llvm.sub"
+                },
+                operand_type,
+            ),
+            BinaryOp::Mul => (
+                if operand_type == ValueType::Float {
+                    "llvm.fmul"
+                } else {
+                    "llvm.mul"
+                },
+                operand_type,
+            ),
+            BinaryOp::Div => (
+                if operand_type == ValueType::Float {
+                    "llvm.fdiv"
+                } else {
+                    "llvm.sdiv"
+                },
+                operand_type,
+            ),
+            BinaryOp::Mod => (
+                if operand_type == ValueType::Float {
+                    "llvm.frem"
+                } else {
+                    "llvm.srem"
+                },
+                operand_type,
+            ),
+            comparison => {
+                let predicate = match comparison {
+                    BinaryOp::Equal => "eq",
+                    BinaryOp::NotEqual => "ne",
+                    BinaryOp::Less => "slt",
+                    BinaryOp::LessEqual => "sle",
+                    BinaryOp::Greater => "sgt",
+                    BinaryOp::GreaterEqual => "sge",
+                    BinaryOp::And | BinaryOp::Or | BinaryOp::In => {
                         writeln!(
                             self.output,
-                            "    {result} = llvm.icmp \"{predicate}\" {left}, {right} : {}",
-                            mlir_type(operand_type)
+                            "    {result} = llvm.mlir.constant(0 : i1) : i1"
                         )
                         .unwrap();
                         return (result, ValueType::Bool);
                     }
+                    _ => unreachable!(),
                 };
                 writeln!(
                     self.output,
-                    "    {result} = {operation} {left}, {right} : i64"
+                    "    {result} = llvm.icmp \"{predicate}\" {left}, {right} : {}",
+                    mlir_type(operand_type)
                 )
                 .unwrap();
-                (result, result_type)
+                return (result, ValueType::Bool);
             }
-        }
+        };
+        writeln!(
+            self.output,
+            "    {result} = {operation} {left}, {right} : {}",
+            mlir_type(operand_type)
+        )
+        .unwrap();
+        (result, result_type)
     }
 
     fn fresh_value(&mut self) -> String {
@@ -287,6 +474,8 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
     for instruction in instructions {
         match instruction {
             Instruction::Let { value, .. }
+            | Instruction::TryLet { value, .. }
+            | Instruction::Assign { value, .. }
             | Instruction::Print(value)
             | Instruction::Assert(value)
             | Instruction::Evaluate(value) => collect_expression_strings(value, strings),
@@ -300,6 +489,34 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                 collect_expression_strings(condition, strings);
                 collect_strings(then_instructions, strings);
                 collect_strings(else_instructions, strings);
+            }
+            Instruction::While {
+                setup,
+                condition,
+                instructions,
+            } => {
+                if let Some(setup) = setup {
+                    collect_strings(std::slice::from_ref(setup), strings);
+                }
+                collect_expression_strings(condition, strings);
+                collect_strings(instructions, strings);
+            }
+            Instruction::For {
+                iterable,
+                instructions,
+                ..
+            } => {
+                collect_expression_strings(iterable, strings);
+                collect_strings(instructions, strings);
+            }
+            Instruction::Switch { value, arms } => {
+                collect_expression_strings(value, strings);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        collect_expression_strings(guard, strings);
+                    }
+                    collect_strings(&arm.instructions, strings);
+                }
             }
         }
     }
@@ -317,6 +534,66 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(argument, strings);
             }
         }
+        Expression::Format(value) => strings.push(value.clone()),
+        Expression::List(values) | Expression::Tuple(values) | Expression::Set(values) => {
+            for value in values {
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::Map(entries) => {
+            for (key, value) in entries {
+                collect_expression_strings(key, strings);
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::Index { object, index } => {
+            collect_expression_strings(object, strings);
+            collect_expression_strings(index, strings);
+        }
+        Expression::ListComprehension {
+            element,
+            iterable,
+            condition,
+            ..
+        } => {
+            collect_expression_strings(element, strings);
+            collect_expression_strings(iterable, strings);
+            if let Some(condition) = condition {
+                collect_expression_strings(condition, strings);
+            }
+        }
+        Expression::Unary { expression, .. } => collect_expression_strings(expression, strings),
+        Expression::CallValue { callee, args } => {
+            collect_expression_strings(callee, strings);
+            for arg in args {
+                collect_expression_strings(arg, strings);
+            }
+        }
+        Expression::PrintArgs(values) | Expression::Construct { args: values, .. } => {
+            for value in values {
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::Member { object, .. } => collect_expression_strings(object, strings),
+        Expression::MethodCall { object, args, .. } => {
+            collect_expression_strings(object, strings);
+            for arg in args {
+                collect_expression_strings(arg, strings);
+            }
+        }
+        Expression::Variant { fields, .. } => {
+            for field in fields {
+                collect_expression_strings(field, strings);
+            }
+        }
+        Expression::Task(value) | Expression::Await(value) => {
+            collect_expression_strings(value, strings);
+        }
+        Expression::Channel(capacity) => collect_expression_strings(capacity, strings),
+        Expression::Send { value, channel } => {
+            collect_expression_strings(value, strings);
+            collect_expression_strings(channel, strings);
+        }
         _ => {}
     }
 }
@@ -324,9 +601,29 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
 fn mlir_type(ty: ValueType) -> &'static str {
     match ty {
         ValueType::Int => "i64",
+        ValueType::Float => "f64",
         ValueType::Bool => "i1",
         ValueType::String => "!llvm.ptr",
         ValueType::Unit => "!llvm.void",
+        ValueType::List
+        | ValueType::Tuple
+        | ValueType::Map
+        | ValueType::Set
+        | ValueType::Function
+        | ValueType::Any
+        | ValueType::Result
+        | ValueType::Option => "!llvm.ptr",
+    }
+}
+
+fn assignment_binary(op: AssignmentOp) -> BinaryOp {
+    match op {
+        AssignmentOp::Assign => unreachable!(),
+        AssignmentOp::Add => BinaryOp::Add,
+        AssignmentOp::Sub => BinaryOp::Sub,
+        AssignmentOp::Mul => BinaryOp::Mul,
+        AssignmentOp::Div => BinaryOp::Div,
+        AssignmentOp::Mod => BinaryOp::Mod,
     }
 }
 

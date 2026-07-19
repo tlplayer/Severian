@@ -1,0 +1,9 @@
+def fib(n: int) -> int:
+    if n < 2:
+        return n
+
+    return fib(n - 1) + fib(n - 2)
+
+test with bench "recursive fibonacci throughput":
+    # The benchmark runner performs warmup and repeated measured iterations.
+    assert(fib(20) == 6765)

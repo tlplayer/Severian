@@ -116,12 +116,19 @@
     "tests": {
       "patterns": [
         {
-          "match": "^\\s*(test|example|bench)\\b(?:\\s+(\"(?:\\\\.|[^\"])*\"))?",
+          "match": "^\\s*(test)\\b",
           "captures": {
-            "1": { "name": "keyword.other.test.severian" },
-            "2": { "name": "string.quoted.double.severian" }
+            "1": { "name": "keyword.other.test.severian" }
           }
-        }
+        },
+        {
+          "match": "\\b(property|bench|chaos)\\b",
+          "name": "storage.modifier.test.severian"
+        },
+        {
+          "match": "\"(?:\\\\.|[^\"])*\"(?=\\s*:)",
+          "name": "string.quoted.double.severian"
+          }
       ]
     },
     "imports": {

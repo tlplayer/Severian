@@ -32,7 +32,7 @@ paths while staying Severian-first:
 | `12-enums-aliases` | Placeholder enum and type alias syntax. |
 | `13-method-mutation` | Placeholder method mutation contracts. |
 | `14-packages` | Cargo-like official package layout and manifest. |
-| `15-test-modes` | Placeholder `example:`, `bench:`, and property tests. |
+| `15-tests` | Ordinary, property, benchmark, chaos, and composed tests. |
 | `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
 | `17-servers` | TCP request/response, channel-based chat, and map/reduce services. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |

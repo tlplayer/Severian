@@ -151,8 +151,16 @@ pub struct ConstructorDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestBlock {
     pub span: Span,
+    pub modes: Vec<TestMode>,
     pub name: Option<Ident>,
     pub body: Block,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestMode {
+    Property,
+    Bench,
+    Chaos,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -320,6 +328,7 @@ pub enum Expr {
     Call(CallExpr),
     Member(MemberExpr),
     List(CollectionExpr),
+    ListComprehension(ListComprehensionExpr),
     Tuple(CollectionExpr),
     Map(MapExpr),
     Set(CollectionExpr),
@@ -344,6 +353,7 @@ impl Expr {
             Expr::Call(node) => node.span,
             Expr::Member(node) => node.span,
             Expr::List(node) | Expr::Tuple(node) | Expr::Set(node) => node.span,
+            Expr::ListComprehension(node) => node.span,
             Expr::Map(node) => node.span,
             Expr::Index(node) => node.span,
             Expr::If(node) => node.span,
@@ -398,6 +408,15 @@ pub struct MemberExpr {
 pub struct CollectionExpr {
     pub span: Span,
     pub elements: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListComprehensionExpr {
+    pub span: Span,
+    pub element: Box<Expr>,
+    pub variable: Ident,
+    pub iterable: Box<Expr>,
+    pub condition: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -678,6 +697,7 @@ pub enum BinaryOp {
     LessEqual,
     Greater,
     GreaterEqual,
+    In,
     And,
     Or,
 }

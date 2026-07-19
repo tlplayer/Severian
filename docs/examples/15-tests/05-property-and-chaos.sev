@@ -1,0 +1,18 @@
+def first(values: list[int]) -> Result[int, BoundsError]:
+    if size(values) == 0:
+        return failure(BoundsError(0))
+
+    return values[0]
+
+test with property and chaos "first is safe for generated lists":
+    # Property generation varies list contents and shape. Chaos injection then
+    # explores every reachable failure point for each bounded generated case.
+    values = [10, 20, 30]
+    result = first(values)
+
+    switch result:
+        ok value:
+            assert(value == values[0])
+
+        failure _:
+            assert(size(values) == 0)

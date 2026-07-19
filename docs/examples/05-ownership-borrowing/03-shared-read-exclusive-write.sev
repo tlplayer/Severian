@@ -7,7 +7,7 @@ def total(values: list[int]) -> int:
 
     return sum
 
-def push_value(values: list[int], value: int):
+def pushValue(values: list[int], value: int):
     writable = borrow values
     writable.append(value)
 
@@ -15,5 +15,5 @@ def main():
     values := [1, 2, 3]
     print(total(values))
 
-    push_value(values, 4)
+    pushValue(values, 4)
     print(total(values))

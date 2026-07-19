@@ -4,7 +4,7 @@ class Counter:
     def inc():
         value += 1
 
-def count_all(values: list[int]) -> int:
+def countAll(values: list[int]) -> int:
     counter := Counter(0)
 
     for value in values:
@@ -14,5 +14,5 @@ def count_all(values: list[int]) -> int:
     return counter.value
 
 def main():
-    task = async count_all([1, -2, 3]) with self
+    task = async countAll([1, -2, 3]) with self
     print(await task)
