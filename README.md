@@ -1,6 +1,6 @@
-# Sevarian
+# Severian
 
-Sevarian is a compiled systems language with Python-like syntax, Rust-like safety,
+Severian is a compiled systems language with Python-like syntax, Rust-like safety,
 and MLIR as the compiler backbone.
 
 The repository is being built piece by piece. The current focus is the language
@@ -13,7 +13,7 @@ front end:
 
 ## Design Center
 
-Sevarian keeps simple code readable while giving the compiler enough structure to
+Severian keeps simple code readable while giving the compiler enough structure to
 infer ownership, verify memory safety, and lower predictable programs into MLIR.
 
 The intended feel is:

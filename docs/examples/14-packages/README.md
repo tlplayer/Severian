@@ -1,6 +1,6 @@
 # Packages
 
-Sevarian packaging should follow a Cargo-like official tool model: one manifest,
+Severian packaging should follow a Cargo-like official tool model: one manifest,
 one standard package manager, one build/test/doc command family.
 
 Placeholder commands:

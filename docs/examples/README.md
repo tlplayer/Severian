@@ -4,7 +4,7 @@ This directory contains complete `.sev` snippets used by the language docs and
 future compiler tests.
 
 The folder order follows the shape of the official Go, Rust, and Python learning
-paths while staying Sevarian-first:
+paths while staying Severian-first:
 
 - Go contributes the habit of small runnable programs, packages, generics, and
   direct concurrency.

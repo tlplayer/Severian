@@ -7,4 +7,4 @@ def strlen(text: string) -> usize:
         return c_strlen(&bytes)
 
 def main():
-    print(strlen("sevarian"))
+    print(strlen("severian"))

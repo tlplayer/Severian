@@ -1,4 +1,4 @@
-# Sevarian AST
+# Severian AST
 
 The AST models source syntax after parsing and before semantic analysis. It keeps
 the shape of the user's program intact: names, spans, indentation-derived blocks,
@@ -45,5 +45,5 @@ Until this directory becomes a Cargo crate, the node definitions can be checked
 directly:
 
 ```sh
-rustc --crate-type lib compiler/ast/nodes.rs -o /tmp/sevarian_ast_nodes.rlib
+rustc --crate-type lib compiler/ast/nodes.rs -o /tmp/severian_ast_nodes.rlib
 ```

@@ -1,6 +1,6 @@
 # Language Fundamentals
 
-Sevarian's surface syntax is intentionally familiar to Python programmers, but
+Severian's surface syntax is intentionally familiar to Python programmers, but
 the compiler treats the program as a statically checked systems language.
 
 ## Bindings
@@ -103,7 +103,7 @@ controls the case count, random seed, distribution, and shrinking.
 
 ## Imports
 
-Sevarian uses Python-style imports.
+Severian uses Python-style imports.
 
 ```sev
 import math
@@ -156,7 +156,7 @@ context, not a class instance.
 ## Counts, Bytes, And Midpoints
 
 `size(values)` returns the number of elements in a collection. `values.size()`
-returns the number of bytes in the object. Sevarian does not provide `.len()`.
+returns the number of bytes in the object. Severian does not provide `.len()`.
 
 ```sev
 values = [10, 20, 30]
@@ -252,7 +252,7 @@ switch result:
         print(error)
 ```
 
-Sevarian uses `switch` for structural branching. The word `match` is reserved
+Severian uses `switch` for structural branching. The word `match` is reserved
 for domain syntax, such as regex helpers imported by a decorator.
 
 ## Concurrency
