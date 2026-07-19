@@ -4,7 +4,7 @@
 **Licensor:** Timothy Player
 **Contact:** timothy.player00@gmail.com
 
-Copyright © 2026 Severian Language Foundation. All Rights Reserved.
+Copyright © 2026 Timothy Player. All Rights Reserved.
 
 SEVERIAN IS PROVIDED “AS IS,” WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
 
