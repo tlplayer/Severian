@@ -8,6 +8,7 @@ fn lowers_primitive_prints_to_native_calls() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![
@@ -36,6 +37,7 @@ fn lowers_boolean_and_without_replacing_it_with_false() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::Print(Expression::Binary {
@@ -59,6 +61,7 @@ fn lowers_integer_range_for_to_control_flow() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::For {
@@ -89,6 +92,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
             Function {
                 name: "consume".into(),
                 decorators: vec![],
+                contract: None,
                 params: vec![],
                 return_type: ValueType::Unit,
                 instructions: vec![],
@@ -97,6 +101,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
             Function {
                 name: "main".into(),
                 decorators: vec![],
+                contract: None,
                 params: vec![],
                 return_type: ValueType::Unit,
                 instructions: vec![Instruction::Evaluate(Expression::Call {

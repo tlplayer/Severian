@@ -18,4 +18,4 @@ def main() -> Result[unit, IOError]:
 
     while true with listener:
         connection ?= await listener.accept()
-            async serve(connection) with self and connection
+        async serve(connection) with self and connection

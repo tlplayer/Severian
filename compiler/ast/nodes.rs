@@ -95,8 +95,16 @@ pub struct FunctionDecl {
     pub name: Ident,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
+    pub contract: Option<FunctionContract>,
     pub body: Block,
     pub tests: Vec<TestBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionContract {
+    pub span: Span,
+    pub requirements: Vec<Expr>,
+    pub capabilities: Vec<Ident>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,6 +174,7 @@ pub struct ConstructorDecl {
     pub decorators: Vec<Decorator>,
     pub name: Ident,
     pub params: Vec<Parameter>,
+    pub contract: Option<FunctionContract>,
     pub body: Block,
     pub tests: Vec<TestBlock>,
 }
@@ -207,6 +216,7 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let(LetStmt),
+    DestructureLet(DestructureLetStmt),
     Assign(AssignStmt),
     Assert(AssertStmt),
     TryBind(TryBindStmt),
@@ -215,6 +225,7 @@ pub enum Stmt {
     While(WhileStmt),
     For(ForStmt),
     Switch(SwitchStmt),
+    With(WithBlock),
     Unsafe(UnsafeBlock),
     Expr(Expr),
     Break(Span),
@@ -225,6 +236,7 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Let(node) => node.span,
+            Stmt::DestructureLet(node) => node.span,
             Stmt::Assign(node) => node.span,
             Stmt::Assert(node) => node.span,
             Stmt::TryBind(node) => node.span,
@@ -233,6 +245,7 @@ impl Stmt {
             Stmt::While(node) => node.span,
             Stmt::For(node) => node.span,
             Stmt::Switch(node) => node.span,
+            Stmt::With(node) => node.span,
             Stmt::Unsafe(node) => node.span,
             Stmt::Expr(node) => node.span(),
             Stmt::Break(span) | Stmt::Continue(span) => *span,
@@ -247,6 +260,13 @@ pub struct LetStmt {
     pub name: Ident,
     pub ty: Option<Type>,
     pub value: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DestructureLetStmt {
+    pub span: Span,
+    pub names: Vec<Ident>,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,6 +322,7 @@ pub enum ElseBranch {
 pub struct WhileStmt {
     pub span: Span,
     pub setup: Option<Box<Stmt>>,
+    pub capabilities: Vec<Expr>,
     pub condition: Expr,
     pub body: Block,
 }
@@ -335,6 +356,13 @@ pub struct SwitchArm {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnsafeBlock {
     pub span: Span,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithBlock {
+    pub span: Span,
+    pub resources: Vec<Expr>,
     pub body: Block,
 }
 

@@ -8,6 +8,7 @@ fn accepts_owned_string_literals() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::Print(Expression::String("hello".into()))],

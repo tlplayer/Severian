@@ -1,0 +1,14 @@
+[package]
+name = "probability"
+version = "0.1.0"
+edition = "2026"
+description = "Probability validation and composition"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "numerics"
+implementation = "source"
+status = "experimental"
+

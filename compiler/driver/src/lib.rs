@@ -479,6 +479,7 @@ fn walk_instructions<'expression>(
                 setup,
                 condition,
                 instructions,
+                ..
             } => {
                 if let Some(setup) = setup {
                     walk_instructions(std::slice::from_ref(setup), visit);
@@ -530,6 +531,15 @@ fn walk_instructions<'expression>(
                     }
                     walk_instructions(&arm.instructions, visit);
                 }
+            }
+            Instruction::With {
+                resources,
+                instructions,
+            } => {
+                for resource in resources {
+                    walk_expression(resource, visit);
+                }
+                walk_instructions(instructions, visit);
             }
         }
     }
@@ -760,6 +770,7 @@ fn execute_instructions(
                 setup,
                 condition,
                 instructions,
+                ..
             } => {
                 if let Some(setup) = setup {
                     execute_instructions(
@@ -941,6 +952,19 @@ fn execute_instructions(
             }
             Instruction::Evaluate(expression) => {
                 evaluate(program, expression, variables, write_line)?;
+            }
+            Instruction::With {
+                resources,
+                instructions,
+            } => {
+                for resource in resources {
+                    evaluate(program, resource, variables, write_line)?;
+                }
+                if let Some(value) =
+                    execute_instructions(program, instructions, variables, write_line)?
+                {
+                    return Ok(Some(value));
+                }
             }
         }
     }
@@ -1267,6 +1291,12 @@ fn execute_call(
                 .map_err(|_| CompileError::Execution("invalid float string".into())),
             _ => Err(CompileError::Execution(
                 "float expects a string or number".into(),
+            )),
+        },
+        "string" => match args.as_slice() {
+            [value] => Ok(Value::String(display_value(value))),
+            _ => Err(CompileError::Execution(
+                "string expects exactly one value".into(),
             )),
         },
         "range" => match args.as_slice() {

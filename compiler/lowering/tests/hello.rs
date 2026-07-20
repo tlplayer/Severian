@@ -8,6 +8,7 @@ fn lowers_hello_to_mlir_text() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::Print(Expression::String(

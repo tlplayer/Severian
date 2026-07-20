@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "boolean",
+    "file",
+    "json",
+    "log",
+    "math",
+    "network",
+    "probability",
+    "regex",
+]
+
+[workspace.metadata.library]
+namespace = "flat"
+source-root = "library"
+runtime-root = "runtime"
+

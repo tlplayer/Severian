@@ -89,6 +89,34 @@ fn parses_imported_decorator_symbol_packs() {
 }
 
 #[test]
+fn parses_server_signatures_destructuring_resources_and_contracts() {
+    let source = concat!(
+        "import network\n",
+        "\n",
+        "def serve(\n",
+        "    connection: network.TcpConnection,\n",
+        ") -> Result[unit, IOError] with {\n",
+        "    connection != invalid,\n",
+        "    with connection,\n",
+        "}:\n",
+        "    reader, writer = connection.split()\n",
+        "    with connection:\n",
+        "        while true with connection:\n",
+        "            return\n",
+    );
+    let tokens = severian_lexer::lex(source).unwrap();
+    let module = severian_parser::parse(&tokens).unwrap();
+    let severian_ast::Item::Function(function) = &module.items[1] else {
+        panic!("expected function");
+    };
+    assert_eq!(
+        function.params[0].ty.as_ref().unwrap().span().start,
+        source.find("network.TcpConnection").unwrap()
+    );
+    assert!(function.contract.is_some());
+}
+
+#[test]
 fn rejects_chaos_injection_patterns_outside_tests() {
     let source = concat!(
         "def read():\n",

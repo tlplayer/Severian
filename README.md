@@ -7,9 +7,12 @@ The repository is being built piece by piece. The current focus is the language
 front end:
 
 - `compiler/ast`: source-level syntax tree nodes.
+- `library`: official Severian packages, manifests, documentation, and
+  language-native tests.
+- `runtime`: native services used by runtime-backed library packages.
 - `docs/language`: living language notes.
 - `docs/examples`: example `.sev` programs that should become compiler fixtures.
-- `docs/examples/14-packages`: placeholder Cargo-like package layout.
+- `docs/examples/14-packages`: Cargo-like package and workspace examples.
 
 ## Design Center
 
@@ -67,3 +70,16 @@ tools/check_docs_examples.sh
 Add `--native` to also invoke the MLIR/LLVM native compiler for every accepted
 example containing `main()`. Successful executables mirror the source tree under
 `bin/examples`.
+
+## Official library
+
+The official library uses flat imports such as `import network` and
+`from math import square`. Its package catalog and compiler/library/runtime
+ownership boundary are documented in `library/README.md` and
+`library/CATALOG.md`.
+
+Run every library package that currently has an implementation with:
+
+```sh
+tools/check_library.sh
+```

@@ -112,3 +112,16 @@ fn resolves_path_dependencies_from_severian_manifests() {
     run(&application.hir, |line| output.push(line.to_owned())).unwrap();
     assert_eq!(output, ["5"]);
 }
+
+#[test]
+fn compiles_server_syntax_and_propagated_file_errors() {
+    let root = examples_root();
+    for fixture in [
+        "17-servers/01-simple-server.sev",
+        "17-servers/02-chat-server.sev",
+        "17-servers/03-map-reduce-server.sev",
+        "bugs/errors/ignored_error/fixed.sev",
+    ] {
+        compile_path(&root.join(fixture)).unwrap_or_else(|error| panic!("{fixture}: {error}"));
+    }
+}

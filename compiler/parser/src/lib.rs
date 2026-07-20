@@ -3,12 +3,12 @@
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
     CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, Decorator,
-    DecoratorSymbol, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionDecl, Ident,
-    IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item, LetKind, LetStmt,
-    ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr,
-    OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner,
-    TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp,
-    UnsafeBlock, WhileStmt,
+    DecoratorSymbol, DestructureLetStmt, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt,
+    FunctionContract, FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr,
+    Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module,
+    OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt,
+    TaskOwner, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr,
+    UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -195,6 +195,9 @@ impl Parser<'_> {
                 if self.take_simple(&TokenKind::Comma).is_none() {
                     break;
                 }
+                if self.at(&TokenKind::RightParen) {
+                    break;
+                }
             }
         }
         self.expect_simple(TokenKind::Newline, "newline after class header")?;
@@ -216,6 +219,7 @@ impl Parser<'_> {
                         decorators: function.decorators,
                         name: function.name,
                         params: function.params,
+                        contract: function.contract,
                         body: function.body,
                         tests: function.tests,
                     });
@@ -373,6 +377,11 @@ impl Parser<'_> {
         } else {
             None
         };
+        let contract = if self.take_simple(&TokenKind::With).is_some() {
+            Some(self.parse_function_contract()?)
+        } else {
+            None
+        };
         self.expect_simple(TokenKind::Colon, "`:`")?;
         self.expect_simple(TokenKind::Newline, "newline after function header")?;
         self.expect_simple(TokenKind::Indent, "indented function body")?;
@@ -393,8 +402,37 @@ impl Parser<'_> {
             name,
             params,
             return_type,
+            contract,
             body,
             tests,
+        })
+    }
+
+    fn parse_function_contract(&mut self) -> Result<FunctionContract, ParseError> {
+        let start = self
+            .expect_simple(TokenKind::LeftBrace, "`{` after function `with`")?
+            .span
+            .start;
+        self.skip_parenthesized_layout();
+        let mut requirements = Vec::new();
+        let mut capabilities = Vec::new();
+        while !self.at(&TokenKind::RightBrace) {
+            if self.take_simple(&TokenKind::With).is_some() {
+                capabilities.push(self.expect_identifier("function capability")?);
+            } else {
+                requirements.push(self.parse_expression()?);
+            }
+            self.take_simple(&TokenKind::Comma);
+            self.skip_parenthesized_layout();
+        }
+        let end = self
+            .expect_simple(TokenKind::RightBrace, "`}` after function contract")?
+            .span
+            .end;
+        Ok(FunctionContract {
+            span: Span::new(start, end),
+            requirements,
+            capabilities,
         })
     }
 
@@ -454,6 +492,7 @@ impl Parser<'_> {
 
     fn parse_parameters(&mut self) -> Result<Vec<Parameter>, ParseError> {
         self.expect_simple(TokenKind::LeftParen, "`(`")?;
+        self.skip_parenthesized_layout();
         let mut params = Vec::new();
         if !self.at(&TokenKind::RightParen) {
             loop {
@@ -478,10 +517,24 @@ impl Parser<'_> {
                 if self.take_simple(&TokenKind::Comma).is_none() {
                     break;
                 }
+                self.skip_parenthesized_layout();
+                if self.at(&TokenKind::RightParen) {
+                    break;
+                }
             }
         }
+        self.skip_parenthesized_layout();
         self.expect_simple(TokenKind::RightParen, "`)`")?;
         Ok(params)
+    }
+
+    fn skip_parenthesized_layout(&mut self) {
+        while matches!(
+            self.peek().kind,
+            TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent
+        ) {
+            self.advance();
+        }
     }
 
     fn parse_test(&mut self) -> Result<TestBlock, ParseError> {
@@ -555,8 +608,12 @@ impl Parser<'_> {
     fn parse_named_type(&mut self) -> Result<Type, ParseError> {
         let name = self.expect_identifier("type name")?;
         let start = name.span.start;
+        let mut segments = vec![name];
+        while self.take_simple(&TokenKind::Dot).is_some() {
+            segments.push(self.expect_identifier("type path segment")?);
+        }
         let mut args = Vec::new();
-        let mut end = name.span.end;
+        let mut end = segments.last().unwrap().span.end;
         if self.take_simple(&TokenKind::LeftBracket).is_some() {
             if !self.at(&TokenKind::RightBracket) {
                 loop {
@@ -574,7 +631,7 @@ impl Parser<'_> {
         }
         Ok(Type::Named(TypePath {
             span: Span::new(start, end),
-            segments: vec![name],
+            segments,
             args,
         }))
     }
@@ -607,6 +664,20 @@ impl Parser<'_> {
         }
         if self.at(&TokenKind::Switch) {
             return self.parse_switch().map(Stmt::Switch);
+        }
+        if self.at(&TokenKind::With) {
+            let start = self.advance().span.start;
+            let mut resources = vec![Expr::Identifier(self.expect_identifier("with resource")?)];
+            while self.take_simple(&TokenKind::And).is_some() {
+                resources.push(Expr::Identifier(self.expect_identifier("with resource")?));
+            }
+            self.expect_simple(TokenKind::Colon, "`:` after with resources")?;
+            let body = self.parse_suite("with")?;
+            return Ok(Stmt::With(WithBlock {
+                span: Span::new(start, body.span.end),
+                resources,
+                body,
+            }));
         }
         if self.at(&TokenKind::Unsafe) {
             let start = self.advance().span.start;
@@ -673,6 +744,26 @@ impl Parser<'_> {
                 span: Span::new(start, end),
                 name,
                 ty: None,
+                value,
+            }));
+        }
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self.peek_kind(1, &TokenKind::Comma)
+        {
+            let mut names = vec![self.expect_identifier("destructured binding")?];
+            while self.take_simple(&TokenKind::Comma).is_some() {
+                names.push(self.expect_identifier("destructured binding")?);
+            }
+            let start = names.first().unwrap().span.start;
+            self.expect_simple(TokenKind::Equal, "`=` after destructured bindings")?;
+            let value = self.parse_expression()?;
+            let end = self
+                .expect_simple(TokenKind::Newline, "newline after destructured binding")?
+                .span
+                .end;
+            return Ok(Stmt::DestructureLet(DestructureLetStmt {
+                span: Span::new(start, end),
+                names,
                 value,
             }));
         }
@@ -746,18 +837,28 @@ impl Parser<'_> {
     fn parse_while(&mut self) -> Result<WhileStmt, ParseError> {
         let start = self.expect_simple(TokenKind::While, "`while`")?.span.start;
         let condition = self.parse_expression()?;
+        let mut capabilities = Vec::new();
         let setup = if self.take_simple(&TokenKind::With).is_some() {
             let name = self.expect_identifier("while setup binding")?;
             let setup_start = name.span.start;
-            self.expect_simple(TokenKind::ChangeableEqual, "`:=` in while setup")?;
-            let value = self.parse_expression()?;
-            Some(Box::new(Stmt::Let(LetStmt {
-                span: Span::new(setup_start, value.span().end),
-                kind: LetKind::Changeable,
-                name,
-                ty: None,
-                value: Some(value),
-            })))
+            if self.take_simple(&TokenKind::ChangeableEqual).is_some() {
+                let value = self.parse_expression()?;
+                Some(Box::new(Stmt::Let(LetStmt {
+                    span: Span::new(setup_start, value.span().end),
+                    kind: LetKind::Changeable,
+                    name,
+                    ty: None,
+                    value: Some(value),
+                })))
+            } else {
+                capabilities.push(Expr::Identifier(name));
+                while self.take_simple(&TokenKind::And).is_some() {
+                    capabilities.push(Expr::Identifier(
+                        self.expect_identifier("while capability")?,
+                    ));
+                }
+                None
+            }
         } else {
             None
         };
@@ -766,6 +867,7 @@ impl Parser<'_> {
         Ok(WhileStmt {
             span: Span::new(start, body.span.end),
             setup,
+            capabilities,
             condition,
             body,
         })

@@ -1,0 +1,19 @@
+def square(value: float) -> float:
+    return value * value
+
+def cube(value: float) -> float:
+    return value * value * value
+
+def clamp(value: float, minimum: float, maximum: float) -> float:
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+test "portable math":
+    assert(square(3.0) == 9.0)
+    assert(cube(2.0) == 8.0)
+    assert(clamp(-1.0, 0.0, 10.0) == 0.0)
+    assert(clamp(12.0, 0.0, 10.0) == 10.0)
+

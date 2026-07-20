@@ -48,10 +48,17 @@ pub struct Global {
 pub struct Function {
     pub name: String,
     pub decorators: Vec<Decorator>,
+    pub contract: Option<FunctionContract>,
     pub params: Vec<Parameter>,
     pub return_type: ValueType,
     pub instructions: Vec<Instruction>,
     pub tests: Vec<Test>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionContract {
+    pub requirements: Vec<Expression>,
+    pub capabilities: Vec<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +131,7 @@ pub enum Instruction {
     },
     While {
         setup: Option<Box<Instruction>>,
+        capabilities: Vec<Expression>,
         condition: Expression,
         instructions: Vec<Instruction>,
     },
@@ -141,6 +149,10 @@ pub enum Instruction {
         setup: Option<Box<Instruction>>,
         repeat_condition: Option<Expression>,
         arms: Vec<SwitchArm>,
+    },
+    With {
+        resources: Vec<Expression>,
+        instructions: Vec<Instruction>,
     },
     Evaluate(Expression),
 }

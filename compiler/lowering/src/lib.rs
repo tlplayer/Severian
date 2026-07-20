@@ -257,6 +257,7 @@ impl LowerContext<'_> {
                     setup,
                     condition,
                     instructions,
+                    ..
                 } => {
                     if let Some(setup) = setup {
                         self.lower_instructions(std::slice::from_ref(setup));
@@ -270,6 +271,9 @@ impl LowerContext<'_> {
                 } => self.lower_for(pattern, iterable, instructions),
                 Instruction::Switch { .. } => {}
                 Instruction::ChannelSwitch { .. } => {}
+                Instruction::With { instructions, .. } => {
+                    self.lower_instructions(instructions);
+                }
             }
         }
     }
@@ -757,6 +761,7 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                 setup,
                 condition,
                 instructions,
+                ..
             } => {
                 if let Some(setup) = setup {
                     collect_strings(std::slice::from_ref(setup), strings);
@@ -808,6 +813,15 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                     }
                     collect_strings(&arm.instructions, strings);
                 }
+            }
+            Instruction::With {
+                resources,
+                instructions,
+            } => {
+                for resource in resources {
+                    collect_expression_strings(resource, strings);
+                }
+                collect_strings(instructions, strings);
             }
         }
     }

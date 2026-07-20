@@ -8,6 +8,7 @@ fn finds_the_main_function() {
         functions: vec![Function {
             name: "main".into(),
             decorators: vec![],
+            contract: None,
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::Print(Expression::String("hello".into()))],

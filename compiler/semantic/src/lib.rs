@@ -7,8 +7,9 @@ use severian_ast::{
 };
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
-    Expression, Function, Global, Instruction, MatchPattern, Parameter, Program,
-    SwitchArm as HirSwitchArm, Test, TestMode as HirTestMode, UnaryOp, ValueType,
+    Expression, Function, FunctionContract as HirFunctionContract, Global, Instruction,
+    MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, Test, TestMode as HirTestMode,
+    UnaryOp, ValueType,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -72,12 +73,30 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                         ),
                     ));
                 }
+                aliases.insert(
+                    format!("__variant_fields.{}", variant.name.name),
+                    variant
+                        .fields
+                        .iter()
+                        .map(|field| field.name.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
             }
         }
         if let Item::Class(class) = item {
             aliases.insert(
                 class.name.name.clone(),
                 format!("__class.{}", class.name.name),
+            );
+            aliases.insert(
+                format!("__class_fields.{}", class.name.name),
+                class
+                    .fields
+                    .iter()
+                    .map(|field| field.name.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
             );
         }
     }
@@ -217,6 +236,12 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         functions.push(Function {
             name: function.name.name.clone(),
             decorators: lower_decorators(&function.decorators, &imported_modules)?,
+            contract: lower_function_contract(
+                function.contract.as_ref(),
+                &scope,
+                &signatures,
+                &aliases,
+            )?,
             params,
             return_type: signature.returns,
             instructions,
@@ -258,6 +283,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                 &constructor.name.name,
                 &constructor.decorators,
                 &constructor.params,
+                constructor.contract.as_ref(),
                 &constructor.body,
                 &constructor.tests,
                 ValueType::Unit,
@@ -281,6 +307,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                 &method.name.name,
                 &method.decorators,
                 &method.params,
+                method.contract.as_ref(),
                 &method.body,
                 &method.tests,
                 returns,
@@ -312,6 +339,7 @@ fn lower_class_function(
     name: &str,
     source_decorators: &[severian_ast::Decorator],
     source_params: &[severian_ast::Parameter],
+    source_contract: Option<&severian_ast::FunctionContract>,
     body: &Block,
     source_tests: &[severian_ast::TestBlock],
     return_type: ValueType,
@@ -385,6 +413,7 @@ fn lower_class_function(
     Ok(Function {
         name: name.into(),
         decorators: decorator_metadata(source_decorators),
+        contract: lower_function_contract(source_contract, &scope, signatures, aliases)?,
         params,
         return_type,
         instructions,
@@ -392,19 +421,73 @@ fn lower_class_function(
     })
 }
 
+fn lower_function_contract(
+    contract: Option<&severian_ast::FunctionContract>,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<Option<HirFunctionContract>, SemanticError> {
+    contract
+        .map(|contract| {
+            let requirements = contract
+                .requirements
+                .iter()
+                .map(|requirement| {
+                    let (requirement, ty) =
+                        lower_expression(requirement, scope, signatures, aliases)?;
+                    compatible(contract.span, ty, ValueType::Bool)?;
+                    Ok(requirement)
+                })
+                .collect::<Result<Vec<_>, SemanticError>>()?;
+            let capabilities = contract
+                .capabilities
+                .iter()
+                .map(|capability| {
+                    lower_expression(
+                        &Expr::Identifier(capability.clone()),
+                        scope,
+                        signatures,
+                        aliases,
+                    )
+                    .map(|(capability, _)| capability)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(HirFunctionContract {
+                requirements,
+                capabilities,
+            })
+        })
+        .transpose()
+}
+
 fn collect_imports(module: &Module) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
     for item in &module.items {
         let Item::Import(import) = item else { continue };
-        if let ImportKind::From { module, names } = &import.kind {
-            let module = module
-                .iter()
-                .map(|part| part.name.as_str())
-                .collect::<Vec<_>>()
-                .join(".");
-            for name in names {
-                let exposed = name.alias.as_ref().unwrap_or(&name.name).name.clone();
-                aliases.insert(exposed, format!("{module}.{}", name.name.name));
+        match &import.kind {
+            ImportKind::Module { path, alias } => {
+                let canonical = path
+                    .iter()
+                    .map(|part| part.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let exposed = alias
+                    .as_ref()
+                    .unwrap_or_else(|| path.first().unwrap())
+                    .name
+                    .clone();
+                aliases.insert(exposed, canonical);
+            }
+            ImportKind::From { module, names } => {
+                let module = module
+                    .iter()
+                    .map(|part| part.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                for name in names {
+                    let exposed = name.alias.as_ref().unwrap_or(&name.name).name.clone();
+                    aliases.insert(exposed, format!("{module}.{}", name.name.name));
+                }
             }
         }
     }
@@ -530,6 +613,31 @@ fn lower_block(
                     name: binding.name.name.clone(),
                     value,
                 });
+            }
+            Stmt::DestructureLet(binding) => {
+                let (value, _) = lower_expression(&binding.value, scope, signatures, aliases)?;
+                let temporary = format!("__destructure_{}", binding.span.start);
+                instructions.push(Instruction::Let {
+                    name: temporary.clone(),
+                    value,
+                });
+                for (index, name) in binding.names.iter().enumerate() {
+                    scope.insert(
+                        name.name.clone(),
+                        Binding {
+                            ty: ValueType::Any,
+                            mutable: false,
+                            field: false,
+                        },
+                    );
+                    instructions.push(Instruction::Let {
+                        name: name.name.clone(),
+                        value: Expression::Index {
+                            object: Box::new(Expression::Variable(temporary.clone())),
+                            index: Box::new(Expression::Integer(index as i64)),
+                        },
+                    });
+                }
             }
             Stmt::Assign(assignment) => {
                 let (target, target_type) =
@@ -671,6 +779,14 @@ fn lower_block(
                 let (condition, ty) =
                     lower_expression(&statement.condition, scope, signatures, aliases)?;
                 compatible(statement.condition.span(), ty, ValueType::Bool)?;
+                let capabilities = statement
+                    .capabilities
+                    .iter()
+                    .map(|capability| {
+                        lower_expression(capability, scope, signatures, aliases)
+                            .map(|(capability, _)| capability)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 let mut body_scope = scope.clone();
                 let body = lower_block(
                     &statement.body,
@@ -681,6 +797,7 @@ fn lower_block(
                 )?;
                 instructions.push(Instruction::While {
                     setup,
+                    capabilities,
                     condition,
                     instructions: body,
                 });
@@ -689,7 +806,7 @@ fn lower_block(
                 let (iterable, _) =
                     lower_expression(&statement.iterable, scope, signatures, aliases)?;
                 let mut body_scope = scope.clone();
-                let pattern = lower_pattern(&statement.pattern, &mut body_scope)?;
+                let pattern = lower_pattern(&statement.pattern, &mut body_scope, aliases)?;
                 let body = lower_block(
                     &statement.body,
                     &mut body_scope,
@@ -734,7 +851,7 @@ fn lower_block(
                 let mut arms = Vec::new();
                 for arm in &statement.arms {
                     let mut arm_scope = scope.clone();
-                    let pattern = lower_pattern(&arm.pattern, &mut arm_scope)?;
+                    let pattern = lower_pattern(&arm.pattern, &mut arm_scope, aliases)?;
                     let source = arm
                         .source
                         .as_ref()
@@ -794,6 +911,28 @@ fn lower_block(
                     aliases,
                 )?);
             }
+            Stmt::With(block) => {
+                let resources = block
+                    .resources
+                    .iter()
+                    .map(|resource| {
+                        lower_expression(resource, scope, signatures, aliases)
+                            .map(|(resource, _)| resource)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut with_scope = scope.clone();
+                let body = lower_block(
+                    &block.body,
+                    &mut with_scope,
+                    return_type,
+                    signatures,
+                    aliases,
+                )?;
+                instructions.push(Instruction::With {
+                    resources,
+                    instructions: body,
+                });
+            }
             _ => {
                 return Err(error(
                     statement.span(),
@@ -831,6 +970,14 @@ fn lower_expression(
                 Ok((
                     Expression::Function(identifier.name.clone()),
                     ValueType::Function,
+                ))
+            } else if identifier.name == "invalid" {
+                Ok((
+                    Expression::Variant {
+                        name: "invalid".into(),
+                        fields: Vec::new(),
+                    },
+                    ValueType::Any,
                 ))
             } else if identifier.name == "absent" {
                 Ok((
@@ -1100,6 +1247,29 @@ fn lower_call(
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
 ) -> Result<(Expression, ValueType), SemanticError> {
+    if let Expr::Index(index) = call.callee.as_ref() {
+        if let Expr::Member(member) = index.object.as_ref() {
+            if let Expr::Identifier(object) = member.object.as_ref() {
+                if let Some(module) = aliases.get(&object.name) {
+                    let function = format!("{module}.{}", member.member.name);
+                    let args = call
+                        .args
+                        .iter()
+                        .map(|arg| {
+                            lower_expression(&arg.value, scope, signatures, aliases)
+                                .map(|(arg, _)| arg)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let return_type = if function == "json.decode" {
+                        ValueType::Result
+                    } else {
+                        ValueType::Any
+                    };
+                    return Ok((Expression::Call { function, args }, return_type));
+                }
+            }
+        }
+    }
     if let Expr::Member(member) = call.callee.as_ref() {
         if let Expr::Identifier(object) = member.object.as_ref() {
             if object.name == "int" && member.member.name == "parse" {
@@ -1142,6 +1312,23 @@ fn lower_call(
                     },
                     ValueType::Any,
                 ));
+            }
+            if let Some(module) = aliases.get(&object.name) {
+                let function = format!("{module}.{}", member.member.name);
+                let args = call
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let return_type = match function.as_str() {
+                    "file.write" | "network.listen" | "json.decode" => ValueType::Result,
+                    "math.sqrt" => ValueType::Float,
+                    "log.info" | "log.error" => ValueType::Unit,
+                    _ => ValueType::Any,
+                };
+                return Ok((Expression::Call { function, args }, return_type));
             }
         }
         let object = lower_expression(&member.object, scope, signatures, aliases)?.0;
@@ -1200,6 +1387,7 @@ fn lower_call(
         "panic" => Some(("panic", ValueType::Unit)),
         "sqrt" | "math.sqrt" => Some(("sqrt", ValueType::Float)),
         "float" => Some(("float", ValueType::Float)),
+        "string" => Some(("string", ValueType::String)),
         "range" => Some(("range", ValueType::List)),
         "indices" => Some(("indices", ValueType::List)),
         "read" if !signatures.contains_key(&callee.name) => Some(("read", ValueType::Result)),
@@ -1432,6 +1620,11 @@ fn always_returns(instructions: &[Instruction]) -> bool {
         Instruction::Switch { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| always_returns(&arm.instructions))
         }
+        Instruction::With { instructions, .. } => always_returns(instructions),
+        Instruction::While {
+            condition: Expression::Boolean(true),
+            ..
+        } => true,
         _ => false,
     })
 }
@@ -1472,6 +1665,7 @@ fn error(span: Span, message: impl Into<String>) -> SemanticError {
 fn lower_pattern(
     pattern: &Pattern,
     scope: &mut HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
 ) -> Result<MatchPattern, SemanticError> {
     match pattern {
         Pattern::Wildcard(_) => Ok(MatchPattern::Wildcard),
@@ -1495,6 +1689,32 @@ fn lower_pattern(
                 return Err(error(name.span(), "invalid constructor pattern"));
             };
             let name = path.segments.first().unwrap().name.clone();
+            if fields.is_empty() {
+                if let Some(field_names) = aliases
+                    .get(&format!("__variant_fields.{name}"))
+                    .or_else(|| aliases.get(&format!("__class_fields.{name}")))
+                {
+                    let fields = if field_names.is_empty() {
+                        Vec::new()
+                    } else {
+                        field_names
+                            .split(',')
+                            .map(|field| {
+                                scope.insert(
+                                    field.into(),
+                                    Binding {
+                                        ty: ValueType::Any,
+                                        mutable: false,
+                                        field: false,
+                                    },
+                                );
+                                MatchPattern::Bind(field.into())
+                            })
+                            .collect()
+                    };
+                    return Ok(MatchPattern::Constructor { name, fields });
+                }
+            }
             if fields.is_empty()
                 && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
                 && !matches!(name.as_str(), "absent" | "ok" | "failure" | "present")
@@ -1511,14 +1731,14 @@ fn lower_pattern(
             }
             let fields = fields
                 .iter()
-                .map(|field| lower_pattern(field, scope))
+                .map(|field| lower_pattern(field, scope, aliases))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(MatchPattern::Constructor { name, fields })
         }
         Pattern::Tuple { elements, .. } => {
             let fields = elements
                 .iter()
-                .map(|field| lower_pattern(field, scope))
+                .map(|field| lower_pattern(field, scope, aliases))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(MatchPattern::Constructor {
                 name: "tuple".into(),

@@ -1,0 +1,14 @@
+[package]
+name = "json"
+version = "0.1.0"
+edition = "2026"
+description = "JSON values, encoding, and decoding"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "data-formats"
+implementation = "source-and-runtime"
+status = "interface-pending"
+
