@@ -73,6 +73,7 @@ pub enum TokenKind {
     Plus,
     Minus,
     Star,
+    Power,
     Slash,
     Percent,
     Less,
@@ -217,6 +218,20 @@ impl<'source> Lexer<'source> {
                 }
                 b':' => self.push_simple(TokenKind::Colon, base, &mut index),
                 b',' => self.push_simple(TokenKind::Comma, base, &mut index),
+                b'.' if bytes.get(index + 1).is_some_and(u8::is_ascii_digit) => {
+                    let start = index;
+                    index += 1;
+                    while index < bytes.len() && bytes[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                    let text = &line[start..index];
+                    self.tokens.push(Token {
+                        kind: TokenKind::Float(
+                            text.parse::<f64>().expect("digits form a float").to_bits(),
+                        ),
+                        span: Span::new(base + start, base + index),
+                    });
+                }
                 b'.' => self.push_simple(TokenKind::Dot, base, &mut index),
                 b'|' => self.push_simple(TokenKind::Pipe, base, &mut index),
                 b'&' => self.push_simple(TokenKind::Ampersand, base, &mut index),
@@ -226,6 +241,9 @@ impl<'source> Lexer<'source> {
                     self.push_double(TokenKind::AddEqual, base, &mut index)
                 }
                 b'+' => self.push_simple(TokenKind::Plus, base, &mut index),
+                b'*' if bytes.get(index + 1) == Some(&b'*') => {
+                    self.push_double(TokenKind::Power, base, &mut index)
+                }
                 b'*' if bytes.get(index + 1) == Some(&b'=') => {
                     self.push_double(TokenKind::MulEqual, base, &mut index)
                 }

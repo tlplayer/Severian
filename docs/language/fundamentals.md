@@ -47,7 +47,9 @@ Parentheses are reserved for calls and runtime construction.
 
 Severian uses casing to make a name's role visible without extra punctuation.
 
-- Classes, traits, and enums use `UpperCamelCase`: `ChatEvent`, `TcpConnection`.
+- Classes, traits, and enums use `UpperCamelCase`: `ChatEvent`, `TCPConnection`.
+  Canonical initialisms stay capitalized inside type names, as in `TCP`, `IO`,
+  and `HTTP`.
 - Enum variants use `UpperCamelCase`: `Join`, `Say`, `Leave`.
 - Functions and methods use `lowerCamelCase`: `runHub`, `readLine`.
 - Variables, parameters, and fields use `snake_case`: `client_id`, `next_job_id`.
@@ -143,7 +145,7 @@ Severian uses Python-style imports.
 import math
 import io as console
 
-from math import sqrt
+from math import dot
 from io import print as write
 ```
 
@@ -344,7 +346,7 @@ does not change the meaning of commas in calls, tuples, collection literals, or
 any other Severian construct.
 
 ```sev
-def runJob(job_id: int, connection: network.TcpConnection) with {
+def runJob(job_id: int, connection: network.TCPConnection) with {
     0 <= job_id <= 1000,
     connection != invalid,
     with connection,
@@ -487,6 +489,21 @@ unsafe:
 
 result = await worker
 ```
+
+## Exponentiation
+
+Exponentiation is native language syntax and is right-associative. Leading-zero
+decimal notation is optional, so `.5` and `0.5` are equivalent.
+
+```sev
+square = value ** 2
+square_root = value ** .5
+power_tower = 2 ** 3 ** 2
+```
+
+Integer bases with non-negative integer exponents produce integers. Any float
+operand produces a float. Integer overflow is checked, and a negative integer
+exponent requires a float base.
 
 ## Math Mode
 

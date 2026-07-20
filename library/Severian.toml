@@ -2,6 +2,7 @@
 members = [
     "boolean",
     "file",
+    "io",
     "json",
     "log",
     "math",
@@ -14,4 +15,3 @@ members = [
 namespace = "flat"
 source-root = "library"
 runtime-root = "runtime"
-

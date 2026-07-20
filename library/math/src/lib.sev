@@ -1,19 +1,19 @@
-def square(value: float) -> float:
-    return value * value
+def dot(left: list[float], right: list[float]) -> float with {
+    size(left) == size(right),
+}:
+    total := 0.0
+    for index in indices(left):
+        total += left[index] * right[index]
+    return total
 
-def cube(value: float) -> float:
-    return value * value * value
+test "dot product":
+    assert(dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]) == 32.0)
 
-def clamp(value: float, minimum: float, maximum: float) -> float:
-    if value < minimum:
-        return minimum
-    if value > maximum:
-        return maximum
-    return value
+def cross(left: list[float], right: list[float]) -> list[float] with {
+    size(left) == 3,
+    size(right) == 3,
+}:
+    return [left[1] * right[2] - left[2] * right[1], left[2] * right[0] - left[0] * right[2], left[0] * right[1] - left[1] * right[0]]
 
-test "portable math":
-    assert(square(3.0) == 9.0)
-    assert(cube(2.0) == 8.0)
-    assert(clamp(-1.0, 0.0, 10.0) == 0.0)
-    assert(clamp(12.0, 0.0, 10.0) == 10.0)
-
+test "cross product":
+    assert(cross([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]) == [0.0, 0.0, 1.0])

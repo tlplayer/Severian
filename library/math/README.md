@@ -1,8 +1,9 @@
 # math
 
-Portable numeric algorithms live in Severian source. Operations that map to a
-hardware or MLIR intrinsic, such as `sqrt`, must be declared by a typed
-compiler/runtime interface rather than recognized by a spelling check.
+Array and linear-algebra algorithms implemented in Severian source. Scalar
+exponentiation, square roots, squares, and cubes use the language's native `**`
+operator instead of package wrappers.
 
-The initial source API provides `square`, `cube`, and `clamp` for floats.
-
+The initial API provides `dot` and three-dimensional `cross`. Matrix, tensor,
+statistics, data analytics, and machine-learning packages will build on this
+foundation without crowding scalar language operations into `math`.

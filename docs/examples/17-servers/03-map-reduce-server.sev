@@ -61,7 +61,7 @@ def coordinate(
 
 def runJob(
     job_id: int,
-    connection: network.TcpConnection,
+    connection: network.TCPConnection,
     jobs: Channel[Job],
 ) -> Result[unit, IOError | JsonError] with {
     0 <= job_id <= 1000,
@@ -79,7 +79,7 @@ def runJob(
 
 def serveJob(
     job_id: int,
-    connection: network.TcpConnection,
+    connection: network.TCPConnection,
     jobs: Channel[Job],
 ):
     switch await runJob(job_id, connection, clone jobs) with connection:

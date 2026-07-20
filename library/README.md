@@ -1,8 +1,18 @@
 # Severian library
 
 `library/` is the source tree for Severian's official library. The directory is
-not part of an import path: programs write `import network` or
-`from math import sqrt`, not `import library.network`.
+not part of an import path. `import math` makes the package's available names
+callable directly, while `from math import sqrt` selects only `sqrt`. Programs
+never write `import library.math`.
+
+```sev
+import math
+
+dot([1.0, 2.0], [3.0, 4.0])
+```
+
+Package functions are ordinary `def` declarations with real bodies. There is
+no separate export header or `extern def` form.
 
 The organization borrows three useful ideas without copying any one ecosystem:
 
@@ -23,8 +33,8 @@ Every public operation has one implementation owner:
 
 The compiler must not silently invent a package API. Runtime-backed packages
 need typed Severian declarations and a runtime symbol mapping before they are
-considered implemented. Their initial packages are therefore marked
-`interface-pending` rather than filled with placeholder functions.
+considered implemented. Packages with declarations but incomplete native
+symbols are marked `runtime-pending` rather than treated as working libraries.
 
 ## Package shape
 
@@ -63,4 +73,3 @@ Run all currently implemented library packages with:
 ```sh
 tools/check_library.sh
 ```
-

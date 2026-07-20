@@ -4,19 +4,22 @@ def all(values: list[bool]) -> bool:
             return false
     return true
 
+test "all":
+    assert(all([true, true]))
+    assert(all([]))
+
 def any(values: list[bool]) -> bool:
     for value in values:
         if value:
             return true
     return false
 
+test "any":
+    assert(any([false, true]))
+    assert(not any([]))
+
 def none(values: list[bool]) -> bool:
     return not any(values)
 
-test "boolean aggregation":
-    assert(all([true, true]))
-    assert(all([]))
-    assert(any([false, true]))
-    assert(not any([]))
+test "none":
     assert(none([false, false]))
-

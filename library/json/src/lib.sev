@@ -1,2 +1,5 @@
-# Public generic interface pending typed runtime declarations.
+def decode[type](text: string) -> Result[type, JsonError]:
+    return runtime.jsonDecode(text)
 
+def encode[type](value: type) -> string:
+    return runtime.jsonEncode(value)

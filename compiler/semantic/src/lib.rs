@@ -53,6 +53,13 @@ struct Binding {
 }
 
 pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
+    analyze_with_interfaces(module, &[])
+}
+
+pub fn analyze_with_interfaces(
+    module: &Module,
+    interfaces: &[(String, Module)],
+) -> Result<Program, SemanticError> {
     let mut aliases = collect_imports(module);
     let imported_modules = collect_imported_modules(module);
     for item in &module.items {
@@ -101,44 +108,49 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         }
     }
     let mut signatures = HashMap::new();
+    for (module_name, interface) in interfaces {
+        for item in &interface.items {
+            let (name, params, return_type) = match item {
+                Item::Function(function) => (
+                    &function.name,
+                    function.params.as_slice(),
+                    function.return_type.as_ref(),
+                ),
+                _ => continue,
+            };
+            let key = format!("{module_name}.{}", name.name);
+            let signature = lower_signature(params, return_type)?;
+            if signatures.insert(key.clone(), signature.clone()).is_some() {
+                return Err(error(
+                    name.span,
+                    format!("duplicate exported function `{key}`"),
+                ));
+            }
+            if imports_entire_module(module, module_name) {
+                aliases.insert(name.name.clone(), key);
+            }
+        }
+    }
     for item in &module.items {
-        let Item::Function(function) = item else {
-            continue;
+        let (name, params, return_type) = match item {
+            Item::Function(function) => (
+                &function.name,
+                function.params.as_slice(),
+                function.return_type.as_ref(),
+            ),
+            _ => continue,
         };
-        if !is_lower_camel_case(&function.name.name) {
+        if !is_lower_camel_case(&name.name) {
             return Err(error(
-                function.name.span,
-                format!("function `{}` must use lowerCamelCase", function.name.name),
+                name.span,
+                format!("function `{}` must use lowerCamelCase", name.name),
             ));
         }
-        let params = function
-            .params
-            .iter()
-            .map(|param| {
-                Ok(SignatureParameter {
-                    name: param.name.name.clone(),
-                    ty: param
-                        .ty
-                        .as_ref()
-                        .ok_or_else(|| error(param.span, "parameters require a type"))
-                        .and_then(lower_type)?,
-                    default: param.default.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, SemanticError>>()?;
-        let returns = function
-            .return_type
-            .as_ref()
-            .map(lower_type)
-            .transpose()?
-            .unwrap_or(ValueType::Unit);
-        if signatures
-            .insert(function.name.name.clone(), Signature { params, returns })
-            .is_some()
-        {
+        let signature = lower_signature(params, return_type)?;
+        if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
-                function.name.span,
-                format!("duplicate function `{}`", function.name.name),
+                name.span,
+                format!("duplicate function `{}`", name.name),
             ));
         }
     }
@@ -177,6 +189,8 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         let Item::Function(function) = item else {
             continue;
         };
+        let decorators = lower_decorators(&function.decorators, &imported_modules)?;
+        let function_aliases = aliases_with_decorators(&aliases, &function.decorators);
         let signature = signatures.get(&function.name.name).unwrap();
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
@@ -185,7 +199,8 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                 .default
                 .as_ref()
                 .map(|value| {
-                    let (value, ty) = lower_expression(value, &scope, &signatures, &aliases)?;
+                    let (value, ty) =
+                        lower_expression(value, &scope, &signatures, &function_aliases)?;
                     compatible(value_span(&parameter.default), ty, parameter.ty)?;
                     Ok(value)
                 })
@@ -209,7 +224,7 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
             &mut scope,
             signature.returns,
             &signatures,
-            &aliases,
+            &function_aliases,
         )?;
         if signature.returns != ValueType::Unit && !always_returns(&instructions) {
             return Err(error(
@@ -229,18 +244,18 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
                     &mut test_scope,
                     ValueType::Unit,
                     &signatures,
-                    &aliases,
+                    &function_aliases,
                 )?,
             });
         }
         functions.push(Function {
             name: function.name.name.clone(),
-            decorators: lower_decorators(&function.decorators, &imported_modules)?,
+            decorators,
             contract: lower_function_contract(
                 function.contract.as_ref(),
                 &scope,
                 &signatures,
-                &aliases,
+                &function_aliases,
             )?,
             params,
             return_type: signature.returns,
@@ -329,6 +344,22 @@ pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
         globals,
         classes,
         functions,
+    })
+}
+
+fn imports_entire_module(module: &Module, module_name: &str) -> bool {
+    module.items.iter().any(|item| {
+        let Item::Import(import) = item else {
+            return false;
+        };
+        let ImportKind::Module { path, .. } = &import.kind else {
+            return false;
+        };
+        path.iter()
+            .map(|part| part.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
+            == module_name
     })
 }
 
@@ -477,6 +508,9 @@ fn collect_imports(module: &Module) -> HashMap<String, String> {
                     .name
                     .clone();
                 aliases.insert(exposed, canonical);
+                if path.first().is_some_and(|part| part.name == "math") {
+                    aliases.insert("matrix".into(), "math".into());
+                }
             }
             ImportKind::From { module, names } => {
                 let module = module
@@ -488,6 +522,29 @@ fn collect_imports(module: &Module) -> HashMap<String, String> {
                     let exposed = name.alias.as_ref().unwrap_or(&name.name).name.clone();
                     aliases.insert(exposed, format!("{module}.{}", name.name.name));
                 }
+            }
+        }
+    }
+    aliases
+}
+
+fn aliases_with_decorators(
+    aliases: &HashMap<String, String>,
+    decorators: &[severian_ast::Decorator],
+) -> HashMap<String, String> {
+    let mut aliases = aliases.clone();
+    for decorator in decorators {
+        let package = decorator
+            .name
+            .segments
+            .iter()
+            .map(|segment| segment.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        for symbol in &decorator.symbols {
+            aliases.insert(format!("__symbol.{}", symbol.spelling), package.clone());
+            if package == "probability" && symbol.spelling == "P" {
+                aliases.insert("P".into(), "probability.probability".into());
             }
         }
     }
@@ -1054,6 +1111,25 @@ fn lower_expression(
                     BinaryOp::Mod,
                     merge_numeric(left_type, right_type, binary.span)?,
                 ),
+                AstBinaryOp::Power => {
+                    let result = power_type(left_type, right_type, binary.span)?;
+                    (BinaryOp::Power, result)
+                }
+                AstBinaryOp::MatMul => {
+                    if aliases.get("__symbol.X").map(String::as_str) != Some("math") {
+                        return Err(error(
+                            binary.span,
+                            "operator `X` requires `@math(X)` on this function",
+                        ));
+                    }
+                    return Ok((
+                        Expression::Call {
+                            function: "math.matrixMultiply".into(),
+                            args: vec![left, right],
+                        },
+                        ValueType::Any,
+                    ));
+                }
                 AstBinaryOp::Equal => (BinaryOp::Equal, ValueType::Bool),
                 AstBinaryOp::NotEqual => (BinaryOp::NotEqual, ValueType::Bool),
                 AstBinaryOp::Less => (BinaryOp::Less, ValueType::Bool),
@@ -1252,20 +1328,12 @@ fn lower_call(
             if let Expr::Identifier(object) = member.object.as_ref() {
                 if let Some(module) = aliases.get(&object.name) {
                     let function = format!("{module}.{}", member.member.name);
-                    let args = call
-                        .args
-                        .iter()
-                        .map(|arg| {
-                            lower_expression(&arg.value, scope, signatures, aliases)
-                                .map(|(arg, _)| arg)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let return_type = if function == "json.decode" {
-                        ValueType::Result
-                    } else {
-                        ValueType::Any
-                    };
-                    return Ok((Expression::Call { function, args }, return_type));
+                    let signature = signatures.get(&function).ok_or_else(|| {
+                        error(call.span, format!("unknown exported function `{function}`"))
+                    })?;
+                    return lower_declared_call(
+                        call, &function, signature, scope, signatures, aliases,
+                    );
                 }
             }
         }
@@ -1315,20 +1383,10 @@ fn lower_call(
             }
             if let Some(module) = aliases.get(&object.name) {
                 let function = format!("{module}.{}", member.member.name);
-                let args = call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let return_type = match function.as_str() {
-                    "file.write" | "network.listen" | "json.decode" => ValueType::Result,
-                    "math.sqrt" => ValueType::Float,
-                    "log.info" | "log.error" => ValueType::Unit,
-                    _ => ValueType::Any,
-                };
-                return Ok((Expression::Call { function, args }, return_type));
+                let signature = signatures.get(&function).ok_or_else(|| {
+                    error(call.span, format!("unknown exported function `{function}`"))
+                })?;
+                return lower_declared_call(call, &function, signature, scope, signatures, aliases);
             }
         }
         let object = lower_expression(&member.object, scope, signatures, aliases)?.0;
@@ -1385,7 +1443,6 @@ fn lower_call(
     let builtin = match canonical {
         "print" | "io.print" => Some(("print", ValueType::Unit)),
         "panic" => Some(("panic", ValueType::Unit)),
-        "sqrt" | "math.sqrt" => Some(("sqrt", ValueType::Float)),
         "float" => Some(("float", ValueType::Float)),
         "string" => Some(("string", ValueType::String)),
         "range" => Some(("range", ValueType::List)),
@@ -1446,54 +1503,8 @@ fn lower_call(
             returns,
         ));
     }
-    if let Some(signature) = signatures.get(&callee.name) {
-        let mut supplied: Vec<Option<Expression>> = vec![None; signature.params.len()];
-        let mut positional = 0;
-        for argument in &call.args {
-            let index = if let Some(name) = &argument.name {
-                signature
-                    .params
-                    .iter()
-                    .position(|param| param.name == name.name)
-                    .ok_or_else(|| error(name.span, format!("unknown argument `{}`", name.name)))?
-            } else {
-                let index = positional;
-                positional += 1;
-                index
-            };
-            if index >= supplied.len() || supplied[index].is_some() {
-                return Err(error(
-                    argument.span,
-                    format!("invalid arguments for `{}`", callee.name),
-                ));
-            }
-            let (value, ty) = lower_expression(&argument.value, scope, signatures, aliases)?;
-            compatible(argument.span, ty, signature.params[index].ty)?;
-            supplied[index] = Some(value);
-        }
-        let args = supplied
-            .into_iter()
-            .zip(&signature.params)
-            .map(|(value, param)| {
-                if let Some(value) = value {
-                    Ok(value)
-                } else if let Some(default) = &param.default {
-                    lower_expression(default, scope, signatures, aliases).map(|(value, _)| value)
-                } else {
-                    Err(error(
-                        call.span,
-                        format!("missing argument `{}`", param.name),
-                    ))
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok((
-            Expression::Call {
-                function: callee.name.clone(),
-                args,
-            },
-            signature.returns,
-        ));
+    if let Some(signature) = signatures.get(canonical) {
+        return lower_declared_call(call, canonical, signature, scope, signatures, aliases);
     }
     if scope
         .get(&callee.name)
@@ -1537,6 +1548,69 @@ fn lower_call(
     ))
 }
 
+fn lower_declared_call(
+    call: &severian_ast::CallExpr,
+    function: &str,
+    signature: &Signature,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<(Expression, ValueType), SemanticError> {
+    let mut supplied: Vec<Option<Expression>> = vec![None; signature.params.len()];
+    let mut positional = 0;
+    for argument in &call.args {
+        let index = if let Some(name) = &argument.name {
+            signature
+                .params
+                .iter()
+                .position(|param| param.name == name.name)
+                .ok_or_else(|| error(name.span, format!("unknown argument `{}`", name.name)))?
+        } else {
+            let index = positional;
+            positional += 1;
+            index
+        };
+        if index >= supplied.len() || supplied[index].is_some() {
+            return Err(error(
+                argument.span,
+                format!("invalid arguments for `{function}`"),
+            ));
+        }
+        let (value, ty) = lower_expression(&argument.value, scope, signatures, aliases)?;
+        compatible(argument.span, ty, signature.params[index].ty)?;
+        supplied[index] = Some(value);
+    }
+    let args = supplied
+        .into_iter()
+        .zip(&signature.params)
+        .map(|(value, param)| {
+            if let Some(value) = value {
+                Ok(value)
+            } else if let Some(default) = &param.default {
+                lower_expression(default, scope, signatures, aliases).map(|(value, _)| value)
+            } else {
+                Err(error(
+                    call.span,
+                    format!("missing argument `{}`", param.name),
+                ))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let runtime_function = match function {
+        // The MLIR backend currently exposes this intrinsic under its C symbol.
+        // Its type comes from library/math, not from this mapping.
+        "math.sqrt" => "sqrt",
+        _ => function,
+    };
+    Ok((
+        Expression::Call {
+            function: runtime_function.into(),
+            args,
+        },
+        signature.returns,
+    ))
+}
+
 fn lower_collection(
     elements: &[Expr],
     scope: &HashMap<String, Binding>,
@@ -1549,6 +1623,31 @@ fn lower_collection(
             lower_expression(element, scope, signatures, aliases).map(|(element, _)| element)
         })
         .collect()
+}
+
+fn lower_signature(
+    params: &[severian_ast::Parameter],
+    return_type: Option<&Type>,
+) -> Result<Signature, SemanticError> {
+    let params = params
+        .iter()
+        .map(|param| {
+            Ok(SignatureParameter {
+                name: param.name.name.clone(),
+                ty: param
+                    .ty
+                    .as_ref()
+                    .ok_or_else(|| error(param.span, "parameters require a type"))
+                    .and_then(lower_type)?,
+                default: param.default.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, SemanticError>>()?;
+    let returns = return_type
+        .map(lower_type)
+        .transpose()?
+        .unwrap_or(ValueType::Unit);
+    Ok(Signature { params, returns })
 }
 
 fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
@@ -1592,6 +1691,25 @@ fn merge_numeric(
     } else {
         Err(error(span, "operator requires matching numeric values"))
     }
+}
+
+fn power_type(
+    base: ValueType,
+    exponent: ValueType,
+    span: Span,
+) -> Result<ValueType, SemanticError> {
+    if base == ValueType::Any || exponent == ValueType::Any {
+        return Ok(ValueType::Any);
+    }
+    if base == ValueType::Int && exponent == ValueType::Int {
+        return Ok(ValueType::Int);
+    }
+    if matches!(base, ValueType::Int | ValueType::Float)
+        && matches!(exponent, ValueType::Int | ValueType::Float)
+    {
+        return Ok(ValueType::Float);
+    }
+    Err(error(span, "power requires numeric values"))
 }
 
 fn compatible(span: Span, actual: ValueType, expected: ValueType) -> Result<(), SemanticError> {

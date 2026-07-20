@@ -1,0 +1,2 @@
+def print(value: Any):
+    print(value)

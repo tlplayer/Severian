@@ -1,2 +1,2 @@
-# Runtime-backed interface pending typed runtime declarations.
-
+def listen(address: string) -> Result[TCPListener, IOError]:
+    return runtime.networkListen(address)

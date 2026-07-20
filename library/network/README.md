@@ -2,8 +2,7 @@
 
 The public networking package. The name is deliberately `network`, not `net`.
 
-This package will own typed connection, listener, address, and socket APIs. The
-runtime will own OS handles and syscalls. Connection ownership, concurrent
-access, closure, timeout, and `IOError` behavior must be represented in the
-public declarations before this package becomes experimental.
-
+This package owns connection, listener, address, and socket APIs while the
+runtime owns OS handles and syscalls. The initial typed `listen` declaration is
+enough to check the server examples. Connection methods, ownership, concurrent
+access, closure, timeout, and runtime symbols are still pending.

@@ -10,5 +10,4 @@ path = "src/lib.sev"
 [package.metadata.library]
 category = "observability"
 implementation = "source-and-runtime"
-status = "interface-pending"
-
+status = "runtime-pending"

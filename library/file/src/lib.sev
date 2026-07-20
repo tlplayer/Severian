@@ -1,2 +1,2 @@
-# Runtime-backed interface pending typed runtime declarations.
-
+def write(path: string, contents: string) -> Result[unit, IOError]:
+    return runtime.fileWrite(path, contents)

@@ -3,8 +3,8 @@
 These examples establish the intended shape of Severian's networking and
 long-running concurrency APIs.
 
-- `network.listen(address)` creates an owned `TcpListener`.
-- `await listener.accept()` returns a move-only `TcpConnection`.
+- `network.listen(address)` creates an owned `TCPListener`.
+- `await listener.accept()` returns a move-only `TCPConnection`.
 - `with` deterministically closes listeners and connections at scope exit.
 - `connection.split()` creates independently owned reader and writer halves.
 - Functions and methods use `lowerCamelCase`; variables, parameters, and fields

@@ -264,6 +264,7 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
+    Power,
     Equal,
     NotEqual,
     Less,

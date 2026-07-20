@@ -350,27 +350,33 @@ impl Parser<'_> {
         self.parse_function_with_decorators(Vec::new())
     }
 
+    fn parse_generic_parameters(&mut self) -> Result<(), ParseError> {
+        if self.take_simple(&TokenKind::LeftBracket).is_none() {
+            return Ok(());
+        }
+        while !self.at(&TokenKind::RightBracket) {
+            self.expect_identifier("generic parameter")?;
+            if self.take_simple(&TokenKind::Colon).is_some() {
+                self.parse_type()?;
+            }
+            if self.take_simple(&TokenKind::Plus).is_some() {
+                self.parse_type()?;
+            }
+            if self.take_simple(&TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect_simple(TokenKind::RightBracket, "`]`")?;
+        Ok(())
+    }
+
     fn parse_function_with_decorators(
         &mut self,
         decorators: Vec<Decorator>,
     ) -> Result<FunctionDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Def, "`def`")?.span.start;
         let name = self.expect_identifier("function name")?;
-        if self.take_simple(&TokenKind::LeftBracket).is_some() {
-            while !self.at(&TokenKind::RightBracket) {
-                self.expect_identifier("generic parameter")?;
-                if self.take_simple(&TokenKind::Colon).is_some() {
-                    self.parse_type()?;
-                }
-                if self.take_simple(&TokenKind::Plus).is_some() {
-                    self.parse_type()?;
-                }
-                if self.take_simple(&TokenKind::Comma).is_none() {
-                    break;
-                }
-            }
-            self.expect_simple(TokenKind::RightBracket, "`]`")?;
-        }
+        self.parse_generic_parameters()?;
         let params = self.parse_parameters()?;
         let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
             Some(self.parse_type()?)
@@ -1131,6 +1137,9 @@ impl Parser<'_> {
         loop {
             let op = if self.take_simple(&TokenKind::Star).is_some() {
                 Some(BinaryOp::Mul)
+            } else if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "X") {
+                self.advance();
+                Some(BinaryOp::MatMul)
             } else if self.take_simple(&TokenKind::Slash).is_some() {
                 Some(BinaryOp::Div)
             } else if self.take_simple(&TokenKind::Percent).is_some() {
@@ -1142,6 +1151,14 @@ impl Parser<'_> {
             expression = binary(expression, op, self.parse_unary()?);
         }
         Ok(expression)
+    }
+
+    fn parse_power(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_postfix()?;
+        if self.take_simple(&TokenKind::Power).is_some() {
+            return Ok(binary(left, BinaryOp::Power, self.parse_unary()?));
+        }
+        Ok(left)
     }
 
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
@@ -1253,7 +1270,7 @@ impl Parser<'_> {
                     op,
                 }))
             } else {
-                self.parse_postfix()
+                self.parse_power()
             }
         }
     }

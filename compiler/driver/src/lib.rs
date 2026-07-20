@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use severian_ast::Span;
+use severian_ast::{ImportKind, Item, Module as AstModule, Span};
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
     Test, TestMode, UnaryOp,
@@ -63,6 +63,11 @@ impl From<std::io::Error> for CompileError {
 }
 
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
+    let ast = parse_source(source)?;
+    compile_ast(&ast, &[])
+}
+
+fn parse_source(source: &str) -> Result<AstModule, CompileError> {
     let tokens = severian_lexer::lex(source).map_err(|error| CompileError::Frontend {
         stage: "lexer",
         span: error.span,
@@ -73,10 +78,19 @@ pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
         span: error.span,
         message: error.message,
     })?;
-    let hir = severian_semantic::analyze(&ast).map_err(|error| CompileError::Frontend {
-        stage: "semantic",
-        span: error.span,
-        message: error.message,
+    Ok(ast)
+}
+
+fn compile_ast(
+    ast: &AstModule,
+    interfaces: &[(String, AstModule)],
+) -> Result<Compilation, CompileError> {
+    let hir = severian_semantic::analyze_with_interfaces(ast, interfaces).map_err(|error| {
+        CompileError::Frontend {
+            stage: "semantic",
+            span: error.span,
+            message: error.message,
+        }
     })?;
     severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
     let mlir = severian_lowering::lower(&hir);
@@ -87,16 +101,84 @@ pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
     let source = std::fs::read_to_string(path)?;
     let Some(manifest_path) = find_manifest(path) else {
-        return compile_source(&source);
+        let ast = parse_source(&source)?;
+        let interfaces = load_official_interfaces(&ast)?;
+        return compile_ast(&ast, &interfaces);
     };
     let dependency_sources = load_path_dependencies(&manifest_path)?;
-    if dependency_sources.is_empty() {
-        return compile_source(&source);
-    }
     let mut package_source = dependency_sources.join("\n");
-    package_source.push('\n');
+    if !package_source.is_empty() {
+        package_source.push('\n');
+    }
     package_source.push_str(&source);
-    compile_source(&package_source)
+    let ast = parse_source(&package_source)?;
+    let interfaces = load_official_interfaces(&ast)?;
+    compile_ast(&ast, &interfaces)
+}
+
+fn load_official_interfaces(module: &AstModule) -> Result<Vec<(String, AstModule)>, CompileError> {
+    let mut package_names = HashSet::new();
+    for item in &module.items {
+        let Item::Import(import) = item else { continue };
+        let path = match &import.kind {
+            ImportKind::Module { path, .. } => path,
+            ImportKind::From { module, .. } => module,
+        };
+        if let Some(root) = path.first() {
+            package_names.insert(root.name.clone());
+        }
+    }
+
+    let library_root = std::env::var_os("SEVERIAN_LIBRARY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library"));
+    let mut package_names = package_names.into_iter().collect::<Vec<_>>();
+    package_names.sort();
+    let mut interfaces = Vec::new();
+    for package_name in package_names {
+        let package_directory = library_root.join(&package_name);
+        let manifest_path = package_directory.join("Severian.toml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let manifest = parse_manifest(&manifest_path)?;
+        let declared_name = manifest
+            .get("package")
+            .and_then(toml::Value::as_table)
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| {
+                CompileError::Package(format!(
+                    "{} is missing `package.name`",
+                    manifest_path.display()
+                ))
+            })?;
+        if declared_name != package_name {
+            return Err(CompileError::Package(format!(
+                "official package `{package_name}` declares package `{declared_name}`"
+            )));
+        }
+        let library_path = manifest
+            .get("lib")
+            .and_then(toml::Value::as_table)
+            .and_then(|library| library.get("path"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("src/lib.sev");
+        let source_path = package_directory.join(library_path);
+        let source = std::fs::read_to_string(&source_path).map_err(|error| {
+            CompileError::Package(format!(
+                "could not read official package `{package_name}` at {}: {error}",
+                source_path.display()
+            ))
+        })?;
+        let interface = parse_source(&source).map_err(|error| {
+            CompileError::Package(format!(
+                "invalid interface for official package `{package_name}`: {error}"
+            ))
+        })?;
+        interfaces.push((package_name, interface));
+    }
+    Ok(interfaces)
 }
 
 fn find_manifest(source: &Path) -> Option<PathBuf> {
@@ -226,7 +308,7 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
         run_tool(
             find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
                 .ok_or_else(|| missing_tool("clang"))?,
-            &[llvm_ir.as_path(), Path::new("-o"), output],
+            &[llvm_ir.as_path(), Path::new("-o"), output, Path::new("-lm")],
         )
     })();
 
@@ -1512,6 +1594,16 @@ fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, Com
         }
         (Value::Int(left), BinaryOp::Div, Value::Int(right)) => Ok(Value::Int(left / right)),
         (Value::Int(left), BinaryOp::Mod, Value::Int(right)) => Ok(Value::Int(left % right)),
+        (Value::Int(base), BinaryOp::Power, Value::Int(exponent)) if exponent >= 0 => {
+            let exponent = u32::try_from(exponent)
+                .map_err(|_| CompileError::Execution("integer power overflow".into()))?;
+            base.checked_pow(exponent)
+                .map(Value::Int)
+                .ok_or_else(|| CompileError::Execution("integer power overflow".into()))
+        }
+        (Value::Int(_), BinaryOp::Power, Value::Int(_)) => Err(CompileError::Execution(
+            "negative integer powers require a float base".into(),
+        )),
         (Value::Float(left), BinaryOp::Add, Value::Float(right)) => {
             Ok(float_value(f64::from_bits(left) + f64::from_bits(right)))
         }
@@ -1526,6 +1618,15 @@ fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, Com
         }
         (Value::Float(left), BinaryOp::Mod, Value::Float(right)) => {
             Ok(float_value(f64::from_bits(left) % f64::from_bits(right)))
+        }
+        (Value::Float(base), BinaryOp::Power, Value::Float(exponent)) => Ok(float_value(
+            f64::from_bits(base).powf(f64::from_bits(exponent)),
+        )),
+        (Value::Float(base), BinaryOp::Power, Value::Int(exponent)) => {
+            Ok(float_value(f64::from_bits(base).powf(exponent as f64)))
+        }
+        (Value::Int(base), BinaryOp::Power, Value::Float(exponent)) => {
+            Ok(float_value((base as f64).powf(f64::from_bits(exponent))))
         }
         (Value::String(left), BinaryOp::Add, Value::String(right)) => {
             Ok(Value::String(left + &right))

@@ -18,8 +18,8 @@ while IFS= read -r source; do
     package="${package%%/*}"
     status="$(sed -n 's/^status = "\([^"]*\)"/\1/p' "library/$package/Severian.toml")"
 
-    if [[ "$status" == "interface-pending" ]]; then
-        printf 'SKIP  %-16s interface pending\n' "$package"
+    if [[ "$status" != "experimental" && "$status" != "stable" ]]; then
+        printf 'SKIP  %-16s %s\n' "$package" "$status"
         continue
     fi
 
@@ -35,4 +35,3 @@ done < <(find library -mindepth 3 -maxdepth 3 -path '*/src/lib.sev' -print | sor
 
 printf '\n%d checked, %d passed, %d failed\n' "$checked" "$passed" "$failed"
 ((failed == 0))
-

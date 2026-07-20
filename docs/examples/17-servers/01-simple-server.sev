@@ -1,11 +1,11 @@
 import log
 import network
 
-def respond(connection: network.TcpConnection) -> Result[unit, IOError]:
+def respond(connection: network.TCPConnection) -> Result[unit, IOError]:
     request ?= await connection.readLine()
     return await connection.writeLine("hello from severian: " + request)
 
-def serve(connection: network.TcpConnection):
+def serve(connection: network.TCPConnection):
     switch await respond(borrow connection) with connection:
             ok _:
                 log.info("request completed")

@@ -461,6 +461,9 @@ impl LowerContext<'_> {
             Expression::Binary { left, op, right } => {
                 let left = self.lower_expression(left);
                 let right = self.lower_expression(right);
+                if *op == BinaryOp::Power {
+                    return self.lower_power_values(left, right);
+                }
                 self.lower_binary_values(left, *op, right)
             }
         }
@@ -561,6 +564,61 @@ impl LowerContext<'_> {
         )
         .unwrap();
         (result, result_type)
+    }
+
+    fn lower_power_values(
+        &mut self,
+        (mut base, base_type): (String, ValueType),
+        (exponent, exponent_type): (String, ValueType),
+    ) -> (String, ValueType) {
+        if !matches!(base_type, ValueType::Int | ValueType::Float)
+            || !matches!(exponent_type, ValueType::Int | ValueType::Float)
+        {
+            let result = self.fresh_value();
+            writeln!(
+                self.output,
+                "    {result} = llvm.mlir.constant(0.0 : f64) : f64"
+            )
+            .unwrap();
+            return (result, ValueType::Any);
+        }
+
+        if base_type == ValueType::Int {
+            let converted = self.fresh_value();
+            writeln!(
+                self.output,
+                "    {converted} = llvm.sitofp {base} : i64 to f64"
+            )
+            .unwrap();
+            base = converted;
+        }
+
+        let powered = self.fresh_value();
+        if exponent_type == ValueType::Int {
+            writeln!(
+                self.output,
+                "    {powered} = llvm.intr.powi({base}, {exponent}) : (f64, i64) -> f64"
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                self.output,
+                "    {powered} = llvm.intr.pow({base}, {exponent}) : (f64, f64) -> f64"
+            )
+            .unwrap();
+        }
+
+        if base_type == ValueType::Int && exponent_type == ValueType::Int {
+            let result = self.fresh_value();
+            writeln!(
+                self.output,
+                "    {result} = llvm.fptosi {powered} : f64 to i64"
+            )
+            .unwrap();
+            (result, ValueType::Int)
+        } else {
+            (powered, ValueType::Float)
+        }
     }
 
     fn fresh_value(&mut self) -> String {

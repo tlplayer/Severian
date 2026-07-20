@@ -1,7 +1,7 @@
 use severian_hir::{Expression, Instruction};
 use severian_lexer::lex;
 use severian_parser::parse;
-use severian_semantic::analyze;
+use severian_semantic::{analyze, analyze_with_interfaces};
 
 #[test]
 fn resolves_print_and_lowers_hello_to_hir() {
@@ -53,4 +53,22 @@ fn type_checks_injected_return_values() {
     let error = analyze(&ast).unwrap_err();
 
     assert_eq!(error.message, "expected Int, found String");
+}
+
+#[test]
+fn type_checks_calls_against_imported_package_interfaces() {
+    let interface =
+        parse(&lex("def square(value: float) -> float:\n    return value * value\n").unwrap())
+            .unwrap();
+    let source = concat!(
+        "import math\n",
+        "\n",
+        "def main():\n",
+        "    square(\"three\")\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+
+    let error = analyze_with_interfaces(&module, &[("math".into(), interface)]).unwrap_err();
+
+    assert_eq!(error.message, "expected Float, found String");
 }

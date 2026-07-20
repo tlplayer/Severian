@@ -1,8 +1,7 @@
-from math import sqrt
 from io import print as write
 
 def main():
-    distance = sqrt(9.0)
+    distance = 9.0 ** .5
     write(distance)
 
 test with integration "imported output":

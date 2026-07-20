@@ -54,3 +54,23 @@ fn rejects_inconsistent_indentation() {
     let error = lex("def main():\n    print(\"a\")\n  print(\"b\")\n").unwrap_err();
     assert!(error.message.contains("indentation"));
 }
+
+#[test]
+fn lexes_power_and_leading_decimal_literals() {
+    let kinds = lex("value ** .5\n")
+        .unwrap()
+        .into_iter()
+        .map(|token| token.kind)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        kinds,
+        [
+            TokenKind::Identifier("value".into()),
+            TokenKind::Power,
+            TokenKind::Float(0.5_f64.to_bits()),
+            TokenKind::Newline,
+            TokenKind::Eof,
+        ]
+    );
+}

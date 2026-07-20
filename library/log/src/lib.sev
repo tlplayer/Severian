@@ -1,2 +1,5 @@
-# Runtime-backed interface pending typed runtime declarations.
+def info(message: string):
+    runtime.logInfo(message)
 
+def error(message: string, cause: Error):
+    runtime.logError(message, cause)

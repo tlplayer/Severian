@@ -5,8 +5,8 @@ def worker(id: int) -> int:
 
 @math(X)
 def main():
-    first = async worker(10)
-    second = async worker(20)
+    first = async worker(10) with self
+    second = async worker(20) with self
 
     a = await first
     b = await second

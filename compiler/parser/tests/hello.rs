@@ -94,7 +94,7 @@ fn parses_server_signatures_destructuring_resources_and_contracts() {
         "import network\n",
         "\n",
         "def serve(\n",
-        "    connection: network.TcpConnection,\n",
+        "    connection: network.TCPConnection,\n",
         ") -> Result[unit, IOError] with {\n",
         "    connection != invalid,\n",
         "    with connection,\n",
@@ -111,7 +111,7 @@ fn parses_server_signatures_destructuring_resources_and_contracts() {
     };
     assert_eq!(
         function.params[0].ty.as_ref().unwrap().span().start,
-        source.find("network.TcpConnection").unwrap()
+        source.find("network.TCPConnection").unwrap()
     );
     assert!(function.contract.is_some());
 }

@@ -74,7 +74,8 @@ example containing `main()`. Successful executables mirror the source tree under
 ## Official library
 
 The official library uses flat imports such as `import network` and
-`from math import square`. Its package catalog and compiler/library/runtime
+`from math import jacobian`; a full import exposes the package's available names. Its package
+catalog and compiler/library/runtime
 ownership boundary are documented in `library/README.md` and
 `library/CATALOG.md`.
 

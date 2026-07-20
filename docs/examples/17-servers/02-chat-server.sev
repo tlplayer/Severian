@@ -29,7 +29,7 @@ def runHub(events: Channel[ChatEvent]):
             log.error("chat event channel collapsed", error)
             running = false
 
-def writeClient(writer: network.TcpWriter, outbound: Channel[string]):
+def writeClient(writer: network.TCPWriter, outbound: Channel[string]):
     switch outbound while connected with connected := true:
         message from outbound:
             switch await writer.writeLine(message):
@@ -44,7 +44,7 @@ def writeClient(writer: network.TcpWriter, outbound: Channel[string]):
 
 def readClient(
     client_id: int,
-    reader: network.TcpReader,
+    reader: network.TCPReader,
     events: Channel[ChatEvent],
 ):
     switch await reader.readLine() while true:
@@ -57,7 +57,7 @@ def readClient(
 
 def serveClient(
     client_id: int,
-    connection: network.TcpConnection,
+    connection: network.TCPConnection,
     events: Channel[ChatEvent],
 ):
     reader, writer = connection.split()

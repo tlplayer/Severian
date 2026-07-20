@@ -1,0 +1,20 @@
+def square(value: float) -> float:
+    return value ** 2
+
+test "square":
+    assert(square(3.0) == 9.0)
+
+def squareRoot(value: float) -> float:
+    return value ** .5
+
+test "square root":
+    assert(squareRoot(9.0) == 3.0)
+
+def main():
+    print(square(3.0))
+    print(squareRoot(9.0))
+
+test with integration "native exponentiation":
+    main()
+    assert("9" in stdout)
+    assert("3" in stdout)

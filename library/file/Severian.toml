@@ -10,5 +10,4 @@ path = "src/lib.sev"
 [package.metadata.library]
 category = "files-io"
 implementation = "runtime"
-status = "interface-pending"
-
+status = "runtime-pending"
