@@ -1,10 +1,7 @@
 # Tensor and neural-network lowering example
 
-This package imports `tensor` and `neuralnet` as path dependencies and runs the
-same dense/ReLU computation through kernels annotated for SIMD and GPU policy.
-Both annotations currently execute the portable CPU implementation. Their HIR
-metadata defines where future MLIR vector and GPU/NVVM lowering selects a
-backend without changing the neural-network API.
+This package imports `tensor` and `neuralnet` as path dependencies and runs a
+dense/ReLU computation through the portable CPU implementation.
 
 The example also runs a task-parallel activation and prints a flattened input
 Jacobian. Run it with:
@@ -16,9 +13,6 @@ cargo run -p severian-driver --bin sev -- compile \
 bin/examples/18-tensor-neuralnet/main
 ```
 
-Inspect the backend selection points with:
-
-```sh
-cargo run -p severian-driver --bin sev -- emit-mlir \
-  docs/examples/18-tensor-neuralnet/main.sev | rg severian_tensor_policy
-```
+SIMD and GPU selection are not claimed here yet. Severian decorators import
+domain syntax rather than wrapping functions or selecting an execution backend;
+backend selection needs an explicit operation-local language construct.

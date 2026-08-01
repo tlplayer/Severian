@@ -1,4 +1,4 @@
-use severian_hir::{Expression, Instruction, ValueType};
+use severian_hir::{Expression, Instruction, TaskPlacement, ValueType};
 use severian_lexer::lex;
 use severian_parser::parse;
 use severian_semantic::{analyze, analyze_with_interfaces};
@@ -22,6 +22,46 @@ fn rejects_unknown_functions() {
     let ast = parse(&lex("def main():\n    write(\"hello\")\n").unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
     assert_eq!(error.message, "unknown function `write`");
+}
+
+#[test]
+fn retains_local_task_placement_after_validating_its_import() {
+    let source = concat!(
+        "import distributed\n",
+        "\n",
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work() with self and local\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Let {
+        value: Expression::Task { placement, .. },
+        ..
+    } = &hir.main().unwrap().instructions[0]
+    else {
+        panic!("expected a task binding");
+    };
+    assert_eq!(*placement, TaskPlacement::Local);
+}
+
+#[test]
+fn rejects_local_task_placement_without_the_distributed_import() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work() with self and local\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert_eq!(
+        error.message,
+        "task placement `local` requires `import distributed`"
+    );
 }
 
 #[test]

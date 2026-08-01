@@ -8,8 +8,8 @@ use severian_ast::{
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
     Expression, Function, FunctionContract as HirFunctionContract, Global, Instruction,
-    MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, Test, TestMode as HirTestMode,
-    UnaryOp, ValueType,
+    MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test,
+    TestMode as HirTestMode, UnaryOp, ValueType,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1279,8 +1279,26 @@ fn lower_expression(
             ))
         }
         Expr::Async(task) => {
+            let placement = match task.placement {
+                severian_ast::TaskPlacement::Default => TaskPlacement::Default,
+                severian_ast::TaskPlacement::Local => {
+                    if !aliases.values().any(|module| module == "distributed") {
+                        return Err(error(
+                            task.span,
+                            "task placement `local` requires `import distributed`",
+                        ));
+                    }
+                    TaskPlacement::Local
+                }
+            };
             let (value, _) = lower_expression(&task.value, scope, signatures, aliases)?;
-            Ok((Expression::Task(Box::new(value)), ValueType::Any))
+            Ok((
+                Expression::Task {
+                    value: Box::new(value),
+                    placement,
+                },
+                ValueType::Any,
+            ))
         }
         Expr::Await(task) => {
             let (value, _) = lower_expression(&task.value, scope, signatures, aliases)?;

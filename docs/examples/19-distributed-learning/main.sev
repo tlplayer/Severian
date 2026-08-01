@@ -1,0 +1,33 @@
+import distributed
+import tensor
+import neuralnet
+
+def buildInput(count: int) -> list[float]:
+    values := []
+    middle = count / 2
+    for index in range(0, count):
+        values.append(float(index - middle))
+    return values
+
+def ones(count: int) -> list[float]:
+    values := []
+    for _ in range(0, count):
+        values.append(1.0)
+    return values
+
+def sumValues(values: list[float]) -> float:
+    total := 0.0
+    for value in values:
+        total += value
+    return total
+
+def main():
+    count = 65536
+    input = buildInput(count)
+    upstream = ones(count)
+    activations = distributedReluForward(input, 4)
+    gradients = distributedReluBackward(input, upstream, 4)
+
+    print(size(activations))
+    print(sumValues(activations))
+    print(sumValues(gradients))

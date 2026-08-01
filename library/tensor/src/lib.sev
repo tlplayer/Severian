@@ -74,3 +74,121 @@ def reluJacobian(values: list[float]) -> list[float]:
 
 test "relu jacobian is a flattened diagonal matrix":
     assert(reluJacobian([2.0, -1.0]) == [1.0, 0.0, 0.0, 0.0])
+
+def absValue(value: float) -> float:
+    if value < 0.0:
+        return -value
+    return value
+
+def leakyRelu(values: list[float], slope: float = 0.01) -> list[float]:
+    output := []
+    for value in values:
+        if value > 0.0:
+            output.append(value)
+        else:
+            output.append(value * slope)
+    return output
+
+test "leaky relu retains a negative gradient":
+    assert(leakyRelu([-2.0, 3.0], 0.5) == [-1.0, 3.0])
+
+def fastSigmoidScalar(value: float) -> float:
+    return 0.5 + value / (2.0 * (1.0 + absValue(value)))
+
+def fastSigmoid(values: list[float]) -> list[float]:
+    output := []
+    for value in values:
+        output.append(fastSigmoidScalar(value))
+    return output
+
+test "fast sigmoid is centered at one half":
+    assert(fastSigmoid([0.0]) == [0.5])
+
+def fastTanhScalar(value: float) -> float:
+    return value / (1.0 + absValue(value))
+
+def fastTanh(values: list[float]) -> list[float]:
+    output := []
+    for value in values:
+        output.append(fastTanhScalar(value))
+    return output
+
+test "fast tanh is centered at zero":
+    assert(fastTanh([0.0]) == [0.0])
+
+def geluScalar(value: float) -> float:
+    cubic = value ** 3
+    curved = 0.7978845608 * (value + 0.044715 * cubic)
+    return 0.5 * value * (1.0 + fastTanhScalar(curved))
+
+def gelu(values: list[float]) -> list[float]:
+    output := []
+    for value in values:
+        output.append(geluScalar(value))
+    return output
+
+test "gelu preserves the origin":
+    assert(gelu([0.0]) == [0.0])
+
+def swish(values: list[float]) -> list[float]:
+    output := []
+    for value in values:
+        output.append(value * fastSigmoidScalar(value))
+    return output
+
+test "swish preserves the origin":
+    assert(swish([0.0]) == [0.0])
+
+def reluBackward(input: list[float], upstream: list[float]) -> list[float]:
+    gradient := []
+    for index in indices(input):
+        if input[index] > 0.0:
+            gradient.append(upstream[index])
+        else:
+            gradient.append(0.0)
+    return gradient
+
+def reluBackwardChunk(
+    input: list[float],
+    upstream: list[float],
+    start: int,
+    end: int,
+) -> list[float]:
+    gradient := []
+    for index in range(start, end):
+        if input[index] > 0.0:
+            gradient.append(upstream[index])
+        else:
+            gradient.append(0.0)
+    return gradient
+
+test "relu backward masks inactive values":
+    assert(reluBackward([-2.0, 3.0], [1.0, 1.0]) == [0.0, 1.0])
+
+def leakyReluBackward(
+    input: list[float],
+    upstream: list[float],
+    slope: float = 0.01,
+) -> list[float]:
+    gradient := []
+    for index in indices(input):
+        if input[index] > 0.0:
+            gradient.append(upstream[index])
+        else:
+            gradient.append(upstream[index] * slope)
+    return gradient
+
+def fastSigmoidJacobian(values: list[float]) -> list[float]:
+    width = size(values)
+    jacobian := []
+    for row in range(0, width):
+        for column in range(0, width):
+            if row == column:
+                scale = 1.0 + absValue(values[row])
+                jacobian.append(1.0 / (2.0 * scale * scale))
+            else:
+                jacobian.append(0.0)
+    return jacobian
+
+test "sigmoid jacobian contains the centered derivative":
+    assert(fastSigmoidJacobian([0.0, 0.0]) == [0.5, 0.0, 0.0, 0.5])

@@ -1,4 +1,6 @@
-use severian_hir::{BinaryOp, Expression, Function, Instruction, MatchPattern, Program, ValueType};
+use severian_hir::{
+    BinaryOp, Expression, Function, Instruction, MatchPattern, Program, TaskPlacement, ValueType,
+};
 
 #[test]
 fn lowers_primitive_prints_to_native_calls() {
@@ -116,4 +118,46 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
     let lowered = severian_lowering::lower(&program);
     assert!(lowered.as_str().contains("llvm.call @consume() : () -> ()"));
     assert!(!lowered.as_str().contains("= llvm.call @consume"));
+}
+
+#[test]
+fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![
+            Function {
+                name: "work".into(),
+                decorators: vec![],
+                contract: None,
+                params: vec![],
+                return_type: ValueType::Int,
+                instructions: vec![Instruction::Return(Some(Expression::Integer(1)))],
+                tests: vec![],
+            },
+            Function {
+                name: "main".into(),
+                decorators: vec![],
+                contract: None,
+                params: vec![],
+                return_type: ValueType::Unit,
+                instructions: vec![Instruction::Let {
+                    name: "task".into(),
+                    value: Expression::Task {
+                        value: Box::new(Expression::Call {
+                            function: "work".into(),
+                            args: vec![],
+                        }),
+                        placement: TaskPlacement::Local,
+                    },
+                }],
+                tests: vec![],
+            },
+        ],
+    };
+
+    let lowered = severian_lowering::lower(&program);
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.call @__sev_task_spawn_work() {severian_distribution = \"local\"}"));
+    assert!(!text.contains("llvm.func @main() -> i32 attributes"));
 }

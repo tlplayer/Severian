@@ -10,3 +10,7 @@ pass can lower the same definitions to scalar CPU loops, MLIR vector kernels,
 or GPU kernels. The package deliberately contains no hidden CUDA-specific API;
 target choice is expressed through tensor execution-policy decorators at the
 calling kernel.
+
+The package also exposes four-worker ReLU forward and backward passes. Shard
+boundaries come from `distributed`; the current implementation launches native
+tasks and preserves deterministic output order.

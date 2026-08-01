@@ -1,0 +1,17 @@
+def shardStart(length: int, workers: int, worker: int) -> int:
+    return length * worker / workers
+
+def shardEnd(length: int, workers: int, worker: int) -> int:
+    return length * (worker + 1) / workers
+
+def shardSize(length: int, workers: int, worker: int) -> int:
+    return shardEnd(length, workers, worker) - shardStart(length, workers, worker)
+
+test "even shard plan covers the input":
+    assert(shardStart(16, 4, 0) == 0)
+    assert(shardEnd(16, 4, 3) == 16)
+    assert(shardSize(16, 4, 2) == 4)
+
+test "remainder is assigned deterministically":
+    assert(shardStart(10, 4, 0) == 0)
+    assert(shardEnd(10, 4, 3) == 10)

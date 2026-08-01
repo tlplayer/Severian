@@ -1,17 +1,11 @@
 import tensor
 import neuralnet
 
-@tensor(SIMD)
-def cpuForward(input: list[float]) -> list[float]:
-    return denseRelu([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], input)
-
-@tensor(GPU)
-def gpuForward(input: list[float]) -> list[float]:
+def portableForward(input: list[float]) -> list[float]:
     return denseRelu([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], input)
 
 def main():
     input = [2.0, 4.0]
-    print(cpuForward(input))
-    print(gpuForward(input))
+    print(portableForward(input))
     print(parallelRelu([-2.0, 3.0, -4.0, 5.0]))
     print(denseReluInputJacobian([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], input))

@@ -106,6 +106,12 @@ pub enum ValueType {
     Unit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPlacement {
+    Default,
+    Local,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     Let {
@@ -218,7 +224,10 @@ pub enum Expression {
         name: String,
         fields: Vec<Expression>,
     },
-    Task(Box<Expression>),
+    Task {
+        value: Box<Expression>,
+        placement: TaskPlacement,
+    },
     Await(Box<Expression>),
     Channel(Box<Expression>),
     Send {

@@ -1,0 +1,13 @@
+[package]
+name = "distributed"
+version = "0.1.0"
+edition = "2026"
+description = "Deterministic shard plans for local and remote workers"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "parallel-computing"
+implementation = "source"
+status = "experimental"

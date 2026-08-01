@@ -2,7 +2,7 @@
 
 use severian_hir::{
     AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern, Program,
-    SwitchArm, UnaryOp, ValueType,
+    SwitchArm, TaskPlacement, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -152,11 +152,29 @@ pub fn lower(program: &Program) -> Module {
         .iter()
         .map(|function| (function.name.clone(), function.return_type))
         .collect::<HashMap<_, _>>();
+    let mut function_params = program
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                function
+                    .params
+                    .iter()
+                    .map(|parameter| parameter.ty)
+                    .collect(),
+            )
+        })
+        .collect::<HashMap<_, Vec<_>>>();
     for class in &program.classes {
         for method in &class.methods {
             function_returns.insert(
                 format!("{}_{}", class.name, method.name),
                 method.return_type,
+            );
+            function_params.insert(
+                format!("{}_{}", class.name, method.name),
+                method.params.iter().map(|parameter| parameter.ty).collect(),
             );
         }
     }
@@ -169,6 +187,7 @@ pub fn lower(program: &Program) -> Module {
                 &program.classes,
                 &strings,
                 &function_returns,
+                &function_params,
                 &mut output,
             );
         }
@@ -180,6 +199,7 @@ pub fn lower(program: &Program) -> Module {
                 &program.classes,
                 &strings,
                 &function_returns,
+                &function_params,
                 &mut output,
             );
         }
@@ -191,6 +211,7 @@ pub fn lower(program: &Program) -> Module {
             &program.classes,
             &strings,
             &function_returns,
+            &function_params,
             &mut output,
         );
     }
@@ -204,6 +225,7 @@ fn lower_function(
     classes: &[Class],
     strings: &[String],
     function_returns: &HashMap<String, ValueType>,
+    function_params: &HashMap<String, Vec<ValueType>>,
     output: &mut String,
 ) {
     let is_main = function.name == "main";
@@ -220,29 +242,13 @@ fn lower_function(
     } else if function.return_type != ValueType::Unit {
         write!(output, " -> {}", mlir_type(function.return_type)).unwrap();
     }
-    if let Some(policy) = function
-        .decorators
-        .iter()
-        .find(|decorator| decorator.package == "tensor")
-        .and_then(|decorator| {
-            decorator
-                .symbols
-                .iter()
-                .find(|symbol| matches!(symbol.as_str(), "SIMD" | "GPU" | "AUTO"))
-        })
-    {
-        write!(
-            output,
-            " attributes {{severian_tensor_policy = \"{policy}\"}}"
-        )
-        .unwrap();
-    }
     output.push_str(" {\n");
 
     let mut context = LowerContext {
         output,
         strings,
         function_returns,
+        function_params,
         classes,
         field_object: None,
         field_names: HashSet::new(),
@@ -297,6 +303,7 @@ fn lower_class_function(
     classes: &[Class],
     strings: &[String],
     function_returns: &HashMap<String, ValueType>,
+    function_params: &HashMap<String, Vec<ValueType>>,
     output: &mut String,
 ) {
     write!(output, "  llvm.func @{symbol}(%self: !llvm.ptr").unwrap();
@@ -313,6 +320,7 @@ fn lower_class_function(
         output,
         strings,
         function_returns,
+        function_params,
         classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
@@ -342,6 +350,7 @@ struct LowerContext<'a> {
     output: &'a mut String,
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
+    function_params: &'a HashMap<String, Vec<ValueType>>,
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,
@@ -508,7 +517,7 @@ impl LowerContext<'_> {
                 }
                 Instruction::Evaluate(expression) => {
                     let (value, _) = self.lower_expression(expression);
-                    if matches!(expression, Expression::Task(_)) {
+                    if matches!(expression, Expression::Task { .. }) {
                         if let Some(return_type) = self.task_results.remove(&value) {
                             if return_type == ValueType::Unit {
                                 writeln!(self.output, "    llvm.call @__sev_task_await_unit({value}) : (!llvm.ptr) -> ()").unwrap();
@@ -1156,7 +1165,7 @@ impl LowerContext<'_> {
                     (result, return_type)
                 }
             }
-            Expression::Task(value) => {
+            Expression::Task { value, placement } => {
                 if let Expression::Send { value, channel } = value.as_ref() {
                     let (value, value_type) = self.lower_expression(value);
                     let (channel, _) = self.lower_expression(channel);
@@ -1179,6 +1188,7 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
+                let args = self.coerce_call_arguments(function, args);
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -1195,9 +1205,13 @@ impl LowerContext<'_> {
                     .copied()
                     .unwrap_or(ValueType::Any);
                 let result = self.fresh_value();
+                let placement_attribute = match placement {
+                    TaskPlacement::Default => "",
+                    TaskPlacement::Local => " {severian_distribution = \"local\"}",
+                };
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call @__sev_task_spawn_{function}({values}) : ({types}) -> !llvm.ptr"
+                    "    {result} = llvm.call @__sev_task_spawn_{function}({values}){placement_attribute} : ({types}) -> !llvm.ptr"
                 )
                 .unwrap();
                 self.task_results.insert(result.clone(), return_type);
@@ -1421,6 +1435,7 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
+                let args = self.coerce_call_arguments(function, args);
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
@@ -1710,6 +1725,32 @@ impl LowerContext<'_> {
         )
         .unwrap();
         result
+    }
+
+    fn coerce_call_arguments(
+        &mut self,
+        function: &str,
+        arguments: Vec<(String, ValueType)>,
+    ) -> Vec<(String, ValueType)> {
+        let Some(parameters) = self.function_params.get(function).cloned() else {
+            return arguments;
+        };
+        arguments
+            .into_iter()
+            .enumerate()
+            .map(|(index, argument)| {
+                let Some(expected) = parameters.get(index).copied() else {
+                    return argument;
+                };
+                if argument.1 == ValueType::Any && expected != ValueType::Any {
+                    self.unbox_value(argument, expected)
+                } else if expected == ValueType::Any && argument.1 != ValueType::Any {
+                    (self.box_value(argument), ValueType::Any)
+                } else {
+                    argument
+                }
+            })
+            .collect()
     }
 
     fn unbox_value(
@@ -2781,7 +2822,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(field, strings);
             }
         }
-        Expression::Task(value) | Expression::Await(value) => {
+        Expression::Task { value, .. } | Expression::Await(value) => {
             collect_expression_strings(value, strings);
         }
         Expression::Channel(capacity) => collect_expression_strings(capacity, strings),
@@ -2937,7 +2978,7 @@ fn collect_task_names(instructions: &[Instruction], names: &mut Vec<String>) {
 
 fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String>) {
     match expression {
-        Expression::Task(value) => {
+        Expression::Task { value, .. } => {
             if let Expression::Call { function, .. } = value.as_ref() {
                 names.push(function.clone());
             }

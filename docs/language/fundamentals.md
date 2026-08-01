@@ -412,6 +412,20 @@ Every task names its lifetime owner. A task declared `with self` cannot outlive
 the current execution. A task declared `with runtime` is runtime-owned and must
 be created inside an explicit `unsafe:` block.
 
+An imported execution package may add placement to the same clause. Local
+distributed work keeps its structured owner and selects placement at the launch
+site:
+
+```sev
+import distributed
+
+worker = async processShard(values) with self and local
+```
+
+`local` selects the native local-task backend and is retained on the task spawn
+in MLIR. It is not a decorator: decorators import domain syntax symbols and do
+not wrap a function or select where its body executes.
+
 Arguments passed to an async call are frozen by default. The child may read
 them, but it cannot mutate the caller's values. Frozen arguments need no lock.
 Code requests scoped access to a captured binding by naming it after the task

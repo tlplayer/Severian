@@ -1,4 +1,4 @@
-use severian_ast::{Expr, Item, Literal, Stmt};
+use severian_ast::{Expr, Item, Literal, Stmt, TaskOwner, TaskPlacement};
 use severian_lexer::lex;
 use severian_parser::parse;
 
@@ -31,6 +31,30 @@ fn rejects_a_missing_function_body() {
     let tokens = lex("def main():\n").unwrap();
     let error = parse(&tokens).unwrap_err();
     assert!(error.message.contains("indented function body"));
+}
+
+#[test]
+fn parses_local_task_placement_in_the_with_clause() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work() with self and local\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(main) = &module.items[1] else {
+        panic!("expected main function");
+    };
+    let Stmt::Let(binding) = &main.body.statements[0] else {
+        panic!("expected task binding");
+    };
+    let Expr::Async(task) = binding.value.as_ref().unwrap() else {
+        panic!("expected async expression");
+    };
+    assert_eq!(task.owner, TaskOwner::SelfOwned);
+    assert_eq!(task.placement, TaskPlacement::Local);
+    assert!(task.captures.is_empty());
 }
 
 #[test]

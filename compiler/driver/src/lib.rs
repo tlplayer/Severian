@@ -731,10 +731,10 @@ fn walk_expression<'expression>(
         | Expression::Unary {
             expression: object, ..
         }
-        | Expression::Task(object)
         | Expression::Await(object)
         | Expression::Channel(object)
         | Expression::ChaosRule { value: object, .. } => walk_expression(object, visit),
+        Expression::Task { value, .. } => walk_expression(value, visit),
         Expression::MethodCall { object, args, .. } => {
             walk_expression(object, visit);
             for arg in args {
@@ -1271,7 +1271,7 @@ fn evaluate(
             name: name.clone(),
             fields: evaluate_all(program, fields, variables, write_line)?,
         }),
-        Expression::Task(value) => Ok(Value::Task(Box::new(evaluate(
+        Expression::Task { value, .. } => Ok(Value::Task(Box::new(evaluate(
             program, value, variables, write_line,
         )?))),
         Expression::Await(value) => match evaluate(program, value, variables, write_line)? {

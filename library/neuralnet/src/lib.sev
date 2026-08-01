@@ -1,4 +1,5 @@
 import tensor
+import distributed
 
 def dense(
     weights: list[float],
@@ -40,3 +41,58 @@ def denseReluInputJacobian(
 test "activation jacobian":
     jacobian = denseReluInputJacobian([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -5.0], [2.0, 4.0])
     assert(jacobian == [1.0, 0.0, 0.0, 0.0])
+
+def appendValues(target: list[float], source: list[float]):
+    for value in source:
+        target.append(value)
+
+def distributedReluForward(values: list[float], workers: int) -> list[float]:
+    assert(workers == 4)
+    length = size(values)
+    first = async reluChunk(values, shardStart(length, workers, 0), shardEnd(length, workers, 0)) with self and local
+    second = async reluChunk(values, shardStart(length, workers, 1), shardEnd(length, workers, 1)) with self and local
+    third = async reluChunk(values, shardStart(length, workers, 2), shardEnd(length, workers, 2)) with self and local
+    fourth = async reluChunk(values, shardStart(length, workers, 3), shardEnd(length, workers, 3)) with self and local
+
+    firstValues = await first
+    secondValues = await second
+    thirdValues = await third
+    fourthValues = await fourth
+    output := []
+    appendValues(output, firstValues)
+    appendValues(output, secondValues)
+    appendValues(output, thirdValues)
+    appendValues(output, fourthValues)
+    return output
+
+test "distributed forward preserves order":
+    values = [-4.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0]
+    assert(distributedReluForward(values, 4) == [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+
+def distributedReluBackward(
+    input: list[float],
+    upstream: list[float],
+    workers: int,
+) -> list[float]:
+    assert(workers == 4)
+    length = size(input)
+    first = async reluBackwardChunk(input, upstream, shardStart(length, workers, 0), shardEnd(length, workers, 0)) with self and local
+    second = async reluBackwardChunk(input, upstream, shardStart(length, workers, 1), shardEnd(length, workers, 1)) with self and local
+    third = async reluBackwardChunk(input, upstream, shardStart(length, workers, 2), shardEnd(length, workers, 2)) with self and local
+    fourth = async reluBackwardChunk(input, upstream, shardStart(length, workers, 3), shardEnd(length, workers, 3)) with self and local
+
+    firstValues = await first
+    secondValues = await second
+    thirdValues = await third
+    fourthValues = await fourth
+    gradient := []
+    appendValues(gradient, firstValues)
+    appendValues(gradient, secondValues)
+    appendValues(gradient, thirdValues)
+    appendValues(gradient, fourthValues)
+    return gradient
+
+test "distributed backward masks inactive shards":
+    input = [-4.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0]
+    upstream = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    assert(distributedReluBackward(input, upstream, 4) == [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])

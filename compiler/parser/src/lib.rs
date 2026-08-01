@@ -7,8 +7,8 @@ use severian_ast::{
     FunctionContract, FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr,
     Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module,
     OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt,
-    TaskOwner, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr,
-    UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath,
+    UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -1221,6 +1221,7 @@ impl Parser<'_> {
                     span: Span::new(start, end),
                     value: Box::new(value),
                     owner: TaskOwner::SelfOwned,
+                    placement: TaskPlacement::Default,
                     captures: Vec::new(),
                 }));
             }
@@ -1232,17 +1233,32 @@ impl Parser<'_> {
             } else {
                 TaskOwner::SelfOwned
             };
+            let mut placement = if owner_name.name == "local" {
+                TaskPlacement::Local
+            } else {
+                TaskPlacement::Default
+            };
+            let mut end = owner_name.span.end;
             let mut captures = Vec::new();
             while self.take_simple(&TokenKind::And).is_some() {
-                captures.push(self.expect_identifier("captured capability")?);
+                let capability = self.expect_identifier("captured capability")?;
+                end = capability.span.end;
+                if capability.name == "local" {
+                    if placement != TaskPlacement::Default {
+                        return Err(
+                            self.error("task placement `local` was specified more than once")
+                        );
+                    }
+                    placement = TaskPlacement::Local;
+                } else {
+                    captures.push(capability);
+                }
             }
-            let end = captures
-                .last()
-                .map_or(owner_name.span.end, |capture| capture.span.end);
             return Ok(Expr::Async(AsyncExpr {
                 span: Span::new(start, end),
                 value: Box::new(value),
                 owner,
+                placement,
                 captures,
             }));
         }

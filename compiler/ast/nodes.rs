@@ -540,6 +540,7 @@ pub struct AsyncExpr {
     pub span: Span,
     pub value: Box<Expr>,
     pub owner: TaskOwner,
+    pub placement: TaskPlacement,
     pub captures: Vec<Ident>,
 }
 
@@ -547,6 +548,12 @@ pub struct AsyncExpr {
 pub enum TaskOwner {
     SelfOwned,
     Runtime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPlacement {
+    Default,
+    Local,
 }
 
 #[derive(Debug, Clone, PartialEq)]

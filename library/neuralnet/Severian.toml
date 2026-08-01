@@ -9,6 +9,7 @@ path = "src/lib.sev"
 
 [dependencies]
 tensor = { path = "../tensor", version = "0.1.0" }
+distributed = { path = "../distributed", version = "0.1.0" }
 
 [package.metadata.library]
 category = "machine-learning"

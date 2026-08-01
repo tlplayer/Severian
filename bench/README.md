@@ -30,3 +30,6 @@ compiler error, or output mismatch is reported and makes the command fail.
 
 Generated binaries, bytecode, and temporary files live under `bench/.work/`.
 Machine-specific CSV results are ignored by Git.
+
+The separate `distributed-learning/` comparison exercises a 65,536-value
+four-worker neural-network forward/backward pass against Python multiprocessing.

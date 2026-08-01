@@ -6,26 +6,20 @@ machine-learning packages. The initial executable implementation uses flat
 That makes ownership and bounds behavior visible while the compiler grows a
 first-class ranked tensor type.
 
-The public operations currently include elementwise ReLU, task-parallel ReLU,
-matrix-vector multiplication, vector addition, and a flattened ReLU Jacobian.
+The public operations include ReLU, leaky ReLU, fast sigmoid, fast tanh, GELU,
+Swish, backward kernels, activation Jacobians, task-parallel ReLU,
+matrix-vector multiplication, and vector addition. The sigmoid and tanh
+implementations are inexpensive rational approximations suitable for showing
+portable lowering; exact transcendental variants will use math intrinsics.
 
-## Lowering contracts
+## Lowering direction
 
-Consumers may annotate a kernel with one of these tensor symbol-pack policies:
+These kernels currently execute through portable scalar loops and native local
+tasks. Severian decorators import a package's syntax symbols; they are not
+Python-style wrappers or execution-policy annotations. A future SIMD/GPU
+selection construct therefore needs its own expression- or task-local syntax
+and lowering semantics before this package claims either backend.
 
-```sev
-@tensor(SIMD)
-@tensor(GPU)
-@tensor(AUTO)
-```
-
-The decorators are retained in HIR and emitted as a
-`severian_tensor_policy` MLIR function attribute. `SIMD` is intended to select
-MLIR vector/LLVM-vector lowering, `GPU` is intended to select MLIR GPU plus
-NVVM/ROCDL lowering, and `AUTO` will use shape and target cost models. Until
-those passes exist, all policies execute the portable CPU implementation; the
-compiler must not claim that CUDA code was generated.
-
-The API keeps execution policy separate from mathematical behavior, allowing
-`neuralnet` to share activation and Jacobian definitions across CPU, SIMD, and
-GPU targets.
+The API keeps mathematical behavior independent of execution placement, so
+`neuralnet` can reuse the same activation and Jacobian definitions as those
+backends are added.
