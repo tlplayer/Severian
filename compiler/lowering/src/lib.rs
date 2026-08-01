@@ -1951,6 +1951,42 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {result} = llvm.call @{function}({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
             return (result, ValueType::Any);
         }
+        if operand_type == ValueType::Any
+            && right_type == ValueType::Any
+            && matches!(
+                op,
+                BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+            )
+        {
+            let (function, first, second, invert) = match op {
+                BinaryOp::Equal => ("__sev_value_equal", left.as_str(), right.as_str(), false),
+                BinaryOp::NotEqual => ("__sev_value_equal", left.as_str(), right.as_str(), true),
+                BinaryOp::Less => ("__sev_value_less", left.as_str(), right.as_str(), false),
+                BinaryOp::LessEqual => ("__sev_value_less", right.as_str(), left.as_str(), true),
+                BinaryOp::Greater => ("__sev_value_less", right.as_str(), left.as_str(), false),
+                BinaryOp::GreaterEqual => ("__sev_value_less", left.as_str(), right.as_str(), true),
+                _ => unreachable!(),
+            };
+            let compared = self.fresh_value();
+            writeln!(self.output, "    {compared} = llvm.call @{function}({first}, {second}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+            if !invert {
+                return (compared, ValueType::Bool);
+            }
+            let one = self.fresh_value();
+            writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1").unwrap();
+            let result = self.fresh_value();
+            writeln!(
+                self.output,
+                "    {result} = llvm.xor {compared}, {one} : i1"
+            )
+            .unwrap();
+            return (result, ValueType::Bool);
+        }
         if operand_type == ValueType::Any && right_type != ValueType::Any {
             (left, operand_type) = self.unbox_value((left, operand_type), right_type);
         } else if right_type == ValueType::Any && operand_type != ValueType::Any {

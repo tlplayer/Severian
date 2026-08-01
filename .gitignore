@@ -2,4 +2,5 @@
 /bin/examples/
 /bench/.work/
 /bench/results.csv
+/bench/onnx-gold/generated/
 *.mlir

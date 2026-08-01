@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import statistics
 import subprocess
@@ -34,18 +35,15 @@ def validated(command: list[str]):
     return elapsed
 
 
-def source_lines(path: Path) -> int:
-    return sum(
-        1
-        for line in path.read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument(
+        "--torch-python",
+        type=Path,
+        default=Path("/tmp/severian-onnx-venv/bin/python"),
+    )
     args = parser.parse_args()
     if args.samples < 1 or args.warmup < 0:
         parser.error("samples must be positive and warmup must be non-negative")
@@ -77,9 +75,26 @@ def main() -> int:
         sys.stderr.buffer.write(python_compile.stderr)
         return 1
 
+    pytorch_source = Path(__file__).with_name("pytorch.py")
+    if not args.torch_python.is_file():
+        parser.error(f"PyTorch interpreter not found: {args.torch_python}")
+    pytorch_compile, pytorch_compile_ms = timed(
+        [
+            str(args.torch_python),
+            "-c",
+            "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",
+            str(pytorch_source),
+            str(WORK / "pytorch.pyc"),
+        ]
+    )
+    if pytorch_compile.returncode != 0:
+        sys.stderr.buffer.write(pytorch_compile.stderr)
+        return 1
+
     commands = {
         "Severian": [str(binary)],
         "Python": [sys.executable, str(PYTHON_SOURCE)],
+        "PyTorch": [str(args.torch_python), str(pytorch_source)],
     }
     results = {}
     for language, command in commands.items():
@@ -93,14 +108,29 @@ def main() -> int:
         )
 
     print("65,536-value, four-worker ReLU forward/backward")
-    print("language  compile ms  median run ms  p95 run ms  entry LOC")
+    print("language  compile ms  median process ms  p95 process ms")
     print(
         f"Severian  {severian_compile_ms:10.3f}  {results['Severian'][0]:13.3f}  "
-        f"{results['Severian'][1]:10.3f}  {source_lines(SEVERIAN_SOURCE):9d}"
+        f"{results['Severian'][1]:10.3f}"
     )
     print(
         f"Python    {python_compile_ms:10.3f}  {results['Python'][0]:13.3f}  "
-        f"{results['Python'][1]:10.3f}  {source_lines(PYTHON_SOURCE):9d}"
+        f"{results['Python'][1]:10.3f}"
+    )
+    print(
+        f"PyTorch   {pytorch_compile_ms:10.3f}  {results['PyTorch'][0]:13.3f}  "
+        f"{results['PyTorch'][1]:10.3f}"
+    )
+    warm = timed(
+        [str(args.torch_python), str(pytorch_source), "--benchmark", "50"]
+    )[0]
+    if warm.returncode != 0:
+        sys.stderr.buffer.write(warm.stderr)
+        return 1
+    warm_result = json.loads(warm.stdout)
+    print(
+        "PyTorch warm tensor/autograd call: "
+        f"median {warm_result['median_ms']:.3f} ms, p95 {warm_result['p95_ms']:.3f} ms"
     )
     print("Both implementations produced the exact checked stdout fixture.")
     return 0

@@ -161,3 +161,34 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
     assert!(text.contains("llvm.call @__sev_task_spawn_work() {severian_distribution = \"local\"}"));
     assert!(!text.contains("llvm.func @main() -> i32 attributes"));
 }
+
+#[test]
+fn compares_dynamic_collection_values_by_value() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            name: "main".into(),
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Print(Expression::Binary {
+                left: Box::new(Expression::Index {
+                    object: Box::new(Expression::List(vec![Expression::Float(1.0f64.to_bits())])),
+                    index: Box::new(Expression::Integer(0)),
+                }),
+                op: BinaryOp::Greater,
+                right: Box::new(Expression::Index {
+                    object: Box::new(Expression::List(vec![Expression::Float(0.0f64.to_bits())])),
+                    index: Box::new(Expression::Integer(0)),
+                }),
+            })],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&program);
+    assert!(lowered.as_str().contains("llvm.call @__sev_value_less"));
+    assert!(!lowered.as_str().contains("llvm.icmp \"sgt\" %v"));
+}
