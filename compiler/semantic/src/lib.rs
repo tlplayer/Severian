@@ -50,6 +50,7 @@ struct SignatureParameter {
 struct Binding {
     ty: ValueType,
     function_return: Option<ValueType>,
+    collection_len: Option<usize>,
     mutable: bool,
     field: bool,
 }
@@ -176,6 +177,7 @@ pub fn analyze_with_interfaces(
                 Binding {
                     ty,
                     function_return: None,
+                    collection_len: None,
                     mutable: false,
                     field: false,
                 },
@@ -213,6 +215,7 @@ pub fn analyze_with_interfaces(
                 Binding {
                     ty: parameter.ty,
                     function_return: parameter.function_return,
+                    collection_len: None,
                     mutable: false,
                     field: false,
                 },
@@ -389,6 +392,7 @@ fn lower_class_function(
             Binding {
                 ty: ValueType::Any,
                 function_return: None,
+                collection_len: None,
                 mutable: true,
                 field: true,
             },
@@ -414,6 +418,7 @@ fn lower_class_function(
             Binding {
                 ty,
                 function_return: function_return_type(param.ty.as_ref()),
+                collection_len: None,
                 mutable: false,
                 field: false,
             },
@@ -662,6 +667,7 @@ fn lower_block(
                         Binding {
                             ty,
                             function_return: None,
+                            collection_len: binding.value.as_ref().and_then(collection_length),
                             mutable: binding.kind == LetKind::Changeable,
                             field: false,
                         },
@@ -691,6 +697,7 @@ fn lower_block(
                         Binding {
                             ty: ValueType::Any,
                             function_return: None,
+                            collection_len: None,
                             mutable: false,
                             field: false,
                         },
@@ -745,6 +752,7 @@ fn lower_block(
                     Binding {
                         ty: ValueType::Any,
                         function_return: None,
+                        collection_len: None,
                         mutable: false,
                         field: false,
                     },
@@ -1184,6 +1192,30 @@ fn lower_expression(
             Ok((Expression::Map(entries), ValueType::Map))
         }
         Expr::Index(index) => {
+            if let Expr::Literal(Literal::Integer {
+                value: element_index,
+                span,
+            }) = index.index.as_ref()
+            {
+                let length = match index.object.as_ref() {
+                    Expr::List(collection) => Some(collection.elements.len()),
+                    Expr::Identifier(identifier) => scope
+                        .get(&identifier.name)
+                        .and_then(|binding| binding.collection_len),
+                    _ => None,
+                };
+                if length
+                    .is_some_and(|length| *element_index < 0 || *element_index as usize >= length)
+                {
+                    return Err(error(
+                        *span,
+                        format!(
+                            "E0401: index {element_index} is outside a collection with {} elements",
+                            length.unwrap()
+                        ),
+                    ));
+                }
+            }
             let object = lower_expression(&index.object, scope, signatures, aliases)?.0;
             let index_value = lower_expression(&index.index, scope, signatures, aliases)?.0;
             Ok((
@@ -1212,6 +1244,7 @@ fn lower_expression(
                 Binding {
                     ty: ValueType::Any,
                     function_return: None,
+                    collection_len: None,
                     mutable: false,
                     field: false,
                 },
@@ -1310,6 +1343,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
         Binding {
             ty: ValueType::Any,
             function_return: None,
+            collection_len: None,
             mutable: false,
             field: false,
         },
@@ -1321,6 +1355,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
                 Binding {
                     ty: ValueType::String,
                     function_return: None,
+                    collection_len: None,
                     mutable: false,
                     field: false,
                 },
@@ -1637,6 +1672,13 @@ fn lower_declared_call(
     ))
 }
 
+fn collection_length(expression: &Expr) -> Option<usize> {
+    match expression {
+        Expr::List(collection) | Expr::Tuple(collection) => Some(collection.elements.len()),
+        _ => None,
+    }
+}
+
 fn lower_format_args(
     template: &str,
     scope: &HashMap<String, Binding>,
@@ -1872,6 +1914,7 @@ fn lower_pattern(
                 Binding {
                     ty: ValueType::Any,
                     function_return: None,
+                    collection_len: None,
                     mutable: false,
                     field: false,
                 },
@@ -1903,6 +1946,7 @@ fn lower_pattern(
                                     Binding {
                                         ty: ValueType::Any,
                                         function_return: None,
+                                        collection_len: None,
                                         mutable: false,
                                         field: false,
                                     },
@@ -1923,6 +1967,7 @@ fn lower_pattern(
                     Binding {
                         ty: ValueType::Any,
                         function_return: None,
+                        collection_len: None,
                         mutable: false,
                         field: false,
                     },

@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use severian_hir::{
-    AssignmentOp, BinaryOp, Expression, Function, Instruction, Program, UnaryOp, ValueType,
+    AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern, Program,
+    SwitchArm, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -9,6 +10,13 @@ use std::fmt::Write;
 
 pub fn lower(program: &Program) -> Module {
     let mut strings = Vec::new();
+    for class in &program.classes {
+        strings.push(class.name.clone());
+        strings.extend(class.fields.iter().cloned());
+        for function in class.methods.iter().chain(&class.constructors) {
+            collect_strings(&function.instructions, &mut strings);
+        }
+    }
     for global in &program.globals {
         collect_expression_strings(&global.value, &mut strings);
     }
@@ -35,6 +43,41 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @snprintf(!llvm.ptr, i64, !llvm.ptr, ...) -> i32\n",
         "  llvm.func @malloc(i64) -> !llvm.ptr\n",
         "  llvm.func @strtod(!llvm.ptr, !llvm.ptr) -> f64\n\n",
+        "  llvm.func @__sev_box_i64(i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_box_f64(f64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_box_bool(i1) -> !llvm.ptr\n",
+        "  llvm.func @__sev_box_string(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_box_collection(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_unbox_i64(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_unbox_f64(!llvm.ptr) -> f64\n",
+        "  llvm.func @__sev_unbox_string(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_unbox_ptr(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_add(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_sub(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_mul(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_div(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_push(!llvm.ptr, !llvm.ptr)\n",
+        "  llvm.func @__sev_collection_get(!llvm.ptr, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_set(!llvm.ptr, i64, !llvm.ptr)\n",
+        "  llvm.func @__sev_collection_size(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_set_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_map_new() -> !llvm.ptr\n",
+        "  llvm.func @__sev_map_insert(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
+        "  llvm.func @__sev_map_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_print_value(!llvm.ptr)\n",
+        "  llvm.func @__sev_print_collection(!llvm.ptr)\n\n",
+        "  llvm.func @__sev_print_value_inline(!llvm.ptr)\n",
+        "  llvm.func @__sev_print_space()\n",
+        "  llvm.func @__sev_print_newline()\n",
+        "  llvm.func @__sev_object_new(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
+        "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",
+        "  llvm.func @__sev_variant_new(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_variant_is(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_variant_field(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_print_variant(!llvm.ptr)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
 
@@ -82,15 +125,48 @@ pub fn lower(program: &Program) -> Module {
         output.push('\n');
     }
 
-    let function_returns = program
+    let mut function_returns = program
         .functions
         .iter()
         .map(|function| (function.name.clone(), function.return_type))
         .collect::<HashMap<_, _>>();
+    for class in &program.classes {
+        for method in &class.methods {
+            function_returns.insert(
+                format!("{}_{}", class.name, method.name),
+                method.return_type,
+            );
+        }
+    }
+    for class in &program.classes {
+        for constructor in &class.constructors {
+            lower_class_function(
+                class,
+                constructor,
+                &format!("{}_ctor_{}", class.name, constructor.params.len()),
+                &program.classes,
+                &strings,
+                &function_returns,
+                &mut output,
+            );
+        }
+        for method in &class.methods {
+            lower_class_function(
+                class,
+                method,
+                &format!("{}_{}", class.name, method.name),
+                &program.classes,
+                &strings,
+                &function_returns,
+                &mut output,
+            );
+        }
+    }
     for function in &program.functions {
         lower_function(
             function,
             &program.globals,
+            &program.classes,
             &strings,
             &function_returns,
             &mut output,
@@ -103,6 +179,7 @@ pub fn lower(program: &Program) -> Module {
 fn lower_function(
     function: &Function,
     globals: &[severian_hir::Global],
+    classes: &[Class],
     strings: &[String],
     function_returns: &HashMap<String, ValueType>,
     output: &mut String,
@@ -127,6 +204,11 @@ fn lower_function(
         output,
         strings,
         function_returns,
+        classes,
+        field_object: None,
+        field_names: HashSet::new(),
+        object_classes: HashMap::new(),
+        declared_return: function.return_type,
         task_results: HashMap::new(),
         channel_types: HashMap::new(),
         variables: function
@@ -161,10 +243,62 @@ fn lower_function(
     context.output.push_str("  }\n");
 }
 
+fn lower_class_function(
+    class: &Class,
+    function: &Function,
+    symbol: &str,
+    classes: &[Class],
+    strings: &[String],
+    function_returns: &HashMap<String, ValueType>,
+    output: &mut String,
+) {
+    write!(output, "  llvm.func @{symbol}(%self: !llvm.ptr").unwrap();
+    for (index, param) in function.params.iter().enumerate() {
+        write!(output, ", %arg_{index}: {}", mlir_type(param.ty)).unwrap();
+    }
+    output.push(')');
+    if function.return_type != ValueType::Unit {
+        write!(output, " -> {}", mlir_type(function.return_type)).unwrap();
+    }
+    output.push_str(" {\n");
+
+    let mut context = LowerContext {
+        output,
+        strings,
+        function_returns,
+        classes,
+        field_object: Some("%self".into()),
+        field_names: class.fields.iter().cloned().collect(),
+        object_classes: HashMap::from([("%self".into(), class.name.clone())]),
+        task_results: HashMap::new(),
+        channel_types: HashMap::new(),
+        variables: function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| (param.name.clone(), (format!("%arg_{index}"), param.ty)))
+            .collect(),
+        next_value: 0,
+        next_block: 0,
+        terminated: false,
+        is_main: false,
+        declared_return: function.return_type,
+    };
+    context.lower_instructions(&function.instructions);
+    if !context.terminated && function.return_type == ValueType::Unit {
+        context.output.push_str("    llvm.return\n");
+    }
+    context.output.push_str("  }\n");
+}
+
 struct LowerContext<'a> {
     output: &'a mut String,
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
+    classes: &'a [Class],
+    field_object: Option<String>,
+    field_names: HashSet<String>,
+    object_classes: HashMap<String, String>,
     task_results: HashMap<String, ValueType>,
     channel_types: HashMap<String, ValueType>,
     variables: HashMap<String, (String, ValueType)>,
@@ -172,6 +306,7 @@ struct LowerContext<'a> {
     next_block: usize,
     terminated: bool,
     is_main: bool,
+    declared_return: ValueType,
 }
 
 impl LowerContext<'_> {
@@ -192,6 +327,21 @@ impl LowerContext<'_> {
                 Instruction::Assign { target, op, value } => {
                     if let Expression::Variable(name) = target {
                         let right = self.lower_expression(value);
+                        if self.field_names.contains(name) && !self.variables.contains_key(name) {
+                            let object = self.field_object.clone().unwrap();
+                            let field = self.string_address(name);
+                            let value = if *op == AssignmentOp::Assign {
+                                right
+                            } else {
+                                let current = self.fresh_value();
+                                writeln!(self.output, "    {current} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                                let current = self.unbox_value((current, ValueType::Any), right.1);
+                                self.lower_binary_values(current, assignment_binary(*op), right)
+                            };
+                            let boxed = self.box_value(value);
+                            writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                            continue;
+                        }
                         let lowered = if *op == AssignmentOp::Assign {
                             right
                         } else {
@@ -199,6 +349,43 @@ impl LowerContext<'_> {
                             self.lower_binary_values(left, assignment_binary(*op), right)
                         };
                         self.variables.insert(name.clone(), lowered);
+                    } else if let Expression::Index { object, index } = target {
+                        let (object, object_type) = self.lower_expression(object);
+                        let index = self.lower_expression(index);
+                        let right = self.lower_expression(value);
+                        if object_type == ValueType::Map {
+                            let key = self.box_value(index);
+                            let boxed = if *op == AssignmentOp::Assign {
+                                self.box_value(right)
+                            } else {
+                                let current = self.fresh_value();
+                                writeln!(self.output, "    {current} = llvm.call @__sev_map_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                                let current = self.unbox_value((current, ValueType::Any), right.1);
+                                let updated = self.lower_binary_values(
+                                    current,
+                                    assignment_binary(*op),
+                                    right,
+                                );
+                                self.box_value(updated)
+                            };
+                            writeln!(self.output, "    llvm.call @__sev_map_insert({object}, {key}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                        } else {
+                            let index = self.unbox_value(index, ValueType::Int).0;
+                            let boxed = if *op == AssignmentOp::Assign {
+                                self.box_value(right)
+                            } else {
+                                let current = self.fresh_value();
+                                writeln!(self.output, "    {current} = llvm.call @__sev_collection_get({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                                let current = self.unbox_value((current, ValueType::Any), right.1);
+                                let updated = self.lower_binary_values(
+                                    current,
+                                    assignment_binary(*op),
+                                    right,
+                                );
+                                self.box_value(updated)
+                            };
+                            writeln!(self.output, "    llvm.call @__sev_collection_set({object}, {index}, {boxed}) : (!llvm.ptr, i64, !llvm.ptr) -> ()").unwrap();
+                        }
                     }
                 }
                 Instruction::Print(value) => {
@@ -244,11 +431,38 @@ impl LowerContext<'_> {
                             )
                             .unwrap();
                         }
+                        ValueType::Any => {
+                            writeln!(
+                                self.output,
+                                "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()"
+                            )
+                            .unwrap();
+                        }
+                        ValueType::List | ValueType::Tuple | ValueType::Set => {
+                            writeln!(self.output, "    llvm.call @__sev_print_collection({value}) : (!llvm.ptr) -> ()").unwrap();
+                        }
+                        ValueType::Result | ValueType::Option => {
+                            writeln!(
+                                self.output,
+                                "    llvm.call @__sev_print_variant({value}) : (!llvm.ptr) -> ()"
+                            )
+                            .unwrap();
+                        }
                         _ => {}
                     }
                 }
                 Instruction::Evaluate(expression) => {
-                    self.lower_expression(expression);
+                    let (value, _) = self.lower_expression(expression);
+                    if matches!(expression, Expression::Task(_)) {
+                        if let Some(return_type) = self.task_results.remove(&value) {
+                            if return_type == ValueType::Unit {
+                                writeln!(self.output, "    llvm.call @__sev_task_await_unit({value}) : (!llvm.ptr) -> ()").unwrap();
+                            } else {
+                                let ignored = self.fresh_value();
+                                writeln!(self.output, "    {ignored} = llvm.call @__sev_task_await_{}({value}) : (!llvm.ptr) -> {}", task_type_suffix(return_type), mlir_type(return_type)).unwrap();
+                            }
+                        }
+                    }
                 }
                 Instruction::Assert(_) => {}
                 Instruction::Return(value) => {
@@ -261,7 +475,8 @@ impl LowerContext<'_> {
                         .unwrap();
                         writeln!(self.output, "    llvm.return {success} : i32").unwrap();
                     } else if let Some(value) = value {
-                        let (value, ty) = self.lower_expression(value);
+                        let lowered = self.lower_expression(value);
+                        let (value, ty) = self.unbox_value(lowered, self.declared_return);
                         writeln!(self.output, "    llvm.return {value} : {}", mlir_type(ty))
                             .unwrap();
                     } else {
@@ -320,8 +535,13 @@ impl LowerContext<'_> {
                     iterable,
                     instructions,
                 } => self.lower_for(pattern, iterable, instructions),
-                Instruction::Switch { .. } => {}
-                Instruction::ChannelSwitch { .. } => {}
+                Instruction::Switch { value, arms } => self.lower_switch(value, arms),
+                Instruction::ChannelSwitch {
+                    channels,
+                    setup,
+                    arms,
+                    ..
+                } => self.lower_channel_switch(channels, setup.as_deref(), arms),
                 Instruction::With { instructions, .. } => {
                     self.lower_instructions(instructions);
                 }
@@ -374,7 +594,21 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, ValueType::String)
             }
-            Expression::Variable(name) => self.variables.get(name).cloned().unwrap(),
+            Expression::Variable(name) => {
+                if let Some(value) = self.variables.get(name).cloned() {
+                    value
+                } else if self.field_names.contains(name) {
+                    let object = self.field_object.clone().unwrap();
+                    let field = self.string_address(name);
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                    (result, ValueType::Any)
+                } else {
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                    (result, ValueType::Any)
+                }
+            }
             Expression::Function(name) => {
                 let result = self.fresh_value();
                 writeln!(
@@ -384,19 +618,215 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, ValueType::Function)
             }
-            Expression::List(_)
-            | Expression::Tuple(_)
-            | Expression::Map(_)
-            | Expression::Set(_)
-            | Expression::ListComprehension { .. }
-            | Expression::PrintArgs(_)
-            | Expression::Construct { .. }
-            | Expression::Member { .. }
-            | Expression::MethodCall { .. }
-            | Expression::ChaosRule { .. } => {
+            Expression::List(values) => self.lower_collection_literal(values, ValueType::List, 0),
+            Expression::Tuple(values) => self.lower_collection_literal(values, ValueType::Tuple, 1),
+            Expression::Set(values) => self.lower_collection_literal(values, ValueType::Set, 2),
+            Expression::Map(entries) => {
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_map_new() : () -> !llvm.ptr"
+                )
+                .unwrap();
+                for (key, value) in entries {
+                    let key = self.lower_expression(key);
+                    let value = self.lower_expression(value);
+                    let key = self.box_value(key);
+                    let value = self.box_value(value);
+                    writeln!(self.output, "    llvm.call @__sev_map_insert({result}, {key}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                }
+                (result, ValueType::Map)
+            }
+            Expression::ListComprehension {
+                element,
+                variable,
+                iterable,
+                condition,
+            } => self.lower_list_comprehension(element, variable, iterable, condition.as_deref()),
+            Expression::PrintArgs(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        writeln!(self.output, "    llvm.call @__sev_print_space() : () -> ()")
+                            .unwrap();
+                    }
+                    let value = self.lower_expression(value);
+                    let value = self.box_value(value);
+                    writeln!(
+                        self.output,
+                        "    llvm.call @__sev_print_value_inline({value}) : (!llvm.ptr) -> ()"
+                    )
+                    .unwrap();
+                }
+                writeln!(
+                    self.output,
+                    "    llvm.call @__sev_print_newline() : () -> ()"
+                )
+                .unwrap();
+                (String::new(), ValueType::Unit)
+            }
+            Expression::Construct { class, args } => {
+                let class_name = self.string_address(class);
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_object_new({class_name}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_expression(arg))
+                    .collect::<Vec<_>>();
+                let definition = self
+                    .classes
+                    .iter()
+                    .find(|candidate| candidate.name == *class);
+                let constructor = definition.and_then(|definition| {
+                    definition
+                        .constructors
+                        .iter()
+                        .find(|constructor| constructor.params.len() == args.len())
+                });
+                if let Some(constructor) = constructor {
+                    let values = lowered_args
+                        .iter()
+                        .map(|(value, _)| value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let types = lowered_args
+                        .iter()
+                        .map(|(_, ty)| mlir_type(*ty))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let value_suffix = if values.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {values}")
+                    };
+                    let type_suffix = if types.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {types}")
+                    };
+                    writeln!(self.output, "    llvm.call @{class}_ctor_{}({result}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()", constructor.params.len()).unwrap();
+                } else if let Some(definition) = definition {
+                    for (field, value) in definition.fields.iter().zip(lowered_args) {
+                        let field = self.string_address(field);
+                        let value = self.box_value(value);
+                        writeln!(self.output, "    llvm.call @__sev_object_set({result}, {field}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                    }
+                }
+                self.object_classes.insert(result.clone(), class.clone());
+                (result, ValueType::Any)
+            }
+            Expression::Member { object, member } => {
+                let (object, _) = self.lower_expression(object);
+                let field = self.string_address(member);
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                 (result, ValueType::Any)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "append" => {
+                let (mut object, object_type) = self.lower_expression(object);
+                if object_type == ValueType::Any {
+                    let unboxed = self.fresh_value();
+                    writeln!(self.output, "    {unboxed} = llvm.call @__sev_unbox_ptr({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    object = unboxed;
+                }
+                let value = self.lower_expression(&args[0]);
+                let value = self.box_value(value);
+                writeln!(self.output, "    llvm.call @__sev_collection_push({object}, {value}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                (String::new(), ValueType::Unit)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } => {
+                let (object, _) = self.lower_expression(object);
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_expression(arg))
+                    .collect::<Vec<_>>();
+                let Some(class) = self.object_classes.get(&object).cloned() else {
+                    if method == "draw" {
+                        writeln!(
+                            self.output,
+                            "    llvm.call @__sev_dispatch_draw({object}) : (!llvm.ptr) -> ()"
+                        )
+                        .unwrap();
+                        return (String::new(), ValueType::Unit);
+                    }
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                    return (result, ValueType::Any);
+                };
+                let symbol = format!("{class}_{method}");
+                let method_definition = self
+                    .classes
+                    .iter()
+                    .find(|candidate| candidate.name == class)
+                    .and_then(|definition| {
+                        definition
+                            .methods
+                            .iter()
+                            .find(|candidate| candidate.name == *method)
+                    });
+                let lowered_args = lowered_args
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, argument)| {
+                        if method_definition
+                            .and_then(|definition| definition.params.get(index))
+                            .is_some_and(|parameter| parameter.ty == ValueType::Any)
+                            && argument.1 != ValueType::Any
+                        {
+                            (self.box_value(argument), ValueType::Any)
+                        } else {
+                            argument
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let values = lowered_args
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = lowered_args
+                    .iter()
+                    .map(|(_, ty)| mlir_type(*ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let value_suffix = if values.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {values}")
+                };
+                let type_suffix = if types.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {types}")
+                };
+                let return_type = self
+                    .function_returns
+                    .get(&symbol)
+                    .copied()
+                    .unwrap_or(ValueType::Any);
+                if return_type == ValueType::Unit {
+                    writeln!(self.output, "    llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()").unwrap();
+                    (String::new(), ValueType::Unit)
+                } else {
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> {}", mlir_type(return_type)).unwrap();
+                    if return_type == ValueType::Any {
+                        self.object_classes.insert(result.clone(), class);
+                    }
+                    (result, return_type)
+                }
             }
             Expression::Task(value) => {
                 if let Expression::Send { value, channel } = value.as_ref() {
@@ -503,18 +933,31 @@ impl LowerContext<'_> {
                 self.task_results.insert(result.clone(), ValueType::Unit);
                 (result, ValueType::Any)
             }
-            Expression::Variant { .. } => {
+            Expression::Variant { name, fields } => {
+                let tag = self.string_address(name);
+                let field = if let Some(field) = fields.first() {
+                    let field = self.lower_expression(field);
+                    self.box_value(field)
+                } else {
+                    let empty = self.fresh_value();
+                    writeln!(self.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                    empty
+                };
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
-                (result, ValueType::Any)
+                writeln!(self.output, "    {result} = llvm.call @__sev_variant_new({tag}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::Option)
             }
-            Expression::Index { .. } => {
+            Expression::Index { object, index } => {
+                let (object, object_type) = self.lower_expression(object);
+                let index = self.lower_expression(index);
                 let result = self.fresh_value();
-                writeln!(
-                    self.output,
-                    "    {result} = llvm.mlir.constant(0 : i64) : i64"
-                )
-                .unwrap();
+                if object_type == ValueType::Map {
+                    let key = self.box_value(index);
+                    writeln!(self.output, "    {result} = llvm.call @__sev_map_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                } else {
+                    let index = self.unbox_value(index, ValueType::Int).0;
+                    writeln!(self.output, "    {result} = llvm.call @__sev_collection_get({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                }
                 (result, ValueType::Any)
             }
             Expression::Format {
@@ -686,6 +1129,12 @@ impl LowerContext<'_> {
                         }
                     };
                 }
+                if function == "size" {
+                    let (value, _) = args.first().cloned().unwrap();
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
+                    return (result, ValueType::Int);
+                }
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -775,12 +1224,216 @@ impl LowerContext<'_> {
         }
     }
 
+    fn lower_collection_literal(
+        &mut self,
+        values: &[Expression],
+        ty: ValueType,
+        kind: i64,
+    ) -> (String, ValueType) {
+        let kind_value = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {kind_value} = llvm.mlir.constant({kind} : i64) : i64"
+        )
+        .unwrap();
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @__sev_collection_new({kind_value}) : (i64) -> !llvm.ptr"
+        )
+        .unwrap();
+        for value in values {
+            let value = self.lower_expression(value);
+            let value = self.box_value(value);
+            writeln!(
+                self.output,
+                "    llvm.call @__sev_collection_push({result}, {value}) : (!llvm.ptr, !llvm.ptr) -> ()"
+            )
+            .unwrap();
+        }
+        (result, ty)
+    }
+
+    fn string_address(&mut self, value: &str) -> String {
+        let index = self
+            .strings
+            .iter()
+            .position(|candidate| candidate == value)
+            .expect("native metadata strings are collected before lowering");
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
+        )
+        .unwrap();
+        result
+    }
+
+    fn box_value(&mut self, (value, ty): (String, ValueType)) -> String {
+        let function = match ty {
+            ValueType::Int => "__sev_box_i64",
+            ValueType::Float => "__sev_box_f64",
+            ValueType::Bool => "__sev_box_bool",
+            ValueType::String => "__sev_box_string",
+            ValueType::List | ValueType::Tuple | ValueType::Set | ValueType::Map => {
+                "__sev_box_collection"
+            }
+            ValueType::Any => return value,
+            _ => return value,
+        };
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @{function}({value}) : ({}) -> !llvm.ptr",
+            mlir_type(ty)
+        )
+        .unwrap();
+        result
+    }
+
+    fn unbox_value(
+        &mut self,
+        (value, ty): (String, ValueType),
+        expected: ValueType,
+    ) -> (String, ValueType) {
+        if ty != ValueType::Any {
+            return (value, ty);
+        }
+        let function = match expected {
+            ValueType::Int => "__sev_unbox_i64",
+            ValueType::Float => "__sev_unbox_f64",
+            ValueType::String => "__sev_unbox_string",
+            ValueType::List | ValueType::Tuple | ValueType::Set | ValueType::Map => {
+                "__sev_unbox_ptr"
+            }
+            _ => return (value, ty),
+        };
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @{function}({value}) : (!llvm.ptr) -> {}",
+            mlir_type(expected)
+        )
+        .unwrap();
+        (result, expected)
+    }
+
+    fn lower_list_comprehension(
+        &mut self,
+        element: &Expression,
+        variable: &str,
+        iterable: &Expression,
+        condition: Option<&Expression>,
+    ) -> (String, ValueType) {
+        let (iterable, _) = self.lower_expression(iterable);
+        let kind = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {kind} = llvm.mlir.constant(0 : i64) : i64"
+        )
+        .unwrap();
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr"
+        )
+        .unwrap();
+        let size = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {size} = llvm.call @__sev_collection_size({iterable}) : (!llvm.ptr) -> i64"
+        )
+        .unwrap();
+        let zero = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+        )
+        .unwrap();
+        let header = self.fresh_block();
+        let body = self.fresh_block();
+        let append = self.fresh_block();
+        let step = self.fresh_block();
+        let exit = self.fresh_block();
+        writeln!(self.output, "    llvm.br ^bb{header}({zero} : i64)").unwrap();
+        let index = self.fresh_value();
+        writeln!(self.output, "  ^bb{header}({index}: i64):").unwrap();
+        let more = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {more} = llvm.icmp \"slt\" {index}, {size} : i64"
+        )
+        .unwrap();
+        writeln!(self.output, "    llvm.cond_br {more}, ^bb{body}, ^bb{exit}").unwrap();
+        writeln!(self.output, "  ^bb{body}:").unwrap();
+        let item = self.fresh_value();
+        writeln!(self.output, "    {item} = llvm.call @__sev_collection_get({iterable}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+        let previous = self
+            .variables
+            .insert(variable.into(), (item, ValueType::Any));
+        if let Some(condition) = condition {
+            let (condition, _) = self.lower_expression(condition);
+            writeln!(
+                self.output,
+                "    llvm.cond_br {condition}, ^bb{append}, ^bb{step}"
+            )
+            .unwrap();
+            writeln!(self.output, "  ^bb{append}:").unwrap();
+        }
+        let value = self.lower_expression(element);
+        let value = self.box_value(value);
+        writeln!(self.output, "    llvm.call @__sev_collection_push({result}, {value}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+        writeln!(self.output, "    llvm.br ^bb{step}").unwrap();
+        writeln!(self.output, "  ^bb{step}:").unwrap();
+        let one = self.fresh_value();
+        writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i64) : i64").unwrap();
+        let next = self.fresh_value();
+        writeln!(self.output, "    {next} = llvm.add {index}, {one} : i64").unwrap();
+        writeln!(self.output, "    llvm.br ^bb{header}({next} : i64)").unwrap();
+        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        if let Some(previous) = previous {
+            self.variables.insert(variable.into(), previous);
+        } else {
+            self.variables.remove(variable);
+        }
+        (result, ValueType::List)
+    }
+
     fn lower_binary_values(
         &mut self,
-        (left, operand_type): (String, ValueType),
+        (mut left, mut operand_type): (String, ValueType),
         op: BinaryOp,
-        (right, _): (String, ValueType),
+        (mut right, right_type): (String, ValueType),
     ) -> (String, ValueType) {
+        if op == BinaryOp::In && right_type == ValueType::Set {
+            let left = self.box_value((left, operand_type));
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+            return (result, ValueType::Bool);
+        }
+        if operand_type == ValueType::Any
+            && right_type == ValueType::Any
+            && matches!(
+                op,
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+            )
+        {
+            let function = match op {
+                BinaryOp::Add => "__sev_value_add",
+                BinaryOp::Sub => "__sev_value_sub",
+                BinaryOp::Mul => "__sev_value_mul",
+                BinaryOp::Div => "__sev_value_div",
+                _ => unreachable!(),
+            };
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @{function}({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+            return (result, ValueType::Any);
+        }
+        if operand_type == ValueType::Any && right_type != ValueType::Any {
+            (left, operand_type) = self.unbox_value((left, operand_type), right_type);
+        } else if right_type == ValueType::Any && operand_type != ValueType::Any {
+            right = self.unbox_value((right, right_type), operand_type).0;
+        }
         let result = self.fresh_value();
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
             let operation = if op == BinaryOp::And {
@@ -877,6 +1530,13 @@ impl LowerContext<'_> {
         (mut base, base_type): (String, ValueType),
         (exponent, exponent_type): (String, ValueType),
     ) -> (String, ValueType) {
+        let base_type = if base_type == ValueType::Any {
+            let unboxed = self.unbox_value((base, base_type), ValueType::Float);
+            base = unboxed.0;
+            ValueType::Float
+        } else {
+            base_type
+        };
         if !matches!(base_type, ValueType::Int | ValueType::Float)
             || !matches!(exponent_type, ValueType::Int | ValueType::Float)
         {
@@ -949,6 +1609,113 @@ impl LowerContext<'_> {
         .unwrap();
     }
 
+    fn lower_switch(&mut self, value: &Expression, arms: &[SwitchArm]) {
+        let (value, _) = self.lower_expression(value);
+        let exit = self.fresh_block();
+        for arm in arms {
+            let body = self.fresh_block();
+            let next = self.fresh_block();
+            if let MatchPattern::Constructor { name, .. } = &arm.pattern {
+                let tag = self.string_address(name);
+                let matches = self.fresh_value();
+                writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                writeln!(
+                    self.output,
+                    "    llvm.cond_br {matches}, ^bb{body}, ^bb{next}"
+                )
+                .unwrap();
+            } else {
+                writeln!(self.output, "    llvm.br ^bb{body}").unwrap();
+            }
+            writeln!(self.output, "  ^bb{body}:").unwrap();
+            let mut bound = None;
+            if let MatchPattern::Constructor { fields, .. } = &arm.pattern {
+                if let Some(MatchPattern::Bind(name)) = fields.first() {
+                    let field = self.fresh_value();
+                    writeln!(self.output, "    {field} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    bound = Some((
+                        name.clone(),
+                        self.variables.insert(name.clone(), (field, ValueType::Any)),
+                    ));
+                }
+            }
+            if let Some(guard) = &arm.guard {
+                let guarded = self.fresh_block();
+                let (guard, _) = self.lower_expression(guard);
+                writeln!(
+                    self.output,
+                    "    llvm.cond_br {guard}, ^bb{guarded}, ^bb{next}"
+                )
+                .unwrap();
+                writeln!(self.output, "  ^bb{guarded}:").unwrap();
+            }
+            self.terminated = false;
+            self.lower_instructions(&arm.instructions);
+            if !self.terminated {
+                writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
+            }
+            if let Some((name, previous)) = bound {
+                if let Some(previous) = previous {
+                    self.variables.insert(name, previous);
+                } else {
+                    self.variables.remove(&name);
+                }
+            }
+            writeln!(self.output, "  ^bb{next}:").unwrap();
+            self.terminated = false;
+        }
+        writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
+        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        self.terminated = false;
+    }
+
+    fn lower_channel_switch(
+        &mut self,
+        channels: &[Expression],
+        setup: Option<&Instruction>,
+        arms: &[SwitchArm],
+    ) {
+        if let Some(setup) = setup {
+            self.lower_instructions(std::slice::from_ref(setup));
+        }
+        for channel in channels {
+            let Expression::Variable(channel_name) = channel else {
+                continue;
+            };
+            let Some(arm) = arms.iter().find(|arm| {
+                matches!(
+                    arm.source.as_ref(),
+                    Some(Expression::Variable(source)) if source == channel_name
+                )
+            }) else {
+                continue;
+            };
+            let (channel, channel_type) = self.lower_expression(channel);
+            let channel_type = self
+                .channel_types
+                .get(&channel)
+                .copied()
+                .unwrap_or(channel_type);
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_channel_receive_ptr({channel}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+            let mut bound = None;
+            if let MatchPattern::Bind(name) = &arm.pattern {
+                bound = Some((
+                    name.clone(),
+                    self.variables.insert(name.clone(), (result, channel_type)),
+                ));
+            }
+            self.lower_instructions(&arm.instructions);
+            if let Some((name, previous)) = bound {
+                if let Some(previous) = previous {
+                    self.variables.insert(name, previous);
+                } else {
+                    self.variables.remove(&name);
+                }
+            }
+        }
+    }
+
     fn lower_while(&mut self, condition: &Expression, instructions: &[Instruction]) {
         let mut carried = self
             .variables
@@ -987,6 +1754,13 @@ impl LowerContext<'_> {
         }
         for (name, value, ty) in &header_values {
             self.variables.insert(name.clone(), (value.clone(), *ty));
+            if let Some((_, original, _)) =
+                carried.iter().find(|(candidate, _, _)| candidate == name)
+            {
+                if let Some(class) = self.object_classes.get(original).cloned() {
+                    self.object_classes.insert(value.clone(), class);
+                }
+            }
         }
         let (condition, _) = self.lower_expression(condition);
         writeln!(
@@ -1030,51 +1804,153 @@ impl LowerContext<'_> {
         let severian_hir::MatchPattern::Bind(name) = pattern else {
             return;
         };
-        let Expression::Call { function, args } = iterable else {
-            return;
-        };
-        if function != "range" || !(1..=2).contains(&args.len()) {
-            return;
-        }
-
-        let (start, end) = if args.len() == 1 {
-            let start = self.fresh_value();
-            writeln!(
-                self.output,
-                "    {start} = llvm.mlir.constant(0 : i64) : i64"
-            )
-            .unwrap();
-            (start, self.lower_expression(&args[0]).0)
-        } else {
-            (
-                self.lower_expression(&args[0]).0,
-                self.lower_expression(&args[1]).0,
-            )
+        let mut collection = None;
+        let mut yields_indices = false;
+        let (start, end) = match iterable {
+            Expression::Call { function, args }
+                if function == "range" && (1..=2).contains(&args.len()) =>
+            {
+                if args.len() == 1 {
+                    let start = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {start} = llvm.mlir.constant(0 : i64) : i64"
+                    )
+                    .unwrap();
+                    (start, self.lower_expression(&args[0]).0)
+                } else {
+                    (
+                        self.lower_expression(&args[0]).0,
+                        self.lower_expression(&args[1]).0,
+                    )
+                }
+            }
+            Expression::Call { function, args } if function == "indices" && args.len() == 1 => {
+                let value = self.lower_expression(&args[0]).0;
+                let start = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {start} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                let end = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {end} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64"
+                )
+                .unwrap();
+                collection = Some(value);
+                yields_indices = true;
+                (start, end)
+            }
+            _ => {
+                let value = self.lower_expression(iterable).0;
+                let start = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {start} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                let end = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {end} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64"
+                )
+                .unwrap();
+                collection = Some(value);
+                (start, end)
+            }
         };
 
         let previous_binding = self.variables.remove(name);
+        let mut carried = self
+            .variables
+            .iter()
+            .map(|(name, (value, ty))| (name.clone(), value.clone(), *ty))
+            .collect::<Vec<_>>();
+        carried.sort_by(|left, right| left.0.cmp(&right.0));
         let header = self.fresh_block();
         let body = self.fresh_block();
         let exit = self.fresh_block();
-        writeln!(self.output, "    llvm.br ^bb{header}({start} : i64)").unwrap();
-
+        let initial_values = std::iter::once(start.as_str())
+            .chain(carried.iter().map(|(_, value, _)| value.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let initial_types = std::iter::once("i64")
+            .chain(carried.iter().map(|(_, _, ty)| mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            self.output,
+            "    llvm.br ^bb{header}({initial_values} : {initial_types})"
+        )
+        .unwrap();
         let index = self.fresh_value();
-        writeln!(self.output, "  ^bb{header}({index}: i64):").unwrap();
+        let header_values = carried
+            .iter()
+            .map(|(name, _, ty)| (name.clone(), self.fresh_value(), *ty))
+            .collect::<Vec<_>>();
+        let header_arguments = header_values
+            .iter()
+            .map(|(_, value, ty)| format!("{value}: {}", mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let header_suffix = if header_arguments.is_empty() {
+            String::new()
+        } else {
+            format!(", {header_arguments}")
+        };
+        writeln!(self.output, "  ^bb{header}({index}: i64{header_suffix}):").unwrap();
+        for (name, value, ty) in &header_values {
+            self.variables.insert(name.clone(), (value.clone(), *ty));
+            if let Some((_, original, _)) =
+                carried.iter().find(|(candidate, _, _)| candidate == name)
+            {
+                if let Some(class) = self.object_classes.get(original).cloned() {
+                    self.object_classes.insert(value.clone(), class);
+                }
+            }
+        }
         let condition = self.fresh_value();
         writeln!(
             self.output,
             "    {condition} = llvm.icmp \"slt\" {index}, {end} : i64"
         )
         .unwrap();
+        let exit_value_names = header_values
+            .iter()
+            .map(|(_, value, _)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let exit_types = header_values
+            .iter()
+            .map(|(_, _, ty)| mlir_type(*ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let exit_suffix = if exit_value_names.is_empty() {
+            String::new()
+        } else {
+            format!("({exit_value_names} : {exit_types})")
+        };
         writeln!(
             self.output,
-            "    llvm.cond_br {condition}, ^bb{body}, ^bb{exit}"
+            "    llvm.cond_br {condition}, ^bb{body}, ^bb{exit}{exit_suffix}"
         )
         .unwrap();
 
         writeln!(self.output, "  ^bb{body}:").unwrap();
-        self.variables
-            .insert(name.clone(), (index.clone(), ValueType::Int));
+        let binding = if let Some(collection) = &collection {
+            if yields_indices {
+                (index.clone(), ValueType::Int)
+            } else {
+                let item = self.fresh_value();
+                writeln!(self.output, "    {item} = llvm.call @__sev_collection_get({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                (item, ValueType::Any)
+            }
+        } else {
+            (index.clone(), ValueType::Int)
+        };
+        self.variables.insert(name.clone(), binding);
         self.terminated = false;
         self.lower_instructions(instructions);
         if !self.terminated {
@@ -1082,10 +1958,62 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i64) : i64").unwrap();
             let next = self.fresh_value();
             writeln!(self.output, "    {next} = llvm.add {index}, {one} : i64").unwrap();
-            writeln!(self.output, "    llvm.br ^bb{header}({next} : i64)").unwrap();
+            let carried_values = carried
+                .iter()
+                .map(|(name, _, _)| {
+                    let (value, _) = self.variables.get(name).unwrap();
+                    value.as_str()
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let carried_types = carried
+                .iter()
+                .map(|(_, _, ty)| mlir_type(*ty))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let next_values = if carried_values.is_empty() {
+                next.clone()
+            } else {
+                format!("{next}, {carried_values}")
+            };
+            let next_types = if carried_types.is_empty() {
+                "i64".to_owned()
+            } else {
+                format!("i64, {carried_types}")
+            };
+            writeln!(
+                self.output,
+                "    llvm.br ^bb{header}({next_values} : {next_types})"
+            )
+            .unwrap();
         }
 
-        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        let exit_arguments = header_values
+            .iter()
+            .map(|(_, _, ty)| (self.fresh_value(), *ty))
+            .collect::<Vec<_>>();
+        let exit_signature = exit_arguments
+            .iter()
+            .map(|(value, ty)| format!("{value}: {}", mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if exit_signature.is_empty() {
+            writeln!(self.output, "  ^bb{exit}:").unwrap();
+        } else {
+            writeln!(self.output, "  ^bb{exit}({exit_signature}):").unwrap();
+        }
+        for ((variable, _, _), (value, ty)) in header_values.iter().zip(&exit_arguments) {
+            self.variables
+                .insert(variable.clone(), (value.clone(), *ty));
+            if let Some((_, original, _)) = carried
+                .iter()
+                .find(|(candidate, _, _)| candidate == variable)
+            {
+                if let Some(class) = self.object_classes.get(original).cloned() {
+                    self.object_classes.insert(value.clone(), class);
+                }
+            }
+        }
         if let Some(previous_binding) = previous_binding {
             self.variables.insert(name.clone(), previous_binding);
         } else {
@@ -1144,6 +2072,7 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
             Instruction::Switch { value, arms } => {
                 collect_expression_strings(value, strings);
                 for arm in arms {
+                    collect_pattern_strings(&arm.pattern, strings);
                     if let Some(source) = &arm.source {
                         collect_expression_strings(source, strings);
                     }
@@ -1169,6 +2098,7 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                     collect_expression_strings(condition, strings);
                 }
                 for arm in arms {
+                    collect_pattern_strings(&arm.pattern, strings);
                     if let Some(source) = &arm.source {
                         collect_expression_strings(source, strings);
                     }
@@ -1188,6 +2118,19 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                 collect_strings(instructions, strings);
             }
         }
+    }
+}
+
+fn collect_pattern_strings(pattern: &MatchPattern, strings: &mut Vec<String>) {
+    match pattern {
+        MatchPattern::String(value) => strings.push(value.clone()),
+        MatchPattern::Constructor { name, fields } => {
+            strings.push(name.clone());
+            for field in fields {
+                collect_pattern_strings(field, strings);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1259,7 +2202,8 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(arg, strings);
             }
         }
-        Expression::Variant { fields, .. } => {
+        Expression::Variant { name, fields } => {
+            strings.push(name.clone());
             for field in fields {
                 collect_expression_strings(field, strings);
             }
@@ -1515,12 +2459,81 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
 pub fn native_task_runtime_source(program: &Program) -> String {
     let specs = task_specs(program);
     let uses_channels = uses_channels(program);
-    if specs.is_empty() && !uses_channels {
-        return String::new();
+    let mut source = String::from(concat!(
+        "#include <pthread.h>\n",
+        "#include <stdbool.h>\n",
+        "#include <stdint.h>\n",
+        "#include <stdio.h>\n",
+        "#include <stdlib.h>\n",
+        "#include <string.h>\n\n",
+        "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
+        "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
+        "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
+        "typedef struct { int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
+        "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; } sev_object;\n\n",
+        "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
+        "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
+        "void *__sev_box_i64(int64_t raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_INT; value->as.i64 = raw; return value; }\n",
+        "void *__sev_box_f64(double raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_FLOAT; value->as.f64 = raw; return value; }\n",
+        "void *__sev_box_bool(bool raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_BOOL; value->as.boolean = raw; return value; }\n",
+        "void *__sev_box_string(void *raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_STRING; value->as.string = raw; return value; }\n",
+        "void *__sev_box_collection(void *raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_COLLECTION; value->as.pointer = raw; return value; }\n",
+        "int64_t __sev_unbox_i64(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_INT) abort(); return value->as.i64; }\n",
+        "double __sev_unbox_f64(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_FLOAT) abort(); return value->as.f64; }\n",
+        "void *__sev_unbox_string(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_STRING) abort(); return (void *)value->as.string; }\n",
+        "void *__sev_unbox_ptr(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_COLLECTION) abort(); return value->as.pointer; }\n",
+        "static double sev_number(sev_value *value) { if (!value) abort(); if (value->kind == SEV_FLOAT) return value->as.f64; if (value->kind == SEV_INT) return (double)value->as.i64; abort(); }\n",
+        "void *__sev_value_add(void *left, void *right) { return __sev_box_f64(sev_number(left) + sev_number(right)); }\n",
+        "void *__sev_value_sub(void *left, void *right) { return __sev_box_f64(sev_number(left) - sev_number(right)); }\n",
+        "void *__sev_value_mul(void *left, void *right) { return __sev_box_f64(sev_number(left) * sev_number(right)); }\n",
+        "void *__sev_value_div(void *left, void *right) { return __sev_box_f64(sev_number(left) / sev_number(right)); }\n",
+        "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
+        "  if (!left || !right || left->kind != right->kind) return false;\n",
+        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; }\n",
+        "  return false;\n",
+        "}\n",
+        "void *__sev_collection_new(int64_t kind) { sev_collection *value = sev_allocate(sizeof(*value)); value->kind = kind; return value; }\n",
+        "void __sev_collection_push(void *raw, void *item) { sev_collection *value = raw; if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->items = realloc(value->items, (size_t)value->capacity * sizeof(*value->items)); if (!value->items) abort(); } value->items[value->size++] = item; }\n",
+        "void *__sev_collection_get(void *raw, int64_t index) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); return value->items[index]; }\n",
+        "void __sev_collection_set(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); value->items[index] = item; }\n",
+        "int64_t __sev_collection_size(void *raw) { sev_collection *value = raw; if (!value) abort(); return value->size; }\n",
+        "bool __sev_set_contains(void *raw, void *item) { sev_collection *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->items[i], item)) return true; return false; }\n",
+        "void *__sev_map_new(void) { return sev_allocate(sizeof(sev_map)); }\n",
+        "void __sev_map_insert(void *raw, void *key, void *item) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->keys = realloc(value->keys, (size_t)value->capacity * sizeof(*value->keys)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->keys || !value->values) abort(); } value->keys[value->size] = key; value->values[value->size++] = item; }\n",
+        "void *__sev_map_get(void *raw, void *key) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) return value->values[i]; abort(); }\n",
+        "static void sev_print_collection_inline(void *raw);\n",
+        "void __sev_print_value_inline(void *raw) { sev_value *value = raw; if (!value) { fputs(\"invalid\", stdout); return; } switch (value->kind) { case SEV_INT: printf(\"%ld\", value->as.i64); break; case SEV_FLOAT: printf(\"%.17g\", value->as.f64); break; case SEV_BOOL: fputs(value->as.boolean ? \"true\" : \"false\", stdout); break; case SEV_STRING: fputs(value->as.string, stdout); break; case SEV_COLLECTION: sev_print_collection_inline(value->as.pointer); break; } }\n",
+        "void __sev_print_value(void *raw) { __sev_print_value_inline(raw); fputc('\\n', stdout); }\n",
+        "void __sev_print_space(void) { fputc(' ', stdout); }\n",
+        "void __sev_print_newline(void) { fputc('\\n', stdout); }\n",
+        "static void sev_print_collection_inline(void *raw) { sev_collection *value = raw; char open = value->kind == 1 ? '(' : value->kind == 2 ? '{' : '['; char close = value->kind == 1 ? ')' : value->kind == 2 ? '}' : ']'; fputc(open, stdout); for (int64_t i = 0; i < value->size; ++i) { if (i) fputs(\", \", stdout); __sev_print_value_inline(value->items[i]); } fputc(close, stdout); }\n",
+        "void __sev_print_collection(void *raw) { sev_print_collection_inline(raw); fputc('\\n', stdout); }\n",
+        "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->class_name = class_name; return value; }\n",
+        "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
+        "void *__sev_object_get(void *raw, void *name) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); }\n\n",
+        "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->tag = tag; value->field = field; return value; }\n",
+        "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && strcmp(value->tag, tag) == 0; }\n",
+        "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value) abort(); return value->field; }\n",
+        "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
+    ));
+    let drawable_classes = program
+        .classes
+        .iter()
+        .filter(|class| class.methods.iter().any(|method| method.name == "draw"))
+        .collect::<Vec<_>>();
+    for class in &drawable_classes {
+        writeln!(source, "extern void {}_draw(void *);", class.name).unwrap();
     }
-    let mut source = String::from(
-        "#include <pthread.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdlib.h>\n\n",
-    );
+    source.push_str("void __sev_dispatch_draw(void *raw) { sev_object *value = raw;\n");
+    for class in &drawable_classes {
+        writeln!(
+            source,
+            "  if (strcmp(value->class_name, \"{}\") == 0) {{ {}_draw(raw); return; }}",
+            class.name, class.name
+        )
+        .unwrap();
+    }
+    source.push_str("  abort();\n}\n\n");
     let mut return_types = specs
         .iter()
         .map(|spec| spec.return_type)
