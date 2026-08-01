@@ -1,0 +1,4 @@
+MAX_RETRIES = 3
+PI = 3.1415926
+print(MAX_RETRIES)
+print(PI)

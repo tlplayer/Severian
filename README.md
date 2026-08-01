@@ -76,6 +76,20 @@ that successfully links is retained under the matching `bin/examples` path even
 when its runtime or output check fails. Use `--frontend-only` for diagnostic
 front-end work; it does not establish example completion.
 
+## Example benchmarks
+
+Root-level [`bench/`](bench/) contains equivalent Severian, Rust, and Python
+programs for every example in directories `00` through `07`. The benchmark
+validates exact stdout before measuring compilation and fresh-process execution:
+
+```sh
+python3 bench/run.py
+```
+
+Run `tests/check_bench_examples.sh` for the one-sample correctness gate. The
+gate is exhaustive and remains red when any inventoried example is not a valid
+native executable.
+
 ## Official library
 
 The official library uses flat imports such as `import network` and
