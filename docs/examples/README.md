@@ -41,7 +41,8 @@ For now these are syntax fixtures that define the language target. Once the
 compiler driver exists, each file should be compiled by automated tests, starting
 with parser acceptance and then advancing to semantic checking and MLIR lowering.
 
-Compile every example in lexical order and then run its attached tests:
+Run every example through native acceptance in lexical order and then run its
+attached tests:
 
 ```sh
 tools/check_docs_examples.sh
@@ -49,9 +50,11 @@ tools/check_docs_examples.sh
 
 The script aggregates failures instead of stopping at the first one. It also
 verifies that every `bugs/**/invalid.sev` fixture fails with the diagnostic in
-its adjacent `expected-error.txt` file. Add `--native` to compile and execute
-programs containing `main()`, compare them with adjacent `.stdout` files, and
-publish only verified executables under `bin/examples`. Set
+its adjacent `expected-error.txt` file. Programs containing `main()` are compiled
+and executed by default, compared with adjacent `.stdout` files, and only
+verified executables are published under `bin/examples`. A front-end check is
+reported as such and is not an executable pass. Use `--frontend-only` only for
+diagnostic front-end work. Set
 `SEV=/path/to/sev` to use a specific
 compiler; otherwise the script builds and uses `target/debug/sev`. It exits with
 a nonzero status when any compilation, test, native build, or expected

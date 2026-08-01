@@ -1,4 +1,4 @@
-use severian_hir::{Expression, Instruction};
+use severian_hir::{Expression, Instruction, ValueType};
 use severian_lexer::lex;
 use severian_parser::parse;
 use severian_semantic::{analyze, analyze_with_interfaces};
@@ -71,4 +71,49 @@ fn type_checks_calls_against_imported_package_interfaces() {
     let error = analyze_with_interfaces(&module, &[("math".into(), interface)]).unwrap_err();
 
     assert_eq!(error.message, "expected Float, found String");
+}
+
+#[test]
+fn retains_formatted_string_operands_for_native_lowering() {
+    let source = concat!(
+        "def describe(label: string, value: float) -> string:\n",
+        "    return f\"{label}: {value}\"\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+
+    let Instruction::Return(Some(Expression::Format {
+        template,
+        args,
+        arg_types,
+    })) = &hir.functions[0].instructions[0]
+    else {
+        panic!("expected a formatted return value")
+    };
+    assert_eq!(template, "{label}: {value}");
+    assert_eq!(
+        args,
+        &[
+            Expression::Variable("label".into()),
+            Expression::Variable("value".into()),
+        ]
+    );
+    assert_eq!(arg_types, &[ValueType::String, ValueType::Float]);
+}
+
+#[test]
+fn retains_first_class_function_return_types() {
+    let source = concat!(
+        "def apply(op: fn[int, int, int], left: int, right: int) -> int:\n",
+        "    return op(left, right)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+
+    let Instruction::Return(Some(Expression::CallValue { return_type, .. })) =
+        &hir.functions[0].instructions[0]
+    else {
+        panic!("expected an indirect function call")
+    };
+    assert_eq!(*return_type, ValueType::Int);
 }

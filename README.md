@@ -61,15 +61,18 @@ Every source snippet in the language docs should have a matching file under
 `docs/examples`. Once the parser and driver exist, those files should be compiled
 as part of the test suite.
 
-Run the ordered compile-and-test harness with:
+Run the ordered native acceptance harness with:
 
 ```sh
 tools/check_docs_examples.sh
 ```
 
-Add `--native` to also invoke the MLIR/LLVM native compiler for every accepted
-example containing `main()`. Successful executables mirror the source tree under
-`bin/examples`.
+The harness invokes the MLIR/LLVM native compiler for every accepted example
+containing `main()`, executes it, and compares its output with the adjacent
+`.stdout` fixture. Only that end-to-end result counts as a complete executable
+example. Successful executables mirror the source tree under `bin/examples`.
+Use `--frontend-only` for diagnostic front-end work; it does not establish
+example completion.
 
 ## Official library
 

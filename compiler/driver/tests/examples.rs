@@ -17,7 +17,7 @@ fn severian_files(directory: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn compiles_and_tests_implemented_example_directories() {
+fn checks_and_tests_frontend_example_directories() {
     let root = examples_root();
     let directories = [
         "00-getting-started",
@@ -47,7 +47,7 @@ fn compiles_and_tests_implemented_example_directories() {
 }
 
 #[test]
-fn compiles_all_concurrency_examples() {
+fn checks_all_concurrency_examples_through_the_frontend() {
     let directory = examples_root().join("08-concurrency");
     for fixture in severian_files(&directory) {
         compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));

@@ -3,25 +3,27 @@ set -uo pipefail
 
 usage() {
     cat <<'EOF'
-usage: tools/check_docs_examples.sh [--native]
+usage: tools/check_docs_examples.sh [--frontend-only]
 
-Compile every docs/examples/**/*.sev file in lexical order and run its attached
-Severian tests. Files named invalid.sev must fail with the diagnostic described
-by the adjacent expected-error.txt file.
+Check every docs/examples/**/*.sev file in lexical order, run its attached
+Severian tests, and natively compile and execute every file containing main().
+Files named invalid.sev must fail with the diagnostic described by the adjacent
+expected-error.txt file.
 
 Options:
-  --native  Compile and run files with main(), compare adjacent .stdout files,
-            and publish verified executables under bin/examples/.
+  --frontend-only  Skip native executable acceptance. This mode is diagnostic
+                   only and does not establish that an example is complete.
 
 Set SEV=/path/to/sev to use a specific compiler. Without SEV, the script builds
 and uses target/debug/sev from this workspace.
 EOF
 }
 
-native=false
+native=true
 case "${1:-}" in
     "") ;;
-    --native) native=true ;;
+    --native) ;;
+    --frontend-only) native=false ;;
     -h|--help)
         usage
         exit 0
@@ -118,12 +120,12 @@ for index in "${!examples[@]}"; do
     fi
 
     if ! "$compiler" check "$example" >"$compile_output" 2>&1; then
-        echo "    COMPILE FAIL" >&2
+        echo "    FRONTEND CHECK FAIL" >&2
         print_failure "$compile_output"
         compile_failed=$((compile_failed + 1))
         continue
     fi
-    echo "    COMPILE PASS"
+    echo "    FRONTEND CHECK PASS"
     compile_passed=$((compile_passed + 1))
 
     test_output="$temporary_dir/test-$number.txt"
@@ -199,12 +201,15 @@ done
 echo
 echo "Example summary"
 echo "  Files:                  $total"
-echo "  Compile:                $compile_passed passed, $compile_failed failed"
+echo "  Front-end checks:       $compile_passed passed, $compile_failed failed"
 echo "  Test commands:          $test_passed passed, $test_failed failed"
 echo "  Expected diagnostics:   $expected_error_passed passed, $expected_error_failed failed"
 if [[ "$native" == true ]]; then
     echo "  Native compilation:     $native_passed passed, $native_failed failed, $native_skipped skipped"
     echo "  Native output:          $output_passed passed, $output_failed failed"
+    echo "  Only Native output passes are complete executable examples."
+else
+    echo "  Front-end-only mode does not mark examples complete."
 fi
 
 failures=$((compile_failed + test_failed + expected_error_failed + native_failed + output_failed))

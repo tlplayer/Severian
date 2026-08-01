@@ -279,6 +279,7 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
     let source_mlir = prefix.with_extension("mlir");
     let checked_mlir = prefix.with_extension("checked.mlir");
     let llvm_ir = prefix.with_extension("ll");
+    let task_runtime = prefix.with_extension("tasks.c");
 
     let result = (|| {
         std::fs::write(&source_mlir, compilation.mlir.as_str())?;
@@ -305,14 +306,31 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
                 llvm_ir.as_path(),
             ],
         )?;
-        run_tool(
-            find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
-                .ok_or_else(|| missing_tool("clang"))?,
-            &[llvm_ir.as_path(), Path::new("-o"), output, Path::new("-lm")],
-        )
+        let clang = find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
+            .ok_or_else(|| missing_tool("clang"))?;
+        let runtime_source = severian_lowering::native_task_runtime_source(&compilation.hir);
+        if runtime_source.is_empty() {
+            run_tool(
+                clang,
+                &[llvm_ir.as_path(), Path::new("-o"), output, Path::new("-lm")],
+            )
+        } else {
+            std::fs::write(&task_runtime, runtime_source)?;
+            run_tool(
+                clang,
+                &[
+                    llvm_ir.as_path(),
+                    task_runtime.as_path(),
+                    Path::new("-o"),
+                    output,
+                    Path::new("-lm"),
+                    Path::new("-pthread"),
+                ],
+            )
+        }
     })();
 
-    for temporary in [&source_mlir, &checked_mlir, &llvm_ir] {
+    for temporary in [&source_mlir, &checked_mlir, &llvm_ir, &task_runtime] {
         let _ = std::fs::remove_file(temporary);
     }
 
@@ -688,8 +706,13 @@ fn walk_expression<'expression>(
                 walk_expression(arg, visit);
             }
         }
-        Expression::CallValue { callee, args } => {
+        Expression::CallValue { callee, args, .. } => {
             walk_expression(callee, visit);
+            for arg in args {
+                walk_expression(arg, visit);
+            }
+        }
+        Expression::Format { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
             }
@@ -703,8 +726,7 @@ fn walk_expression<'expression>(
         | Expression::Boolean(_)
         | Expression::String(_)
         | Expression::Variable(_)
-        | Expression::Function(_)
-        | Expression::Format(_) => {}
+        | Expression::Function(_) => {}
     }
 }
 
@@ -1243,7 +1265,7 @@ fn evaluate(
             let index = evaluate(program, index, variables, write_line)?;
             index_value(object, index)
         }
-        Expression::Format(template) => {
+        Expression::Format { template, .. } => {
             let mut formatted = template.clone();
             for (name, value) in variables {
                 formatted = formatted.replace(&format!("{{{name}}}"), &display_value(value));
@@ -1304,7 +1326,7 @@ fn evaluate(
             }
             execute_call(program, function, args, chaos_event, write_line)
         }
-        Expression::CallValue { callee, args } => {
+        Expression::CallValue { callee, args, .. } => {
             let Value::Function(function) = evaluate(program, callee, variables, write_line)?
             else {
                 return Err(CompileError::Execution("value is not callable".into()));

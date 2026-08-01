@@ -11,6 +11,12 @@ const VERIFIED_EXAMPLES: &[&str] = &[
     "01-values-control/02-if-while-for.sev",
     "01-values-control/03-basic-functions.sev",
     "01-values-control/04-while-initializer.sev",
+    "02-functions-modules/01-signatures.sev",
+    "02-functions-modules/02-first-class-functions.sev",
+    "02-functions-modules/03-union-parameters.sev",
+    "08-concurrency/01-async-await.sev",
+    "08-concurrency/04-unsafe-async-boundary.sev",
+    "08-concurrency/07-channel-send-receive.sev",
     "16-compiler-stages/parser-placeholder.sev",
 ];
 

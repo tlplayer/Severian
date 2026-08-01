@@ -42,12 +42,14 @@ struct Signature {
 struct SignatureParameter {
     name: String,
     ty: ValueType,
+    function_return: Option<ValueType>,
     default: Option<Expr>,
 }
 
 #[derive(Clone, Copy)]
 struct Binding {
     ty: ValueType,
+    function_return: Option<ValueType>,
     mutable: bool,
     field: bool,
 }
@@ -173,6 +175,7 @@ pub fn analyze_with_interfaces(
                 binding.name.name.clone(),
                 Binding {
                     ty,
+                    function_return: None,
                     mutable: false,
                     field: false,
                 },
@@ -209,6 +212,7 @@ pub fn analyze_with_interfaces(
                 parameter.name.clone(),
                 Binding {
                     ty: parameter.ty,
+                    function_return: parameter.function_return,
                     mutable: false,
                     field: false,
                 },
@@ -384,6 +388,7 @@ fn lower_class_function(
             field.clone(),
             Binding {
                 ty: ValueType::Any,
+                function_return: None,
                 mutable: true,
                 field: true,
             },
@@ -408,6 +413,7 @@ fn lower_class_function(
             param.name.name.clone(),
             Binding {
                 ty,
+                function_return: function_return_type(param.ty.as_ref()),
                 mutable: false,
                 field: false,
             },
@@ -655,6 +661,7 @@ fn lower_block(
                         binding.name.name.clone(),
                         Binding {
                             ty,
+                            function_return: None,
                             mutable: binding.kind == LetKind::Changeable,
                             field: false,
                         },
@@ -683,6 +690,7 @@ fn lower_block(
                         name.name.clone(),
                         Binding {
                             ty: ValueType::Any,
+                            function_return: None,
                             mutable: false,
                             field: false,
                         },
@@ -736,6 +744,7 @@ fn lower_block(
                     binding.name.name.clone(),
                     Binding {
                         ty: ValueType::Any,
+                        function_return: None,
                         mutable: false,
                         field: false,
                     },
@@ -1202,6 +1211,7 @@ fn lower_expression(
                 comprehension.variable.name.clone(),
                 Binding {
                     ty: ValueType::Any,
+                    function_return: None,
                     mutable: false,
                     field: false,
                 },
@@ -1299,6 +1309,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
         "chaos".into(),
         Binding {
             ty: ValueType::Any,
+            function_return: None,
             mutable: false,
             field: false,
         },
@@ -1309,6 +1320,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
                 name.into(),
                 Binding {
                     ty: ValueType::String,
+                    function_return: None,
                     mutable: false,
                     field: false,
                 },
@@ -1418,6 +1430,7 @@ fn lower_call(
             Expression::CallValue {
                 callee: Box::new(callee),
                 args,
+                return_type: ValueType::Any,
             },
             ValueType::Any,
         ));
@@ -1485,7 +1498,15 @@ fn lower_call(
             let Expr::Literal(Literal::String { value, .. }) = &call.args[0].value else {
                 unreachable!()
             };
-            return Ok((Expression::Format(value.clone()), ValueType::String));
+            let (args, arg_types) = lower_format_args(value, scope, call.span)?;
+            return Ok((
+                Expression::Format {
+                    template: value.clone(),
+                    args,
+                    arg_types,
+                },
+                ValueType::String,
+            ));
         }
         _ => None,
     };
@@ -1510,6 +1531,10 @@ fn lower_call(
         .get(&callee.name)
         .is_some_and(|binding| binding.ty == ValueType::Function)
     {
+        let return_type = scope
+            .get(&callee.name)
+            .and_then(|binding| binding.function_return)
+            .unwrap_or(ValueType::Any);
         let args = call
             .args
             .iter()
@@ -1519,8 +1544,9 @@ fn lower_call(
             Expression::CallValue {
                 callee: Box::new(Expression::Variable(callee.name.clone())),
                 args,
+                return_type,
             },
-            ValueType::Any,
+            return_type,
         ));
     }
     if callee
@@ -1611,6 +1637,46 @@ fn lower_declared_call(
     ))
 }
 
+fn lower_format_args(
+    template: &str,
+    scope: &HashMap<String, Binding>,
+    span: Span,
+) -> Result<(Vec<Expression>, Vec<ValueType>), SemanticError> {
+    let mut args = Vec::new();
+    let mut arg_types = Vec::new();
+    let mut remainder = template;
+
+    while let Some(open) = remainder.find('{') {
+        remainder = &remainder[open + 1..];
+        let close = remainder
+            .find('}')
+            .ok_or_else(|| error(span, "formatted string has an unmatched `{`"))?;
+        let name = &remainder[..close];
+        if name.is_empty()
+            || !name.bytes().enumerate().all(|(index, byte)| {
+                byte == b'_'
+                    || byte.is_ascii_alphanumeric() && (index > 0 || !byte.is_ascii_digit())
+            })
+        {
+            return Err(error(
+                span,
+                format!("unsupported formatted string field `{{{name}}}`"),
+            ));
+        }
+        let binding = scope
+            .get(name)
+            .ok_or_else(|| error(span, format!("unknown formatted string field `{name}`")))?;
+        args.push(Expression::Variable(name.into()));
+        arg_types.push(binding.ty);
+        remainder = &remainder[close + 1..];
+    }
+
+    if remainder.contains('}') {
+        return Err(error(span, "formatted string has an unmatched `}`"));
+    }
+    Ok((args, arg_types))
+}
+
 fn lower_collection(
     elements: &[Expr],
     scope: &HashMap<String, Binding>,
@@ -1639,6 +1705,7 @@ fn lower_signature(
                     .as_ref()
                     .ok_or_else(|| error(param.span, "parameters require a type"))
                     .and_then(lower_type)?,
+                function_return: function_return_type(param.ty.as_ref()),
                 default: param.default.clone(),
             })
         })
@@ -1648,6 +1715,18 @@ fn lower_signature(
         .transpose()?
         .unwrap_or(ValueType::Unit);
     Ok(Signature { params, returns })
+}
+
+fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
+    let Type::Named(path) = ty? else {
+        return None;
+    };
+    if path.segments.first()?.name != "fn" {
+        return None;
+    }
+    path.args
+        .last()
+        .and_then(|argument| lower_type(&argument.ty).ok())
 }
 
 fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
@@ -1792,6 +1871,7 @@ fn lower_pattern(
                 name.name.clone(),
                 Binding {
                     ty: ValueType::Any,
+                    function_return: None,
                     mutable: false,
                     field: false,
                 },
@@ -1822,6 +1902,7 @@ fn lower_pattern(
                                     field.into(),
                                     Binding {
                                         ty: ValueType::Any,
+                                        function_return: None,
                                         mutable: false,
                                         field: false,
                                     },
@@ -1841,6 +1922,7 @@ fn lower_pattern(
                     name.clone(),
                     Binding {
                         ty: ValueType::Any,
+                        function_return: None,
                         mutable: false,
                         field: false,
                     },

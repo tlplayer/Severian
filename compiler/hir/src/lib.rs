@@ -89,7 +89,7 @@ pub enum TestMode {
     Integration,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueType {
     Int,
     Float,
@@ -195,7 +195,11 @@ pub enum Expression {
         object: Box<Expression>,
         index: Box<Expression>,
     },
-    Format(String),
+    Format {
+        template: String,
+        args: Vec<Expression>,
+        arg_types: Vec<ValueType>,
+    },
     PrintArgs(Vec<Expression>),
     Construct {
         class: String,
@@ -248,6 +252,7 @@ pub enum Expression {
     CallValue {
         callee: Box<Expression>,
         args: Vec<Expression>,
+        return_type: ValueType,
     },
 }
 

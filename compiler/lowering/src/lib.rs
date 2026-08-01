@@ -4,7 +4,7 @@ use severian_hir::{
     AssignmentOp, BinaryOp, Expression, Function, Instruction, Program, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 pub fn lower(program: &Program) -> Module {
@@ -32,8 +32,55 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.mlir.global internal constant @__sev_bool_false(\"false\\00\")\n",
         "  llvm.func @puts(!llvm.ptr) -> i32\n",
         "  llvm.func @printf(!llvm.ptr, ...) -> i32\n\n",
+        "  llvm.func @snprintf(!llvm.ptr, i64, !llvm.ptr, ...) -> i32\n",
+        "  llvm.func @malloc(i64) -> !llvm.ptr\n",
+        "  llvm.func @strtod(!llvm.ptr, !llvm.ptr) -> f64\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
+
+    let task_specs = task_specs(program);
+    let uses_channels = uses_channels(program);
+    let mut await_types = HashSet::new();
+    for task in &task_specs {
+        write!(output, "  llvm.func @__sev_task_spawn_{}(", task.function).unwrap();
+        for (index, ty) in task.params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(mlir_type(*ty));
+        }
+        output.push_str(") -> !llvm.ptr\n");
+        await_types.insert(task.return_type);
+    }
+    for ty in await_types {
+        if ty == ValueType::Unit {
+            output.push_str("  llvm.func @__sev_task_await_unit(!llvm.ptr)\n");
+        } else {
+            writeln!(
+                output,
+                "  llvm.func @__sev_task_await_{}(!llvm.ptr) -> {}",
+                task_type_suffix(ty),
+                mlir_type(ty)
+            )
+            .unwrap();
+        }
+    }
+    if uses_channels {
+        output.push_str(concat!(
+            "  llvm.func @__sev_channel_create(i64) -> !llvm.ptr\n",
+            "  llvm.func @__sev_channel_send_ptr_async(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_channel_receive_ptr(!llvm.ptr) -> !llvm.ptr\n",
+        ));
+        if !task_specs
+            .iter()
+            .any(|task| task.return_type == ValueType::Unit)
+        {
+            output.push_str("  llvm.func @__sev_task_await_unit(!llvm.ptr)\n");
+        }
+    }
+    if !task_specs.is_empty() || uses_channels {
+        output.push('\n');
+    }
 
     let function_returns = program
         .functions
@@ -80,6 +127,8 @@ fn lower_function(
         output,
         strings,
         function_returns,
+        task_results: HashMap::new(),
+        channel_types: HashMap::new(),
         variables: function
             .params
             .iter()
@@ -116,6 +165,8 @@ struct LowerContext<'a> {
     output: &'a mut String,
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
+    task_results: HashMap<String, ValueType>,
+    channel_types: HashMap<String, ValueType>,
     variables: HashMap<String, (String, ValueType)>,
     next_value: usize,
     next_block: usize,
@@ -324,8 +375,16 @@ impl LowerContext<'_> {
                 (result, ValueType::String)
             }
             Expression::Variable(name) => self.variables.get(name).cloned().unwrap(),
-            Expression::Function(_)
-            | Expression::List(_)
+            Expression::Function(name) => {
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.addressof @{name} : !llvm.ptr"
+                )
+                .unwrap();
+                (result, ValueType::Function)
+            }
+            Expression::List(_)
             | Expression::Tuple(_)
             | Expression::Map(_)
             | Expression::Set(_)
@@ -334,13 +393,114 @@ impl LowerContext<'_> {
             | Expression::Construct { .. }
             | Expression::Member { .. }
             | Expression::MethodCall { .. }
-            | Expression::Task(_)
-            | Expression::Await(_)
-            | Expression::Channel(_)
-            | Expression::Send { .. }
             | Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Task(value) => {
+                if let Expression::Send { value, channel } = value.as_ref() {
+                    let (value, value_type) = self.lower_expression(value);
+                    let (channel, _) = self.lower_expression(channel);
+                    self.channel_types.insert(channel.clone(), value_type);
+                    let result = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @__sev_channel_send_ptr_async({value}, {channel}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr"
+                    )
+                    .unwrap();
+                    self.task_results.insert(result.clone(), ValueType::Unit);
+                    return (result, ValueType::Any);
+                }
+                let Expression::Call { function, args } = value.as_ref() else {
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                    return (result, ValueType::Any);
+                };
+                let args = args
+                    .iter()
+                    .map(|argument| self.lower_expression(argument))
+                    .collect::<Vec<_>>();
+                let values = args
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = args
+                    .iter()
+                    .map(|(_, ty)| mlir_type(*ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let return_type = self
+                    .function_returns
+                    .get(function)
+                    .copied()
+                    .unwrap_or(ValueType::Any);
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_task_spawn_{function}({values}) : ({types}) -> !llvm.ptr"
+                )
+                .unwrap();
+                self.task_results.insert(result.clone(), return_type);
+                (result, ValueType::Any)
+            }
+            Expression::Await(value) => {
+                let (task, _) = self.lower_expression(value);
+                let return_type = self.task_results.remove(&task);
+                if let Some(channel_type) = self.channel_types.get(&task).copied() {
+                    let result = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @__sev_channel_receive_ptr({task}) : (!llvm.ptr) -> !llvm.ptr"
+                    )
+                    .unwrap();
+                    return (result, channel_type);
+                }
+                let Some(return_type) = return_type else {
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                    return (result, ValueType::Any);
+                };
+                if return_type == ValueType::Unit {
+                    writeln!(
+                        self.output,
+                        "    llvm.call @__sev_task_await_unit({task}) : (!llvm.ptr) -> ()"
+                    )
+                    .unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_task_await_{}({task}) : (!llvm.ptr) -> {}",
+                    task_type_suffix(return_type),
+                    mlir_type(return_type)
+                )
+                .unwrap();
+                (result, return_type)
+            }
+            Expression::Channel(capacity) => {
+                let (capacity, _) = self.lower_expression(capacity);
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_channel_create({capacity}) : (i64) -> !llvm.ptr"
+                )
+                .unwrap();
+                (result, ValueType::Any)
+            }
+            Expression::Send { value, channel } => {
+                let (value, value_type) = self.lower_expression(value);
+                let (channel, _) = self.lower_expression(channel);
+                self.channel_types.insert(channel.clone(), value_type);
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_channel_send_ptr_async({value}, {channel}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr"
+                )
+                .unwrap();
+                self.task_results.insert(result.clone(), ValueType::Unit);
                 (result, ValueType::Any)
             }
             Expression::Variant { .. } => {
@@ -357,16 +517,98 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, ValueType::Any)
             }
-            Expression::Format(value) => {
+            Expression::Format {
+                template,
+                args,
+                arg_types,
+            } => {
+                let native_template = native_format_template(template, arg_types);
                 let index = self
                     .strings
                     .iter()
-                    .position(|candidate| candidate == value)
+                    .position(|candidate| candidate == &native_template)
                     .unwrap();
+                let format = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {format} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
+                )
+                .unwrap();
+                let mut lowered_args = Vec::new();
+                for argument in args {
+                    let (mut value, ty) = self.lower_expression(argument);
+                    let native_type = if ty == ValueType::Bool {
+                        let promoted = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {promoted} = llvm.zext {value} : i1 to i32"
+                        )
+                        .unwrap();
+                        value = promoted;
+                        "i32"
+                    } else {
+                        mlir_type(ty)
+                    };
+                    lowered_args.push((value, native_type));
+                }
+                let values = lowered_args
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = lowered_args
+                    .iter()
+                    .map(|(_, ty)| *ty)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let suffix_values = if values.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {values}")
+                };
+                let suffix_types = if types.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {types}")
+                };
+                let empty = self.fresh_value();
+                writeln!(self.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                let zero = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                let required = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {required} = llvm.call @snprintf({empty}, {zero}, {format}{suffix_values}) vararg(!llvm.func<i32 (!llvm.ptr, i64, !llvm.ptr, ...)>) : (!llvm.ptr, i64, !llvm.ptr{suffix_types}) -> i32"
+                )
+                .unwrap();
+                let required_wide = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {required_wide} = llvm.zext {required} : i32 to i64"
+                )
+                .unwrap();
+                let one = self.fresh_value();
+                writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i64) : i64").unwrap();
+                let capacity = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {capacity} = llvm.add {required_wide}, {one} : i64"
+                )
+                .unwrap();
                 let result = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
+                    "    {result} = llvm.call @malloc({capacity}) : (i64) -> !llvm.ptr"
+                )
+                .unwrap();
+                let status = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {status} = llvm.call @snprintf({result}, {capacity}, {format}{suffix_values}) vararg(!llvm.func<i32 (!llvm.ptr, i64, !llvm.ptr, ...)>) : (!llvm.ptr, i64, !llvm.ptr{suffix_types}) -> i32"
                 )
                 .unwrap();
                 (result, ValueType::String)
@@ -408,6 +650,42 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
+                if function == "float" {
+                    let (value, ty) = args.first().cloned().unwrap();
+                    return match ty {
+                        ValueType::Float => (value, ValueType::Float),
+                        ValueType::Int => {
+                            let result = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {result} = llvm.sitofp {value} : i64 to f64"
+                            )
+                            .unwrap();
+                            (result, ValueType::Float)
+                        }
+                        ValueType::String | ValueType::Any => {
+                            let end = self.fresh_value();
+                            writeln!(self.output, "    {end} = llvm.mlir.zero : !llvm.ptr")
+                                .unwrap();
+                            let result = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {result} = llvm.call @strtod({value}, {end}) : (!llvm.ptr, !llvm.ptr) -> f64"
+                            )
+                            .unwrap();
+                            (result, ValueType::Float)
+                        }
+                        _ => {
+                            let result = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {result} = llvm.mlir.constant(0.0 : f64) : f64"
+                            )
+                            .unwrap();
+                            (result, ValueType::Float)
+                        }
+                    };
+                }
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -449,14 +727,42 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, return_type)
             }
-            Expression::CallValue { .. } => {
+            Expression::CallValue {
+                callee,
+                args,
+                return_type,
+            } => {
+                let (callee, _) = self.lower_expression(callee);
+                let args = args
+                    .iter()
+                    .map(|argument| self.lower_expression(argument))
+                    .collect::<Vec<_>>();
+                let values = args
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = args
+                    .iter()
+                    .map(|(_, ty)| mlir_type(*ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if *return_type == ValueType::Unit {
+                    writeln!(
+                        self.output,
+                        "    llvm.call {callee}({values}) : !llvm.ptr, ({types}) -> ()"
+                    )
+                    .unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
                 let result = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.mlir.constant(0 : i64) : i64"
+                    "    {result} = llvm.call {callee}({values}) : !llvm.ptr, ({types}) -> {}",
+                    mlir_type(*return_type)
                 )
                 .unwrap();
-                (result, ValueType::Any)
+                (result, *return_type)
             }
             Expression::Binary { left, op, right } => {
                 let left = self.lower_expression(left);
@@ -897,7 +1203,16 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(argument, strings);
             }
         }
-        Expression::Format(value) => strings.push(value.clone()),
+        Expression::Format {
+            template,
+            args,
+            arg_types,
+        } => {
+            strings.push(native_format_template(template, arg_types));
+            for arg in args {
+                collect_expression_strings(arg, strings);
+            }
+        }
         Expression::List(values) | Expression::Tuple(values) | Expression::Set(values) => {
             for value in values {
                 collect_expression_strings(value, strings);
@@ -926,7 +1241,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
             }
         }
         Expression::Unary { expression, .. } => collect_expression_strings(expression, strings),
-        Expression::CallValue { callee, args } => {
+        Expression::CallValue { callee, args, .. } => {
             collect_expression_strings(callee, strings);
             for arg in args {
                 collect_expression_strings(arg, strings);
@@ -959,6 +1274,450 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
         }
         Expression::ChaosRule { value, .. } => collect_expression_strings(value, strings),
         _ => {}
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskSpec {
+    function: String,
+    params: Vec<ValueType>,
+    return_type: ValueType,
+}
+
+const CHANNEL_MARKER: &str = "<severian-native-channel>";
+
+fn task_specs(program: &Program) -> Vec<TaskSpec> {
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| (function.name.as_str(), function))
+        .collect::<HashMap<_, _>>();
+    let mut names = Vec::new();
+    for function in &program.functions {
+        collect_task_names(&function.instructions, &mut names);
+    }
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let function = functions.get(name.as_str())?;
+            Some(TaskSpec {
+                function: name,
+                params: function.params.iter().map(|param| param.ty).collect(),
+                return_type: function.return_type,
+            })
+        })
+        .collect()
+}
+
+fn uses_channels(program: &Program) -> bool {
+    let mut names = Vec::new();
+    for function in &program.functions {
+        collect_task_names(&function.instructions, &mut names);
+    }
+    names.iter().any(|name| name == CHANNEL_MARKER)
+}
+
+fn collect_task_names(instructions: &[Instruction], names: &mut Vec<String>) {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { value, .. }
+            | Instruction::TryLet { value, .. }
+            | Instruction::Print(value)
+            | Instruction::Assert(value)
+            | Instruction::Evaluate(value) => collect_task_names_expression(value, names),
+            Instruction::Assign { target, value, .. } => {
+                collect_task_names_expression(target, names);
+                collect_task_names_expression(value, names);
+            }
+            Instruction::Return(value) => {
+                if let Some(value) = value {
+                    collect_task_names_expression(value, names);
+                }
+            }
+            Instruction::If {
+                condition,
+                then_instructions,
+                else_instructions,
+            } => {
+                collect_task_names_expression(condition, names);
+                collect_task_names(then_instructions, names);
+                collect_task_names(else_instructions, names);
+            }
+            Instruction::While {
+                setup,
+                capabilities,
+                condition,
+                instructions,
+            } => {
+                if let Some(setup) = setup {
+                    collect_task_names(std::slice::from_ref(setup), names);
+                }
+                for capability in capabilities {
+                    collect_task_names_expression(capability, names);
+                }
+                collect_task_names_expression(condition, names);
+                collect_task_names(instructions, names);
+            }
+            Instruction::For {
+                iterable,
+                instructions,
+                ..
+            } => {
+                collect_task_names_expression(iterable, names);
+                collect_task_names(instructions, names);
+            }
+            Instruction::Switch { value, arms } => {
+                collect_task_names_expression(value, names);
+                for arm in arms {
+                    if let Some(source) = &arm.source {
+                        collect_task_names_expression(source, names);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        collect_task_names_expression(guard, names);
+                    }
+                    collect_task_names(&arm.instructions, names);
+                }
+            }
+            Instruction::ChannelSwitch {
+                channels,
+                setup,
+                repeat_condition,
+                arms,
+            } => {
+                for channel in channels {
+                    collect_task_names_expression(channel, names);
+                }
+                if let Some(setup) = setup {
+                    collect_task_names(std::slice::from_ref(setup), names);
+                }
+                if let Some(condition) = repeat_condition {
+                    collect_task_names_expression(condition, names);
+                }
+                for arm in arms {
+                    if let Some(source) = &arm.source {
+                        collect_task_names_expression(source, names);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        collect_task_names_expression(guard, names);
+                    }
+                    collect_task_names(&arm.instructions, names);
+                }
+            }
+            Instruction::With {
+                resources,
+                instructions,
+            } => {
+                for resource in resources {
+                    collect_task_names_expression(resource, names);
+                }
+                collect_task_names(instructions, names);
+            }
+        }
+    }
+}
+
+fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String>) {
+    match expression {
+        Expression::Task(value) => {
+            if let Expression::Call { function, .. } = value.as_ref() {
+                names.push(function.clone());
+            }
+            collect_task_names_expression(value, names);
+        }
+        Expression::List(values)
+        | Expression::Tuple(values)
+        | Expression::Set(values)
+        | Expression::PrintArgs(values)
+        | Expression::Construct { args: values, .. }
+        | Expression::Variant { fields: values, .. } => {
+            for value in values {
+                collect_task_names_expression(value, names);
+            }
+        }
+        Expression::Map(entries) => {
+            for (key, value) in entries {
+                collect_task_names_expression(key, names);
+                collect_task_names_expression(value, names);
+            }
+        }
+        Expression::Index { object, index }
+        | Expression::Binary {
+            left: object,
+            right: index,
+            ..
+        } => {
+            collect_task_names_expression(object, names);
+            collect_task_names_expression(index, names);
+        }
+        Expression::Member { object, .. }
+        | Expression::Unary {
+            expression: object, ..
+        }
+        | Expression::Await(object)
+        | Expression::ChaosRule { value: object, .. } => {
+            collect_task_names_expression(object, names)
+        }
+        Expression::Channel(capacity) => {
+            names.push(CHANNEL_MARKER.to_owned());
+            collect_task_names_expression(capacity, names);
+        }
+        Expression::MethodCall { object, args, .. } => {
+            collect_task_names_expression(object, names);
+            for arg in args {
+                collect_task_names_expression(arg, names);
+            }
+        }
+        Expression::Send { value, channel } => {
+            names.push(CHANNEL_MARKER.to_owned());
+            collect_task_names_expression(value, names);
+            collect_task_names_expression(channel, names);
+        }
+        Expression::ListComprehension {
+            element,
+            iterable,
+            condition,
+            ..
+        } => {
+            collect_task_names_expression(element, names);
+            collect_task_names_expression(iterable, names);
+            if let Some(condition) = condition {
+                collect_task_names_expression(condition, names);
+            }
+        }
+        Expression::Call { args, .. } => {
+            for arg in args {
+                collect_task_names_expression(arg, names);
+            }
+        }
+        Expression::CallValue { callee, args, .. } => {
+            collect_task_names_expression(callee, names);
+            for arg in args {
+                collect_task_names_expression(arg, names);
+            }
+        }
+        Expression::Format { args, .. } => {
+            for arg in args {
+                collect_task_names_expression(arg, names);
+            }
+        }
+        Expression::Integer(_)
+        | Expression::Float(_)
+        | Expression::Boolean(_)
+        | Expression::String(_)
+        | Expression::Variable(_)
+        | Expression::Function(_) => {}
+    }
+}
+
+/// C bridge linked beside generated LLVM IR to execute Severian tasks on pthreads.
+pub fn native_task_runtime_source(program: &Program) -> String {
+    let specs = task_specs(program);
+    let uses_channels = uses_channels(program);
+    if specs.is_empty() && !uses_channels {
+        return String::new();
+    }
+    let mut source = String::from(
+        "#include <pthread.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdlib.h>\n\n",
+    );
+    let mut return_types = specs
+        .iter()
+        .map(|spec| spec.return_type)
+        .collect::<HashSet<_>>();
+    if uses_channels {
+        return_types.insert(ValueType::Unit);
+    }
+    for ty in &return_types {
+        if *ty == ValueType::Unit {
+            source.push_str("typedef struct { pthread_t thread; } sev_task_unit;\n");
+        } else {
+            writeln!(
+                source,
+                "typedef struct {{ pthread_t thread; {} result; }} sev_task_{};",
+                c_type(*ty),
+                task_type_suffix(*ty)
+            )
+            .unwrap();
+        }
+    }
+    source.push('\n');
+    for spec in &specs {
+        let result_type = c_type(spec.return_type);
+        write!(source, "extern {result_type} {}(", spec.function).unwrap();
+        if spec.params.is_empty() {
+            source.push_str("void");
+        } else {
+            for (index, ty) in spec.params.iter().enumerate() {
+                if index > 0 {
+                    source.push_str(", ");
+                }
+                source.push_str(c_type(*ty));
+            }
+        }
+        source.push_str(");\n");
+        let header = if spec.return_type == ValueType::Unit {
+            "sev_task_unit".to_owned()
+        } else {
+            format!("sev_task_{}", task_type_suffix(spec.return_type))
+        };
+        writeln!(source, "typedef struct {{ {header} base;").unwrap();
+        for (index, ty) in spec.params.iter().enumerate() {
+            writeln!(source, "  {} arg_{index};", c_type(*ty)).unwrap();
+        }
+        writeln!(source, "}} sev_task_frame_{};", spec.function).unwrap();
+        writeln!(
+            source,
+            "static void *__sev_task_worker_{}(void *raw) {{",
+            spec.function
+        )
+        .unwrap();
+        writeln!(source, "  sev_task_frame_{} *task = raw;", spec.function).unwrap();
+        let args = (0..spec.params.len())
+            .map(|index| format!("task->arg_{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if spec.return_type == ValueType::Unit {
+            writeln!(source, "  {}({args});", spec.function).unwrap();
+        } else {
+            writeln!(source, "  task->base.result = {}({args});", spec.function).unwrap();
+        }
+        source.push_str("  return NULL;\n}\n");
+        write!(source, "void *__sev_task_spawn_{}(", spec.function).unwrap();
+        for (index, ty) in spec.params.iter().enumerate() {
+            if index > 0 {
+                source.push_str(", ");
+            }
+            write!(source, "{} arg_{index}", c_type(*ty)).unwrap();
+        }
+        if spec.params.is_empty() {
+            source.push_str("void");
+        }
+        source.push_str(") {\n");
+        writeln!(
+            source,
+            "  sev_task_frame_{} *task = calloc(1, sizeof(*task));",
+            spec.function
+        )
+        .unwrap();
+        source.push_str("  if (!task) abort();\n");
+        for index in 0..spec.params.len() {
+            writeln!(source, "  task->arg_{index} = arg_{index};").unwrap();
+        }
+        writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_task_worker_{}, task) != 0) abort();", spec.function).unwrap();
+        source.push_str("  return task;\n}\n\n");
+    }
+    if uses_channels {
+        source.push_str(concat!(
+            "typedef struct {\n",
+            "  pthread_mutex_t mutex;\n",
+            "  pthread_cond_t readable;\n",
+            "  pthread_cond_t writable;\n",
+            "  void **items;\n",
+            "  int64_t capacity;\n",
+            "  int64_t head;\n",
+            "  int64_t tail;\n",
+            "  int64_t count;\n",
+            "} sev_channel;\n",
+            "typedef struct { sev_task_unit base; sev_channel *channel; void *value; } sev_send_task;\n\n",
+            "void *__sev_channel_create(int64_t capacity) {\n",
+            "  if (capacity <= 0) abort();\n",
+            "  sev_channel *channel = calloc(1, sizeof(*channel));\n",
+            "  if (!channel) abort();\n",
+            "  channel->items = calloc((size_t)capacity, sizeof(*channel->items));\n",
+            "  if (!channel->items) abort();\n",
+            "  channel->capacity = capacity;\n",
+            "  pthread_mutex_init(&channel->mutex, NULL);\n",
+            "  pthread_cond_init(&channel->readable, NULL);\n",
+            "  pthread_cond_init(&channel->writable, NULL);\n",
+            "  return channel;\n",
+            "}\n",
+            "static void *__sev_channel_send_worker(void *raw) {\n",
+            "  sev_send_task *task = raw;\n",
+            "  sev_channel *channel = task->channel;\n",
+            "  pthread_mutex_lock(&channel->mutex);\n",
+            "  while (channel->count == channel->capacity) pthread_cond_wait(&channel->writable, &channel->mutex);\n",
+            "  channel->items[channel->tail] = task->value;\n",
+            "  channel->tail = (channel->tail + 1) % channel->capacity;\n",
+            "  channel->count += 1;\n",
+            "  pthread_cond_signal(&channel->readable);\n",
+            "  pthread_mutex_unlock(&channel->mutex);\n",
+            "  return NULL;\n",
+            "}\n",
+            "void *__sev_channel_send_ptr_async(void *value, void *raw_channel) {\n",
+            "  sev_send_task *task = calloc(1, sizeof(*task));\n",
+            "  if (!task) abort();\n",
+            "  task->channel = raw_channel;\n",
+            "  task->value = value;\n",
+            "  if (pthread_create(&task->base.thread, NULL, __sev_channel_send_worker, task) != 0) abort();\n",
+            "  return task;\n",
+            "}\n",
+            "void *__sev_channel_receive_ptr(void *raw_channel) {\n",
+            "  sev_channel *channel = raw_channel;\n",
+            "  pthread_mutex_lock(&channel->mutex);\n",
+            "  while (channel->count == 0) pthread_cond_wait(&channel->readable, &channel->mutex);\n",
+            "  void *value = channel->items[channel->head];\n",
+            "  channel->head = (channel->head + 1) % channel->capacity;\n",
+            "  channel->count -= 1;\n",
+            "  pthread_cond_signal(&channel->writable);\n",
+            "  pthread_mutex_unlock(&channel->mutex);\n",
+            "  return value;\n",
+            "}\n\n",
+        ));
+    }
+    for ty in return_types {
+        let suffix = task_type_suffix(ty);
+        if ty == ValueType::Unit {
+            source.push_str("void __sev_task_await_unit(void *raw) {\n  sev_task_unit *task = raw;\n  pthread_join(task->thread, NULL);\n  free(task);\n}\n");
+        } else {
+            writeln!(
+                source,
+                "{} __sev_task_await_{suffix}(void *raw) {{",
+                c_type(ty)
+            )
+            .unwrap();
+            writeln!(source, "  sev_task_{suffix} *task = raw;").unwrap();
+            source.push_str("  pthread_join(task->thread, NULL);\n");
+            writeln!(source, "  {} result = task->result;", c_type(ty)).unwrap();
+            source.push_str("  free(task);\n  return result;\n}\n");
+        }
+    }
+    source
+}
+
+fn task_type_suffix(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Int => "i64",
+        ValueType::Float => "f64",
+        ValueType::Bool => "bool",
+        ValueType::Unit => "unit",
+        ValueType::String
+        | ValueType::List
+        | ValueType::Tuple
+        | ValueType::Map
+        | ValueType::Set
+        | ValueType::Function
+        | ValueType::Result
+        | ValueType::Option
+        | ValueType::Any => "ptr",
+    }
+}
+
+fn c_type(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Int => "int64_t",
+        ValueType::Float => "double",
+        ValueType::Bool => "bool",
+        ValueType::Unit => "void",
+        ValueType::String
+        | ValueType::List
+        | ValueType::Tuple
+        | ValueType::Map
+        | ValueType::Set
+        | ValueType::Function
+        | ValueType::Result
+        | ValueType::Option
+        | ValueType::Any => "void *",
     }
 }
 
@@ -1000,4 +1759,27 @@ fn escape_string(value: &str) -> String {
         }
     }
     escaped
+}
+
+fn native_format_template(template: &str, arg_types: &[ValueType]) -> String {
+    let mut output = String::new();
+    let mut remainder = template;
+    let mut index = 0;
+
+    while let Some(open) = remainder.find('{') {
+        output.push_str(&remainder[..open].replace('%', "%%"));
+        let field = &remainder[open + 1..];
+        let close = field.find('}').expect("formatted fields are validated");
+        output.push_str(match arg_types[index] {
+            ValueType::Int => "%ld",
+            ValueType::Float => "%.15g",
+            ValueType::String => "%s",
+            ValueType::Bool => "%d",
+            _ => "%p",
+        });
+        index += 1;
+        remainder = &field[close + 1..];
+    }
+    output.push_str(&remainder.replace('%', "%%"));
+    output
 }
