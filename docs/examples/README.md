@@ -48,13 +48,15 @@ attached tests:
 tools/check_docs_examples.sh
 ```
 
-The script aggregates failures instead of stopping at the first one. It also
-verifies that every `bugs/**/invalid.sev` fixture fails with the diagnostic in
-its adjacent `expected-error.txt` file. Programs containing `main()` are compiled
-and executed by default, compared with adjacent `.stdout` files, and only
-verified executables are published under `bin/examples`. A front-end check is
-reported as such and is not an executable pass. Use `--frontend-only` only for
-diagnostic front-end work. Set
+The script aggregates failures instead of stopping at the first one and does not
+use a curated native subset. Every `.sev` file must declare `main()`, reach valid
+MLIR, link, execute, and match an adjacent `.stdout` file. A missing entry point
+or output fixture is an explicit failure. Successfully linked executables are
+published under `bin/examples` before runtime validation, so a timeout, stderr,
+or output mismatch remains inspectable. The script also verifies every
+`bugs/**/invalid.sev` diagnostic; those files still fail executable acceptance
+because they cannot satisfy the native contract. A front-end check is not an
+executable pass. Use `--frontend-only` only for diagnostic front-end work. Set
 `SEV=/path/to/sev` to use a specific
 compiler; otherwise the script builds and uses `target/debug/sev`. It exits with
 a nonzero status when any compilation, test, native build, or expected

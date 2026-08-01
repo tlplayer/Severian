@@ -6,9 +6,9 @@ usage() {
 usage: tools/check_docs_examples.sh [--frontend-only]
 
 Check every docs/examples/**/*.sev file in lexical order, run its attached
-Severian tests, and natively compile and execute every file containing main().
-Files named invalid.sev must fail with the diagnostic described by the adjacent
-expected-error.txt file.
+Severian tests, and require every file to contain main(), lower through MLIR,
+link, execute, and match an adjacent .stdout fixture. Files named invalid.sev
+must also fail with the diagnostic described by adjacent expected-error.txt.
 
 Options:
   --frontend-only  Skip native executable acceptance. This mode is diagnostic
@@ -74,7 +74,6 @@ expected_error_passed=0
 expected_error_failed=0
 native_passed=0
 native_failed=0
-native_skipped=0
 output_passed=0
 output_failed=0
 
@@ -94,39 +93,34 @@ for index in "${!examples[@]}"; do
         if [[ ! -f "$expected" ]]; then
             echo "    EXPECTED ERROR FAIL (missing $expected)" >&2
             expected_error_failed=$((expected_error_failed + 1))
-            continue
-        fi
-
-        if "$compiler" check "$example" >"$compile_output" 2>&1; then
+        elif "$compiler" check "$example" >"$compile_output" 2>&1; then
             echo "    EXPECTED ERROR FAIL (file compiled successfully)" >&2
             expected_error_failed=$((expected_error_failed + 1))
-            continue
-        fi
-
-        code=$(sed -n '1p' "$expected")
-        span=$(sed -n '2p' "$expected")
-        message=$(sed -n '3p' "$expected")
-        if grep -Fq "$code" "$compile_output" \
-            && grep -Fq "$span" "$compile_output" \
-            && grep -Fq "$message" "$compile_output"; then
-            echo "    EXPECTED ERROR PASS"
-            expected_error_passed=$((expected_error_passed + 1))
         else
-            echo "    EXPECTED ERROR FAIL (diagnostic mismatch)" >&2
-            print_failure "$compile_output"
-            expected_error_failed=$((expected_error_failed + 1))
+            code=$(sed -n '1p' "$expected")
+            span=$(sed -n '2p' "$expected")
+            message=$(sed -n '3p' "$expected")
+            if grep -Fq "$code" "$compile_output" \
+                && grep -Fq "$span" "$compile_output" \
+                && grep -Fq "$message" "$compile_output"; then
+                echo "    EXPECTED ERROR PASS"
+                expected_error_passed=$((expected_error_passed + 1))
+            else
+                echo "    EXPECTED ERROR FAIL (diagnostic mismatch)" >&2
+                print_failure "$compile_output"
+                expected_error_failed=$((expected_error_failed + 1))
+            fi
         fi
-        continue
     fi
 
     if ! "$compiler" check "$example" >"$compile_output" 2>&1; then
         echo "    FRONTEND CHECK FAIL" >&2
         print_failure "$compile_output"
         compile_failed=$((compile_failed + 1))
-        continue
+    else
+        echo "    FRONTEND CHECK PASS"
+        compile_passed=$((compile_passed + 1))
     fi
-    echo "    FRONTEND CHECK PASS"
-    compile_passed=$((compile_passed + 1))
 
     test_output="$temporary_dir/test-$number.txt"
     if "$compiler" test "$example" >"$test_output" 2>&1; then
@@ -141,9 +135,8 @@ for index in "${!examples[@]}"; do
 
     if [[ "$native" == true ]]; then
         if ! grep -Eq '^def[[:space:]]+main\(' "$example"; then
-            echo "    NATIVE SKIP (no main function)"
-            native_skipped=$((native_skipped + 1))
-            continue
+            echo "    NATIVE REQUIREMENT FAIL (missing source main())" >&2
+            native_failed=$((native_failed + 1))
         fi
 
         relative_path=${example#docs/examples/}
@@ -153,7 +146,8 @@ for index in "${!examples[@]}"; do
         temporary_executable="$temporary_dir/example-$number"
         native_output="$temporary_dir/native-$number.txt"
         if "$compiler" compile "$example" -o "$temporary_executable" >"$native_output" 2>&1; then
-            echo "    NATIVE COMPILE PASS"
+            mv -- "$temporary_executable" "$executable"
+            echo "    NATIVE COMPILE PASS ($executable)"
             native_passed=$((native_passed + 1))
         else
             echo "    NATIVE COMPILE FAIL" >&2
@@ -171,7 +165,7 @@ for index in "${!examples[@]}"; do
 
         actual_output="$temporary_dir/stdout-$number.txt"
         actual_error="$temporary_dir/stderr-$number.txt"
-        timeout "${SEV_EXAMPLE_TIMEOUT:-5}" "$temporary_executable" \
+        timeout "${SEV_EXAMPLE_TIMEOUT:-5}" "$executable" \
             >"$actual_output" 2>"$actual_error"
         status=$?
         if (( status != 0 )); then
@@ -192,7 +186,6 @@ for index in "${!examples[@]}"; do
             output_failed=$((output_failed + 1))
             continue
         fi
-        mv -- "$temporary_executable" "$executable"
         echo "    OUTPUT PASS ($executable)"
         output_passed=$((output_passed + 1))
     fi
@@ -205,7 +198,7 @@ echo "  Front-end checks:       $compile_passed passed, $compile_failed failed"
 echo "  Test commands:          $test_passed passed, $test_failed failed"
 echo "  Expected diagnostics:   $expected_error_passed passed, $expected_error_failed failed"
 if [[ "$native" == true ]]; then
-    echo "  Native compilation:     $native_passed passed, $native_failed failed, $native_skipped skipped"
+    echo "  Native compilation:     $native_passed passed, $native_failed failed"
     echo "  Native output:          $output_passed passed, $output_failed failed"
     echo "  Only Native output passes are complete executable examples."
 else

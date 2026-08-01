@@ -67,12 +67,14 @@ Run the ordered native acceptance harness with:
 tools/check_docs_examples.sh
 ```
 
-The harness invokes the MLIR/LLVM native compiler for every accepted example
-containing `main()`, executes it, and compares its output with the adjacent
-`.stdout` fixture. Only that end-to-end result counts as a complete executable
-example. Successful executables mirror the source tree under `bin/examples`.
-Use `--frontend-only` for diagnostic front-end work; it does not establish
-example completion.
+The harness inventories every `.sev` file under `docs/examples`; there is no
+curated native subset. Every file must declare `main()`, reach valid MLIR, link,
+execute, and match an adjacent `.stdout` fixture. Missing entry points, missing
+output fixtures, expected-invalid sources, compiler failures, timeouts, stderr,
+and output mismatches all fail mandatory executable acceptance. Every binary
+that successfully links is retained under the matching `bin/examples` path even
+when its runtime or output check fails. Use `--frontend-only` for diagnostic
+front-end work; it does not establish example completion.
 
 ## Official library
 
