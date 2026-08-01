@@ -33,14 +33,18 @@ fn retains_local_task_placement_after_validating_its_import() {
         "    return 1\n",
         "\n",
         "def main():\n",
-        "    task = async work() with self and local\n",
+        "    with self and local:\n",
+        "        task = async work()\n",
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
+    let Instruction::With { instructions, .. } = &hir.main().unwrap().instructions[0] else {
+        panic!("expected task context");
+    };
     let Instruction::Let {
         value: Expression::Task { placement, .. },
         ..
-    } = &hir.main().unwrap().instructions[0]
+    } = &instructions[0]
     else {
         panic!("expected a task binding");
     };

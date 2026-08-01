@@ -419,12 +419,19 @@ site:
 ```sev
 import distributed
 
-worker = async processShard(values) with self and local
+with self and local:
+    first = async processShard(firstValues)
+    second = async processShard(secondValues)
+    firstResult = await first
+    secondResult = await second
 ```
 
-`local` selects the native local-task backend and is retained on the task spawn
-in MLIR. It is not a decorator: decorators import domain syntax symbols and do
-not wrap a function or select where its body executes.
+The owner and placement are inherited by every bare `async` expression in the
+block. `local` selects the native local-task backend and is retained on each
+task spawn in MLIR. A task outside such a block must keep its explicit
+`with self`/`with runtime` suffix. Placement is not a decorator: decorators
+import domain syntax symbols and do not wrap a function or select where its
+body executes.
 
 Arguments passed to an async call are frozen by default. The child may read
 them, but it cannot mutate the caller's values. Frozen arguments need no lock.

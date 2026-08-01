@@ -37,6 +37,7 @@ pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
         current: 0,
         test_depth: 0,
         unsafe_depth: 0,
+        task_contexts: Vec::new(),
     }
     .parse_module()
 }
@@ -46,6 +47,14 @@ struct Parser<'tokens> {
     current: usize,
     test_depth: usize,
     unsafe_depth: usize,
+    task_contexts: Vec<TaskContext>,
+}
+
+#[derive(Clone)]
+struct TaskContext {
+    owner: TaskOwner,
+    placement: TaskPlacement,
+    captures: Vec<Ident>,
 }
 
 impl Parser<'_> {
@@ -678,7 +687,52 @@ impl Parser<'_> {
                 resources.push(Expr::Identifier(self.expect_identifier("with resource")?));
             }
             self.expect_simple(TokenKind::Colon, "`:` after with resources")?;
-            let body = self.parse_suite("with")?;
+            let identifiers = resources
+                .iter()
+                .filter_map(|resource| {
+                    let Expr::Identifier(identifier) = resource else {
+                        return None;
+                    };
+                    Some(identifier.clone())
+                })
+                .collect::<Vec<_>>();
+            let owner = if identifiers
+                .iter()
+                .any(|identifier| identifier.name == "runtime")
+            {
+                Some(TaskOwner::Runtime)
+            } else if identifiers
+                .iter()
+                .any(|identifier| identifier.name == "self")
+            {
+                Some(TaskOwner::SelfOwned)
+            } else {
+                None
+            };
+            let placement = identifiers
+                .iter()
+                .any(|identifier| identifier.name == "local")
+                .then_some(TaskPlacement::Local);
+            let establishes_task_context = owner.is_some() || placement.is_some();
+            if establishes_task_context {
+                let captures = identifiers
+                    .iter()
+                    .filter(|identifier| {
+                        !matches!(identifier.name.as_str(), "self" | "runtime" | "local")
+                    })
+                    .cloned()
+                    .collect();
+                self.task_contexts.push(TaskContext {
+                    owner: owner.unwrap_or(TaskOwner::SelfOwned),
+                    placement: placement.unwrap_or(TaskPlacement::Default),
+                    captures,
+                });
+            }
+            let body = self.parse_suite("with");
+            if establishes_task_context {
+                self.task_contexts.pop();
+            }
+            let body = body?;
             return Ok(Stmt::With(WithBlock {
                 span: Span::new(start, body.span.end),
                 resources,
@@ -1226,6 +1280,19 @@ impl Parser<'_> {
                 }));
             }
             let value = self.parse_postfix()?;
+            if !self.at(&TokenKind::With) {
+                let context = self.task_contexts.last().cloned().ok_or_else(|| {
+                    self.error("expected `with` after async operation outside a task context")
+                })?;
+                let end = value.span().end;
+                return Ok(Expr::Async(AsyncExpr {
+                    span: Span::new(start, end),
+                    value: Box::new(value),
+                    owner: context.owner,
+                    placement: context.placement,
+                    captures: context.captures,
+                }));
+            }
             self.expect_simple(TokenKind::With, "`with` after async operation")?;
             let owner_name = self.expect_identifier("task owner")?;
             let owner = if owner_name.name == "runtime" {

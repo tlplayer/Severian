@@ -5,16 +5,22 @@ model code. The current backend maps workers to native Severian tasks in one
 process. Future placement implementations can map the same worker indices to
 remote processes, GPU workgroups, or VM-isolated workers.
 
-Placement belongs on the task launch, alongside its lifetime owner:
+Placement can be scoped across a group of task launches alongside their
+lifetime owner:
 
 ```sev
-task = async processShard(values) with self and local
+with self and local:
+    first = async processShard(firstValues)
+    second = async processShard(secondValues)
+    firstResult = await first
+    secondResult = await second
 ```
 
-`self` gives the task a structured lifetime. `local` selects the native
-pthread-backed scheduler at the exact point where work fans out, and lowering
-preserves it as a `severian_distribution = "local"` call attribute. The
-placement symbol requires `import distributed`.
+`self` gives every enclosed task a structured lifetime. `local` selects the
+native pthread-backed scheduler for the scoped fan-out, and lowering preserves
+it as a `severian_distribution = "local"` attribute on each spawn call. The
+placement symbol requires `import distributed`. A one-off task may still write
+`async processShard(values) with self and local` directly.
 
 Remote execution still requires serialization, transport, cancellation, and
 retry semantics rather than a fake networking stub, so `REMOTE` is not exposed

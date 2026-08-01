@@ -995,14 +995,14 @@ fn lower_block(
                 )?);
             }
             Stmt::With(block) => {
-                let resources = block
-                    .resources
-                    .iter()
-                    .map(|resource| {
-                        lower_expression(resource, scope, signatures, aliases)
-                            .map(|(resource, _)| resource)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut resources = Vec::new();
+                for resource in &block.resources {
+                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local"))
+                    {
+                        continue;
+                    }
+                    resources.push(lower_expression(resource, scope, signatures, aliases)?.0);
+                }
                 let mut with_scope = scope.clone();
                 let body = lower_block(
                     &block.body,

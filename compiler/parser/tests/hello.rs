@@ -40,13 +40,17 @@ fn parses_local_task_placement_in_the_with_clause() {
         "    return 1\n",
         "\n",
         "def main():\n",
-        "    task = async work() with self and local\n",
+        "    with self and local:\n",
+        "        task = async work()\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
     let Item::Function(main) = &module.items[1] else {
         panic!("expected main function");
     };
-    let Stmt::Let(binding) = &main.body.statements[0] else {
+    let Stmt::With(block) = &main.body.statements[0] else {
+        panic!("expected task context");
+    };
+    let Stmt::Let(binding) = &block.body.statements[0] else {
         panic!("expected task binding");
     };
     let Expr::Async(task) = binding.value.as_ref().unwrap() else {
@@ -55,6 +59,19 @@ fn parses_local_task_placement_in_the_with_clause() {
     assert_eq!(task.owner, TaskOwner::SelfOwned);
     assert_eq!(task.placement, TaskPlacement::Local);
     assert!(task.captures.is_empty());
+}
+
+#[test]
+fn rejects_a_bare_async_expression_without_an_enclosing_task_context() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work()\n",
+    );
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert!(error.message.contains("outside a task context"));
 }
 
 #[test]
