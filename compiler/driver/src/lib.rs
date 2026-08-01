@@ -337,6 +337,62 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
     result
 }
 
+/// Build a native executable whose entry point runs every non-integration test.
+///
+/// This is deliberately unavailable for a test-free library: emitting a no-op
+/// entry point would make native acceptance appear to cover code it never ran.
+pub fn compile_native_tests(
+    compilation: &Compilation,
+    output: &Path,
+) -> Result<usize, CompileError> {
+    let mut instructions = Vec::new();
+    let mut count = 0;
+    for function in &compilation.hir.functions {
+        for test in &function.tests {
+            if !test.modes.contains(&TestMode::Integration) {
+                instructions.extend(test.instructions.clone());
+                count += 1;
+            }
+        }
+    }
+    for class in &compilation.hir.classes {
+        for function in class.methods.iter().chain(&class.constructors) {
+            for test in &function.tests {
+                if !test.modes.contains(&TestMode::Integration) {
+                    instructions.extend(test.instructions.clone());
+                    count += 1;
+                }
+            }
+        }
+    }
+    if count == 0 {
+        return Err(CompileError::Execution(
+            "source has neither `main()` nor native tests; refusing to generate a no-op executable"
+                .into(),
+        ));
+    }
+    instructions.push(Instruction::Print(Expression::String(format!(
+        "{count} passed"
+    ))));
+    let mut hir = compilation.hir.clone();
+    hir.functions.retain(|function| function.name != "main");
+    hir.functions.push(Function {
+        name: "main".into(),
+        decorators: Vec::new(),
+        contract: None,
+        params: Vec::new(),
+        return_type: severian_hir::ValueType::Unit,
+        instructions,
+        tests: Vec::new(),
+    });
+    let native = Compilation {
+        mlir: severian_lowering::lower(&hir),
+        hir,
+    };
+    compile_native(&native, output)?;
+    Ok(count)
+}
+
 pub fn run(program: &Program, mut write_line: impl FnMut(&str)) -> Result<(), CompileError> {
     program.main().ok_or_else(|| CompileError::Frontend {
         stage: "semantic",

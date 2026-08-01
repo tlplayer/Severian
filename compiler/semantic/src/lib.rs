@@ -644,6 +644,15 @@ fn lower_block(
                     .value
                     .as_ref()
                     .ok_or_else(|| error(binding.span, "binding requires a value"))?;
+                if binding.ty.as_ref().is_some_and(|ty| {
+                    matches!(ty, Type::Named(path) if path.segments.first().is_some_and(|segment| segment.name == "u8"))
+                }) && constant_integer(source).is_some_and(|value| !(0..=u8::MAX as i64).contains(&value))
+                {
+                    return Err(error(
+                        source.span(),
+                        "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
+                    ));
+                }
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
                 let declared = binding.ty.as_ref().map(lower_type).transpose()?;
                 if let Some(declared) = declared {
@@ -1210,7 +1219,7 @@ fn lower_expression(
                     return Err(error(
                         *span,
                         format!(
-                            "E0401: index {element_index} is outside a collection with {} elements",
+                            "E0401: An index known to be outside a fixed-length collection is rejected at compile time. (index {element_index}, length {})",
                             length.unwrap()
                         ),
                     ));
@@ -1679,6 +1688,23 @@ fn collection_length(expression: &Expr) -> Option<usize> {
     }
 }
 
+fn constant_integer(expression: &Expr) -> Option<i64> {
+    match expression {
+        Expr::Literal(Literal::Integer { value, .. }) => Some(*value),
+        Expr::Binary(binary) => {
+            let left = constant_integer(&binary.left)?;
+            let right = constant_integer(&binary.right)?;
+            match binary.op {
+                AstBinaryOp::Add => left.checked_add(right),
+                AstBinaryOp::Sub => left.checked_sub(right),
+                AstBinaryOp::Mul => left.checked_mul(right),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn lower_format_args(
     template: &str,
     scope: &HashMap<String, Binding>,
@@ -1781,8 +1807,8 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 .map(|segment| segment.name.as_str())
                 .unwrap_or("");
             match name {
-                "int" => Ok(ValueType::Int),
-                "float" => Ok(ValueType::Float),
+                "int" | "u8" | "u16" | "u32" | "u64" | "usize" => Ok(ValueType::Int),
+                "float" | "f32" | "f64" => Ok(ValueType::Float),
                 "bool" => Ok(ValueType::Bool),
                 "string" => Ok(ValueType::String),
                 "unit" => Ok(ValueType::Unit),

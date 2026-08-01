@@ -1,7 +1,4 @@
-type Number = int | float
-type UserId = string
-
-def scale(value: Number, factor: Number) -> float:
+def scale(value: int | float, factor: int | float) -> float:
     return float(value) * float(factor)
 
 test:

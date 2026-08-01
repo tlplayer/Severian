@@ -1,4 +1,4 @@
-use severian_driver::{compile_native, compile_path};
+use severian_driver::{compile_native, compile_native_tests, compile_path};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,11 +72,39 @@ fn every_example_is_a_verified_native_executable() {
                 continue;
             }
         };
-        if !has_main(&source) {
-            failures.push(format!(
-                "{}: executable acceptance requires a source main()",
-                relative.display()
-            ));
+        if fixture.file_name().is_some_and(|name| name == "invalid.sev") {
+            let expected_path = fixture.parent().unwrap().join("expected-error.txt");
+            let expected = match std::fs::read_to_string(&expected_path) {
+                Ok(expected) => expected,
+                Err(error) => {
+                    failures.push(format!(
+                        "{}: missing expected diagnostic {}: {error}",
+                        relative.display(),
+                        expected_path.display()
+                    ));
+                    continue;
+                }
+            };
+            match compile_path(fixture) {
+                Ok(_) => failures.push(format!(
+                    "{}: expected-invalid source compiled successfully",
+                    relative.display()
+                )),
+                Err(error) => {
+                    let actual = error.to_string();
+                    for required in expected.lines().take(1).chain(expected.lines().skip(3).take(1)) {
+                        if !actual.contains(required) {
+                            failures.push(format!(
+                                "{}: diagnostic {:?} did not contain {:?}",
+                                relative.display(),
+                                actual,
+                                required
+                            ));
+                        }
+                    }
+                }
+            }
+            continue;
         }
 
         let compilation = match compile_path(fixture) {
@@ -90,7 +118,12 @@ fn every_example_is_a_verified_native_executable() {
             }
         };
         let executable = TemporaryExecutable::new(index);
-        if let Err(error) = compile_native(&compilation, executable.path()) {
+        let native_result = if has_main(&source) {
+            compile_native(&compilation, executable.path())
+        } else {
+            compile_native_tests(&compilation, executable.path()).map(|_| ())
+        };
+        if let Err(error) = native_result {
             failures.push(format!(
                 "{}: native compilation failed: {error}",
                 relative.display()

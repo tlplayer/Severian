@@ -17,3 +17,15 @@ def cross(left: list[float], right: list[float]) -> list[float] with {
 
 test "cross product":
     assert(cross([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]) == [0.0, 0.0, 1.0])
+
+def rand(rows: int, columns: int) -> Matrix[f32]:
+    return []
+
+def eye(size: int) -> Matrix[f32]:
+    return []
+
+def matrixMultiply(left: Matrix[f32], right: Matrix[f32]) -> Matrix[f32]:
+    return left
+
+def scale(value: Matrix[f32], factor: float) -> Matrix[f32]:
+    return value

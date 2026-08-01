@@ -754,6 +754,27 @@ impl Parser<'_> {
             }));
         }
         if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self.peek_kind(1, &TokenKind::Colon)
+        {
+            let name = self.expect_identifier("binding name")?;
+            let start = name.span.start;
+            self.expect_simple(TokenKind::Colon, "`:` after binding name")?;
+            let ty = self.parse_type()?;
+            self.expect_simple(TokenKind::Equal, "`=` after binding type")?;
+            let value = self.parse_expression()?;
+            let end = self
+                .expect_simple(TokenKind::Newline, "newline after typed binding")?
+                .span
+                .end;
+            return Ok(Stmt::Let(LetStmt {
+                span: Span::new(start, end),
+                kind: LetKind::Stable,
+                name,
+                ty: Some(ty),
+                value: Some(value),
+            }));
+        }
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
             && self.peek_kind(1, &TokenKind::Comma)
         {
             let mut names = vec![self.expect_identifier("destructured binding")?];

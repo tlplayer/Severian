@@ -12,3 +12,7 @@ def describe(point):
             print(x)
         case (x, y):
             print(x + y)
+
+describe(Point(0, 0))
+describe(Point(7, 0))
+describe(Point(3, 4))

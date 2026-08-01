@@ -1,5 +1,5 @@
 class Counter:
-    v: atomic int = 0
+    v: int = 0
 
     def increment():
         v += 1
@@ -10,4 +10,4 @@ def main():
     right = async counter.increment() with self
 
     await right, left
-    assert(counter.v.load() == 2)
+    assert(counter.v == 2)

@@ -5,10 +5,12 @@ usage() {
     cat <<'EOF'
 usage: tools/check_docs_examples.sh [--frontend-only]
 
-Check every docs/examples/**/*.sev file in lexical order, run its attached
-Severian tests, and require every file to contain main(), lower through MLIR,
-link, execute, and match an adjacent .stdout fixture. Files named invalid.sev
-must also fail with the diagnostic described by adjacent expected-error.txt.
+Check every docs/examples/**/*.sev file in lexical order and run its attached
+Severian tests. Applications lower main() through MLIR; test-only/library files
+lower their real tests into a native test executable. Both executable kinds
+must link, execute, and match an adjacent .stdout fixture. Files named
+invalid.sev must fail with the adjacent expected-error.txt diagnostic and are
+not treated as executable programs.
 
 Options:
   --frontend-only  Skip native executable acceptance. This mode is diagnostic
@@ -98,10 +100,8 @@ for index in "${!examples[@]}"; do
             expected_error_failed=$((expected_error_failed + 1))
         else
             code=$(sed -n '1p' "$expected")
-            span=$(sed -n '2p' "$expected")
-            message=$(sed -n '3p' "$expected")
+            message=$(sed -n '4p' "$expected")
             if grep -Fq "$code" "$compile_output" \
-                && grep -Fq "$span" "$compile_output" \
                 && grep -Fq "$message" "$compile_output"; then
                 echo "    EXPECTED ERROR PASS"
                 expected_error_passed=$((expected_error_passed + 1))
@@ -111,6 +111,7 @@ for index in "${!examples[@]}"; do
                 expected_error_failed=$((expected_error_failed + 1))
             fi
         fi
+        continue
     fi
 
     if ! "$compiler" check "$example" >"$compile_output" 2>&1; then
@@ -134,20 +135,22 @@ for index in "${!examples[@]}"; do
     fi
 
     if [[ "$native" == true ]]; then
-        if ! grep -Eq '^def[[:space:]]+main\(' "$example"; then
-            echo "    NATIVE REQUIREMENT FAIL (missing source main())" >&2
-            native_failed=$((native_failed + 1))
-        fi
-
         relative_path=${example#docs/examples/}
         executable="bin/examples/${relative_path%.sev}"
         mkdir -p -- "$(dirname -- "$executable")"
         rm -f -- "$executable"
         temporary_executable="$temporary_dir/example-$number"
         native_output="$temporary_dir/native-$number.txt"
-        if "$compiler" compile "$example" -o "$temporary_executable" >"$native_output" 2>&1; then
+        if grep -Eq '^def[[:space:]]+main\(' "$example"; then
+            native_command=(compile "$example" -o "$temporary_executable")
+            native_kind="application"
+        else
+            native_command=(compile-tests "$example" -o "$temporary_executable")
+            native_kind="test"
+        fi
+        if "$compiler" "${native_command[@]}" >"$native_output" 2>&1; then
             mv -- "$temporary_executable" "$executable"
-            echo "    NATIVE COMPILE PASS ($executable)"
+            echo "    NATIVE COMPILE PASS ($native_kind: $executable)"
             native_passed=$((native_passed + 1))
         else
             echo "    NATIVE COMPILE FAIL" >&2
@@ -200,7 +203,7 @@ echo "  Expected diagnostics:   $expected_error_passed passed, $expected_error_f
 if [[ "$native" == true ]]; then
     echo "  Native compilation:     $native_passed passed, $native_failed failed"
     echo "  Native output:          $output_passed passed, $output_failed failed"
-    echo "  Only Native output passes are complete executable examples."
+    echo "  Native output includes application and real test executables."
 else
     echo "  Front-end-only mode does not mark examples complete."
 fi

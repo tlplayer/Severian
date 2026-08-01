@@ -3,7 +3,7 @@ def lower_bound(values: list[int], target: int) -> int:
     high := size(values)
 
     while low < high:
-        middle = low + (high - low) // 2
+        middle = low + (high - low) / 2
         if values[middle] < target:
             low = middle + 1
         else:

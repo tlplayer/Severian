@@ -1,5 +1,5 @@
 class Buffer:
-    bytes: list[u8]
+    bytes: list[u8] = []
 
     # [] is a mutable value by default
     def push(byte: u8):

@@ -31,6 +31,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @printf(!llvm.ptr, ...) -> i32\n\n",
             "  llvm.func @snprintf(!llvm.ptr, i64, !llvm.ptr, ...) -> i32\n",
             "  llvm.func @malloc(i64) -> !llvm.ptr\n",
+            "  llvm.func @abort()\n",
             "  llvm.func @strtod(!llvm.ptr, !llvm.ptr) -> f64\n\n",
             "  llvm.func @__sev_box_i64(i64) -> !llvm.ptr\n",
             "  llvm.func @__sev_box_f64(f64) -> !llvm.ptr\n",

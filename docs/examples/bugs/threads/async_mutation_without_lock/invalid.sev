@@ -8,7 +8,10 @@ class Account:
 
     def increment(amount: int):
         balance += amount
-        status = "debt" if balance < 0 else "surplus"
+        if balance < 0:
+            status = "debt"
+        else:
+            status = "surplus"
 
     def decrement(amount: int):
         balance -= amount

@@ -1,10 +1,9 @@
-extern def c_strlen(text: pointer[u8]) -> usize
+def cStrlen(text: string) -> usize:
+    return text.length()
 
 def strlen(text: string) -> usize:
-    bytes = text.utf8()
-
     unsafe:
-        return c_strlen(&bytes)
+        return cStrlen(text)
 
 def main():
     print(strlen("severian"))

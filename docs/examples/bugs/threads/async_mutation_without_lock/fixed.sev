@@ -8,17 +8,24 @@ class Account:
 
     def increment(amount: int):
         balance += amount
-        status = "debt" if balance < 0 else "surplus"
+        if balance < 0:
+            status = "debt"
+        else:
+            status = "surplus"
 
     def decrement(amount: int):
         balance -= amount
-        status = "debt" if balance < 0 else "surplus"
+        if balance < 0:
+            status = "debt"
+        else:
+            status = "surplus"
 
 def main():
     account := Account()
     credit = async account.increment(10) with self and lock
     debit = async account.decrement(15) with self and lock
 
-    await credit, debit
+    await credit
+    await debit
     assert(account.balance == -5)
     assert(account.status == "debt")
