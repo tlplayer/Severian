@@ -1,0 +1,42 @@
+import tensor
+
+def dense(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    input: list[float],
+) -> list[float]:
+    projected = matVec(weights, rows, columns, input)
+    return add(projected, bias)
+
+test "dense affine projection":
+    result = dense([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], [2.0, 4.0])
+    assert(result == [2.0, 1.0])
+
+def denseRelu(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    input: list[float],
+) -> list[float]:
+    return relu(dense(weights, rows, columns, bias, input))
+
+test "dense relu activation":
+    result = denseRelu([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -5.0], [2.0, 4.0])
+    assert(result == [2.0, 0.0])
+
+def denseReluInputJacobian(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    input: list[float],
+) -> list[float]:
+    preActivation = dense(weights, rows, columns, bias, input)
+    return reluJacobian(preActivation)
+
+test "activation jacobian":
+    jacobian = denseReluInputJacobian([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -5.0], [2.0, 4.0])
+    assert(jacobian == [1.0, 0.0, 0.0, 0.0])

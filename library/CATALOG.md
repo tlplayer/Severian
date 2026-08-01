@@ -6,7 +6,8 @@ The catalog is grouped for discovery, while package imports stay flat.
 | --- | --- | --- |
 | Language foundation | `prelude`, `option`, `result`, `iteration` | language design |
 | Core data | `boolean`, `collections`, `text`, `bytes` | `boolean` started |
-| Numerics | `math`, `probability`, `statistics`, `random` | `math`, `probability` started |
+| Numerics | `math`, `tensor`, `probability`, `statistics`, `random` | `math`, `tensor`, `probability` experimental |
+| Machine learning | `neuralnet`, `autodiff`, `optim` | `neuralnet` experimental |
 | Text processing | `regex`, `unicode`, `format` | `regex` interface pending |
 | Data formats | `json`, `csv`, `base64`, `binary` | `json` interface pending |
 | Files and I/O | `io`, `file`, `path` | `io`, `file` runtime pending |

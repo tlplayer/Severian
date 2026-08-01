@@ -1666,11 +1666,16 @@ fn lower_declared_call(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let runtime_function = match function {
+    let linked_function = function
+        .rsplit_once('.')
+        .map(|(_, name)| name)
+        .filter(|name| signatures.contains_key(*name))
+        .unwrap_or(function);
+    let runtime_function = match linked_function {
         // The MLIR backend currently exposes this intrinsic under its C symbol.
         // Its type comes from library/math, not from this mapping.
         "math.sqrt" => "sqrt",
-        _ => function,
+        _ => linked_function,
     };
     Ok((
         Expression::Call {

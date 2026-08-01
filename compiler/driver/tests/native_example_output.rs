@@ -72,7 +72,10 @@ fn every_example_is_a_verified_native_executable() {
                 continue;
             }
         };
-        if fixture.file_name().is_some_and(|name| name == "invalid.sev") {
+        if fixture
+            .file_name()
+            .is_some_and(|name| name == "invalid.sev")
+        {
             let expected_path = fixture.parent().unwrap().join("expected-error.txt");
             let expected = match std::fs::read_to_string(&expected_path) {
                 Ok(expected) => expected,
@@ -92,7 +95,11 @@ fn every_example_is_a_verified_native_executable() {
                 )),
                 Err(error) => {
                     let actual = error.to_string();
-                    for required in expected.lines().take(1).chain(expected.lines().skip(3).take(1)) {
+                    for required in expected
+                        .lines()
+                        .take(1)
+                        .chain(expected.lines().skip(3).take(1))
+                    {
                         if !actual.contains(required) {
                             failures.push(format!(
                                 "{}: diagnostic {:?} did not contain {:?}",

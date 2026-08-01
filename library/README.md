@@ -68,6 +68,14 @@ groups packages by subject.
 6. Package tests belong beside the package and are written in Severian. Rust
    tests may verify the compiler, but are not the package's primary test suite.
 
+## Numerical stack
+
+The experimental numerical stack separates portable algorithms from lowering
+policy: `tensor` owns kernels, shapes, parallel activation, and Jacobians;
+`neuralnet` imports those operations for layers and activation derivatives.
+Tensor decorators preserve `SIMD`, `GPU`, or `AUTO` policy in HIR so future
+MLIR vector/GPU passes can select a target without forking the public API.
+
 Run all currently implemented library packages with:
 
 ```sh

@@ -6,9 +6,11 @@ members = [
     "json",
     "log",
     "math",
+    "neuralnet",
     "network",
     "probability",
     "regex",
+    "tensor",
 ]
 
 [workspace.metadata.library]

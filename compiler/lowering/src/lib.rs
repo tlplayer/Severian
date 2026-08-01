@@ -220,6 +220,23 @@ fn lower_function(
     } else if function.return_type != ValueType::Unit {
         write!(output, " -> {}", mlir_type(function.return_type)).unwrap();
     }
+    if let Some(policy) = function
+        .decorators
+        .iter()
+        .find(|decorator| decorator.package == "tensor")
+        .and_then(|decorator| {
+            decorator
+                .symbols
+                .iter()
+                .find(|symbol| matches!(symbol.as_str(), "SIMD" | "GPU" | "AUTO"))
+        })
+    {
+        write!(
+            output,
+            " attributes {{severian_tensor_policy = \"{policy}\"}}"
+        )
+        .unwrap();
+    }
     output.push_str(" {\n");
 
     let mut context = LowerContext {
@@ -462,10 +479,18 @@ impl LowerContext<'_> {
                             .unwrap();
                         }
                         ValueType::Any => {
-                            if self.object_classes.get(&value).is_some_and(|class| class == "Matrix") {
+                            if self
+                                .object_classes
+                                .get(&value)
+                                .is_some_and(|class| class == "Matrix")
+                            {
                                 writeln!(self.output, "    llvm.call @__sev_matrix_print({value}) : (!llvm.ptr) -> ()").unwrap();
                             } else {
-                                writeln!(self.output, "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()").unwrap();
+                                writeln!(
+                                    self.output,
+                                    "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()"
+                                )
+                                .unwrap();
                             }
                         }
                         ValueType::List | ValueType::Tuple | ValueType::Set => {
@@ -521,9 +546,13 @@ impl LowerContext<'_> {
                         writeln!(self.output, "    llvm.return {success} : i32").unwrap();
                     } else if let Some(value) = value {
                         let mut lowered = self.lower_expression(value);
-                        if matches!(self.declared_return, ValueType::Any | ValueType::Result | ValueType::Option)
-                            && !matches!(lowered.1, ValueType::Any | ValueType::Result | ValueType::Option)
-                        {
+                        if matches!(
+                            self.declared_return,
+                            ValueType::Any | ValueType::Result | ValueType::Option
+                        ) && !matches!(
+                            lowered.1,
+                            ValueType::Any | ValueType::Result | ValueType::Option
+                        ) {
                             lowered = (self.box_value(lowered), ValueType::Any);
                         }
                         let (value, ty) = self.unbox_value(lowered, self.declared_return);
@@ -557,12 +586,37 @@ impl LowerContext<'_> {
                     if !then_terminated {
                         let mut carried = incoming.keys().cloned().collect::<Vec<_>>();
                         carried.sort();
-                        let values = carried.iter().map(|name| then_variables.get(name).unwrap_or_else(|| &incoming[name]).0.as_str()).collect::<Vec<_>>().join(", ");
-                        let types = carried.iter().map(|name| mlir_type(then_variables.get(name).unwrap_or_else(|| &incoming[name]).1)).collect::<Vec<_>>().join(", ");
+                        let values = carried
+                            .iter()
+                            .map(|name| {
+                                then_variables
+                                    .get(name)
+                                    .unwrap_or_else(|| &incoming[name])
+                                    .0
+                                    .as_str()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let types = carried
+                            .iter()
+                            .map(|name| {
+                                mlir_type(
+                                    then_variables
+                                        .get(name)
+                                        .unwrap_or_else(|| &incoming[name])
+                                        .1,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         if values.is_empty() {
                             writeln!(self.output, "    llvm.br ^bb{continue_block}").unwrap();
                         } else {
-                            writeln!(self.output, "    llvm.br ^bb{continue_block}({values} : {types})").unwrap();
+                            writeln!(
+                                self.output,
+                                "    llvm.br ^bb{continue_block}({values} : {types})"
+                            )
+                            .unwrap();
                         }
                     }
                     writeln!(self.output, "  ^bb{else_block}:").unwrap();
@@ -574,28 +628,64 @@ impl LowerContext<'_> {
                     if !else_terminated {
                         let mut carried = incoming.keys().cloned().collect::<Vec<_>>();
                         carried.sort();
-                        let values = carried.iter().map(|name| else_variables.get(name).unwrap_or_else(|| &incoming[name]).0.as_str()).collect::<Vec<_>>().join(", ");
-                        let types = carried.iter().map(|name| mlir_type(else_variables.get(name).unwrap_or_else(|| &incoming[name]).1)).collect::<Vec<_>>().join(", ");
+                        let values = carried
+                            .iter()
+                            .map(|name| {
+                                else_variables
+                                    .get(name)
+                                    .unwrap_or_else(|| &incoming[name])
+                                    .0
+                                    .as_str()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let types = carried
+                            .iter()
+                            .map(|name| {
+                                mlir_type(
+                                    else_variables
+                                        .get(name)
+                                        .unwrap_or_else(|| &incoming[name])
+                                        .1,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         if values.is_empty() {
                             writeln!(self.output, "    llvm.br ^bb{continue_block}").unwrap();
                         } else {
-                            writeln!(self.output, "    llvm.br ^bb{continue_block}({values} : {types})").unwrap();
+                            writeln!(
+                                self.output,
+                                "    llvm.br ^bb{continue_block}({values} : {types})"
+                            )
+                            .unwrap();
                         }
                     }
                     if !then_terminated || !else_terminated {
                         let mut carried = incoming.into_iter().collect::<Vec<_>>();
                         carried.sort_by(|left, right| left.0.cmp(&right.0));
-                        let arguments = carried.iter().map(|(_, (_, ty))| {
-                            let value = self.fresh_value();
-                            (value, *ty)
-                        }).collect::<Vec<_>>();
-                        let signature = arguments.iter().map(|(value, ty)| format!("{value}: {}", mlir_type(*ty))).collect::<Vec<_>>().join(", ");
+                        let arguments = carried
+                            .iter()
+                            .map(|(_, (_, ty))| {
+                                let value = self.fresh_value();
+                                (value, *ty)
+                            })
+                            .collect::<Vec<_>>();
+                        let signature = arguments
+                            .iter()
+                            .map(|(value, ty)| format!("{value}: {}", mlir_type(*ty)))
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         if signature.is_empty() {
                             writeln!(self.output, "  ^bb{continue_block}:").unwrap();
                         } else {
                             writeln!(self.output, "  ^bb{continue_block}({signature}):").unwrap();
                         }
-                        self.variables = carried.into_iter().zip(arguments).map(|((name, _), value)| (name, value)).collect();
+                        self.variables = carried
+                            .into_iter()
+                            .zip(arguments)
+                            .map(|((name, _), value)| (name, value))
+                            .collect();
                         self.terminated = false;
                     } else {
                         self.terminated = true;
@@ -805,7 +895,12 @@ impl LowerContext<'_> {
             }
             Expression::Member { object, member } => {
                 let (object, _) = self.lower_expression(object);
-                if member == "shape" && self.object_classes.get(&object).is_some_and(|class| class == "Matrix") {
+                if member == "shape"
+                    && self
+                        .object_classes
+                        .get(&object)
+                        .is_some_and(|class| class == "Matrix")
+                {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_matrix_shape({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
@@ -859,15 +954,22 @@ impl LowerContext<'_> {
                 let (object, object_type) = self.lower_expression(object);
                 let object = self.unbox_value((object, object_type), ValueType::String).0;
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @strlen({object}) : (!llvm.ptr) -> i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @strlen({object}) : (!llvm.ptr) -> i64"
+                )
+                .unwrap();
                 (result, ValueType::Int)
             }
             Expression::MethodCall {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "wrapping_add" | "saturating_add" | "overflowing_add")
-                && args.len() == 1 => {
+            } if matches!(
+                method.as_str(),
+                "wrapping_add" | "saturating_add" | "overflowing_add"
+            ) && args.len() == 1 =>
+            {
                 let (left, left_type) = self.lower_expression(object);
                 let left = self.unbox_value((left, left_type), ValueType::Int).0;
                 let (right, right_type) = self.lower_expression(&args[0]);
@@ -875,25 +977,53 @@ impl LowerContext<'_> {
                 let sum = self.fresh_value();
                 writeln!(self.output, "    {sum} = llvm.add {left}, {right} : i64").unwrap();
                 let limit = self.fresh_value();
-                writeln!(self.output, "    {limit} = llvm.mlir.constant(256 : i64) : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {limit} = llvm.mlir.constant(256 : i64) : i64"
+                )
+                .unwrap();
                 let wrapped = self.fresh_value();
-                writeln!(self.output, "    {wrapped} = llvm.urem {sum}, {limit} : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {wrapped} = llvm.urem {sum}, {limit} : i64"
+                )
+                .unwrap();
                 if method == "wrapping_add" {
                     return (wrapped, ValueType::Int);
                 }
                 let max = self.fresh_value();
-                writeln!(self.output, "    {max} = llvm.mlir.constant(255 : i64) : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {max} = llvm.mlir.constant(255 : i64) : i64"
+                )
+                .unwrap();
                 let overflowed = self.fresh_value();
-                writeln!(self.output, "    {overflowed} = llvm.icmp \"sgt\" {sum}, {max} : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {overflowed} = llvm.icmp \"sgt\" {sum}, {max} : i64"
+                )
+                .unwrap();
                 if method == "saturating_add" {
                     let capped = self.fresh_value();
-                    writeln!(self.output, "    {capped} = llvm.select {overflowed}, {max}, {sum} : i1, i64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {capped} = llvm.select {overflowed}, {max}, {sum} : i1, i64"
+                    )
+                    .unwrap();
                     return (capped, ValueType::Int);
                 }
                 let kind = self.fresh_value();
-                writeln!(self.output, "    {kind} = llvm.mlir.constant(1 : i64) : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {kind} = llvm.mlir.constant(1 : i64) : i64"
+                )
+                .unwrap();
                 let tuple = self.fresh_value();
-                writeln!(self.output, "    {tuple} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
+                writeln!(
+                    self.output,
+                    "    {tuple} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr"
+                )
+                .unwrap();
                 let wrapped = self.box_value((wrapped, ValueType::Int));
                 let overflowed = self.box_value((overflowed, ValueType::Bool));
                 writeln!(self.output, "    llvm.call @__sev_collection_push({tuple}, {wrapped}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
@@ -919,7 +1049,11 @@ impl LowerContext<'_> {
                 args,
             } if method == "zero" && args.is_empty() => {
                 let zero = self.fresh_value();
-                writeln!(self.output, "    {zero} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
                 let result = self.box_value((zero, ValueType::Int));
                 (result, ValueType::Any)
             }
@@ -1331,7 +1465,11 @@ impl LowerContext<'_> {
                 }
                 if function.ends_with(".zero") && args.is_empty() {
                     let zero = self.fresh_value();
-                    writeln!(self.output, "    {zero} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                    )
+                    .unwrap();
                     return (self.box_value((zero, ValueType::Int)), ValueType::Any);
                 }
                 if function.ends_with(".add") && args.len() == 2 {
@@ -1341,7 +1479,10 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_add({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 }
-                if matches!(function.as_str(), "math.rand" | "math.eye" | "math.matrixMultiply" | "math.scale") {
+                if matches!(
+                    function.as_str(),
+                    "math.rand" | "math.eye" | "math.matrixMultiply" | "math.scale"
+                ) {
                     let result = self.fresh_value();
                     match function.as_str() {
                         "math.rand" => {
@@ -1366,7 +1507,11 @@ impl LowerContext<'_> {
                 }
                 if function == "probability.probability" {
                     let result = self.fresh_value();
-                    writeln!(self.output, "    {result} = llvm.mlir.constant(0.5 : f64) : f64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.mlir.constant(0.5 : f64) : f64"
+                    )
+                    .unwrap();
                     return (result, ValueType::Float);
                 }
                 if function == "regex.matches" {
@@ -1383,10 +1528,22 @@ impl LowerContext<'_> {
                         _ => None,
                     };
                     if let Some((symbol, return_type)) = builtin {
-                        let values = args.iter().map(|(value, _)| value.as_str()).collect::<Vec<_>>().join(", ");
-                        let types = args.iter().map(|(_, ty)| mlir_type(*ty)).collect::<Vec<_>>().join(", ");
+                        let values = args
+                            .iter()
+                            .map(|(value, _)| value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let types = args
+                            .iter()
+                            .map(|(_, ty)| mlir_type(*ty))
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         let result = self.fresh_value();
-                        writeln!(self.output, "    {result} = llvm.call @{symbol}({values}) : ({types}) -> !llvm.ptr").unwrap();
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @{symbol}({values}) : ({types}) -> !llvm.ptr"
+                        )
+                        .unwrap();
                         return (result, return_type);
                     }
                 }
@@ -1676,7 +1833,11 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
             return (result, ValueType::Bool);
         }
-        if self.object_classes.get(&left).is_some_and(|class| class == "Matrix") {
+        if self
+            .object_classes
+            .get(&left)
+            .is_some_and(|class| class == "Matrix")
+        {
             if op == BinaryOp::Mul && right_type == ValueType::Float {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({left}, {right}) : (!llvm.ptr, f64) -> !llvm.ptr").unwrap();
@@ -1684,7 +1845,10 @@ impl LowerContext<'_> {
                 return (result, ValueType::Any);
             }
             if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-                && self.object_classes.get(&right).is_some_and(|class| class == "Matrix")
+                && self
+                    .object_classes
+                    .get(&right)
+                    .is_some_and(|class| class == "Matrix")
             {
                 let equal = self.fresh_value();
                 writeln!(self.output, "    {equal} = llvm.call @__sev_matrix_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
@@ -1697,14 +1861,24 @@ impl LowerContext<'_> {
                 writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
                 return (result, ValueType::Bool);
             }
-            if matches!(op, BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual) {
+            if matches!(
+                op,
+                BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual
+            ) {
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.mlir.constant(1 : i1) : i1").unwrap();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant(1 : i1) : i1"
+                )
+                .unwrap();
                 return (result, ValueType::Bool);
             }
         }
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-            && matches!(operand_type, ValueType::List | ValueType::Tuple | ValueType::Set)
+            && matches!(
+                operand_type,
+                ValueType::List | ValueType::Tuple | ValueType::Set
+            )
             && operand_type == right_type
         {
             let equal = self.fresh_value();
@@ -1824,9 +1998,18 @@ impl LowerContext<'_> {
                         BinaryOp::GreaterEqual => "oge",
                         _ => unreachable!(),
                     };
-                    writeln!(self.output, "    {result} = llvm.fcmp \"{float_predicate}\" {left}, {right} : f64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.fcmp \"{float_predicate}\" {left}, {right} : f64"
+                    )
+                    .unwrap();
                 } else {
-                    writeln!(self.output, "    {result} = llvm.icmp \"{predicate}\" {left}, {right} : {}", mlir_type(operand_type)).unwrap();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.icmp \"{predicate}\" {left}, {right} : {}",
+                        mlir_type(operand_type)
+                    )
+                    .unwrap();
                 }
                 return (result, ValueType::Bool);
             }
@@ -1954,14 +2137,22 @@ impl LowerContext<'_> {
                                 let field_matches = self.fresh_value();
                                 writeln!(self.output, "    {field_matches} = llvm.icmp \"eq\" {actual}, {expected_value} : i64").unwrap();
                                 let both = self.fresh_value();
-                                writeln!(self.output, "    {both} = llvm.and {combined}, {field_matches} : i1").unwrap();
+                                writeln!(
+                                    self.output,
+                                    "    {both} = llvm.and {combined}, {field_matches} : i1"
+                                )
+                                .unwrap();
                                 combined = both;
                             }
                             MatchPattern::Wildcard => {}
                             _ => {}
                         }
                     }
-                    writeln!(self.output, "    llvm.cond_br {combined}, ^bb{body}, ^bb{next}").unwrap();
+                    writeln!(
+                        self.output,
+                        "    llvm.cond_br {combined}, ^bb{body}, ^bb{next}"
+                    )
+                    .unwrap();
                 } else {
                     writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
                     if let Some(MatchPattern::Bind(name)) = fields.first() {
@@ -1972,7 +2163,11 @@ impl LowerContext<'_> {
                             self.variables.insert(name.clone(), (field, ValueType::Any)),
                         ));
                     }
-                    writeln!(self.output, "    llvm.cond_br {matches}, ^bb{body}, ^bb{next}").unwrap();
+                    writeln!(
+                        self.output,
+                        "    llvm.cond_br {matches}, ^bb{body}, ^bb{next}"
+                    )
+                    .unwrap();
                 }
             } else {
                 writeln!(self.output, "    llvm.br ^bb{body}").unwrap();
@@ -2201,7 +2396,11 @@ impl LowerContext<'_> {
                 .unwrap();
                 let end = self.fresh_value();
                 if iterable_type == ValueType::Map {
-                    writeln!(self.output, "    {end} = llvm.call @__sev_map_size({value}) : (!llvm.ptr) -> i64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {end} = llvm.call @__sev_map_size({value}) : (!llvm.ptr) -> i64"
+                    )
+                    .unwrap();
                     map_collection = true;
                 } else {
                     writeln!(self.output, "    {end} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
@@ -2301,7 +2500,11 @@ impl LowerContext<'_> {
                     for (position, field) in fields.iter().enumerate() {
                         if let MatchPattern::Bind(name) = field {
                             let item = self.fresh_value();
-                            let function = if position == 0 { "__sev_map_key_at" } else { "__sev_map_value_at" };
+                            let function = if position == 0 {
+                                "__sev_map_key_at"
+                            } else {
+                                "__sev_map_value_at"
+                            };
                             writeln!(self.output, "    {item} = llvm.call @{function}({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
                             self.variables.insert(name.clone(), (item, ValueType::Any));
                         }

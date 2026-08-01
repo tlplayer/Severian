@@ -39,8 +39,8 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             let output = PathBuf::from(&args[3]);
-            let count = compile_native_tests(&compilation, &output)
-                .map_err(|error| error.to_string())?;
+            let count =
+                compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
             println!("{} ({count} native tests)", output.display());
         }
         "run" if args.len() == 2 => {

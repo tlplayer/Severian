@@ -1,0 +1,76 @@
+def relu(values: list[float]) -> list[float]:
+    output := []
+    for value in values:
+        if value > 0.0:
+            output.append(value)
+        else:
+            output.append(0.0)
+    return output
+
+test "relu clips negative values":
+    assert(relu([-2.0, 0.0, 3.0]) == [0.0, 0.0, 3.0])
+
+def reluChunk(values: list[float], start: int, end: int) -> list[float]:
+    output := []
+    for index in range(start, end):
+        value = values[index]
+        if value > 0.0:
+            output.append(value)
+        else:
+            output.append(0.0)
+    return output
+
+def parallelRelu(values: list[float]) -> list[float]:
+    middle = size(values) / 2
+    leftTask = async reluChunk(values, 0, middle) with self
+    rightTask = async reluChunk(values, middle, size(values)) with self
+    left = await leftTask
+    right = await rightTask
+
+    output := []
+    for value in left:
+        output.append(value)
+    for value in right:
+        output.append(value)
+    return output
+
+test "parallel relu preserves element order":
+    assert(parallelRelu([-2.0, 3.0, -4.0, 5.0]) == [0.0, 3.0, 0.0, 5.0])
+
+def matVec(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    input: list[float],
+) -> list[float]:
+    output := []
+    for row in range(0, rows):
+        total := 0.0
+        for column in range(0, columns):
+            total += weights[row * columns + column] * input[column]
+        output.append(total)
+    return output
+
+test "matrix vector product":
+    result = matVec([1.0, 2.0, 3.0, 4.0], 2, 2, [5.0, 6.0])
+    assert(result == [17.0, 39.0])
+
+def add(left: list[float], right: list[float]) -> list[float]:
+    output := []
+    for index in indices(left):
+        output.append(left[index] + right[index])
+    return output
+
+def reluJacobian(values: list[float]) -> list[float]:
+    width = size(values)
+    jacobian := []
+    for row in range(0, width):
+        for column in range(0, width):
+            if row == column and values[row] > 0.0:
+                jacobian.append(1.0)
+            else:
+                jacobian.append(0.0)
+    return jacobian
+
+test "relu jacobian is a flattened diagonal matrix":
+    assert(reluJacobian([2.0, -1.0]) == [1.0, 0.0, 0.0, 0.0])

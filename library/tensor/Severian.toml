@@ -1,0 +1,13 @@
+[package]
+name = "tensor"
+version = "0.1.0"
+edition = "2026"
+description = "Shape-aware tensor kernels and parallel execution policies"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "numerics"
+implementation = "source-and-compiler-contracts"
+status = "experimental"
