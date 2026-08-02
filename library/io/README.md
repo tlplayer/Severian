@@ -1,6 +1,5 @@
 # io
 
-Common stream abstractions and standard process streams. The initial `print`
-declaration describes the compiler/runtime primitive used by introductory
-examples; stream ownership and error-returning writes remain to be designed.
-
+Common stream abstractions and standard process streams. `print` is a language
+primitive, while native output sinks are explicitly declared by `platform`.
+Stream ownership and error-returning writes remain to be designed.

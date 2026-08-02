@@ -34,6 +34,23 @@ fn rejects_a_missing_function_body() {
 }
 
 #[test]
+fn parses_an_explicit_native_abi_declaration() {
+    let source = concat!(
+        "native(\"__sev_file_read\") def fileRead(\n",
+        "    path: string,\n",
+        ") -> Result[string, IOError]\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected native function declaration");
+    };
+
+    assert_eq!(function.name.name, "fileRead");
+    assert_eq!(function.native_symbol.as_deref(), Some("__sev_file_read"));
+    assert!(function.body.statements.is_empty());
+}
+
+#[test]
 fn parses_local_task_placement_in_the_with_clause() {
     let source = concat!(
         "def work() -> int:\n",

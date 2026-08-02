@@ -147,8 +147,10 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
     };
 
     let lowered = severian_lowering::lower(&program);
-    assert!(lowered.as_str().contains("llvm.call @consume() : () -> ()"));
-    assert!(!lowered.as_str().contains("= llvm.call @consume"));
+    assert!(lowered
+        .as_str()
+        .contains("llvm.call @__sev_fn_consume() : () -> ()"));
+    assert!(!lowered.as_str().contains("= llvm.call @__sev_fn_consume"));
 }
 
 #[test]

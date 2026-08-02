@@ -29,12 +29,13 @@ Every public operation has one implementation owner:
 | --- | --- | --- |
 | compiler | Language primitives, type checking, ownership, and intrinsics | `int`, `string`, `Result`, borrowing, `size` |
 | library | Public APIs and portable Severian algorithms | `boolean`, `probability`, JSON values |
-| runtime | OS calls and native machinery used by library APIs | sockets, files, clocks, entropy |
+| platform | typed native ABI used underneath library APIs | sockets, files, clocks, entropy |
 
-The compiler must not silently invent a package API. Runtime-backed packages
-need typed Severian declarations and a runtime symbol mapping before they are
-considered implemented. Packages with declarations but incomplete native
-symbols are marked `runtime-pending` rather than treated as working libraries.
+The compiler must not silently invent a package API. Native-backed packages use
+typed Severian `native(\"symbol\")` declarations in the `platform` package.
+There is no implicit source-level native namespace. A package is considered
+implemented only when its native test executable links, runs, and matches its
+expected stdout and stderr.
 
 ## Package shape
 
@@ -59,9 +60,9 @@ groups packages by subject.
    control/result types only.
 2. Prefer one obvious package for a concept. Do not create both `net` and
    `network`, or `fs` and `file`.
-3. Put algorithms in Severian source when practical; use the runtime only for
+3. Put algorithms in Severian source when practical; use `platform` only for
    capabilities that require the OS, native code, or a compiler intrinsic.
-4. A runtime-backed API must have a typed public declaration, tests, and a
+4. A platform-backed API must have a typed public declaration, tests, and a
    documented failure model before it is stable.
 5. Security-sensitive implementations such as cryptography and TLS must wrap
    reviewed native providers; they must never begin as toy implementations.

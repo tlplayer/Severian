@@ -126,12 +126,53 @@ fn resolves_model_decorator_symbols_to_package_functions() {
 }
 
 #[test]
+fn native_calls_require_an_explicit_declaration_and_lower_to_its_abi_symbol() {
+    let compilation = compile_source(concat!(
+        "native(\"__sev_regex_matches\") def matches(\n",
+        "    value: string,\n",
+        "    pattern: string,\n",
+        ") -> bool\n",
+        "\n",
+        "def main():\n",
+        "    print(matches(\"severian\", \"sev.*\"))\n",
+    ))
+    .unwrap();
+
+    assert!(compilation
+        .mlir
+        .as_str()
+        .contains("llvm.func @__sev_regex_matches"));
+    assert!(compilation
+        .mlir
+        .as_str()
+        .contains("llvm.call @__sev_regex_matches"));
+
+    let error =
+        compile_source("def main():\n    print(runtime.fileRead(\"missing.txt\"))\n").unwrap_err();
+    assert!(error.to_string().contains("runtime"));
+}
+
+#[test]
+fn ranked_tensor_example_emits_real_linalg_kernels() {
+    let fixture = examples_root().join("22-ranked-tensors/main.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    let mlir = compilation.mlir.as_str();
+
+    assert!(mlir.contains("linalg.generic"));
+    assert!(mlir.contains("linalg.matmul"));
+    assert!(mlir.contains("llvm.emit_c_interface"));
+    assert!(mlir.contains("llvm.call @__sev_tensor_matmul"));
+    assert!(mlir.contains("llvm.call @__sev_tensor_add"));
+    assert!(mlir.contains("llvm.call @__sev_tensor_relu"));
+}
+
+#[test]
 fn fuses_stacked_model_activations_without_user_optimization_syntax() {
     let fixture = examples_root().join("21-parallel-kernels/main.sev");
     let compilation = compile_path(&fixture).unwrap();
     let mlir = compilation.mlir.as_str();
     let forward = mlir
-        .split("llvm.func @forward(")
+        .split("llvm.func @__sev_fn_forward(")
         .nth(1)
         .unwrap()
         .split("llvm.func @main(")

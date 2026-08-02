@@ -1,7 +1,6 @@
 # regex
 
-Regular-expression values and matching. Literal or decorator forms may be
-compiler symbol packs, but the exported types and functions still belong to
-this package. Invalid patterns need explicit compile-time or runtime diagnostics
-according to whether the pattern is static.
-
+Regular-expression values and matching. Matching uses POSIX extended regular
+expressions through the explicit `platform` package and is native
+compile-link-execute tested. Literal-pattern compile-time diagnostics remain
+future work; invalid dynamic patterns return `false`.

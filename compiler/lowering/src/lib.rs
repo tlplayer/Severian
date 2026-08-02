@@ -245,7 +245,7 @@ pub fn lower(program: &Program) -> Module {
             lower_class_function(
                 class,
                 constructor,
-                &format!("{}_ctor_{}", class.name, constructor.params.len()),
+                &class_function_symbol(&class.name, &format!("ctor_{}", constructor.params.len())),
                 &program.classes,
                 &strings,
                 &function_returns,
@@ -258,7 +258,7 @@ pub fn lower(program: &Program) -> Module {
             lower_class_function(
                 class,
                 method,
-                &format!("{}_{}", class.name, method.name),
+                &class_function_symbol(&class.name, &method.name),
                 &program.classes,
                 &strings,
                 &function_returns,
@@ -298,7 +298,12 @@ fn lower_function(
     output: &mut String,
 ) {
     let is_main = function.name == "main";
-    write!(output, "  llvm.func @{}(", function.name).unwrap();
+    write!(
+        output,
+        "  llvm.func @{}(",
+        source_function_symbol(&function.name)
+    )
+    .unwrap();
     for (index, param) in function.params.iter().enumerate() {
         if index > 0 {
             output.push_str(", ");
@@ -866,9 +871,10 @@ impl LowerContext<'_> {
             }
             Expression::Function(name) => {
                 let result = self.fresh_value();
+                let symbol = source_function_symbol(name);
                 writeln!(
                     self.output,
-                    "    {result} = llvm.mlir.addressof @{name} : !llvm.ptr"
+                    "    {result} = llvm.mlir.addressof @{symbol} : !llvm.ptr"
                 )
                 .unwrap();
                 (result, ValueType::Function)
@@ -1012,7 +1018,9 @@ impl LowerContext<'_> {
                     } else {
                         format!(", {types}")
                     };
-                    writeln!(self.output, "    llvm.call @{class}_ctor_{}({result}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()", constructor.params.len()).unwrap();
+                    let constructor_symbol =
+                        class_function_symbol(class, &format!("ctor_{}", constructor.params.len()));
+                    writeln!(self.output, "    llvm.call @{constructor_symbol}({result}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()").unwrap();
                 } else if let Some(definition) = definition {
                     for (index, field) in definition.fields.iter().enumerate() {
                         let value = lowered_args.get(index).cloned().or_else(|| {
@@ -1234,7 +1242,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 };
-                let symbol = format!("{class}_{method}");
+                let symbol = class_function_symbol(&class, method);
                 let method_definition = self
                     .classes
                     .iter()
@@ -1280,10 +1288,8 @@ impl LowerContext<'_> {
                 } else {
                     format!(", {types}")
                 };
-                let return_type = self
-                    .function_returns
-                    .get(&symbol)
-                    .copied()
+                let return_type = method_definition
+                    .map(|definition| definition.return_type)
                     .unwrap_or(ValueType::Any);
                 if return_type == ValueType::Unit {
                     writeln!(self.output, "    llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()").unwrap();
@@ -1904,12 +1910,18 @@ impl LowerContext<'_> {
                         .unwrap_or(ValueType::Any),
                 };
                 let symbol = if function == "sqrt" {
-                    "llvm.sqrt.f64"
+                    "llvm.sqrt.f64".to_owned()
                 } else {
                     self.native_symbols
                         .get(linked_function)
-                        .map(String::as_str)
-                        .unwrap_or(linked_function)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            if self.function_returns.contains_key(linked_function) {
+                                source_function_symbol(linked_function)
+                            } else {
+                                linked_function.to_owned()
+                            }
+                        })
                 };
                 if return_type == ValueType::Unit {
                     writeln!(
@@ -3542,6 +3554,7 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "#include <stdlib.h>\n",
         "#include <string.h>\n",
         "#include <sys/socket.h>\n",
+        "#include <sys/syscall.h>\n",
         "#include <unistd.h>\n",
         "#include <regex.h>\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
@@ -3841,7 +3854,7 @@ void *__sev_network_listen(void *address_raw) {
   endpoint.sin_port = htons((uint16_t)port);
   if (inet_pton(AF_INET, host, &endpoint.sin_addr) != 1 ||
       bind(socket_fd, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 ||
-      listen(socket_fd, 16) != 0) {
+      syscall(SYS_listen, socket_fd, 16) != 0) {
     close(socket_fd);
     return sev_failure("could not bind listener");
   }
@@ -3857,7 +3870,7 @@ void *__sev_network_loopback_echo(void *message_raw) {
   struct sockaddr_in endpoint = {0};
   endpoint.sin_family = AF_INET;
   endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(server, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 || listen(server, 1) != 0) {
+  if (bind(server, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 || syscall(SYS_listen, server, 1) != 0) {
     close(server);
     return sev_failure("could not bind loopback server");
   }
@@ -3904,14 +3917,20 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
         .filter(|class| class.methods.iter().any(|method| method.name == "draw"))
         .collect::<Vec<_>>();
     for class in &drawable_classes {
-        writeln!(source, "extern void {}_draw(void *);", class.name).unwrap();
+        writeln!(
+            source,
+            "extern void {}(void *);",
+            class_function_symbol(&class.name, "draw")
+        )
+        .unwrap();
     }
     source.push_str("void __sev_dispatch_draw(void *raw) { sev_object *value = raw;\n");
     for class in &drawable_classes {
         writeln!(
             source,
-            "  if (strcmp(value->class_name, \"{}\") == 0) {{ {}_draw(raw); return; }}",
-            class.name, class.name
+            "  if (strcmp(value->class_name, \"{}\") == 0) {{ {}(raw); return; }}",
+            class.name,
+            class_function_symbol(&class.name, "draw")
         )
         .unwrap();
     }
@@ -3945,7 +3964,8 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
     source.push('\n');
     for spec in &specs {
         let result_type = c_type(spec.return_type);
-        write!(source, "extern {result_type} {}(", spec.function).unwrap();
+        let function_symbol = source_function_symbol(&spec.function);
+        write!(source, "extern {result_type} {function_symbol}(").unwrap();
         if spec.params.is_empty() {
             source.push_str("void");
         } else {
@@ -3979,9 +3999,9 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
             .collect::<Vec<_>>()
             .join(", ");
         if spec.return_type == ValueType::Unit {
-            writeln!(source, "  {}({args});", spec.function).unwrap();
+            writeln!(source, "  {function_symbol}({args});").unwrap();
         } else {
-            writeln!(source, "  task->base.result = {}({args});", spec.function).unwrap();
+            writeln!(source, "  task->base.result = {function_symbol}({args});").unwrap();
         }
         source.push_str("  return NULL;\n}\n");
         write!(source, "void *__sev_task_spawn_{}(", spec.function).unwrap();
@@ -4011,12 +4031,8 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
     for class in &program.classes {
         for method in &class.methods {
             let result_type = c_type(method.return_type);
-            write!(
-                source,
-                "extern {result_type} {}_{}(void *",
-                class.name, method.name
-            )
-            .unwrap();
+            let method_symbol = class_function_symbol(&class.name, &method.name);
+            write!(source, "extern {result_type} {method_symbol}(void *").unwrap();
             for parameter in &method.params {
                 write!(source, ", {}", c_type(parameter.ty)).unwrap();
             }
@@ -4048,17 +4064,11 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
                 .map(|index| format!(", task->arg_{index}"))
                 .collect::<String>();
             if method.return_type == ValueType::Unit {
-                writeln!(
-                    source,
-                    "  {}_{}(task->self{args});",
-                    class.name, method.name
-                )
-                .unwrap();
+                writeln!(source, "  {method_symbol}(task->self{args});").unwrap();
             } else {
                 writeln!(
                     source,
-                    "  task->base.result = {}_{}(task->self{args});",
-                    class.name, method.name
+                    "  task->base.result = {method_symbol}(task->self{args});"
                 )
                 .unwrap();
             }
@@ -4191,6 +4201,18 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Option
         | ValueType::Any => "ptr",
     }
+}
+
+fn source_function_symbol(name: &str) -> String {
+    if name == "main" {
+        "main".into()
+    } else {
+        format!("__sev_fn_{name}")
+    }
+}
+
+fn class_function_symbol(class: &str, method: &str) -> String {
+    format!("__sev_method_{class}_{method}")
 }
 
 fn is_predeclared_native_symbol(symbol: &str) -> bool {
