@@ -824,6 +824,32 @@ impl LowerContext<'_> {
                 iterable,
                 condition,
             } => self.lower_list_comprehension(element, variable, iterable, condition.as_deref()),
+            Expression::Conditional {
+                condition,
+                then_expression,
+                else_expression,
+            } => {
+                let (condition, _) = self.lower_expression(condition);
+                let mut then_value = self.lower_expression(then_expression);
+                let mut else_value = self.lower_expression(else_expression);
+                let result_type = if then_value.1 == else_value.1 {
+                    then_value.1
+                } else {
+                    then_value = (self.box_value(then_value), ValueType::Any);
+                    else_value = (self.box_value(else_value), ValueType::Any);
+                    ValueType::Any
+                };
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.select {condition}, {}, {} : i1, {}",
+                    then_value.0,
+                    else_value.0,
+                    mlir_type(result_type)
+                )
+                .unwrap();
+                (result, result_type)
+            }
             Expression::PrintArgs(values) => {
                 for (index, value) in values.iter().enumerate() {
                     if index > 0 {
@@ -2833,6 +2859,15 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(condition, strings);
             }
         }
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => {
+            collect_expression_strings(condition, strings);
+            collect_expression_strings(then_expression, strings);
+            collect_expression_strings(else_expression, strings);
+        }
         Expression::Unary { expression, .. } => collect_expression_strings(expression, strings),
         Expression::CallValue { callee, args, .. } => {
             collect_expression_strings(callee, strings);
@@ -3044,6 +3079,15 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
         } => {
             collect_task_names_expression(object, names);
             collect_task_names_expression(index, names);
+        }
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => {
+            collect_task_names_expression(condition, names);
+            collect_task_names_expression(then_expression, names);
+            collect_task_names_expression(else_expression, names);
         }
         Expression::Member { object, .. }
         | Expression::Unary {

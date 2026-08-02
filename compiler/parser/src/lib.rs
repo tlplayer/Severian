@@ -4,11 +4,11 @@ use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
     CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, Decorator,
     DecoratorSymbol, DestructureLetStmt, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt,
-    FunctionContract, FunctionDecl, Ident, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr,
-    Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr, MemberExpr, Module,
-    OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt, SwitchArm, SwitchStmt,
-    TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath,
-    UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    FunctionContract, FunctionDecl, Ident, IfExpr, IfStmt, ImportDecl, ImportKind, ImportName,
+    IndexExpr, Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr,
+    MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt,
+    SwitchArm, SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod,
+    Type, TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -1134,7 +1134,23 @@ impl Parser<'_> {
     }
 
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
-        self.parse_or()
+        self.parse_conditional()
+    }
+
+    fn parse_conditional(&mut self) -> Result<Expr, ParseError> {
+        let then_expr = self.parse_or()?;
+        if self.take_simple(&TokenKind::If).is_none() {
+            return Ok(then_expr);
+        }
+        let condition = self.parse_or()?;
+        self.expect_simple(TokenKind::Else, "`else` in conditional expression")?;
+        let else_expr = self.parse_conditional()?;
+        Ok(Expr::If(IfExpr {
+            span: Span::new(then_expr.span().start, else_expr.span().end),
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+        }))
     }
 
     fn parse_or(&mut self) -> Result<Expr, ParseError> {
@@ -1576,7 +1592,9 @@ impl Parser<'_> {
         if self.take_simple(&TokenKind::For).is_some() {
             let variable = self.expect_identifier("comprehension variable")?;
             self.expect_simple(TokenKind::In, "`in`")?;
-            let iterable = self.parse_expression()?;
+            // The following `if` belongs to the comprehension unless an
+            // explicit conditional expression has already been grouped.
+            let iterable = self.parse_or()?;
             let condition = if self.take_simple(&TokenKind::If).is_some() {
                 Some(Box::new(self.parse_expression()?))
             } else {

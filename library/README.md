@@ -70,11 +70,13 @@ groups packages by subject.
 
 ## Numerical stack
 
-The experimental numerical stack separates portable algorithms from lowering
-policy: `tensor` owns kernels, shapes, parallel activation, and Jacobians;
-`neuralnet` imports those operations for layers and activation derivatives.
-Tensor decorators preserve `SIMD`, `GPU`, or `AUTO` policy in HIR so future
-MLIR vector/GPU passes can select a target without forking the public API.
+The experimental numerical stack separates portable algorithms from model
+notation and lowering policy. `tensor` owns kernels, shapes, parallel
+activation, and Jacobians; `neuralnet` builds layers from them; and `models`
+exports domain symbols such as `Relu` and `J` through Severian decorator symbol
+packs. Execution placement remains explicit at the task or scoped `with`
+expression where it can be represented in HIR and selected by later MLIR
+vector/GPU passes.
 
 Run all currently implemented library packages with:
 

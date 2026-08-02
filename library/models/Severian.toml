@@ -1,0 +1,16 @@
+[package]
+name = "models"
+version = "0.1.0"
+edition = "2026"
+description = "Mathematical model notation built on Severian tensor kernels"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+tensor = { path = "../tensor", version = "0.1.0" }
+
+[package.metadata.library]
+category = "machine-learning"
+implementation = "source"
+status = "experimental"

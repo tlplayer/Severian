@@ -1,0 +1,12 @@
+import models
+
+@models(Relu, FastSigmoid, J)
+def main():
+    X = [-2.0, 0.0, 3.0]
+    values = Relu(X)
+    centered = FastSigmoid([0.0])
+    jacobian = J(X)
+
+    print(values)
+    print(centered)
+    print(jacobian)

@@ -130,6 +130,19 @@ fn parses_imported_decorator_symbol_packs() {
 }
 
 #[test]
+fn parses_piecewise_conditional_expressions() {
+    let source = "def reluValue(x: float) -> float:\n    return 0.0 if x < 0.0 else x\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::Return(statement) = &function.body.statements[0] else {
+        panic!("expected return");
+    };
+    assert!(matches!(statement.value, Some(Expr::If(_))));
+}
+
+#[test]
 fn parses_server_signatures_destructuring_resources_and_contracts() {
     let source = concat!(
         "import network\n",

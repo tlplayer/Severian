@@ -56,6 +56,31 @@ fn lowers_boolean_and_without_replacing_it_with_false() {
 }
 
 #[test]
+fn lowers_conditional_expressions_to_native_selects() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            name: "main".into(),
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Print(Expression::Conditional {
+                condition: Box::new(Expression::Boolean(true)),
+                then_expression: Box::new(Expression::Float(1.0f64.to_bits())),
+                else_expression: Box::new(Expression::Float(0.0f64.to_bits())),
+            })],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&program);
+    assert!(lowered.as_str().contains("llvm.select"));
+    assert!(lowered.as_str().contains(": i1, f64"));
+}
+
+#[test]
 fn lowers_integer_range_for_to_control_flow() {
     let program = Program {
         globals: vec![],

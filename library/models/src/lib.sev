@@ -1,0 +1,58 @@
+import tensor
+
+def reluValue(x: float) -> float:
+    return 0.0 if x < 0.0 else x
+
+test "scalar ReLU follows its piecewise definition":
+    assert(reluValue(-2.0) == 0.0)
+    assert(reluValue(3.0) == 3.0)
+
+def reluDerivative(x: float) -> float:
+    return 0.0 if x <= 0.0 else 1.0
+
+test "ReLU derivative chooses zero at the origin":
+    assert(reluDerivative(-2.0) == 0.0)
+    assert(reluDerivative(0.0) == 0.0)
+    assert(reluDerivative(3.0) == 1.0)
+
+def activation(X: list[float]) -> list[float]:
+    values := []
+    for x in X:
+        values.append(reluValue(x))
+    return values
+
+test "activation applies the mathematical ReLU definition":
+    assert(activation([-2.0, 0.0, 3.0]) == [0.0, 0.0, 3.0])
+
+def leakyActivation(X: list[float], slope: float = 0.01) -> list[float]:
+    return leakyRelu(X, slope)
+
+def sigmoidActivation(X: list[float]) -> list[float]:
+    return fastSigmoid(X)
+
+def tanhActivation(X: list[float]) -> list[float]:
+    return fastTanh(X)
+
+def geluActivation(X: list[float]) -> list[float]:
+    return gelu(X)
+
+def swishActivation(X: list[float]) -> list[float]:
+    return swish(X)
+
+test "named activation symbols retain the tensor behavior":
+    assert(leakyActivation([-2.0], 0.5) == [-1.0])
+    assert(sigmoidActivation([0.0]) == [0.5])
+    assert(tanhActivation([0.0]) == [0.0])
+    assert(geluActivation([0.0]) == [0.0])
+    assert(swishActivation([0.0]) == [0.0])
+
+def activationJacobian(X: list[float]) -> list[float]:
+    width = size(X)
+    J := []
+    for row in range(0, width):
+        for column in range(0, width):
+            J.append(reluDerivative(X[row]) if row == column else 0.0)
+    return J
+
+test "J is a flattened diagonal activation Jacobian":
+    assert(activationJacobian([-2.0, 3.0]) == [0.0, 0.0, 0.0, 1.0])

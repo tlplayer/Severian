@@ -1,0 +1,11 @@
+[package]
+name = "model-symbols-example"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "model-symbols-example"
+path = "main.sev"
+
+[dependencies]
+models = { path = "../../../library/models", version = "0.1.0" }

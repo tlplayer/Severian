@@ -1,5 +1,8 @@
 # Example benchmarks
 
+The checked neural-network measurements and their interpretation are recorded
+in [RESULTS.md](RESULTS.md).
+
 This suite compares the complete Severian example inventory in directories
 `00-getting-started` through `07-generics-constraints` with equivalent Rust and
 Python programs. It measures fresh-process execution, not an in-process loop,

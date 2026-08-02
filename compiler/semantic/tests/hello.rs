@@ -25,6 +25,17 @@ fn rejects_unknown_functions() {
 }
 
 #[test]
+fn retains_typed_conditional_expressions_in_hir() {
+    let source = "def reluValue(x: float) -> float:\n    return 0.0 if x < 0.0 else x\n";
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    assert!(matches!(
+        &hir.functions[0].instructions[0],
+        Instruction::Return(Some(Expression::Conditional { .. }))
+    ));
+}
+
+#[test]
 fn retains_local_task_placement_after_validating_its_import() {
     let source = concat!(
         "import distributed\n",

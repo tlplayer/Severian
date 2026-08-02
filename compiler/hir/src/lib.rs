@@ -245,6 +245,11 @@ pub enum Expression {
         iterable: Box<Expression>,
         condition: Option<Box<Expression>>,
     },
+    Conditional {
+        condition: Box<Expression>,
+        then_expression: Box<Expression>,
+        else_expression: Box<Expression>,
+    },
     Unary {
         op: UnaryOp,
         expression: Box<Expression>,

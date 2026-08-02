@@ -557,6 +557,21 @@ fn aliases_with_decorators(
             if package == "probability" && symbol.spelling == "P" {
                 aliases.insert("P".into(), "probability.probability".into());
             }
+            if package == "models" {
+                let function = match symbol.spelling.as_str() {
+                    "Relu" => Some("activation"),
+                    "LeakyRelu" => Some("leakyActivation"),
+                    "FastSigmoid" => Some("sigmoidActivation"),
+                    "FastTanh" => Some("tanhActivation"),
+                    "Gelu" => Some("geluActivation"),
+                    "Swish" => Some("swishActivation"),
+                    "J" => Some("activationJacobian"),
+                    _ => None,
+                };
+                if let Some(function) = function {
+                    aliases.insert(symbol.spelling.clone(), format!("models.{function}"));
+                }
+            }
         }
     }
     aliases
@@ -1276,6 +1291,39 @@ fn lower_expression(
                     condition,
                 },
                 ValueType::List,
+            ))
+        }
+        Expr::If(conditional) => {
+            let (condition, condition_type) =
+                lower_expression(&conditional.condition, scope, signatures, aliases)?;
+            compatible(
+                conditional.condition.span(),
+                condition_type,
+                ValueType::Bool,
+            )?;
+            let (then_expression, then_type) =
+                lower_expression(&conditional.then_expr, scope, signatures, aliases)?;
+            let (else_expression, else_type) =
+                lower_expression(&conditional.else_expr, scope, signatures, aliases)?;
+            let result_type = if then_type == else_type {
+                then_type
+            } else if then_type == ValueType::Any || else_type == ValueType::Any {
+                ValueType::Any
+            } else {
+                return Err(error(
+                    conditional.span,
+                    format!(
+                        "conditional branches have incompatible types `{then_type:?}` and `{else_type:?}`"
+                    ),
+                ));
+            };
+            Ok((
+                Expression::Conditional {
+                    condition: Box::new(condition),
+                    then_expression: Box::new(then_expression),
+                    else_expression: Box::new(else_expression),
+                },
+                result_type,
             ))
         }
         Expr::Async(task) => {

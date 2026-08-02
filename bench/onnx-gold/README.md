@@ -34,9 +34,14 @@ model = torch.nn.Sequential(
 logits = model(features)
 ```
 
-Severian makes execution topology and lifetime more visible:
+Severian now gives the ONNX activation its model-domain spelling while making
+execution topology and lifetime visible:
 
 ```sev
+@models(Relu)
+def inferChunk(...):
+    hidden = Relu(add(matVec(...), hiddenBias))
+
 with self and local:
     first = async inferChunk(...)
     second = async inferChunk(...)

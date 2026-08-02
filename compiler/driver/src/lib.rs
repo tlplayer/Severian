@@ -757,6 +757,15 @@ fn walk_expression<'expression>(
                 walk_expression(condition, visit);
             }
         }
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => {
+            walk_expression(condition, visit);
+            walk_expression(then_expression, visit);
+            walk_expression(else_expression, visit);
+        }
         Expression::Call { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
@@ -1396,6 +1405,17 @@ fn evaluate(
                 write_line,
             )
         }
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => match evaluate(program, condition, variables, write_line)? {
+            Value::Bool(true) => evaluate(program, then_expression, variables, write_line),
+            Value::Bool(false) => evaluate(program, else_expression, variables, write_line),
+            _ => Err(CompileError::Execution(
+                "conditional expression requires a boolean condition".into(),
+            )),
+        },
         Expression::Binary { left, op, right } => {
             let left = evaluate(program, left, variables, write_line)?;
             let right = evaluate(program, right, variables, write_line)?;

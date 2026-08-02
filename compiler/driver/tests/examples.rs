@@ -114,6 +114,18 @@ fn resolves_path_dependencies_from_severian_manifests() {
 }
 
 #[test]
+fn resolves_model_decorator_symbols_to_package_functions() {
+    let fixture = examples_root().join("20-model-symbols/main.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    let mut output = Vec::new();
+    run(&compilation.hir, |line| output.push(line.to_owned())).unwrap();
+    assert_eq!(
+        output,
+        ["[0, 0, 3]", "[0.5]", "[0, 0, 0, 0, 0, 0, 0, 0, 1]",]
+    );
+}
+
+#[test]
 fn compiles_server_syntax_and_propagated_file_errors() {
     let root = examples_root();
     for fixture in [

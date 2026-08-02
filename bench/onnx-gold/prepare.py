@@ -67,6 +67,7 @@ def generate_severian(model_path: Path, features: np.ndarray):
 
     source = f'''import distributed
 import tensor
+import models
 
 def appendValues(target: list[float], source: list[float]):
     for value in source:
@@ -78,6 +79,7 @@ def repeatInputs(base: list[float], repeats: int) -> list[float]:
         appendValues(inputs, base)
     return inputs
 
+@models(Relu)
 def inferChunk(
     inputs: list[float],
     start: int,
@@ -91,7 +93,7 @@ def inferChunk(
     for sample in range(start, end):
         offset = sample * 4
         features = [inputs[offset], inputs[offset + 1], inputs[offset + 2], inputs[offset + 3]]
-        hidden = relu(add(matVec(hiddenWeights, 12, 4, features), hiddenBias))
+        hidden = Relu(add(matVec(hiddenWeights, 12, 4, features), hiddenBias))
         appendValues(logits, add(matVec(outputWeights, 3, 12, hidden), outputBias))
     return logits
 
