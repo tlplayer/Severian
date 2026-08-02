@@ -12,6 +12,7 @@ members = [
     "neuralnet",
     "network",
     "parallel",
+    "platform",
     "probability",
     "regex",
     "tensor",

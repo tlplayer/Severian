@@ -91,6 +91,7 @@ pub struct ImportName {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
     pub span: Span,
+    pub native_symbol: Option<String>,
     pub decorators: Vec<Decorator>,
     pub name: Ident,
     pub params: Vec<Parameter>,

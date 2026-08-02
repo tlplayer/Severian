@@ -9,6 +9,7 @@ fn lowers_primitive_prints_to_native_calls() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],
@@ -38,6 +39,7 @@ fn lowers_boolean_and_without_replacing_it_with_false() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],
@@ -62,6 +64,7 @@ fn lowers_conditional_expressions_to_native_selects() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],
@@ -87,6 +90,7 @@ fn lowers_integer_range_for_to_control_flow() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],
@@ -118,6 +122,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
         functions: vec![
             Function {
                 name: "consume".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -127,6 +132,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
             },
             Function {
                 name: "main".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -153,6 +159,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
         functions: vec![
             Function {
                 name: "work".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -162,6 +169,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
             },
             Function {
                 name: "main".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -195,6 +203,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
         functions: vec![
             Function {
                 name: "work".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -204,6 +213,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
             },
             Function {
                 name: "main".into(),
+                native_symbol: None,
                 decorators: vec![],
                 contract: None,
                 params: vec![],
@@ -236,6 +246,7 @@ fn compares_dynamic_collection_values_by_value() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],

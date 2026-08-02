@@ -7,7 +7,10 @@ description = "Ownership-safe networking"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
 [package.metadata.library]
 category = "networking"
 implementation = "runtime"
-status = "runtime-pending"
+status = "experimental"

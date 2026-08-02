@@ -7,8 +7,10 @@ description = "Standard input, output, and stream interfaces"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
 [package.metadata.library]
 category = "files-io"
 implementation = "source-and-runtime"
-status = "runtime-pending"
-
+status = "experimental"

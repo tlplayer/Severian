@@ -1,5 +1,17 @@
+import platform
+
 def decode[type](text: string) -> Result[type, JsonError]:
-    return runtime.jsonDecode(text)
+    return platform.jsonDecode(text)
 
 def encode[type](value: type) -> string:
-    return runtime.jsonEncode(value)
+    return platform.jsonEncode(value)
+
+test "integer decoding":
+    switch decode[int]("42"):
+        ok value:
+            assert(value == 42)
+        failure error:
+            assert(false, error)
+
+test "compact list encoding":
+    assert(encode([1, 2, 3]) == "[1,2,3]")

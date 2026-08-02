@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod tensor;
+
 use severian_hir::{
     Activation, AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern,
     Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
@@ -109,6 +111,53 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
 
+    let native_symbols = program
+        .functions
+        .iter()
+        .filter_map(|function| {
+            function
+                .native_symbol
+                .as_ref()
+                .map(|symbol| (function.name.clone(), symbol.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for function in program
+        .functions
+        .iter()
+        .filter(|function| function.native_symbol.is_some())
+    {
+        let symbol = function.native_symbol.as_ref().unwrap();
+        if is_predeclared_native_symbol(symbol) {
+            continue;
+        }
+        write!(output, "  llvm.func @{symbol}(").unwrap();
+        for (index, parameter) in function.params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(mlir_type(parameter.ty));
+        }
+        output.push(')');
+        if function.return_type != ValueType::Unit {
+            write!(output, " -> {}", mlir_type(function.return_type)).unwrap();
+        }
+        output.push('\n');
+    }
+    let has_tensor_relu = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_relu");
+    let has_tensor_add = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_add");
+    let has_tensor_matmul = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_matmul");
+    output.push_str(&tensor::mlir_kernels(
+        has_tensor_relu,
+        has_tensor_add,
+        has_tensor_matmul,
+    ));
+
     let task_specs = task_specs(program);
     let uses_channels = uses_channels(program);
     let mut await_types = HashSet::new();
@@ -201,6 +250,7 @@ pub fn lower(program: &Program) -> Module {
                 &strings,
                 &function_returns,
                 &function_params,
+                &native_symbols,
                 &mut output,
             );
         }
@@ -213,11 +263,15 @@ pub fn lower(program: &Program) -> Module {
                 &strings,
                 &function_returns,
                 &function_params,
+                &native_symbols,
                 &mut output,
             );
         }
     }
     for function in &program.functions {
+        if function.native_symbol.is_some() {
+            continue;
+        }
         lower_function(
             function,
             &program.globals,
@@ -225,6 +279,7 @@ pub fn lower(program: &Program) -> Module {
             &strings,
             &function_returns,
             &function_params,
+            &native_symbols,
             &mut output,
         );
     }
@@ -239,6 +294,7 @@ fn lower_function(
     strings: &[String],
     function_returns: &HashMap<String, ValueType>,
     function_params: &HashMap<String, Vec<ValueType>>,
+    native_symbols: &HashMap<String, String>,
     output: &mut String,
 ) {
     let is_main = function.name == "main";
@@ -262,6 +318,7 @@ fn lower_function(
         strings,
         function_returns,
         function_params,
+        native_symbols,
         classes,
         field_object: None,
         field_names: HashSet::new(),
@@ -317,6 +374,7 @@ fn lower_class_function(
     strings: &[String],
     function_returns: &HashMap<String, ValueType>,
     function_params: &HashMap<String, Vec<ValueType>>,
+    native_symbols: &HashMap<String, String>,
     output: &mut String,
 ) {
     write!(output, "  llvm.func @{symbol}(%self: !llvm.ptr").unwrap();
@@ -334,6 +392,7 @@ fn lower_class_function(
         strings,
         function_returns,
         function_params,
+        native_symbols,
         classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
@@ -364,6 +423,7 @@ struct LowerContext<'a> {
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
+    native_symbols: &'a HashMap<String, String>,
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,
@@ -591,7 +651,8 @@ impl LowerContext<'_> {
                     else_instructions,
                 } => {
                     let incoming = self.variables.clone();
-                    let (condition, _) = self.lower_expression(condition);
+                    let condition = self.lower_expression(condition);
+                    let (condition, _) = self.unbox_value(condition, ValueType::Bool);
                     let then_block = self.fresh_block();
                     let else_block = self.fresh_block();
                     let continue_block = self.fresh_block();
@@ -842,7 +903,8 @@ impl LowerContext<'_> {
                 then_expression,
                 else_expression,
             } => {
-                let (condition, _) = self.lower_expression(condition);
+                let condition = self.lower_expression(condition);
+                let (condition, _) = self.unbox_value(condition, ValueType::Bool);
                 let mut then_value = self.lower_expression(then_expression);
                 let mut else_value = self.lower_expression(else_expression);
                 let result_type = if then_value.1 == else_value.1 {
@@ -1632,6 +1694,7 @@ impl LowerContext<'_> {
                         self.lower_binary_values((zero, ty), BinaryOp::Sub, (value, ty))
                     }
                     UnaryOp::Not => {
+                        let (value, _) = self.unbox_value((value, ty), ValueType::Bool);
                         let one = self.fresh_value();
                         writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1")
                             .unwrap();
@@ -1843,7 +1906,10 @@ impl LowerContext<'_> {
                 let symbol = if function == "sqrt" {
                     "llvm.sqrt.f64"
                 } else {
-                    linked_function
+                    self.native_symbols
+                        .get(linked_function)
+                        .map(String::as_str)
+                        .unwrap_or(linked_function)
                 };
                 if return_type == ValueType::Unit {
                     writeln!(
@@ -2094,7 +2160,8 @@ impl LowerContext<'_> {
             .variables
             .insert(variable.into(), (item, ValueType::Any));
         if let Some(condition) = condition {
-            let (condition, _) = self.lower_expression(condition);
+            let condition = self.lower_expression(condition);
+            let (condition, _) = self.unbox_value(condition, ValueType::Bool);
             writeln!(
                 self.output,
                 "    llvm.cond_br {condition}, ^bb{append}, ^bb{step}"
@@ -2125,7 +2192,7 @@ impl LowerContext<'_> {
         &mut self,
         (mut left, mut operand_type): (String, ValueType),
         op: BinaryOp,
-        (mut right, right_type): (String, ValueType),
+        (mut right, mut right_type): (String, ValueType),
     ) -> (String, ValueType) {
         if op == BinaryOp::In && right_type == ValueType::Set {
             let left = self.box_value((left, operand_type));
@@ -2273,6 +2340,26 @@ impl LowerContext<'_> {
             (left, operand_type) = self.unbox_value((left, operand_type), right_type);
         } else if right_type == ValueType::Any && operand_type != ValueType::Any {
             right = self.unbox_value((right, right_type), operand_type).0;
+            right_type = operand_type;
+        }
+        if operand_type == ValueType::String && right_type == ValueType::String {
+            if op == BinaryOp::Add {
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_concat({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                return (result, ValueType::String);
+            }
+            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+                let equal = self.fresh_value();
+                writeln!(self.output, "    {equal} = llvm.call @__sev_string_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                if op == BinaryOp::Equal {
+                    return (equal, ValueType::Bool);
+                }
+                let one = self.fresh_value();
+                writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1").unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
+                return (result, ValueType::Bool);
+            }
         }
         let result = self.fresh_value();
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -2680,7 +2767,8 @@ impl LowerContext<'_> {
                 }
             }
         }
-        let (condition, _) = self.lower_expression(condition);
+        let condition = self.lower_expression(condition);
+        let (condition, _) = self.unbox_value(condition, ValueType::Bool);
         writeln!(
             self.output,
             "    llvm.cond_br {condition}, ^bb{body}, ^bb{exit}"
@@ -3447,11 +3535,15 @@ pub fn native_task_runtime_source(program: &Program) -> String {
     let uses_channels = uses_channels(program);
     let mut source = String::from(concat!(
         "#include <pthread.h>\n",
+        "#include <arpa/inet.h>\n",
         "#include <stdbool.h>\n",
         "#include <stdint.h>\n",
         "#include <stdio.h>\n",
         "#include <stdlib.h>\n",
-        "#include <string.h>\n\n",
+        "#include <string.h>\n",
+        "#include <sys/socket.h>\n",
+        "#include <unistd.h>\n",
+        "#include <regex.h>\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
@@ -3528,9 +3620,284 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "void *__sev_builtin_read(void *path) { (void)path; return __sev_box_string(\"settings\"); }\n",
         "void *__sev_builtin_http_get(void *url) { (void)url; return __sev_box_string(\"response\"); }\n",
         "void *__sev_builtin_int_parse(void *text) { char *end = NULL; long value = strtol(text, &end, 10); if (!text || end == text || *end != '\\0') abort(); return __sev_box_i64(value); }\n",
-        "void *__sev_builtin_file_write(void *path, void *text) { (void)path; (void)text; return __sev_variant_new(\"ok\", NULL); }\n\n",
-        "bool __sev_regex_matches(void *text_raw, void *pattern_raw) { const char *text = text_raw; (void)pattern_raw; const char *dash = strchr(text, '-'); if (!dash || dash == text || !dash[1]) return false; for (const char *value = dash + 1; *value; ++value) if (*value < '0' || *value > '9') return false; return true; }\n\n",
+        "\n",
     ));
+    source.push_str(
+        r#"
+static void *sev_failure(const char *message) {
+  return __sev_variant_new("failure", __sev_box_string((void *)message));
+}
+
+void *__sev_file_write(void *path_raw, void *text_raw) {
+  const char *path = path_raw;
+  const char *text = text_raw;
+  FILE *file = fopen(path, "wb");
+  if (!file) return sev_failure("could not open file for writing");
+  size_t size = strlen(text);
+  bool success = fwrite(text, 1, size, file) == size && fclose(file) == 0;
+  if (!success) return sev_failure("could not write file");
+  return __sev_variant_new("ok", NULL);
+}
+
+void *__sev_builtin_file_write(void *path, void *text) {
+  return __sev_file_write(path, text);
+}
+
+void *__sev_file_read(void *path_raw) {
+  FILE *file = fopen((const char *)path_raw, "rb");
+  if (!file) return sev_failure("could not open file for reading");
+  if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return sev_failure("could not seek file"); }
+  long size = ftell(file);
+  if (size < 0 || fseek(file, 0, SEEK_SET) != 0) { fclose(file); return sev_failure("could not size file"); }
+  char *contents = sev_allocate((size_t)size + 1);
+  bool success = fread(contents, 1, (size_t)size, file) == (size_t)size && fclose(file) == 0;
+  if (!success) return sev_failure("could not read file");
+  return __sev_variant_new("ok", __sev_box_string(contents));
+}
+
+typedef struct { char *data; size_t size; size_t capacity; } sev_json_buffer;
+
+static void sev_json_reserve(sev_json_buffer *buffer, size_t extra) {
+  size_t required = buffer->size + extra + 1;
+  if (required <= buffer->capacity) return;
+  size_t capacity = buffer->capacity ? buffer->capacity : 64;
+  while (capacity < required) capacity *= 2;
+  buffer->data = realloc(buffer->data, capacity);
+  if (!buffer->data) abort();
+  buffer->capacity = capacity;
+}
+
+static void sev_json_character(sev_json_buffer *buffer, char value) {
+  sev_json_reserve(buffer, 1);
+  buffer->data[buffer->size++] = value;
+  buffer->data[buffer->size] = '\0';
+}
+
+static void sev_json_text(sev_json_buffer *buffer, const char *value) {
+  size_t size = strlen(value);
+  sev_json_reserve(buffer, size);
+  memcpy(buffer->data + buffer->size, value, size + 1);
+  buffer->size += size;
+}
+
+static void sev_json_encode_value(sev_json_buffer *buffer, sev_value *value) {
+  if (!value) { sev_json_text(buffer, "null"); return; }
+  char number[64];
+  switch (value->kind) {
+    case SEV_INT:
+      snprintf(number, sizeof(number), "%ld", value->as.i64);
+      sev_json_text(buffer, number);
+      return;
+    case SEV_FLOAT:
+      snprintf(number, sizeof(number), "%.17g", value->as.f64);
+      sev_json_text(buffer, number);
+      return;
+    case SEV_BOOL:
+      sev_json_text(buffer, value->as.boolean ? "true" : "false");
+      return;
+    case SEV_STRING:
+      sev_json_character(buffer, '"');
+      for (const char *cursor = value->as.string; *cursor; ++cursor) {
+        if (*cursor == '"' || *cursor == '\\') sev_json_character(buffer, '\\');
+        if (*cursor == '\n') { sev_json_text(buffer, "\\n"); continue; }
+        sev_json_character(buffer, *cursor);
+      }
+      sev_json_character(buffer, '"');
+      return;
+    case SEV_COLLECTION: {
+      sev_collection *collection = value->as.pointer;
+      sev_json_character(buffer, '[');
+      for (int64_t index = 0; index < collection->size; ++index) {
+        if (index) sev_json_character(buffer, ',');
+        sev_json_encode_value(buffer, collection->items[index]);
+      }
+      sev_json_character(buffer, ']');
+      return;
+    }
+  }
+  abort();
+}
+
+void *__sev_json_encode(void *raw) {
+  sev_json_buffer buffer = {0};
+  sev_json_encode_value(&buffer, raw);
+  return buffer.data;
+}
+
+static void sev_json_space(const char **cursor) {
+  while (**cursor == ' ' || **cursor == '\n' || **cursor == '\r' || **cursor == '\t') ++*cursor;
+}
+
+static sev_value *sev_json_parse_value(const char **cursor) {
+  sev_json_space(cursor);
+  if (**cursor == '"') {
+    ++*cursor;
+    sev_json_buffer buffer = {0};
+    while (**cursor && **cursor != '"') {
+      char value = *(*cursor)++;
+      if (value == '\\') {
+        value = *(*cursor)++;
+        if (value == 'n') value = '\n';
+      }
+      sev_json_character(&buffer, value);
+    }
+    if (**cursor != '"') { free(buffer.data); return NULL; }
+    ++*cursor;
+    if (!buffer.data) buffer.data = strcpy(sev_allocate(1), "");
+    return __sev_box_string(buffer.data);
+  }
+  if (**cursor == '[') {
+    ++*cursor;
+    sev_collection *values = __sev_collection_new(0);
+    sev_json_space(cursor);
+    if (**cursor != ']') {
+      while (true) {
+        sev_value *value = sev_json_parse_value(cursor);
+        if (!value) return NULL;
+        __sev_collection_push(values, value);
+        sev_json_space(cursor);
+        if (**cursor != ',') break;
+        ++*cursor;
+      }
+    }
+    if (**cursor != ']') return NULL;
+    ++*cursor;
+    return __sev_box_collection(values);
+  }
+  if (strncmp(*cursor, "true", 4) == 0) { *cursor += 4; return __sev_box_bool(true); }
+  if (strncmp(*cursor, "false", 5) == 0) { *cursor += 5; return __sev_box_bool(false); }
+  char *end = NULL;
+  double number = strtod(*cursor, &end);
+  if (end == *cursor) return NULL;
+  bool integral = true;
+  for (const char *value = *cursor; value < end; ++value) {
+    if (*value == '.' || *value == 'e' || *value == 'E') integral = false;
+  }
+  *cursor = end;
+  return integral ? __sev_box_i64((int64_t)number) : __sev_box_f64(number);
+}
+
+void *__sev_json_decode(void *text_raw) {
+  const char *cursor = text_raw;
+  sev_value *value = sev_json_parse_value(&cursor);
+  sev_json_space(&cursor);
+  if (!value || *cursor) return sev_failure("invalid JSON");
+  return __sev_variant_new("ok", value);
+}
+
+void __sev_log_info(void *message) {
+  fprintf(stderr, "INFO %s\n", (const char *)message);
+}
+
+void __sev_log_error(void *message, void *cause) {
+  sev_value *value = cause;
+  if (value && value->kind == SEV_STRING) {
+    fprintf(stderr, "ERROR %s: %s\n", (const char *)message, value->as.string);
+  } else {
+    fprintf(stderr, "ERROR %s\n", (const char *)message);
+  }
+}
+
+typedef struct { int socket; } sev_tcp_listener;
+
+static bool sev_socket_write_all(int socket_fd, const char *data, size_t size) {
+  while (size) {
+    ssize_t written = send(socket_fd, data, size, 0);
+    if (written <= 0) return false;
+    data += written;
+    size -= (size_t)written;
+  }
+  return true;
+}
+
+static bool sev_socket_read_all(int socket_fd, char *data, size_t size) {
+  while (size) {
+    ssize_t received = recv(socket_fd, data, size, 0);
+    if (received <= 0) return false;
+    data += received;
+    size -= (size_t)received;
+  }
+  return true;
+}
+
+void *__sev_network_listen(void *address_raw) {
+  const char *address = address_raw;
+  const char *colon = strrchr(address, ':');
+  if (!colon) return sev_failure("network address requires a port");
+  char host[64];
+  size_t host_size = (size_t)(colon - address);
+  if (host_size == 0 || host_size >= sizeof(host)) return sev_failure("invalid network host");
+  memcpy(host, address, host_size);
+  host[host_size] = '\0';
+  char *port_end = NULL;
+  long port = strtol(colon + 1, &port_end, 10);
+  if (*port_end || port < 0 || port > 65535) return sev_failure("invalid network port");
+  int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_fd < 0) return sev_failure("could not create listener");
+  int reuse = 1;
+  setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  struct sockaddr_in endpoint = {0};
+  endpoint.sin_family = AF_INET;
+  endpoint.sin_port = htons((uint16_t)port);
+  if (inet_pton(AF_INET, host, &endpoint.sin_addr) != 1 ||
+      bind(socket_fd, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 ||
+      listen(socket_fd, 16) != 0) {
+    close(socket_fd);
+    return sev_failure("could not bind listener");
+  }
+  sev_tcp_listener *listener = sev_allocate(sizeof(*listener));
+  listener->socket = socket_fd;
+  return __sev_variant_new("ok", listener);
+}
+
+void *__sev_network_loopback_echo(void *message_raw) {
+  const char *message = message_raw;
+  int server = socket(AF_INET, SOCK_STREAM, 0);
+  if (server < 0) return sev_failure("could not create loopback server");
+  struct sockaddr_in endpoint = {0};
+  endpoint.sin_family = AF_INET;
+  endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (bind(server, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 || listen(server, 1) != 0) {
+    close(server);
+    return sev_failure("could not bind loopback server");
+  }
+  socklen_t endpoint_size = sizeof(endpoint);
+  if (getsockname(server, (struct sockaddr *)&endpoint, &endpoint_size) != 0) {
+    close(server);
+    return sev_failure("could not inspect loopback server");
+  }
+  int client = socket(AF_INET, SOCK_STREAM, 0);
+  if (client < 0 || connect(client, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0) {
+    if (client >= 0) close(client);
+    close(server);
+    return sev_failure("could not connect loopback client");
+  }
+  int peer = accept(server, NULL, NULL);
+  if (peer < 0) { close(client); close(server); return sev_failure("could not accept loopback client"); }
+  size_t size = strlen(message);
+  char *buffer = sev_allocate(size + 1);
+  bool success = sev_socket_write_all(client, message, size) &&
+                 sev_socket_read_all(peer, buffer, size) &&
+                 sev_socket_write_all(peer, buffer, size) &&
+                 sev_socket_read_all(client, buffer, size);
+  close(peer);
+  close(client);
+  close(server);
+  if (!success) return sev_failure("loopback transfer failed");
+  buffer[size] = '\0';
+  return __sev_variant_new("ok", __sev_box_string(buffer));
+}
+
+bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
+  regex_t expression;
+  if (regcomp(&expression, (const char *)pattern_raw, REG_EXTENDED | REG_NOSUB) != 0) return false;
+  bool matches = regexec(&expression, (const char *)text_raw, 0, NULL, 0) == 0;
+  regfree(&expression);
+  return matches;
+}
+
+"#,
+    );
     let drawable_classes = program
         .classes
         .iter()
@@ -3794,6 +4161,16 @@ pub fn native_task_runtime_source(program: &Program) -> String {
             source.push_str("  free(task);\n  return result;\n}\n");
         }
     }
+    let native_symbols = program
+        .functions
+        .iter()
+        .filter_map(|function| function.native_symbol.as_deref())
+        .collect::<HashSet<_>>();
+    source.push_str(&tensor::runtime_source(
+        native_symbols.contains("__sev_tensor_relu"),
+        native_symbols.contains("__sev_tensor_add"),
+        native_symbols.contains("__sev_tensor_matmul"),
+    ));
     source
 }
 
@@ -3808,11 +4185,16 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Tensor
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
         | ValueType::Any => "ptr",
     }
+}
+
+fn is_predeclared_native_symbol(symbol: &str) -> bool {
+    matches!(symbol, "__sev_regex_matches")
 }
 
 fn c_type(ty: ValueType) -> &'static str {
@@ -3826,6 +4208,7 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Tensor
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
@@ -3844,6 +4227,7 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Tensor
         | ValueType::Function
         | ValueType::Any
         | ValueType::Result

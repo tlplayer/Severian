@@ -134,7 +134,7 @@ pub fn analyze_with_interfaces(
                 ));
             }
             if imports_entire_module(module, module_name) {
-                aliases.insert(name.name.clone(), key);
+                aliases.entry(name.name.clone()).or_insert(key);
             }
         }
     }
@@ -245,7 +245,10 @@ pub fn analyze_with_interfaces(
             &signatures,
             &function_aliases,
         )?;
-        if signature.returns != ValueType::Unit && !always_returns(&instructions) {
+        if function.native_symbol.is_none()
+            && signature.returns != ValueType::Unit
+            && !always_returns(&instructions)
+        {
             return Err(error(
                 function.span,
                 format!("function `{}` must return a value", function.name.name),
@@ -269,6 +272,7 @@ pub fn analyze_with_interfaces(
         }
         functions.push(Function {
             name: function.name.name.clone(),
+            native_symbol: function.native_symbol.clone(),
             decorators,
             contract: lower_function_contract(
                 function.contract.as_ref(),
@@ -474,6 +478,7 @@ fn lower_class_function(
     }
     Ok(Function {
         name: name.into(),
+        native_symbol: None,
         decorators: decorator_metadata(source_decorators),
         contract: lower_function_contract(source_contract, &scope, signatures, aliases)?,
         params,
@@ -1613,6 +1618,15 @@ fn lower_call(
     aliases: &HashMap<String, String>,
 ) -> Result<(Expression, ValueType), SemanticError> {
     if let Expr::Index(index) = call.callee.as_ref() {
+        if let Expr::Identifier(callee) = index.object.as_ref() {
+            let canonical = aliases
+                .get(&callee.name)
+                .map(String::as_str)
+                .unwrap_or(&callee.name);
+            if let Some(signature) = signatures.get(canonical) {
+                return lower_declared_call(call, canonical, signature, scope, signatures, aliases);
+            }
+        }
         if let Expr::Member(member) = index.object.as_ref() {
             if let Expr::Identifier(object) = member.object.as_ref() {
                 if let Some(module) = aliases.get(&object.name) {
@@ -2144,6 +2158,7 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
+                "Tensor" => Ok(ValueType::Tensor),
                 "fn" => Ok(ValueType::Function),
                 "Result" => Ok(ValueType::Result),
                 "Option" => Ok(ValueType::Option),

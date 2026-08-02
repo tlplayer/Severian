@@ -1,0 +1,13 @@
+[package]
+name = "platform"
+version = "0.1.0"
+edition = "2026"
+description = "Typed native ABI used by Severian standard-library packages"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "runtime"
+implementation = "native-abi"
+status = "experimental"

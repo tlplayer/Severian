@@ -1,2 +1,19 @@
+import platform
+
+def read(path: string) -> Result[string, IOError]:
+    return platform.fileRead(path)
+
 def write(path: string, contents: string) -> Result[unit, IOError]:
-    return runtime.fileWrite(path, contents)
+    return platform.fileWrite(path, contents)
+
+test "native file round trip":
+    path = "/tmp/severian-library-file-roundtrip.txt"
+    switch write(path, "severian file runtime"):
+        ok:
+            switch read(path):
+                ok contents:
+                    assert(contents == "severian file runtime")
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)

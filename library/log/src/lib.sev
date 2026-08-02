@@ -1,5 +1,11 @@
+import platform
+
 def info(message: string):
-    runtime.logInfo(message)
+    platform.logInfo(message)
 
 def error(message: string, cause: Error):
-    runtime.logError(message, cause)
+    platform.logError(message, cause)
+
+test "native logging sinks":
+    info("library ready")
+    error("library failure", IOError("test cause"))

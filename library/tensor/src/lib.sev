@@ -1,5 +1,36 @@
 import matrix
 
+native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
+
+native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
+
+native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
+
+native("__sev_tensor_relu") def rankedRelu(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_matmul") def rankedMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+test "ranked tensors retain contiguous values and shape":
+    value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    assert(rankedShape(value) == [2, 2])
+    assert(rankedValues(value) == [1.0, 2.0, 3.0, 4.0])
+
+test "ranked ReLU executes the native linalg kernel":
+    value = ranked([-2.0, 0.0, 3.0], [3])
+    assert(rankedValues(rankedRelu(value)) == [0.0, 0.0, 3.0])
+
+test "ranked elementwise addition executes the native linalg kernel":
+    left = ranked([1.0, 2.0, 3.0], [3])
+    right = ranked([4.0, 5.0, 6.0], [3])
+    assert(rankedValues(rankedAdd(left, right)) == [5.0, 7.0, 9.0])
+
+test "ranked matrix multiplication executes the native linalg kernel":
+    left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    right = ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
+    assert(rankedValues(rankedMatmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
+
 def tensor(values: list[float]) -> list[float]:
     return values
 

@@ -1,0 +1,53 @@
+native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
+
+native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]
+
+test "native file ABI":
+    path = "/tmp/severian-platform-roundtrip.txt"
+    switch fileWrite(path, "platform ABI"):
+        ok:
+            switch fileRead(path):
+                ok contents:
+                    assert(contents == "platform ABI")
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)
+
+native("__sev_json_decode") def jsonDecode(text: string) -> Result[Any, JsonError]
+
+test "native JSON decode ABI":
+    switch jsonDecode("42"):
+        ok value:
+            assert(value == 42)
+        failure error:
+            assert(false, error)
+
+native("__sev_json_encode") def jsonEncode(value: Any) -> string
+
+test "native JSON encode ABI":
+    assert(jsonEncode([1, 2, 3]) == "[1,2,3]")
+
+native("__sev_log_info") def logInfo(message: string)
+
+test "native log ABI":
+    logInfo("platform ready")
+
+native("__sev_log_error") def logError(message: string, cause: Any)
+
+native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
+
+native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
+
+test "native network ABI":
+    switch networkLoopbackEcho("platform loopback"):
+        ok echoed:
+            assert(echoed == "platform loopback")
+        failure error:
+            logError("native network ABI failed", error)
+            assert(false, error)
+
+native("__sev_regex_matches") def regexMatches(text: string, pattern: string) -> bool
+
+test "native regex ABI":
+    assert(regexMatches("release-42", "^[a-z]+-[0-9]+$"))

@@ -7,8 +7,10 @@ description = "Regular-expression compilation and matching"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
 [package.metadata.library]
 category = "text-processing"
 implementation = "compiler-symbol-pack"
-status = "interface-pending"
-
+status = "experimental"

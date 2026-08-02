@@ -47,6 +47,7 @@ pub struct Global {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub native_symbol: Option<String>,
     pub decorators: Vec<Decorator>,
     pub contract: Option<FunctionContract>,
     pub params: Vec<Parameter>,
@@ -99,6 +100,7 @@ pub enum ValueType {
     Tuple,
     Map,
     Set,
+    Tensor,
     Function,
     Result,
     Option,

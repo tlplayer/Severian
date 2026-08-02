@@ -7,6 +7,7 @@ fn finds_the_main_function() {
         classes: vec![],
         functions: vec![Function {
             name: "main".into(),
+            native_symbol: None,
             decorators: vec![],
             contract: None,
             params: vec![],

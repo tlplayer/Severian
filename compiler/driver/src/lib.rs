@@ -291,6 +291,14 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
                 .ok_or_else(|| missing_tool("mlir-opt"))?,
             &[
                 source_mlir.as_path(),
+                Path::new("--convert-linalg-to-loops"),
+                Path::new("--lower-affine"),
+                Path::new("--convert-scf-to-cf"),
+                Path::new("--convert-cf-to-llvm"),
+                Path::new("--convert-arith-to-llvm"),
+                Path::new("--finalize-memref-to-llvm"),
+                Path::new("--convert-func-to-llvm"),
+                Path::new("--reconcile-unrealized-casts"),
                 Path::new("-o"),
                 checked_mlir.as_path(),
             ],
@@ -333,8 +341,10 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
         }
     })();
 
-    for temporary in [&source_mlir, &checked_mlir, &llvm_ir, &task_runtime] {
-        let _ = std::fs::remove_file(temporary);
+    if std::env::var_os("SEVERIAN_KEEP_NATIVE_TEMPS").is_none() {
+        for temporary in [&source_mlir, &checked_mlir, &llvm_ir, &task_runtime] {
+            let _ = std::fs::remove_file(temporary);
+        }
     }
 
     result
@@ -406,6 +416,7 @@ pub fn native_test_compilation(
     hir.functions.retain(|function| function.name != "main");
     hir.functions.push(Function {
         name: "main".into(),
+        native_symbol: None,
         decorators: Vec::new(),
         contract: None,
         params: Vec::new(),
@@ -834,6 +845,10 @@ enum Value {
         rows: i64,
         columns: i64,
         fill: u64,
+    },
+    Tensor {
+        shape: Vec<i64>,
+        values: Vec<u64>,
     },
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Vec<Value>),
@@ -1505,13 +1520,34 @@ fn execute_call(
                 .any(|candidate| candidate.name == *name)
         })
         .unwrap_or(function);
-    if program
+    let linked_definition = program
         .functions
         .iter()
-        .any(|candidate| candidate.name == linked_function)
-    {
+        .find(|candidate| candidate.name == linked_function);
+    if linked_definition.is_some_and(|function| function.native_symbol.is_none()) {
         return execute_function(program, linked_function, args, chaos_event, write_line);
     }
+    let function = linked_definition
+        .and_then(|function| function.native_symbol.as_deref())
+        .map(|symbol| match symbol {
+            "__sev_file_read" => "platform.fileRead",
+            "__sev_file_write" => "platform.fileWrite",
+            "__sev_json_decode" => "platform.jsonDecode",
+            "__sev_json_encode" => "platform.jsonEncode",
+            "__sev_log_info" => "platform.logInfo",
+            "__sev_log_error" => "platform.logError",
+            "__sev_network_listen" => "platform.networkListen",
+            "__sev_network_loopback_echo" => "platform.networkLoopbackEcho",
+            "__sev_regex_matches" => "platform.regexMatches",
+            "__sev_tensor_from_list" => "platform.tensorFromList",
+            "__sev_tensor_to_list" => "platform.tensorToList",
+            "__sev_tensor_shape" => "platform.tensorShape",
+            "__sev_tensor_relu" => "platform.tensorRelu",
+            "__sev_tensor_add" => "platform.tensorAdd",
+            "__sev_tensor_matmul" => "platform.tensorMatmul",
+            _ => function,
+        })
+        .unwrap_or(function);
     match function {
         "print" => {
             write_line(&display_value(args.first().unwrap_or(&Value::Unit)));
@@ -1559,6 +1595,202 @@ fn execute_call(
             name: "ok".into(),
             fields: vec![Value::String("settings".into())],
         }),
+        "platform.fileRead" => match args.as_slice() {
+            [Value::String(path)] => match std::fs::read_to_string(path) {
+                Ok(contents) => Ok(Value::Variant {
+                    name: "ok".into(),
+                    fields: vec![Value::String(contents)],
+                }),
+                Err(error) => Ok(Value::Variant {
+                    name: "failure".into(),
+                    fields: vec![Value::String(error.to_string())],
+                }),
+            },
+            _ => Err(CompileError::Execution(
+                "platform.fileRead expects a path".into(),
+            )),
+        },
+        "platform.fileWrite" => match args.as_slice() {
+            [Value::String(path), Value::String(contents)] => {
+                match std::fs::write(path, contents) {
+                    Ok(()) => Ok(Value::Variant {
+                        name: "ok".into(),
+                        fields: Vec::new(),
+                    }),
+                    Err(error) => Ok(Value::Variant {
+                        name: "failure".into(),
+                        fields: vec![Value::String(error.to_string())],
+                    }),
+                }
+            }
+            _ => Err(CompileError::Execution(
+                "platform.fileWrite expects a path and contents".into(),
+            )),
+        },
+        "platform.jsonDecode" => match args.as_slice() {
+            [Value::String(text)] => Ok(Value::Variant {
+                name: "ok".into(),
+                fields: vec![decode_json_value(text)?],
+            }),
+            _ => Err(CompileError::Execution(
+                "platform.jsonDecode expects text".into(),
+            )),
+        },
+        "platform.jsonEncode" => match args.as_slice() {
+            [value] => Ok(Value::String(encode_json_value(value))),
+            _ => Err(CompileError::Execution(
+                "platform.jsonEncode expects one value".into(),
+            )),
+        },
+        "platform.logInfo" => match args.as_slice() {
+            [Value::String(message)] => {
+                write_line(&format!("INFO {message}"));
+                Ok(Value::Unit)
+            }
+            _ => Err(CompileError::Execution(
+                "platform.logInfo expects a message".into(),
+            )),
+        },
+        "platform.logError" => match args.as_slice() {
+            [Value::String(message), _] => {
+                write_line(&format!("ERROR {message}"));
+                Ok(Value::Unit)
+            }
+            _ => Err(CompileError::Execution(
+                "platform.logError expects a message and cause".into(),
+            )),
+        },
+        "platform.networkListen" => match args.as_slice() {
+            [Value::String(address)] => Ok(Value::Variant {
+                name: "ok".into(),
+                fields: vec![Value::String(address.clone())],
+            }),
+            _ => Err(CompileError::Execution(
+                "platform.networkListen expects an address".into(),
+            )),
+        },
+        "platform.networkLoopbackEcho" => match args.as_slice() {
+            [Value::String(message)] => Ok(Value::Variant {
+                name: "ok".into(),
+                fields: vec![Value::String(message.clone())],
+            }),
+            _ => Err(CompileError::Execution(
+                "platform.networkLoopbackEcho expects a message".into(),
+            )),
+        },
+        "platform.tensorFromList" => match args.as_slice() {
+            [Value::List(values), Value::List(shape)] => {
+                let values = values
+                    .borrow()
+                    .iter()
+                    .map(|value| match value {
+                        Value::Float(value) => Ok(*value),
+                        Value::Int(value) => Ok((*value as f64).to_bits()),
+                        _ => Err(CompileError::Execution(
+                            "tensor values must be numeric".into(),
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let shape = shape
+                    .borrow()
+                    .iter()
+                    .map(|value| match value {
+                        Value::Int(value) => Ok(*value),
+                        _ => Err(CompileError::Execution(
+                            "tensor shape must contain integers".into(),
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let expected = shape.iter().try_fold(1i64, |size, axis| {
+                    size.checked_mul(*axis)
+                        .ok_or_else(|| CompileError::Execution("tensor shape overflows".into()))
+                })?;
+                if expected < 0 || expected as usize != values.len() {
+                    return Err(CompileError::Execution(
+                        "tensor shape does not match its values".into(),
+                    ));
+                }
+                Ok(Value::Tensor { shape, values })
+            }
+            _ => Err(CompileError::Execution(
+                "tensor construction expects values and shape lists".into(),
+            )),
+        },
+        "platform.tensorToList" => match args.as_slice() {
+            [Value::Tensor { values, .. }] => Ok(Value::List(Rc::new(RefCell::new(
+                values.iter().copied().map(Value::Float).collect(),
+            )))),
+            _ => Err(CompileError::Execution("expected a tensor".into())),
+        },
+        "platform.tensorShape" => match args.as_slice() {
+            [Value::Tensor { shape, .. }] => Ok(Value::List(Rc::new(RefCell::new(
+                shape.iter().copied().map(Value::Int).collect(),
+            )))),
+            _ => Err(CompileError::Execution("expected a tensor".into())),
+        },
+        "platform.tensorRelu" => match args.as_slice() {
+            [Value::Tensor { shape, values }] => Ok(Value::Tensor {
+                shape: shape.clone(),
+                values: values
+                    .iter()
+                    .map(|value| f64::from_bits(*value).max(0.0).to_bits())
+                    .collect(),
+            }),
+            _ => Err(CompileError::Execution("ReLU expects a tensor".into())),
+        },
+        "platform.tensorAdd" => match args.as_slice() {
+            [Value::Tensor {
+                shape: left_shape,
+                values: left,
+            }, Value::Tensor {
+                shape: right_shape,
+                values: right,
+            }] if left_shape == right_shape => Ok(Value::Tensor {
+                shape: left_shape.clone(),
+                values: left
+                    .iter()
+                    .zip(right)
+                    .map(|(left, right)| (f64::from_bits(*left) + f64::from_bits(*right)).to_bits())
+                    .collect(),
+            }),
+            _ => Err(CompileError::Execution(
+                "tensor addition requires equal shapes".into(),
+            )),
+        },
+        "platform.tensorMatmul" => match args.as_slice() {
+            [Value::Tensor {
+                shape: left_shape,
+                values: left,
+            }, Value::Tensor {
+                shape: right_shape,
+                values: right,
+            }] if left_shape.len() == 2
+                && right_shape.len() == 2
+                && left_shape[1] == right_shape[0] =>
+            {
+                let rows = left_shape[0] as usize;
+                let inner = left_shape[1] as usize;
+                let columns = right_shape[1] as usize;
+                let mut values = vec![0.0f64.to_bits(); rows * columns];
+                for row in 0..rows {
+                    for column in 0..columns {
+                        let mut total = 0.0;
+                        for index in 0..inner {
+                            total += f64::from_bits(left[row * inner + index])
+                                * f64::from_bits(right[index * columns + column]);
+                        }
+                        values[row * columns + column] = total.to_bits();
+                    }
+                }
+                Ok(Value::Tensor {
+                    shape: vec![rows as i64, columns as i64],
+                    values,
+                })
+            }
+            _ => Err(CompileError::Execution(
+                "tensor matrix dimensions do not align".into(),
+            )),
+        },
         "http.get" => Ok(Value::Variant {
             name: "ok".into(),
             fields: vec![Value::String("example response".into())],
@@ -1638,7 +1870,7 @@ fn execute_call(
                 "matrix scale expects a matrix and float".into(),
             )),
         },
-        "regex.matches" => match args.as_slice() {
+        "regex.matches" | "platform.regexMatches" => match args.as_slice() {
             [Value::String(text), Value::String(_)] => {
                 let Some((prefix, suffix)) = text.split_once('-') else {
                     return Ok(Value::Bool(false));
@@ -2050,6 +2282,14 @@ fn display_value(value: &Value) -> String {
             columns,
             fill,
         } => format!("matrix({rows}x{columns}, {})", f64::from_bits(*fill)),
+        Value::Tensor { shape, values } => format!(
+            "tensor(shape={shape:?}, values=[{}])",
+            values
+                .iter()
+                .map(|value| f64::from_bits(*value).to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Value::List(values) => format_collection("[", "]", &values.borrow()),
         Value::Tuple(values) => format_collection("(", ")", values),
         Value::Set(values) => format_collection("{", "}", values),
@@ -2101,6 +2341,71 @@ fn display_value(value: &Value) -> String {
             format!("when {function} {action} {}", display_value(value))
         }
         Value::Unit => "unit".into(),
+    }
+}
+
+fn decode_json_value(text: &str) -> Result<Value, CompileError> {
+    let text = text.trim();
+    if text == "true" {
+        return Ok(Value::Bool(true));
+    }
+    if text == "false" {
+        return Ok(Value::Bool(false));
+    }
+    if text == "null" {
+        return Ok(Value::Unit);
+    }
+    if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
+        return Ok(Value::String(
+            text[1..text.len() - 1]
+                .replace("\\\"", "\"")
+                .replace("\\n", "\n")
+                .replace("\\\\", "\\"),
+        ));
+    }
+    if text.starts_with('[') && text.ends_with(']') {
+        let body = &text[1..text.len() - 1];
+        let values = if body.trim().is_empty() {
+            Vec::new()
+        } else {
+            body.split(',')
+                .map(decode_json_value)
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        return Ok(Value::List(Rc::new(RefCell::new(values))));
+    }
+    if let Ok(value) = text.parse::<i64>() {
+        return Ok(Value::Int(value));
+    }
+    if let Ok(value) = text.parse::<f64>() {
+        return Ok(Value::Float(value.to_bits()));
+    }
+    Err(CompileError::Execution("invalid JSON value".into()))
+}
+
+fn encode_json_value(value: &Value) -> String {
+    match value {
+        Value::Int(value) => value.to_string(),
+        Value::Float(value) => f64::from_bits(*value).to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::String(value) => format!(
+            "\"{}\"",
+            value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+        ),
+        Value::List(values) => format!(
+            "[{}]",
+            values
+                .borrow()
+                .iter()
+                .map(encode_json_value)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Value::Unit => "null".into(),
+        _ => format!("\"{}\"", display_value(value)),
     }
 }
 

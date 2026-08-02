@@ -4,3 +4,5 @@
 /bench/results.csv
 /bench/onnx-gold/generated/
 *.mlir
+*.stderr
+*.stdout

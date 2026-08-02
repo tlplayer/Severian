@@ -1,2 +1,8 @@
+import platform
+
 def matches(text: string, pattern: string) -> bool:
-    return false
+    return platform.regexMatches(text, pattern)
+
+test "POSIX extended matching":
+    assert(matches("release-42", "^[a-z]+-[0-9]+$"))
+    assert(not matches("release", "^[a-z]+-[0-9]+$"))

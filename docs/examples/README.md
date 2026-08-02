@@ -39,6 +39,7 @@ paths while staying Severian-first:
 | `19-distributed-learning` | Large sharded forward/backward passes with deterministic native task reduction. |
 | `20-onnx-iris` | Generated model algebra checked against an exported Iris ONNX graph. |
 | `21-parallel-kernels` | Matrix notation and compiler-driven fusion of stacked model activations. |
+| `22-ranked-tensors` | Contiguous ranked tensors executing MLIR linalg kernels through the tensor package. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the

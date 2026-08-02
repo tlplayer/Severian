@@ -1,2 +1,7 @@
+import platform
+
 def print(value: Any):
     print(value)
+
+test "native standard output":
+    print("io runtime")

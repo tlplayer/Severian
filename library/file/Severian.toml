@@ -7,7 +7,10 @@ description = "File operations and owned file handles"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
 [package.metadata.library]
 category = "files-io"
 implementation = "runtime"
-status = "runtime-pending"
+status = "experimental"

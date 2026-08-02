@@ -71,6 +71,8 @@ impl Parser<'_> {
                 } else {
                     return Err(self.error("decorators require a function or class"));
                 }
+            } else if self.at(&TokenKind::Native) {
+                Item::Function(self.parse_native_function()?)
             } else if self.at(&TokenKind::Def) {
                 Item::Function(self.parse_function()?)
             } else if self.at(&TokenKind::Class) {
@@ -359,6 +361,53 @@ impl Parser<'_> {
         self.parse_function_with_decorators(Vec::new())
     }
 
+    fn parse_native_function(&mut self) -> Result<FunctionDecl, ParseError> {
+        let start = self
+            .expect_simple(TokenKind::Native, "`native`")?
+            .span
+            .start;
+        self.expect_simple(TokenKind::LeftParen, "`(` after `native`")?;
+        let symbol = match self.advance().clone() {
+            Token {
+                kind: TokenKind::String(symbol),
+                ..
+            } => symbol,
+            _ => return Err(self.error("native declarations require a linker symbol string")),
+        };
+        self.expect_simple(TokenKind::RightParen, "`)` after native linker symbol")?;
+        self.expect_simple(TokenKind::Def, "`def` after native linker symbol")?;
+        let name = self.expect_identifier("native function name")?;
+        self.parse_generic_parameters()?;
+        let params = self.parse_parameters()?;
+        let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        let end = self
+            .expect_simple(TokenKind::Newline, "newline after native declaration")?
+            .span
+            .end;
+        let mut tests = Vec::new();
+        while self.at(&TokenKind::Test) {
+            tests.push(self.parse_test()?);
+        }
+        Ok(FunctionDecl {
+            span: Span::new(start, end),
+            native_symbol: Some(symbol),
+            decorators: Vec::new(),
+            name,
+            params,
+            return_type,
+            contract: None,
+            body: Block {
+                span: Span::new(end, end),
+                statements: Vec::new(),
+            },
+            tests,
+        })
+    }
+
     fn parse_generic_parameters(&mut self) -> Result<(), ParseError> {
         if self.take_simple(&TokenKind::LeftBracket).is_none() {
             return Ok(());
@@ -413,6 +462,7 @@ impl Parser<'_> {
         }
         Ok(FunctionDecl {
             span: Span::new(start, end),
+            native_symbol: None,
             decorators,
             name,
             params,

@@ -1,2 +1,14 @@
+import platform
+
 def listen(address: string) -> Result[TCPListener, IOError]:
-    return runtime.networkListen(address)
+    return platform.networkListen(address)
+
+def loopbackEcho(message: string) -> Result[string, IOError]:
+    return platform.networkLoopbackEcho(message)
+
+test "native TCP loopback":
+    switch loopbackEcho("severian network runtime"):
+        ok echoed:
+            assert(echoed == "severian network runtime")
+        failure error:
+            assert(false, error)
