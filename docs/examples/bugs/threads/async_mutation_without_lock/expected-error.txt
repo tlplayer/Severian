@@ -1,4 +1,4 @@
-E0602
+E0601
 invalid.sev:19:20
 account
-Mutable access across an async boundary requires transferring the value's lock capability.
+Mutable method calls across an async boundary require transferring the value's `lock` capability.

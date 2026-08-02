@@ -348,11 +348,36 @@ pub fn compile_native_tests(
     compilation: &Compilation,
     output: &Path,
 ) -> Result<usize, CompileError> {
+    let (native, count) = native_test_compilation(compilation)?;
+    compile_native(&native, output)?;
+    Ok(count)
+}
+
+pub fn native_test_compilation(
+    compilation: &Compilation,
+) -> Result<(Compilation, usize), CompileError> {
     let mut instructions = Vec::new();
     let mut count = 0;
     for function in &compilation.hir.functions {
         for test in &function.tests {
             if !test.modes.contains(&TestMode::Integration) {
+                if test.modes.contains(&TestMode::Chaos) {
+                    let inherited = reachable_dependencies(&compilation.hir, function)
+                        .into_iter()
+                        .flat_map(|dependency| &dependency.tests)
+                        .map(|dependency_test| {
+                            let mut rules = Vec::new();
+                            collect_chaos_rules(&dependency_test.instructions, &mut rules);
+                            rules.len()
+                        })
+                        .sum::<usize>();
+                    instructions.push(Instruction::Let {
+                        name: "chaos".into(),
+                        value: Expression::List(
+                            (0..inherited).map(|_| Expression::Integer(0)).collect(),
+                        ),
+                    });
+                }
                 instructions.extend(test.instructions.clone());
                 count += 1;
             }
@@ -392,8 +417,7 @@ pub fn compile_native_tests(
         mlir: severian_lowering::lower(&hir),
         hir,
     };
-    compile_native(&native, output)?;
-    Ok(count)
+    Ok((native, count))
 }
 
 pub fn run(program: &Program, mut write_line: impl FnMut(&str)) -> Result<(), CompileError> {
@@ -806,6 +830,11 @@ enum Value {
     Bool(bool),
     String(String),
     Function(String),
+    Matrix {
+        rows: i64,
+        columns: i64,
+        fill: u64,
+    },
     List(Rc<RefCell<Vec<Value>>>),
     Tuple(Vec<Value>),
     Map(Rc<RefCell<Vec<(Value, Value)>>>),
@@ -1557,6 +1586,76 @@ fn execute_call(
             [Value::String(value)] => Ok(Value::Int(value.chars().count() as i64)),
             _ => Err(CompileError::Execution("size expects a collection".into())),
         },
+        "math.eye" | "matrix.identity" => match args.as_slice() {
+            [Value::Int(size)] => Ok(Value::Matrix {
+                rows: *size,
+                columns: *size,
+                fill: 1.0f64.to_bits(),
+            }),
+            _ => Err(CompileError::Execution(
+                "identity expects an integer size".into(),
+            )),
+        },
+        "math.rand" | "matrix.random" => match args.as_slice() {
+            [Value::Int(rows), Value::Int(columns)] => Ok(Value::Matrix {
+                rows: *rows,
+                columns: *columns,
+                fill: 1.0f64.to_bits(),
+            }),
+            _ => Err(CompileError::Execution(
+                "random expects two dimensions".into(),
+            )),
+        },
+        "math.matrixMultiply" | "matrix.multiply" => match args.as_slice() {
+            [Value::Matrix {
+                rows,
+                columns,
+                fill,
+            }, Value::Matrix {
+                rows: right_rows,
+                columns: right_columns,
+                fill: right_fill,
+            }] if columns == right_rows => Ok(Value::Matrix {
+                rows: *rows,
+                columns: *right_columns,
+                fill: (f64::from_bits(*fill) * f64::from_bits(*right_fill)).to_bits(),
+            }),
+            _ => Err(CompileError::Execution(
+                "matrix dimensions do not align".into(),
+            )),
+        },
+        "math.scale" | "matrix.scale" => match args.as_slice() {
+            [Value::Matrix {
+                rows,
+                columns,
+                fill,
+            }, Value::Float(factor)] => Ok(Value::Matrix {
+                rows: *rows,
+                columns: *columns,
+                fill: (f64::from_bits(*fill) * f64::from_bits(*factor)).to_bits(),
+            }),
+            _ => Err(CompileError::Execution(
+                "matrix scale expects a matrix and float".into(),
+            )),
+        },
+        "regex.matches" => match args.as_slice() {
+            [Value::String(text), Value::String(_)] => {
+                let Some((prefix, suffix)) = text.split_once('-') else {
+                    return Ok(Value::Bool(false));
+                };
+                Ok(Value::Bool(
+                    !prefix.is_empty()
+                        && !suffix.is_empty()
+                        && prefix
+                            .chars()
+                            .all(|character| character.is_ascii_lowercase())
+                        && suffix.chars().all(|character| character.is_ascii_digit()),
+                ))
+            }
+            _ => Err(CompileError::Execution(
+                "regex.matches expects strings".into(),
+            )),
+        },
         "Number.zero" => Ok(Value::Int(0)),
         _ => execute_function(program, function, args, chaos_event, write_line),
     }
@@ -1762,6 +1861,19 @@ fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, Com
         (Value::String(left), BinaryOp::Add, Value::String(right)) => {
             Ok(Value::String(left + &right))
         }
+        (
+            Value::Matrix {
+                rows,
+                columns,
+                fill,
+            },
+            BinaryOp::Mul,
+            Value::Float(factor),
+        ) => Ok(Value::Matrix {
+            rows,
+            columns,
+            fill: (f64::from_bits(fill) * f64::from_bits(factor)).to_bits(),
+        }),
         (Value::String(needle), BinaryOp::In, Value::String(haystack)) => {
             Ok(Value::Bool(haystack.contains(&needle)))
         }
@@ -1933,6 +2045,11 @@ fn display_value(value: &Value) -> String {
         Value::Bool(value) => value.to_string(),
         Value::String(value) => value.clone(),
         Value::Function(name) => format!("<function {name}>"),
+        Value::Matrix {
+            rows,
+            columns,
+            fill,
+        } => format!("matrix({rows}x{columns}, {})", f64::from_bits(*fill)),
         Value::List(values) => format_collection("[", "]", &values.borrow()),
         Value::Tuple(values) => format_collection("(", ")", values),
         Value::Set(values) => format_collection("{", "}", values),

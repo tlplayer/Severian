@@ -1,5 +1,5 @@
 def main():
     values := [1, 2, 3]
-    values_view = view values
-    print(values_view[0])
+    valuesView = clone values
+    print(valuesView[0])
     values.push(4)

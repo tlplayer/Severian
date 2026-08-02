@@ -1,3 +1,5 @@
+import math
+
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)
@@ -5,10 +7,10 @@ enum Shape:
 @math(*)
 def area(shape: Shape) -> float:
     switch shape:
-        Circle radius:
+        Circle:
             return 3.1415926 * radius * radius
 
-        Rectangle width height:
+        Rectangle:
             return width * height
 
 test:

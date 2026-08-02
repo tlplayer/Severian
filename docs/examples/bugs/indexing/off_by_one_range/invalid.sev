@@ -1,4 +1,4 @@
 def main():
     values = [10, 20, 30]
-    for i in [0:size(values)]:
+    for i in range(0, size(values) + 1):
         print(values[i])

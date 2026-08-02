@@ -6,6 +6,12 @@ enum ChatEvent:
     Say(client_id: int, text: string)
     Leave(client_id: int)
 
+def joinMessage(clientId: int) -> string:
+    return "client " + string(clientId) + " joined"
+
+test "join messages include the client id":
+    assert(joinMessage(7) == "client 7 joined")
+
 def broadcast(clients: map[int, Channel[string]], text: string):
     for _, outbound in clients:
         async send clone text with outbound
@@ -16,7 +22,7 @@ def runHub(events: Channel[ChatEvent]):
     switch events while running with running := true:
         Join from events:
             clients[client_id] = move outbound
-            broadcast(view clients, "client " + string(client_id) + " joined")
+            broadcast(view clients, joinMessage(client_id))
 
         Say from events:
             broadcast(view clients, string(client_id) + ": " + text)
@@ -69,7 +75,7 @@ def serveClient(
 
     await reading, writing
 
-def main() -> Result[unit, IOError]:
+def runServer() -> Result[unit, IOError]:
     listener ?= network.listen("127.0.0.1:7000")
     events = Channel[ChatEvent] with Buffer(256)
     hub = async runHub(clone events) with self

@@ -6,8 +6,8 @@ class Counter:
 
 def main():
     counter := Counter()
-    left = async counter.increment() with self
-    right = async counter.increment() with self
+    left = async counter.increment() with self and lock
+    right = async counter.increment() with self and lock
 
     await right, left
     assert(counter.v == 2)

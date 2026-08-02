@@ -171,3 +171,22 @@ fn compiles_server_syntax_and_propagated_file_errors() {
         compile_path(&root.join(fixture)).unwrap_or_else(|error| panic!("{fixture}: {error}"));
     }
 }
+
+#[test]
+fn lowers_locked_method_tasks_to_workers_and_awaits_each_tuple_member() {
+    let fixture = examples_root().join("bugs/threads/data_race/fixed.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    let main = compilation
+        .mlir
+        .as_str()
+        .split("llvm.func @main(")
+        .nth(1)
+        .unwrap();
+
+    assert_eq!(
+        main.matches("llvm.call @__sev_task_spawn_Counter_increment")
+            .count(),
+        2
+    );
+    assert_eq!(main.matches("llvm.call @__sev_task_await_unit").count(), 2);
+}

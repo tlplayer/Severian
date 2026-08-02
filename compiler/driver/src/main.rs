@@ -1,5 +1,6 @@
 use severian_driver::{
-    compile_native, compile_native_tests, compile_path, run, run_integration_tests, run_tests,
+    compile_native, compile_native_tests, compile_path, native_test_compilation, run,
+    run_integration_tests, run_tests,
 };
 use std::path::{Path, PathBuf};
 
@@ -23,6 +24,13 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             print!("{}", compilation.mlir);
+        }
+        "emit-test-mlir" if args.len() == 2 => {
+            let compilation =
+                compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
+            let (native, _) =
+                native_test_compilation(&compilation).map_err(|error| error.to_string())?;
+            print!("{}", native.mlir);
         }
         "compile" if args.len() == 2 || args.len() == 4 => {
             let input = Path::new(&args[1]);
@@ -78,7 +86,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 
 fn usage() -> String {
     concat!(
-        "usage: sev <check|emit-mlir|compile|compile-tests|run|test> <source.sev> [options]\n",
+        "usage: sev <check|emit-mlir|emit-test-mlir|compile|compile-tests|run|test> <source.sev> [options]\n",
         "  compile options: -o executable\n",
         "  compile-tests options: -o executable\n",
         "  test options: --integration | --integration-only"

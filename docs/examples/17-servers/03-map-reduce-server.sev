@@ -21,6 +21,9 @@ def mapValues(values: list[int]) -> int:
         total += value * value
     return total
 
+test "map workers square and sum values":
+    assert(mapValues([1, 2, 3]) == 14)
+
 def mapWorker(
     tasks: Channel[MapTask],
     partials: Channel[Partial],
@@ -89,7 +92,7 @@ def serveJob(
         failure error:
             log.error("map/reduce job failed", error)
 
-def main() -> Result[unit, IOError]:
+def runServer() -> Result[unit, IOError]:
     listener ?= network.listen("127.0.0.1:9000")
     jobs = Channel[Job] with Buffer(128)
     tasks = Channel[MapTask] with Buffer(256)

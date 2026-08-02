@@ -1,9 +1,15 @@
 import log
 import network
 
+def greeting(request: string) -> string:
+    return "hello from severian: " + request
+
+test "server greeting is deterministic":
+    assert(greeting("ping") == "hello from severian: ping")
+
 def respond(connection: network.TCPConnection) -> Result[unit, IOError]:
     request ?= await connection.readLine()
-    return await connection.writeLine("hello from severian: " + request)
+    return await connection.writeLine(greeting(request))
 
 def serve(connection: network.TCPConnection):
     switch await respond(borrow connection) with connection:
@@ -13,7 +19,7 @@ def serve(connection: network.TCPConnection):
             failure error:
                 log.error("request failed", error)
 
-def main() -> Result[unit, IOError]:
+def runServer() -> Result[unit, IOError]:
     listener ?= network.listen("127.0.0.1:8080")
 
     while true with listener:

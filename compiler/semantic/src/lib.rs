@@ -53,6 +53,10 @@ struct Binding {
     collection_len: Option<usize>,
     mutable: bool,
     field: bool,
+    moved: bool,
+    borrowed: bool,
+    integer_max: Option<i64>,
+    known_integer: Option<i64>,
 }
 
 pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
@@ -180,6 +184,10 @@ pub fn analyze_with_interfaces(
                     collection_len: None,
                     mutable: false,
                     field: false,
+                    moved: false,
+                    borrowed: false,
+                    integer_max: None,
+                    known_integer: None,
                 },
             );
             globals.push(Global {
@@ -218,6 +226,10 @@ pub fn analyze_with_interfaces(
                     collection_len: None,
                     mutable: false,
                     field: false,
+                    moved: false,
+                    borrowed: false,
+                    integer_max: None,
+                    known_integer: None,
                 },
             );
             params.push(Parameter {
@@ -395,6 +407,10 @@ fn lower_class_function(
                 collection_len: None,
                 mutable: true,
                 field: true,
+                moved: false,
+                borrowed: false,
+                integer_max: None,
+                known_integer: None,
             },
         );
     }
@@ -421,6 +437,10 @@ fn lower_class_function(
                 collection_len: None,
                 mutable: false,
                 field: false,
+                moved: false,
+                borrowed: false,
+                integer_max: None,
+                known_integer: None,
             },
         );
         params.push(Parameter {
@@ -678,12 +698,33 @@ fn lower_block(
                         "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
                     ));
                 }
+                if checked_integer_overflow(source, scope) {
+                    return Err(error(
+                        source.span(),
+                        "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
+                    ));
+                }
+                let ownership_source = match source {
+                    Expr::Ownership(ownership) => match ownership.value.as_ref() {
+                        Expr::Identifier(identifier) => {
+                            Some((identifier.name.clone(), ownership.op))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
                 let declared = binding.ty.as_ref().map(lower_type).transpose()?;
                 if let Some(declared) = declared {
                     compatible(binding.span, inferred, declared)?;
                 }
                 let ty = declared.unwrap_or(inferred);
+                let integer_max = binding
+                    .ty
+                    .as_ref()
+                    .filter(|ty| named_type_is(ty, "u8"))
+                    .map(|_| u8::MAX as i64);
+                let known_integer = constant_integer(source);
                 if scope
                     .get(&binding.name.name)
                     .is_some_and(|existing| existing.field || existing.mutable)
@@ -704,6 +745,10 @@ fn lower_block(
                             collection_len: binding.value.as_ref().and_then(collection_length),
                             mutable: binding.kind == LetKind::Changeable,
                             field: false,
+                            moved: false,
+                            borrowed: false,
+                            integer_max,
+                            known_integer,
                         },
                     )
                     .is_some()
@@ -712,6 +757,16 @@ fn lower_block(
                         binding.name.span,
                         format!("duplicate binding `{}`", binding.name.name),
                     ));
+                }
+                if let Some((source, operation)) = ownership_source {
+                    let source = scope
+                        .get_mut(&source)
+                        .ok_or_else(|| error(binding.span, "ownership source is not a binding"))?;
+                    match operation {
+                        AstOwnershipOp::Move => source.moved = true,
+                        AstOwnershipOp::View | AstOwnershipOp::Borrow => source.borrowed = true,
+                        AstOwnershipOp::Clone | AstOwnershipOp::AddressOf => {}
+                    }
                 }
                 instructions.push(Instruction::Let {
                     name: binding.name.name.clone(),
@@ -734,6 +789,10 @@ fn lower_block(
                             collection_len: None,
                             mutable: false,
                             field: false,
+                            moved: false,
+                            borrowed: false,
+                            integer_max: None,
+                            known_integer: None,
                         },
                     );
                     instructions.push(Instruction::Let {
@@ -789,6 +848,10 @@ fn lower_block(
                         collection_len: None,
                         mutable: false,
                         field: false,
+                        moved: false,
+                        borrowed: false,
+                        integer_max: None,
+                        known_integer: None,
                     },
                 );
                 instructions.push(Instruction::TryLet {
@@ -797,7 +860,14 @@ fn lower_block(
                 });
             }
             Stmt::Expr(expression) => {
-                let (expression, _) = lower_expression(expression, scope, signatures, aliases)?;
+                let (expression, expression_type) =
+                    lower_expression(expression, scope, signatures, aliases)?;
+                if expression_type == ValueType::Result {
+                    return Err(error(
+                        statement.span(),
+                        "E0801: A recoverable error must be propagated, handled, or explicitly discarded with a reason.",
+                    ));
+                }
                 match expression {
                     Expression::Call { function, mut args } if function == "print" => {
                         let value = if args.len() == 1 {
@@ -911,6 +981,12 @@ fn lower_block(
                 });
             }
             Stmt::For(statement) => {
+                if inclusive_collection_range(&statement.iterable) {
+                    return Err(error(
+                        statement.iterable.span(),
+                        "E0402: An inclusive range ending at a collection's element count includes one invalid index.",
+                    ));
+                }
                 let (iterable, _) =
                     lower_expression(&statement.iterable, scope, signatures, aliases)?;
                 let mut body_scope = scope.clone();
@@ -1073,6 +1149,12 @@ fn lower_expression(
         }
         Expr::Identifier(identifier) => {
             if let Some(binding) = scope.get(&identifier.name) {
+                if binding.moved {
+                    return Err(error(
+                        identifier.span,
+                        "E0301: A binding cannot be read after ownership has moved to another binding.",
+                    ));
+                }
                 Ok((Expression::Variable(identifier.name.clone()), binding.ty))
             } else if signatures.contains_key(&identifier.name) {
                 Ok((
@@ -1304,6 +1386,10 @@ fn lower_expression(
                     collection_len: None,
                     mutable: false,
                     field: false,
+                    moved: false,
+                    borrowed: false,
+                    integer_max: None,
+                    known_integer: None,
                 },
             );
             let element =
@@ -1360,6 +1446,22 @@ fn lower_expression(
             ))
         }
         Expr::Async(task) => {
+            if let Expr::Call(call) = task.value.as_ref() {
+                if let Expr::Member(member) = call.callee.as_ref() {
+                    if let Expr::Identifier(object) = member.object.as_ref() {
+                        if scope
+                            .get(&object.name)
+                            .is_some_and(|binding| binding.mutable)
+                            && !task.captures.iter().any(|capture| capture.name == "lock")
+                        {
+                            return Err(error(
+                                task.span,
+                                "E0601: Mutable method calls across an async boundary require transferring the value's `lock` capability.",
+                            ));
+                        }
+                    }
+                }
+            }
             let placement = match task.placement {
                 severian_ast::TaskPlacement::Default => TaskPlacement::Default,
                 severian_ast::TaskPlacement::Local => {
@@ -1473,11 +1575,15 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
     scope.insert(
         "chaos".into(),
         Binding {
-            ty: ValueType::Any,
+            ty: ValueType::List,
             function_return: None,
             collection_len: None,
             mutable: false,
             field: false,
+            moved: false,
+            borrowed: false,
+            integer_max: None,
+            known_integer: None,
         },
     );
     if modes.contains(&severian_ast::TestMode::Integration) {
@@ -1490,6 +1596,10 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
                     collection_len: None,
                     mutable: false,
                     field: false,
+                    moved: false,
+                    borrowed: false,
+                    integer_max: None,
+                    known_integer: None,
                 },
             );
         }
@@ -1518,6 +1628,21 @@ fn lower_call(
         }
     }
     if let Expr::Member(member) = call.callee.as_ref() {
+        if let Expr::Identifier(object) = member.object.as_ref() {
+            if scope
+                .get(&object.name)
+                .is_some_and(|binding| binding.borrowed)
+                && matches!(
+                    member.member.name.as_str(),
+                    "append" | "push" | "remove" | "clear"
+                )
+            {
+                return Err(error(
+                    call.span,
+                    "E0302: An owner cannot be structurally mutated while an immutable borrow is live.",
+                ));
+            }
+        }
         if let Expr::Identifier(object) = member.object.as_ref() {
             if object.name == "int" && member.member.name == "parse" {
                 let args = call
@@ -1855,6 +1980,60 @@ fn constant_integer(expression: &Expr) -> Option<i64> {
     }
 }
 
+fn named_type_is(ty: &Type, expected: &str) -> bool {
+    matches!(ty, Type::Named(path) if path.segments.first().is_some_and(|segment| segment.name == expected))
+}
+
+fn checked_integer_overflow(expression: &Expr, scope: &HashMap<String, Binding>) -> bool {
+    let Expr::Binary(binary) = expression else {
+        return false;
+    };
+    let (binding, constant, operation) = match (binary.left.as_ref(), binary.right.as_ref()) {
+        (Expr::Identifier(identifier), right) => (
+            scope.get(&identifier.name),
+            constant_integer(right),
+            binary.op,
+        ),
+        _ => return false,
+    };
+    let (Some(constant), Some(value), Some(maximum)) = (
+        constant,
+        binding.and_then(|binding| binding.known_integer),
+        binding.and_then(|binding| binding.integer_max),
+    ) else {
+        return false;
+    };
+    let result = match operation {
+        AstBinaryOp::Add => value.checked_add(constant),
+        AstBinaryOp::Sub => value.checked_sub(constant),
+        AstBinaryOp::Mul => value.checked_mul(constant),
+        _ => return false,
+    };
+    result.is_none_or(|result| !(0..=maximum).contains(&result))
+}
+
+fn inclusive_collection_range(expression: &Expr) -> bool {
+    let Expr::Call(call) = expression else {
+        return false;
+    };
+    let Expr::Identifier(callee) = call.callee.as_ref() else {
+        return false;
+    };
+    if callee.name != "range" || call.args.len() != 2 {
+        return false;
+    }
+    let Expr::Binary(end) = &call.args[1].value else {
+        return false;
+    };
+    if end.op != AstBinaryOp::Add || constant_integer(&end.right) != Some(1) {
+        return false;
+    }
+    let Expr::Call(size) = end.left.as_ref() else {
+        return false;
+    };
+    matches!(size.callee.as_ref(), Expr::Identifier(name) if name.name == "size")
+}
+
 fn lower_format_args(
     template: &str,
     scope: &HashMap<String, Binding>,
@@ -2093,6 +2272,10 @@ fn lower_pattern(
                     collection_len: None,
                     mutable: false,
                     field: false,
+                    moved: false,
+                    borrowed: false,
+                    integer_max: None,
+                    known_integer: None,
                 },
             );
             Ok(MatchPattern::Bind(name.name.clone()))
@@ -2125,6 +2308,10 @@ fn lower_pattern(
                                         collection_len: None,
                                         mutable: false,
                                         field: false,
+                                        moved: false,
+                                        borrowed: false,
+                                        integer_max: None,
+                                        known_integer: None,
                                     },
                                 );
                                 MatchPattern::Bind(field.into())
@@ -2146,6 +2333,10 @@ fn lower_pattern(
                         collection_len: None,
                         mutable: false,
                         field: false,
+                        moved: false,
+                        borrowed: false,
+                        integer_max: None,
+                        known_integer: None,
                     },
                 );
                 return Ok(MatchPattern::Bind(name));

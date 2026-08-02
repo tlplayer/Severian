@@ -44,7 +44,7 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @malloc(i64) -> !llvm.ptr\n",
         "  llvm.func @abort()\n",
         "  llvm.func @strtod(!llvm.ptr, !llvm.ptr) -> f64\n\n",
-        "  llvm.func @strlen(!llvm.ptr) -> i64\n\n",
+        "  llvm.func @__sev_strlen(!llvm.ptr) -> i64\n\n",
         "  llvm.func @__sev_box_i64(i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_box_f64(f64) -> !llvm.ptr\n",
         "  llvm.func @__sev_box_bool(i1) -> !llvm.ptr\n",
@@ -59,6 +59,10 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_value_sub(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_mul(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_div(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_float(!llvm.ptr) -> f64\n",
+        "  llvm.func @__sev_value_string(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_less(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
@@ -100,7 +104,8 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_builtin_http_get(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_int_parse(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
-        "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n\n",
+        "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
 
@@ -118,10 +123,23 @@ pub fn lower(program: &Program) -> Module {
         output.push_str(") -> !llvm.ptr\n");
         await_types.insert(task.return_type);
     }
+    for class in &program.classes {
+        for method in &class.methods {
+            write!(
+                output,
+                "  llvm.func @__sev_task_spawn_{}_{}(!llvm.ptr",
+                class.name, method.name
+            )
+            .unwrap();
+            for parameter in &method.params {
+                write!(output, ", {}", mlir_type(parameter.ty)).unwrap();
+            }
+            output.push_str(") -> !llvm.ptr\n");
+            await_types.insert(method.return_type);
+        }
+    }
     for ty in await_types {
-        if ty == ValueType::Unit {
-            output.push_str("  llvm.func @__sev_task_await_unit(!llvm.ptr)\n");
-        } else {
+        if ty != ValueType::Unit {
             writeln!(
                 output,
                 "  llvm.func @__sev_task_await_{}(!llvm.ptr) -> {}",
@@ -137,12 +155,6 @@ pub fn lower(program: &Program) -> Module {
             "  llvm.func @__sev_channel_send_ptr_async(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_channel_receive_ptr(!llvm.ptr) -> !llvm.ptr\n",
         ));
-        if !task_specs
-            .iter()
-            .any(|task| task.return_type == ValueType::Unit)
-        {
-            output.push_str("  llvm.func @__sev_task_await_unit(!llvm.ptr)\n");
-        }
     }
     if !task_specs.is_empty() || uses_channels {
         output.push('\n');
@@ -1018,7 +1030,7 @@ impl LowerContext<'_> {
                 let result = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call @strlen({object}) : (!llvm.ptr) -> i64"
+                    "    {result} = llvm.call @__sev_strlen({object}) : (!llvm.ptr) -> i64"
                 )
                 .unwrap();
                 (result, ValueType::Int)
@@ -1126,6 +1138,11 @@ impl LowerContext<'_> {
             } if method == "add" && args.len() == 1 => {
                 let left = self.lower_expression(object);
                 let right = self.lower_expression(&args[0]);
+                if left.1 == ValueType::List {
+                    let right = self.box_value(right);
+                    writeln!(self.output, "    llvm.call @__sev_collection_push({}, {right}) : (!llvm.ptr, !llvm.ptr) -> ()", left.0).unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
                 let left = self.box_value(left);
                 let right = self.box_value(right);
                 let result = self.fresh_value();
@@ -1220,7 +1237,9 @@ impl LowerContext<'_> {
             }
             Expression::Task { value, placement } => {
                 if let Expression::Send { value, channel } = value.as_ref() {
-                    let (value, value_type) = self.lower_expression(value);
+                    let lowered = self.lower_expression(value);
+                    let value_type = lowered.1;
+                    let value = self.box_value(lowered);
                     let (channel, _) = self.lower_expression(channel);
                     self.channel_types.insert(channel.clone(), value_type);
                     let result = self.fresh_value();
@@ -1230,6 +1249,101 @@ impl LowerContext<'_> {
                     )
                     .unwrap();
                     self.task_results.insert(result.clone(), ValueType::Unit);
+                    return (result, ValueType::Any);
+                }
+                if let Expression::MethodCall {
+                    object,
+                    method,
+                    args,
+                } = value.as_ref()
+                {
+                    let (object, _) = self.lower_expression(object);
+                    let Some(class) = self.object_classes.get(&object).cloned() else {
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                        return (result, ValueType::Any);
+                    };
+                    let definition = self
+                        .classes
+                        .iter()
+                        .find(|candidate| candidate.name == class)
+                        .and_then(|definition| {
+                            definition
+                                .methods
+                                .iter()
+                                .find(|candidate| candidate.name == *method)
+                        })
+                        .cloned();
+                    let Some(definition) = definition else {
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                        return (result, ValueType::Any);
+                    };
+                    let lowered_args = args
+                        .iter()
+                        .map(|argument| self.lower_expression(argument))
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, argument)| {
+                            let expected = definition.params[index].ty;
+                            if argument.1 == ValueType::Any && expected != ValueType::Any {
+                                self.unbox_value(argument, expected)
+                            } else if expected == ValueType::Any && argument.1 != ValueType::Any {
+                                (self.box_value(argument), ValueType::Any)
+                            } else {
+                                argument
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let values = lowered_args
+                        .iter()
+                        .map(|(value, _)| value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let types = lowered_args
+                        .iter()
+                        .map(|(_, ty)| mlir_type(*ty))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let value_suffix = if values.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {values}")
+                    };
+                    let type_suffix = if types.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {types}")
+                    };
+                    let result = self.fresh_value();
+                    let mut attributes = Vec::new();
+                    match placement {
+                        TaskPlacement::Default => {}
+                        TaskPlacement::Local => {
+                            attributes.push("severian_distribution = \"local\"")
+                        }
+                        TaskPlacement::Gpu => {
+                            attributes.push("severian_parallel = \"gpu\"");
+                            attributes.push("severian_device_fallback = \"cpu\"");
+                        }
+                        TaskPlacement::Simd => {
+                            attributes.push("severian_parallel = \"simd\"");
+                            attributes.push("severian_device_fallback = \"cpu\"");
+                        }
+                        TaskPlacement::Simt => {
+                            attributes.push("severian_parallel = \"simt\"");
+                            attributes.push("severian_device_fallback = \"cpu\"");
+                        }
+                    }
+                    let placement_attribute = if attributes.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {{{}}}", attributes.join(", "))
+                    };
+                    writeln!(self.output, "    {result} = llvm.call @__sev_task_spawn_{class}_{method}({object}{value_suffix}){placement_attribute} : (!llvm.ptr{type_suffix}) -> !llvm.ptr").unwrap();
+                    self.task_results
+                        .insert(result.clone(), definition.return_type);
                     return (result, ValueType::Any);
                 }
                 let Expression::Call { function, args } = value.as_ref() else {
@@ -1290,6 +1404,12 @@ impl LowerContext<'_> {
                 (result, ValueType::Any)
             }
             Expression::Await(value) => {
+                if let Expression::Tuple(tasks) = value.as_ref() {
+                    for task in tasks {
+                        self.lower_expression(&Expression::Await(Box::new(task.clone())));
+                    }
+                    return (String::new(), ValueType::Unit);
+                }
                 let (task, _) = self.lower_expression(value);
                 let return_type = self.task_results.remove(&task);
                 if let Some(channel_type) = self.channel_types.get(&task).copied() {
@@ -1299,7 +1419,7 @@ impl LowerContext<'_> {
                         "    {result} = llvm.call @__sev_channel_receive_ptr({task}) : (!llvm.ptr) -> !llvm.ptr"
                     )
                     .unwrap();
-                    return (result, channel_type);
+                    return self.unbox_value((result, ValueType::Any), channel_type);
                 }
                 let Some(return_type) = return_type else {
                     let result = self.fresh_value();
@@ -1335,7 +1455,9 @@ impl LowerContext<'_> {
                 (result, ValueType::Any)
             }
             Expression::Send { value, channel } => {
-                let (value, value_type) = self.lower_expression(value);
+                let lowered = self.lower_expression(value);
+                let value_type = lowered.1;
+                let value = self.box_value(lowered);
                 let (channel, _) = self.lower_expression(channel);
                 self.channel_types.insert(channel.clone(), value_type);
                 let result = self.fresh_value();
@@ -1349,7 +1471,22 @@ impl LowerContext<'_> {
             }
             Expression::Variant { name, fields } => {
                 let tag = self.string_address(name);
-                let field = if let Some(field) = fields.first() {
+                let field = if fields.len() > 1 {
+                    let kind = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {kind} = llvm.mlir.constant(1 : i64) : i64"
+                    )
+                    .unwrap();
+                    let tuple = self.fresh_value();
+                    writeln!(self.output, "    {tuple} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
+                    for field in fields {
+                        let field = self.lower_expression(field);
+                        let field = self.box_value(field);
+                        writeln!(self.output, "    llvm.call @__sev_collection_push({tuple}, {field}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                    }
+                    tuple
+                } else if let Some(field) = fields.first() {
                     let field = self.lower_expression(field);
                     self.box_value(field)
                 } else {
@@ -1362,7 +1499,10 @@ impl LowerContext<'_> {
                 (result, ValueType::Option)
             }
             Expression::Index { object, index } => {
-                let (object, object_type) = self.lower_expression(object);
+                let (mut object, object_type) = self.lower_expression(object);
+                if object_type == ValueType::Any {
+                    object = self.unbox_value((object, object_type), ValueType::List).0;
+                }
                 let index = self.lower_expression(index);
                 let result = self.fresh_value();
                 if object_type == ValueType::Map {
@@ -1522,7 +1662,7 @@ impl LowerContext<'_> {
                             .unwrap();
                             (result, ValueType::Float)
                         }
-                        ValueType::String | ValueType::Any => {
+                        ValueType::String => {
                             let end = self.fresh_value();
                             writeln!(self.output, "    {end} = llvm.mlir.zero : !llvm.ptr")
                                 .unwrap();
@@ -1532,6 +1672,11 @@ impl LowerContext<'_> {
                                 "    {result} = llvm.call @strtod({value}, {end}) : (!llvm.ptr, !llvm.ptr) -> f64"
                             )
                             .unwrap();
+                            (result, ValueType::Float)
+                        }
+                        ValueType::Any => {
+                            let result = self.fresh_value();
+                            writeln!(self.output, "    {result} = llvm.call @__sev_value_float({value}) : (!llvm.ptr) -> f64").unwrap();
                             (result, ValueType::Float)
                         }
                         _ => {
@@ -1545,8 +1690,17 @@ impl LowerContext<'_> {
                         }
                     };
                 }
+                if function == "string" {
+                    let value = self.box_value(args.first().cloned().unwrap());
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_value_string({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    return (result, ValueType::String);
+                }
                 if function == "size" {
-                    let (value, _) = args.first().cloned().unwrap();
+                    let (mut value, ty) = args.first().cloned().unwrap();
+                    if ty == ValueType::Any {
+                        value = self.unbox_value((value, ty), ValueType::List).0;
+                    }
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
                     return (result, ValueType::Int);
@@ -1661,6 +1815,11 @@ impl LowerContext<'_> {
                         .unwrap();
                         return (result, return_type);
                     }
+                    if function.contains('.') {
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                        return (result, ValueType::Any);
+                    }
                 }
                 let values = args
                     .iter()
@@ -1679,7 +1838,7 @@ impl LowerContext<'_> {
                         .function_returns
                         .get(linked_function)
                         .copied()
-                        .unwrap_or(ValueType::Int),
+                        .unwrap_or(ValueType::Any),
                 };
                 let symbol = if function == "sqrt" {
                     "llvm.sqrt.f64"
@@ -2033,6 +2192,29 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
             return (result, ValueType::Bool);
         }
+        if op == BinaryOp::Add
+            && operand_type == ValueType::String
+            && right_type == ValueType::String
+        {
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_string_concat({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+            return (result, ValueType::String);
+        }
+        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
+            && operand_type == ValueType::String
+            && right_type == ValueType::String
+        {
+            let equal = self.fresh_value();
+            writeln!(self.output, "    {equal} = llvm.call @__sev_string_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+            if op == BinaryOp::Equal {
+                return (equal, ValueType::Bool);
+            }
+            let one = self.fresh_value();
+            writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1").unwrap();
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
+            return (result, ValueType::Bool);
+        }
         if operand_type == ValueType::Any
             && right_type == ValueType::Any
             && matches!(
@@ -2332,13 +2514,31 @@ impl LowerContext<'_> {
                     .unwrap();
                 } else {
                     writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
-                    if let Some(MatchPattern::Bind(name)) = fields.first() {
-                        let field = self.fresh_value();
-                        writeln!(self.output, "    {field} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
-                        bound.push((
-                            name.clone(),
-                            self.variables.insert(name.clone(), (field, ValueType::Any)),
-                        ));
+                    if !fields.is_empty() {
+                        let payload = self.fresh_value();
+                        writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                        for (index, pattern) in fields.iter().enumerate() {
+                            let MatchPattern::Bind(name) = pattern else {
+                                continue;
+                            };
+                            let field = if fields.len() == 1 {
+                                payload.clone()
+                            } else {
+                                let index_value = self.fresh_value();
+                                writeln!(
+                                    self.output,
+                                    "    {index_value} = llvm.mlir.constant({index} : i64) : i64"
+                                )
+                                .unwrap();
+                                let field = self.fresh_value();
+                                writeln!(self.output, "    {field} = llvm.call @__sev_collection_get({payload}, {index_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                                field
+                            };
+                            bound.push((
+                                name.clone(),
+                                self.variables.insert(name.clone(), (field, ValueType::Any)),
+                            ));
+                        }
                     }
                     writeln!(
                         self.output,
@@ -2409,12 +2609,10 @@ impl LowerContext<'_> {
                 .unwrap_or(channel_type);
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_channel_receive_ptr({channel}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+            let result = self.unbox_value((result, ValueType::Any), channel_type);
             let mut bound = None;
             if let MatchPattern::Bind(name) = &arm.pattern {
-                bound = Some((
-                    name.clone(),
-                    self.variables.insert(name.clone(), (result, channel_type)),
-                ));
+                bound = Some((name.clone(), self.variables.insert(name.clone(), result)));
             }
             self.lower_instructions(&arm.instructions);
             if let Some((name, previous)) = bound {
@@ -2440,13 +2638,22 @@ impl LowerContext<'_> {
         let exit = self.fresh_block();
         let initial_values = carried
             .iter()
-            .map(|(_, value, ty)| format!("{value} : {}", mlir_type(*ty)))
+            .map(|(_, value, _)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let initial_types = carried
+            .iter()
+            .map(|(_, _, ty)| mlir_type(*ty))
             .collect::<Vec<_>>()
             .join(", ");
         if initial_values.is_empty() {
             writeln!(self.output, "    llvm.br ^bb{header}").unwrap();
         } else {
-            writeln!(self.output, "    llvm.br ^bb{header}({initial_values})").unwrap();
+            writeln!(
+                self.output,
+                "    llvm.br ^bb{header}({initial_values} : {initial_types})"
+            )
+            .unwrap();
         }
 
         let header_values = carried
@@ -2486,16 +2693,20 @@ impl LowerContext<'_> {
         if !self.terminated {
             let next_values = carried
                 .iter()
-                .map(|(name, _, ty)| {
+                .map(|(name, _, _)| {
                     let (value, _) = self.variables.get(name).unwrap();
-                    format!("{value} : {}", mlir_type(*ty))
+                    value.as_str()
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
             if next_values.is_empty() {
                 writeln!(self.output, "    llvm.br ^bb{header}").unwrap();
             } else {
-                writeln!(self.output, "    llvm.br ^bb{header}({next_values})").unwrap();
+                writeln!(
+                    self.output,
+                    "    llvm.br ^bb{header}({next_values} : {initial_types})"
+                )
+                .unwrap();
             }
         }
 
@@ -2762,6 +2973,12 @@ impl LowerContext<'_> {
                 }
             }
         }
+        let carried_names = carried
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .collect::<HashSet<_>>();
+        self.variables
+            .retain(|name, _| carried_names.contains(name.as_str()));
         for (name, previous_binding) in previous_bindings {
             if let Some(previous_binding) = previous_binding {
                 self.variables.insert(name, previous_binding);
@@ -3239,7 +3456,7 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
         "typedef struct { int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
-        "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; } sev_object;\n\n",
+        "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { int64_t rows; int64_t columns; double fill; } sev_matrix;\n\n",
         "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
@@ -3254,10 +3471,15 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "void *__sev_unbox_string(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_STRING) abort(); return (void *)value->as.string; }\n",
         "void *__sev_unbox_ptr(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_COLLECTION) abort(); return value->as.pointer; }\n",
         "static double sev_number(sev_value *value) { if (!value) abort(); if (value->kind == SEV_FLOAT) return value->as.f64; if (value->kind == SEV_INT) return (double)value->as.i64; abort(); }\n",
-        "void *__sev_value_add(void *left, void *right) { return __sev_box_f64(sev_number(left) + sev_number(right)); }\n",
-        "void *__sev_value_sub(void *left, void *right) { return __sev_box_f64(sev_number(left) - sev_number(right)); }\n",
-        "void *__sev_value_mul(void *left, void *right) { return __sev_box_f64(sev_number(left) * sev_number(right)); }\n",
-        "void *__sev_value_div(void *left, void *right) { return __sev_box_f64(sev_number(left) / sev_number(right)); }\n",
+        "void *__sev_value_add(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) return __sev_box_i64(left->as.i64 + right->as.i64); return __sev_box_f64(sev_number(left) + sev_number(right)); }\n",
+        "void *__sev_value_sub(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) return __sev_box_i64(left->as.i64 - right->as.i64); return __sev_box_f64(sev_number(left) - sev_number(right)); }\n",
+        "void *__sev_value_mul(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) return __sev_box_i64(left->as.i64 * right->as.i64); return __sev_box_f64(sev_number(left) * sev_number(right)); }\n",
+        "void *__sev_value_div(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) { if (right->as.i64 == 0) abort(); return __sev_box_i64(left->as.i64 / right->as.i64); } return __sev_box_f64(sev_number(left) / sev_number(right)); }\n",
+        "double __sev_value_float(void *raw) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_FLOAT) return value->as.f64; if (value->kind == SEV_INT) return (double)value->as.i64; if (value->kind == SEV_STRING) { char *end = NULL; double result = strtod(value->as.string, &end); if (end == value->as.string || *end != '\\0') abort(); return result; } abort(); }\n",
+        "void *__sev_value_string(void *raw) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_STRING) return (void *)value->as.string; char *result = sev_allocate(64); if (value->kind == SEV_INT) snprintf(result, 64, \"%ld\", value->as.i64); else if (value->kind == SEV_FLOAT) snprintf(result, 64, \"%.17g\", value->as.f64); else if (value->kind == SEV_BOOL) strcpy(result, value->as.boolean ? \"true\" : \"false\"); else abort(); return result; }\n",
+        "int64_t __sev_strlen(void *raw) { const char *text = raw; int64_t size = 0; if (!text) abort(); while (text[size]) size += 1; return size; }\n",
+        "void *__sev_string_concat(void *left_raw, void *right_raw) { const char *left = left_raw; const char *right = right_raw; size_t left_size = (size_t)__sev_strlen(left_raw); size_t right_size = (size_t)__sev_strlen(right_raw); char *result = sev_allocate(left_size + right_size + 1); memcpy(result, left, left_size); memcpy(result + left_size, right, right_size + 1); return result; }\n",
+        "bool __sev_string_equal(void *left, void *right) { return strcmp(left, right) == 0; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
         "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; }\n",
@@ -3289,7 +3511,7 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "void __sev_print_newline(void) { fputc('\\n', stdout); }\n",
         "static void sev_print_collection_inline(void *raw) { sev_collection *value = raw; char open = value->kind == 1 ? '(' : value->kind == 2 ? '{' : '['; char close = value->kind == 1 ? ')' : value->kind == 2 ? '}' : ']'; fputc(open, stdout); for (int64_t i = 0; i < value->size; ++i) { if (i) fputs(\", \", stdout); __sev_print_value_inline(value->items[i]); } fputc(close, stdout); }\n",
         "void __sev_print_collection(void *raw) { sev_print_collection_inline(raw); fputc('\\n', stdout); }\n",
-        "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->class_name = class_name; return value; }\n",
+        "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->class_name = class_name; pthread_mutex_init(&value->mutex, NULL); return value; }\n",
         "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
         "void *__sev_object_get(void *raw, void *name) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); }\n\n",
         "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && strcmp(value->class_name, class_name) == 0; }\n\n",
@@ -3331,13 +3553,19 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         .iter()
         .map(|spec| spec.return_type)
         .collect::<HashSet<_>>();
+    return_types.extend(
+        program
+            .classes
+            .iter()
+            .flat_map(|class| &class.methods)
+            .map(|method| method.return_type),
+    );
     if uses_channels {
         return_types.insert(ValueType::Unit);
     }
+    source.push_str("typedef struct { pthread_t thread; } sev_task_unit;\n");
     for ty in &return_types {
-        if *ty == ValueType::Unit {
-            source.push_str("typedef struct { pthread_t thread; } sev_task_unit;\n");
-        } else {
+        if *ty != ValueType::Unit {
             writeln!(
                 source,
                 "typedef struct {{ pthread_t thread; {} result; }} sev_task_{};",
@@ -3413,6 +3641,85 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_task_worker_{}, task) != 0) abort();", spec.function).unwrap();
         source.push_str("  return task;\n}\n\n");
     }
+    for class in &program.classes {
+        for method in &class.methods {
+            let result_type = c_type(method.return_type);
+            write!(
+                source,
+                "extern {result_type} {}_{}(void *",
+                class.name, method.name
+            )
+            .unwrap();
+            for parameter in &method.params {
+                write!(source, ", {}", c_type(parameter.ty)).unwrap();
+            }
+            source.push_str(");\n");
+            let header = if method.return_type == ValueType::Unit {
+                "sev_task_unit".to_owned()
+            } else {
+                format!("sev_task_{}", task_type_suffix(method.return_type))
+            };
+            writeln!(source, "typedef struct {{ {header} base; sev_object *self;").unwrap();
+            for (index, parameter) in method.params.iter().enumerate() {
+                writeln!(source, "  {} arg_{index};", c_type(parameter.ty)).unwrap();
+            }
+            writeln!(source, "}} sev_method_task_{}_{};", class.name, method.name).unwrap();
+            writeln!(
+                source,
+                "static void *__sev_method_worker_{}_{}(void *raw) {{",
+                class.name, method.name
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "  sev_method_task_{}_{} *task = raw;",
+                class.name, method.name
+            )
+            .unwrap();
+            source.push_str("  pthread_mutex_lock(&task->self->mutex);\n");
+            let args = (0..method.params.len())
+                .map(|index| format!(", task->arg_{index}"))
+                .collect::<String>();
+            if method.return_type == ValueType::Unit {
+                writeln!(
+                    source,
+                    "  {}_{}(task->self{args});",
+                    class.name, method.name
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    source,
+                    "  task->base.result = {}_{}(task->self{args});",
+                    class.name, method.name
+                )
+                .unwrap();
+            }
+            source.push_str("  pthread_mutex_unlock(&task->self->mutex);\n  return NULL;\n}\n");
+            write!(
+                source,
+                "void *__sev_task_spawn_{}_{}(void *self_raw",
+                class.name, method.name
+            )
+            .unwrap();
+            for (index, parameter) in method.params.iter().enumerate() {
+                write!(source, ", {} arg_{index}", c_type(parameter.ty)).unwrap();
+            }
+            source.push_str(") {\n");
+            writeln!(
+                source,
+                "  sev_method_task_{}_{} *task = calloc(1, sizeof(*task));",
+                class.name, method.name
+            )
+            .unwrap();
+            source.push_str("  if (!task) abort();\n  task->self = self_raw;\n");
+            for index in 0..method.params.len() {
+                writeln!(source, "  task->arg_{index} = arg_{index};").unwrap();
+            }
+            writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_method_worker_{}_{}, task) != 0) abort();", class.name, method.name).unwrap();
+            source.push_str("  return task;\n}\n\n");
+        }
+    }
     if uses_channels {
         source.push_str(concat!(
             "typedef struct {\n",
@@ -3471,11 +3778,10 @@ pub fn native_task_runtime_source(program: &Program) -> String {
             "}\n\n",
         ));
     }
+    source.push_str("void __sev_task_await_unit(void *raw) { sev_task_unit *task = raw; if (!task) abort(); pthread_join(task->thread, NULL); free(task); }\n");
     for ty in return_types {
         let suffix = task_type_suffix(ty);
-        if ty == ValueType::Unit {
-            source.push_str("void __sev_task_await_unit(void *raw) {\n  sev_task_unit *task = raw;\n  pthread_join(task->thread, NULL);\n  free(task);\n}\n");
-        } else {
+        if ty != ValueType::Unit {
             writeln!(
                 source,
                 "{} __sev_task_await_{suffix}(void *raw) {{",
