@@ -1,4 +1,4 @@
-pub(crate) fn runtime_source() -> &'static str {
+pub(crate) fn source() -> &'static str {
     r#"
 #include <sqlite3.h>
 

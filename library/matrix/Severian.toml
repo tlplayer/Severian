@@ -11,3 +11,10 @@ path = "src/lib.sev"
 category = "numerics"
 implementation = "source-and-intrinsics"
 status = "experimental"
+
+[package.metadata.compiler]
+external-functions = ["matrix", "random", "identity", "multiply", "scale"]
+
+[package.metadata.compiler.symbols]
+I = "identity"
+J = "jacobianDiagonal"

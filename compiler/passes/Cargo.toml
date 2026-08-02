@@ -1,14 +1,9 @@
 [package]
-name = "severian-semantic"
+name = "severian-passes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-severian-ast = { path = "../ast" }
 severian-hir = { path = "../hir" }
 severian-package = { path = "../package" }
-
-[dev-dependencies]
-severian-lexer = { path = "../lexer" }
-severian-parser = { path = "../parser" }

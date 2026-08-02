@@ -14,3 +14,9 @@ matrix = { path = "../matrix", version = "0.1.0" }
 category = "numerics"
 implementation = "source-and-compiler-contracts"
 status = "experimental"
+
+[package.metadata.compiler.fusion]
+runtime-symbol = "__sev_fused_activations"
+packing-bits = 4
+max-chain = 16
+operations = { relu = 1, fastSigmoid = 2, fastTanh = 3, gelu = 4, swish = 5 }

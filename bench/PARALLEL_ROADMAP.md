@@ -9,10 +9,11 @@ the exact same checked stdout fixture.
 ## What fuses today
 
 Fusion is a compiler decision, not a task capability and not syntax the model
-author requests. The driver recognizes compatible nested `models`/`tensor`
-activation calls and creates one `FusedActivations` HIR operation. Native
-lowering traverses the input once and applies each scalar stage before storing
-the output:
+author requests. The `models` and `tensor` manifests declare which operations
+share a native elementwise pipeline. A generic compiler pass consumes those
+rules and creates one opaque `FusedPipeline` HIR operation. Native lowering
+traverses the input once and applies each scalar stage before storing the
+output:
 
 ```sev
 @models(Relu, FastTanh, Swish)
@@ -34,9 +35,10 @@ claim that hardware-specific lowering exists already.
 
 `matrix` owns symbolic linear algebra (`X`, `^`, `I`, and `J`). `tensor` builds
 storage and elementwise operations above it, and `models` supplies domain names
-such as `Relu` and `Swish`. Model code composes those operations; compiler passes
-inspect their resolved HIR identities and choose fusion and backend lowering.
-Hardware decisions do not leak into ordinary model source.
+such as `Relu` and `Swish`. Model code composes those operations; package
+metadata registers their resolved identities with generic compiler passes,
+which choose fusion and backend lowering. Hardware decisions do not leak into
+ordinary model source, and new aliases do not require driver edits.
 
 The current `Matrix` runtime records only shape and uniform fill. It establishes
 the namespace and lowering boundary, but it is not yet a ranked JAX-style array.

@@ -1,10 +1,10 @@
 [package]
-name = "severian-lowering"
+name = "severian-backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 severian-hir = { path = "../hir" }
+severian-lowering = { path = "../lowering" }
 severian-mlir = { path = "../mlir" }
-severian-platform = { path = "../platform" }

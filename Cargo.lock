@@ -76,18 +76,29 @@ name = "severian-ast"
 version = "0.1.0"
 
 [[package]]
+name = "severian-backend"
+version = "0.1.0"
+dependencies = [
+ "severian-hir",
+ "severian-lowering",
+ "severian-mlir",
+]
+
+[[package]]
 name = "severian-driver"
 version = "0.1.0"
 dependencies = [
  "severian-ast",
+ "severian-backend",
  "severian-hir",
  "severian-lexer",
  "severian-lowering",
  "severian-mlir",
  "severian-ownership",
+ "severian-package",
  "severian-parser",
+ "severian-passes",
  "severian-semantic",
- "toml",
 ]
 
 [[package]]
@@ -107,6 +118,7 @@ version = "0.1.0"
 dependencies = [
  "severian-hir",
  "severian-mlir",
+ "severian-platform",
 ]
 
 [[package]]
@@ -121,6 +133,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-package"
+version = "0.1.0"
+dependencies = [
+ "severian-ast",
+ "severian-lexer",
+ "severian-parser",
+ "toml",
+]
+
+[[package]]
 name = "severian-parser"
 version = "0.1.0"
 dependencies = [
@@ -129,12 +151,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-passes"
+version = "0.1.0"
+dependencies = [
+ "severian-hir",
+ "severian-package",
+]
+
+[[package]]
+name = "severian-platform"
+version = "0.1.0"
+
+[[package]]
 name = "severian-semantic"
 version = "0.1.0"
 dependencies = [
  "severian-ast",
  "severian-hir",
  "severian-lexer",
+ "severian-package",
  "severian-parser",
 ]
 

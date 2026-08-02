@@ -12,3 +12,5 @@ category = "numerics"
 implementation = "source"
 status = "experimental"
 
+[package.metadata.compiler.symbols]
+P = "probability"

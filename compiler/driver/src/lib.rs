@@ -1,13 +1,12 @@
 #![forbid(unsafe_code)]
 
-mod model_fusion;
-
-use severian_ast::{ImportKind, Item, Module as AstModule, Span};
+use severian_ast::{Module as AstModule, Span};
 use severian_hir::{
-    Activation, AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction,
-    MatchPattern, Program, Test, TestMode, UnaryOp,
+    AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
+    Test, TestMode, UnaryOp,
 };
 use severian_mlir::Module;
+use severian_package::PackageInterface;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -30,6 +29,7 @@ pub enum CompileError {
         message: String,
     },
     Ownership(String),
+    Optimization(String),
     Package(String),
     Execution(String),
     ChaosThrow(String),
@@ -49,6 +49,9 @@ impl fmt::Display for CompileError {
                 span.start, span.end
             ),
             CompileError::Ownership(message) => write!(formatter, "ownership error: {message}"),
+            CompileError::Optimization(message) => {
+                write!(formatter, "optimization error: {message}")
+            }
             CompileError::Package(message) => write!(formatter, "package error: {message}"),
             CompileError::Execution(message) => write!(formatter, "execution error: {message}"),
             CompileError::ChaosThrow(message) => write!(formatter, "injected throw: {message}"),
@@ -85,9 +88,9 @@ fn parse_source(source: &str) -> Result<AstModule, CompileError> {
 
 fn compile_ast(
     ast: &AstModule,
-    interfaces: &[(String, AstModule)],
+    interfaces: &[PackageInterface],
 ) -> Result<Compilation, CompileError> {
-    let mut hir = severian_semantic::analyze_with_interfaces(ast, interfaces).map_err(|error| {
+    let hir = severian_semantic::analyze_with_packages(ast, interfaces).map_err(|error| {
         CompileError::Frontend {
             stage: "semantic",
             span: error.span,
@@ -95,20 +98,30 @@ fn compile_ast(
         }
     })?;
     severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
-    model_fusion::fuse_activation_chains(&mut hir);
-    let mlir = severian_lowering::lower(&hir);
+    let mut optimized_hir = hir.clone();
+    let fusion_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_rules.iter().cloned());
+    let fusion_aliases = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_aliases.iter().cloned());
+    severian_passes::standard_pipeline(fusion_rules, fusion_aliases)
+        .run(&mut optimized_hir)
+        .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    let mlir = severian_lowering::lower(&optimized_hir);
 
     Ok(Compilation { hir, mlir })
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
     let source = std::fs::read_to_string(path)?;
-    let Some(manifest_path) = find_manifest(path) else {
+    let Some(manifest_path) = severian_package::find_manifest(path) else {
         let ast = parse_source(&source)?;
         let interfaces = load_official_interfaces(&ast)?;
         return compile_ast(&ast, &interfaces);
     };
-    let dependency_sources = load_path_dependencies(&manifest_path)?;
+    let dependency_sources = severian_package::load_path_dependency_sources(&manifest_path)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
     let mut package_source = dependency_sources.join("\n");
     if !package_source.is_empty() {
         package_source.push('\n');
@@ -119,242 +132,17 @@ pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
     compile_ast(&ast, &interfaces)
 }
 
-fn load_official_interfaces(module: &AstModule) -> Result<Vec<(String, AstModule)>, CompileError> {
-    let mut package_names = HashSet::new();
-    for item in &module.items {
-        let Item::Import(import) = item else { continue };
-        let path = match &import.kind {
-            ImportKind::Module { path, .. } => path,
-            ImportKind::From { module, .. } => module,
-        };
-        if let Some(root) = path.first() {
-            package_names.insert(root.name.clone());
-        }
-    }
-
+fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>, CompileError> {
     let library_root = std::env::var_os("SEVERIAN_LIBRARY_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library"));
-    let mut package_names = package_names.into_iter().collect::<Vec<_>>();
-    package_names.sort();
-    let mut interfaces = Vec::new();
-    for package_name in package_names {
-        let package_directory = library_root.join(&package_name);
-        let manifest_path = package_directory.join("Severian.toml");
-        if !manifest_path.is_file() {
-            continue;
-        }
-        let manifest = parse_manifest(&manifest_path)?;
-        let declared_name = manifest
-            .get("package")
-            .and_then(toml::Value::as_table)
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| {
-                CompileError::Package(format!(
-                    "{} is missing `package.name`",
-                    manifest_path.display()
-                ))
-            })?;
-        if declared_name != package_name {
-            return Err(CompileError::Package(format!(
-                "official package `{package_name}` declares package `{declared_name}`"
-            )));
-        }
-        let library_path = manifest
-            .get("lib")
-            .and_then(toml::Value::as_table)
-            .and_then(|library| library.get("path"))
-            .and_then(toml::Value::as_str)
-            .unwrap_or("src/lib.sev");
-        let source_path = package_directory.join(library_path);
-        let source = std::fs::read_to_string(&source_path).map_err(|error| {
-            CompileError::Package(format!(
-                "could not read official package `{package_name}` at {}: {error}",
-                source_path.display()
-            ))
-        })?;
-        let interface = parse_source(&source).map_err(|error| {
-            CompileError::Package(format!(
-                "invalid interface for official package `{package_name}`: {error}"
-            ))
-        })?;
-        interfaces.push((package_name, interface));
-    }
-    Ok(interfaces)
-}
-
-fn find_manifest(source: &Path) -> Option<PathBuf> {
-    source
-        .parent()?
-        .ancestors()
-        .map(|directory| directory.join("Severian.toml"))
-        .find(|candidate| candidate.is_file())
-}
-
-fn load_path_dependencies(manifest_path: &Path) -> Result<Vec<String>, CompileError> {
-    let mut visited = HashSet::new();
-    let mut sources = Vec::new();
-    load_manifest_dependencies(manifest_path, &mut visited, &mut sources)?;
-    Ok(sources)
-}
-
-fn load_manifest_dependencies(
-    manifest_path: &Path,
-    visited: &mut HashSet<PathBuf>,
-    sources: &mut Vec<String>,
-) -> Result<(), CompileError> {
-    let manifest = parse_manifest(manifest_path)?;
-    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
-        return Ok(());
-    };
-    let manifest_directory = manifest_path.parent().unwrap();
-    for (dependency_name, dependency) in dependencies {
-        let Some(path) = dependency
-            .as_table()
-            .and_then(|table| table.get("path"))
-            .and_then(toml::Value::as_str)
-        else {
-            continue;
-        };
-        let dependency_directory = manifest_directory.join(path);
-        let dependency_manifest = dependency_directory.join("Severian.toml");
-        let canonical_manifest = dependency_manifest.canonicalize().map_err(|error| {
-            CompileError::Package(format!(
-                "dependency `{dependency_name}` has invalid path `{}`: {error}",
-                dependency_directory.display()
-            ))
-        })?;
-        if !visited.insert(canonical_manifest.clone()) {
-            continue;
-        }
-        let dependency_package = parse_manifest(&canonical_manifest)?;
-        let declared_name = dependency_package
-            .get("package")
-            .and_then(toml::Value::as_table)
-            .and_then(|package| package.get("name"))
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| {
-                CompileError::Package(format!(
-                    "{} is missing `package.name`",
-                    canonical_manifest.display()
-                ))
-            })?;
-        if declared_name != dependency_name {
-            return Err(CompileError::Package(format!(
-                "dependency `{dependency_name}` resolves to package `{declared_name}`"
-            )));
-        }
-        load_manifest_dependencies(&canonical_manifest, visited, sources)?;
-        let library_path = dependency_package
-            .get("lib")
-            .and_then(toml::Value::as_table)
-            .and_then(|library| library.get("path"))
-            .and_then(toml::Value::as_str)
-            .unwrap_or("src/lib.sev");
-        let source_path = canonical_manifest.parent().unwrap().join(library_path);
-        sources.push(std::fs::read_to_string(&source_path).map_err(|error| {
-            CompileError::Package(format!(
-                "could not read library for `{dependency_name}` at {}: {error}",
-                source_path.display()
-            ))
-        })?);
-    }
-    Ok(())
-}
-
-fn parse_manifest(path: &Path) -> Result<toml::Value, CompileError> {
-    let source = std::fs::read_to_string(path)?;
-    toml::from_str::<toml::Value>(&source).map_err(|error| {
-        CompileError::Package(format!("invalid manifest {}: {error}", path.display()))
-    })
+    severian_package::load_official_interfaces(module, &library_root)
+        .map_err(|error| CompileError::Package(error.to_string()))
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
-    let prefix = std::env::temp_dir().join(format!(
-        "severian-compile-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time must follow the Unix epoch")
-            .as_nanos()
-    ));
-    let source_mlir = prefix.with_extension("mlir");
-    let checked_mlir = prefix.with_extension("checked.mlir");
-    let llvm_ir = prefix.with_extension("ll");
-    let task_runtime = prefix.with_extension("tasks.c");
-
-    let result = (|| {
-        std::fs::write(&source_mlir, compilation.mlir.as_str())?;
-        run_tool(
-            find_tool(&["mlir-opt", "mlir-opt-21", "/usr/lib/llvm-21/bin/mlir-opt"])
-                .ok_or_else(|| missing_tool("mlir-opt"))?,
-            &[
-                source_mlir.as_path(),
-                Path::new("--convert-linalg-to-loops"),
-                Path::new("--lower-affine"),
-                Path::new("--convert-scf-to-cf"),
-                Path::new("--convert-cf-to-llvm"),
-                Path::new("--convert-arith-to-llvm"),
-                Path::new("--finalize-memref-to-llvm"),
-                Path::new("--convert-func-to-llvm"),
-                Path::new("--reconcile-unrealized-casts"),
-                Path::new("-o"),
-                checked_mlir.as_path(),
-            ],
-        )?;
-        run_tool(
-            find_tool(&[
-                "mlir-translate",
-                "mlir-translate-21",
-                "/usr/lib/llvm-21/bin/mlir-translate",
-            ])
-            .ok_or_else(|| missing_tool("mlir-translate"))?,
-            &[
-                Path::new("--mlir-to-llvmir"),
-                checked_mlir.as_path(),
-                Path::new("-o"),
-                llvm_ir.as_path(),
-            ],
-        )?;
-        let clang = find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
-            .ok_or_else(|| missing_tool("clang"))?;
-        let uses_database = compilation.hir.functions.iter().any(|function| {
-            function
-                .native_symbol
-                .as_deref()
-                .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
-        });
-        let runtime_source = severian_lowering::native_task_runtime_source(&compilation.hir);
-        if runtime_source.is_empty() {
-            run_tool(
-                clang,
-                &[llvm_ir.as_path(), Path::new("-o"), output, Path::new("-lm")],
-            )
-        } else {
-            std::fs::write(&task_runtime, runtime_source)?;
-            let mut arguments = vec![
-                llvm_ir.as_path(),
-                task_runtime.as_path(),
-                Path::new("-o"),
-                output,
-                Path::new("-lm"),
-                Path::new("-pthread"),
-            ];
-            if uses_database {
-                arguments.push(Path::new("-lsqlite3"));
-            }
-            run_tool(clang, &arguments)
-        }
-    })();
-
-    if std::env::var_os("SEVERIAN_KEEP_NATIVE_TEMPS").is_none() {
-        for temporary in [&source_mlir, &checked_mlir, &llvm_ir, &task_runtime] {
-            let _ = std::fs::remove_file(temporary);
-        }
-    }
-
-    result
+    severian_backend::compile_native(&compilation.hir, &compilation.mlir, output)
+        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 
 /// Build a native executable whose entry point runs every non-integration test.
@@ -811,7 +599,7 @@ fn walk_expression<'expression>(
             walk_expression(then_expression, visit);
             walk_expression(else_expression, visit);
         }
-        Expression::FusedActivations { input, .. } => walk_expression(input, visit),
+        Expression::FusedPipeline { input, .. } => walk_expression(input, visit),
         Expression::Call { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
@@ -1488,25 +1276,9 @@ fn evaluate(
                 "conditional expression requires a boolean condition".into(),
             )),
         },
-        Expression::FusedActivations { input, activations } => {
-            let Value::List(values) = evaluate(program, input, variables, write_line)? else {
-                return Err(CompileError::Execution(
-                    "fused activations require a list of numbers".into(),
-                ));
-            };
-            let output = values
-                .borrow()
-                .iter()
-                .map(|value| {
-                    let mut value = numeric_value(value)?;
-                    for activation in activations {
-                        value = apply_activation(value, *activation);
-                    }
-                    Ok(float_value(value))
-                })
-                .collect::<Result<Vec<_>, CompileError>>()?;
-            Ok(Value::List(Rc::new(RefCell::new(output))))
-        }
+        Expression::FusedPipeline { .. } => Err(CompileError::Execution(
+            "backend-only fused pipeline reached the controlled evaluator".into(),
+        )),
         Expression::Binary { left, op, right } => {
             let left = evaluate(program, left, variables, write_line)?;
             let right = evaluate(program, right, variables, write_line)?;
@@ -2338,31 +2110,6 @@ fn float_value(value: f64) -> Value {
     Value::Float(value.to_bits())
 }
 
-fn numeric_value(value: &Value) -> Result<f64, CompileError> {
-    match value {
-        Value::Float(value) => Ok(f64::from_bits(*value)),
-        Value::Int(value) => Ok(*value as f64),
-        _ => Err(CompileError::Execution(
-            "fused activations require numeric elements".into(),
-        )),
-    }
-}
-
-fn apply_activation(value: f64, activation: Activation) -> f64 {
-    let fast_sigmoid = |value: f64| 0.5 + value / (2.0 * (1.0 + value.abs()));
-    let fast_tanh = |value: f64| value / (1.0 + value.abs());
-    match activation {
-        Activation::Relu => value.max(0.0),
-        Activation::FastSigmoid => fast_sigmoid(value),
-        Activation::FastTanh => fast_tanh(value),
-        Activation::Gelu => {
-            let curved = 0.797_884_560_8 * (value + 0.044_715 * value.powi(3));
-            0.5 * value * (1.0 + fast_tanh(curved))
-        }
-        Activation::Swish => value * fast_sigmoid(value),
-    }
-}
-
 fn assignment_binary(op: AssignmentOp) -> BinaryOp {
     match op {
         AssignmentOp::Assign => unreachable!(),
@@ -2745,43 +2492,4 @@ fn display_nested(value: &Value) -> String {
         Value::String(value) => format!("\"{value}\""),
         value => display_value(value),
     }
-}
-
-fn find_tool(candidates: &[&str]) -> Option<PathBuf> {
-    for candidate in candidates {
-        let path = Path::new(candidate);
-        if path.components().count() > 1 && path.is_file() {
-            return Some(path.into());
-        }
-
-        if let Some(paths) = std::env::var_os("PATH") {
-            for directory in std::env::split_paths(&paths) {
-                let executable = directory.join(candidate);
-                if executable.is_file() {
-                    return Some(executable);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn run_tool(tool: PathBuf, args: &[&Path]) -> Result<(), CompileError> {
-    let output = Command::new(&tool).args(args).output()?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    Err(CompileError::Io(std::io::Error::other(format!(
-        "{} failed: {stderr}",
-        tool.display()
-    ))))
-}
-
-fn missing_tool(name: &str) -> CompileError {
-    CompileError::Io(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!("required tool `{name}` was not found"),
-    ))
 }

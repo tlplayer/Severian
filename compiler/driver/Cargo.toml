@@ -10,11 +10,13 @@ path = "src/main.rs"
 
 [dependencies]
 severian-ast = { path = "../ast" }
+severian-backend = { path = "../backend" }
 severian-hir = { path = "../hir" }
 severian-lexer = { path = "../lexer" }
 severian-lowering = { path = "../lowering" }
 severian-mlir = { path = "../mlir" }
 severian-ownership = { path = "../ownership" }
+severian-package = { path = "../package" }
 severian-parser = { path = "../parser" }
+severian-passes = { path = "../passes" }
 severian-semantic = { path = "../semantic" }
-toml = "1.1.3"

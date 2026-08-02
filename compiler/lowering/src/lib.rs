@@ -1,11 +1,10 @@
 #![forbid(unsafe_code)]
 
-mod database;
 mod tensor;
 
 use severian_hir::{
-    Activation, AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern,
-    Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
+    AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern, Program,
+    SwitchArm, TaskPlacement, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -75,7 +74,6 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_collection_size(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_collection_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_collection_reversed(!llvm.ptr) -> !llvm.ptr\n",
-        "  llvm.func @__sev_fused_activations(!llvm.ptr, i64, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_set_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_map_new() -> !llvm.ptr\n",
         "  llvm.func @__sev_map_insert(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
@@ -111,6 +109,21 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
+
+    let mut fusion_runtime_symbols = HashSet::new();
+    let mut scanned_program = program.clone();
+    scanned_program.visit_expressions_mut(&mut |expression| {
+        if let Expression::FusedPipeline { runtime_symbol, .. } = expression {
+            fusion_runtime_symbols.insert(runtime_symbol.clone());
+        }
+    });
+    for runtime_symbol in fusion_runtime_symbols {
+        writeln!(
+            output,
+            "  llvm.func @{runtime_symbol}(!llvm.ptr, i64, i64) -> !llvm.ptr"
+        )
+        .unwrap();
+    }
 
     let native_symbols = program
         .functions
@@ -241,17 +254,21 @@ pub fn lower(program: &Program) -> Module {
             );
         }
     }
+    let environment = LoweringEnvironment {
+        globals: &program.globals,
+        classes: &program.classes,
+        strings: &strings,
+        function_returns: &function_returns,
+        function_params: &function_params,
+        native_symbols: &native_symbols,
+    };
     for class in &program.classes {
         for constructor in &class.constructors {
             lower_class_function(
                 class,
                 constructor,
                 &class_function_symbol(&class.name, &format!("ctor_{}", constructor.params.len())),
-                &program.classes,
-                &strings,
-                &function_returns,
-                &function_params,
-                &native_symbols,
+                &environment,
                 &mut output,
             );
         }
@@ -260,11 +277,7 @@ pub fn lower(program: &Program) -> Module {
                 class,
                 method,
                 &class_function_symbol(&class.name, &method.name),
-                &program.classes,
-                &strings,
-                &function_returns,
-                &function_params,
-                &native_symbols,
+                &environment,
                 &mut output,
             );
         }
@@ -273,31 +286,22 @@ pub fn lower(program: &Program) -> Module {
         if function.native_symbol.is_some() {
             continue;
         }
-        lower_function(
-            function,
-            &program.globals,
-            &program.classes,
-            &strings,
-            &function_returns,
-            &function_params,
-            &native_symbols,
-            &mut output,
-        );
+        lower_function(function, &environment, &mut output);
     }
     output.push_str("}\n");
     Module::new(output)
 }
 
-fn lower_function(
-    function: &Function,
-    globals: &[severian_hir::Global],
-    classes: &[Class],
-    strings: &[String],
-    function_returns: &HashMap<String, ValueType>,
-    function_params: &HashMap<String, Vec<ValueType>>,
-    native_symbols: &HashMap<String, String>,
-    output: &mut String,
-) {
+struct LoweringEnvironment<'a> {
+    globals: &'a [severian_hir::Global],
+    classes: &'a [Class],
+    strings: &'a [String],
+    function_returns: &'a HashMap<String, ValueType>,
+    function_params: &'a HashMap<String, Vec<ValueType>>,
+    native_symbols: &'a HashMap<String, String>,
+}
+
+fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, output: &mut String) {
     let is_main = function.name == "main";
     write!(
         output,
@@ -321,11 +325,11 @@ fn lower_function(
 
     let mut context = LowerContext {
         output,
-        strings,
-        function_returns,
-        function_params,
-        native_symbols,
-        classes,
+        strings: environment.strings,
+        function_returns: environment.function_returns,
+        function_params: environment.function_params,
+        native_symbols: environment.native_symbols,
+        classes: environment.classes,
         field_object: None,
         field_names: HashSet::new(),
         object_classes: HashMap::new(),
@@ -343,7 +347,7 @@ fn lower_function(
         terminated: false,
         is_main,
     };
-    for global in globals {
+    for global in environment.globals {
         let value = context.lower_expression(&global.value);
         context.variables.insert(global.name.clone(), value);
     }
@@ -376,11 +380,7 @@ fn lower_class_function(
     class: &Class,
     function: &Function,
     symbol: &str,
-    classes: &[Class],
-    strings: &[String],
-    function_returns: &HashMap<String, ValueType>,
-    function_params: &HashMap<String, Vec<ValueType>>,
-    native_symbols: &HashMap<String, String>,
+    environment: &LoweringEnvironment<'_>,
     output: &mut String,
 ) {
     write!(output, "  llvm.func @{symbol}(%self: !llvm.ptr").unwrap();
@@ -395,11 +395,11 @@ fn lower_class_function(
 
     let mut context = LowerContext {
         output,
-        strings,
-        function_returns,
-        function_params,
-        native_symbols,
-        classes,
+        strings: environment.strings,
+        function_returns: environment.function_returns,
+        function_params: environment.function_params,
+        native_symbols: environment.native_symbols,
+        classes: environment.classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
         object_classes: HashMap::from([("%self".into(), class.name.clone())]),
@@ -932,15 +932,19 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, result_type)
             }
-            Expression::FusedActivations { input, activations } => {
+            Expression::FusedPipeline {
+                input,
+                runtime_symbol,
+                operations,
+                packing_bits,
+            } => {
                 let (input, _) = self.lower_expression(input);
-                let packed =
-                    activations
-                        .iter()
-                        .enumerate()
-                        .fold(0i64, |packed, (index, activation)| {
-                            packed | (activation_code(*activation) << (index * 4))
-                        });
+                let packed = operations
+                    .iter()
+                    .enumerate()
+                    .fold(0i64, |packed, (index, opcode)| {
+                        packed | (i64::from(*opcode) << (index * usize::from(*packing_bits)))
+                    });
                 let packed_value = self.fresh_value();
                 writeln!(
                     self.output,
@@ -951,11 +955,11 @@ impl LowerContext<'_> {
                 writeln!(
                     self.output,
                     "    {count} = llvm.mlir.constant({} : i64) : i64",
-                    activations.len()
+                    operations.len()
                 )
                 .unwrap();
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @__sev_fused_activations({input}, {packed_value}, {count}) {{severian_fusion = \"automatic\", severian_parallel = \"auto\", severian_candidates = \"simd,simt,gpu\", severian_device_fallback = \"cpu\"}} : (!llvm.ptr, i64, i64) -> !llvm.ptr").unwrap();
+                writeln!(self.output, "    {result} = llvm.call @{runtime_symbol}({input}, {packed_value}, {count}) {{severian_fusion = \"automatic\", severian_parallel = \"auto\", severian_candidates = \"simd,simt,gpu\", severian_device_fallback = \"cpu\"}} : (!llvm.ptr, i64, i64) -> !llvm.ptr").unwrap();
                 (result, ValueType::List)
             }
             Expression::PrintArgs(values) => {
@@ -3491,7 +3495,7 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
             collect_task_names_expression(then_expression, names);
             collect_task_names_expression(else_expression, names);
         }
-        Expression::FusedActivations { input, .. } => collect_task_names_expression(input, names),
+        Expression::FusedPipeline { input, .. } => collect_task_names_expression(input, names),
         Expression::Member { object, .. }
         | Expression::Unary {
             expression: object, ..
@@ -3553,7 +3557,9 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
 }
 
 /// C bridge linked beside generated LLVM IR to execute Severian tasks on pthreads.
-pub fn native_task_runtime_source(program: &Program) -> String {
+/// Generates ABI glue for language values, classes, tasks, and channels.
+/// Concrete database and tensor providers live in `severian-platform`.
+pub fn native_bridge_source(program: &Program) -> String {
     let specs = task_specs(program);
     let uses_channels = uses_channels(program);
     let mut source = String::from(concat!(
@@ -3968,7 +3974,7 @@ int64_t __sev_host_page_size(void) {
             .as_deref()
             .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
     }) {
-        source.push_str(database::runtime_source());
+        source.push_str(severian_platform::database_source());
     }
     let drawable_classes = program
         .classes
@@ -4235,7 +4241,7 @@ int64_t __sev_host_page_size(void) {
         .iter()
         .filter_map(|function| function.native_symbol.as_deref())
         .collect::<HashSet<_>>();
-    source.push_str(&tensor::runtime_source(
+    source.push_str(&severian_platform::tensor_source(
         native_symbols.contains("__sev_tensor_relu"),
         native_symbols.contains("__sev_tensor_add"),
         native_symbols.contains("__sev_tensor_matmul"),
@@ -4313,16 +4319,6 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Any
         | ValueType::Result
         | ValueType::Option => "!llvm.ptr",
-    }
-}
-
-fn activation_code(activation: Activation) -> i64 {
-    match activation {
-        Activation::Relu => 1,
-        Activation::FastSigmoid => 2,
-        Activation::FastTanh => 3,
-        Activation::Gelu => 4,
-        Activation::Swish => 5,
     }
 }
 

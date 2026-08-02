@@ -11,6 +11,7 @@ use severian_hir::{
     MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test,
     TestMode as HirTestMode, UnaryOp, ValueType,
 };
+use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -67,8 +68,46 @@ pub fn analyze_with_interfaces(
     module: &Module,
     interfaces: &[(String, Module)],
 ) -> Result<Program, SemanticError> {
+    let interfaces = interfaces
+        .iter()
+        .map(|(name, module)| PackageInterface {
+            name: name.clone(),
+            module: module.clone(),
+            compiler: Default::default(),
+        })
+        .collect::<Vec<_>>();
+    analyze_with_packages(module, &interfaces)
+}
+
+pub fn analyze_with_packages(
+    module: &Module,
+    interfaces: &[PackageInterface],
+) -> Result<Program, SemanticError> {
     let mut aliases = collect_imports(module);
     let imported_modules = collect_imported_modules(module);
+    for interface in interfaces {
+        for (symbol, function) in &interface.compiler.symbols {
+            aliases.insert(
+                format!("__symbol_alias.{}.{}", interface.name, symbol),
+                format!("{}.{}", interface.name, function),
+            );
+        }
+        for function in &interface.compiler.external_functions {
+            aliases.insert(format!("__external_function.{function}"), String::new());
+        }
+        for rule in &interface.compiler.fusion_rules {
+            aliases.insert(
+                format!("__external_function.{}", rule.function),
+                String::new(),
+            );
+        }
+        for alias in &interface.compiler.fusion_aliases {
+            aliases.insert(
+                format!("__external_function.{}", alias.function),
+                String::new(),
+            );
+        }
+    }
     for item in &module.items {
         if let Item::Enum(enumeration) = item {
             if !is_upper_camel_case(&enumeration.name.name) {
@@ -115,8 +154,9 @@ pub fn analyze_with_interfaces(
         }
     }
     let mut signatures = HashMap::new();
-    for (module_name, interface) in interfaces {
-        for item in &interface.items {
+    for interface in interfaces {
+        let module_name = &interface.name;
+        for item in &interface.module.items {
             if let Item::Class(class) = item {
                 let exported = format!("{module_name}.{}", class.name.name);
                 aliases.insert(
@@ -602,33 +642,10 @@ fn aliases_with_decorators(
             .join(".");
         for symbol in &decorator.symbols {
             aliases.insert(format!("__symbol.{}", symbol.spelling), package.clone());
-            if package == "probability" && symbol.spelling == "P" {
-                aliases.insert("P".into(), "probability.probability".into());
-            }
-            if package == "models" {
-                let function = match symbol.spelling.as_str() {
-                    "Relu" => Some("activation"),
-                    "LeakyRelu" => Some("leakyActivation"),
-                    "FastSigmoid" => Some("sigmoidActivation"),
-                    "FastTanh" => Some("tanhActivation"),
-                    "Gelu" => Some("geluActivation"),
-                    "Swish" => Some("swishActivation"),
-                    "J" => Some("activationJacobian"),
-                    _ => None,
-                };
-                if let Some(function) = function {
-                    aliases.insert(symbol.spelling.clone(), format!("models.{function}"));
-                }
-            }
-            if package == "matrix" {
-                let function = match symbol.spelling.as_str() {
-                    "I" => Some("identity"),
-                    "J" => Some("jacobianDiagonal"),
-                    _ => None,
-                };
-                if let Some(function) = function {
-                    aliases.insert(symbol.spelling.clone(), format!("matrix.{function}"));
-                }
+            if let Some(function) =
+                aliases.get(&format!("__symbol_alias.{package}.{}", symbol.spelling))
+            {
+                aliases.insert(symbol.spelling.clone(), function.clone());
             }
         }
     }
@@ -1973,25 +1990,8 @@ fn lower_declared_call(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let compiler_graph_operation = matches!(
-        function,
-        "matrix.matrix"
-            | "matrix.random"
-            | "matrix.identity"
-            | "matrix.multiply"
-            | "matrix.scale"
-            | "models.activation"
-            | "models.sigmoidActivation"
-            | "models.tanhActivation"
-            | "models.geluActivation"
-            | "models.swishActivation"
-            | "tensor.relu"
-            | "tensor.fastSigmoid"
-            | "tensor.fastTanh"
-            | "tensor.gelu"
-            | "tensor.swish"
-    );
-    let linked_function = if compiler_graph_operation {
+    let external_operation = aliases.contains_key(&format!("__external_function.{function}"));
+    let linked_function = if external_operation {
         function
     } else {
         function
