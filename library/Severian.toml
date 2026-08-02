@@ -1,21 +1,27 @@
 [workspace]
 members = [
     "boolean",
+    "container",
     "distributed",
     "file",
     "io",
     "json",
+    "hypervisor",
     "log",
     "math",
     "matrix",
     "models",
     "neuralnet",
     "network",
+    "orchestrator",
     "parallel",
     "platform",
+    "pql",
     "probability",
     "regex",
+    "storage",
     "tensor",
+    "vm",
 ]
 
 [workspace.metadata.library]

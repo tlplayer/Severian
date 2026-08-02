@@ -1,0 +1,179 @@
+class Schema:
+    relation: string
+    columns: list[string]
+    types: list[string]
+    nullable: list[bool]
+    primaryKey: string
+
+class Query:
+    relation: string
+    fields: list[string]
+    outputs: list[string]
+    aggregated: list[bool]
+    filterField: string
+    parameterType: string
+    groupFields: list[string]
+
+def containsName(names: list[string], expected: string) -> bool:
+    for name in names:
+        if name == expected:
+            return true
+    return false
+
+def fieldIndex(schema: Schema, field: string) -> int:
+    for index in indices(schema.columns):
+        if schema.columns[index] == field:
+            return index
+    return -1
+
+def schemaErrors(schema: Schema) -> list[string]:
+    errors := []
+    if schema.relation == "":
+        errors.append("schema relation is empty")
+    if size(schema.columns) != size(schema.types):
+        errors.append("column/type arity mismatch")
+    if size(schema.columns) != size(schema.nullable):
+        errors.append("column/nullability arity mismatch")
+    if schema.primaryKey != "" and fieldIndex(schema, schema.primaryKey) < 0:
+        errors.append("primary key is not a declared column")
+    for left in indices(schema.columns):
+        for right in range(left + 1, size(schema.columns)):
+            if schema.columns[left] == schema.columns[right]:
+                errors.append("duplicate column: " + string(schema.columns[left]))
+    return errors
+
+def queryErrors(schema: Schema, query: Query) -> list[string]:
+    errors := []
+    for error in schemaErrors(schema):
+        errors.append(error)
+    if query.relation != schema.relation:
+        errors.append("query relation does not match schema")
+    if size(query.fields) != size(query.outputs):
+        errors.append("field/output arity mismatch")
+    if size(query.fields) != size(query.aggregated):
+        errors.append("field/aggregate arity mismatch")
+    for field in query.fields:
+        if fieldIndex(schema, field) < 0:
+            errors.append("unknown projected field: " + string(field))
+    if query.filterField != "":
+        filterIndex = fieldIndex(schema, query.filterField)
+        if filterIndex < 0:
+            errors.append("unknown filter field: " + query.filterField)
+        else:
+            if schema.types[filterIndex] != query.parameterType:
+                errors.append("filter parameter type mismatch")
+    for groupField in query.groupFields:
+        if fieldIndex(schema, groupField) < 0:
+            errors.append("unknown group field: " + string(groupField))
+    if size(query.groupFields) > 0:
+        for index in indices(query.fields):
+            if not query.aggregated[index] and not containsName(query.groupFields, query.fields[index]):
+                errors.append("ungrouped projected field: " + string(query.fields[index]))
+    return errors
+
+def valid(schema: Schema, query: Query) -> bool:
+    return size(queryErrors(schema, query)) == 0
+
+def joinErrors(left: Schema, right: Schema, leftField: string, rightField: string) -> list[string]:
+    errors := []
+    leftIndex = fieldIndex(left, leftField)
+    rightIndex = fieldIndex(right, rightField)
+    if leftIndex < 0:
+        errors.append("unknown left join field")
+    if rightIndex < 0:
+        errors.append("unknown right join field")
+    if leftIndex >= 0 and rightIndex >= 0:
+        if left.types[leftIndex] != right.types[rightIndex]:
+            errors.append("join field type mismatch")
+    return errors
+
+def resultFields(query: Query) -> list[string]:
+    return query.outputs
+
+def resultTypes(schema: Schema, query: Query) -> list[string]:
+    types := []
+    for field in query.fields:
+        index = fieldIndex(schema, field)
+        if index >= 0:
+            types.append(schema.types[index])
+    return types
+
+def resultNullability(schema: Schema, query: Query) -> list[bool]:
+    nullable := []
+    for field in query.fields:
+        index = fieldIndex(schema, field)
+        if index >= 0:
+            nullable.append(schema.nullable[index])
+    return nullable
+
+def joinText(values: list[string], separator: string) -> string:
+    output := ""
+    for index in indices(values):
+        if index > 0:
+            output = output + separator
+        output = output + string(values[index])
+    return output
+
+def logicalPlan(schema: Schema, query: Query) -> list[string]:
+    assert(valid(schema, query))
+    plan := ["scan " + query.relation]
+    if query.filterField != "":
+        plan.append("filter " + query.filterField + ":" + query.parameterType)
+    if size(query.groupFields) > 0:
+        plan.append("group " + joinText(query.groupFields, ","))
+    plan.append("project " + joinText(query.outputs, ","))
+    return plan
+
+def sql(schema: Schema, query: Query, dialect: string) -> string:
+    assert(valid(schema, query))
+    statement := "SELECT " + joinText(query.outputs, ", ") + " FROM " + schema.relation
+    if query.filterField != "":
+        placeholder = "$1" if dialect == "postgres" else "?1"
+        statement = statement + " WHERE " + query.filterField + " = " + placeholder
+    if size(query.groupFields) > 0:
+        statement = statement + " GROUP BY " + joinText(query.groupFields, ", ")
+    return statement
+
+def executeFixture(schema: Schema, query: Query, rows: list[list[Any]], parameter: Any) -> list[Any]:
+    assert(valid(schema, query))
+    output := []
+    filterIndex = fieldIndex(schema, query.filterField)
+    for row in rows:
+        if filterIndex < 0 or row[filterIndex] == parameter:
+            for field in query.fields:
+                output.append(row[fieldIndex(schema, field)])
+    return output
+
+test "schema and query validation":
+    users = Schema("users", ["id", "tenantId", "name"], ["int", "int", "string"], [false, false, true], "id")
+    query = Query("users", ["id", "name"], ["id", "name"], [false, false], "tenantId", "int", [])
+    assert(valid(users, query))
+    assert(resultFields(query) == ["id", "name"])
+    assert(resultTypes(users, query) == ["int", "string"])
+    assert(resultNullability(users, query) == [false, true])
+
+test "invalid fields and parameter types are rejected before SQL":
+    users = Schema("users", ["id", "tenantId"], ["int", "int"], [false, false], "id")
+    query = Query("users", ["missing"], ["missing"], [false], "tenantId", "string", [])
+    assert(queryErrors(users, query) == ["unknown projected field: missing", "filter parameter type mismatch"])
+
+test "grouping and joins are checked":
+    users = Schema("users", ["id", "tenantId"], ["int", "int"], [false, false], "id")
+    tenants = Schema("tenants", ["id", "name"], ["int", "string"], [false, false], "id")
+    grouped = Query("users", ["tenantId", "id"], ["tenantId", "count(id)"], [false, true], "", "", ["tenantId"])
+    assert(valid(users, grouped))
+    assert(joinErrors(users, tenants, "tenantId", "id") == [])
+    assert(sql(users, grouped, "postgres") == "SELECT tenantId, count(id) FROM users GROUP BY tenantId")
+
+test "dialects and logical plans are deterministic":
+    users = Schema("users", ["id", "tenantId", "name"], ["int", "int", "string"], [false, false, true], "id")
+    query = Query("users", ["id", "name"], ["id", "name"], [false, false], "tenantId", "int", [])
+    assert(sql(users, query, "postgres") == "SELECT id, name FROM users WHERE tenantId = $1")
+    assert(sql(users, query, "sqlite") == "SELECT id, name FROM users WHERE tenantId = ?1")
+    assert(logicalPlan(users, query) == ["scan users", "filter tenantId:int", "project id,name"])
+
+test "fixtures execute without a database":
+    users = Schema("users", ["id", "tenantId", "name"], ["int", "int", "string"], [false, false, true], "id")
+    query = Query("users", ["id", "name"], ["id", "name"], [false, false], "tenantId", "int", [])
+    rows = [[1, 7, "Ada"], [2, 8, "Grace"], [3, 7, "Linus"]]
+    assert(executeFixture(users, query, rows, 7) == [1, "Ada", 3, "Linus"])

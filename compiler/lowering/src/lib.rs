@@ -2848,16 +2848,23 @@ impl LowerContext<'_> {
                         "    {start} = llvm.mlir.constant(0 : i64) : i64"
                     )
                     .unwrap();
-                    (start, self.lower_expression(&args[0]).0)
+                    let end = self.lower_expression(&args[0]);
+                    let end = self.unbox_value(end, ValueType::Int).0;
+                    (start, end)
                 } else {
+                    let start = self.lower_expression(&args[0]);
+                    let end = self.lower_expression(&args[1]);
                     (
-                        self.lower_expression(&args[0]).0,
-                        self.lower_expression(&args[1]).0,
+                        self.unbox_value(start, ValueType::Int).0,
+                        self.unbox_value(end, ValueType::Int).0,
                     )
                 }
             }
             Expression::Call { function, args } if function == "indices" && args.len() == 1 => {
-                let value = self.lower_expression(&args[0]).0;
+                let (mut value, value_type) = self.lower_expression(&args[0]);
+                if value_type == ValueType::Any {
+                    value = self.unbox_value((value, value_type), ValueType::List).0;
+                }
                 let start = self.fresh_value();
                 writeln!(
                     self.output,
@@ -2875,7 +2882,10 @@ impl LowerContext<'_> {
                 (start, end)
             }
             _ => {
-                let (value, iterable_type) = self.lower_expression(iterable);
+                let (mut value, iterable_type) = self.lower_expression(iterable);
+                if iterable_type == ValueType::Any {
+                    value = self.unbox_value((value, iterable_type), ValueType::List).0;
+                }
                 let start = self.fresh_value();
                 writeln!(
                     self.output,
@@ -3548,15 +3558,18 @@ pub fn native_task_runtime_source(program: &Program) -> String {
     let mut source = String::from(concat!(
         "#include <pthread.h>\n",
         "#include <arpa/inet.h>\n",
+        "#include <fcntl.h>\n",
         "#include <stdbool.h>\n",
         "#include <stdint.h>\n",
         "#include <stdio.h>\n",
         "#include <stdlib.h>\n",
         "#include <string.h>\n",
         "#include <sys/socket.h>\n",
+        "#include <sys/ioctl.h>\n",
         "#include <sys/syscall.h>\n",
         "#include <unistd.h>\n",
-        "#include <regex.h>\n\n",
+        "#include <regex.h>\n",
+        "#ifdef __linux__\n#include <linux/kvm.h>\n#endif\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
@@ -3907,6 +3920,43 @@ bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
   bool matches = regexec(&expression, (const char *)text_raw, 0, NULL, 0) == 0;
   regfree(&expression);
   return matches;
+}
+
+void *__sev_host_container_backend(void) {
+#ifdef __linux__
+  if (access("/proc/self/ns", R_OK) == 0 && access("/sys/fs/cgroup", R_OK) == 0) return "linux";
+#endif
+  return "unavailable";
+}
+
+int64_t __sev_host_kvm_api_version(void) {
+#ifdef __linux__
+  int descriptor = open("/dev/kvm", O_RDWR | O_CLOEXEC);
+  if (descriptor < 0) return -1;
+  int version = ioctl(descriptor, KVM_GET_API_VERSION, 0);
+  close(descriptor);
+  return version;
+#else
+  return -1;
+#endif
+}
+
+bool __sev_host_kvm_create_probe(void) {
+#ifdef __linux__
+  int descriptor = open("/dev/kvm", O_RDWR | O_CLOEXEC);
+  if (descriptor < 0) return false;
+  int vm = ioctl(descriptor, KVM_CREATE_VM, 0);
+  if (vm >= 0) close(vm);
+  close(descriptor);
+  return vm >= 0;
+#else
+  return false;
+#endif
+}
+
+int64_t __sev_host_page_size(void) {
+  long size = sysconf(_SC_PAGESIZE);
+  return size > 0 ? (int64_t)size : -1;
 }
 
 "#,

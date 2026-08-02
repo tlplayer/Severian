@@ -1,0 +1,17 @@
+[package]
+name = "hypervisor"
+version = "0.1.0"
+edition = "2026"
+description = "vCPU, guest-memory, interrupt, device, and KVM backend plans"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+vm = { path = "../vm", version = "0.1.0" }
+
+[package.metadata.library]
+category = "infrastructure"
+implementation = "source-and-native"
+status = "experimental"

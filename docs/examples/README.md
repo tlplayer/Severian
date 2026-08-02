@@ -40,6 +40,7 @@ paths while staying Severian-first:
 | `20-onnx-iris` | Generated model algebra checked against an exported Iris ONNX graph. |
 | `21-parallel-kernels` | Matrix notation and compiler-driven fusion of stacked model activations. |
 | `22-ranked-tensors` | Contiguous ranked tensors executing MLIR linalg kernels through the tensor package. |
+| `23-data-infrastructure` | PQL-backed controller state, scheduling, and desired-state reconciliation. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the
@@ -54,9 +55,10 @@ tools/check_docs_examples.sh
 ```
 
 The script aggregates failures instead of stopping at the first one and does not
-use a curated native subset. Every `.sev` file must declare `main()`, reach valid
-MLIR, link, execute, and match an adjacent `.stdout` file. A missing entry point
-or output fixture is an explicit failure. Successfully linked executables are
+use a curated native subset. Every valid `.sev` file must provide `main()` or
+attached tests, reach valid MLIR, link, execute, and match adjacent output
+fixtures. A file with neither an entry point nor native tests is an explicit
+failure. Successfully linked executables are
 published under `bin/examples` before runtime validation, so a timeout, stderr,
 or output mismatch remains inspectable. The script also verifies every
 `bugs/**/invalid.sev` diagnostic; those files still fail executable acceptance

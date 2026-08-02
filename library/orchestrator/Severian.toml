@@ -1,0 +1,17 @@
+[package]
+name = "orchestrator"
+version = "0.1.0"
+edition = "2026"
+description = "Desired-state scheduling and reconciliation for Severian containers"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+container = { path = "../container", version = "0.1.0" }
+storage = { path = "../storage", version = "0.1.0" }
+
+[package.metadata.library]
+category = "infrastructure"
+implementation = "source"
+status = "experimental"

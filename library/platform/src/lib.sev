@@ -51,3 +51,11 @@ native("__sev_regex_matches") def regexMatches(text: string, pattern: string) ->
 
 test "native regex ABI":
     assert(regexMatches("release-42", "^[a-z]+-[0-9]+$"))
+
+native("__sev_host_container_backend") def hostContainerBackend() -> string
+
+native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
+
+native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
+
+native("__sev_host_page_size") def hostPageSize() -> int

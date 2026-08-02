@@ -17,7 +17,9 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Networking | `network`, `http`, `url` | `network` bind/loopback baseline implemented |
 | Observability | `log`, `trace`, `metrics` | `log` native sinks implemented |
 | Security | `hash`, `crypto`, `tls` | provider policy required |
-| Data and storage | `database`, `compression`, `archive` | planned |
+| Data and storage | `pql`, `storage`, `database`, `compression`, `archive` | PQL validation and unified storage plans experimental |
+| Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
+| Orchestration | `orchestrator` | scheduling and reconciliation baseline experimental |
 | Development | `testing`, `benchmark`, `profile` | language design |
 
 ## Admission stages

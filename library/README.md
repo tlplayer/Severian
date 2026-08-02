@@ -79,6 +79,16 @@ packs. `parallel` owns operation-local `simd`, `simt`, and `gpu` contracts used
 inside libraries. Compatible activation chains are fused automatically; model
 callers do not request fusion or select a backend.
 
+## Data and infrastructure stack
+
+`pql` validates typed schemas and query structure before emitting SQL or running
+deterministic fixtures. `storage` provides shared relational, document,
+key/value, and Dynamo-style logical plans. `vm`, `container`, and `hypervisor`
+describe validated host plans above the explicit `platform` ABI, while
+`orchestrator` supplies desired-state scheduling and reconciliation. Privileged
+host mutation remains a distinct executor boundary and is never performed by
+ordinary package tests.
+
 Run all currently implemented library packages with:
 
 ```sh

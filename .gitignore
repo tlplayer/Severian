@@ -6,3 +6,7 @@
 *.mlir
 *.stderr
 *.stdout
+!library/*/src/lib.stderr
+!library/*/src/lib.stdout
+!docs/examples/**/*.stderr
+!docs/examples/**/*.stdout

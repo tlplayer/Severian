@@ -1,0 +1,106 @@
+import pql
+
+class StoragePlan:
+    model: string
+    resource: string
+    operations: list[string]
+
+def storageCopied(values: list[string]) -> list[string]:
+    output := []
+    for value in values:
+        output.append(value)
+    return output
+
+def relationalScan(table: string) -> StoragePlan:
+    return StoragePlan("relational", table, ["scan"])
+
+def documentGet(collection: string, key: string) -> StoragePlan:
+    return StoragePlan("document", collection, ["get " + key])
+
+def keyValueGet(table: string, key: string) -> StoragePlan:
+    return StoragePlan("key-value", table, ["get " + key])
+
+def dynamoQuery(table: string, partitionKey: string, sortCondition: string) -> StoragePlan:
+    return StoragePlan("dynamo", table, ["partition " + partitionKey, "sort " + sortCondition])
+
+def appendOperation(plan: StoragePlan, operation: string) -> StoragePlan:
+    operations = storageCopied(plan.operations)
+    operations.append(operation)
+    return StoragePlan(plan.model, plan.resource, operations)
+
+def transaction(plans: list[StoragePlan]) -> list[string]:
+    operations := ["begin"]
+    for plan in plans:
+        operations.append(plan.model + ":" + plan.resource)
+        for operation in plan.operations:
+            operations.append("  " + string(operation))
+    operations.append("commit")
+    return operations
+
+def inspectPlan(plan: StoragePlan) -> list[string]:
+    output := ["model=" + plan.model, "resource=" + plan.resource]
+    for operation in plan.operations:
+        output.append("operation=" + string(operation))
+    return output
+
+def storageFieldPosition(fields: list[string], expected: string) -> int:
+    for index in indices(fields):
+        if fields[index] == expected:
+            return index
+    return -1
+
+def migrationErrors(
+    oldFields: list[string],
+    oldTypes: list[string],
+    newFields: list[string],
+    newTypes: list[string],
+) -> list[string]:
+    errors := []
+    if size(oldFields) != size(oldTypes) or size(newFields) != size(newTypes):
+        errors.append("migration schema arity mismatch")
+        return errors
+    for index in indices(oldFields):
+        next = storageFieldPosition(newFields, oldFields[index])
+        if next < 0:
+            errors.append("removed field: " + string(oldFields[index]))
+        else:
+            if oldTypes[index] != newTypes[next]:
+                errors.append("changed field type: " + string(oldFields[index]))
+    return errors
+
+def schemaCompatible(
+    oldFields: list[string],
+    oldTypes: list[string],
+    newFields: list[string],
+    newTypes: list[string],
+) -> bool:
+    return size(migrationErrors(oldFields, oldTypes, newFields, newTypes)) == 0
+
+def sqlAdapter(dialect: string, statement: string) -> list[string]:
+    return ["adapter=" + dialect, "statement=" + statement]
+
+def dynamoAdapter(plan: StoragePlan) -> list[string]:
+    assert(plan.model == "dynamo")
+    return ["TableName=" + plan.resource, string(plan.operations[0]), string(plan.operations[1])]
+
+test "relational plans compose and remain inspectable":
+    plan = appendOperation(appendOperation(relationalScan("users"), "filter tenantId:int"), "project id,name")
+    assert(inspectPlan(plan) == ["model=relational", "resource=users", "operation=scan", "operation=filter tenantId:int", "operation=project id,name"])
+
+test "document key-value and Dynamo plans retain their models":
+    assert(inspectPlan(documentGet("sessions", "abc"))[0] == "model=document")
+    assert(inspectPlan(keyValueGet("cache", "answer"))[0] == "model=key-value")
+    assert(dynamoAdapter(dynamoQuery("events", "tenant=7", "time>100")) == ["TableName=events", "partition tenant=7", "sort time>100"])
+
+test "transactions preserve operation order":
+    plans = [appendOperation(relationalScan("users"), "update id=1"), documentGet("sessions", "abc")]
+    assert(transaction(plans) == ["begin", "relational:users", "  scan", "  update id=1", "document:sessions", "  get abc", "commit"])
+
+test "migrations reject removal and type changes":
+    assert(migrationErrors(["id", "name"], ["int", "string"], ["id"], ["string"]) == ["changed field type: id", "removed field: name"])
+    assert(schemaCompatible(["id"], ["int"], ["id", "name"], ["int", "string"]))
+
+test "SQL adapters consume PQL output":
+    users = pql.Schema("users", ["id"], ["int"], [false], "id")
+    query = pql.Query("users", ["id"], ["id"], [false], "", "", [])
+    assert(sqlAdapter("postgres", pql.sql(users, query, "postgres")) == ["adapter=postgres", "statement=SELECT id FROM users"])

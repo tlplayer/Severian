@@ -1539,6 +1539,10 @@ fn execute_call(
             "__sev_network_listen" => "platform.networkListen",
             "__sev_network_loopback_echo" => "platform.networkLoopbackEcho",
             "__sev_regex_matches" => "platform.regexMatches",
+            "__sev_host_container_backend" => "platform.hostContainerBackend",
+            "__sev_host_kvm_api_version" => "platform.hostKvmApiVersion",
+            "__sev_host_kvm_create_probe" => "platform.hostKvmCreateProbe",
+            "__sev_host_page_size" => "platform.hostPageSize",
             "__sev_tensor_from_list" => "platform.tensorFromList",
             "__sev_tensor_to_list" => "platform.tensorToList",
             "__sev_tensor_shape" => "platform.tensorShape",
@@ -1676,6 +1680,30 @@ fn execute_call(
             }),
             _ => Err(CompileError::Execution(
                 "platform.networkLoopbackEcho expects a message".into(),
+            )),
+        },
+        "platform.hostContainerBackend" => match args.as_slice() {
+            [] => Ok(Value::String("linux".into())),
+            _ => Err(CompileError::Execution(
+                "platform.hostContainerBackend expects no arguments".into(),
+            )),
+        },
+        "platform.hostKvmApiVersion" => match args.as_slice() {
+            [] => Ok(Value::Int(-1)),
+            _ => Err(CompileError::Execution(
+                "platform.hostKvmApiVersion expects no arguments".into(),
+            )),
+        },
+        "platform.hostKvmCreateProbe" => match args.as_slice() {
+            [] => Ok(Value::Bool(false)),
+            _ => Err(CompileError::Execution(
+                "platform.hostKvmCreateProbe expects no arguments".into(),
+            )),
+        },
+        "platform.hostPageSize" => match args.as_slice() {
+            [] => Ok(Value::Int(4096)),
+            _ => Err(CompileError::Execution(
+                "platform.hostPageSize expects no arguments".into(),
             )),
         },
         "platform.tensorFromList" => match args.as_slice() {

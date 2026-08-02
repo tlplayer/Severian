@@ -167,6 +167,24 @@ fn ranked_tensor_example_emits_real_linalg_kernels() {
 }
 
 #[test]
+fn resolves_qualified_package_classes_across_the_data_infrastructure_stack() {
+    let fixture = examples_root().join("23-data-infrastructure/main.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    let mut output = Vec::new();
+    run(&compilation.hir, |line| output.push(line.to_owned())).unwrap();
+
+    assert_eq!(
+        output,
+        [
+            "[\"api-0 -> node-a\", \"api-1 -> node-b\", \"api-2 -> node-a\", \"rollout v1->v2\", \"scale 2->3\", \"repair 1\"]",
+            "SELECT id, action FROM controller_events WHERE namespace = $1",
+        ]
+    );
+    assert!(compilation.mlir.as_str().contains("__sev_unbox_ptr"));
+    assert!(compilation.mlir.as_str().contains("__sev_unbox_i64"));
+}
+
+#[test]
 fn fuses_stacked_model_activations_without_user_optimization_syntax() {
     let fixture = examples_root().join("21-parallel-kernels/main.sev");
     let compilation = compile_path(&fixture).unwrap();

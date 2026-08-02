@@ -1,0 +1,13 @@
+[package]
+name = "pql"
+version = "0.1.0"
+edition = "2026"
+description = "Prestructured Query Language schemas, validation, plans, fixtures, and SQL emission"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "data"
+implementation = "source"
+status = "experimental"

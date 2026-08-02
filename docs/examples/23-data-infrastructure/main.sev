@@ -1,0 +1,15 @@
+import orchestrator
+
+def deployment() -> list[string]:
+    workload = orchestrator.Workload("prod", "api", "sev://images/api:v2", 3, 250, 128, 8080, "api-state", "v2")
+    nodes = [orchestrator.Node("node-a", 2000, 4096, true), orchestrator.Node("node-b", 2000, 4096, true)]
+    placements = orchestrator.schedule(workload, nodes)
+    actions = orchestrator.reconcile(workload, orchestrator.ObservedWorkload(2, 1, "v1"))
+    return [string(placements[0]), string(placements[1]), string(placements[2]), string(actions[0]), string(actions[1]), string(actions[2])]
+
+test "full desired-state workflow":
+    assert(deployment() == ["api-0 -> node-a", "api-1 -> node-b", "api-2 -> node-a", "rollout v1->v2", "scale 2->3", "repair 1"])
+
+def main():
+    print(deployment())
+    print(orchestrator.controllerSql())

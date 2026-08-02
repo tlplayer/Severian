@@ -1,0 +1,16 @@
+[package]
+name = "vm"
+version = "0.1.0"
+edition = "2026"
+description = "Virtual-machine specifications and deterministic launch plans"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
+[package.metadata.library]
+category = "infrastructure"
+implementation = "source-and-native"
+status = "experimental"

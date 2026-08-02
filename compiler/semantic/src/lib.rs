@@ -117,6 +117,29 @@ pub fn analyze_with_interfaces(
     let mut signatures = HashMap::new();
     for (module_name, interface) in interfaces {
         for item in &interface.items {
+            if let Item::Class(class) = item {
+                let exported = format!("{module_name}.{}", class.name.name);
+                aliases.insert(
+                    format!("__module_class.{exported}"),
+                    class.name.name.clone(),
+                );
+                aliases
+                    .entry(format!("__class_fields.{}", class.name.name))
+                    .or_insert_with(|| {
+                        class
+                            .fields
+                            .iter()
+                            .map(|field| field.name.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    });
+                if imports_entire_module(module, module_name) {
+                    aliases
+                        .entry(class.name.name.clone())
+                        .or_insert_with(|| format!("__class.{}", class.name.name));
+                }
+                continue;
+            }
             let (name, params, return_type) = match item {
                 Item::Function(function) => (
                     &function.name,
@@ -1701,10 +1724,32 @@ fn lower_call(
             }
             if let Some(module) = aliases.get(&object.name) {
                 let function = format!("{module}.{}", member.member.name);
-                let signature = signatures.get(&function).ok_or_else(|| {
-                    error(call.span, format!("unknown exported function `{function}`"))
-                })?;
-                return lower_declared_call(call, &function, signature, scope, signatures, aliases);
+                if let Some(signature) = signatures.get(&function) {
+                    return lower_declared_call(
+                        call, &function, signature, scope, signatures, aliases,
+                    );
+                }
+                if let Some(class) = aliases.get(&format!("__module_class.{function}")) {
+                    let args = call
+                        .args
+                        .iter()
+                        .map(|arg| {
+                            lower_expression(&arg.value, scope, signatures, aliases)
+                                .map(|(arg, _)| arg)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok((
+                        Expression::Construct {
+                            class: class.clone(),
+                            args,
+                        },
+                        ValueType::Any,
+                    ));
+                }
+                return Err(error(
+                    call.span,
+                    format!("unknown exported function or class `{function}`"),
+                ));
             }
         }
         let object = lower_expression(&member.object, scope, signatures, aliases)?.0;

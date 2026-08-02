@@ -1,0 +1,16 @@
+[package]
+name = "storage"
+version = "0.1.0"
+edition = "2026"
+description = "Unified relational, document, and key-value logical storage plans"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+pql = { path = "../pql", version = "0.1.0" }
+
+[package.metadata.library]
+category = "data"
+implementation = "source"
+status = "experimental"

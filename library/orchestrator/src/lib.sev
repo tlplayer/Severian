@@ -1,0 +1,132 @@
+import container
+import pql
+import storage
+
+class Workload:
+    namespace: string
+    name: string
+    image: string
+    replicas: int
+    cpuMillis: int
+    memoryMiB: int
+    port: int
+    volume: string
+    version: string
+
+class Node:
+    name: string
+    cpuMillis: int
+    memoryMiB: int
+    healthy: bool
+
+class ObservedWorkload:
+    replicas: int
+    ready: int
+    version: string
+
+def workloadErrors(workload: Workload) -> list[string]:
+    failures := []
+    if workload.namespace == "":
+        failures.append("namespace is empty")
+    if workload.name == "":
+        failures.append("workload name is empty")
+    if workload.image == "":
+        failures.append("workload image is empty")
+    if workload.replicas < 0:
+        failures.append("replicas cannot be negative")
+    if workload.cpuMillis < 1 or workload.memoryMiB < 1:
+        failures.append("resource requests must be positive")
+    if workload.port < 1 or workload.port > 65535:
+        failures.append("service port is invalid")
+    return failures
+
+def workloadValid(workload: Workload) -> bool:
+    return size(workloadErrors(workload)) == 0
+
+def schedule(workload: Workload, nodes: list[Node]) -> list[string]:
+    assert(workloadValid(workload))
+    placements := []
+    if size(nodes) == 0:
+        return ["unscheduled " + workload.name + ": no nodes"]
+    for replica in range(0, workload.replicas):
+        node = nodes[replica % size(nodes)]
+        if node.healthy and node.cpuMillis >= workload.cpuMillis and node.memoryMiB >= workload.memoryMiB:
+            placements.append(workload.name + "-" + string(replica) + " -> " + node.name)
+        else:
+            placements.append("unscheduled " + workload.name + "-" + string(replica))
+    return placements
+
+def reconcile(workload: Workload, observed: ObservedWorkload) -> list[string]:
+    assert(workloadValid(workload))
+    actions := []
+    if observed.replicas < 0:
+        actions.append("create " + workload.namespace + "/" + workload.name)
+        actions.append("scale 0->" + string(workload.replicas))
+        return actions
+    if observed.version != workload.version:
+        actions.append("rollout " + observed.version + "->" + workload.version)
+    if observed.replicas != workload.replicas:
+        actions.append("scale " + string(observed.replicas) + "->" + string(workload.replicas))
+    if observed.ready < observed.replicas:
+        actions.append("repair " + string(observed.replicas - observed.ready))
+    if size(actions) == 0:
+        actions.append("stable")
+    return actions
+
+def healthStatus(successes: int, failures: int, healthyThreshold: int, failureThreshold: int) -> string:
+    if failures >= failureThreshold:
+        return "unhealthy"
+    if successes >= healthyThreshold:
+        return "healthy"
+    return "probing"
+
+def serviceAddress(workload: Workload, domain: string) -> string:
+    return workload.name + "." + workload.namespace + ".svc." + domain + ":" + string(workload.port)
+
+def rolloutPlan(workload: Workload, fromVersion: string, maxUnavailable: int) -> list[string]:
+    assert(maxUnavailable >= 0)
+    return ["rollout " + workload.name, "from " + fromVersion, "to " + workload.version, "maxUnavailable " + string(maxUnavailable), "health before promote", "rollback on failure"]
+
+def volumeClaim(workload: Workload, sizeGiB: int, storageClass: string) -> list[string]:
+    assert(sizeGiB > 0)
+    return ["claim " + workload.namespace + "/" + workload.volume, "sizeGiB " + string(sizeGiB), "class " + storageClass, "mount /var/lib/" + workload.name]
+
+def controllerHistory(workload: Workload, action: string) -> list[string]:
+    plan = storage.appendOperation(storage.relationalScan("controller_events"), "insert " + workload.namespace + "/" + workload.name + " " + action)
+    return storage.inspectPlan(plan)
+
+def controllerSql() -> string:
+    events = pql.Schema("controller_events", ["id", "namespace", "workload", "action"], ["int", "string", "string", "string"], [false, false, false, false], "id")
+    query = pql.Query("controller_events", ["id", "action"], ["id", "action"], [false, false], "namespace", "string", [])
+    return pql.sql(events, query, "postgres")
+
+test "scheduler places replicas deterministically":
+    workload = Workload("prod", "api", "sev://images/api:v2", 3, 250, 128, 8080, "api-state", "v2")
+    nodes = [Node("node-a", 2000, 4096, true), Node("node-b", 2000, 4096, true)]
+    assert(schedule(workload, nodes) == ["api-0 -> node-a", "api-1 -> node-b", "api-2 -> node-a"])
+
+test "reconciliation handles rollout scale and repair":
+    workload = Workload("prod", "api", "sev://images/api:v2", 4, 250, 128, 8080, "api-state", "v2")
+    observed = ObservedWorkload(2, 1, "v1")
+    assert(reconcile(workload, observed) == ["rollout v1->v2", "scale 2->4", "repair 1"])
+
+test "health checks have explicit thresholds":
+    assert(healthStatus(3, 0, 3, 2) == "healthy")
+    assert(healthStatus(0, 2, 3, 2) == "unhealthy")
+    assert(healthStatus(1, 0, 3, 2) == "probing")
+
+test "service discovery and volumes are deterministic":
+    workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
+    assert(serviceAddress(workload, "cluster.local") == "api.prod.svc.cluster.local:8080")
+    assert(volumeClaim(workload, 20, "fast") == ["claim prod/api-state", "sizeGiB 20", "class fast", "mount /var/lib/api"])
+
+test "rollouts include promotion and rollback policy":
+    workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
+    assert(rolloutPlan(workload, "v1", 1) == ["rollout api", "from v1", "to v2", "maxUnavailable 1", "health before promote", "rollback on failure"])
+
+test "controller history uses the unified storage plan":
+    workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
+    assert(controllerHistory(workload, "stable") == ["model=relational", "resource=controller_events", "operation=scan", "operation=insert prod/api stable"])
+
+test "controller queries are PQL validated before emission":
+    assert(controllerSql() == "SELECT id, action FROM controller_events WHERE namespace = $1")

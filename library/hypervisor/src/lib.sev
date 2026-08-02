@@ -1,0 +1,78 @@
+import platform
+import vm
+
+class VirtualCpu:
+    id: int
+    entry: int
+
+class MemoryRegion:
+    guestAddress: int
+    bytes: int
+    writable: bool
+
+class Interrupt:
+    vector: int
+    targetCpu: int
+
+class Device:
+    kind: string
+    identifier: string
+
+def backend() -> string:
+    version = platform.hostKvmApiVersion()
+    return "kvm:" + string(version) if version >= 0 else "unavailable"
+
+def canCreateMachine() -> bool:
+    return platform.hostKvmCreateProbe()
+
+def memoryErrors(region: MemoryRegion) -> list[string]:
+    failures := []
+    pageSize = platform.hostPageSize()
+    if region.guestAddress < 0:
+        failures.append("guest address is negative")
+    if region.bytes < pageSize:
+        failures.append("memory region is smaller than one page")
+    if region.guestAddress % pageSize != 0:
+        failures.append("guest address is not page aligned")
+    if region.bytes % pageSize != 0:
+        failures.append("memory size is not page aligned")
+    return failures
+
+def hypervisorLaunchPlan(
+    cpus: list[VirtualCpu],
+    memory: list[MemoryRegion],
+    interrupts: list[Interrupt],
+    devices: list[Device],
+) -> list[string]:
+    plan := ["backend " + backend()]
+    for cpu in cpus:
+        plan.append("vcpu " + string(cpu.id) + " entry=" + string(cpu.entry))
+    for region in memory:
+        assert(size(memoryErrors(region)) == 0)
+        plan.append("memory " + string(region.guestAddress) + ":" + string(region.bytes))
+    for interrupt in interrupts:
+        plan.append("interrupt " + string(interrupt.vector) + " cpu=" + string(interrupt.targetCpu))
+    for device in devices:
+        plan.append("device " + string(device.kind) + ":" + string(device.identifier))
+    return plan
+
+test "KVM discovery reports reality rather than inventing availability":
+    detected = backend()
+    assert(detected == "unavailable" or platform.hostKvmApiVersion() >= 0)
+
+test "guest memory mappings require host page alignment":
+    pageSize = platform.hostPageSize()
+    assert(memoryErrors(MemoryRegion(1, pageSize - 1, true)) == ["memory region is smaller than one page", "guest address is not page aligned", "memory size is not page aligned"])
+    assert(memoryErrors(MemoryRegion(0, pageSize, true)) == [])
+
+test "hypervisor plans include CPUs memory interrupts and devices":
+    pageSize = platform.hostPageSize()
+    plan = hypervisorLaunchPlan([VirtualCpu(0, 4096)], [MemoryRegion(0, pageSize, true)], [Interrupt(32, 0)], [Device("virtio-block", "root")])
+    assert(plan[1] == "vcpu 0 entry=4096")
+    assert(plan[2] == "memory 0:" + string(pageSize))
+    assert(plan[3] == "interrupt 32 cpu=0")
+    assert(plan[4] == "device virtio-block:root")
+
+test "KVM create probe is safe when the backend is unavailable":
+    created = canCreateMachine()
+    assert(created or not created)

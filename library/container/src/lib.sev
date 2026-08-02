@@ -1,0 +1,77 @@
+import platform
+
+class ContainerSpec:
+    name: string
+    image: string
+    command: list[string]
+    cpuMillis: int
+    memoryMiB: int
+    namespaces: list[string]
+    mounts: list[string]
+    networks: list[string]
+    volumes: list[string]
+
+def containerHas(values: list[string], expected: string) -> bool:
+    for value in values:
+        if value == expected:
+            return true
+    return false
+
+def containerErrors(spec: ContainerSpec) -> list[string]:
+    failures := []
+    if spec.name == "":
+        failures.append("container name is empty")
+    if spec.image == "":
+        failures.append("container image is empty")
+    if size(spec.command) == 0:
+        failures.append("container command is empty")
+    if spec.cpuMillis < 1:
+        failures.append("CPU limit must be positive")
+    if spec.memoryMiB < 1:
+        failures.append("memory limit must be positive")
+    if not containerHas(spec.namespaces, "pid"):
+        failures.append("pid namespace is required")
+    if not containerHas(spec.namespaces, "mount"):
+        failures.append("mount namespace is required")
+    return failures
+
+def containerValid(spec: ContainerSpec) -> bool:
+    return size(containerErrors(spec)) == 0
+
+def containerCreatePlan(spec: ContainerSpec) -> list[string]:
+    assert(containerValid(spec))
+    plan := ["container " + spec.name, "backend " + platform.hostContainerBackend(), "image " + spec.image, "cpu.max " + string(spec.cpuMillis), "memory.max " + string(spec.memoryMiB)]
+    for argument in spec.command:
+        plan.append("exec " + string(argument))
+    for namespace in spec.namespaces:
+        plan.append("namespace " + string(namespace))
+    for mount in spec.mounts:
+        plan.append("mount " + string(mount))
+    for network in spec.networks:
+        plan.append("network " + string(network))
+    for volume in spec.volumes:
+        plan.append("volume " + string(volume))
+    return plan
+
+test "container specifications validate namespaces and cgroups":
+    invalid = ContainerSpec("api", "", [], 0, 0, ["network"], [], [], [])
+    assert(containerErrors(invalid) == ["container image is empty", "container command is empty", "CPU limit must be positive", "memory limit must be positive", "pid namespace is required", "mount namespace is required"])
+
+test "container plans cover the complete isolation surface":
+    spec = ContainerSpec("api", "sev://images/api:v3", ["/bin/api", "--port=8080"], 500, 256, ["pid", "mount", "network", "user"], ["rootfs:ro"], ["frontend"], ["state:/var/lib/api"])
+    plan = containerCreatePlan(spec)
+    assert(plan[0] == "container api")
+    assert(plan[2] == "image sev://images/api:v3")
+    assert(plan[10] == "namespace user")
+    assert(plan[11] == "mount rootfs:ro")
+    assert(plan[12] == "network frontend")
+    assert(plan[13] == "volume state:/var/lib/api")
+
+test "container backend discovery is explicit":
+    backend = platform.hostContainerBackend()
+    assert(backend == "linux" or backend == "unavailable")
+
+test "container resource limits are retained":
+    spec = ContainerSpec("job", "sev://images/job:v1", ["/bin/job"], 250, 128, ["pid", "mount"], [], [], [])
+    assert(containerCreatePlan(spec)[3] == "cpu.max 250")
+    assert(containerCreatePlan(spec)[4] == "memory.max 128")
