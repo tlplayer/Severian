@@ -1,0 +1,11 @@
+[package]
+name = "parallel-kernels-example"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "parallel-kernels-example"
+path = "main.sev"
+
+[dependencies]
+parallel = { path = "../../../library/parallel", version = "0.1.0" }

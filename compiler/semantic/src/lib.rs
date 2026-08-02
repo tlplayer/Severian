@@ -1012,7 +1012,7 @@ fn lower_block(
             Stmt::With(block) => {
                 let mut resources = Vec::new();
                 for resource in &block.resources {
-                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local"))
+                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local" | "gpu" | "simd" | "simt" | "fuse"))
                     {
                         continue;
                     }
@@ -1338,12 +1338,40 @@ fn lower_expression(
                     }
                     TaskPlacement::Local
                 }
+                severian_ast::TaskPlacement::Gpu
+                | severian_ast::TaskPlacement::Simd
+                | severian_ast::TaskPlacement::Simt => {
+                    if !aliases.values().any(|module| module == "parallel") {
+                        return Err(error(
+                            task.span,
+                            format!(
+                                "task placement `{}` requires `import parallel`",
+                                match task.placement {
+                                    severian_ast::TaskPlacement::Gpu => "gpu",
+                                    severian_ast::TaskPlacement::Simd => "simd",
+                                    severian_ast::TaskPlacement::Simt => "simt",
+                                    _ => unreachable!(),
+                                }
+                            ),
+                        ));
+                    }
+                    match task.placement {
+                        severian_ast::TaskPlacement::Gpu => TaskPlacement::Gpu,
+                        severian_ast::TaskPlacement::Simd => TaskPlacement::Simd,
+                        severian_ast::TaskPlacement::Simt => TaskPlacement::Simt,
+                        _ => unreachable!(),
+                    }
+                }
             };
+            if task.fused && !aliases.values().any(|module| module == "parallel") {
+                return Err(error(task.span, "kernel fusion requires `import parallel`"));
+            }
             let (value, _) = lower_expression(&task.value, scope, signatures, aliases)?;
             Ok((
                 Expression::Task {
                     value: Box::new(value),
                     placement,
+                    fused: task.fused,
                 },
                 ValueType::Any,
             ))

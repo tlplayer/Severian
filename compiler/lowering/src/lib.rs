@@ -1191,7 +1191,11 @@ impl LowerContext<'_> {
                     (result, return_type)
                 }
             }
-            Expression::Task { value, placement } => {
+            Expression::Task {
+                value,
+                placement,
+                fused,
+            } => {
                 if let Expression::Send { value, channel } = value.as_ref() {
                     let (value, value_type) = self.lower_expression(value);
                     let (channel, _) = self.lower_expression(channel);
@@ -1231,9 +1235,30 @@ impl LowerContext<'_> {
                     .copied()
                     .unwrap_or(ValueType::Any);
                 let result = self.fresh_value();
-                let placement_attribute = match placement {
-                    TaskPlacement::Default => "",
-                    TaskPlacement::Local => " {severian_distribution = \"local\"}",
+                let mut attributes = Vec::new();
+                match placement {
+                    TaskPlacement::Default => {}
+                    TaskPlacement::Local => attributes.push("severian_distribution = \"local\""),
+                    TaskPlacement::Gpu => {
+                        attributes.push("severian_parallel = \"gpu\"");
+                        attributes.push("severian_device_fallback = \"cpu\"");
+                    }
+                    TaskPlacement::Simd => {
+                        attributes.push("severian_parallel = \"simd\"");
+                        attributes.push("severian_device_fallback = \"cpu\"");
+                    }
+                    TaskPlacement::Simt => {
+                        attributes.push("severian_parallel = \"simt\"");
+                        attributes.push("severian_device_fallback = \"cpu\"");
+                    }
+                }
+                if *fused {
+                    attributes.push("severian_fusion = \"requested\"");
+                }
+                let placement_attribute = if attributes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {{{}}}", attributes.join(", "))
                 };
                 writeln!(
                     self.output,

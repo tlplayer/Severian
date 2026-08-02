@@ -7,6 +7,11 @@ equivalent Severian source from the ONNX initializers. The graph deliberately
 uses the currently executable intersection of both stacks:
 `Gemm -> Relu -> Gemm`.
 
+The generated benchmark includes both `Relu(add(matVec(...), bias))` and a
+`fusedDenseRelu(...)` form. Both use four identical local shards and weights,
+so their timing delta isolates source-level producer/consumer fusion from task
+parallelism.
+
 It repeats the 150 observations to run 60,000 inferences. Native Severian uses
 four `with self and local:` shards. PyTorch and ONNX Runtime use the same ONNX
 weights and normalized inputs. Before accepting timing samples, the runner
@@ -40,9 +45,9 @@ execution topology and lifetime visible:
 ```sev
 @models(Relu)
 def inferChunk(...):
-    hidden = Relu(add(matVec(...), hiddenBias))
+    hidden = Relu(add(matVec(hiddenWeights, 12, 4, features), hiddenBias))
 
-with self and local:
+with self and local and fuse:
     first = async inferChunk(...)
     second = async inferChunk(...)
     firstValues = await first

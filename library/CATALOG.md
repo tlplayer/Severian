@@ -13,7 +13,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Files and I/O | `io`, `file`, `path` | `io`, `file` runtime pending |
 | Time and environment | `time`, `environment`, `process` | planned |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
-| Parallel computing | `distributed` | local shard planning experimental; remote runtime planned |
+| Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
 | Networking | `network`, `http`, `url` | `network` runtime pending |
 | Observability | `log`, `trace`, `metrics` | `log` runtime pending |
 | Security | `hash`, `crypto`, `tls` | provider policy required |

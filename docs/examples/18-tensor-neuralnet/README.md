@@ -13,6 +13,7 @@ cargo run -p severian-driver --bin sev -- compile \
 bin/examples/18-tensor-neuralnet/main
 ```
 
-SIMD and GPU selection are not claimed here yet. Severian decorators import
-domain syntax rather than wrapping functions or selecting an execution backend;
-backend selection needs an explicit operation-local language construct.
+Severian decorators import domain syntax rather than wrapping functions or
+selecting an execution backend. The later `21-parallel-kernels` example shows
+the operation-local `simd`, `simt`, `gpu`, and `fuse` contracts. Those requests
+currently retain an explicit CPU fallback rather than claiming device speedup.

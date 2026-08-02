@@ -62,6 +62,59 @@ fn parses_local_task_placement_in_the_with_clause() {
 }
 
 #[test]
+fn parses_parallel_placement_and_fusion_in_the_with_clause() {
+    let source = concat!(
+        "import parallel\n",
+        "\n",
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    with self and gpu and fuse:\n",
+        "        task = async work()\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(main) = &module.items[2] else {
+        panic!("expected main function");
+    };
+    let Stmt::With(block) = &main.body.statements[0] else {
+        panic!("expected with block");
+    };
+    let Stmt::Let(binding) = &block.body.statements[0] else {
+        panic!("expected task binding");
+    };
+    let Some(Expr::Async(task)) = &binding.value else {
+        panic!("expected async expression");
+    };
+    assert_eq!(task.placement, TaskPlacement::Gpu);
+    assert!(task.fused);
+}
+
+#[test]
+fn parses_one_off_gpu_placement_without_an_explicit_owner() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work() with gpu and fuse\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(main) = &module.items[1] else {
+        panic!("expected main function");
+    };
+    let Stmt::Let(binding) = &main.body.statements[0] else {
+        panic!("expected task binding");
+    };
+    let Some(Expr::Async(task)) = &binding.value else {
+        panic!("expected async expression");
+    };
+    assert_eq!(task.owner, TaskOwner::SelfOwned);
+    assert_eq!(task.placement, TaskPlacement::Gpu);
+    assert!(task.fused);
+}
+
+#[test]
 fn rejects_a_bare_async_expression_without_an_enclosing_task_context() {
     let source = concat!(
         "def work() -> int:\n",

@@ -541,6 +541,7 @@ pub struct AsyncExpr {
     pub value: Box<Expr>,
     pub owner: TaskOwner,
     pub placement: TaskPlacement,
+    pub fused: bool,
     pub captures: Vec<Ident>,
 }
 
@@ -554,6 +555,9 @@ pub enum TaskOwner {
 pub enum TaskPlacement {
     Default,
     Local,
+    Gpu,
+    Simd,
+    Simt,
 }
 
 #[derive(Debug, Clone, PartialEq)]

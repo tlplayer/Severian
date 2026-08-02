@@ -126,6 +126,31 @@ fn resolves_model_decorator_symbols_to_package_functions() {
 }
 
 #[test]
+fn fuses_requested_parallel_kernel_graphs_and_keeps_the_control_unfused() {
+    let fixture = examples_root().join("21-parallel-kernels/main.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    let mlir = compilation.mlir.as_str();
+    let fused = mlir
+        .split("llvm.func @denseReluKernel(")
+        .nth(1)
+        .unwrap()
+        .split("llvm.func @denseReluKernelUnfused(")
+        .next()
+        .unwrap();
+    let unfused = mlir
+        .split("llvm.func @denseReluKernelUnfused(")
+        .nth(1)
+        .unwrap()
+        .split("llvm.func @main(")
+        .next()
+        .unwrap();
+    assert!(fused.contains("llvm.call @fusedDenseRelu"));
+    assert!(!fused.contains("llvm.call @matVec"));
+    assert!(unfused.contains("llvm.call @matVec"));
+    assert!(unfused.contains("llvm.call @activation"));
+}
+
+#[test]
 fn compiles_server_syntax_and_propagated_file_errors() {
     let root = examples_root();
     for fixture in [

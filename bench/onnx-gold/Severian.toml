@@ -7,3 +7,4 @@ edition = "2026"
 distributed = { path = "../../library/distributed" }
 tensor = { path = "../../library/tensor" }
 models = { path = "../../library/models" }
+parallel = { path = "../../library/parallel" }

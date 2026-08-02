@@ -54,6 +54,7 @@ struct Parser<'tokens> {
 struct TaskContext {
     owner: TaskOwner,
     placement: TaskPlacement,
+    fused: bool,
     captures: Vec<Ident>,
 }
 
@@ -709,22 +710,28 @@ impl Parser<'_> {
             } else {
                 None
             };
-            let placement = identifiers
+            let placements = identifiers
                 .iter()
-                .any(|identifier| identifier.name == "local")
-                .then_some(TaskPlacement::Local);
-            let establishes_task_context = owner.is_some() || placement.is_some();
+                .filter_map(|identifier| task_placement(&identifier.name))
+                .collect::<Vec<_>>();
+            if placements.len() > 1 {
+                return Err(self.error("a task context accepts only one execution placement"));
+            }
+            let placement = placements.first().copied();
+            let fused = identifiers
+                .iter()
+                .any(|identifier| identifier.name == "fuse");
+            let establishes_task_context = owner.is_some() || placement.is_some() || fused;
             if establishes_task_context {
                 let captures = identifiers
                     .iter()
-                    .filter(|identifier| {
-                        !matches!(identifier.name.as_str(), "self" | "runtime" | "local")
-                    })
+                    .filter(|identifier| !is_task_context_symbol(&identifier.name))
                     .cloned()
                     .collect();
                 self.task_contexts.push(TaskContext {
                     owner: owner.unwrap_or(TaskOwner::SelfOwned),
                     placement: placement.unwrap_or(TaskPlacement::Default),
+                    fused,
                     captures,
                 });
             }
@@ -1292,6 +1299,7 @@ impl Parser<'_> {
                     value: Box::new(value),
                     owner: TaskOwner::SelfOwned,
                     placement: TaskPlacement::Default,
+                    fused: false,
                     captures: Vec::new(),
                 }));
             }
@@ -1306,6 +1314,7 @@ impl Parser<'_> {
                     value: Box::new(value),
                     owner: context.owner,
                     placement: context.placement,
+                    fused: context.fused,
                     captures: context.captures,
                 }));
             }
@@ -1316,25 +1325,27 @@ impl Parser<'_> {
             } else {
                 TaskOwner::SelfOwned
             };
-            let mut placement = if owner_name.name == "local" {
-                TaskPlacement::Local
-            } else {
-                TaskPlacement::Default
-            };
+            let mut placement = task_placement(&owner_name.name).unwrap_or(TaskPlacement::Default);
+            let mut fused = owner_name.name == "fuse";
             let mut end = owner_name.span.end;
             let mut captures = Vec::new();
             while self.take_simple(&TokenKind::And).is_some() {
                 let capability = self.expect_identifier("captured capability")?;
                 end = capability.span.end;
-                if capability.name == "local" {
+                if let Some(requested) = task_placement(&capability.name) {
                     if placement != TaskPlacement::Default {
-                        return Err(
-                            self.error("task placement `local` was specified more than once")
-                        );
+                        return Err(self.error("task placement was specified more than once"));
                     }
-                    placement = TaskPlacement::Local;
-                } else {
+                    placement = requested;
+                } else if capability.name == "fuse" {
+                    if fused {
+                        return Err(self.error("kernel fusion was specified more than once"));
+                    }
+                    fused = true;
+                } else if !matches!(capability.name.as_str(), "self" | "runtime") {
                     captures.push(capability);
+                } else {
+                    continue;
                 }
             }
             return Ok(Expr::Async(AsyncExpr {
@@ -1342,6 +1353,7 @@ impl Parser<'_> {
                 value: Box::new(value),
                 owner,
                 placement,
+                fused,
                 captures,
             }));
         }
@@ -1764,6 +1776,20 @@ fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
         op,
         right: Box::new(right),
     })
+}
+
+fn task_placement(name: &str) -> Option<TaskPlacement> {
+    match name {
+        "local" => Some(TaskPlacement::Local),
+        "gpu" => Some(TaskPlacement::Gpu),
+        "simd" => Some(TaskPlacement::Simd),
+        "simt" => Some(TaskPlacement::Simt),
+        _ => None,
+    }
+}
+
+fn is_task_context_symbol(name: &str) -> bool {
+    matches!(name, "self" | "runtime" | "fuse") || task_placement(name).is_some()
 }
 
 fn internal_call(name: &str, span: Span, args: Vec<Expr>) -> Expr {

@@ -1,0 +1,42 @@
+import tensor
+import models
+
+def fusedDenseRelu(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    X: list[float],
+) -> list[float]:
+    output := []
+    for row in range(0, rows):
+        total := 0.0
+        for column in range(0, columns):
+            total += weights[row * columns + column] * X[column]
+        total += bias[row]
+        output.append(0.0 if total < 0.0 else total)
+    return output
+
+test "fused dense ReLU avoids an intermediate projection list":
+    result = fusedDenseRelu([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -5.0], [2.0, 4.0])
+    assert(result == [2.0, 0.0])
+
+def fusedDenseReluBackwardInput(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    preActivation: list[float],
+    upstream: list[float],
+) -> list[float]:
+    gradient := []
+    for column in range(0, columns):
+        total := 0.0
+        for row in range(0, rows):
+            active = 0.0 if preActivation[row] <= 0.0 else upstream[row]
+            total += weights[row * columns + column] * active
+        gradient.append(total)
+    return gradient
+
+test "fused backward masks ReLU and projects the input gradient":
+    gradient = fusedDenseReluBackwardInput([1.0, 2.0, 3.0, 4.0], 2, 2, [2.0, -1.0], [1.0, 1.0])
+    assert(gradient == [1.0, 2.0])

@@ -1,7 +1,8 @@
 # Example benchmarks
 
 The checked neural-network measurements and their interpretation are recorded
-in [RESULTS.md](RESULTS.md).
+in [RESULTS.md](RESULTS.md). The backend and autodiff work derived from those
+measurements is tracked in [PARALLEL_ROADMAP.md](PARALLEL_ROADMAP.md).
 
 This suite compares the complete Severian example inventory in directories
 `00-getting-started` through `07-generics-constraints` with equivalent Rust and

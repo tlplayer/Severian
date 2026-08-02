@@ -1,0 +1,17 @@
+[package]
+name = "parallel"
+version = "0.1.0"
+edition = "2026"
+description = "Parallel placement contracts and fused numerical kernels"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+tensor = { path = "../tensor", version = "0.1.0" }
+models = { path = "../models", version = "0.1.0" }
+
+[package.metadata.library]
+category = "parallel-computing"
+implementation = "source-and-compiler-contracts"
+status = "experimental"

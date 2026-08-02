@@ -80,6 +80,52 @@ fn rejects_local_task_placement_without_the_distributed_import() {
 }
 
 #[test]
+fn retains_parallel_placement_and_fusion_after_validating_the_import() {
+    let source = concat!(
+        "import parallel\n",
+        "\n",
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    with self and simd and fuse:\n",
+        "        task = async work()\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::With { instructions, .. } = &hir.main().unwrap().instructions[0] else {
+        panic!("expected task context");
+    };
+    let Instruction::Let {
+        value: Expression::Task {
+            placement, fused, ..
+        },
+        ..
+    } = &instructions[0]
+    else {
+        panic!("expected task binding");
+    };
+    assert_eq!(*placement, TaskPlacement::Simd);
+    assert!(*fused);
+}
+
+#[test]
+fn rejects_parallel_placement_without_the_parallel_import() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    task = async work() with self and gpu\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("task placement `gpu` requires `import parallel`"));
+}
+
+#[test]
 fn rejects_snake_case_function_names() {
     let ast = parse(&lex("def bad_name():\n    print(\"hello\")\n").unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();

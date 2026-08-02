@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod parallel_fusion;
+
 use severian_ast::{ImportKind, Item, Module as AstModule, Span};
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
@@ -85,7 +87,7 @@ fn compile_ast(
     ast: &AstModule,
     interfaces: &[(String, AstModule)],
 ) -> Result<Compilation, CompileError> {
-    let hir = severian_semantic::analyze_with_interfaces(ast, interfaces).map_err(|error| {
+    let mut hir = severian_semantic::analyze_with_interfaces(ast, interfaces).map_err(|error| {
         CompileError::Frontend {
             stage: "semantic",
             span: error.span,
@@ -93,6 +95,7 @@ fn compile_ast(
         }
     })?;
     severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
+    parallel_fusion::fuse_requested_kernels(&mut hir);
     let mlir = severian_lowering::lower(&hir);
 
     Ok(Compilation { hir, mlir })

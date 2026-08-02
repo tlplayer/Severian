@@ -74,9 +74,9 @@ The experimental numerical stack separates portable algorithms from model
 notation and lowering policy. `tensor` owns kernels, shapes, parallel
 activation, and Jacobians; `neuralnet` builds layers from them; and `models`
 exports domain symbols such as `Relu` and `J` through Severian decorator symbol
-packs. Execution placement remains explicit at the task or scoped `with`
-expression where it can be represented in HIR and selected by later MLIR
-vector/GPU passes.
+packs. `parallel` owns operation-local `simd`, `simt`, `gpu`, and `fuse`
+contracts. Those choices remain explicit at the task or scoped `with`
+expression where they are represented in HIR and preserved for MLIR passes.
 
 Run all currently implemented library packages with:
 

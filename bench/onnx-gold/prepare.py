@@ -68,6 +68,7 @@ def generate_severian(model_path: Path, features: np.ndarray):
     source = f'''import distributed
 import tensor
 import models
+import parallel
 
 def appendValues(target: list[float], source: list[float]):
     for value in source:
@@ -106,7 +107,7 @@ def inferBatch(
     outputWeights: list[float],
     outputBias: list[float],
 ) -> list[float]:
-    with self and local:
+    with self and local and fuse:
         first = async inferChunk(inputs, shardStart(samples, workers, 0), shardEnd(samples, workers, 0), hiddenWeights, hiddenBias, outputWeights, outputBias)
         second = async inferChunk(inputs, shardStart(samples, workers, 1), shardEnd(samples, workers, 1), hiddenWeights, hiddenBias, outputWeights, outputBias)
         third = async inferChunk(inputs, shardStart(samples, workers, 2), shardEnd(samples, workers, 2), hiddenWeights, hiddenBias, outputWeights, outputBias)
@@ -164,6 +165,8 @@ def main():
     print(classCount(logits, 2))
 '''
     (GENERATED / "model.sev").write_text(source)
+    unfused = source.replace("with self and local and fuse:", "with self and local:")
+    (GENERATED / "model-unfused.sev").write_text(unfused)
     sequential = source.replace(
         "logits = inferBatch(inputs, samples, 4, hiddenWeights, hiddenBias, outputWeights, outputBias)",
         "logits = inferChunk(inputs, 0, samples, hiddenWeights, hiddenBias, outputWeights, outputBias)",

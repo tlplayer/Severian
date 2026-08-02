@@ -110,6 +110,9 @@ pub enum ValueType {
 pub enum TaskPlacement {
     Default,
     Local,
+    Gpu,
+    Simd,
+    Simt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +230,7 @@ pub enum Expression {
     Task {
         value: Box<Expression>,
         placement: TaskPlacement,
+        fused: bool,
     },
     Await(Box<Expression>),
     Channel(Box<Expression>),

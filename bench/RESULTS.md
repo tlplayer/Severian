@@ -49,26 +49,29 @@ Command:
 python3 bench/onnx-gold/run.py --samples 7 --warmup 2
 ```
 
-Severian native compilation took 160.308 ms.
+Severian native compilation took 161.027 ms.
 
 | Engine | Median fresh process (ms) | p95 fresh process (ms) |
 | --- | ---: | ---: |
-| Severian, four local shards | 146.372 | 153.009 |
-| Severian, sequential control | 315.215 | 325.097 |
-| PyTorch | 1,049.215 | 1,056.340 |
-| ONNX Runtime | 162.220 | 165.954 |
+| Severian, automatically fused, four shards | 117.499 | 130.443 |
+| Severian, unfused, four shards | 147.618 | 154.638 |
+| Severian, automatically fused, sequential | 251.180 | 255.144 |
+| PyTorch | 1,034.169 | 1,048.993 |
+| ONNX Runtime | 163.842 | 168.758 |
 
 | Warm engine call | Median (ms) | p95 (ms) |
 | --- | ---: | ---: |
-| PyTorch | 1.703 | 1.948 |
-| ONNX Runtime | 0.414 | 1.142 |
+| PyTorch | 1.664 | 2.006 |
+| ONNX Runtime | 0.249 | 0.903 |
 
 Every engine produced 180,000 logits with exact class counts
 `[20000, 20000, 20000]`; the runner also checked per-class logit checksums
-within its floating-point tolerance. The four-shard Severian executable was
-about 2.15x faster than its sequential control. Its complete fresh-process time
-was in the same range as ONNX Runtime's fresh process, while the warm batched
-PyTorch and ONNX Runtime calls show the substantial kernel-performance gap that
+within its floating-point tolerance. `with self and local and fuse:` caused the
+compiler to recognize `Relu(add(matVec(...), bias))` and replace it with the
+single-pass `fusedDenseRelu` kernel. Against the otherwise-identical four-shard
+control, fusion reduced median process time by 20.4%. Four fused shards were
+about 2.14x faster than the fused sequential control. The warm batched PyTorch
+and ONNX Runtime calls still show the substantial kernel-performance gap that
 remains.
 
 ## What the result says
@@ -98,7 +101,8 @@ replacing the expensive scalar runtime path.
 - Clang/LLVM 21.1.8
 - Python 3.14.4
 - PyTorch 2.13.0, ONNX 1.22.0, ONNX Runtime 1.28.0, NumPy 2.3.5
-- Seven measured fresh-process samples after two warmups
+- Distributed result: seven measured samples after two warmups
+- ONNX/fusion result: eleven measured samples after three warmups
 - CPU execution only; no CUDA or SIMD backend is claimed
 
 Generated ONNX data and binaries are intentionally ignored. Preparation and

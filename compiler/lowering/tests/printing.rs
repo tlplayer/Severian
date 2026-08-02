@@ -174,6 +174,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
                             args: vec![],
                         }),
                         placement: TaskPlacement::Local,
+                        fused: false,
                     },
                 }],
                 tests: vec![],
@@ -185,6 +186,50 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
     let text = lowered.as_str();
     assert!(text.contains("llvm.call @__sev_task_spawn_work() {severian_distribution = \"local\"}"));
     assert!(!text.contains("llvm.func @main() -> i32 attributes"));
+}
+
+#[test]
+fn preserves_parallel_placement_and_fusion_requests_on_spawn_calls() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![
+            Function {
+                name: "work".into(),
+                decorators: vec![],
+                contract: None,
+                params: vec![],
+                return_type: ValueType::Int,
+                instructions: vec![Instruction::Return(Some(Expression::Integer(1)))],
+                tests: vec![],
+            },
+            Function {
+                name: "main".into(),
+                decorators: vec![],
+                contract: None,
+                params: vec![],
+                return_type: ValueType::Unit,
+                instructions: vec![Instruction::Let {
+                    name: "task".into(),
+                    value: Expression::Task {
+                        value: Box::new(Expression::Call {
+                            function: "work".into(),
+                            args: vec![],
+                        }),
+                        placement: TaskPlacement::Gpu,
+                        fused: true,
+                    },
+                }],
+                tests: vec![],
+            },
+        ],
+    };
+
+    let lowered = severian_lowering::lower(&program);
+    let text = lowered.as_str();
+    assert!(text.contains("severian_parallel = \"gpu\""));
+    assert!(text.contains("severian_device_fallback = \"cpu\""));
+    assert!(text.contains("severian_fusion = \"requested\""));
 }
 
 #[test]

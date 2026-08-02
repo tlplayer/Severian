@@ -1,0 +1,47 @@
+import parallel
+import tensor
+import models
+
+@models(Relu)
+def denseReluKernel(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    X: list[float],
+) -> list[float]:
+    return Relu(add(matVec(weights, rows, columns, X), bias))
+
+@models(Relu)
+def denseReluKernelUnfused(
+    weights: list[float],
+    rows: int,
+    columns: int,
+    bias: list[float],
+    X: list[float],
+) -> list[float]:
+    return Relu(add(matVec(weights, rows, columns, X), bias))
+
+def main():
+    weights = [1.0, 0.0, 0.0, 1.0]
+    bias = [0.0, -5.0]
+    X = [2.0, 4.0]
+    vectorResult := []
+    laneResult := []
+    deviceResult := []
+
+    with self and simd and fuse:
+        vectorTask = async denseReluKernel(weights, 2, 2, bias, X)
+        vectorResult = await vectorTask
+
+    with self and simt:
+        laneTask = async denseReluKernelUnfused(weights, 2, 2, bias, X)
+        laneResult = await laneTask
+
+    with self and gpu and fuse:
+        deviceTask = async denseReluKernel(weights, 2, 2, bias, X)
+        deviceResult = await deviceTask
+
+    print(vectorResult)
+    print(laneResult)
+    print(deviceResult)
