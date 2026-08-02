@@ -41,6 +41,7 @@ paths while staying Severian-first:
 | `21-parallel-kernels` | Matrix notation and compiler-driven fusion of stacked model activations. |
 | `22-ranked-tensors` | Contiguous ranked tensors executing MLIR linalg kernels through the tensor package. |
 | `23-data-infrastructure` | PQL-backed controller state, scheduling, and desired-state reconciliation. |
+| `24-database-server` | Real SQLite-backed TCP server, SQL execution, and iterable result rows. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the

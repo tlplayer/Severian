@@ -59,3 +59,25 @@ native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
 native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
 
 native("__sev_host_page_size") def hostPageSize() -> int
+
+native("__sev_database_open") def databaseOpen(path: string) -> Result[Database, DatabaseError]
+
+native("__sev_database_execute") def databaseExecute(database: Database, sql: string) -> Result[int, DatabaseError]
+
+native("__sev_database_query") def databaseQuery(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+
+native("__sev_database_close") def databaseClose(database: Database) -> Result[unit, DatabaseError]
+
+native("__sev_database_server_start") def databaseServerStart(path: string) -> Result[DatabaseServer, DatabaseError]
+
+native("__sev_database_server_address") def databaseServerAddress(server: DatabaseServer) -> string
+
+native("__sev_database_server_connect") def databaseServerConnect(address: string) -> Result[DatabaseConnection, DatabaseError]
+
+native("__sev_database_server_execute") def databaseServerExecute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
+
+native("__sev_database_server_query") def databaseServerQuery(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
+
+native("__sev_database_server_close") def databaseServerClose(connection: DatabaseConnection) -> Result[unit, DatabaseError]
+
+native("__sev_database_server_stop") def databaseServerStop(server: DatabaseServer) -> Result[unit, DatabaseError]

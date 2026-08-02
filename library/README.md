@@ -82,8 +82,10 @@ callers do not request fusion or select a backend.
 ## Data and infrastructure stack
 
 `pql` validates typed schemas and query structure before emitting SQL or running
-deterministic fixtures. `storage` provides shared relational, document,
-key/value, and Dynamo-style logical plans. `vm`, `container`, and `hypervisor`
+deterministic fixtures. `storage` provides provider-neutral relational,
+document, key/value, Dynamo-style, and future object-storage plans; it does not
+execute operations. `database` owns real SQL connections, transactions,
+iterable rows, persistence, and a TCP database server. `vm`, `container`, and `hypervisor`
 describe validated host plans above the explicit `platform` ABI, while
 `orchestrator` supplies desired-state scheduling and reconciliation. Privileged
 host mutation remains a distinct executor boundary and is never performed by

@@ -319,6 +319,12 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
         )?;
         let clang = find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
             .ok_or_else(|| missing_tool("clang"))?;
+        let uses_database = compilation.hir.functions.iter().any(|function| {
+            function
+                .native_symbol
+                .as_deref()
+                .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
+        });
         let runtime_source = severian_lowering::native_task_runtime_source(&compilation.hir);
         if runtime_source.is_empty() {
             run_tool(
@@ -327,17 +333,18 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
             )
         } else {
             std::fs::write(&task_runtime, runtime_source)?;
-            run_tool(
-                clang,
-                &[
-                    llvm_ir.as_path(),
-                    task_runtime.as_path(),
-                    Path::new("-o"),
-                    output,
-                    Path::new("-lm"),
-                    Path::new("-pthread"),
-                ],
-            )
+            let mut arguments = vec![
+                llvm_ir.as_path(),
+                task_runtime.as_path(),
+                Path::new("-o"),
+                output,
+                Path::new("-lm"),
+                Path::new("-pthread"),
+            ];
+            if uses_database {
+                arguments.push(Path::new("-lsqlite3"));
+            }
+            run_tool(clang, &arguments)
         }
     })();
 
@@ -834,6 +841,17 @@ fn walk_expression<'expression>(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct ControlledDatabase {
+    rows: Vec<Vec<String>>,
+    transaction: Option<Vec<Vec<String>>>,
+}
+
+thread_local! {
+    static CONTROLLED_DATABASES: RefCell<HashMap<String, Rc<RefCell<ControlledDatabase>>>> = RefCell::new(HashMap::new());
+    static CONTROLLED_DATABASE_SERVERS: RefCell<HashMap<String, Rc<RefCell<ControlledDatabase>>>> = RefCell::new(HashMap::new());
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
     Int(i64),
@@ -855,6 +873,12 @@ enum Value {
     Map(Rc<RefCell<Vec<(Value, Value)>>>),
     Set(Vec<Value>),
     Object(Rc<RefCell<ObjectValue>>),
+    Database(Rc<RefCell<ControlledDatabase>>),
+    DatabaseServer {
+        address: String,
+        database: Rc<RefCell<ControlledDatabase>>,
+    },
+    DatabaseConnection(Rc<RefCell<ControlledDatabase>>),
     Variant {
         name: String,
         fields: Vec<Value>,
@@ -1543,6 +1567,17 @@ fn execute_call(
             "__sev_host_kvm_api_version" => "platform.hostKvmApiVersion",
             "__sev_host_kvm_create_probe" => "platform.hostKvmCreateProbe",
             "__sev_host_page_size" => "platform.hostPageSize",
+            "__sev_database_open" => "platform.databaseOpen",
+            "__sev_database_execute" => "platform.databaseExecute",
+            "__sev_database_query" => "platform.databaseQuery",
+            "__sev_database_close" => "platform.databaseClose",
+            "__sev_database_server_start" => "platform.databaseServerStart",
+            "__sev_database_server_address" => "platform.databaseServerAddress",
+            "__sev_database_server_connect" => "platform.databaseServerConnect",
+            "__sev_database_server_execute" => "platform.databaseServerExecute",
+            "__sev_database_server_query" => "platform.databaseServerQuery",
+            "__sev_database_server_close" => "platform.databaseServerClose",
+            "__sev_database_server_stop" => "platform.databaseServerStop",
             "__sev_tensor_from_list" => "platform.tensorFromList",
             "__sev_tensor_to_list" => "platform.tensorToList",
             "__sev_tensor_shape" => "platform.tensorShape",
@@ -1704,6 +1739,133 @@ fn execute_call(
             [] => Ok(Value::Int(4096)),
             _ => Err(CompileError::Execution(
                 "platform.hostPageSize expects no arguments".into(),
+            )),
+        },
+        "platform.databaseOpen" => match args.as_slice() {
+            [Value::String(path)] => {
+                let database = if path == ":memory:" {
+                    Rc::new(RefCell::new(ControlledDatabase::default()))
+                } else {
+                    CONTROLLED_DATABASES.with(|databases| {
+                        databases
+                            .borrow_mut()
+                            .entry(path.clone())
+                            .or_default()
+                            .clone()
+                    })
+                };
+                Ok(ok_value(Value::Database(database)))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseOpen expects a path".into(),
+            )),
+        },
+        "platform.databaseExecute" => match args.as_slice() {
+            [database, Value::String(statement)] => {
+                let database = controlled_database_handle(database)?;
+                let changed = controlled_database_execute(&mut database.borrow_mut(), statement)?;
+                Ok(ok_value(Value::Int(changed)))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseExecute expects a database and SQL".into(),
+            )),
+        },
+        "platform.databaseQuery" => match args.as_slice() {
+            [database, Value::String(statement)] => {
+                let database = controlled_database_handle(database)?;
+                let rows = controlled_database_query(&database.borrow(), statement);
+                Ok(ok_value(rows))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseQuery expects a database and SQL".into(),
+            )),
+        },
+        "platform.databaseClose" => match args.as_slice() {
+            [Value::Database(_)] => Ok(ok_value(Value::Unit)),
+            _ => Err(CompileError::Execution(
+                "platform.databaseClose expects a database".into(),
+            )),
+        },
+        "platform.databaseServerStart" => match args.as_slice() {
+            [Value::String(path)] => {
+                let database = if path == ":memory:" {
+                    Rc::new(RefCell::new(ControlledDatabase::default()))
+                } else {
+                    CONTROLLED_DATABASES.with(|databases| {
+                        databases
+                            .borrow_mut()
+                            .entry(path.clone())
+                            .or_default()
+                            .clone()
+                    })
+                };
+                let address = "127.0.0.1:47001".to_owned();
+                CONTROLLED_DATABASE_SERVERS.with(|servers| {
+                    servers
+                        .borrow_mut()
+                        .insert(address.clone(), database.clone());
+                });
+                Ok(ok_value(Value::DatabaseServer { address, database }))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerStart expects a path".into(),
+            )),
+        },
+        "platform.databaseServerAddress" => match args.as_slice() {
+            [Value::DatabaseServer { address, .. }] => Ok(Value::String(address.clone())),
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerAddress expects a server".into(),
+            )),
+        },
+        "platform.databaseServerConnect" => match args.as_slice() {
+            [Value::String(address)] => CONTROLLED_DATABASE_SERVERS.with(|servers| {
+                servers
+                    .borrow()
+                    .get(address)
+                    .cloned()
+                    .map(Value::DatabaseConnection)
+                    .map(ok_value)
+                    .ok_or_else(|| CompileError::Execution("database server is unavailable".into()))
+            }),
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerConnect expects an address".into(),
+            )),
+        },
+        "platform.databaseServerExecute" => match args.as_slice() {
+            [database, Value::String(statement)] => {
+                let database = controlled_database_handle(database)?;
+                let changed = controlled_database_execute(&mut database.borrow_mut(), statement)?;
+                Ok(ok_value(Value::Int(changed)))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerExecute expects a connection and SQL".into(),
+            )),
+        },
+        "platform.databaseServerQuery" => match args.as_slice() {
+            [database, Value::String(statement)] => {
+                let database = controlled_database_handle(database)?;
+                let rows = controlled_database_query(&database.borrow(), statement);
+                Ok(ok_value(rows))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerQuery expects a connection and SQL".into(),
+            )),
+        },
+        "platform.databaseServerClose" => match args.as_slice() {
+            [Value::DatabaseConnection(_)] => Ok(ok_value(Value::Unit)),
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerClose expects a connection".into(),
+            )),
+        },
+        "platform.databaseServerStop" => match args.as_slice() {
+            [Value::DatabaseServer { address, .. }] => {
+                CONTROLLED_DATABASE_SERVERS.with(|servers| {
+                    servers.borrow_mut().remove(address);
+                });
+                Ok(ok_value(Value::Unit))
+            }
+            _ => Err(CompileError::Execution(
+                "platform.databaseServerStop expects a server".into(),
             )),
         },
         "platform.tensorFromList" => match args.as_slice() {
@@ -2340,6 +2502,9 @@ fn display_value(value: &Value) -> String {
                 .join(", ");
             format!("{}({fields})", object.class)
         }
+        Value::Database(_) => "<database>".into(),
+        Value::DatabaseServer { address, .. } => format!("<database-server {address}>"),
+        Value::DatabaseConnection(_) => "<database-connection>".into(),
         Value::Variant { name, fields } => {
             if fields.is_empty() {
                 name.clone()
@@ -2370,6 +2535,135 @@ fn display_value(value: &Value) -> String {
         }
         Value::Unit => "unit".into(),
     }
+}
+
+fn ok_value(value: Value) -> Value {
+    Value::Variant {
+        name: "ok".into(),
+        fields: if value == Value::Unit {
+            Vec::new()
+        } else {
+            vec![value]
+        },
+    }
+}
+
+fn controlled_database_handle(
+    value: &Value,
+) -> Result<Rc<RefCell<ControlledDatabase>>, CompileError> {
+    match value {
+        Value::Database(database) | Value::DatabaseConnection(database) => Ok(database.clone()),
+        _ => Err(CompileError::Execution(
+            "expected a database connection".into(),
+        )),
+    }
+}
+
+fn controlled_database_execute(
+    database: &mut ControlledDatabase,
+    statement: &str,
+) -> Result<i64, CompileError> {
+    let normalized = statement.trim().to_ascii_lowercase();
+    if normalized.starts_with("create table") {
+        return Ok(0);
+    }
+    if normalized == "begin" || normalized.starts_with("begin ") {
+        database.transaction = Some(database.rows.clone());
+        return Ok(0);
+    }
+    if normalized == "commit" {
+        database.transaction = None;
+        return Ok(0);
+    }
+    if normalized == "rollback" {
+        if let Some(rows) = database.transaction.take() {
+            database.rows = rows;
+        }
+        return Ok(0);
+    }
+    if normalized.starts_with("delete from") {
+        let changed = database.rows.len() as i64;
+        database.rows.clear();
+        return Ok(changed);
+    }
+    if normalized.starts_with("insert into") {
+        let rows = parse_controlled_insert(statement)?;
+        let changed = rows.len() as i64;
+        database.rows.extend(rows);
+        return Ok(changed);
+    }
+    Err(CompileError::Execution(format!(
+        "controlled database does not support SQL `{statement}`"
+    )))
+}
+
+fn parse_controlled_insert(statement: &str) -> Result<Vec<Vec<String>>, CompileError> {
+    let normalized = statement.to_ascii_lowercase();
+    let values_offset = normalized
+        .find("values")
+        .ok_or_else(|| CompileError::Execution("INSERT requires VALUES".into()))?
+        + "values".len();
+    let values = &statement[values_offset..];
+    let mut groups = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+    let mut quoted = false;
+    for character in values.chars() {
+        match character {
+            '\'' => {
+                quoted = !quoted;
+                if depth > 0 {
+                    current.push(character);
+                }
+            }
+            '(' if !quoted => {
+                depth += 1;
+                if depth > 1 {
+                    current.push(character);
+                }
+            }
+            ')' if !quoted => {
+                depth -= 1;
+                if depth == 0 {
+                    groups.push(current.trim().to_owned());
+                    current.clear();
+                } else {
+                    current.push(character);
+                }
+            }
+            _ if depth > 0 => current.push(character),
+            _ => {}
+        }
+    }
+    if depth != 0 || quoted || groups.is_empty() {
+        return Err(CompileError::Execution("invalid INSERT values".into()));
+    }
+    Ok(groups
+        .into_iter()
+        .map(|group| {
+            group
+                .split(',')
+                .map(|cell| cell.trim().trim_matches('\'').to_owned())
+                .collect::<Vec<_>>()
+        })
+        .collect())
+}
+
+fn controlled_database_query(database: &ControlledDatabase, statement: &str) -> Value {
+    let rows = if statement.to_ascii_lowercase().contains("count(*)") {
+        vec![vec![database.rows.len().to_string()]]
+    } else {
+        database.rows.clone()
+    };
+    Value::List(Rc::new(RefCell::new(
+        rows.into_iter()
+            .map(|row| {
+                Value::List(Rc::new(RefCell::new(
+                    row.into_iter().map(Value::String).collect(),
+                )))
+            })
+            .collect(),
+    )))
 }
 
 fn decode_json_value(text: &str) -> Result<Value, CompileError> {

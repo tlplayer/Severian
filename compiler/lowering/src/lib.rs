@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod database;
 mod tensor;
 
 use severian_hir::{
@@ -3600,7 +3601,7 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "bool __sev_string_equal(void *left, void *right) { return strcmp(left, right) == 0; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
-        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; }\n",
+        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } }\n",
         "  return false;\n",
         "}\n",
         "bool __sev_value_equal(void *left, void *right) { return sev_value_equal(left, right); }\n",
@@ -3961,6 +3962,14 @@ int64_t __sev_host_page_size(void) {
 
 "#,
     );
+    if program.functions.iter().any(|function| {
+        function
+            .native_symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
+    }) {
+        source.push_str(database::runtime_source());
+    }
     let drawable_classes = program
         .classes
         .iter()

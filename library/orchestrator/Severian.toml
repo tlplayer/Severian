@@ -9,7 +9,7 @@ path = "src/lib.sev"
 
 [dependencies]
 container = { path = "../container", version = "0.1.0" }
-storage = { path = "../storage", version = "0.1.0" }
+database = { path = "../database", version = "0.1.0" }
 
 [package.metadata.library]
 category = "infrastructure"

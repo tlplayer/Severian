@@ -1,0 +1,33 @@
+import database
+
+def runClient(connection: DatabaseConnection):
+    database.mustRemoteExecute(connection, "CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT)")
+    database.mustRemoteExecute(connection, "INSERT INTO people(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
+    result = database.remoteQuery(connection, "SELECT id, name FROM people ORDER BY id")
+    database.mustDisconnect(connection)
+    switch result:
+        ok rows:
+            print(size(rows))
+            for row in rows:
+                print(row[0], row[1])
+        failure error:
+            print(error)
+
+def runClientAndStop(server: DatabaseServer, connection: DatabaseConnection):
+    runClient(connection)
+    database.mustStop(server)
+
+def runServer(server: DatabaseServer):
+    switch database.connect(database.address(server)):
+        ok connection:
+            runClientAndStop(server, connection)
+        failure error:
+            print(error)
+            database.mustStop(server)
+
+def main():
+    switch database.start(":memory:"):
+        ok server:
+            runServer(server)
+        failure error:
+            print(error)

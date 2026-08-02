@@ -1,0 +1,11 @@
+[package]
+name = "database-server-example"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "database-server-example"
+path = "main.sev"
+
+[dependencies]
+database = { path = "../../../library/database", version = "0.1.0" }

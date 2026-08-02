@@ -2,6 +2,7 @@
 members = [
     "boolean",
     "container",
+    "database",
     "distributed",
     "file",
     "io",

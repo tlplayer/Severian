@@ -1,6 +1,6 @@
 import container
+import database
 import pql
-import storage
 
 class Workload:
     namespace: string
@@ -91,9 +91,15 @@ def volumeClaim(workload: Workload, sizeGiB: int, storageClass: string) -> list[
     assert(sizeGiB > 0)
     return ["claim " + workload.namespace + "/" + workload.volume, "sizeGiB " + string(sizeGiB), "class " + storageClass, "mount /var/lib/" + workload.name]
 
-def controllerHistory(workload: Workload, action: string) -> list[string]:
-    plan = storage.appendOperation(storage.relationalScan("controller_events"), "insert " + workload.namespace + "/" + workload.name + " " + action)
-    return storage.inspectPlan(plan)
+def initializeControllerHistory(connection: Database) -> int:
+    return database.mustExecute(connection, "CREATE TABLE controller_events(id INTEGER PRIMARY KEY, namespace TEXT, workload TEXT, action TEXT)")
+
+def recordControllerEvent(connection: Database, workload: Workload, action: string) -> int:
+    statement = "INSERT INTO controller_events(namespace, workload, action) VALUES ('" + workload.namespace + "', '" + workload.name + "', '" + action + "')"
+    return database.mustExecute(connection, statement)
+
+def controllerHistory(connection: Database) -> Result[list[list[string]], DatabaseError]:
+    return database.query(connection, "SELECT namespace, workload, action FROM controller_events ORDER BY id")
 
 def controllerSql() -> string:
     events = pql.Schema("controller_events", ["id", "namespace", "workload", "action"], ["int", "string", "string", "string"], [false, false, false, false], "id")
@@ -124,9 +130,21 @@ test "rollouts include promotion and rollback policy":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
     assert(rolloutPlan(workload, "v1", 1) == ["rollout api", "from v1", "to v2", "maxUnavailable 1", "health before promote", "rollback on failure"])
 
-test "controller history uses the unified storage plan":
+test "controller history executes against the database":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
-    assert(controllerHistory(workload, "stable") == ["model=relational", "resource=controller_events", "operation=scan", "operation=insert prod/api stable"])
+    switch database.memory():
+        ok connection:
+            initializeControllerHistory(connection)
+            assert(recordControllerEvent(connection, workload, "stable") == 1)
+            switch controllerHistory(connection):
+                ok rows:
+                    assert(rows[0][0] == "prod")
+                    assert(rows[0][1] == "api")
+                    assert(rows[0][2] == "stable")
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)
 
 test "controller queries are PQL validated before emission":
     assert(controllerSql() == "SELECT id, action FROM controller_events WHERE namespace = $1")
