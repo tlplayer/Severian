@@ -15,5 +15,6 @@ bin/examples/18-tensor-neuralnet/main
 
 Severian decorators import domain syntax rather than wrapping functions or
 selecting an execution backend. The later `21-parallel-kernels` example shows
-the operation-local `simd`, `simt`, `gpu`, and `fuse` contracts. Those requests
-currently retain an explicit CPU fallback rather than claiming device speedup.
+the matrix/model library stack and automatic activation fusion. Internal
+`simd`, `simt`, and `gpu` candidates currently retain an explicit CPU fallback
+rather than claiming device speedup.

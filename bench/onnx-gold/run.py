@@ -72,7 +72,6 @@ def main():
 
     required = [
         GENERATED / "model.sev",
-        GENERATED / "model-unfused.sev",
         GENERATED / "model-sequential.sev",
         GENERATED / "iris-mlp.onnx",
         GENERATED / "features.npy",
@@ -97,18 +96,6 @@ def main():
     )
     if compiled.returncode != 0:
         raise RuntimeError(compiled.stderr.decode())
-    unfused_binary = WORK / "iris-severian-unfused"
-    unfused_compiled, _ = timed(
-        [
-            str(sev),
-            "compile",
-            str(GENERATED / "model-unfused.sev"),
-            "-o",
-            str(unfused_binary),
-        ]
-    )
-    if unfused_compiled.returncode != 0:
-        raise RuntimeError(unfused_compiled.stderr.decode())
     sequential_binary = WORK / "iris-severian-sequential"
     sequential_compiled, _ = timed(
         [
@@ -123,9 +110,8 @@ def main():
         raise RuntimeError(sequential_compiled.stderr.decode())
 
     commands = {
-        "Severian fused 4x": [str(binary)],
-        "Severian unfused 4x": [str(unfused_binary)],
-        "Severian fused 1x": [str(sequential_binary)],
+        "Severian 4x": [str(binary)],
+        "Severian 1x": [str(sequential_binary)],
         "PyTorch": [str(args.torch_python), str(HERE / "reference.py"), "pytorch"],
         "ONNX Runtime": [
             str(args.torch_python),
@@ -143,7 +129,7 @@ def main():
         timings[name] = [run[1] for run in runs]
 
     validate(summaries["ONNX Runtime"], summaries["PyTorch"], "ONNX Runtime")
-    for name in ("Severian fused 4x", "Severian unfused 4x", "Severian fused 1x"):
+    for name in ("Severian 4x", "Severian 1x"):
         validate(summaries[name], summaries["PyTorch"], name)
     metadata = json.loads((GENERATED / "metadata.json").read_text())
     steady = {}

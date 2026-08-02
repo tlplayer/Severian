@@ -1,4 +1,4 @@
-use severian_driver::{compile_path, run, run_tests};
+use severian_driver::{compile_path, compile_source, run, run_tests};
 use severian_hir::TestMode;
 use std::path::{Path, PathBuf};
 
@@ -126,28 +126,37 @@ fn resolves_model_decorator_symbols_to_package_functions() {
 }
 
 #[test]
-fn fuses_requested_parallel_kernel_graphs_and_keeps_the_control_unfused() {
+fn fuses_stacked_model_activations_without_user_optimization_syntax() {
     let fixture = examples_root().join("21-parallel-kernels/main.sev");
     let compilation = compile_path(&fixture).unwrap();
     let mlir = compilation.mlir.as_str();
-    let fused = mlir
-        .split("llvm.func @denseReluKernel(")
-        .nth(1)
-        .unwrap()
-        .split("llvm.func @denseReluKernelUnfused(")
-        .next()
-        .unwrap();
-    let unfused = mlir
-        .split("llvm.func @denseReluKernelUnfused(")
+    let forward = mlir
+        .split("llvm.func @forward(")
         .nth(1)
         .unwrap()
         .split("llvm.func @main(")
         .next()
         .unwrap();
-    assert!(fused.contains("llvm.call @fusedDenseRelu"));
-    assert!(!fused.contains("llvm.call @matVec"));
-    assert!(unfused.contains("llvm.call @matVec"));
-    assert!(unfused.contains("llvm.call @activation"));
+    assert!(forward.contains("llvm.call @__sev_fused_activations"));
+    assert!(forward.contains("severian_fusion = \"automatic\""));
+    assert!(!forward.contains("llvm.call @activation"));
+    assert!(!forward.contains("llvm.call @tanhActivation"));
+    assert!(!forward.contains("llvm.call @swishActivation"));
+}
+
+#[test]
+fn does_not_fuse_user_functions_that_only_share_activation_names() {
+    let compilation = compile_source(
+        "def relu(X: list[float]) -> list[float]:\n    return X\n\ndef swish(X: list[float]) -> list[float]:\n    return X\n\ndef main():\n    print(swish(relu([1.0])))\n",
+    )
+    .unwrap();
+    let main = compilation
+        .mlir
+        .as_str()
+        .split("llvm.func @main(")
+        .nth(1)
+        .unwrap();
+    assert!(!main.contains("llvm.call @__sev_fused_activations"));
 }
 
 #[test]

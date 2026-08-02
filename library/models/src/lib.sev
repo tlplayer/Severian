@@ -39,12 +39,16 @@ def geluActivation(X: list[float]) -> list[float]:
 def swishActivation(X: list[float]) -> list[float]:
     return swish(X)
 
+def activationStack(X: list[float]) -> list[float]:
+    return swish(fastTanh(relu(X)))
+
 test "named activation symbols retain the tensor behavior":
     assert(leakyActivation([-2.0], 0.5) == [-1.0])
     assert(sigmoidActivation([0.0]) == [0.5])
     assert(tanhActivation([0.0]) == [0.0])
     assert(geluActivation([0.0]) == [0.0])
     assert(swishActivation([0.0]) == [0.0])
+    assert(activationStack([0.0]) == [0.0])
 
 def activationJacobian(X: list[float]) -> list[float]:
     width = size(X)

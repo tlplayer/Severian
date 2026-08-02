@@ -17,9 +17,9 @@ portable lowering; exact transcendental variants will use math intrinsics.
 These kernels currently execute through portable scalar loops and native local
 tasks. Severian decorators import a package's syntax symbols; they are not
 Python-style wrappers or execution-policy annotations. The `parallel` package
-enables task-local `simd`, `simt`, `gpu`, and `fuse` requests. The compiler
-currently preserves them through MLIR and executes a labeled CPU fallback;
-native vector and GPU lowering remain backend work.
+enables task-local `simd`, `simt`, and `gpu` requests for library kernels. Model
+fusion is automatic and lowered with backend candidates; native vector and GPU
+lowering still use a labeled CPU fallback.
 
 The API keeps mathematical behavior independent of execution placement, so
 `neuralnet` can reuse the same activation and Jacobian definitions as those

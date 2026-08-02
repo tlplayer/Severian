@@ -1,11 +1,13 @@
 [package]
-name = "parallel-kernels-example"
+name = "automatic-model-fusion-example"
 version = "0.1.0"
 edition = "2026"
 
 [[bin]]
-name = "parallel-kernels-example"
+name = "automatic-model-fusion-example"
 path = "main.sev"
 
 [dependencies]
-parallel = { path = "../../../library/parallel", version = "0.1.0" }
+matrix = { path = "../../../library/matrix", version = "0.1.0" }
+tensor = { path = "../../../library/tensor", version = "0.1.0" }
+models = { path = "../../../library/models", version = "0.1.0" }

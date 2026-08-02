@@ -62,7 +62,7 @@ fn parses_local_task_placement_in_the_with_clause() {
 }
 
 #[test]
-fn parses_parallel_placement_and_fusion_in_the_with_clause() {
+fn parses_parallel_placement_in_the_with_clause() {
     let source = concat!(
         "import parallel\n",
         "\n",
@@ -70,7 +70,7 @@ fn parses_parallel_placement_and_fusion_in_the_with_clause() {
         "    return 1\n",
         "\n",
         "def main():\n",
-        "    with self and gpu and fuse:\n",
+        "    with self and gpu:\n",
         "        task = async work()\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
@@ -87,7 +87,6 @@ fn parses_parallel_placement_and_fusion_in_the_with_clause() {
         panic!("expected async expression");
     };
     assert_eq!(task.placement, TaskPlacement::Gpu);
-    assert!(task.fused);
 }
 
 #[test]
@@ -97,7 +96,7 @@ fn parses_one_off_gpu_placement_without_an_explicit_owner() {
         "    return 1\n",
         "\n",
         "def main():\n",
-        "    task = async work() with gpu and fuse\n",
+        "    task = async work() with gpu\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
     let Item::Function(main) = &module.items[1] else {
@@ -111,7 +110,20 @@ fn parses_one_off_gpu_placement_without_an_explicit_owner() {
     };
     assert_eq!(task.owner, TaskOwner::SelfOwned);
     assert_eq!(task.placement, TaskPlacement::Gpu);
-    assert!(task.fused);
+}
+
+#[test]
+fn rejects_user_directed_kernel_fusion() {
+    let source = concat!(
+        "def work() -> int:\n",
+        "    return 1\n",
+        "\n",
+        "def main():\n",
+        "    with self and fuse:\n",
+        "        task = async work()\n",
+    );
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert!(error.message.contains("kernel fusion is automatic"));
 }
 
 #[test]

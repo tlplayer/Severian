@@ -1,17 +1,21 @@
-# Parallel kernel placement
+# Matrix notation and automatic model fusion
 
-This example executes the same fused dense+bias+ReLU kernel under `simd`,
-`simt`, and `gpu` placement requests. `fuse` is orthogonal to placement, so it
-can be attached to a vector or device task without becoming a decorator.
+This example has no user-directed optimization syntax. `matrix` imports the
+linear-algebra symbols `X`, `^`, `I`, and `J`; `models` imports activation
+names. The model is written as ordinary composition:
 
-All three paths currently execute through the native pthread CPU fallback. The
-generated MLIR still distinguishes them with `severian_parallel`,
-`severian_fusion`, and `severian_device_fallback` attributes. That makes the
-example executable today and gives future MLIR vector, GPU, and fusion passes a
-stable operation-local contract to consume.
+```sev
+return Swish(FastTanh(Relu(X)))
+```
 
-`denseReluKernel` is written as `Relu(add(matVec(...), bias))`. Because the SIMD
-and GPU spawns request `fuse`, the compiler rewrites that graph to the
-single-pass `fusedDenseRelu` reference kernel. The otherwise-equivalent SIMT
-function omits `fuse` and therefore remains an unfused control. Other operation
-graphs are currently left unchanged.
+The compiler recognizes the compatible elementwise chain and replaces three
+list traversals with one `FusedActivations` HIR operation. Native lowering emits
+one runtime traversal with automatic `simd`, `simt`, and `gpu` candidates plus
+an explicit CPU fallback. Model callers do not select a backend or request
+fusion.
+
+The example also uses the explicit constructors requested by the packages:
+`from matrix import matrix` and `from tensor import tensor`.
+
+The directory name is retained to avoid renumbering the example inventory; its
+content now demonstrates the corrected library-driven parallel architecture.

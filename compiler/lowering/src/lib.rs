@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use severian_hir::{
-    AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern, Program,
-    SwitchArm, TaskPlacement, UnaryOp, ValueType,
+    Activation, AssignmentOp, BinaryOp, Class, Expression, Function, Instruction, MatchPattern,
+    Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -68,6 +68,7 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_collection_size(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_collection_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_collection_reversed(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_fused_activations(!llvm.ptr, i64, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_set_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_map_new() -> !llvm.ptr\n",
         "  llvm.func @__sev_map_insert(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
@@ -850,6 +851,32 @@ impl LowerContext<'_> {
                 .unwrap();
                 (result, result_type)
             }
+            Expression::FusedActivations { input, activations } => {
+                let (input, _) = self.lower_expression(input);
+                let packed =
+                    activations
+                        .iter()
+                        .enumerate()
+                        .fold(0i64, |packed, (index, activation)| {
+                            packed | (activation_code(*activation) << (index * 4))
+                        });
+                let packed_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {packed_value} = llvm.mlir.constant({packed} : i64) : i64"
+                )
+                .unwrap();
+                let count = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {count} = llvm.mlir.constant({} : i64) : i64",
+                    activations.len()
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_fused_activations({input}, {packed_value}, {count}) {{severian_fusion = \"automatic\", severian_parallel = \"auto\", severian_candidates = \"simd,simt,gpu\", severian_device_fallback = \"cpu\"}} : (!llvm.ptr, i64, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::List)
+            }
             Expression::PrintArgs(values) => {
                 for (index, value) in values.iter().enumerate() {
                     if index > 0 {
@@ -1191,11 +1218,7 @@ impl LowerContext<'_> {
                     (result, return_type)
                 }
             }
-            Expression::Task {
-                value,
-                placement,
-                fused,
-            } => {
+            Expression::Task { value, placement } => {
                 if let Expression::Send { value, channel } = value.as_ref() {
                     let (value, value_type) = self.lower_expression(value);
                     let (channel, _) = self.lower_expression(channel);
@@ -1214,11 +1237,12 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 };
+                let linked_function = linked_source_function(function, self.function_returns);
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_call_arguments(function, args);
+                let args = self.coerce_call_arguments(linked_function, args);
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -1231,7 +1255,7 @@ impl LowerContext<'_> {
                     .join(", ");
                 let return_type = self
                     .function_returns
-                    .get(function)
+                    .get(linked_function)
                     .copied()
                     .unwrap_or(ValueType::Any);
                 let result = self.fresh_value();
@@ -1252,9 +1276,6 @@ impl LowerContext<'_> {
                         attributes.push("severian_device_fallback = \"cpu\"");
                     }
                 }
-                if *fused {
-                    attributes.push("severian_fusion = \"requested\"");
-                }
                 let placement_attribute = if attributes.is_empty() {
                     String::new()
                 } else {
@@ -1262,7 +1283,7 @@ impl LowerContext<'_> {
                 };
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call @__sev_task_spawn_{function}({values}){placement_attribute} : ({types}) -> !llvm.ptr"
+                    "    {result} = llvm.call @__sev_task_spawn_{linked_function}({values}){placement_attribute} : ({types}) -> !llvm.ptr"
                 )
                 .unwrap();
                 self.task_results.insert(result.clone(), return_type);
@@ -1482,11 +1503,12 @@ impl LowerContext<'_> {
                 }
             }
             Expression::Call { function, args } => {
+                let linked_function = linked_source_function(function, self.function_returns);
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_call_arguments(function, args);
+                let args = self.coerce_call_arguments(linked_function, args);
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
@@ -1547,7 +1569,15 @@ impl LowerContext<'_> {
                 }
                 if matches!(
                     function.as_str(),
-                    "math.rand" | "math.eye" | "math.matrixMultiply" | "math.scale"
+                    "math.rand"
+                        | "math.eye"
+                        | "math.matrixMultiply"
+                        | "math.scale"
+                        | "matrix.matrix"
+                        | "matrix.random"
+                        | "matrix.identity"
+                        | "matrix.multiply"
+                        | "matrix.scale"
                 ) {
                     let result = self.fresh_value();
                     match function.as_str() {
@@ -1563,6 +1593,25 @@ impl LowerContext<'_> {
                         }
                         "math.matrixMultiply" => writeln!(self.output, "    {result} = llvm.call @__sev_matrix_multiply({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", args[0].0, args[1].0).unwrap(),
                         "math.scale" => {
+                            let factor = self.unbox_value(args[1].clone(), ValueType::Float).0;
+                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({}, {factor}) : (!llvm.ptr, f64) -> !llvm.ptr", args[0].0).unwrap();
+                        }
+                        "matrix.matrix" => {
+                            let fill = self.unbox_value(args[2].clone(), ValueType::Float).0;
+                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[1].0).unwrap();
+                        }
+                        "matrix.random" => {
+                            let fill = self.fresh_value();
+                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
+                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[1].0).unwrap();
+                        }
+                        "matrix.identity" => {
+                            let fill = self.fresh_value();
+                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
+                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[0].0).unwrap();
+                        }
+                        "matrix.multiply" => writeln!(self.output, "    {result} = llvm.call @__sev_matrix_multiply({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", args[0].0, args[1].0).unwrap(),
+                        "matrix.scale" => {
                             let factor = self.unbox_value(args[1].clone(), ValueType::Float).0;
                             writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({}, {factor}) : (!llvm.ptr, f64) -> !llvm.ptr", args[0].0).unwrap();
                         }
@@ -1585,7 +1634,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_regex_matches({}, {}) : (!llvm.ptr, !llvm.ptr) -> i1", args[0].0, args[1].0).unwrap();
                     return (result, ValueType::Bool);
                 }
-                if !self.function_returns.contains_key(function) {
+                if !self.function_returns.contains_key(linked_function) {
                     let builtin = match function.as_str() {
                         "read" => Some(("__sev_builtin_read", ValueType::Any)),
                         "http.get" => Some(("__sev_builtin_http_get", ValueType::Any)),
@@ -1628,14 +1677,14 @@ impl LowerContext<'_> {
                     "size" => ValueType::Int,
                     _ => self
                         .function_returns
-                        .get(function)
+                        .get(linked_function)
                         .copied()
                         .unwrap_or(ValueType::Int),
                 };
                 let symbol = if function == "sqrt" {
                     "llvm.sqrt.f64"
                 } else {
-                    function
+                    linked_function
                 };
                 if return_type == ValueType::Unit {
                     writeln!(
@@ -3114,6 +3163,7 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
             collect_task_names_expression(then_expression, names);
             collect_task_names_expression(else_expression, names);
         }
+        Expression::FusedActivations { input, .. } => collect_task_names_expression(input, names),
         Expression::Member { object, .. }
         | Expression::Unary {
             expression: object, ..
@@ -3222,6 +3272,9 @@ pub fn native_task_runtime_source(program: &Program) -> String {
         "int64_t __sev_collection_size(void *raw) { sev_collection *value = raw; if (!value) abort(); return value->size; }\n",
         "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
         "void *__sev_collection_reversed(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t i = value->size; i > 0; --i) __sev_collection_push(result, value->items[i - 1]); return result; }\n",
+        "static double sev_fast_sigmoid(double value) { double magnitude = value < 0.0 ? -value : value; return 0.5 + value / (2.0 * (1.0 + magnitude)); }\n",
+        "static double sev_fast_tanh(double value) { double magnitude = value < 0.0 ? -value : value; return value / (1.0 + magnitude); }\n",
+        "void *__sev_fused_activations(void *raw, int64_t packed, int64_t count) { sev_collection *input = raw; if (!input) abort(); sev_collection *output = __sev_collection_new(0); for (int64_t index = 0; index < input->size; ++index) { double value = sev_number(input->items[index]); for (int64_t stage = 0; stage < count; ++stage) { switch ((packed >> (stage * 4)) & 15) { case 1: value = value < 0.0 ? 0.0 : value; break; case 2: value = sev_fast_sigmoid(value); break; case 3: value = sev_fast_tanh(value); break; case 4: { double cubic = value * value * value; double curved = 0.7978845608 * (value + 0.044715 * cubic); value = 0.5 * value * (1.0 + sev_fast_tanh(curved)); break; } case 5: value = value * sev_fast_sigmoid(value); break; default: abort(); } } __sev_collection_push(output, __sev_box_f64(value)); } return output; }\n",
         "bool __sev_set_contains(void *raw, void *item) { sev_collection *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->items[i], item)) return true; return false; }\n",
         "void *__sev_map_new(void) { return sev_allocate(sizeof(sev_map)); }\n",
         "void __sev_map_insert(void *raw, void *key, void *item) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->keys = realloc(value->keys, (size_t)value->capacity * sizeof(*value->keys)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->keys || !value->values) abort(); } value->keys[value->size] = key; value->values[value->size++] = item; }\n",
@@ -3490,6 +3543,27 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Result
         | ValueType::Option => "!llvm.ptr",
     }
+}
+
+fn activation_code(activation: Activation) -> i64 {
+    match activation {
+        Activation::Relu => 1,
+        Activation::FastSigmoid => 2,
+        Activation::FastTanh => 3,
+        Activation::Gelu => 4,
+        Activation::Swish => 5,
+    }
+}
+
+fn linked_source_function<'function>(
+    function: &'function str,
+    function_returns: &HashMap<String, ValueType>,
+) -> &'function str {
+    function
+        .rsplit_once('.')
+        .map(|(_, name)| name)
+        .filter(|name| function_returns.contains_key(*name))
+        .unwrap_or(function)
 }
 
 fn assignment_binary(op: AssignmentOp) -> BinaryOp {

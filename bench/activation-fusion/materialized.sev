@@ -1,0 +1,25 @@
+import models
+
+def buildInput(count: int) -> list[float]:
+    X := []
+    for index in range(0, count):
+        X.append(float(index % 17 - 8))
+    return X
+
+def sumValues(values: list[float]) -> float:
+    total := 0.0
+    for value in values:
+        total += value
+    return total
+
+@models(Relu, FastTanh, Swish)
+def forward(X: list[float]) -> list[float]:
+    active = Relu(X)
+    curved = FastTanh(active)
+    return Swish(curved)
+
+def main():
+    X = buildInput(262144)
+    output = forward(X)
+    print(size(output))
+    print(sumValues(output))

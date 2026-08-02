@@ -1,3 +1,12 @@
+import matrix
+
+def tensor(values: list[float]) -> list[float]:
+    return values
+
+@matrix(X)
+def matrixProduct(left: Matrix[f32], right: Matrix[f32]) -> Matrix[f32]:
+    return left X right
+
 def relu(values: list[float]) -> list[float]:
     output := []
     for value in values:

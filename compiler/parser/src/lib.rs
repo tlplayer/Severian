@@ -54,7 +54,6 @@ struct Parser<'tokens> {
 struct TaskContext {
     owner: TaskOwner,
     placement: TaskPlacement,
-    fused: bool,
     captures: Vec<Ident>,
 }
 
@@ -697,6 +696,14 @@ impl Parser<'_> {
                     Some(identifier.clone())
                 })
                 .collect::<Vec<_>>();
+            if identifiers
+                .iter()
+                .any(|identifier| identifier.name == "fuse")
+            {
+                return Err(self.error(
+                    "kernel fusion is automatic for compatible model operations; remove `fuse`",
+                ));
+            }
             let owner = if identifiers
                 .iter()
                 .any(|identifier| identifier.name == "runtime")
@@ -718,10 +725,7 @@ impl Parser<'_> {
                 return Err(self.error("a task context accepts only one execution placement"));
             }
             let placement = placements.first().copied();
-            let fused = identifiers
-                .iter()
-                .any(|identifier| identifier.name == "fuse");
-            let establishes_task_context = owner.is_some() || placement.is_some() || fused;
+            let establishes_task_context = owner.is_some() || placement.is_some();
             if establishes_task_context {
                 let captures = identifiers
                     .iter()
@@ -731,7 +735,6 @@ impl Parser<'_> {
                 self.task_contexts.push(TaskContext {
                     owner: owner.unwrap_or(TaskOwner::SelfOwned),
                     placement: placement.unwrap_or(TaskPlacement::Default),
-                    fused,
                     captures,
                 });
             }
@@ -1238,6 +1241,8 @@ impl Parser<'_> {
             } else if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "X") {
                 self.advance();
                 Some(BinaryOp::MatMul)
+            } else if self.take_simple(&TokenKind::Caret).is_some() {
+                Some(BinaryOp::Cross)
             } else if self.take_simple(&TokenKind::Slash).is_some() {
                 Some(BinaryOp::Div)
             } else if self.take_simple(&TokenKind::Percent).is_some() {
@@ -1299,7 +1304,6 @@ impl Parser<'_> {
                     value: Box::new(value),
                     owner: TaskOwner::SelfOwned,
                     placement: TaskPlacement::Default,
-                    fused: false,
                     captures: Vec::new(),
                 }));
             }
@@ -1314,7 +1318,6 @@ impl Parser<'_> {
                     value: Box::new(value),
                     owner: context.owner,
                     placement: context.placement,
-                    fused: context.fused,
                     captures: context.captures,
                 }));
             }
@@ -1326,7 +1329,11 @@ impl Parser<'_> {
                 TaskOwner::SelfOwned
             };
             let mut placement = task_placement(&owner_name.name).unwrap_or(TaskPlacement::Default);
-            let mut fused = owner_name.name == "fuse";
+            if owner_name.name == "fuse" {
+                return Err(self.error(
+                    "kernel fusion is automatic for compatible model operations; remove `fuse`",
+                ));
+            }
             let mut end = owner_name.span.end;
             let mut captures = Vec::new();
             while self.take_simple(&TokenKind::And).is_some() {
@@ -1338,10 +1345,9 @@ impl Parser<'_> {
                     }
                     placement = requested;
                 } else if capability.name == "fuse" {
-                    if fused {
-                        return Err(self.error("kernel fusion was specified more than once"));
-                    }
-                    fused = true;
+                    return Err(self.error(
+                        "kernel fusion is automatic for compatible model operations; remove `fuse`",
+                    ));
                 } else if !matches!(capability.name.as_str(), "self" | "runtime") {
                     captures.push(capability);
                 } else {
@@ -1353,7 +1359,6 @@ impl Parser<'_> {
                 value: Box::new(value),
                 owner,
                 placement,
-                fused,
                 captures,
             }));
         }
@@ -1789,7 +1794,7 @@ fn task_placement(name: &str) -> Option<TaskPlacement> {
 }
 
 fn is_task_context_symbol(name: &str) -> bool {
-    matches!(name, "self" | "runtime" | "fuse") || task_placement(name).is_some()
+    matches!(name, "self" | "runtime") || task_placement(name).is_some()
 }
 
 fn internal_call(name: &str, span: Span, args: Vec<Expr>) -> Expr {

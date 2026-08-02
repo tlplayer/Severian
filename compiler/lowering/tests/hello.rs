@@ -57,6 +57,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_collection_size(!llvm.ptr) -> i64\n",
             "  llvm.func @__sev_collection_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
             "  llvm.func @__sev_collection_reversed(!llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_fused_activations(!llvm.ptr, i64, i64) -> !llvm.ptr\n",
             "  llvm.func @__sev_set_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
             "  llvm.func @__sev_map_new() -> !llvm.ptr\n",
             "  llvm.func @__sev_map_insert(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",

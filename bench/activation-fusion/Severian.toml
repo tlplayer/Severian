@@ -1,0 +1,15 @@
+[package]
+name = "activation-fusion-bench"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "fused"
+path = "fused.sev"
+
+[[bin]]
+name = "materialized"
+path = "materialized.sev"
+
+[dependencies]
+models = { path = "../../library/models", version = "0.1.0" }

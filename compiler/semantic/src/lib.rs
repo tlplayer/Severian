@@ -572,6 +572,16 @@ fn aliases_with_decorators(
                     aliases.insert(symbol.spelling.clone(), format!("models.{function}"));
                 }
             }
+            if package == "matrix" {
+                let function = match symbol.spelling.as_str() {
+                    "I" => Some("identity"),
+                    "J" => Some("jacobianDiagonal"),
+                    _ => None,
+                };
+                if let Some(function) = function {
+                    aliases.insert(symbol.spelling.clone(), format!("matrix.{function}"));
+                }
+            }
         }
     }
     aliases
@@ -1012,7 +1022,7 @@ fn lower_block(
             Stmt::With(block) => {
                 let mut resources = Vec::new();
                 for resource in &block.resources {
-                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local" | "gpu" | "simd" | "simt" | "fuse"))
+                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local" | "gpu" | "simd" | "simt"))
                     {
                         continue;
                     }
@@ -1157,18 +1167,42 @@ fn lower_expression(
                     (BinaryOp::Power, result)
                 }
                 AstBinaryOp::MatMul => {
-                    if aliases.get("__symbol.X").map(String::as_str) != Some("math") {
+                    let package = aliases.get("__symbol.X").map(String::as_str);
+                    if !matches!(package, Some("math" | "matrix")) {
                         return Err(error(
                             binary.span,
-                            "operator `X` requires `@math(X)` on this function",
+                            "operator `X` requires `@matrix(X)` on this function",
                         ));
                     }
                     return Ok((
                         Expression::Call {
-                            function: "math.matrixMultiply".into(),
+                            function: if package == Some("matrix") {
+                                "matrix.multiply".into()
+                            } else {
+                                "math.matrixMultiply".into()
+                            },
                             args: vec![left, right],
                         },
                         ValueType::Any,
+                    ));
+                }
+                AstBinaryOp::Cross => {
+                    if aliases.get("__symbol.^").map(String::as_str) != Some("matrix") {
+                        return Err(error(
+                            binary.span,
+                            "operator `^` requires `@matrix(^)` on this function",
+                        ));
+                    }
+                    return Ok((
+                        Expression::Call {
+                            function: if signatures.contains_key("cross") {
+                                "cross".into()
+                            } else {
+                                "matrix.cross".into()
+                            },
+                            args: vec![left, right],
+                        },
+                        ValueType::List,
                     ));
                 }
                 AstBinaryOp::Equal => (BinaryOp::Equal, ValueType::Bool),
@@ -1180,7 +1214,6 @@ fn lower_expression(
                 AstBinaryOp::And => (BinaryOp::And, ValueType::Bool),
                 AstBinaryOp::Or => (BinaryOp::Or, ValueType::Bool),
                 AstBinaryOp::In => (BinaryOp::In, ValueType::Bool),
-                _ => return Err(error(binary.span, "operator is not supported yet")),
             };
             Ok((
                 Expression::Binary {
@@ -1363,15 +1396,11 @@ fn lower_expression(
                     }
                 }
             };
-            if task.fused && !aliases.values().any(|module| module == "parallel") {
-                return Err(error(task.span, "kernel fusion requires `import parallel`"));
-            }
             let (value, _) = lower_expression(&task.value, scope, signatures, aliases)?;
             Ok((
                 Expression::Task {
                     value: Box::new(value),
                     placement,
-                    fused: task.fused,
                 },
                 ValueType::Any,
             ))
@@ -1760,11 +1789,33 @@ fn lower_declared_call(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let linked_function = function
-        .rsplit_once('.')
-        .map(|(_, name)| name)
-        .filter(|name| signatures.contains_key(*name))
-        .unwrap_or(function);
+    let compiler_graph_operation = matches!(
+        function,
+        "matrix.matrix"
+            | "matrix.random"
+            | "matrix.identity"
+            | "matrix.multiply"
+            | "matrix.scale"
+            | "models.activation"
+            | "models.sigmoidActivation"
+            | "models.tanhActivation"
+            | "models.geluActivation"
+            | "models.swishActivation"
+            | "tensor.relu"
+            | "tensor.fastSigmoid"
+            | "tensor.fastTanh"
+            | "tensor.gelu"
+            | "tensor.swish"
+    );
+    let linked_function = if compiler_graph_operation {
+        function
+    } else {
+        function
+            .rsplit_once('.')
+            .map(|(_, name)| name)
+            .filter(|name| signatures.contains_key(*name))
+            .unwrap_or(function)
+    };
     let runtime_function = match linked_function {
         // The MLIR backend currently exposes this intrinsic under its C symbol.
         // Its type comes from library/math, not from this mapping.

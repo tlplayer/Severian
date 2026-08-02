@@ -39,6 +39,11 @@ The separate `distributed-learning/` comparison exercises a 65,536-value
 four-worker neural-network forward/backward pass against Python multiprocessing.
 It also includes an equivalent PyTorch/autograd implementation.
 
+`activation-fusion/` compares nested
+`Swish(FastTanh(Relu(X)))` with an explicitly materialized control. Neither
+program requests fusion or names a hardware backend; the compiler recognizes
+the nested elementwise graph through the model/tensor library calls.
+
 `onnx-gold/` trains a real Iris classifier, exports a checked ONNX graph,
 generates an equivalent four-shard native Severian program from its weights,
 and validates it against PyTorch and ONNX Runtime before reporting timing.

@@ -49,30 +49,49 @@ Command:
 python3 bench/onnx-gold/run.py --samples 7 --warmup 2
 ```
 
-Severian native compilation took 161.027 ms.
+Severian native compilation took 178.909 ms.
 
 | Engine | Median fresh process (ms) | p95 fresh process (ms) |
 | --- | ---: | ---: |
-| Severian, automatically fused, four shards | 117.499 | 130.443 |
-| Severian, unfused, four shards | 147.618 | 154.638 |
-| Severian, automatically fused, sequential | 251.180 | 255.144 |
-| PyTorch | 1,034.169 | 1,048.993 |
-| ONNX Runtime | 163.842 | 168.758 |
+| Severian, four shards | 156.449 | 159.287 |
+| Severian, sequential | 333.924 | 343.545 |
+| PyTorch | 1,153.231 | 1,168.430 |
+| ONNX Runtime | 182.120 | 192.292 |
 
 | Warm engine call | Median (ms) | p95 (ms) |
 | --- | ---: | ---: |
-| PyTorch | 1.664 | 2.006 |
-| ONNX Runtime | 0.249 | 0.903 |
+| PyTorch | 1.892 | 2.211 |
+| ONNX Runtime | 0.314 | 0.948 |
 
 Every engine produced 180,000 logits with exact class counts
 `[20000, 20000, 20000]`; the runner also checked per-class logit checksums
-within its floating-point tolerance. `with self and local and fuse:` caused the
-compiler to recognize `Relu(add(matVec(...), bias))` and replace it with the
-single-pass `fusedDenseRelu` kernel. Against the otherwise-identical four-shard
-control, fusion reduced median process time by 20.4%. Four fused shards were
-about 2.14x faster than the fused sequential control. The warm batched PyTorch
-and ONNX Runtime calls still show the substantial kernel-performance gap that
-remains.
+within its floating-point tolerance. Four local shards were about 2.13x faster
+than the sequential Severian control. This benchmark does not claim affine
+fusion: it measures distribution of the generated scalar/list model while the
+separate activation benchmark isolates automatic fusion.
+
+## Automatic activation-chain fusion
+
+This benchmark applies `Relu -> FastTanh -> Swish` to 262,144 values. One source
+nests the model calls, allowing a single compiler-created elementwise traversal.
+The control stores each result in a binding, intentionally materializing three
+traversals. Neither source contains fusion or hardware-placement syntax.
+
+Command:
+
+```sh
+python3 bench/activation-fusion/run.py --samples 15 --warmup 3
+```
+
+| Form | Compile (ms) | Median fresh process (ms) | p95 fresh process (ms) |
+| --- | ---: | ---: | ---: |
+| Automatic nested fusion | 159.710 | 22.357 | 25.190 |
+| Materialized control | 136.110 | 37.574 | 39.223 |
+
+Automatic fusion was 1.681x faster in this run. Both executables produced the
+exact checked stdout fixture. The compiler currently emits a CPU implementation
+and records SIMD/SIMT/GPU as future lowering candidates; this result makes no
+GPU or vector-backend claim.
 
 ## What the result says
 
@@ -82,9 +101,11 @@ The experiment already validates several useful language properties:
   the same weights running in PyTorch and ONNX Runtime.
 - Scoped task ownership and `local` placement provide a measurable parallel
   speedup without hiding shard boundaries or join order.
-- The `models` symbol pack now lets source say `Relu(X)` and `J(X)`, while the
+- The `models` symbol pack lets source say `Relu(X)` and `J(X)`, while the
   scalar package definition uses the piecewise expression
   `0.0 if x < 0.0 else x`.
+- Nested compatible activation calls can be fused without user optimization
+  syntax, while explicit materialization remains visible and testable.
 
 It also identifies the next optimization target. The Severian model currently
 uses flat dynamic lists and scalar loops rather than a batched GEMM. Indexed
@@ -102,7 +123,8 @@ replacing the expensive scalar runtime path.
 - Python 3.14.4
 - PyTorch 2.13.0, ONNX 1.22.0, ONNX Runtime 1.28.0, NumPy 2.3.5
 - Distributed result: seven measured samples after two warmups
-- ONNX/fusion result: eleven measured samples after three warmups
+- ONNX result: seven measured samples after two warmups
+- Activation-fusion result: fifteen measured samples after three warmups
 - CPU execution only; no CUDA or SIMD backend is claimed
 
 Generated ONNX data and binaries are intentionally ignored. Preparation and

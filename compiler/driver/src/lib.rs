@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
-mod parallel_fusion;
+mod model_fusion;
 
 use severian_ast::{ImportKind, Item, Module as AstModule, Span};
 use severian_hir::{
-    AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
-    Test, TestMode, UnaryOp,
+    Activation, AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction,
+    MatchPattern, Program, Test, TestMode, UnaryOp,
 };
 use severian_mlir::Module;
 use std::cell::{Cell, RefCell};
@@ -95,7 +95,7 @@ fn compile_ast(
         }
     })?;
     severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
-    parallel_fusion::fuse_requested_kernels(&mut hir);
+    model_fusion::fuse_activation_chains(&mut hir);
     let mlir = severian_lowering::lower(&hir);
 
     Ok(Compilation { hir, mlir })
@@ -769,6 +769,7 @@ fn walk_expression<'expression>(
             walk_expression(then_expression, visit);
             walk_expression(else_expression, visit);
         }
+        Expression::FusedActivations { input, .. } => walk_expression(input, visit),
         Expression::Call { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
@@ -1419,6 +1420,25 @@ fn evaluate(
                 "conditional expression requires a boolean condition".into(),
             )),
         },
+        Expression::FusedActivations { input, activations } => {
+            let Value::List(values) = evaluate(program, input, variables, write_line)? else {
+                return Err(CompileError::Execution(
+                    "fused activations require a list of numbers".into(),
+                ));
+            };
+            let output = values
+                .borrow()
+                .iter()
+                .map(|value| {
+                    let mut value = numeric_value(value)?;
+                    for activation in activations {
+                        value = apply_activation(value, *activation);
+                    }
+                    Ok(float_value(value))
+                })
+                .collect::<Result<Vec<_>, CompileError>>()?;
+            Ok(Value::List(Rc::new(RefCell::new(output))))
+        }
         Expression::Binary { left, op, right } => {
             let left = evaluate(program, left, variables, write_line)?;
             let right = evaluate(program, right, variables, write_line)?;
@@ -1446,12 +1466,22 @@ fn execute_call(
     chaos_event: Option<Value>,
     write_line: &mut dyn FnMut(&str),
 ) -> Result<Value, CompileError> {
+    let linked_function = function
+        .rsplit_once('.')
+        .map(|(_, name)| name)
+        .filter(|name| {
+            program
+                .functions
+                .iter()
+                .any(|candidate| candidate.name == *name)
+        })
+        .unwrap_or(function);
     if program
         .functions
         .iter()
-        .any(|candidate| candidate.name == function)
+        .any(|candidate| candidate.name == linked_function)
     {
-        return execute_function(program, function, args, chaos_event, write_line);
+        return execute_function(program, linked_function, args, chaos_event, write_line);
     }
     match function {
         "print" => {
@@ -1772,6 +1802,31 @@ fn evaluate_binary(left: Value, op: BinaryOp, right: Value) -> Result<Value, Com
 
 fn float_value(value: f64) -> Value {
     Value::Float(value.to_bits())
+}
+
+fn numeric_value(value: &Value) -> Result<f64, CompileError> {
+    match value {
+        Value::Float(value) => Ok(f64::from_bits(*value)),
+        Value::Int(value) => Ok(*value as f64),
+        _ => Err(CompileError::Execution(
+            "fused activations require numeric elements".into(),
+        )),
+    }
+}
+
+fn apply_activation(value: f64, activation: Activation) -> f64 {
+    let fast_sigmoid = |value: f64| 0.5 + value / (2.0 * (1.0 + value.abs()));
+    let fast_tanh = |value: f64| value / (1.0 + value.abs());
+    match activation {
+        Activation::Relu => value.max(0.0),
+        Activation::FastSigmoid => fast_sigmoid(value),
+        Activation::FastTanh => fast_tanh(value),
+        Activation::Gelu => {
+            let curved = 0.797_884_560_8 * (value + 0.044_715 * value.powi(3));
+            0.5 * value * (1.0 + fast_tanh(curved))
+        }
+        Activation::Swish => value * fast_sigmoid(value),
+    }
 }
 
 fn assignment_binary(op: AssignmentOp) -> BinaryOp {

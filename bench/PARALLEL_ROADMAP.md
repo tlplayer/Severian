@@ -1,65 +1,82 @@
-# Parallel and automatic-differentiation performance roadmap
+# Tensor, fusion, and parallel-backend roadmap
 
-The first automatic fusion experiment is now measured, not hypothetical. On
-the 60,000-row Iris ONNX workload, rewriting
-`Relu(add(matVec(...), bias))` to `fusedDenseRelu(...)` reduced the four-shard
-median from 147.618 ms to 117.499 ms, or 20.4%. Output shape, class counts, and
-logit checksums remained equal to PyTorch and ONNX Runtime.
+The first automatic activation-fusion experiment is measured, not
+hypothetical. On a 262,144-value pipeline, compiling the nested model expression
+`Swish(FastTanh(Relu(X)))` to one traversal reduced median fresh-process time
+from 37.574 ms to 22.357 ms, a 1.681x speedup. Both native executables produced
+the exact same checked stdout fixture.
 
-## What `fuse` does today
+## What fuses today
 
-`with self and local and fuse:` marks the spawned function as a fusion target.
-The compiler walks that function's HIR and recognizes this graph:
+Fusion is a compiler decision, not a task capability and not syntax the model
+author requests. The driver recognizes compatible nested `models`/`tensor`
+activation calls and creates one `FusedActivations` HIR operation. Native
+lowering traverses the input once and applies each scalar stage before storing
+the output:
 
-```text
-matVec(weights, rows, columns, X) -> add(..., bias) -> Relu(...)
+```sev
+@models(Relu, FastTanh, Swish)
+def forward(X: list[float]) -> list[float]:
+    return Swish(FastTanh(Relu(X)))
 ```
 
-It rewrites the graph to the `parallel.fusedDenseRelu` reference kernel. The
-unfused benchmark differs only by omitting `fuse`, which makes it a useful
-control. Other graphs are left unchanged; this is a safe first pattern, not a
-general-purpose fusion engine.
+Explicit bindings are materialization boundaries and therefore make a useful
+unfused control. Calls with side effects, incompatible arity, or unknown
+functions are not fused. User-written `fuse` placement is rejected; `local`,
+`gpu`, `simd`, and `simt` remain execution-placement contracts for library and
+compiler kernels.
+
+The emitted operation currently records `simd`, `simt`, and `gpu` as lowering
+candidates but executes the CPU fallback. This is honest intent metadata, not a
+claim that hardware-specific lowering exists already.
+
+## The library boundary
+
+`matrix` owns symbolic linear algebra (`X`, `^`, `I`, and `J`). `tensor` builds
+storage and elementwise operations above it, and `models` supplies domain names
+such as `Relu` and `Swish`. Model code composes those operations; compiler passes
+inspect their resolved HIR identities and choose fusion and backend lowering.
+Hardware decisions do not leak into ordinary model source.
+
+The current `Matrix` runtime records only shape and uniform fill. It establishes
+the namespace and lowering boundary, but it is not yet a ranked JAX-style array.
+That storage representation is the most important prerequisite for general
+matrix/tensor fusion.
 
 ## Why warm PyTorch is still faster
 
-Warm PyTorch measured 1.664 ms for the same model call, but its measurement
-starts after the framework and worker pools are initialized. Severian's
-117.499 ms is a complete fresh executable. Startup does not explain the whole
-gap, however. The important backend differences are:
+In the ONNX gold test, warm PyTorch measured 1.892 ms and ONNX Runtime measured
+0.314 ms per model call. Severian measured 156.449 ms for a complete fresh
+four-shard executable, so that is not a direct kernel-only comparison. The
+backend gap is nevertheless real:
 
-1. PyTorch executes a contiguous batched matrix multiplication. Severian runs
-   one small matrix-vector operation per sample.
-2. Severian's `list[float]` elements are dynamically boxed. Indexed arithmetic
-   crosses boxing/unboxing helpers and frequently allocates scalar results.
-3. PyTorch dispatches tuned, vectorized native kernels with mature thread-pool
-   scheduling. Severian currently emits scalar LLVM loops and pthread tasks.
-4. PyTorch autograd builds a graph of tensor operations and invokes specialized
-   backward kernels. It does not interpret one Python operation per scalar.
-5. Severian has no persistent model/session API yet, so its reported timing
-   includes process and runtime initialization.
+1. PyTorch and ONNX Runtime execute contiguous batched matrix multiplications;
+   Severian performs one small matrix-vector operation per sample.
+2. Severian `list[float]` elements are dynamically boxed, so indexed arithmetic
+   crosses runtime helpers and allocates scalar results.
+3. Mature frameworks dispatch tuned vectorized kernels and persistent worker
+   pools; Severian currently emits scalar LLVM loops and pthread tasks.
+4. Framework autodiff tracks tensor operations and invokes specialized backward
+   kernels rather than interpreting Python scalar arithmetic.
+5. Severian has no persistent model/session benchmark API yet.
 
-Autograd itself is not the source of the speedup. The advantage comes from
-tracking derivatives at tensor-operation granularity and lowering those
-operations to batched forward and backward kernels.
+Autograd itself is not the source of PyTorch's speed. The advantage comes from
+tensor-granularity graphs and optimized forward/backward kernels.
 
 ## Backend sequence
 
-The practical implementation order is:
-
-1. Add ranked, contiguous `Tensor[element, shape]` storage with unboxed element
-   access and explicit strides.
-2. Lower tensor algebra to MLIR `linalg`/`tensor` operations instead of scalar
-   boxed-list runtime calls.
-3. Generalize fusion into a graph pass with legality checks for shape,
-   aliasing, side effects, and reduction boundaries.
-4. Lower `simd` tasks through MLIR vectorization and target-specific LLVM
-   vector types, with scalar remainder loops.
-5. Lower `gpu`/`simt` tasks by outlining kernels, mapping logical lanes, and
-   making host/device transfer and async completion explicit.
-6. Build reverse-mode autodiff over tensor HIR, then fuse patterns such as
-   ReLU-mask plus transposed GEMM in the backward graph.
-7. Add persistent benchmark sessions so Severian kernel time can be compared
-   directly with warm PyTorch and ONNX Runtime calls.
-
-Until steps 4 and 5 land, generated MLIR records `simd`, `simt`, and `gpu`
-placement but deliberately labels execution as a CPU fallback.
+1. Replace uniform-fill `Matrix` with ranked contiguous storage, explicit shape,
+   strides, and unboxed element access.
+2. Make tensor operations produce typed graph nodes and lower matrix algebra to
+   MLIR `tensor`/`linalg` operations.
+3. Generalize activation fusion with legality checks for shapes, aliasing, side
+   effects, broadcasts, reductions, and materialization boundaries.
+4. Add whole expressions such as affine + bias + activation to the same graph
+   fusion system, driven by library operation identities rather than user hints.
+5. Lower CPU candidates through MLIR vectorization and target-specific SIMD,
+   including scalar remainder loops.
+6. Outline GPU/SIMT kernels with explicit transfer, logical-lane mapping,
+   synchronization, and async completion semantics.
+7. Build reverse-mode autodiff over tensor HIR, then fuse backward graphs such
+   as activation masks plus transposed matrix products.
+8. Add persistent benchmark sessions for direct warm-kernel comparisons.

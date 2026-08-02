@@ -35,8 +35,10 @@ paths while staying Severian-first:
 | `15-tests` | Ordinary, property, benchmark, chaos, integration, and composed tests. |
 | `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
 | `17-servers` | TCP request/response, channel-based chat, and map/reduce services. |
-| `18-tensor-neuralnet` | Imported tensor kernels, neural-network activations, task parallelism, Jacobians, and SIMD/GPU lowering policies. |
+| `18-tensor-neuralnet` | Imported tensor kernels, neural-network activations, task parallelism, and Jacobians. |
 | `19-distributed-learning` | Large sharded forward/backward passes with deterministic native task reduction. |
+| `20-onnx-iris` | Generated model algebra checked against an exported Iris ONNX graph. |
+| `21-parallel-kernels` | Matrix notation and compiler-driven fusion of stacked model activations. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the

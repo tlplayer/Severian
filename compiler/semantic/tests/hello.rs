@@ -80,7 +80,7 @@ fn rejects_local_task_placement_without_the_distributed_import() {
 }
 
 #[test]
-fn retains_parallel_placement_and_fusion_after_validating_the_import() {
+fn retains_parallel_placement_after_validating_the_import() {
     let source = concat!(
         "import parallel\n",
         "\n",
@@ -88,7 +88,7 @@ fn retains_parallel_placement_and_fusion_after_validating_the_import() {
         "    return 1\n",
         "\n",
         "def main():\n",
-        "    with self and simd and fuse:\n",
+        "    with self and simd:\n",
         "        task = async work()\n",
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
@@ -97,16 +97,13 @@ fn retains_parallel_placement_and_fusion_after_validating_the_import() {
         panic!("expected task context");
     };
     let Instruction::Let {
-        value: Expression::Task {
-            placement, fused, ..
-        },
+        value: Expression::Task { placement, .. },
         ..
     } = &instructions[0]
     else {
         panic!("expected task binding");
     };
     assert_eq!(*placement, TaskPlacement::Simd);
-    assert!(*fused);
 }
 
 #[test]

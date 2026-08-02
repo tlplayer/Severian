@@ -115,6 +115,15 @@ pub enum TaskPlacement {
     Simt,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activation {
+    Relu,
+    FastSigmoid,
+    FastTanh,
+    Gelu,
+    Swish,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     Let {
@@ -230,7 +239,6 @@ pub enum Expression {
     Task {
         value: Box<Expression>,
         placement: TaskPlacement,
-        fused: bool,
     },
     Await(Box<Expression>),
     Channel(Box<Expression>),
@@ -253,6 +261,10 @@ pub enum Expression {
         condition: Box<Expression>,
         then_expression: Box<Expression>,
         else_expression: Box<Expression>,
+    },
+    FusedActivations {
+        input: Box<Expression>,
+        activations: Vec<Activation>,
     },
     Unary {
         op: UnaryOp,

@@ -174,7 +174,6 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
                             args: vec![],
                         }),
                         placement: TaskPlacement::Local,
-                        fused: false,
                     },
                 }],
                 tests: vec![],
@@ -189,7 +188,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
 }
 
 #[test]
-fn preserves_parallel_placement_and_fusion_requests_on_spawn_calls() {
+fn preserves_parallel_placement_on_spawn_calls() {
     let program = Program {
         globals: vec![],
         classes: vec![],
@@ -217,7 +216,6 @@ fn preserves_parallel_placement_and_fusion_requests_on_spawn_calls() {
                             args: vec![],
                         }),
                         placement: TaskPlacement::Gpu,
-                        fused: true,
                     },
                 }],
                 tests: vec![],
@@ -229,7 +227,6 @@ fn preserves_parallel_placement_and_fusion_requests_on_spawn_calls() {
     let text = lowered.as_str();
     assert!(text.contains("severian_parallel = \"gpu\""));
     assert!(text.contains("severian_device_fallback = \"cpu\""));
-    assert!(text.contains("severian_fusion = \"requested\""));
 }
 
 #[test]

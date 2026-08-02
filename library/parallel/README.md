@@ -1,44 +1,33 @@
 # parallel
 
-`parallel` owns operation-local execution placement and kernel-fusion
-contracts. Importing it enables `gpu`, `simd`, `simt`, and `fuse` in an async
-task context:
+`parallel` owns execution-placement contracts used by numerical and systems
+libraries. Library implementations may place internal tasks with `gpu`, `simd`,
+or `simt`:
 
 ```sev
 import parallel
 
-with self and gpu and fuse:
-    result = async fusedDenseRelu(weights, rows, columns, bias, X)
-
-single = async fusedDenseRelu(weights, rows, columns, bias, X) with gpu and fuse
+with self and simd:
+    result = async internalKernel(values)
 ```
 
-- `simd` requests vector lanes executing one instruction over multiple values.
-- `simt` requests many logical lanes with independent control state.
-- `gpu` requests a device kernel and will normally lower through SIMT-oriented
-  GPU dialects.
-- `fuse` asks the optimizer to keep compatible producer/consumer operations in
-  one kernel.
+Ordinary model callers should not need these controls. `matrix`, `tensor`, and
+`models` expose algebraic operations; the compiler selects legal backend
+candidates after fusion and shape analysis.
 
-The compiler preserves these choices as attributes on the task-spawn operation.
-The current executable backend intentionally records
-`severian_device_fallback = "cpu"` and runs the task through the existing
-pthread runtime. This makes programs executable without claiming that a GPU or
-vector backend exists yet.
+- `simd` means vector lanes executing one instruction over multiple values.
+- `simt` means many logical lanes with independent control state.
+- `gpu` means a device-kernel placement, normally using SIMT lowering.
 
-The package also contains manually fused reference kernels. They establish the
-semantics and provide a performance control for later automatic fusion passes.
-`fusedDenseRelu` combines matrix-vector multiplication, bias addition, and ReLU
-without allocating intermediate lists. `fusedDenseReluBackwardInput` combines
-the ReLU mask with the transposed matrix-vector product used for input
-gradients.
+These placements are retained in HIR and MLIR. The current native backend
+labels and executes a CPU fallback rather than claiming device acceleration.
 
-## Other parallel paradigms
+Kernel fusion is not a placement and is not requested with `with`. Compatible
+model operations are fused automatically. Writing `fuse` in a task context is
+therefore rejected with a diagnostic explaining that optimization belongs to
+the model/tensor pipeline.
 
-`simd`, `simt`, and `gpu` describe how one task executes. Data parallelism,
-model/tensor parallelism, pipeline parallelism, work stealing, and remote
-collectives describe how many tasks and tensors are partitioned. They should be
-higher-level plans in this package rather than additional device-placement
-words. Their implementation needs explicit shard shapes, transfer ownership,
-barriers, reductions, failure behavior, and collectives such as broadcast and
-all-reduce; none are silently treated as working placements yet.
+Data, model/tensor, and pipeline parallelism describe partitioning across tasks
+and devices rather than execution of one kernel. Those future plans require
+explicit shard shapes, transfer ownership, collectives, barriers, and failure
+semantics.
