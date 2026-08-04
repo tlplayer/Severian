@@ -1,6 +1,7 @@
 trait Ordered:
     lessThan(other: Self) -> bool
 
+    
 def largest[type: Ordered](values: list[type]) -> Option[type]:
     if size(values) == 0:
         return absent

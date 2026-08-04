@@ -172,7 +172,7 @@ Any enforceable waiver must be made expressly in writing by the Licensor.
 
 ## 11. No Implied Agreement
 
-No commercial license or pricing commitment arises through:
+No license or pricing commitment arises through:
 
 * silence;
 * delay;
