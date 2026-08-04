@@ -82,6 +82,13 @@ test "layer norm backward removes a constant upstream":
     upstream = ranked([1.0, 1.0], [1, 2])
     assert(rankedValues(rankedLayerNormBackward(input, upstream)) == [0.0, 0.0])
 
+test "reverse mode accumulates gradients and SGD updates a leaf":
+    input = ranked([-1.0, 2.0], [1, 2])
+    output = rankedRelu(input)
+    rankedBackwardMse(output)
+    assert(rankedValues(rankedGradient(input)) == [0.0, 2.0])
+    assert(rankedValues(rankedSgd(input, 0.1)) == [-1.0, 1.8])
+
 def tensor(values: list[float]) -> list[float]:
     return values
 
