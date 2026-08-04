@@ -1,86 +1,168 @@
 #!/usr/bin/env python3
-"""Validate ROCm lowering and compare the current CPU baseline with PyTorch."""
+"""Benchmark the same complete transformer encoder in Severian and PyTorch."""
 
 from __future__ import annotations
 
 import argparse
+import ast
+import json
+import math
+import os
 from pathlib import Path
-import statistics
 import subprocess
 import sys
-import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-SOURCE = ROOT / "docs/examples/25-transformer-rocm/main.sev"
-EXPECTED = b"[1.75, 0]\n"
+EXAMPLE = ROOT / "docs/examples/25-transformer-rocm/main.sev"
 
 
-def invoke(command: list[str], timeout: int = 120) -> tuple[subprocess.CompletedProcess[bytes], float]:
-    started = time.perf_counter_ns()
-    result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=timeout)
-    return result, (time.perf_counter_ns() - started) / 1_000_000
+def require(result: subprocess.CompletedProcess[str], label: str) -> None:
+    if result.returncode:
+        raise RuntimeError(f"{label}: {result.stderr.strip() or result.stdout.strip()}")
 
 
-def checked(command: list[str], expected: bytes | None = None) -> float:
-    result, elapsed = invoke(command)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.decode(errors="replace").strip() or "command failed")
-    if expected is not None and result.stdout != expected:
-        raise RuntimeError(f"expected {expected!r}, got {result.stdout!r}")
-    return elapsed
+def generate_benchmark(path: Path, iterations: int, warmup: int) -> None:
+    source = EXAMPLE.read_text()
+    source = source[: source.index("def main():")]
+    source += f'''native("__sev_monotonic_ns") def monotonicNs() -> int
 
+def main():
+    inference := transformerEncoder()
+    for iteration in range(0, {warmup}):
+        inference = transformerEncoder()
+    inferenceStart = monotonicNs()
+    for iteration in range(0, {iterations}):
+        inference = transformerEncoder()
+    inferenceElapsed = monotonicNs() - inferenceStart
 
-def median(command: list[str], samples: int) -> float:
-    checked(command, EXPECTED)
-    return statistics.median(checked(command, EXPECTED) for _ in range(samples))
+    training := transformerTrainStep()
+    for iteration in range(0, {warmup}):
+        training = transformerTrainStep()
+    trainingStart = monotonicNs()
+    for iteration in range(0, {iterations}):
+        training = transformerTrainStep()
+    trainingElapsed = monotonicNs() - trainingStart
+
+    print(inferenceElapsed)
+    print(inference)
+    print(trainingElapsed)
+    print(training)
+'''
+    path.write_text(source)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=20)
-    parser.add_argument("--chip", default="gfx1100")
+    parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--chip", default="gfx1101")
+    parser.add_argument(
+        "--torch-python",
+        type=Path,
+        default=Path("/home/tplayer/.pyenv/versions/betterquest-rocm/bin/python"),
+    )
     args = parser.parse_args()
-    if args.samples < 1:
-        parser.error("--samples must be positive")
+    if args.iterations < 1 or args.warmup < 0:
+        parser.error("iterations must be positive and warmup non-negative")
 
     work = ROOT / "bench/.work/transformer-rocm"
     work.mkdir(parents=True, exist_ok=True)
-    sev = ROOT / "target/debug/sev"
-    native = work / "severian"
-    rocdl = work / f"transformer-{args.chip}.mlir"
+    source = work / "benchmark.sev"
+    executable = work / "benchmark"
+    generate_benchmark(source, args.iterations, args.warmup)
+    (work / "Severian.toml").write_text(
+        '''[package]
+name = "transformer-rocm-benchmark"
+version = "0.1.0"
+edition = "2026"
 
-    checked(["cargo", "build", "-q", "-p", "severian-driver", "--bin", "sev"])
-    checked([str(sev), "compile", str(SOURCE), "-o", str(native)])
-    target, _ = invoke(
-        [str(sev), "emit-mlir", str(SOURCE), "--target", "rocm", "--chip", args.chip]
+[[bin]]
+name = "transformer-rocm-benchmark"
+path = "benchmark.sev"
+
+[dependencies]
+parallel = { path = "../../../library/parallel", version = "0.1.0" }
+tensor = { path = "../../../library/tensor", version = "0.1.0" }
+'''
     )
-    if target.returncode != 0:
-        raise RuntimeError(target.stderr.decode(errors="replace").strip())
-    if b"rocdl.target" not in target.stdout or b"gpu.launch_func" not in target.stdout:
-        raise RuntimeError("target output contains no outlined ROCDL kernels")
-    rocdl.write_bytes(target.stdout)
 
-    torch_command = [sys.executable, str(HERE / "torch_baseline.py")]
-    severian_ms = median([str(native)], args.samples)
-    try:
-        pytorch_ms = median(torch_command, args.samples)
-    except RuntimeError as error:
-        if "No module named 'torch'" in str(error):
-            raise RuntimeError(
-                "PyTorch is not installed in this Python environment; install a ROCm/CPU "
-                "PyTorch build to run the comparison"
-            ) from error
-        raise
-    ratio = severian_ms / pytorch_ms
+    require(
+        subprocess.run(
+            ["cargo", "build", "-q", "-p", "severian-driver", "--bin", "sev"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        ),
+        "building sev",
+    )
+    require(
+        subprocess.run(
+            [
+                str(ROOT / "target/debug/sev"),
+                "compile",
+                str(source),
+                "--target",
+                "rocm",
+                "--chip",
+                args.chip,
+                "-o",
+                str(executable),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        ),
+        "compiling Severian ROCm benchmark",
+    )
+    severian = subprocess.run(
+        [str(executable)], cwd=ROOT, text=True, capture_output=True, timeout=300
+    )
+    require(severian, "Severian GPU benchmark")
+    lines = severian.stdout.splitlines()
+    if len(lines) != 4:
+        raise RuntimeError(f"unexpected Severian output: {severian.stdout!r}")
+    severian_inference_ms = int(lines[0]) / args.iterations / 1_000_000
+    severian_output = ast.literal_eval(lines[1])
+    severian_training_ms = int(lines[2]) / args.iterations / 1_000_000
+    severian_update = ast.literal_eval(lines[3])
 
-    print(f"ROCDL validation: PASS ({args.chip}, {rocdl.relative_to(ROOT)})")
-    print("Fresh-process CPU baseline (float64; lower is better)")
-    print(f"  Severian native: {severian_ms:.3f} ms")
-    print(f"  PyTorch CPU:     {pytorch_ms:.3f} ms")
-    print(f"  Severian/PyTorch: {ratio:.3f}x")
-    print("GPU execution is not timed: the ROCm path currently emits target MLIR but does not link/transfer buffers.")
+    torch_env = os.environ.copy()
+    torch_result = subprocess.run(
+        [
+            str(args.torch_python),
+            str(HERE / "pytorch_workload.py"),
+            "--iterations",
+            str(args.iterations),
+            "--warmup",
+            str(args.warmup),
+        ],
+        cwd=ROOT,
+        env=torch_env,
+        text=True,
+        capture_output=True,
+        timeout=300,
+    )
+    require(torch_result, "PyTorch ROCm benchmark")
+    torch = json.loads(torch_result.stdout)
+
+    output_error = max(abs(a - b) for a, b in zip(severian_output, torch["output"]))
+    update_error = max(abs(a - b) for a, b in zip(severian_update, torch["update"]))
+    if len(severian_output) != len(torch["output"]) or output_error > 2e-4:
+        raise RuntimeError(f"inference mismatch (max absolute error {output_error})")
+    if len(severian_update) != len(torch["update"]) or update_error > 2e-4:
+        raise RuntimeError(f"training mismatch (max absolute error {update_error})")
+
+    print(f"device: {torch['device']}")
+    print(f"software: Severian MLIR/ROCDL gfx1101; PyTorch {torch['torch_version']} HIP {torch['torch_hip']}")
+    print(f"dataset: 3 tokens, hidden=2, one attention head, FFN=4, float64")
+    print(f"correctness: PASS (forward max abs {output_error:.3g}; SGD update max abs {update_error:.3g})")
+    print("warm latency per step (Severian mean; PyTorch median)")
+    print(f"  inference  Severian {severian_inference_ms:.6f} ms | PyTorch {torch['inference_ms']:.6f} ms")
+    print(f"  training   Severian {severian_training_ms:.6f} ms | PyTorch {torch['training_ms']:.6f} ms")
+    print(f"  inference ratio Severian/PyTorch: {severian_inference_ms / torch['inference_ms']:.2f}x")
+    print(f"  training ratio Severian/PyTorch: {severian_training_ms / torch['training_ms']:.2f}x")
     return 0
 
 

@@ -48,8 +48,7 @@ the nested elementwise graph through the model/tensor library calls.
 generates an equivalent four-shard native Severian program from its weights,
 and validates it against PyTorch and ONNX Runtime before reporting timing.
 
-`transformer-rocm/` validates the transformer-style ranked-tensor example,
-checks AMD ROCDL emission for a selected `gfx` architecture, and measures the
-current native CPU executable against an equivalent float64 PyTorch baseline.
-It labels that comparison as CPU-only: target MLIR emission is not represented
-as runnable GPU throughput.
+`transformer-rocm/` compiles and executes a complete float64 encoder and its
+reverse-mode/SGD step through MLIR, embedded ROCDL code objects, and HIP. It
+checks forward values and the first weight update against PyTorch ROCm, then
+reports warm in-process GPU latency for both implementations.

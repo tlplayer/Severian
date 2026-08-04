@@ -12,6 +12,26 @@ native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) 
 
 native("__sev_tensor_matmul") def rankedMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
+native("__sev_tensor_transpose") def rankedTranspose(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_scale") def rankedScale(value: Tensor[f64], scale: float) -> Tensor[f64]
+
+native("__sev_tensor_softmax_rows") def rankedSoftmaxRows(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_layer_norm") def rankedLayerNorm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+
+native("__sev_tensor_relu_backward") def rankedReluBackward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_softmax_backward") def rankedSoftmaxBackward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_layer_norm_backward") def rankedLayerNormBackward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+
+native("__sev_tensor_backward_mse") def rankedBackwardMse(output: Tensor[f64])
+
+native("__sev_tensor_gradient") def rankedGradient(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_sgd") def rankedSgd(value: Tensor[f64], learningRate: float) -> Tensor[f64]
+
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     assert(rankedShape(value) == [2, 2])
@@ -30,6 +50,37 @@ test "ranked matrix multiplication executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     right = ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
     assert(rankedValues(rankedMatmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
+
+test "ranked transpose swaps matrix axes":
+    value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    assert(rankedValues(rankedTranspose(value)) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
+
+test "ranked scaling is elementwise":
+    value = ranked([1.0, -2.0], [1, 2])
+    assert(rankedValues(rankedScale(value, 0.5)) == [0.5, -1.0])
+
+test "row softmax normalizes a constant row":
+    value = ranked([0.0, 0.0], [1, 2])
+    assert(rankedValues(rankedSoftmaxRows(value)) == [0.5, 0.5])
+
+test "layer normalization centers a constant row":
+    value = ranked([2.0, 2.0], [1, 2])
+    assert(rankedValues(rankedLayerNorm(value)) == [0.0, 0.0])
+
+test "ranked ReLU backward masks inactive elements":
+    input = ranked([-1.0, 2.0], [1, 2])
+    upstream = ranked([3.0, 4.0], [1, 2])
+    assert(rankedValues(rankedReluBackward(input, upstream)) == [0.0, 4.0])
+
+test "row softmax backward removes a constant upstream":
+    output = ranked([0.25, 0.75], [1, 2])
+    upstream = ranked([1.0, 1.0], [1, 2])
+    assert(rankedValues(rankedSoftmaxBackward(output, upstream)) == [0.0, 0.0])
+
+test "layer norm backward removes a constant upstream":
+    input = ranked([-1.0, 1.0], [1, 2])
+    upstream = ranked([1.0, 1.0], [1, 2])
+    assert(rankedValues(rankedLayerNormBackward(input, upstream)) == [0.0, 0.0])
 
 def tensor(values: list[float]) -> list[float]:
     return values

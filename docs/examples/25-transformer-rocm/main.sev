@@ -1,18 +1,74 @@
 import parallel
 import tensor
 
-def transformerBlock() -> list[float]:
-    weights = tensor.ranked([1.0, 0.5, -1.0, 2.0], [2, 2])
-    hidden = tensor.ranked([2.0, -1.0], [2, 1])
-    bias = tensor.ranked([0.25, 0.5], [2, 1])
+def transformerEncoder() -> list[float]:
+    tokens = tensor.ranked([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
+    identity = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    feedForwardIn = tensor.ranked([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4])
+    feedForwardOut = tensor.ranked([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2])
+    feedForwardBias = tensor.ranked([0.01, -0.02, 0.03, 0.04, 0.01, -0.02, 0.03, 0.04, 0.01, -0.02, 0.03, 0.04], [3, 4])
+    outputBias = tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [3, 2])
 
     with gpu:
-        projected = tensor.rankedMatmul(weights, hidden)
-        activated = tensor.rankedRelu(tensor.rankedAdd(projected, bias))
-        return tensor.rankedValues(activated)
+        queries = tensor.rankedMatmul(tokens, identity)
+        keys = tensor.rankedMatmul(tokens, identity)
+        values = tensor.rankedMatmul(tokens, identity)
+        scores = tensor.rankedScale(tensor.rankedMatmul(queries, tensor.rankedTranspose(keys)), 0.7071067811865476)
+        attention = tensor.rankedSoftmaxRows(scores)
+        context = tensor.rankedMatmul(attention, values)
+        attentionResidual = tensor.rankedLayerNorm(tensor.rankedAdd(tokens, tensor.rankedMatmul(context, identity)))
+        hidden = tensor.rankedRelu(tensor.rankedAdd(tensor.rankedMatmul(attentionResidual, feedForwardIn), feedForwardBias))
+        projected = tensor.rankedAdd(tensor.rankedMatmul(hidden, feedForwardOut), outputBias)
+        output = tensor.rankedLayerNorm(tensor.rankedAdd(attentionResidual, projected))
+        return tensor.rankedValues(output)
 
-test "transformer feed-forward projection is deterministic":
-    assert(transformerBlock() == [1.75, 0.0])
+def transformerTrainStep() -> list[float]:
+    tokens = tensor.ranked([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
+    queryWeights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    keyWeights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    valueWeights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    outputWeights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    feedForwardIn = tensor.ranked([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4])
+    feedForwardOut = tensor.ranked([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2])
+    feedForwardBias = tensor.ranked([0.01, -0.02, 0.03, 0.04, 0.01, -0.02, 0.03, 0.04, 0.01, -0.02, 0.03, 0.04], [3, 4])
+    outputBias = tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [3, 2])
+
+    with gpu:
+        queries = tensor.rankedMatmul(tokens, queryWeights)
+        keys = tensor.rankedMatmul(tokens, keyWeights)
+        values = tensor.rankedMatmul(tokens, valueWeights)
+        rawScores = tensor.rankedMatmul(queries, tensor.rankedTranspose(keys))
+        scores = tensor.rankedScale(rawScores, 0.7071067811865476)
+        attention = tensor.rankedSoftmaxRows(scores)
+        context = tensor.rankedMatmul(attention, values)
+        contextProjection = tensor.rankedMatmul(context, outputWeights)
+        attentionPreNorm = tensor.rankedAdd(tokens, contextProjection)
+        attentionResidual = tensor.rankedLayerNorm(attentionPreNorm)
+        feedForwardPreActivation = tensor.rankedAdd(tensor.rankedMatmul(attentionResidual, feedForwardIn), feedForwardBias)
+        hidden = tensor.rankedRelu(feedForwardPreActivation)
+        projected = tensor.rankedAdd(tensor.rankedMatmul(hidden, feedForwardOut), outputBias)
+        outputPreNorm = tensor.rankedAdd(attentionResidual, projected)
+        output = tensor.rankedLayerNorm(outputPreNorm)
+
+        tensor.rankedBackwardMse(output)
+        updatedFeedForwardIn = tensor.rankedSgd(feedForwardIn, 0.01)
+        updatedFeedForwardOut = tensor.rankedSgd(feedForwardOut, 0.01)
+        updatedQueryWeights = tensor.rankedSgd(queryWeights, 0.01)
+        updatedKeyWeights = tensor.rankedSgd(keyWeights, 0.01)
+        updatedValueWeights = tensor.rankedSgd(valueWeights, 0.01)
+        updatedOutputWeights = tensor.rankedSgd(outputWeights, 0.01)
+        return tensor.rankedValues(updatedFeedForwardIn)
+
+test "transformer encoder executes attention residuals normalization and FFN":
+    output = transformerEncoder()
+    assert(size(output) == 6)
+    assert(output[0] > 0.99 and output[1] < -0.99)
+
+test "reverse pass and SGD update transformer weights":
+    updated = transformerTrainStep()
+    assert(size(updated) == 8)
+    assert(updated != [0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3])
 
 def main():
-    print(transformerBlock())
+    print(transformerEncoder())
+    print(transformerTrainStep())

@@ -1,13 +1,26 @@
-# Transformer ROCm and PyTorch baseline
+# Transformer ROCm benchmark
+
+This benchmark runs the same float64 transformer encoder forward pass and
+reverse-mode training step in Severian and PyTorch on an AMD GPU. The graph has
+scaled dot-product self-attention, row softmax, residual connections, two layer
+normalizations, a `2 -> 4 -> 2` ReLU FFN, mean-square loss, backward kernels,
+and an SGD update.
 
 Run from the repository root:
 
 ```sh
-python3 bench/transformer-rocm/run.py --chip gfx1100 --samples 20
+python3 bench/transformer-rocm/run.py --chip gfx1101 --iterations 20 --warmup 3
 ```
 
-The runner checks that the `with gpu:` example reaches outlined `gpu.module`
-kernels with a matching `#rocdl.target`, then compares fresh-process execution
-of the current Severian CPU native binary and an equivalent float64 PyTorch CPU
-program. This deliberately does not publish a Severian-versus-PyTorch GPU speed
-claim: executable ROCm linking and explicit tensor transfers are still absent.
+Severian timing happens inside one persistent process after warmup, so ROCm
+initialization, code-object loading, and compilation are excluded. Each tensor
+kernel currently synchronizes its HIP stream. PyTorch uses its ROCm `cuda`
+surface and synchronizes around each measured sample.
+
+The checked-in dataset is intentionally tiny (3 tokens, hidden width 2, one
+head, FFN width 4) so it is a correctness and launch-overhead baseline, not a
+throughput claim. The runner rejects forward or updated-weight mismatches.
+
+Some locally packaged PyTorch ROCm builds require additional ROCm shared
+libraries. Point `LD_LIBRARY_PATH` at those libraries before running; the
+benchmark does not download or install dependencies itself.

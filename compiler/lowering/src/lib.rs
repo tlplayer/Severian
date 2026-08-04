@@ -166,10 +166,41 @@ pub fn lower(program: &Program) -> Module {
     let has_tensor_matmul = native_symbols
         .values()
         .any(|symbol| symbol == "__sev_tensor_matmul");
+    let has_tensor_transpose = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_transpose");
+    let has_tensor_scale = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_scale");
+    let has_tensor_softmax_rows = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_softmax_rows");
+    let has_tensor_layer_norm = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_layer_norm");
+    let has_tensor_relu_backward = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_relu_backward");
+    let has_tensor_softmax_backward = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_softmax_backward");
+    let has_tensor_layer_norm_backward = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_layer_norm_backward");
+    let has_tensor_autodiff = native_symbols
+        .values()
+        .any(|symbol| symbol == "__sev_tensor_backward_mse");
     output.push_str(&tensor::mlir_kernels(
         has_tensor_relu,
         has_tensor_add,
         has_tensor_matmul,
+        has_tensor_transpose,
+        has_tensor_scale,
+        has_tensor_softmax_rows,
+        has_tensor_layer_norm,
+        has_tensor_relu_backward || has_tensor_autodiff,
+        has_tensor_softmax_backward || has_tensor_autodiff,
+        has_tensor_layer_norm_backward || has_tensor_autodiff,
     ));
 
     let task_specs = task_specs(program);
@@ -3581,6 +3612,15 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
 /// Generates ABI glue for language values, classes, tasks, and channels.
 /// Concrete database and tensor providers live in `severian-platform`.
 pub fn native_bridge_source(program: &Program) -> String {
+    native_bridge_source_for_target(program, false)
+}
+
+/// C bridge using HIP managed tensor storage and MLIR's ROCm runtime ABI.
+pub fn rocm_bridge_source(program: &Program) -> String {
+    native_bridge_source_for_target(program, true)
+}
+
+fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
     let specs = task_specs(program);
     let uses_channels = uses_channels(program);
     let mut source = String::from(concat!(
@@ -3592,6 +3632,7 @@ pub fn native_bridge_source(program: &Program) -> String {
         "#include <stdio.h>\n",
         "#include <stdlib.h>\n",
         "#include <string.h>\n",
+        "#include <time.h>\n",
         "#include <sys/socket.h>\n",
         "#include <sys/ioctl.h>\n",
         "#include <sys/syscall.h>\n",
@@ -3606,6 +3647,7 @@ pub fn native_bridge_source(program: &Program) -> String {
         "typedef struct { int64_t rows; int64_t columns; double fill; } sev_matrix;\n\n",
         "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
+        "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
         "void *__sev_box_i64(int64_t raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_INT; value->as.i64 = raw; return value; }\n",
         "void *__sev_box_f64(double raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_FLOAT; value->as.f64 = raw; return value; }\n",
         "void *__sev_box_bool(bool raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_BOOL; value->as.boolean = raw; return value; }\n",
@@ -4266,6 +4308,18 @@ int64_t __sev_host_page_size(void) {
         native_symbols.contains("__sev_tensor_relu"),
         native_symbols.contains("__sev_tensor_add"),
         native_symbols.contains("__sev_tensor_matmul"),
+        native_symbols.contains("__sev_tensor_transpose"),
+        native_symbols.contains("__sev_tensor_scale"),
+        native_symbols.contains("__sev_tensor_softmax_rows"),
+        native_symbols.contains("__sev_tensor_layer_norm"),
+        native_symbols.contains("__sev_tensor_relu_backward")
+            || native_symbols.contains("__sev_tensor_backward_mse"),
+        native_symbols.contains("__sev_tensor_softmax_backward")
+            || native_symbols.contains("__sev_tensor_backward_mse"),
+        native_symbols.contains("__sev_tensor_layer_norm_backward")
+            || native_symbols.contains("__sev_tensor_backward_mse"),
+        native_symbols.contains("__sev_tensor_backward_mse"),
+        rocm,
     ));
     source
 }

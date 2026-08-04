@@ -1,19 +1,18 @@
-# Transformer-style ROCm lowering
+# Transformer encoder on ROCm
 
-This example implements the affine-plus-bias-plus-activation portion of a
-transformer feed-forward block with ranked tensors. `with gpu:` is the explicit
-parallel execution boundary. A single loop may equivalently use
-`for i in indices(values) with gpu:`; the parser represents both forms as the
-same HIR region. Replace `gpu` with `simd` to request a host-vector region.
-
-Inspect ordinary MLIR or lower the parallel linalg kernels through GPU dialect
-outlining to AMD ROCDL:
+This example uses `with gpu:` around a complete transformer encoder forward and
+training step. It includes scaled dot-product attention, softmax, residuals,
+layer normalization, a ReLU FFN, reverse-mode gradient kernels, and SGD weight
+updates. The compiler outlines the ranked tensor operations, serializes gfx11
+ROCDL code objects, links the HIP runtime, and launches them on AMD GPUs.
 
 ```sh
-sev emit-mlir main.sev
-sev emit-mlir main.sev --target rocm --chip gfx1100
+sev compile main.sev --target rocm --chip gfx1101 -o /tmp/transformer
+SEVERIAN_ROCM_TRACE=1 /tmp/transformer
 ```
 
-When `--chip` is omitted, the driver uses `SEVERIAN_AMDGPU_CHIP` or an installed
-`amdgpu-arch`. The target form currently emits target-specific ROCDL MLIR; it
-does not yet link a runnable HIP executable or insert host/device transfers.
+When `--chip` is omitted, the driver checks `SEVERIAN_AMDGPU_CHIP`,
+`amdgpu-arch`, `rocminfo`, and known AMD PCI IDs from `lspci`.
+`for i in indices(values) with gpu:` is the
+single-loop form of the same explicit placement. Replace `gpu` with `simd` for
+a host-vector execution region.

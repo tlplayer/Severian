@@ -145,6 +145,15 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
         .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 
+pub fn compile_rocm(
+    compilation: &Compilation,
+    output: &Path,
+    chip: &str,
+) -> Result<(), CompileError> {
+    severian_backend::compile_rocm(&compilation.hir, &compilation.mlir, output, chip)
+        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+}
+
 pub fn lower_to_rocdl(compilation: &Compilation, chip: &str) -> Result<Module, CompileError> {
     severian_backend::lower_to_rocdl(&compilation.mlir, chip)
         .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))

@@ -2,6 +2,7 @@
 /bin/examples/
 /bench/.work/
 /bench/results.csv
+__pycache__/
 /bench/onnx-gold/generated/
 *.mlir
 *.stderr

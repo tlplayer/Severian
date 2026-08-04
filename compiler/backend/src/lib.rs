@@ -54,6 +54,7 @@ pub fn compile_native(
                 Path::new("--lower-affine"),
                 Path::new("--convert-scf-to-cf"),
                 Path::new("--convert-cf-to-llvm"),
+                Path::new("--convert-math-to-llvm"),
                 Path::new("--convert-arith-to-llvm"),
                 Path::new("--finalize-memref-to-llvm"),
                 Path::new("--convert-func-to-llvm"),
@@ -115,9 +116,166 @@ pub fn compile_native(
     result
 }
 
+/// Compiles GPU execution regions to an AMD code object, embeds it in the host
+/// executable, and links the MLIR GPU runtime ABI to HIP.
+pub fn compile_rocm(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    chip: &str,
+) -> Result<(), BackendError> {
+    if !is_amd_gpu_chip(chip) {
+        return Err(BackendError(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid AMD GPU architecture `{chip}`; expected a name such as `gfx1101`"),
+        )));
+    }
+    if !module.as_str().contains("severian_parallel = \"gpu\"") {
+        return Err(BackendError(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "ROCm compilation requires a `with gpu:` execution region",
+        )));
+    }
+
+    let prefix = temporary_prefix("severian-rocm-compile");
+    let source = prefix.with_extension("mlir");
+    let device = prefix.with_extension("device.mlir");
+    let binary = prefix.with_extension("binary.mlir");
+    let host_gpu = prefix.with_extension("host-gpu.mlir");
+    let lowered = prefix.with_extension("llvm.mlir");
+    let llvm_ir = prefix.with_extension("ll");
+    let platform_source = prefix.with_extension("platform.c");
+    let toolkit = prepare_rocm_toolkit(&prefix)?;
+    let hip_library = find_hip_library().ok_or_else(|| {
+        BackendError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "ROCm HIP runtime was not found; set SEVERIAN_ROCM_LIB to libamdhip64.so",
+        ))
+    })?;
+    let hip_directory = hip_library.parent().expect("HIP library has a parent");
+    let mlir_opt = find_tool(&["mlir-opt", "mlir-opt-21", "/usr/lib/llvm-21/bin/mlir-opt"])
+        .ok_or_else(|| missing_tool("mlir-opt"))?;
+    let translate = find_tool(&[
+        "mlir-translate",
+        "mlir-translate-21",
+        "/usr/lib/llvm-21/bin/mlir-translate",
+    ])
+    .ok_or_else(|| missing_tool("mlir-translate"))?;
+    let clang = find_tool(&["clang", "clang-21", "/usr/bin/clang-21"])
+        .ok_or_else(|| missing_tool("clang"))?;
+    let target = PathBuf::from(format!("--rocdl-attach-target=chip={chip}"));
+    let binary_pass = PathBuf::from(format!(
+        "--gpu-module-to-binary=toolkit={}",
+        toolkit.display()
+    ));
+    let rpath = PathBuf::from(format!("-Wl,-rpath,{}", hip_directory.display()));
+
+    let result = (|| {
+        std::fs::write(&source, module.as_str())?;
+        run_tool(
+            mlir_opt.clone(),
+            &[
+                source.as_path(),
+                Path::new("--convert-linalg-to-parallel-loops"),
+                Path::new("--gpu-map-parallel-loops"),
+                Path::new("--convert-parallel-loops-to-gpu"),
+                Path::new("--gpu-kernel-outlining"),
+                target.as_path(),
+                Path::new("--lower-affine"),
+                Path::new("--convert-scf-to-cf"),
+                Path::new("--convert-index-to-llvm"),
+                Path::new("--convert-math-to-rocdl"),
+                Path::new("--convert-arith-to-llvm"),
+                Path::new("--convert-gpu-to-rocdl=runtime=HIP"),
+                Path::new("--reconcile-unrealized-casts"),
+                Path::new("-o"),
+                device.as_path(),
+            ],
+        )?;
+        run_tool(
+            mlir_opt.clone(),
+            &[
+                device.as_path(),
+                binary_pass.as_path(),
+                Path::new("-o"),
+                binary.as_path(),
+            ],
+        )?;
+        run_tool(
+            mlir_opt.clone(),
+            &[
+                binary.as_path(),
+                Path::new("--gpu-to-llvm"),
+                Path::new("-o"),
+                host_gpu.as_path(),
+            ],
+        )?;
+        run_tool(
+            mlir_opt,
+            &[
+                host_gpu.as_path(),
+                Path::new("--lower-affine"),
+                Path::new("--convert-scf-to-cf"),
+                Path::new("--convert-index-to-llvm"),
+                Path::new("--convert-math-to-llvm"),
+                Path::new("--convert-arith-to-llvm"),
+                Path::new("--finalize-memref-to-llvm"),
+                Path::new("--convert-func-to-llvm"),
+                Path::new("--reconcile-unrealized-casts"),
+                Path::new("-o"),
+                lowered.as_path(),
+            ],
+        )?;
+        run_tool(
+            translate,
+            &[
+                Path::new("--mlir-to-llvmir"),
+                lowered.as_path(),
+                Path::new("-o"),
+                llvm_ir.as_path(),
+            ],
+        )?;
+        std::fs::write(
+            &platform_source,
+            severian_lowering::rocm_bridge_source(program),
+        )?;
+        run_tool(
+            clang,
+            &[
+                llvm_ir.as_path(),
+                platform_source.as_path(),
+                hip_library.as_path(),
+                rpath.as_path(),
+                Path::new("-o"),
+                output,
+                Path::new("-lm"),
+                Path::new("-pthread"),
+            ],
+        )
+    })();
+
+    if std::env::var_os("SEVERIAN_KEEP_NATIVE_TEMPS").is_none() {
+        for temporary in [
+            &source,
+            &device,
+            &binary,
+            &host_gpu,
+            &lowered,
+            &llvm_ir,
+            &platform_source,
+        ] {
+            let _ = std::fs::remove_file(temporary);
+        }
+        if toolkit.starts_with(&prefix) {
+            let _ = std::fs::remove_dir_all(toolkit);
+        }
+    }
+    result
+}
+
 /// Outlines parallel linalg kernels and lowers their device bodies to AMD's
-/// ROCDL dialect. The result is target-specific MLIR suitable for inspection
-/// or a later ROCm object/link step.
+/// ROCDL dialect. This inspection form is also the device-lowering prefix used
+/// by `compile_rocm` before code-object serialization and HIP linking.
 pub fn lower_to_rocdl(module: &Module, chip: &str) -> Result<Module, BackendError> {
     if !is_amd_gpu_chip(chip) {
         return Err(BackendError(std::io::Error::new(
@@ -151,6 +309,7 @@ pub fn lower_to_rocdl(module: &Module, chip: &str) -> Result<Module, BackendErro
                 Path::new("--lower-affine"),
                 Path::new("--convert-scf-to-cf"),
                 Path::new("--convert-index-to-llvm"),
+                Path::new("--convert-math-to-rocdl"),
                 Path::new("--convert-arith-to-llvm"),
                 Path::new("--finalize-memref-to-llvm"),
                 Path::new("--convert-func-to-llvm"),
@@ -215,7 +374,76 @@ pub fn detect_amd_gpu_chip() -> Option<String> {
             }
         }
     }
+    if let Some(tool) = find_tool(&["lspci", "/usr/bin/lspci"]) {
+        if let Ok(output) = Command::new(tool).arg("-nn").output() {
+            if output.status.success() {
+                let devices = String::from_utf8_lossy(&output.stdout);
+                for (needle, chip) in [
+                    ("Navi 31", "gfx1100"),
+                    ("[1002:744c]", "gfx1100"),
+                    ("Navi 32", "gfx1101"),
+                    ("[1002:747e]", "gfx1101"),
+                    ("Navi 33", "gfx1102"),
+                    ("[1002:7480]", "gfx1102"),
+                ] {
+                    if devices.contains(needle) {
+                        return Some(chip.to_owned());
+                    }
+                }
+            }
+        }
+    }
     None
+}
+
+fn prepare_rocm_toolkit(prefix: &Path) -> Result<PathBuf, BackendError> {
+    if let Some(path) = std::env::var_os("SEVERIAN_ROCM_TOOLKIT").map(PathBuf::from) {
+        if path.join("llvm/bin/ld.lld").is_file() {
+            return Ok(path);
+        }
+        return Err(BackendError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "SEVERIAN_ROCM_TOOLKIT={} has no llvm/bin/ld.lld",
+                path.display()
+            ),
+        )));
+    }
+    let standard = PathBuf::from("/opt/rocm");
+    if standard.join("llvm/bin/ld.lld").is_file() {
+        return Ok(standard);
+    }
+    let lld = find_tool(&[
+        "ld.lld",
+        "/usr/lib/llvm-21/bin/ld.lld",
+        "/usr/lib/llvm-21/bin/lld",
+    ])
+    .ok_or_else(|| missing_tool("ld.lld"))?;
+    let toolkit = prefix.with_extension("rocm-toolkit");
+    let llvm_bin = toolkit.join("llvm/bin");
+    std::fs::create_dir_all(&llvm_bin)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(lld, llvm_bin.join("ld.lld"))?;
+    #[cfg(not(unix))]
+    std::fs::copy(lld, llvm_bin.join("ld.lld"))?;
+    Ok(toolkit)
+}
+
+fn find_hip_library() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("SEVERIAN_ROCM_LIB").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    [
+        "/opt/rocm/lib/libamdhip64.so",
+        "/opt/rocm/lib64/libamdhip64.so",
+        "/usr/lib/x86_64-linux-gnu/libamdhip64.so",
+        "/usr/local/lib/ollama/rocm_v7_2/libamdhip64.so.7",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .find(|path| path.is_file())
 }
 
 fn is_amd_gpu_chip(chip: &str) -> bool {

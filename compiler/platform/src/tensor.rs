@@ -1,10 +1,62 @@
-pub(crate) fn source(relu: bool, add: bool, matmul: bool) -> String {
-    if !relu && !add && !matmul {
+pub(crate) fn source(
+    relu: bool,
+    add: bool,
+    matmul: bool,
+    transpose: bool,
+    scale: bool,
+    softmax_rows: bool,
+    layer_norm: bool,
+    relu_backward: bool,
+    softmax_backward: bool,
+    layer_norm_backward: bool,
+    autodiff: bool,
+    rocm: bool,
+) -> String {
+    if !relu
+        && !add
+        && !matmul
+        && !transpose
+        && !scale
+        && !softmax_rows
+        && !layer_norm
+        && !relu_backward
+        && !softmax_backward
+        && !layer_norm_backward
+        && !autodiff
+    {
         return String::new();
     }
-    let mut source = String::from(
+    let mut source = String::new();
+    if rocm {
+        source.push_str(ROCM_RUNTIME_SOURCE);
+    } else {
+        source.push_str(
+            "static void *sev_tensor_data_allocate(size_t size) { return sev_allocate(size); }\n",
+        );
+    }
+    source.push_str(
         r#"
-typedef struct { int64_t rank; int64_t *shape; int64_t size; double *data; } sev_tensor;
+typedef enum {
+  SEV_TENSOR_LEAF,
+  SEV_TENSOR_RELU,
+  SEV_TENSOR_ADD,
+  SEV_TENSOR_MATMUL,
+  SEV_TENSOR_TRANSPOSE,
+  SEV_TENSOR_SCALE,
+  SEV_TENSOR_SOFTMAX_ROWS,
+  SEV_TENSOR_LAYER_NORM
+} sev_tensor_operation;
+typedef struct sev_tensor {
+  int64_t rank;
+  int64_t *shape;
+  int64_t size;
+  double *data;
+  sev_tensor_operation operation;
+  struct sev_tensor *left;
+  struct sev_tensor *right;
+  struct sev_tensor *gradient;
+  double scalar;
+} sev_tensor;
 typedef struct { double *allocated; double *aligned; int64_t offset; int64_t sizes[1]; int64_t strides[1]; } sev_memref_1d_f64;
 typedef struct { double *allocated; double *aligned; int64_t offset; int64_t sizes[2]; int64_t strides[2]; } sev_memref_2d_f64;
 
@@ -19,7 +71,7 @@ static sev_tensor *sev_tensor_allocate(int64_t rank, const int64_t *shape) {
     tensor->shape[axis] = shape[axis];
     tensor->size *= shape[axis];
   }
-  tensor->data = sev_allocate((size_t)tensor->size * sizeof(*tensor->data));
+  tensor->data = sev_tensor_data_allocate((size_t)tensor->size * sizeof(*tensor->data));
   return tensor;
 }
 
@@ -71,6 +123,8 @@ void *__sev_tensor_relu(void *input_raw) {
   sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
   sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
   _mlir_ciface___sev_linalg_relu(&input_memref, &output_memref);
+  output->operation = SEV_TENSOR_RELU;
+  output->left = input;
   return output;
 }
 "#,
@@ -90,6 +144,9 @@ void *__sev_tensor_add(void *left_raw, void *right_raw) {
   sev_memref_1d_f64 right_memref = sev_tensor_memref_1d(right);
   sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
   _mlir_ciface___sev_linalg_add(&left_memref, &right_memref, &output_memref);
+  output->operation = SEV_TENSOR_ADD;
+  output->left = left;
+  output->right = right;
   return output;
 }
 "#,
@@ -109,10 +166,307 @@ void *__sev_tensor_matmul(void *left_raw, void *right_raw) {
   sev_memref_2d_f64 right_memref = sev_tensor_memref_2d(right);
   sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
   _mlir_ciface___sev_linalg_matmul(&left_memref, &right_memref, &output_memref);
+  output->operation = SEV_TENSOR_MATMUL;
+  output->left = left;
+  output->right = right;
   return output;
+}
+"#,
+        );
+    }
+    if transpose {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_transpose(sev_memref_2d_f64 *, sev_memref_2d_f64 *);
+void *__sev_tensor_transpose(void *input_raw) {
+  sev_tensor *input = input_raw;
+  if (input->rank != 2) abort();
+  int64_t output_shape[2] = {input->shape[1], input->shape[0]};
+  sev_tensor *output = sev_tensor_allocate(2, output_shape);
+  sev_memref_2d_f64 input_memref = sev_tensor_memref_2d(input);
+  sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
+  _mlir_ciface___sev_linalg_transpose(&input_memref, &output_memref);
+  output->operation = SEV_TENSOR_TRANSPOSE;
+  output->left = input;
+  return output;
+}
+"#,
+        );
+    }
+    if scale {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_scale(sev_memref_1d_f64 *, double, sev_memref_1d_f64 *);
+void *__sev_tensor_scale(void *input_raw, double scale) {
+  sev_tensor *input = input_raw;
+  sev_tensor *output = sev_tensor_allocate(input->rank, input->shape);
+  sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
+  sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
+  _mlir_ciface___sev_linalg_scale(&input_memref, scale, &output_memref);
+  output->operation = SEV_TENSOR_SCALE;
+  output->left = input;
+  output->scalar = scale;
+  return output;
+}
+"#,
+        );
+    }
+    if softmax_rows {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_softmax_rows(sev_memref_2d_f64 *, sev_memref_2d_f64 *);
+void *__sev_tensor_softmax_rows(void *input_raw) {
+  sev_tensor *input = input_raw;
+  if (input->rank != 2) abort();
+  sev_tensor *output = sev_tensor_allocate(2, input->shape);
+  sev_memref_2d_f64 input_memref = sev_tensor_memref_2d(input);
+  sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
+  _mlir_ciface___sev_linalg_softmax_rows(&input_memref, &output_memref);
+  output->operation = SEV_TENSOR_SOFTMAX_ROWS;
+  output->left = input;
+  return output;
+}
+"#,
+        );
+    }
+    if layer_norm {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_layer_norm(sev_memref_2d_f64 *, double, sev_memref_2d_f64 *);
+void *__sev_tensor_layer_norm(void *input_raw, double epsilon) {
+  sev_tensor *input = input_raw;
+  if (input->rank != 2 || epsilon <= 0.0) abort();
+  sev_tensor *output = sev_tensor_allocate(2, input->shape);
+  sev_memref_2d_f64 input_memref = sev_tensor_memref_2d(input);
+  sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
+  _mlir_ciface___sev_linalg_layer_norm(&input_memref, epsilon, &output_memref);
+  output->operation = SEV_TENSOR_LAYER_NORM;
+  output->left = input;
+  output->scalar = epsilon;
+  return output;
+}
+"#,
+        );
+    }
+    if relu_backward {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_relu_backward(sev_memref_1d_f64 *, sev_memref_1d_f64 *, sev_memref_1d_f64 *);
+void *__sev_tensor_relu_backward(void *input_raw, void *upstream_raw) {
+  sev_tensor *input = input_raw;
+  sev_tensor *upstream = upstream_raw;
+  if (input->size != upstream->size) abort();
+  sev_tensor *output = sev_tensor_allocate(input->rank, input->shape);
+  sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
+  sev_memref_1d_f64 upstream_memref = sev_tensor_memref_1d(upstream);
+  sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
+  _mlir_ciface___sev_linalg_relu_backward(&input_memref, &upstream_memref, &output_memref);
+  return output;
+}
+"#,
+        );
+    }
+    if softmax_backward {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_softmax_backward(sev_memref_2d_f64 *, sev_memref_2d_f64 *, sev_memref_2d_f64 *);
+void *__sev_tensor_softmax_backward(void *softmax_raw, void *upstream_raw) {
+  sev_tensor *softmax = softmax_raw;
+  sev_tensor *upstream = upstream_raw;
+  if (softmax->rank != 2 || upstream->rank != 2 || softmax->size != upstream->size) abort();
+  sev_tensor *output = sev_tensor_allocate(2, softmax->shape);
+  sev_memref_2d_f64 softmax_memref = sev_tensor_memref_2d(softmax);
+  sev_memref_2d_f64 upstream_memref = sev_tensor_memref_2d(upstream);
+  sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
+  _mlir_ciface___sev_linalg_softmax_backward(&softmax_memref, &upstream_memref, &output_memref);
+  return output;
+}
+"#,
+        );
+    }
+    if layer_norm_backward {
+        source.push_str(
+            r#"
+extern void _mlir_ciface___sev_linalg_layer_norm_backward(sev_memref_2d_f64 *, sev_memref_2d_f64 *, double, sev_memref_2d_f64 *);
+void *__sev_tensor_layer_norm_backward(void *input_raw, void *upstream_raw, double epsilon) {
+  sev_tensor *input = input_raw;
+  sev_tensor *upstream = upstream_raw;
+  if (input->rank != 2 || upstream->rank != 2 || input->size != upstream->size || epsilon <= 0.0) abort();
+  sev_tensor *output = sev_tensor_allocate(2, input->shape);
+  sev_memref_2d_f64 input_memref = sev_tensor_memref_2d(input);
+  sev_memref_2d_f64 upstream_memref = sev_tensor_memref_2d(upstream);
+  sev_memref_2d_f64 output_memref = sev_tensor_memref_2d(output);
+  _mlir_ciface___sev_linalg_layer_norm_backward(&input_memref, &upstream_memref, epsilon, &output_memref);
+  return output;
+}
+"#,
+        );
+    }
+    if autodiff {
+        source.push_str(
+            r#"
+static void sev_tensor_detach(sev_tensor *value) {
+  value->operation = SEV_TENSOR_LEAF;
+  value->left = NULL;
+  value->right = NULL;
+}
+
+static void sev_tensor_accumulate_gradient(sev_tensor *value, sev_tensor *gradient) {
+  sev_tensor_detach(gradient);
+  if (!value->gradient) {
+    value->gradient = gradient;
+    return;
+  }
+  value->gradient = __sev_tensor_add(value->gradient, gradient);
+  sev_tensor_detach(value->gradient);
+}
+
+static void sev_tensor_backward(sev_tensor *value, sev_tensor *upstream) {
+  sev_tensor_accumulate_gradient(value, upstream);
+  switch (value->operation) {
+    case SEV_TENSOR_LEAF:
+      return;
+    case SEV_TENSOR_RELU:
+      sev_tensor_backward(value->left, __sev_tensor_relu_backward(value->left, upstream));
+      return;
+    case SEV_TENSOR_ADD:
+      sev_tensor_backward(value->left, upstream);
+      sev_tensor_backward(value->right, upstream);
+      return;
+    case SEV_TENSOR_MATMUL: {
+      sev_tensor *right_transpose = __sev_tensor_transpose(value->right);
+      sev_tensor *left_transpose = __sev_tensor_transpose(value->left);
+      sev_tensor_backward(value->left, __sev_tensor_matmul(upstream, right_transpose));
+      sev_tensor_backward(value->right, __sev_tensor_matmul(left_transpose, upstream));
+      return;
+    }
+    case SEV_TENSOR_TRANSPOSE:
+      sev_tensor_backward(value->left, __sev_tensor_transpose(upstream));
+      return;
+    case SEV_TENSOR_SCALE:
+      sev_tensor_backward(value->left, __sev_tensor_scale(upstream, value->scalar));
+      return;
+    case SEV_TENSOR_SOFTMAX_ROWS:
+      sev_tensor_backward(value->left, __sev_tensor_softmax_backward(value, upstream));
+      return;
+    case SEV_TENSOR_LAYER_NORM:
+      sev_tensor_backward(value->left, __sev_tensor_layer_norm_backward(value->left, upstream, value->scalar));
+      return;
+  }
+  abort();
+}
+
+void __sev_tensor_backward_mse(void *output_raw) {
+  sev_tensor *output = output_raw;
+  if (!output || output->size <= 0) abort();
+  sev_tensor *seed = __sev_tensor_scale(output, 2.0 / (double)output->size);
+  sev_tensor_detach(seed);
+  sev_tensor_backward(output, seed);
+}
+
+void *__sev_tensor_gradient(void *value_raw) {
+  sev_tensor *value = value_raw;
+  if (!value || !value->gradient) abort();
+  return value->gradient;
+}
+
+void *__sev_tensor_sgd(void *value_raw, double learning_rate) {
+  sev_tensor *value = value_raw;
+  if (!value || !value->gradient || learning_rate < 0.0) abort();
+  sev_tensor *step = __sev_tensor_scale(value->gradient, -learning_rate);
+  sev_tensor *updated = __sev_tensor_add(value, step);
+  sev_tensor_detach(updated);
+  return updated;
 }
 "#,
         );
     }
     source
 }
+
+const ROCM_RUNTIME_SOURCE: &str = r#"
+typedef int hipError_t;
+typedef void *hipModule_t;
+typedef void *hipFunction_t;
+typedef void *hipStream_t;
+
+extern hipError_t hipInit(unsigned int);
+extern hipError_t hipMallocManaged(void **, size_t, unsigned int);
+extern hipError_t hipModuleLoadData(hipModule_t *, const void *);
+extern hipError_t hipModuleUnload(hipModule_t);
+extern hipError_t hipModuleGetFunction(hipFunction_t *, hipModule_t, const char *);
+extern hipError_t hipModuleLaunchKernel(hipFunction_t, unsigned int, unsigned int, unsigned int,
+                                       unsigned int, unsigned int, unsigned int, unsigned int,
+                                       hipStream_t, void **, void **);
+extern hipError_t hipStreamCreate(hipStream_t *);
+extern hipError_t hipStreamSynchronize(hipStream_t);
+extern hipError_t hipStreamDestroy(hipStream_t);
+extern const char *hipGetErrorString(hipError_t);
+
+static void sev_hip_check(hipError_t result, const char *operation) {
+  if (result == 0) return;
+  const char *message = hipGetErrorString(result);
+  fprintf(stderr, "Severian ROCm failure in %s: %s (%d)\n", operation,
+          message ? message : "unknown HIP error", result);
+  abort();
+}
+
+static bool sev_rocm_trace_enabled(void) {
+  const char *value = getenv("SEVERIAN_ROCM_TRACE");
+  return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static void *sev_tensor_data_allocate(size_t size) {
+  void *value = NULL;
+  sev_hip_check(hipInit(0), "hipInit");
+  sev_hip_check(hipMallocManaged(&value, size ? size : 1, 1), "hipMallocManaged");
+  memset(value, 0, size);
+  return value;
+}
+
+void *mgpuModuleLoad(void *data, size_t size) {
+  hipModule_t module = NULL;
+  sev_hip_check(hipInit(0), "hipInit");
+  sev_hip_check(hipModuleLoadData(&module, data), "hipModuleLoadData");
+  if (sev_rocm_trace_enabled()) fprintf(stderr, "severian-rocm: loaded code object (%zu bytes)\n", size);
+  return module;
+}
+
+void mgpuModuleUnload(hipModule_t module) {
+  sev_hip_check(hipModuleUnload(module), "hipModuleUnload");
+}
+
+void *mgpuModuleGetFunction(hipModule_t module, const char *name) {
+  hipFunction_t function = NULL;
+  sev_hip_check(hipModuleGetFunction(&function, module, name), "hipModuleGetFunction");
+  return function;
+}
+
+void mgpuLaunchKernel(hipFunction_t function, intptr_t grid_x, intptr_t grid_y,
+                      intptr_t grid_z, intptr_t block_x, intptr_t block_y,
+                      intptr_t block_z, int32_t shared_memory, hipStream_t stream,
+                      void **parameters, void **extra, size_t parameter_count) {
+  if (sev_rocm_trace_enabled())
+    fprintf(stderr, "severian-rocm: launch grid=(%ld,%ld,%ld) block=(%ld,%ld,%ld) args=%zu\n",
+            grid_x, grid_y, grid_z, block_x, block_y, block_z, parameter_count);
+  sev_hip_check(hipModuleLaunchKernel(function, (unsigned int)grid_x, (unsigned int)grid_y,
+                                     (unsigned int)grid_z, (unsigned int)block_x,
+                                     (unsigned int)block_y, (unsigned int)block_z,
+                                     (unsigned int)shared_memory, stream, parameters, extra),
+                "hipModuleLaunchKernel");
+}
+
+void *mgpuStreamCreate(void) {
+  hipStream_t stream = NULL;
+  sev_hip_check(hipStreamCreate(&stream), "hipStreamCreate");
+  return stream;
+}
+
+void mgpuStreamSynchronize(hipStream_t stream) {
+  sev_hip_check(hipStreamSynchronize(stream), "hipStreamSynchronize");
+}
+
+void mgpuStreamDestroy(hipStream_t stream) {
+  sev_hip_check(hipStreamDestroy(stream), "hipStreamDestroy");
+}
+"#;
