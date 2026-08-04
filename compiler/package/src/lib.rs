@@ -82,6 +82,44 @@ pub fn find_manifest(source: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Resolves the first binary target for `sev build` from the nearest manifest.
+pub fn default_binary_source(directory: &Path) -> Result<PathBuf, PackageError> {
+    let direct = directory.join("main.sev");
+    if direct.is_file() {
+        return Ok(direct);
+    }
+    let manifest_path = directory
+        .ancestors()
+        .map(|ancestor| ancestor.join("Severian.toml"))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            PackageError::Manifest(format!(
+                "could not find `main.sev` or Severian.toml from {}",
+                directory.display()
+            ))
+        })?;
+    let manifest = parse_manifest(&manifest_path)?;
+    let binary_path = manifest
+        .get("bin")
+        .and_then(toml::Value::as_array)
+        .and_then(|binaries| binaries.first())
+        .and_then(toml::Value::as_table)
+        .and_then(|binary| binary.get("path"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("src/main.sev");
+    let source = manifest_path
+        .parent()
+        .expect("a manifest path has a parent")
+        .join(binary_path);
+    if !source.is_file() {
+        return Err(PackageError::Manifest(format!(
+            "binary source {} does not exist",
+            source.display()
+        )));
+    }
+    Ok(source)
+}
+
 pub fn load_path_dependency_sources(manifest_path: &Path) -> Result<Vec<String>, PackageError> {
     let mut visited = HashSet::new();
     let mut sources = Vec::new();

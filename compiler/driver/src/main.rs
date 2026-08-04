@@ -11,7 +11,16 @@ fn main() {
     }
 }
 
-fn execute(args: Vec<String>) -> Result<(), String> {
+fn execute(mut args: Vec<String>) -> Result<(), String> {
+    if args.first().map(String::as_str) == Some("build") {
+        args[0] = "compile".into();
+        if args.get(1).is_none_or(|argument| argument.starts_with('-')) {
+            let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+            let source = severian_package::default_binary_source(&directory)
+                .map_err(|error| error.to_string())?;
+            args.insert(1, source.to_string_lossy().into_owned());
+        }
+    }
     let Some(command) = args.first().map(String::as_str) else {
         return Err(usage());
     };
@@ -118,7 +127,8 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 
 fn usage() -> String {
     concat!(
-        "usage: sev <check|emit-mlir|emit-test-mlir|compile|compile-tests|run|test> <source.sev> [options]\n",
+        "usage: sev <build|check|emit-mlir|emit-test-mlir|compile|compile-tests|run|test> [source.sev] [options]\n",
+        "  build: compile source.sev, or the current package's first binary target\n",
         "  emit-mlir target options: --target rocm [--chip gfx1100]\n",
         "  compile options: [-o executable] [--target rocm [--chip gfx1101]]\n",
         "  compile-tests options: -o executable\n",
