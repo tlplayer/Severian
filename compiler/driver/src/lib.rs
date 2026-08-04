@@ -105,7 +105,10 @@ fn compile_ast(
     let fusion_aliases = interfaces
         .iter()
         .flat_map(|interface| interface.compiler.fusion_aliases.iter().cloned());
-    severian_passes::standard_pipeline(fusion_rules, fusion_aliases)
+    let graph_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.graph_rules.iter().cloned());
+    severian_passes::standard_pipeline_with_graph(fusion_rules, fusion_aliases, graph_rules)
         .run(&mut optimized_hir)
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
     let mlir = severian_lowering::lower(&optimized_hir);

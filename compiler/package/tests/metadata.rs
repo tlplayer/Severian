@@ -1,4 +1,4 @@
-use severian_package::load_official_interfaces;
+use severian_package::{load_official_interfaces, GraphOperation};
 use std::path::PathBuf;
 
 fn parse(source: &str) -> severian_ast::Module {
@@ -25,6 +25,9 @@ fn loads_package_owned_symbols_and_fusion_contracts() {
         .fusion_aliases
         .iter()
         .any(|alias| { alias.function == "models.activation" && alias.target == "tensor.relu" }));
+    assert!(models.compiler.graph_rules.iter().any(|rule| {
+        rule.function == "models.graphMatmul" && rule.operation == GraphOperation::Matmul
+    }));
     let tensor = interfaces
         .iter()
         .find(|interface| interface.name == "tensor")

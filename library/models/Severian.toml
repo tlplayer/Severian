@@ -34,3 +34,16 @@ sigmoidActivation = "tensor.fastSigmoid"
 tanhActivation = "tensor.fastTanh"
 geluActivation = "tensor.gelu"
 swishActivation = "tensor.swish"
+
+# These semantic roles let the compiler optimize model graphs without baking
+# the public `models` API names into a compiler pass.
+[package.metadata.compiler.graph-operations]
+graphInput = "input"
+graphRelu = "relu"
+graphAdd = "add"
+graphMatmul = "matmul"
+graphTranspose = "transpose"
+graphScale = "scale"
+graphSoftmaxRows = "softmax-rows"
+graphLayerNorm = "layer-norm"
+runGraph = "run"

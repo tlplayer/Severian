@@ -85,6 +85,7 @@ path = "benchmark.sev"
 [dependencies]
 parallel = { path = "../../../library/parallel", version = "0.1.0" }
 tensor = { path = "../../../library/tensor", version = "0.1.0" }
+models = { path = "../../../library/models", version = "0.1.0" }
 '''
     )
 

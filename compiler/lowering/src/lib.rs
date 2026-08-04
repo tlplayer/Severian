@@ -190,14 +190,17 @@ pub fn lower(program: &Program) -> Module {
     let has_tensor_autodiff = native_symbols
         .values()
         .any(|symbol| symbol == "__sev_tensor_backward_mse");
+    let has_model_graph = native_symbols
+        .values()
+        .any(|symbol| symbol.starts_with("__sev_model_graph_"));
     output.push_str(&tensor::mlir_kernels(
-        has_tensor_relu,
-        has_tensor_add,
-        has_tensor_matmul,
-        has_tensor_transpose,
-        has_tensor_scale,
-        has_tensor_softmax_rows,
-        has_tensor_layer_norm,
+        has_tensor_relu || has_model_graph,
+        has_tensor_add || has_model_graph,
+        has_tensor_matmul || has_model_graph,
+        has_tensor_transpose || has_model_graph,
+        has_tensor_scale || has_model_graph,
+        has_tensor_softmax_rows || has_model_graph,
+        has_tensor_layer_norm || has_model_graph,
         has_tensor_relu_backward || has_tensor_autodiff,
         has_tensor_softmax_backward || has_tensor_autodiff,
         has_tensor_layer_norm_backward || has_tensor_autodiff,
@@ -4304,14 +4307,17 @@ int64_t __sev_host_page_size(void) {
         .iter()
         .filter_map(|function| function.native_symbol.as_deref())
         .collect::<HashSet<_>>();
+    let has_model_graph = native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_model_graph_"));
     source.push_str(&severian_platform::tensor_source(
-        native_symbols.contains("__sev_tensor_relu"),
-        native_symbols.contains("__sev_tensor_add"),
-        native_symbols.contains("__sev_tensor_matmul"),
-        native_symbols.contains("__sev_tensor_transpose"),
-        native_symbols.contains("__sev_tensor_scale"),
-        native_symbols.contains("__sev_tensor_softmax_rows"),
-        native_symbols.contains("__sev_tensor_layer_norm"),
+        native_symbols.contains("__sev_tensor_relu") || has_model_graph,
+        native_symbols.contains("__sev_tensor_add") || has_model_graph,
+        native_symbols.contains("__sev_tensor_matmul") || has_model_graph,
+        native_symbols.contains("__sev_tensor_transpose") || has_model_graph,
+        native_symbols.contains("__sev_tensor_scale") || has_model_graph,
+        native_symbols.contains("__sev_tensor_softmax_rows") || has_model_graph,
+        native_symbols.contains("__sev_tensor_layer_norm") || has_model_graph,
         native_symbols.contains("__sev_tensor_relu_backward")
             || native_symbols.contains("__sev_tensor_backward_mse"),
         native_symbols.contains("__sev_tensor_softmax_backward")
@@ -4321,6 +4327,9 @@ int64_t __sev_host_page_size(void) {
         native_symbols.contains("__sev_tensor_backward_mse"),
         rocm,
     ));
+    if has_model_graph {
+        source.push_str(&severian_platform::model_graph_source(rocm));
+    }
     source
 }
 

@@ -20,12 +20,32 @@ pub struct FusionAlias {
     pub target: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GraphOperation {
+    Input,
+    Relu,
+    Add,
+    Matmul,
+    Transpose,
+    Scale,
+    SoftmaxRows,
+    LayerNorm,
+    Run,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRule {
+    pub function: String,
+    pub operation: GraphOperation,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompilerMetadata {
     pub symbols: HashMap<String, String>,
     pub external_functions: Vec<String>,
     pub fusion_rules: Vec<FusionRule>,
     pub fusion_aliases: Vec<FusionAlias>,
+    pub graph_rules: Vec<GraphRule>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -341,11 +361,53 @@ fn compiler_metadata(
         }
     }
     fusion_rules.sort_by(|left, right| left.function.cmp(&right.function));
+
+    let mut graph_rules = compiler
+        .get("graph-operations")
+        .and_then(toml::Value::as_table)
+        .map(|operations| {
+            operations
+                .iter()
+                .map(|(function, operation)| {
+                    let operation = operation.as_str().ok_or_else(|| {
+                        metadata_error(
+                            manifest_path,
+                            format!("graph operation `{function}` must name an operation kind"),
+                        )
+                    })?;
+                    let operation = match operation {
+                        "input" => GraphOperation::Input,
+                        "relu" => GraphOperation::Relu,
+                        "add" => GraphOperation::Add,
+                        "matmul" => GraphOperation::Matmul,
+                        "transpose" => GraphOperation::Transpose,
+                        "scale" => GraphOperation::Scale,
+                        "softmax-rows" => GraphOperation::SoftmaxRows,
+                        "layer-norm" => GraphOperation::LayerNorm,
+                        "run" => GraphOperation::Run,
+                        other => {
+                            return Err(metadata_error(
+                                manifest_path,
+                                format!("unknown graph operation kind `{other}`"),
+                            ));
+                        }
+                    };
+                    Ok(GraphRule {
+                        function: format!("{package}.{function}"),
+                        operation,
+                    })
+                })
+                .collect::<Result<Vec<_>, PackageError>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    graph_rules.sort_by(|left, right| left.function.cmp(&right.function));
     Ok(CompilerMetadata {
         symbols,
         external_functions,
         fusion_rules,
         fusion_aliases,
+        graph_rules,
     })
 }
 

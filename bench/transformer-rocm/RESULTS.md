@@ -21,3 +21,19 @@ operation, and allocates managed memory without reuse. The reusable autodiff
 traversal also materializes gradient tensors as separate launches. The result
 establishes a real executable baseline, but it is not yet a competitive GPU
 kernel schedule.
+
+## Model graph follow-up
+
+After adding graph capture, graph CSE, and one ROCm stream/synchronization for
+the forward graph, a 10-iteration run after 2 warmups measured `1.268 ms` per
+encoder inference and `88.848 ms` per forward/backward/SGD step. The output and
+updated FFN weights remained bit-for-bit equal to the preceding Severian result.
+
+This makes graph inference about `10.95x` faster than the eager Severian
+baseline. Against the previously measured `0.383 ms` PyTorch reference it is
+approximately `3.31x`, down from `36.28x`. Training is still about `122x` the
+previous PyTorch measurement because reverse-mode traversal and SGD remain eager
+and synchronize their kernels independently. PyTorch could not be rerun for
+this follow-up because the local ROCm wheel currently cannot load
+`libMIOpen.so.1`; its number here is explicitly the prior same-workload result,
+not a newly paired sample.

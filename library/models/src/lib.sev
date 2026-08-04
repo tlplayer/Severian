@@ -1,5 +1,64 @@
 import tensor
 
+# A graph value has the same public tensor type as its eventual result, but it
+# is only a symbolic node until runGraph crosses the execution boundary.
+native("__sev_model_graph_input") def graphInput(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_relu") def graphRelu(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_add") def graphAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_matmul") def graphMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_transpose") def graphTranspose(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_scale") def graphScale(value: Tensor[f64], scale: float) -> Tensor[f64]
+
+native("__sev_model_graph_softmax_rows") def graphSoftmaxRows(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_model_graph_layer_norm") def graphLayerNorm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+
+native("__sev_model_graph_run") def runGraph(output: Tensor[f64]) -> Tensor[f64]
+
+def transformerEncoderGraph(
+    input: Tensor[f64],
+    queryWeights: Tensor[f64],
+    keyWeights: Tensor[f64],
+    valueWeights: Tensor[f64],
+    attentionOutputWeights: Tensor[f64],
+    feedForwardInputWeights: Tensor[f64],
+    feedForwardOutputWeights: Tensor[f64],
+    attentionScale: float,
+    epsilon: float = 0.00001,
+) -> Tensor[f64]:
+    X = graphInput(input)
+    Wq = graphInput(queryWeights)
+    Wk = graphInput(keyWeights)
+    Wv = graphInput(valueWeights)
+    Wo = graphInput(attentionOutputWeights)
+    W1 = graphInput(feedForwardInputWeights)
+    W2 = graphInput(feedForwardOutputWeights)
+
+    queries = graphMatmul(X, Wq)
+    keys = graphMatmul(X, Wk)
+    values = graphMatmul(X, Wv)
+    scores = graphScale(graphMatmul(queries, graphTranspose(keys)), attentionScale)
+    attention = graphSoftmaxRows(scores)
+    context = graphMatmul(attention, values)
+    attentionOutput = graphMatmul(context, Wo)
+    normalized = graphLayerNorm(graphAdd(X, attentionOutput), epsilon)
+    hidden = graphRelu(graphMatmul(normalized, W1))
+    projected = graphMatmul(hidden, W2)
+    return graphLayerNorm(graphAdd(normalized, projected), epsilon)
+
+test "model graphs execute shared tensor structure":
+    input = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    weights = ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    X = graphInput(input)
+    W = graphInput(weights)
+    output = runGraph(graphAdd(graphMatmul(X, W), X))
+    assert(rankedValues(output) == [2.0, 4.0, 6.0, 8.0])
+
 def reluValue(x: float) -> float:
     return 0.0 if x < 0.0 else x
 

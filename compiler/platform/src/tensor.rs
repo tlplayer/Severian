@@ -31,7 +31,9 @@ pub(crate) fn source(
         source.push_str(ROCM_RUNTIME_SOURCE);
     } else {
         source.push_str(
-            "static void *sev_tensor_data_allocate(size_t size) { return sev_allocate(size); }\n",
+            "static void sev_tensor_graph_begin(void) {}\n\
+             static void sev_tensor_graph_end(void) {}\n\
+             static void *sev_tensor_data_allocate(size_t size) { return sev_allocate(size); }\n",
         );
     }
     source.push_str(
@@ -401,7 +403,11 @@ extern hipError_t hipModuleLaunchKernel(hipFunction_t, unsigned int, unsigned in
 extern hipError_t hipStreamCreate(hipStream_t *);
 extern hipError_t hipStreamSynchronize(hipStream_t);
 extern hipError_t hipStreamDestroy(hipStream_t);
+extern hipError_t hipMemsetAsync(void *, int, size_t, hipStream_t);
 extern const char *hipGetErrorString(hipError_t);
+
+static int sev_tensor_graph_depth = 0;
+static hipStream_t sev_tensor_graph_stream = NULL;
 
 static void sev_hip_check(hipError_t result, const char *operation) {
   if (result == 0) return;
@@ -416,11 +422,31 @@ static bool sev_rocm_trace_enabled(void) {
   return value && value[0] && strcmp(value, "0") != 0;
 }
 
+static void sev_tensor_graph_begin(void) {
+  if (sev_tensor_graph_depth++ == 0) {
+    sev_hip_check(hipStreamCreate(&sev_tensor_graph_stream), "hipStreamCreate(graph)");
+    if (sev_rocm_trace_enabled()) fprintf(stderr, "severian-rocm: begin optimized model graph\n");
+  }
+}
+
+static void sev_tensor_graph_end(void) {
+  if (sev_tensor_graph_depth <= 0) abort();
+  if (--sev_tensor_graph_depth == 0) {
+    sev_hip_check(hipStreamSynchronize(sev_tensor_graph_stream), "hipStreamSynchronize(graph)");
+    sev_hip_check(hipStreamDestroy(sev_tensor_graph_stream), "hipStreamDestroy(graph)");
+    sev_tensor_graph_stream = NULL;
+    if (sev_rocm_trace_enabled()) fprintf(stderr, "severian-rocm: end optimized model graph\n");
+  }
+}
+
 static void *sev_tensor_data_allocate(size_t size) {
   void *value = NULL;
   sev_hip_check(hipInit(0), "hipInit");
   sev_hip_check(hipMallocManaged(&value, size ? size : 1, 1), "hipMallocManaged");
-  memset(value, 0, size);
+  if (sev_tensor_graph_depth > 0)
+    sev_hip_check(hipMemsetAsync(value, 0, size, sev_tensor_graph_stream), "hipMemsetAsync");
+  else
+    memset(value, 0, size);
   return value;
 }
 
@@ -457,16 +483,19 @@ void mgpuLaunchKernel(hipFunction_t function, intptr_t grid_x, intptr_t grid_y,
 }
 
 void *mgpuStreamCreate(void) {
+  if (sev_tensor_graph_depth > 0) return sev_tensor_graph_stream;
   hipStream_t stream = NULL;
   sev_hip_check(hipStreamCreate(&stream), "hipStreamCreate");
   return stream;
 }
 
 void mgpuStreamSynchronize(hipStream_t stream) {
+  if (sev_tensor_graph_depth > 0 && stream == sev_tensor_graph_stream) return;
   sev_hip_check(hipStreamSynchronize(stream), "hipStreamSynchronize");
 }
 
 void mgpuStreamDestroy(hipStream_t stream) {
+  if (sev_tensor_graph_depth > 0 && stream == sev_tensor_graph_stream) return;
   sev_hip_check(hipStreamDestroy(stream), "hipStreamDestroy");
 }
 "#;

@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 
 mod database;
+mod model_graph;
 mod tensor;
 
 pub fn database_source() -> &'static str {
     database::source()
+}
+
+pub fn model_graph_source(rocm: bool) -> String {
+    model_graph::source(rocm)
 }
 
 pub fn tensor_source(

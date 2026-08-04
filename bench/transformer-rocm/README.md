@@ -13,9 +13,10 @@ python3 bench/transformer-rocm/run.py --chip gfx1101 --iterations 20 --warmup 3
 ```
 
 Severian timing happens inside one persistent process after warmup, so ROCm
-initialization, code-object loading, and compilation are excluded. Each tensor
-kernel currently synchronizes its HIP stream. PyTorch uses its ROCm `cuda`
-surface and synchronizes around each measured sample.
+initialization, code-object loading, and compilation are excluded. The model is
+captured with the `models` graph API; its compiler pass shares common nodes and
+the ROCm executor uses one stream and one synchronization for the forward graph.
+PyTorch uses its ROCm `cuda` surface and synchronizes around each measured sample.
 
 The checked-in dataset is intentionally tiny (3 tokens, hidden width 2, one
 head, FFN width 4) so it is a correctness and launch-overhead baseline, not a

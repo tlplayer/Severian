@@ -1,5 +1,6 @@
 import parallel
 import tensor
+import models
 
 def transformerEncoder() -> list[float]:
     tokens = tensor.ranked([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
@@ -10,16 +11,25 @@ def transformerEncoder() -> list[float]:
     outputBias = tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [3, 2])
 
     with gpu:
-        queries = tensor.rankedMatmul(tokens, identity)
-        keys = tensor.rankedMatmul(tokens, identity)
-        values = tensor.rankedMatmul(tokens, identity)
-        scores = tensor.rankedScale(tensor.rankedMatmul(queries, tensor.rankedTranspose(keys)), 0.7071067811865476)
-        attention = tensor.rankedSoftmaxRows(scores)
-        context = tensor.rankedMatmul(attention, values)
-        attentionResidual = tensor.rankedLayerNorm(tensor.rankedAdd(tokens, tensor.rankedMatmul(context, identity)))
-        hidden = tensor.rankedRelu(tensor.rankedAdd(tensor.rankedMatmul(attentionResidual, feedForwardIn), feedForwardBias))
-        projected = tensor.rankedAdd(tensor.rankedMatmul(hidden, feedForwardOut), outputBias)
-        output = tensor.rankedLayerNorm(tensor.rankedAdd(attentionResidual, projected))
+        X = models.graphInput(tokens)
+        identityNode = models.graphInput(identity)
+        feedForwardInNode = models.graphInput(feedForwardIn)
+        feedForwardOutNode = models.graphInput(feedForwardOut)
+        feedForwardBiasNode = models.graphInput(feedForwardBias)
+        outputBiasNode = models.graphInput(outputBias)
+
+        # The compiler shares these identical projections in the graph CSE pass.
+        queries = models.graphMatmul(X, identityNode)
+        keys = models.graphMatmul(X, identityNode)
+        values = models.graphMatmul(X, identityNode)
+        scores = models.graphScale(models.graphMatmul(queries, models.graphTranspose(keys)), 0.7071067811865476)
+        attention = models.graphSoftmaxRows(scores)
+        context = models.graphMatmul(attention, values)
+        attentionResidual = models.graphLayerNorm(models.graphAdd(X, models.graphMatmul(context, identityNode)))
+        hidden = models.graphRelu(models.graphAdd(models.graphMatmul(attentionResidual, feedForwardInNode), feedForwardBiasNode))
+        projected = models.graphAdd(models.graphMatmul(hidden, feedForwardOutNode), outputBiasNode)
+        outputNode = models.graphLayerNorm(models.graphAdd(attentionResidual, projected))
+        output = models.runGraph(outputNode)
         return tensor.rankedValues(output)
 
 def transformerTrainStep() -> list[float]:
@@ -34,21 +44,30 @@ def transformerTrainStep() -> list[float]:
     outputBias = tensor.ranked([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [3, 2])
 
     with gpu:
-        queries = tensor.rankedMatmul(tokens, queryWeights)
-        keys = tensor.rankedMatmul(tokens, keyWeights)
-        values = tensor.rankedMatmul(tokens, valueWeights)
-        rawScores = tensor.rankedMatmul(queries, tensor.rankedTranspose(keys))
-        scores = tensor.rankedScale(rawScores, 0.7071067811865476)
-        attention = tensor.rankedSoftmaxRows(scores)
-        context = tensor.rankedMatmul(attention, values)
-        contextProjection = tensor.rankedMatmul(context, outputWeights)
-        attentionPreNorm = tensor.rankedAdd(tokens, contextProjection)
-        attentionResidual = tensor.rankedLayerNorm(attentionPreNorm)
-        feedForwardPreActivation = tensor.rankedAdd(tensor.rankedMatmul(attentionResidual, feedForwardIn), feedForwardBias)
-        hidden = tensor.rankedRelu(feedForwardPreActivation)
-        projected = tensor.rankedAdd(tensor.rankedMatmul(hidden, feedForwardOut), outputBias)
-        outputPreNorm = tensor.rankedAdd(attentionResidual, projected)
-        output = tensor.rankedLayerNorm(outputPreNorm)
+        X = models.graphInput(tokens)
+        Wq = models.graphInput(queryWeights)
+        Wk = models.graphInput(keyWeights)
+        Wv = models.graphInput(valueWeights)
+        Wo = models.graphInput(outputWeights)
+        W1 = models.graphInput(feedForwardIn)
+        W2 = models.graphInput(feedForwardOut)
+        B1 = models.graphInput(feedForwardBias)
+        B2 = models.graphInput(outputBias)
+        queries = models.graphMatmul(X, Wq)
+        keys = models.graphMatmul(X, Wk)
+        values = models.graphMatmul(X, Wv)
+        rawScores = models.graphMatmul(queries, models.graphTranspose(keys))
+        scores = models.graphScale(rawScores, 0.7071067811865476)
+        attention = models.graphSoftmaxRows(scores)
+        context = models.graphMatmul(attention, values)
+        contextProjection = models.graphMatmul(context, Wo)
+        attentionPreNorm = models.graphAdd(X, contextProjection)
+        attentionResidual = models.graphLayerNorm(attentionPreNorm)
+        feedForwardPreActivation = models.graphAdd(models.graphMatmul(attentionResidual, W1), B1)
+        hidden = models.graphRelu(feedForwardPreActivation)
+        projected = models.graphAdd(models.graphMatmul(hidden, W2), B2)
+        outputPreNorm = models.graphAdd(attentionResidual, projected)
+        output = models.runGraph(models.graphLayerNorm(outputPreNorm))
 
         tensor.rankedBackwardMse(output)
         updatedFeedForwardIn = tensor.rankedSgd(feedForwardIn, 0.01)
