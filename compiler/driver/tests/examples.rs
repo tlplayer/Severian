@@ -167,6 +167,17 @@ fn ranked_tensor_example_emits_real_linalg_kernels() {
 }
 
 #[test]
+fn gpu_regions_reach_mlir_as_explicit_target_boundaries() {
+    let fixture = examples_root().join("25-transformer-rocm/main.sev");
+    let compilation = compile_path(&fixture).unwrap();
+    assert!(compilation
+        .mlir
+        .as_str()
+        .contains("severian_parallel = \"gpu\""));
+    assert!(compilation.mlir.as_str().contains("linalg.matmul"));
+}
+
+#[test]
 fn resolves_qualified_package_classes_across_the_data_infrastructure_stack() {
     let fixture = examples_root().join("23-data-infrastructure/main.sev");
     let compilation = compile_path(&fixture).unwrap();

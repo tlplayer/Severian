@@ -183,6 +183,7 @@ pub enum Instruction {
         arms: Vec<SwitchArm>,
     },
     With {
+        placement: TaskPlacement,
         resources: Vec<Expression>,
         instructions: Vec<Instruction>,
     },
@@ -388,6 +389,7 @@ fn visit_instructions_mut(
                 visit_arms_mut(arms, visitor);
             }
             Instruction::With {
+                placement: _,
                 resources,
                 instructions,
             } => {

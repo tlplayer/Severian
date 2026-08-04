@@ -1,6 +1,6 @@
 use severian_driver::{
-    compile_native, compile_native_tests, compile_path, native_test_compilation, run,
-    run_integration_tests, run_tests,
+    compile_native, compile_native_tests, compile_path, detect_amd_gpu_chip, lower_to_rocdl,
+    native_test_compilation, run, run_integration_tests, run_tests,
 };
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,19 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             print!("{}", compilation.mlir);
+        }
+        "emit-mlir" if args.len() >= 4 && args[2] == "--target" && args[3] == "rocm" => {
+            let chip = option_value(&args[4..], "--chip")
+                .map(str::to_owned)
+                .or_else(detect_amd_gpu_chip)
+                .ok_or_else(|| {
+                    "could not detect an AMD GPU; pass `--chip gfx…` or set SEVERIAN_AMDGPU_CHIP"
+                        .to_string()
+                })?;
+            let compilation =
+                compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
+            let module = lower_to_rocdl(&compilation, &chip).map_err(|error| error.to_string())?;
+            print!("{module}");
         }
         "emit-test-mlir" if args.len() == 2 => {
             let compilation =
@@ -87,9 +100,16 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 fn usage() -> String {
     concat!(
         "usage: sev <check|emit-mlir|emit-test-mlir|compile|compile-tests|run|test> <source.sev> [options]\n",
+        "  emit-mlir target options: --target rocm [--chip gfx1100]\n",
         "  compile options: -o executable\n",
         "  compile-tests options: -o executable\n",
         "  test options: --integration | --integration-only"
     )
     .into()
+}
+
+fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|pair| pair[0] == option)
+        .map(|pair| pair[1].as_str())
 }

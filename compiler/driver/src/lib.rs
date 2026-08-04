@@ -145,6 +145,15 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
         .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 
+pub fn lower_to_rocdl(compilation: &Compilation, chip: &str) -> Result<Module, CompileError> {
+    severian_backend::lower_to_rocdl(&compilation.mlir, chip)
+        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+}
+
+pub fn detect_amd_gpu_chip() -> Option<String> {
+    severian_backend::detect_amd_gpu_chip()
+}
+
 /// Build a native executable whose entry point runs every non-integration test.
 ///
 /// This is deliberately unavailable for a test-free library: emitting a no-op
@@ -524,6 +533,7 @@ fn walk_instructions<'expression>(
             Instruction::With {
                 resources,
                 instructions,
+                ..
             } => {
                 for resource in resources {
                     walk_expression(resource, visit);
@@ -985,6 +995,7 @@ fn execute_instructions(
             Instruction::With {
                 resources,
                 instructions,
+                ..
             } => {
                 for resource in resources {
                     evaluate(program, resource, variables, write_line)?;

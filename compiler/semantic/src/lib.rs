@@ -1142,10 +1142,37 @@ fn lower_block(
             }
             Stmt::With(block) => {
                 let mut resources = Vec::new();
+                let mut placement = TaskPlacement::Default;
                 for resource in &block.resources {
-                    if matches!(resource, Expr::Identifier(identifier) if matches!(identifier.name.as_str(), "self" | "runtime" | "local" | "gpu" | "simd" | "simt"))
-                    {
-                        continue;
+                    if let Expr::Identifier(identifier) = resource {
+                        match identifier.name.as_str() {
+                            "gpu" | "simd" => {
+                                if !aliases.values().any(|module| module == "parallel") {
+                                    return Err(error(
+                                        identifier.span,
+                                        format!(
+                                            "execution placement `{}` requires `import parallel`",
+                                            identifier.name
+                                        ),
+                                    ));
+                                }
+                                let requested = if identifier.name == "gpu" {
+                                    TaskPlacement::Gpu
+                                } else {
+                                    TaskPlacement::Simd
+                                };
+                                if placement != TaskPlacement::Default {
+                                    return Err(error(
+                                        identifier.span,
+                                        "an execution region accepts only one placement",
+                                    ));
+                                }
+                                placement = requested;
+                                continue;
+                            }
+                            "self" | "runtime" | "local" | "simt" => continue,
+                            _ => {}
+                        }
                     }
                     resources.push(lower_expression(resource, scope, signatures, aliases)?.0);
                 }
@@ -1158,6 +1185,7 @@ fn lower_block(
                     aliases,
                 )?;
                 instructions.push(Instruction::With {
+                    placement,
                     resources,
                     instructions: body,
                 });

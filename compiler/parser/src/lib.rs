@@ -725,7 +725,7 @@ impl Parser<'_> {
             return self.parse_while().map(Stmt::While);
         }
         if self.at(&TokenKind::For) {
-            return self.parse_for().map(Stmt::For);
+            return self.parse_for();
         }
         if self.at(&TokenKind::Switch) {
             return self.parse_switch().map(Stmt::Switch);
@@ -1014,7 +1014,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_for(&mut self) -> Result<ForStmt, ParseError> {
+    fn parse_for(&mut self) -> Result<Stmt, ParseError> {
         let start = self.expect_simple(TokenKind::For, "`for`")?.span.start;
         let first = self.expect_identifier("loop variable")?;
         let pattern = if self.take_simple(&TokenKind::Comma).is_some() {
@@ -1041,13 +1041,38 @@ impl Parser<'_> {
         };
         self.expect_simple(TokenKind::In, "`in`")?;
         let iterable = self.parse_expression()?;
+        let placement = if self.take_simple(&TokenKind::With).is_some() {
+            let placement = self.expect_identifier("for execution placement")?;
+            if !matches!(placement.name.as_str(), "gpu" | "simd") {
+                return Err(ParseError {
+                    span: placement.span,
+                    message: "a for loop supports only `with gpu` or `with simd`".into(),
+                });
+            }
+            Some(placement)
+        } else {
+            None
+        };
         self.expect_simple(TokenKind::Colon, "`:` after for")?;
         let body = self.parse_suite("for")?;
-        Ok(ForStmt {
+        let end = body.span.end;
+        let loop_statement = Stmt::For(ForStmt {
             span: Span::new(start, body.span.end),
             pattern,
             iterable,
             body,
+        });
+        Ok(if let Some(placement) = placement {
+            Stmt::With(WithBlock {
+                span: Span::new(start, end),
+                resources: vec![Expr::Identifier(placement)],
+                body: Block {
+                    span: Span::new(start, end),
+                    statements: vec![loop_statement],
+                },
+            })
+        } else {
+            loop_statement
         })
     }
 

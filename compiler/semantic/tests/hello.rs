@@ -107,6 +107,45 @@ fn retains_parallel_placement_after_validating_the_import() {
 }
 
 #[test]
+fn retains_gpu_placement_on_a_parallel_for_region() {
+    let source = concat!(
+        "import parallel\n",
+        "\n",
+        "def main():\n",
+        "    values := [1, 2]\n",
+        "    for index in indices(values) with gpu:\n",
+        "        values[index] += 1\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::With {
+        placement,
+        instructions,
+        ..
+    } = &hir.main().unwrap().instructions[1]
+    else {
+        panic!("expected placement region");
+    };
+    assert_eq!(*placement, TaskPlacement::Gpu);
+    assert!(matches!(instructions[0], Instruction::For { .. }));
+}
+
+#[test]
+fn rejects_gpu_regions_without_the_parallel_import() {
+    let source = concat!(
+        "def main():\n",
+        "    values := [1]\n",
+        "    with gpu:\n",
+        "        values[0] += 1\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("execution placement `gpu` requires `import parallel`"));
+}
+
+#[test]
 fn rejects_parallel_placement_without_the_parallel_import() {
     let source = concat!(
         "def work() -> int:\n",

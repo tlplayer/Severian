@@ -107,6 +107,25 @@ fn parses_parallel_placement_in_the_with_clause() {
 }
 
 #[test]
+fn parses_gpu_suffix_on_a_for_loop_as_an_execution_region() {
+    let source = concat!(
+        "def main():\n",
+        "    values := [1, 2]\n",
+        "    for index in indices(values) with gpu:\n",
+        "        values[index] += 1\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(main) = &module.items[0] else {
+        panic!("expected main function");
+    };
+    let Stmt::With(region) = &main.body.statements[1] else {
+        panic!("expected placement region");
+    };
+    assert!(matches!(&region.resources[0], Expr::Identifier(name) if name.name == "gpu"));
+    assert!(matches!(&region.body.statements[0], Stmt::For(_)));
+}
+
+#[test]
 fn parses_one_off_gpu_placement_without_an_explicit_owner() {
     let source = concat!(
         "def work() -> int:\n",

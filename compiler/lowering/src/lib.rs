@@ -346,6 +346,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         next_block: 0,
         terminated: false,
         is_main,
+        placement: TaskPlacement::Default,
     };
     for global in environment.globals {
         let value = context.lower_expression(&global.value);
@@ -416,6 +417,7 @@ fn lower_class_function(
         terminated: false,
         is_main: false,
         declared_return: function.return_type,
+        placement: TaskPlacement::Default,
     };
     context.lower_instructions(&function.instructions);
     if !context.terminated && function.return_type == ValueType::Unit {
@@ -442,6 +444,7 @@ struct LowerContext<'a> {
     terminated: bool,
     is_main: bool,
     declared_return: ValueType,
+    placement: TaskPlacement,
 }
 
 impl LowerContext<'_> {
@@ -803,8 +806,24 @@ impl LowerContext<'_> {
                     arms,
                     ..
                 } => self.lower_channel_switch(channels, setup.as_deref(), arms),
-                Instruction::With { instructions, .. } => {
+                Instruction::With {
+                    placement,
+                    instructions,
+                    ..
+                } => {
+                    let previous = self.placement;
+                    self.placement = *placement;
+                    if matches!(placement, TaskPlacement::Gpu | TaskPlacement::Simd) {
+                        let marker = self.fresh_value();
+                        let name = if *placement == TaskPlacement::Gpu {
+                            "gpu"
+                        } else {
+                            "simd"
+                        };
+                        writeln!(self.output, "    {marker} = llvm.mlir.constant(0 : i1) {{severian_parallel = \"{name}\"}} : i1").unwrap();
+                    }
                     self.lower_instructions(instructions);
+                    self.placement = previous;
                 }
             }
         }
@@ -3193,6 +3212,7 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
             Instruction::With {
                 resources,
                 instructions,
+                ..
             } => {
                 for resource in resources {
                     collect_expression_strings(resource, strings);
@@ -3443,6 +3463,7 @@ fn collect_task_names(instructions: &[Instruction], names: &mut Vec<String>) {
             Instruction::With {
                 resources,
                 instructions,
+                ..
             } => {
                 for resource in resources {
                     collect_task_names_expression(resource, names);

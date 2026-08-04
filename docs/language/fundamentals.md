@@ -433,6 +433,26 @@ task spawn in MLIR. A task outside such a block must keep its explicit
 import domain syntax symbols and do not wrap a function or select where its
 body executes.
 
+Data-parallel regions use the same explicit `with` vocabulary, independently
+of task ownership. A region may contain several kernels, or placement may be
+attached to one `for` loop as compact syntax:
+
+```sev
+import parallel
+
+with gpu:
+    for index in indices(values):
+        values[index] += 1
+
+for index in indices(values) with simd:
+    values[index] += 1
+```
+
+The two forms produce the same placement node in HIR. `gpu` selects GPU kernel
+outlining for supported ranked `linalg` operations; `simd` records the request
+for host-vector lowering. Existing shape-stability checks still reject a loop
+that resizes the collection it is traversing.
+
 Arguments passed to an async call are frozen by default. The child may read
 them, but it cannot mutate the caller's values. Frozen arguments need no lock.
 Code requests scoped access to a captured binding by naming it after the task

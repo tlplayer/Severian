@@ -1,0 +1,18 @@
+import parallel
+import tensor
+
+def transformerBlock() -> list[float]:
+    weights = tensor.ranked([1.0, 0.5, -1.0, 2.0], [2, 2])
+    hidden = tensor.ranked([2.0, -1.0], [2, 1])
+    bias = tensor.ranked([0.25, 0.5], [2, 1])
+
+    with gpu:
+        projected = tensor.rankedMatmul(weights, hidden)
+        activated = tensor.rankedRelu(tensor.rankedAdd(projected, bias))
+        return tensor.rankedValues(activated)
+
+test "transformer feed-forward projection is deterministic":
+    assert(transformerBlock() == [1.75, 0.0])
+
+def main():
+    print(transformerBlock())
