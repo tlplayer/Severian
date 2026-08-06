@@ -923,6 +923,10 @@ impl LowerContext<'_> {
                     (result, ValueType::Any)
                 }
             }
+            // Ownership is a static property.  Runtime representation is
+            // unchanged; clone lowering can become type-directed once HIR
+            // carries concrete collection element types.
+            Expression::Ownership { value, .. } => self.lower_expression(value),
             Expression::Function(name) => {
                 let result = self.fresh_value();
                 let symbol = source_function_symbol(name);
@@ -3551,6 +3555,7 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
             collect_task_names_expression(else_expression, names);
         }
         Expression::FusedPipeline { input, .. } => collect_task_names_expression(input, names),
+        Expression::Ownership { value, .. } => collect_task_names_expression(value, names),
         Expression::Member { object, .. }
         | Expression::Unary {
             expression: object, ..

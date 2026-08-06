@@ -220,6 +220,10 @@ pub enum Expression {
     String(String),
     Variable(String),
     Function(String),
+    Ownership {
+        op: OwnershipOp,
+        value: Box<Expression>,
+    },
     List(Vec<Expression>),
     Tuple(Vec<Expression>),
     Map(Vec<(Expression, Expression)>),
@@ -443,6 +447,7 @@ fn visit_expression_mut(expression: &mut Expression, visitor: &mut impl FnMut(&m
         | Expression::FusedPipeline { input: object, .. } => {
             visit_expression_mut(object, visitor);
         }
+        Expression::Ownership { value, .. } => visit_expression_mut(value, visitor),
         Expression::MethodCall { object, args, .. } => {
             visit_expression_mut(object, visitor);
             for arg in args {
@@ -535,6 +540,15 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Negate,
     Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnershipOp {
+    View,
+    Borrow,
+    Clone,
+    Move,
+    AddressOf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

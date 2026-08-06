@@ -622,6 +622,7 @@ fn walk_expression<'expression>(
             walk_expression(else_expression, visit);
         }
         Expression::FusedPipeline { input, .. } => walk_expression(input, visit),
+        Expression::Ownership { value, .. } => walk_expression(value, visit),
         Expression::Call { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
@@ -1208,6 +1209,7 @@ fn evaluate(
             .get(name)
             .cloned()
             .ok_or_else(|| CompileError::Execution(format!("unknown binding `{name}`"))),
+        Expression::Ownership { value, .. } => evaluate(program, value, variables, write_line),
         Expression::Index { object, index } => {
             let object = evaluate(program, object, variables, write_line)?;
             let index = evaluate(program, index, variables, write_line)?;

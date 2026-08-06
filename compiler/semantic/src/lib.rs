@@ -8,7 +8,7 @@ use severian_ast::{
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
     Expression, Function, FunctionContract as HirFunctionContract, Global, Instruction,
-    MatchPattern, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test,
+    MatchPattern, OwnershipOp, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test,
     TestMode as HirTestMode, UnaryOp, ValueType,
 };
 use severian_package::PackageInterface;
@@ -54,8 +54,6 @@ struct Binding {
     collection_len: Option<usize>,
     mutable: bool,
     field: bool,
-    moved: bool,
-    borrowed: bool,
     integer_max: Option<i64>,
     known_integer: Option<i64>,
 }
@@ -247,8 +245,6 @@ pub fn analyze_with_packages(
                     collection_len: None,
                     mutable: false,
                     field: false,
-                    moved: false,
-                    borrowed: false,
                     integer_max: None,
                     known_integer: None,
                 },
@@ -289,8 +285,6 @@ pub fn analyze_with_packages(
                     collection_len: None,
                     mutable: false,
                     field: false,
-                    moved: false,
-                    borrowed: false,
                     integer_max: None,
                     known_integer: None,
                 },
@@ -474,8 +468,6 @@ fn lower_class_function(
                 collection_len: None,
                 mutable: true,
                 field: true,
-                moved: false,
-                borrowed: false,
                 integer_max: None,
                 known_integer: None,
             },
@@ -504,8 +496,6 @@ fn lower_class_function(
                 collection_len: None,
                 mutable: false,
                 field: false,
-                moved: false,
-                borrowed: false,
                 integer_max: None,
                 known_integer: None,
             },
@@ -749,15 +739,6 @@ fn lower_block(
                         "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
                     ));
                 }
-                let ownership_source = match source {
-                    Expr::Ownership(ownership) => match ownership.value.as_ref() {
-                        Expr::Identifier(identifier) => {
-                            Some((identifier.name.clone(), ownership.op))
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                };
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
                 let declared = binding.ty.as_ref().map(lower_type).transpose()?;
                 if let Some(declared) = declared {
@@ -790,8 +771,6 @@ fn lower_block(
                             collection_len: binding.value.as_ref().and_then(collection_length),
                             mutable: binding.kind == LetKind::Changeable,
                             field: false,
-                            moved: false,
-                            borrowed: false,
                             integer_max,
                             known_integer,
                         },
@@ -802,16 +781,6 @@ fn lower_block(
                         binding.name.span,
                         format!("duplicate binding `{}`", binding.name.name),
                     ));
-                }
-                if let Some((source, operation)) = ownership_source {
-                    let source = scope
-                        .get_mut(&source)
-                        .ok_or_else(|| error(binding.span, "ownership source is not a binding"))?;
-                    match operation {
-                        AstOwnershipOp::Move => source.moved = true,
-                        AstOwnershipOp::View | AstOwnershipOp::Borrow => source.borrowed = true,
-                        AstOwnershipOp::Clone | AstOwnershipOp::AddressOf => {}
-                    }
                 }
                 instructions.push(Instruction::Let {
                     name: binding.name.name.clone(),
@@ -834,8 +803,6 @@ fn lower_block(
                             collection_len: None,
                             mutable: false,
                             field: false,
-                            moved: false,
-                            borrowed: false,
                             integer_max: None,
                             known_integer: None,
                         },
@@ -893,8 +860,6 @@ fn lower_block(
                         collection_len: None,
                         mutable: false,
                         field: false,
-                        moved: false,
-                        borrowed: false,
                         integer_max: None,
                         known_integer: None,
                     },
@@ -1222,12 +1187,6 @@ fn lower_expression(
         }
         Expr::Identifier(identifier) => {
             if let Some(binding) = scope.get(&identifier.name) {
-                if binding.moved {
-                    return Err(error(
-                        identifier.span,
-                        "E0301: A binding cannot be read after ownership has moved to another binding.",
-                    ));
-                }
                 Ok((Expression::Variable(identifier.name.clone()), binding.ty))
             } else if signatures.contains_key(&identifier.name) {
                 Ok((
@@ -1459,8 +1418,6 @@ fn lower_expression(
                     collection_len: None,
                     mutable: false,
                     field: false,
-                    moved: false,
-                    borrowed: false,
                     integer_max: None,
                     known_integer: None,
                 },
@@ -1601,13 +1558,20 @@ fn lower_expression(
         }
         Expr::Ownership(ownership) => {
             let (value, ty) = lower_expression(&ownership.value, scope, signatures, aliases)?;
-            match ownership.op {
-                AstOwnershipOp::View
-                | AstOwnershipOp::Borrow
-                | AstOwnershipOp::Clone
-                | AstOwnershipOp::Move
-                | AstOwnershipOp::AddressOf => Ok((value, ty)),
-            }
+            let op = match ownership.op {
+                AstOwnershipOp::View => OwnershipOp::View,
+                AstOwnershipOp::Borrow => OwnershipOp::Borrow,
+                AstOwnershipOp::Clone => OwnershipOp::Clone,
+                AstOwnershipOp::Move => OwnershipOp::Move,
+                AstOwnershipOp::AddressOf => OwnershipOp::AddressOf,
+            };
+            Ok((
+                Expression::Ownership {
+                    op,
+                    value: Box::new(value),
+                },
+                ty,
+            ))
         }
         Expr::ChaosRule(rule) => {
             let (function, return_type) =
@@ -1653,8 +1617,6 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
             collection_len: None,
             mutable: false,
             field: false,
-            moved: false,
-            borrowed: false,
             integer_max: None,
             known_integer: None,
         },
@@ -1669,8 +1631,6 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
                     collection_len: None,
                     mutable: false,
                     field: false,
-                    moved: false,
-                    borrowed: false,
                     integer_max: None,
                     known_integer: None,
                 },
@@ -1710,21 +1670,6 @@ fn lower_call(
         }
     }
     if let Expr::Member(member) = call.callee.as_ref() {
-        if let Expr::Identifier(object) = member.object.as_ref() {
-            if scope
-                .get(&object.name)
-                .is_some_and(|binding| binding.borrowed)
-                && matches!(
-                    member.member.name.as_str(),
-                    "append" | "push" | "remove" | "clear"
-                )
-            {
-                return Err(error(
-                    call.span,
-                    "E0302: An owner cannot be structurally mutated while an immutable borrow is live.",
-                ));
-            }
-        }
         if let Expr::Identifier(object) = member.object.as_ref() {
             if object.name == "int" && member.member.name == "parse" {
                 let args = call
@@ -2360,8 +2305,6 @@ fn lower_pattern(
                     collection_len: None,
                     mutable: false,
                     field: false,
-                    moved: false,
-                    borrowed: false,
                     integer_max: None,
                     known_integer: None,
                 },
@@ -2396,8 +2339,6 @@ fn lower_pattern(
                                         collection_len: None,
                                         mutable: false,
                                         field: false,
-                                        moved: false,
-                                        borrowed: false,
                                         integer_max: None,
                                         known_integer: None,
                                     },
@@ -2421,8 +2362,6 @@ fn lower_pattern(
                         collection_len: None,
                         mutable: false,
                         field: false,
-                        moved: false,
-                        borrowed: false,
                         integer_max: None,
                         known_integer: None,
                     },
