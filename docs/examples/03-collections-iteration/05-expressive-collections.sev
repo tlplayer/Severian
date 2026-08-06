@@ -1,0 +1,18 @@
+def normalizeFields(text: string) -> string:
+    return text.split(",").join(" | ")
+
+def summarize(values: list[int]) -> list[int]:
+    return [values.minimum(), values.maximum(), values.sum()]
+
+def consumeStack(values: list[int]) -> list[int]:
+    last = values.last()
+    popped = values.pop()
+    return [last, popped, values.last()]
+
+test "string and reduction helpers":
+    assert(normalizeFields("alpha,beta,gamma") == "alpha | beta | gamma")
+    assert(normalizeFields("a,,b") == "a |  | b")
+    assert(summarize([4, -2, 7, 1]) == [-2, 7, 10])
+
+test "stack helpers":
+    assert(consumeStack([3, 5, 8]) == [8, 8, 5])

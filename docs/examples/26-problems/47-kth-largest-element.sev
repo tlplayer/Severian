@@ -47,11 +47,17 @@ def findKthLargest(values: list[int], k: int) -> int:
                 replaceHeapMinimum(heap, value)
     return heap[0]
 
+def findKthLargestConcise(values: list[int], k: int) -> int:
+    return values.sorted()[size(values) - k]
+
 test "second largest":
     assert(findKthLargest([3, 2, 1, 5, 6, 4], 2) == 5)
+    assert(findKthLargestConcise([3, 2, 1, 5, 6, 4], 2) == 5)
 
 test "duplicates":
     assert(findKthLargest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
+    assert(findKthLargestConcise([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
 
 test "only value":
     assert(findKthLargest([-1], 1) == -1)
+    assert(findKthLargestConcise([-1], 1) == -1)

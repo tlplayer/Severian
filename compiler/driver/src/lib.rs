@@ -1976,10 +1976,212 @@ fn execute_method(
             values.borrow_mut().push(value.clone());
             return Ok(Value::Unit);
         }
+        (Value::List(values), "pop") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution("pop expects no arguments".into()));
+            }
+            return values
+                .borrow_mut()
+                .pop()
+                .ok_or_else(|| CompileError::Execution("cannot pop an empty list".into()));
+        }
+        (Value::List(values), "last") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution("last expects no arguments".into()));
+            }
+            return values
+                .borrow()
+                .last()
+                .cloned()
+                .ok_or_else(|| CompileError::Execution("an empty list has no last value".into()));
+        }
         (Value::List(values), "reversed") => {
             let mut reversed = values.borrow().clone();
             reversed.reverse();
             return Ok(Value::List(Rc::new(RefCell::new(reversed))));
+        }
+        (Value::List(values), "sorted") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "sorted expects no arguments".into(),
+                ));
+            }
+            let mut sorted = values.borrow().clone();
+            sorted.sort_by(controlled_value_ordering);
+            return Ok(Value::List(Rc::new(RefCell::new(sorted))));
+        }
+        (Value::List(values), "join") => {
+            let [Value::String(separator)] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "join expects one string separator".into(),
+                ));
+            };
+            let parts = values
+                .borrow()
+                .iter()
+                .map(|value| match value {
+                    Value::String(value) => Ok(value.clone()),
+                    _ => Err(CompileError::Execution(
+                        "join requires a list of strings".into(),
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Value::String(parts.join(separator)));
+        }
+        (Value::List(values), "sum") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution("sum expects no arguments".into()));
+            }
+            let values = values.borrow();
+            if values.iter().any(|value| matches!(value, Value::Float(_))) {
+                let mut total = 0.0;
+                for value in values.iter() {
+                    total += match value {
+                        Value::Int(value) => *value as f64,
+                        Value::Float(value) => f64::from_bits(*value),
+                        _ => {
+                            return Err(CompileError::Execution(
+                                "sum requires numeric values".into(),
+                            ))
+                        }
+                    };
+                }
+                return Ok(Value::Float(total.to_bits()));
+            }
+            let mut total = 0i64;
+            for value in values.iter() {
+                let Value::Int(value) = value else {
+                    return Err(CompileError::Execution(
+                        "sum requires numeric values".into(),
+                    ));
+                };
+                total += value;
+            }
+            return Ok(Value::Int(total));
+        }
+        (Value::List(values), "toSet") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution("toSet expects no arguments".into()));
+            }
+            let mut set = Vec::new();
+            for value in values.borrow().iter() {
+                if !set.contains(value) {
+                    set.push(value.clone());
+                }
+            }
+            return Ok(Value::Set(set));
+        }
+        (Value::Set(values), "difference") => {
+            let [Value::Set(excluded)] = args.as_slice() else {
+                return Err(CompileError::Execution("difference expects one set".into()));
+            };
+            return Ok(Value::Set(
+                values
+                    .iter()
+                    .filter(|value| !excluded.contains(value))
+                    .cloned()
+                    .collect(),
+            ));
+        }
+        (Value::Set(values), "toList") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "toList expects no arguments".into(),
+                ));
+            }
+            return Ok(Value::List(Rc::new(RefCell::new(values.clone()))));
+        }
+        (Value::List(values), "minimum" | "maximum") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(format!(
+                    "{method} expects no arguments"
+                )));
+            }
+            let values = values.borrow();
+            let mut best = values.first().cloned().ok_or_else(|| {
+                CompileError::Execution(format!("{method} requires a non-empty list"))
+            })?;
+            for value in values.iter().skip(1) {
+                let ordering = controlled_value_ordering(value, &best);
+                if (method == "minimum" && ordering.is_lt())
+                    || (method == "maximum" && ordering.is_gt())
+                {
+                    best = value.clone();
+                }
+            }
+            return Ok(best);
+        }
+        (Value::String(text), "characters") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "characters expects no arguments".into(),
+                ));
+            }
+            return Ok(Value::List(Rc::new(RefCell::new(
+                text.chars()
+                    .map(|character| Value::String(character.to_string()))
+                    .collect(),
+            ))));
+        }
+        (Value::String(text), "words") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution("words expects no arguments".into()));
+            }
+            return Ok(Value::List(Rc::new(RefCell::new(
+                text.split_whitespace()
+                    .map(|word| Value::String(word.to_owned()))
+                    .collect(),
+            ))));
+        }
+        (Value::String(text), "split") => {
+            let [Value::String(separator)] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "split expects one string separator".into(),
+                ));
+            };
+            if separator.is_empty() {
+                return Err(CompileError::Execution(
+                    "split separator cannot be empty".into(),
+                ));
+            }
+            return Ok(Value::List(Rc::new(RefCell::new(
+                text.split(separator)
+                    .map(|part| Value::String(part.to_owned()))
+                    .collect(),
+            ))));
+        }
+        (Value::String(text), "frequencies") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "frequencies expects no arguments".into(),
+                ));
+            }
+            let mut entries: Vec<(Value, Value)> = Vec::new();
+            for character in text.chars() {
+                let key = Value::String(character.to_string());
+                if let Some((_, Value::Int(count))) =
+                    entries.iter_mut().find(|(candidate, _)| candidate == &key)
+                {
+                    *count += 1;
+                } else {
+                    entries.push((key, Value::Int(1)));
+                }
+            }
+            return Ok(Value::Map(Rc::new(RefCell::new(entries))));
+        }
+        (Value::Map(entries), "keys" | "values") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(format!(
+                    "{method} expects no arguments"
+                )));
+            }
+            let values = entries
+                .borrow()
+                .iter()
+                .map(|(key, value)| if method == "keys" { key } else { value })
+                .cloned()
+                .collect();
+            return Ok(Value::List(Rc::new(RefCell::new(values))));
         }
         (Value::Int(left), "less_than" | "lessThan") => {
             let [Value::Int(right)] = args.as_slice() else {
@@ -2022,6 +2224,23 @@ fn execute_method(
             CompileError::Execution(format!("class `{class_name}` has no method `{method}`"))
         })?;
     execute_class_function(program, object, function, args, write_line)
+}
+
+fn controlled_value_ordering(left: &Value, right: &Value) -> std::cmp::Ordering {
+    match (left, right) {
+        (Value::Int(left), Value::Int(right)) => left.cmp(right),
+        (Value::Float(left), Value::Float(right)) => f64::from_bits(*left)
+            .partial_cmp(&f64::from_bits(*right))
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Int(left), Value::Float(right)) => (*left as f64)
+            .partial_cmp(&f64::from_bits(*right))
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Float(left), Value::Int(right)) => f64::from_bits(*left)
+            .partial_cmp(&(*right as f64))
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Value::String(left), Value::String(right)) => left.cmp(right),
+        _ => std::cmp::Ordering::Equal,
+    }
 }
 
 fn execute_class_function(

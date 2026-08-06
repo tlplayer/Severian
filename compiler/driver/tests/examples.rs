@@ -42,8 +42,8 @@ fn checks_and_tests_frontend_example_directories() {
         }
     }
 
-    assert_eq!(compiled, 27);
-    assert_eq!(severian_tests, 11);
+    assert_eq!(compiled, 28);
+    assert_eq!(severian_tests, 13);
 }
 
 #[test]

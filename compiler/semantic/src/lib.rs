@@ -1765,19 +1765,20 @@ fn lower_call(
                 ));
             }
         }
-        let object = lower_expression(&member.object, scope, signatures, aliases)?.0;
+        let (object, object_type) = lower_expression(&member.object, scope, signatures, aliases)?;
         let args = call
             .args
             .iter()
             .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
             .collect::<Result<Vec<_>, _>>()?;
+        let return_type = method_return_type(object_type, &member.member.name);
         return Ok((
             Expression::MethodCall {
                 object: Box::new(object),
                 method: member.member.name.clone(),
                 args,
             },
-            ValueType::Any,
+            return_type,
         ));
     }
     let Expr::Identifier(callee) = call.callee.as_ref() else {
@@ -1936,6 +1937,21 @@ fn lower_call(
         callee.span,
         format!("unknown function `{}`", callee.name),
     ))
+}
+
+fn method_return_type(object: ValueType, method: &str) -> ValueType {
+    match (object, method) {
+        (ValueType::String, "characters" | "words" | "split")
+        | (ValueType::List, "reversed" | "sorted")
+        | (ValueType::Map, "keys" | "values")
+        | (ValueType::Set, "toList") => ValueType::List,
+        (ValueType::String, "frequencies") => ValueType::Map,
+        (ValueType::List, "toSet") | (ValueType::Set, "difference") => ValueType::Set,
+        (ValueType::List, "join") => ValueType::String,
+        (ValueType::String, "length") => ValueType::Int,
+        (ValueType::List, "append") => ValueType::Unit,
+        _ => ValueType::Any,
+    }
 }
 
 fn lower_declared_call(

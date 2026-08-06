@@ -7,9 +7,7 @@ def vowel(character: string) -> bool:
     return character == "a" or character == "e" or character == "i" or character == "o" or character == "u" or character == "A" or character == "E" or character == "I" or character == "O" or character == "U"
 
 def reverseVowels(text: string) -> string:
-    characters := []
-    for index in range(0, size(text)):
-        characters.append(text[index])
+    characters := text.characters()
 
     right := size(characters) - 1
     while left < right with left := 0:
@@ -24,10 +22,7 @@ def reverseVowels(text: string) -> string:
             left += 1
             right -= 1
 
-    result := ""
-    for character in characters:
-        result += character
-    return result
+    return characters.join("")
 
 test "hello":
     assert(reverseVowels("hello") == "holle")

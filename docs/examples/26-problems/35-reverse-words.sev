@@ -4,21 +4,7 @@
 # Tags: string, two-pointers
 
 def reverseWords(text: string) -> string:
-    result := ""
-    index := size(text) - 1
-
-    while index >= 0:
-        while index >= 0 and text[index] == " ":
-            index -= 1
-        if index >= 0:
-            end = index
-            while index >= 0 and text[index] != " ":
-                index -= 1
-            if result != "":
-                result += " "
-            for character in range(index + 1, end + 1):
-                result += text[character]
-    return result
+    return text.words().reversed().join(" ")
 
 test "ordinary sentence":
     assert(reverseWords("the sky is blue") == "blue is sky the")

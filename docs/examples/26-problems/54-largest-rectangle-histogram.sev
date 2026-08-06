@@ -5,27 +5,21 @@
 
 def largestRectangleArea(heights: list[int]) -> int:
     stack := []
-    top := 0
     best := 0
     index := 0
     while index <= size(heights):
         current := 0
         if index < size(heights):
             current = heights[index]
-        while top > 0 and heights[stack[top - 1]] > current:
-            top -= 1
-            height = heights[stack[top]]
+        while size(stack) > 0 and heights[stack.last()] > current:
+            height = heights[stack.pop()]
             left := 0
-            if top > 0:
-                left = stack[top - 1] + 1
+            if size(stack) > 0:
+                left = stack.last() + 1
             area = height * (index - left)
             if area > best:
                 best = area
-        if top < size(stack):
-            stack[top] = index
-        else:
-            stack.append(index)
-        top += 1
+        stack.append(index)
         index += 1
     return best
 

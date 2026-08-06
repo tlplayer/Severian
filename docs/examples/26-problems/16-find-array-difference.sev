@@ -4,16 +4,7 @@
 # Tags: array, set
 
 def uniqueDifference(source: list[int], excluded: list[int]) -> list[int]:
-    difference := []
-    for value in source:
-        if value in excluded:
-            pass = 0
-        else:
-            if value in difference:
-                pass = 0
-            else:
-                difference.append(value)
-    return difference
+    return source.toSet().difference(excluded.toSet()).toList()
 
 def findDifference(first: list[int], second: list[int]) -> list[list[int]]:
     return [uniqueDifference(first, second), uniqueDifference(second, first)]

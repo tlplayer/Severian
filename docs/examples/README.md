@@ -20,7 +20,7 @@ paths while staying Severian-first:
 | `00-getting-started` | Smallest runnable programs and imports. |
 | `01-values-control` | Literals, bindings, operators, conditionals, loops. |
 | `02-functions-modules` | Function signatures, defaults, imports, modules. |
-| `03-collections-iteration` | Lists, tuples, maps, sets, ranges, iteration. |
+| `03-collections-iteration` | Lists, tuples, maps, sets, ranges, iteration, reductions, ordering, string splitting/joining, and stack helpers. |
 | `04-classes-traits` | Value classes, methods, traits, trait composition. |
 | `05-ownership-borrowing` | Inferred ownership plus explicit view/borrow/clone/move keywords. |
 | `06-results-patterns` | `Result`, `Option`, `?=`, `present`, `absent`, and exhaustive switching. |

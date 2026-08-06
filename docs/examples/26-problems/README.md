@@ -45,7 +45,7 @@ without duplicating its source file.
 | `13-maximum-average-subarray.sev` | LeetCode 75: Maximum Average Subarray I | Fixed-width sliding window. |
 | `14-max-consecutive-ones.sev` | LeetCode 75: Max Consecutive Ones III | Variable-width sliding window. |
 | `15-longest-subarray-after-delete.sev` | LeetCode 75: Longest Subarray After Deleting One | Sliding window with a mandatory deletion. |
-| `16-find-array-difference.sev` | LeetCode 75: Find the Difference of Two Arrays | Membership and deduplicated list construction. |
+| `16-find-array-difference.sev` | LeetCode 75: Find the Difference of Two Arrays | Set conversion, difference, and list materialization. |
 | `17-unique-occurrences.sev` | LeetCode 75: Unique Number of Occurrences | Frequency analysis and uniqueness. |
 | `18-koko-eating-bananas.sev` | LeetCode 75: Koko Eating Bananas | Binary search over an answer space. |
 | `19-successful-pairs.sev` | LeetCode 75: Successful Pairs | Pair counting and threshold arithmetic. |
@@ -63,12 +63,12 @@ without duplicating its source file.
 | `31-longest-common-subsequence.sev` | LeetCode 75: Longest Common Subsequence | One-row string DP. |
 | `32-edit-distance.sev` | LeetCode 75: Edit Distance | One-row edit DP. |
 | `33-gcd-of-strings.sev` | LeetCode 75: GCD of Strings | Euclidean arithmetic and string construction. |
-| `34-reverse-vowels.sev` | LeetCode 75: Reverse Vowels | Character lists and two pointers. |
-| `35-reverse-words.sev` | LeetCode 75: Reverse Words | Reverse scanning and whitespace normalization. |
+| `34-reverse-vowels.sev` | LeetCode 75: Reverse Vowels | String/character conversion, joining, and two pointers. |
+| `35-reverse-words.sev` | LeetCode 75: Reverse Words | Native word splitting, reversal, and joining. |
 | `36-string-compression.sev` | LeetCode 75: String Compression | In-place character mutation. |
 | `37-max-k-sum-pairs.sev` | LeetCode 75: Max K-Sum Pairs | Pair consumption and logical removal. |
 | `38-equal-row-column-pairs.sev` | LeetCode 75: Equal Row and Column Pairs | Nested collection indexing. |
-| `39-determine-close-strings.sev` | LeetCode 75: Determine if Two Strings Are Close | Character-frequency equivalence without maps. |
+| `39-determine-close-strings.sev` | LeetCode 75: Determine if Two Strings Are Close | Frequency maps, sorted views, and collection equality. |
 | `40-removing-stars.sev` | LeetCode 75: Removing Stars From a String | Logical stack truncation and string reconstruction. |
 | `41-dota2-senate.sev` | LeetCode 75: Dota2 Senate | Competing logical queues and cyclic scheduling. |
 | `42-nearest-exit.sev` | LeetCode 75: Nearest Exit from Entrance in Maze | Matrix mutation and breadth-first search. |
@@ -76,7 +76,7 @@ without duplicating its source file.
 | `44-number-of-provinces.sev` | LeetCode 75: Number of Provinces | Recursive DFS and union-find. |
 | `45-course-schedule.sev` | Top Interview 150: Course Schedule | Topological sorting with an indegree queue. |
 | `46-range-sum-mutable.sev` | Top Interview 150: Range Sum Query - Mutable | Iterative segment tree construction, update, and query. |
-| `47-kth-largest-element.sev` | LeetCode 75: Kth Largest Element | Bounded min-heap maintenance. |
+| `47-kth-largest-element.sev` | LeetCode 75: Kth Largest Element | Bounded min-heap and concise sorted variants. |
 | `48-n-queens-ii.sev` | Hard validation: N-Queens II | Recursive backtracking with arithmetic bitmasks. |
 | `49-merge-sort.sev` | Hard validation: Sort an Array | Bottom-up merge sort. |
 | `50-polynomial-string-search.sev` | Hard validation: Find First Occurrence | Polynomial rolling hash with collision verification. |
@@ -119,8 +119,9 @@ Keep observations here even when the current syntax is valid. Repeated friction
 is stronger evidence for a language or standard-library change than a single
 contrived example.
 
-- Algorithms that need a maximum currently spell out the initial element and a
-  loop because there is no general `max(values)` reduction.
+- Collections expose `minimum()`, `maximum()`, `sum()`, and `sorted()` as
+  ownership-preserving native operations. Explicit algorithm variants remain
+  in the gallery when the implementation technique itself is under test.
 - Index-sensitive algorithms use `indices(values)`, which is readable and keeps
   the collection's shape stable while iterating.
 - Returning a list still requires a concrete annotation such as `list[bool]`;
@@ -130,11 +131,13 @@ contrived example.
 - Loop initialization reads naturally for a single value (`while index <= n
   with index := 3`), while algorithms needing several loop-local cursors still
   initialize the remaining state immediately above the loop.
-- Small `minimum` and `maximum` helpers currently read more clearly than
-  repeatedly mutating a temporary inside conditionals nested in DP loops.
-- Stack algorithms currently manage a logical `top` cursor because lists do not
-  yet expose a removal operation; the resulting control flow is noticeably
-  noisier than the underlying algorithms.
+- `pop()` and `last()` remove the logical-cursor boilerplate from ordinary stack
+  algorithms. Shape-stable iteration still rejects mutation of the collection
+  being traversed.
+- `characters()`, `words()`, `split()`, and `join()` let string problems state
+  their transformation directly while lowering to native loops and buffers.
+- `frequencies()`, map `keys()`/`values()`, and set conversion/difference cover
+  common counting and membership idioms without hand-written nested scans.
 - Queue algorithms similarly keep a logical `head` cursor because removing the
   first list element would otherwise require shifting the remaining values.
 - Matrix BFS is readable with parallel row, column, and distance queues, though
