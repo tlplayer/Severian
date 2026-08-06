@@ -1,0 +1,47 @@
+import data
+import model
+from model import preprocessing
+from model import metrics
+from model import linear
+
+def main():
+    train = data.readCsv("train.csv")
+    test = data.readCsv("test.csv")
+
+    features = [
+        "Pclass",
+        "Sex",
+        "Age",
+        "SibSp",
+        "Parch",
+        "Fare",
+        "Embarked",
+    ]
+
+    pipeline = model.Pipeline([
+        preprocessing.Select(features),
+        preprocessing.Impute({
+            "Age": preprocessing.Median,
+            "Fare": preprocessing.Median,
+            "Embarked": preprocessing.MostFrequent,
+        }),
+        preprocessing.OneHot(["Sex", "Embarked"]),
+        preprocessing.Standardize(["Age", "Fare"]),
+        linear.LogisticRegression(
+            learningRate=0.05,
+            epochs=500,
+            regularization=0.001,
+        ),
+    ])
+
+    pipeline.fit(train, target="Survived")
+
+    predictions = pipeline.predict(test)
+
+    data.writeCsv(
+        "submission.csv",
+        {
+            "PassengerId": test["PassengerId"],
+            "Survived": predictions,
+        },
+    )

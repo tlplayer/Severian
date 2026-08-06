@@ -12,3 +12,4 @@ __pycache__/
 !library/*/src/lib.stdout
 !docs/examples/**/*.stderr
 !docs/examples/**/*.stdout
+*TODO.md
