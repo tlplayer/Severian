@@ -1,0 +1,26 @@
+# Track: Top Interview 150
+# Problem: 98 - Validate Binary Search Tree
+# Difficulty: medium
+# Tags: binary-search-tree, binary-tree, tree, depth-first-search, recursion
+
+def validNode(tree: list[int], present: list[bool], index: int, lower: int, upper: int, hasLower: bool, hasUpper: bool) -> bool:
+    if index >= size(tree) or not present[index]:
+        return true
+    value = tree[index]
+    if hasLower and value <= lower:
+        return false
+    if hasUpper and value >= upper:
+        return false
+    return validNode(tree, present, index * 2 + 1, lower, value, hasLower, true) and validNode(tree, present, index * 2 + 2, value, upper, true, hasUpper)
+
+def isValidBst(tree: list[int], present: list[bool]) -> bool:
+    return validNode(tree, present, 0, 0, 0, false, false)
+
+test "valid tree":
+    assert(isValidBst([2, 1, 3], [true, true, true]))
+
+test "deep violation":
+    assert(not isValidBst([5, 1, 4, 0, 0, 3, 6], [true, true, true, false, false, true, true]))
+
+test "empty tree":
+    assert(isValidBst([], []))

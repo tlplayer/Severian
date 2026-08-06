@@ -1,0 +1,50 @@
+# Track: Hard validation
+# Problem: 28 - Find the Index of the First Occurrence in a String
+# Difficulty: easy
+# Tags: string-matching, rolling-hash, hash-function, string
+
+def characterCode(character: string) -> int:
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    for index in range(0, size(alphabet)):
+        if alphabet[index] == character:
+            return index + 1
+    return 0
+
+def matchesAt(haystack: string, needle: string, start: int) -> bool:
+    for index in range(0, size(needle)):
+        if haystack[start + index] != needle[index]:
+            return false
+    return true
+
+def firstOccurrence(haystack: string, needle: string) -> int:
+    if size(needle) == 0:
+        return 0
+    if size(needle) > size(haystack):
+        return -1
+    base := 31
+    modulus := 1000003
+    power := 1
+    needleHash := 0
+    windowHash := 0
+    for index in range(0, size(needle)):
+        needleHash = (needleHash * base + characterCode(needle[index])) % modulus
+        windowHash = (windowHash * base + characterCode(haystack[index])) % modulus
+        if index + 1 < size(needle):
+            power = power * base % modulus
+    for start in range(0, size(haystack) - size(needle) + 1):
+        if windowHash == needleHash and matchesAt(haystack, needle, start):
+            return start
+        if start + size(needle) < size(haystack):
+            outgoing = characterCode(haystack[start]) * power % modulus
+            windowHash = (windowHash - outgoing + modulus) % modulus
+            windowHash = (windowHash * base + characterCode(haystack[start + size(needle)])) % modulus
+    return -1
+
+test "found at start":
+    assert(firstOccurrence("sadbutsad", "sad") == 0)
+
+test "not found":
+    assert(firstOccurrence("leetcode", "leeto") == -1)
+
+test "empty needle":
+    assert(firstOccurrence("abc", "") == 0)

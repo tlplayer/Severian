@@ -68,6 +68,8 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_string_char_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_less(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_value_size(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_value_index(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_push(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_collection_get(!llvm.ptr, i64) -> !llvm.ptr\n",
@@ -1649,9 +1651,13 @@ impl LowerContext<'_> {
                 (result, ValueType::Option)
             }
             Expression::Index { object, index } => {
-                let (mut object, object_type) = self.lower_expression(object);
+                let (object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
-                    object = self.unbox_value((object, object_type), ValueType::List).0;
+                    let index = self.lower_expression(index);
+                    let index = self.unbox_value(index, ValueType::Int).0;
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_value_index({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                    return (result, ValueType::Any);
                 }
                 let index = self.lower_expression(index);
                 let result = self.fresh_value();
@@ -1852,7 +1858,7 @@ impl LowerContext<'_> {
                     return (result, ValueType::String);
                 }
                 if function == "size" {
-                    let (mut value, ty) = args.first().cloned().unwrap();
+                    let (value, ty) = args.first().cloned().unwrap();
                     if ty == ValueType::String {
                         let result = self.fresh_value();
                         writeln!(
@@ -1863,7 +1869,9 @@ impl LowerContext<'_> {
                         return (result, ValueType::Int);
                     }
                     if ty == ValueType::Any {
-                        value = self.unbox_value((value, ty), ValueType::List).0;
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.call @__sev_value_size({value}) : (!llvm.ptr) -> i64").unwrap();
+                        return (result, ValueType::Int);
                     }
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
@@ -3760,6 +3768,8 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "void *__sev_collection_get(void *raw, int64_t index) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); return value->items[index]; }\n",
         "void __sev_collection_set(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); value->items[index] = item; }\n",
         "int64_t __sev_collection_size(void *raw) { sev_collection *value = raw; if (!value) abort(); return value->size; }\n",
+        "int64_t __sev_value_size(void *raw) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_STRING) return __sev_strlen((void *)value->as.string); if (value->kind == SEV_COLLECTION) return __sev_collection_size(value->as.pointer); abort(); }\n",
+        "void *__sev_value_index(void *raw, int64_t index) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_collection_get(value->as.pointer, index); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_char_at((void *)value->as.string, index)); abort(); }\n",
         "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
         "void *__sev_collection_reversed(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t i = value->size; i > 0; --i) __sev_collection_push(result, value->items[i - 1]); return result; }\n",
         "static double sev_fast_sigmoid(double value) { double magnitude = value < 0.0 ? -value : value; return 0.5 + value / (2.0 * (1.0 + magnitude)); }\n",

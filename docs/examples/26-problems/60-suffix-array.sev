@@ -1,0 +1,45 @@
+# Track: Hard validation
+# Problem: Suffix Array Construction
+# Difficulty: hard
+# Tags: suffix-array, string, sorting, string-matching
+
+def characterRank(character: string) -> int:
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    for index in range(0, size(alphabet)):
+        if alphabet[index] == character:
+            return index
+    return -1
+
+def suffixLess(text: string, left: int, right: int) -> bool:
+    leftIndex := left
+    rightIndex := right
+    while leftIndex < size(text) and rightIndex < size(text):
+        leftRank = characterRank(text[leftIndex])
+        rightRank = characterRank(text[rightIndex])
+        if leftRank != rightRank:
+            return leftRank < rightRank
+        leftIndex += 1
+        rightIndex += 1
+    return leftIndex == size(text) and rightIndex != size(text)
+
+def suffixArray(text: string) -> list[int]:
+    suffixes := []
+    for index in range(0, size(text)):
+        suffixes.append(index)
+    for index in range(1, size(suffixes)):
+        cursor := index
+        while cursor > 0 and suffixLess(text, suffixes[cursor], suffixes[cursor - 1]):
+            temporary = suffixes[cursor]
+            suffixes[cursor] = suffixes[cursor - 1]
+            suffixes[cursor - 1] = temporary
+            cursor -= 1
+    return suffixes
+
+test "banana":
+    assert(suffixArray("banana") == [5, 3, 1, 0, 4, 2])
+
+test "repeated character":
+    assert(suffixArray("aaa") == [2, 1, 0])
+
+test "empty text":
+    assert(suffixArray("") == [])

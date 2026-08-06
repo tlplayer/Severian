@@ -1,0 +1,44 @@
+# Track: Hard validation
+# Problem: 1584 - Min Cost to Connect All Points
+# Difficulty: medium
+# Tags: minimum-spanning-tree, graph, greedy, geometry
+
+def absolute(value: int) -> int:
+    if value < 0:
+        return 0 - value
+    return value
+
+def manhattan(first: list[int], second: list[int]) -> int:
+    return absolute(first[0] - second[0]) + absolute(first[1] - second[1])
+
+def minCostConnectPoints(points: list[list[int]]) -> int:
+    count = size(points)
+    used := [false]
+    distance := [0]
+    for index in range(1, count):
+        used.append(false)
+        distance.append(1000000000)
+    total := 0
+    for step in range(0, count):
+        chosen := -1
+        for point in range(0, count):
+            if not used[point]:
+                if chosen == -1 or distance[point] < distance[chosen]:
+                    chosen = point
+        used[chosen] = true
+        total += distance[chosen]
+        for neighbor in range(0, count):
+            if not used[neighbor]:
+                cost = manhattan(points[chosen], points[neighbor])
+                if cost < distance[neighbor]:
+                    distance[neighbor] = cost
+    return total
+
+test "five points":
+    assert(minCostConnectPoints([[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]) == 20)
+
+test "three points":
+    assert(minCostConnectPoints([[3, 12], [-2, 5], [-4, 1]]) == 18)
+
+test "single point":
+    assert(minCostConnectPoints([[0, 0]]) == 0)

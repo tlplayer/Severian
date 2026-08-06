@@ -1,7 +1,7 @@
 # Track: LeetCode 75
 # Problem: 1926 - Nearest Exit from Entrance in Maze
 # Difficulty: medium
-# Tags: matrix, breadth-first-search, queue, graph
+# Tags: matrix, breadth-first-search, queue, graph, shortest-path
 
 def nearestExit(maze: list[list[string]], entrance: list[int]) -> int:
     rowQueue := [entrance[0]]

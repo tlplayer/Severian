@@ -1,0 +1,20 @@
+# Tags: concurrency, channel, queue, fan-in
+
+def channelSuite():
+    pass = 0
+
+test "two producers":
+    messages = Channel[string] with Buffer(2)
+    first = async send "alpha" with messages
+    second = async send "beta" with messages
+    assert(await messages == "alpha")
+    assert(await messages == "beta")
+    await first, second
+
+test "integer channel":
+    values = Channel[int] with Buffer(3)
+    one = async send 3 with values
+    two = async send 5 with values
+    three = async send 8 with values
+    assert(await values + await values + await values == 16)
+    await one, two, three

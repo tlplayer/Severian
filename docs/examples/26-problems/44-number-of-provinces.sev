@@ -1,0 +1,55 @@
+# Track: LeetCode 75
+# Problem: 547 - Number of Provinces
+# Difficulty: medium
+# Tags: graph, matrix, depth-first-search, union-find
+
+def findRoot(parent: list[int], city: int) -> int:
+    root := city
+    while parent[root] != root:
+        root = parent[root]
+    return root
+
+def provincesUnionFind(connected: list[list[int]]) -> int:
+    parent := []
+    for city in indices(connected):
+        parent.append(city)
+    provinces := size(connected)
+    for first in indices(connected):
+        for second in range(first + 1, size(connected)):
+            if connected[first][second] == 1:
+                firstRoot = findRoot(parent, first)
+                secondRoot = findRoot(parent, second)
+                if firstRoot != secondRoot:
+                    parent[secondRoot] = firstRoot
+                    provinces -= 1
+    return provinces
+
+def visitProvince(connected: list[list[int]], visited: list[bool], city: int):
+    visited[city] = true
+    for neighbor in indices(connected):
+        if connected[city][neighbor] == 1 and not visited[neighbor]:
+            visitProvince(connected, visited, neighbor)
+
+def provincesDepthFirst(connected: list[list[int]]) -> int:
+    visited := []
+    for city in indices(connected):
+        visited.append(false)
+    provinces := 0
+    for city in indices(connected):
+        if not visited[city]:
+            provinces += 1
+            visitProvince(connected, visited, city)
+    return provinces
+
+test "two provinces":
+    graph = [[1, 1, 0], [1, 1, 0], [0, 0, 1]]
+    assert(provincesUnionFind(graph) == 2)
+    assert(provincesDepthFirst(graph) == 2)
+
+test "separate components":
+    graph = [[1, 0, 0], [0, 1, 1], [0, 1, 1]]
+    assert(provincesUnionFind(graph) == 2)
+
+test "single city":
+    assert(provincesUnionFind([[1]]) == 1)
+    assert(provincesDepthFirst([[1]]) == 1)

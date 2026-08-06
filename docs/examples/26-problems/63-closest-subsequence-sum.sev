@@ -1,0 +1,46 @@
+# Track: Hard validation
+# Problem: 1755 - Closest Subsequence Sum
+# Difficulty: hard
+# Tags: meet-in-the-middle, bitmask, enumeration, combinatorics
+
+def magnitude(value: int) -> int:
+    if value < 0:
+        return 0 - value
+    return value
+
+def subsetSums(values: list[int], start: int, end: int) -> list[int]:
+    length = end - start
+    combinationCount := 1
+    for index in range(0, length):
+        combinationCount *= 2
+    sums := []
+    for mask in range(0, combinationCount):
+        remaining := mask
+        total := 0
+        for offset in range(0, length):
+            if remaining % 2 == 1:
+                total += values[start + offset]
+            remaining = remaining / 2
+        sums.append(total)
+    return sums
+
+def minAbsDifference(values: list[int], goal: int) -> int:
+    middle = size(values) / 2
+    leftSums = subsetSums(values, 0, middle)
+    rightSums = subsetSums(values, middle, size(values))
+    best := magnitude(goal)
+    for left in leftSums:
+        for right in rightSums:
+            difference = magnitude(goal - left - right)
+            if difference < best:
+                best = difference
+    return best
+
+test "exact target":
+    assert(minAbsDifference([5, -7, 3, 5], 6) == 0)
+
+test "nearest target":
+    assert(minAbsDifference([7, -9, 15, -2], -5) == 1)
+
+test "single value":
+    assert(minAbsDifference([1], 3) == 2)

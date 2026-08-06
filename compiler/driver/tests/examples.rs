@@ -68,8 +68,8 @@ fn checks_and_runs_the_problem_gallery() {
         compiled += 1;
     }
 
-    assert_eq!(compiled, 43);
-    assert_eq!(tests, 137);
+    assert_eq!(compiled, 64);
+    assert_eq!(tests, 200);
 }
 
 #[test]

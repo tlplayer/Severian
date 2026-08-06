@@ -1,7 +1,7 @@
 # Track: LeetCode 75
 # Problem: 1071 - Greatest Common Divisor of Strings
 # Difficulty: easy
-# Tags: string, math
+# Tags: string, math, number-theory
 
 def gcd(left: int, right: int) -> int:
     first := left

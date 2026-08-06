@@ -1,0 +1,57 @@
+# Track: LeetCode 75
+# Problem: 215 - Kth Largest Element in an Array
+# Difficulty: medium
+# Tags: heap-priority-queue, sorting, array
+
+def pushMinHeap(heap: list[int], value: int):
+    heap.append(value)
+    child := size(heap) - 1
+    while child > 0:
+        parent = (child - 1) / 2
+        if heap[parent] <= heap[child]:
+            return
+        temporary = heap[parent]
+        heap[parent] = heap[child]
+        heap[child] = temporary
+        child = parent
+
+def replaceHeapMinimum(heap: list[int], value: int):
+    heap[0] = value
+    parent := 0
+    moving := true
+    while moving:
+        left = parent * 2 + 1
+        if left >= size(heap):
+            moving = false
+        else:
+            child := left
+            right = left + 1
+            if right < size(heap) and heap[right] < heap[left]:
+                child = right
+            if heap[parent] <= heap[child]:
+                moving = false
+            else:
+                temporary = heap[parent]
+                heap[parent] = heap[child]
+                heap[child] = temporary
+                parent = child
+
+def findKthLargest(values: list[int], k: int) -> int:
+    heap := [values[0]]
+    for index in range(1, size(values)):
+        value = values[index]
+        if size(heap) < k:
+            pushMinHeap(heap, value)
+        else:
+            if value > heap[0]:
+                replaceHeapMinimum(heap, value)
+    return heap[0]
+
+test "second largest":
+    assert(findKthLargest([3, 2, 1, 5, 6, 4], 2) == 5)
+
+test "duplicates":
+    assert(findKthLargest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
+
+test "only value":
+    assert(findKthLargest([-1], 1) == -1)

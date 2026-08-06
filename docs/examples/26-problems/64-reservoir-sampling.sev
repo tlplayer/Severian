@@ -1,0 +1,30 @@
+# Track: Hard validation
+# Problem: 398 - Random Pick Index (Reservoir variant)
+# Difficulty: medium
+# Tags: reservoir-sampling, randomized, probability-and-statistics, data-stream
+
+def reservoirSample(values: list[int], sampleSize: int, initialSeed: int) -> list[int]:
+    sample := []
+    for index in range(0, sampleSize):
+        sample.append(values[index])
+    seed := initialSeed
+    for index in range(sampleSize, size(values)):
+        seed = (seed * 1103515245 + 12345) % 2147483647
+        chosen = seed % (index + 1)
+        if chosen < sampleSize:
+            sample[chosen] = values[index]
+    return sample
+
+test "fixed sample size":
+    sample = reservoirSample([10, 20, 30, 40, 50], 2, 7)
+    assert(size(sample) == 2)
+    assert(sample[0] in [10, 20, 30, 40, 50])
+    assert(sample[1] in [10, 20, 30, 40, 50])
+
+test "seeded reproducibility":
+    first = reservoirSample([1, 2, 3, 4, 5, 6], 3, 42)
+    second = reservoirSample([1, 2, 3, 4, 5, 6], 3, 42)
+    assert(first == second)
+
+test "whole stream":
+    assert(reservoirSample([3, 5, 8], 3, 9) == [3, 5, 8])

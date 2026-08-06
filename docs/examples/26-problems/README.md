@@ -73,8 +73,45 @@ without duplicating its source file.
 | `41-dota2-senate.sev` | LeetCode 75: Dota2 Senate | Competing logical queues and cyclic scheduling. |
 | `42-nearest-exit.sev` | LeetCode 75: Nearest Exit from Entrance in Maze | Matrix mutation and breadth-first search. |
 | `43-rotting-oranges.sev` | LeetCode 75: Rotting Oranges | Multi-source breadth-first search. |
+| `44-number-of-provinces.sev` | LeetCode 75: Number of Provinces | Recursive DFS and union-find. |
+| `45-course-schedule.sev` | Top Interview 150: Course Schedule | Topological sorting with an indegree queue. |
+| `46-range-sum-mutable.sev` | Top Interview 150: Range Sum Query - Mutable | Iterative segment tree construction, update, and query. |
+| `47-kth-largest-element.sev` | LeetCode 75: Kth Largest Element | Bounded min-heap maintenance. |
+| `48-n-queens-ii.sev` | Hard validation: N-Queens II | Recursive backtracking with arithmetic bitmasks. |
+| `49-merge-sort.sev` | Hard validation: Sort an Array | Bottom-up merge sort. |
+| `50-polynomial-string-search.sev` | Hard validation: Find First Occurrence | Polynomial rolling hash with collision verification. |
+| `51-fenwick-tree.sev` | Hard validation: Range Sum Query - Mutable | Fenwick tree updates and prefix queries. |
+| `52-check-straight-line.sev` | Hard validation: Check Straight Line | Cross-product geometry. |
+| `53-quickselect.sev` | Hard validation: Kth Largest Element | In-place quickselect partitioning. |
+| `54-largest-rectangle-histogram.sev` | Hard validation: Largest Rectangle in Histogram | Monotonic stack with a sentinel iteration. |
+| `55-sliding-window-maximum.sev` | Hard validation: Sliding Window Maximum | Logical monotonic deque. |
+| `56-validate-binary-search-tree.sev` | Top Interview 150: Validate BST | Recursive bound propagation over a binary tree. |
+| `57-predict-the-winner.sev` | Hard validation: Predict the Winner | Memoized minimax and game state. |
+| `58-counting-sort.sev` | Hard validation: Sort an Array | Counting and bucket sort over signed values. |
+| `59-implement-trie.sev` | LeetCode 75: Implement Trie | Array-backed prefix-tree construction and lookup. |
+| `60-suffix-array.sev` | Hard validation: Suffix Array Construction | Lexicographic suffix ordering. |
+| `61-car-pooling.sev` | Hard validation: Car Pooling | Sweep-line deltas and prefix accumulation. |
+| `62-min-cost-connect-points.sev` | Hard validation: Min Cost to Connect Points | Prim minimum spanning tree over Manhattan distance. |
+| `63-closest-subsequence-sum.sev` | Hard validation: Closest Subsequence Sum | Meet-in-the-middle subset enumeration. |
+| `64-reservoir-sampling.sev` | Hard validation: Random Pick Index | Seeded reservoir sampling over a stream. |
 
-Progress: **43 / 75** LeetCode 75 problems, **137** attached test cases.
+Progress: **64** total problems, including **46 / 75** from LeetCode 75,
+with **200** attached test cases.
+
+## Technique coverage
+
+The gallery now directly exercises array and string processing, hash tables,
+math and number theory, dynamic programming and memoization, sorting, greedy
+algorithms, DFS and BFS, binary search, bit manipulation and arithmetic
+bitmasks, matrices, trees and binary-search trees, prefix sums, two pointers,
+heaps, simulation, counting, graphs, stacks and monotonic stacks, sliding
+windows and monotonic queues, enumeration, data-structure design,
+backtracking, union-find, segment and Fenwick trees, divide-and-conquer,
+combinatorics, tries, queues, recursion, geometry, shortest paths,
+topological sorting, string matching and rolling hashes, game theory and
+minimax, merge/counting/bucket sorting, data streams, suffix arrays,
+quickselect, sweep lines, probability, minimum spanning trees,
+meet-in-the-middle, and reservoir sampling.
 
 ## Syntax observations
 
@@ -103,6 +140,13 @@ contrived example.
 - Matrix BFS is readable with parallel row, column, and distance queues, though
   a tuple-valued queue would express the relationship between those values more
   directly.
+- A list grown entirely through a mutating helper retains its initial fixed
+  shape in semantic analysis, so heap construction seeds the first element
+  locally before delegating later insertions.
+- The off-by-one range diagnostic treats every `range(0, size(values) + 1)` as
+  collection indexing, even when the final iteration is an intentional
+  sentinel or the loop only appends to a different collection. Such loops
+  currently use explicit `while` conditions or seed-and-append construction.
 
 When a syntax or library improvement lands, update the solution and retain a
 short note describing what became simpler.

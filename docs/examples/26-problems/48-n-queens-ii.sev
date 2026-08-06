@@ -1,0 +1,36 @@
+# Track: Hard validation
+# Problem: 52 - N-Queens II
+# Difficulty: hard
+# Tags: backtracking, recursion, bitmask, combinatorics
+
+def powerOfTwo(position: int) -> int:
+    value := 1
+    for index in range(0, position):
+        value *= 2
+    return value
+
+def occupied(mask: int, position: int) -> bool:
+    return mask / powerOfTwo(position) % 2 == 1
+
+def searchQueens(size: int, row: int, columns: int, descending: int, ascending: int) -> int:
+    if row == size:
+        return 1
+    solutions := 0
+    for column in range(0, size):
+        downIndex = row - column + size - 1
+        upIndex = row + column
+        if not occupied(columns, column) and not occupied(descending, downIndex) and not occupied(ascending, upIndex):
+            solutions += searchQueens(size, row + 1, columns + powerOfTwo(column), descending + powerOfTwo(downIndex), ascending + powerOfTwo(upIndex))
+    return solutions
+
+def totalNQueens(size: int) -> int:
+    return searchQueens(size, 0, 0, 0, 0)
+
+test "one queen":
+    assert(totalNQueens(1) == 1)
+
+test "four queens":
+    assert(totalNQueens(4) == 2)
+
+test "five queens":
+    assert(totalNQueens(5) == 10)

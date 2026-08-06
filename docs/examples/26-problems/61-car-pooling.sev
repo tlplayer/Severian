@@ -1,0 +1,31 @@
+# Track: Hard validation
+# Problem: 1094 - Car Pooling
+# Difficulty: medium
+# Tags: sweep-line, prefix-sum, sorting, simulation
+
+def carPooling(trips: list[list[int]], capacity: int) -> bool:
+    lastStop := 0
+    for trip in trips:
+        if trip[2] > lastStop:
+            lastStop = trip[2]
+    changes := []
+    for stop in range(0, lastStop + 1):
+        changes.append(0)
+    for trip in trips:
+        changes[trip[1]] += trip[0]
+        changes[trip[2]] -= trip[0]
+    passengers := 0
+    for change in changes:
+        passengers += change
+        if passengers > capacity:
+            return false
+    return true
+
+test "capacity exceeded":
+    assert(not carPooling([[2, 1, 5], [3, 3, 7]], 4))
+
+test "capacity fits":
+    assert(carPooling([[2, 1, 5], [3, 3, 7]], 5))
+
+test "drop before pickup":
+    assert(carPooling([[3, 2, 7], [3, 7, 9]], 3))

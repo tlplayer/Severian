@@ -1,0 +1,21 @@
+# Tags: concurrency, lock, shared-state, data-race
+
+class Counter:
+    value: int
+
+    def increment():
+        value += 1
+
+test "locked fan out":
+    counter := Counter(0)
+    first = async counter.increment() with self and lock
+    second = async counter.increment() with self and lock
+    await first, second
+    assert(counter.value == 2)
+
+test "lock scope ends after await":
+    counter := Counter(4)
+    task = async counter.increment() with self and lock
+    await task
+    counter.increment()
+    assert(counter.value == 6)

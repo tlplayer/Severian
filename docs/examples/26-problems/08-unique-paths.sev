@@ -1,7 +1,7 @@
 # Track: LeetCode 75
 # Problem: 62 - Unique Paths
 # Difficulty: medium
-# Tags: dynamic-programming, math, matrix
+# Tags: dynamic-programming, math, matrix, combinatorics
 # Count paths from the upper-left to the lower-right of a grid when movement is
 # restricted to one cell right or one cell down.
 
