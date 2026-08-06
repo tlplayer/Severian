@@ -438,7 +438,9 @@ mod tests {
                 decorators: Vec::new(),
                 contract: None,
                 params: Vec::new(),
-                return_type: ValueType::Tensor,
+                return_type: ValueType::Tensor(severian_hir::TensorType::dynamic(
+                    severian_hir::TensorElementType::F64,
+                )),
                 instructions: vec![
                     Instruction::Let {
                         name: "left".into(),

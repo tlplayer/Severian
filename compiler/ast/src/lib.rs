@@ -777,9 +777,24 @@ pub struct TypePath {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeArg {
-    pub span: Span,
-    pub ty: Box<Type>,
+pub enum TypeArg {
+    Type { span: Span, ty: Box<Type> },
+    Dimension { span: Span, size: u64 },
+}
+
+impl TypeArg {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Type { span, .. } | Self::Dimension { span, .. } => *span,
+        }
+    }
+
+    pub fn as_type(&self) -> Option<&Type> {
+        match self {
+            Self::Type { ty, .. } => Some(ty),
+            Self::Dimension { .. } => None,
+        }
+    }
 }
 
 //

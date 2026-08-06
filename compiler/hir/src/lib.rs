@@ -123,13 +123,100 @@ pub enum ValueType {
     Tuple,
     Map,
     Set,
-    Tensor,
+    Tensor(TensorType),
     Channel,
     Function,
     Result,
     Option,
     Any,
     Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TensorElementType {
+    F32,
+    F64,
+    I32,
+    I64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TensorDimension {
+    Static(u64),
+    Dynamic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TensorType {
+    pub element: TensorElementType,
+    /// `None` is dynamic rank. Ranked tensors use the first `rank` entries.
+    pub rank: Option<u8>,
+    pub dimensions: [TensorDimension; 8],
+}
+
+impl TensorType {
+    pub const fn dynamic(element: TensorElementType) -> Self {
+        Self {
+            element,
+            rank: None,
+            dimensions: [TensorDimension::Dynamic; 8],
+        }
+    }
+
+    pub fn ranked(
+        element: TensorElementType,
+        dimensions: &[TensorDimension],
+    ) -> Result<Self, &'static str> {
+        if dimensions.len() > 8 {
+            return Err("tensor rank exceeds the supported maximum of 8");
+        }
+        let mut result = Self::dynamic(element);
+        result.rank = Some(dimensions.len() as u8);
+        result.dimensions[..dimensions.len()].copy_from_slice(dimensions);
+        Ok(result)
+    }
+
+    pub fn is_compatible_with(self, expected: Self) -> bool {
+        if self.element != expected.element {
+            return false;
+        }
+        let (Some(actual_rank), Some(expected_rank)) = (self.rank, expected.rank) else {
+            return true;
+        };
+        actual_rank == expected_rank
+            && (0..actual_rank as usize).all(|axis| {
+                self.dimensions[axis] == expected.dimensions[axis]
+                    || self.dimensions[axis] == TensorDimension::Dynamic
+                    || expected.dimensions[axis] == TensorDimension::Dynamic
+            })
+    }
+
+    pub fn broadcast_with(self, right: Self) -> Result<Self, &'static str> {
+        if self.element != right.element {
+            return Err("tensor element types do not match");
+        }
+        let (Some(left_rank), Some(right_rank)) = (self.rank, right.rank) else {
+            return Ok(Self::dynamic(self.element));
+        };
+        let rank = left_rank.max(right_rank) as usize;
+        let mut dimensions = [TensorDimension::Dynamic; 8];
+        for output_axis in 0..rank {
+            let left_axis = output_axis.checked_sub(rank - left_rank as usize);
+            let right_axis = output_axis.checked_sub(rank - right_rank as usize);
+            let left = left_axis.map_or(TensorDimension::Static(1), |axis| self.dimensions[axis]);
+            let right =
+                right_axis.map_or(TensorDimension::Static(1), |axis| right.dimensions[axis]);
+            dimensions[output_axis] = match (left, right) {
+                (TensorDimension::Static(a), TensorDimension::Static(b)) if a == b => left,
+                (TensorDimension::Static(1), other) | (other, TensorDimension::Static(1)) => other,
+                (TensorDimension::Dynamic, _) | (_, TensorDimension::Dynamic) => {
+                    TensorDimension::Dynamic
+                }
+                _ => return Err("tensor shapes cannot be broadcast"),
+            };
+        }
+        Self::ranked(self.element, &dimensions[..rank])
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

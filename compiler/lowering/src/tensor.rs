@@ -317,5 +317,21 @@ pub(crate) fn mlir_kernels(
 "#,
         );
     }
+    if relu || add || matmul || transpose || scale || softmax_rows || layer_norm {
+        source.push_str(
+            r#"  func.func @__sev_linalg_sum(%input: memref<?xf64>, %output: memref<?xf64>) attributes {llvm.emit_c_interface} {
+    linalg.generic {
+      indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (0)>],
+      iterator_types = ["reduction"]
+    } ins(%input : memref<?xf64>) outs(%output : memref<?xf64>) {
+    ^bb0(%value: f64, %accumulator: f64):
+      %result = arith.addf %accumulator, %value : f64
+      linalg.yield %result : f64
+    }
+    return
+  }
+"#,
+        );
+    }
     source
 }

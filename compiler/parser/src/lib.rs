@@ -685,11 +685,28 @@ impl Parser<'_> {
         if self.take_simple(&TokenKind::LeftBracket).is_some() {
             if !self.at(&TokenKind::RightBracket) {
                 loop {
-                    let ty = self.parse_type()?;
-                    args.push(TypeArg {
-                        span: ty.span(),
-                        ty: Box::new(ty),
-                    });
+                    let tensor_dimension = segments
+                        .first()
+                        .is_some_and(|segment| segment.name == "Tensor")
+                        && !args.is_empty();
+                    if tensor_dimension && matches!(self.peek().kind, TokenKind::Integer(_)) {
+                        let TokenKind::Integer(value) = self.peek().kind else {
+                            unreachable!()
+                        };
+                        let token = self.advance().clone();
+                        let size = u64::try_from(value)
+                            .map_err(|_| self.error("tensor dimensions cannot be negative"))?;
+                        args.push(TypeArg::Dimension {
+                            span: token.span,
+                            size,
+                        });
+                    } else {
+                        let ty = self.parse_type()?;
+                        args.push(TypeArg::Type {
+                            span: ty.span(),
+                            ty: Box::new(ty),
+                        });
+                    }
                     if self.take_simple(&TokenKind::Comma).is_none() {
                         break;
                     }

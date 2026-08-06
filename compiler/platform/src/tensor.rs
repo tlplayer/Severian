@@ -51,8 +51,11 @@ typedef enum {
 typedef struct sev_tensor {
   int64_t rank;
   int64_t *shape;
+  int64_t *strides;
   int64_t size;
   double *data;
+  double *allocation;
+  bool is_view;
   sev_tensor_operation operation;
   struct sev_tensor *left;
   struct sev_tensor *right;
@@ -67,14 +70,49 @@ static sev_tensor *sev_tensor_allocate(int64_t rank, const int64_t *shape) {
   sev_tensor *tensor = sev_allocate(sizeof(*tensor));
   tensor->rank = rank;
   tensor->shape = sev_allocate((size_t)rank * sizeof(*tensor->shape));
+  tensor->strides = sev_allocate((size_t)rank * sizeof(*tensor->strides));
   tensor->size = 1;
-  for (int64_t axis = 0; axis < rank; ++axis) {
+  for (int64_t axis = rank - 1; axis >= 0; --axis) {
     if (shape[axis] < 0 || (shape[axis] != 0 && tensor->size > INT64_MAX / shape[axis])) abort();
     tensor->shape[axis] = shape[axis];
+    tensor->strides[axis] = tensor->size;
     tensor->size *= shape[axis];
   }
   tensor->data = sev_tensor_data_allocate((size_t)tensor->size * sizeof(*tensor->data));
+  tensor->allocation = tensor->data;
+  tensor->is_view = false;
   return tensor;
+}
+
+static int64_t sev_tensor_offset(const sev_tensor *tensor, int64_t linear) {
+  int64_t offset = 0;
+  for (int64_t axis = tensor->rank - 1; axis >= 0; --axis) {
+    int64_t coordinate = tensor->shape[axis] == 0 ? 0 : linear % tensor->shape[axis];
+    if (tensor->shape[axis] != 0) linear /= tensor->shape[axis];
+    offset += coordinate * tensor->strides[axis];
+  }
+  return offset;
+}
+
+static bool sev_tensor_is_contiguous(const sev_tensor *tensor) {
+  int64_t stride = 1;
+  for (int64_t axis = tensor->rank - 1; axis >= 0; --axis) {
+    if (tensor->shape[axis] > 1 && tensor->strides[axis] != stride) return false;
+    stride *= tensor->shape[axis];
+  }
+  return true;
+}
+
+static sev_tensor *sev_tensor_materialize(sev_tensor *input) {
+  if (!input) abort();
+  sev_tensor *output = sev_tensor_allocate(input->rank, input->shape);
+  for (int64_t index = 0; index < input->size; ++index)
+    output->data[index] = input->data[sev_tensor_offset(input, index)];
+  return output;
+}
+
+static sev_tensor *sev_tensor_contiguous(sev_tensor *input) {
+  return sev_tensor_is_contiguous(input) ? input : sev_tensor_materialize(input);
 }
 
 void *__sev_tensor_from_list(void *values_raw, void *shape_raw) {
@@ -92,7 +130,8 @@ void *__sev_tensor_from_list(void *values_raw, void *shape_raw) {
 void *__sev_tensor_to_list(void *tensor_raw) {
   sev_tensor *tensor = tensor_raw;
   sev_collection *values = __sev_collection_new(0);
-  for (int64_t index = 0; index < tensor->size; ++index) __sev_collection_push(values, __sev_box_f64(tensor->data[index]));
+  for (int64_t index = 0; index < tensor->size; ++index)
+    __sev_collection_push(values, __sev_box_f64(tensor->data[sev_tensor_offset(tensor, index)]));
   return values;
 }
 
@@ -103,15 +142,101 @@ void *__sev_tensor_shape(void *tensor_raw) {
   return shape;
 }
 
+void *__sev_tensor_strides(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  sev_collection *strides = __sev_collection_new(0);
+  for (int64_t axis = 0; axis < tensor->rank; ++axis)
+    __sev_collection_push(strides, __sev_box_i64(tensor->strides[axis]));
+  return strides;
+}
+
+void *__sev_tensor_slice(void *tensor_raw, void *starts_raw, void *ends_raw, void *steps_raw) {
+  sev_tensor *input = tensor_raw;
+  sev_collection *starts = starts_raw;
+  sev_collection *ends = ends_raw;
+  sev_collection *steps = steps_raw;
+  if (!input || starts->size != input->rank || ends->size != input->rank || steps->size != input->rank) abort();
+  sev_tensor *view = sev_allocate(sizeof(*view));
+  *view = *input;
+  view->shape = sev_allocate((size_t)input->rank * sizeof(*view->shape));
+  view->strides = sev_allocate((size_t)input->rank * sizeof(*view->strides));
+  view->size = 1;
+  int64_t offset = 0;
+  for (int64_t axis = 0; axis < input->rank; ++axis) {
+    int64_t start = __sev_unbox_i64(starts->items[axis]);
+    int64_t end = __sev_unbox_i64(ends->items[axis]);
+    int64_t step = __sev_unbox_i64(steps->items[axis]);
+    if (start < 0) start += input->shape[axis];
+    if (end < 0) end += input->shape[axis];
+    if (step <= 0 || start < 0 || end < start || end > input->shape[axis]) abort();
+    int64_t extent = (end - start + step - 1) / step;
+    if (extent != 0 && view->size > INT64_MAX / extent) abort();
+    view->shape[axis] = extent;
+    view->strides[axis] = input->strides[axis] * step;
+    view->size *= extent;
+    offset += start * input->strides[axis];
+  }
+  view->data = input->data + offset;
+  view->allocation = input->allocation;
+  view->is_view = true;
+  view->operation = SEV_TENSOR_LEAF;
+  view->left = NULL;
+  view->right = NULL;
+  view->gradient = NULL;
+  return view;
+}
+
+void *__sev_tensor_materialize(void *tensor_raw) {
+  return sev_tensor_materialize(tensor_raw);
+}
+
 static sev_memref_1d_f64 sev_tensor_memref_1d(sev_tensor *tensor) {
+  if (!sev_tensor_is_contiguous(tensor)) abort();
   sev_memref_1d_f64 value = {tensor->data, tensor->data, 0, {tensor->size}, {1}};
   return value;
 }
 
 static sev_memref_2d_f64 sev_tensor_memref_2d(sev_tensor *tensor) {
   if (tensor->rank != 2) abort();
-  sev_memref_2d_f64 value = {tensor->data, tensor->data, 0, {tensor->shape[0], tensor->shape[1]}, {tensor->shape[1], 1}};
+  sev_memref_2d_f64 value = {tensor->allocation, tensor->data, 0, {tensor->shape[0], tensor->shape[1]}, {tensor->strides[0], tensor->strides[1]}};
   return value;
+}
+
+extern void _mlir_ciface___sev_linalg_sum(sev_memref_1d_f64 *, sev_memref_1d_f64 *);
+void *__sev_tensor_sum(void *input_raw) {
+  sev_tensor *input = sev_tensor_contiguous(input_raw);
+  int64_t output_shape[1] = {1};
+  sev_tensor *output = sev_tensor_allocate(1, output_shape);
+  sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
+  sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
+  _mlir_ciface___sev_linalg_sum(&input_memref, &output_memref);
+  return output;
+}
+
+static int64_t *sev_tensor_broadcast_shape(const sev_tensor *left, const sev_tensor *right, int64_t *rank) {
+  *rank = left->rank > right->rank ? left->rank : right->rank;
+  int64_t *shape = sev_allocate((size_t)*rank * sizeof(*shape));
+  for (int64_t output_axis = *rank - 1; output_axis >= 0; --output_axis) {
+    int64_t left_axis = output_axis - (*rank - left->rank);
+    int64_t right_axis = output_axis - (*rank - right->rank);
+    int64_t left_size = left_axis < 0 ? 1 : left->shape[left_axis];
+    int64_t right_size = right_axis < 0 ? 1 : right->shape[right_axis];
+    if (left_size != right_size && left_size != 1 && right_size != 1) abort();
+    shape[output_axis] = left_size > right_size ? left_size : right_size;
+  }
+  return shape;
+}
+
+static int64_t sev_tensor_broadcast_offset(const sev_tensor *input, const sev_tensor *output, int64_t linear) {
+  int64_t offset = 0;
+  for (int64_t output_axis = output->rank - 1; output_axis >= 0; --output_axis) {
+    int64_t coordinate = output->shape[output_axis] == 0 ? 0 : linear % output->shape[output_axis];
+    if (output->shape[output_axis] != 0) linear /= output->shape[output_axis];
+    int64_t input_axis = output_axis - (output->rank - input->rank);
+    if (input_axis >= 0 && input->shape[input_axis] != 1)
+      offset += coordinate * input->strides[input_axis];
+  }
+  return offset;
 }
 "#,
     );
@@ -120,7 +245,7 @@ static sev_memref_2d_f64 sev_tensor_memref_2d(sev_tensor *tensor) {
             r#"
 extern void _mlir_ciface___sev_linalg_relu(sev_memref_1d_f64 *, sev_memref_1d_f64 *);
 void *__sev_tensor_relu(void *input_raw) {
-  sev_tensor *input = input_raw;
+  sev_tensor *input = sev_tensor_contiguous(input_raw);
   sev_tensor *output = sev_tensor_allocate(input->rank, input->shape);
   sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
   sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
@@ -139,22 +264,22 @@ extern void _mlir_ciface___sev_linalg_add(sev_memref_1d_f64 *, sev_memref_1d_f64
 void *__sev_tensor_add(void *left_raw, void *right_raw) {
   sev_tensor *left = left_raw;
   sev_tensor *right = right_raw;
-  if (left->rank == 2 && right->rank == 1 && left->shape[1] == right->shape[0]) {
-    sev_tensor *output = sev_tensor_allocate(left->rank, left->shape);
-    for (int64_t row = 0; row < left->shape[0]; ++row) {
-      for (int64_t column = 0; column < left->shape[1]; ++column) {
-        int64_t index = row * left->shape[1] + column;
-        output->data[index] = left->data[index] + right->data[column];
-      }
-    }
+  int64_t output_rank = 0;
+  int64_t *output_shape = sev_tensor_broadcast_shape(left, right, &output_rank);
+  sev_tensor *output = sev_tensor_allocate(output_rank, output_shape);
+  free(output_shape);
+  bool identical = left->rank == right->rank && left->size == right->size;
+  for (int64_t axis = 0; identical && axis < left->rank; ++axis)
+    identical = left->shape[axis] == right->shape[axis];
+  if (!identical || !sev_tensor_is_contiguous(left) || !sev_tensor_is_contiguous(right)) {
+    for (int64_t index = 0; index < output->size; ++index)
+      output->data[index] = left->data[sev_tensor_broadcast_offset(left, output, index)]
+                          + right->data[sev_tensor_broadcast_offset(right, output, index)];
     output->operation = SEV_TENSOR_ADD;
     output->left = left;
     output->right = right;
     return output;
   }
-  if (left->rank != right->rank || left->size != right->size) abort();
-  for (int64_t axis = 0; axis < left->rank; ++axis) if (left->shape[axis] != right->shape[axis]) abort();
-  sev_tensor *output = sev_tensor_allocate(left->rank, left->shape);
   sev_memref_1d_f64 left_memref = sev_tensor_memref_1d(left);
   sev_memref_1d_f64 right_memref = sev_tensor_memref_1d(right);
   sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);
@@ -213,7 +338,7 @@ void *__sev_tensor_transpose(void *input_raw) {
             r#"
 extern void _mlir_ciface___sev_linalg_scale(sev_memref_1d_f64 *, double, sev_memref_1d_f64 *);
 void *__sev_tensor_scale(void *input_raw, double scale) {
-  sev_tensor *input = input_raw;
+  sev_tensor *input = sev_tensor_contiguous(input_raw);
   sev_tensor *output = sev_tensor_allocate(input->rank, input->shape);
   sev_memref_1d_f64 input_memref = sev_tensor_memref_1d(input);
   sev_memref_1d_f64 output_memref = sev_tensor_memref_1d(output);

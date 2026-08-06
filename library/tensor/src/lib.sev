@@ -6,6 +6,14 @@ native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[floa
 
 native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
 
+native("__sev_tensor_strides") def rankedStrides(value: Tensor[f64]) -> list[int]
+
+native("__sev_tensor_slice") def rankedSlice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
+
+native("__sev_tensor_materialize") def rankedMaterialize(value: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_sum") def rankedSum(value: Tensor[f64]) -> Tensor[f64]
+
 native("__sev_tensor_relu") def rankedRelu(value: Tensor[f64]) -> Tensor[f64]
 
 native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
@@ -36,6 +44,17 @@ test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     assert(rankedShape(value) == [2, 2])
     assert(rankedValues(value) == [1.0, 2.0, 3.0, 4.0])
+    assert(rankedStrides(value) == [2, 1])
+
+test "ranked slices are strided views with explicit materialization":
+    value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    sliced = rankedSlice(value, [0, 0], [2, 3], [1, 2])
+    assert(rankedShape(sliced) == [2, 2])
+    assert(rankedStrides(sliced) == [3, 2])
+    assert(rankedValues(sliced) == [1.0, 3.0, 4.0, 6.0])
+    materialized = rankedMaterialize(sliced)
+    assert(rankedStrides(materialized) == [2, 1])
+    assert(rankedValues(materialized) == [1.0, 3.0, 4.0, 6.0])
 
 test "ranked ReLU executes the native linalg kernel":
     value = ranked([-2.0, 0.0, 3.0], [3])
@@ -45,6 +64,15 @@ test "ranked elementwise addition executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0], [3])
     right = ranked([4.0, 5.0, 6.0], [3])
     assert(rankedValues(rankedAdd(left, right)) == [5.0, 7.0, 9.0])
+
+test "ranked elementwise addition follows trailing-axis broadcasting":
+    left = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    right = ranked([10.0, 20.0, 30.0], [3])
+    assert(rankedValues(rankedAdd(left, right)) == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0])
+
+test "ranked sum lowers as a reduction":
+    value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    assert(rankedValues(rankedSum(value)) == [10.0])
 
 test "ranked matrix multiplication executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

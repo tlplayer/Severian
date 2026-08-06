@@ -205,13 +205,20 @@ pub fn compile_native(
         if native_bridge.is_empty() {
             run_tool(
                 clang,
-                &[llvm_ir.as_path(), Path::new("-o"), output, Path::new("-lm")],
+                &[
+                    llvm_ir.as_path(),
+                    Path::new("-O3"),
+                    Path::new("-o"),
+                    output,
+                    Path::new("-lm"),
+                ],
             )
         } else {
             std::fs::write(&platform_source, native_bridge)?;
             let mut arguments = vec![
                 llvm_ir.as_path(),
                 platform_source.as_path(),
+                Path::new("-O3"),
                 Path::new("-o"),
                 output,
                 Path::new("-lm"),

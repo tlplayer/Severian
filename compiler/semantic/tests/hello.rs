@@ -1,4 +1,6 @@
-use severian_hir::{Expression, Instruction, TaskPlacement, ValueType};
+use severian_hir::{
+    Expression, Instruction, TaskPlacement, TensorDimension, TensorElementType, ValueType,
+};
 use severian_lexer::lex;
 use severian_parser::parse;
 use severian_semantic::{analyze, analyze_with_interfaces};
@@ -33,6 +35,35 @@ fn retains_typed_conditional_expressions_in_hir() {
         &hir.functions[0].instructions[0],
         Instruction::Return(Some(Expression::Conditional { .. }))
     ));
+}
+
+#[test]
+fn retains_ranked_tensor_element_and_dimension_types_in_hir() {
+    let source = concat!(
+        "native(\"tensor_identity\") def identity(value: Tensor[f32, 2, dynamic]) -> Tensor[f32, 2, dynamic]\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let ValueType::Tensor(tensor) = hir.functions[0].params[0].ty else {
+        panic!("expected tensor parameter");
+    };
+    assert_eq!(tensor.element, TensorElementType::F32);
+    assert_eq!(tensor.rank, Some(2));
+    assert_eq!(tensor.dimensions[0], TensorDimension::Static(2));
+    assert_eq!(tensor.dimensions[1], TensorDimension::Dynamic);
+    assert_eq!(hir.functions[0].return_type, ValueType::Tensor(tensor));
+}
+
+#[test]
+fn rejects_incompatible_static_tensor_shapes_at_call_boundaries() {
+    let source = concat!(
+        "native(\"consume\") def consume(value: Tensor[f64, 2, 3])\n",
+        "def wrong(value: Tensor[f64, 2, 4]):\n",
+        "    consume(value)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("expected Tensor"));
 }
 
 #[test]

@@ -43,6 +43,23 @@ Class-like types use PascalCase, including `Result`, `Option`, `Channel`, and
 lowercase. Parameterized types follow Python's square-bracket convention.
 Parentheses are reserved for calls and runtime construction.
 
+### Tensor types
+
+Tensor annotations retain their scalar type and, when supplied, every ranked
+dimension in HIR. Dimensions may be static integers or `dynamic`:
+
+```sev
+def encode(input: Tensor[f32, dynamic, 768]) -> Tensor[f32, dynamic, 768]:
+    return input
+```
+
+The tensor type system distinguishes `f32`, `f64`, `i32`, and `i64`. Omitting
+dimensions, as in `Tensor[f64]`, denotes dynamic rank. Ranked types are checked
+for scalar, rank, and compatible static dimensions at call boundaries. The
+current executable `tensor.ranked` constructor and linalg kernels use `f64`;
+the other scalar kinds are retained through typed HIR but do not yet have their
+dedicated unboxed runtime ABI and kernels.
+
 ### Naming
 
 Severian uses casing to make a name's role visible without extra punctuation.

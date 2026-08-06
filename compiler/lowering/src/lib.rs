@@ -1076,7 +1076,7 @@ impl LowerContext<'_> {
                         .field_types
                         .get(name)
                         .copied()
-                        .filter(|ty| *ty == ValueType::Tensor)
+                        .filter(|ty| matches!(ty, ValueType::Tensor(_)))
                         .unwrap_or(ValueType::Any);
                     (result, ty)
                 } else {
@@ -1324,7 +1324,7 @@ impl LowerContext<'_> {
                 }
                 let ty = metadata
                     .map(|(ty, _)| ty)
-                    .filter(|ty| *ty == ValueType::Tensor)
+                    .filter(|ty| matches!(ty, ValueType::Tensor(_)))
                     .unwrap_or(ValueType::Any);
                 (result, ty)
             }
@@ -5751,7 +5751,7 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Tensor
+        | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
         | ValueType::Result
@@ -5787,7 +5787,7 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Tensor
+        | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
         | ValueType::Result
@@ -5807,7 +5807,7 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Tensor
+        | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
         | ValueType::Any

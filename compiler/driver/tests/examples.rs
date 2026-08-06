@@ -212,6 +212,7 @@ fn ranked_tensor_example_emits_real_linalg_kernels() {
 
     assert!(mlir.contains("linalg.generic"));
     assert!(mlir.contains("linalg.matmul"));
+    assert!(mlir.contains("@__sev_linalg_sum"));
     assert!(mlir.contains("llvm.emit_c_interface"));
     assert!(mlir.contains("llvm.call @__sev_tensor_matmul"));
     assert!(mlir.contains("llvm.call @__sev_tensor_add"));

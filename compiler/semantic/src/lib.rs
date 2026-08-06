@@ -2,15 +2,15 @@
 
 use severian_ast::{
     AssignOp as AstAssignOp, BinaryOp as AstBinaryOp, Block, ElseBranch, Expr, ImportKind, Item,
-    LetKind, Literal, Module, OwnershipOp as AstOwnershipOp, Pattern, Span, Stmt, Type,
+    LetKind, Literal, Module, OwnershipOp as AstOwnershipOp, Pattern, Span, Stmt, Type, TypeArg,
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class,
     ComprehensionClause as HirComprehensionClause, Decorator as HirDecorator, Expression, Function,
     FunctionContract as HirFunctionContract, Global, Instruction, MatchPattern, OwnershipOp,
-    Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test, TestMode as HirTestMode,
-    UnaryOp, ValueType,
+    Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension,
+    TensorElementType, TensorType, Test, TestMode as HirTestMode, UnaryOp, ValueType,
 };
 use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
@@ -2541,7 +2541,8 @@ fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
     }
     path.args
         .last()
-        .and_then(|argument| lower_type(&argument.ty).ok())
+        .and_then(TypeArg::as_type)
+        .and_then(|argument| lower_type(argument).ok())
 }
 
 fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
@@ -2562,7 +2563,7 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
-                "Tensor" => Ok(ValueType::Tensor),
+                "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
                 "Channel" => Ok(ValueType::Channel),
                 "fn" => Ok(ValueType::Function),
                 "Result" => Ok(ValueType::Result),
@@ -2572,6 +2573,50 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
         }
         _ => Err(error(ty.span(), "type is not supported yet")),
     }
+}
+
+fn lower_tensor_type(path: &severian_ast::TypePath) -> Result<TensorType, SemanticError> {
+    let element = match path.args.first().and_then(TypeArg::as_type) {
+        Some(Type::Named(element)) => match element.segments.first().map(|part| part.name.as_str())
+        {
+            Some("f32") => TensorElementType::F32,
+            Some("f64" | "float") => TensorElementType::F64,
+            Some("i32") => TensorElementType::I32,
+            Some("i64" | "int") => TensorElementType::I64,
+            _ => {
+                return Err(error(
+                    path.span,
+                    "tensor elements must be f32, f64, i32, or i64",
+                ))
+            }
+        },
+        None if path.args.is_empty() => TensorElementType::F64,
+        _ => {
+            return Err(error(
+                path.span,
+                "the first Tensor argument must be an element type",
+            ))
+        }
+    };
+    if path.args.len() <= 1 {
+        return Ok(TensorType::dynamic(element));
+    }
+    let mut dimensions = Vec::with_capacity(path.args.len() - 1);
+    for argument in &path.args[1..] {
+        match argument {
+            TypeArg::Dimension { size, .. } => dimensions.push(TensorDimension::Static(*size)),
+            TypeArg::Type { ty, .. } if matches!(ty.as_ref(), Type::Named(name) if name.segments.first().is_some_and(|part| part.name == "dynamic")) => {
+                dimensions.push(TensorDimension::Dynamic)
+            }
+            _ => {
+                return Err(error(
+                    argument.span(),
+                    "tensor dimensions must be integers or `dynamic`",
+                ))
+            }
+        }
+    }
+    TensorType::ranked(element, &dimensions).map_err(|message| error(path.span, message))
 }
 
 fn merge_numeric(
@@ -2612,6 +2657,7 @@ fn compatible(span: Span, actual: ValueType, expected: ValueType) -> Result<(), 
     if actual == expected
         || actual == ValueType::Any
         || expected == ValueType::Any
+        || matches!((actual, expected), (ValueType::Tensor(actual), ValueType::Tensor(expected)) if actual.is_compatible_with(expected))
         || (expected == ValueType::Result && actual != ValueType::Unit)
     {
         Ok(())
