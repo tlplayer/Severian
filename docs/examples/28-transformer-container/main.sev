@@ -1,0 +1,46 @@
+import container
+import model
+from model import neuralnet as nn
+
+def transformerForward(tokens: Tensor[f64]) -> Tensor[f64]:
+    identity = model.tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    attention = nn.MultiheadAttention(identity, identity, identity, identity, 0.7071067811865476)
+    linear1 = nn.Linear(model.tensor([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4]), model.tensor([0.01, -0.02, 0.03, 0.04], [4]))
+    linear2 = nn.Linear(model.tensor([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2]), model.tensor([0.0, 0.0], [2]))
+    encoder = nn.TransformerEncoderLayer(attention, linear1, linear2, nn.LayerNorm(), nn.LayerNorm())
+    return encoder.forward(tokens)
+
+def sampleTokens() -> Tensor[f64]:
+    return model.tensor([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
+
+def deployment() -> container.ContainerSpec:
+    return container.ContainerSpec("transformer", "severian/transformer:local", ["/usr/local/bin/transformer-container-example"], 1000, 256, ["pid", "mount", "network", "user"], ["rootfs:ro"], ["none"], [])
+
+test "author-facing transformer vocabulary executes natively":
+    output = transformerForward(sampleTokens())
+    values = model.values(output)
+    assert(model.shape(output) == [3, 2])
+    assert(size(values) == 6)
+    assert(values[0] > 0.99 and values[1] < -0.99)
+
+test "fixed weights produce deterministic logits":
+    first = model.values(transformerForward(sampleTokens()))
+    second = model.values(transformerForward(sampleTokens()))
+    assert(first == second)
+
+test "the same native executable has a bounded container plan":
+    spec = deployment()
+    assert(container.containerValid(spec))
+    assert(container.containerCreatePlan(spec)[2] == "image severian/transformer:local")
+    assert(container.containerCreatePlan(spec)[3] == "cpu.max 1000")
+    assert(container.containerCreatePlan(spec)[4] == "memory.max 256")
+
+def main():
+    output = transformerForward(sampleTokens())
+    values = model.values(output)
+    print("shape", model.shape(output))
+    print("tokens", 3)
+    print("hidden", 2)
+    print("checksum", values[0] + values[1] + values[2] + values[3] + values[4] + values[5])
+    print("first", values[0], values[1])
+    print("image", deployment().image)

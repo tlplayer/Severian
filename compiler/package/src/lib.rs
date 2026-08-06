@@ -375,7 +375,11 @@ pub fn load_official_interfaces(
             continue;
         }
         let Some((name, directory)) = ({
-            let directory = library_root.join(&name);
+            let directory = name
+                .split('.')
+                .fold(library_root.to_path_buf(), |path, segment| {
+                    path.join(segment)
+                });
             directory
                 .join("Severian.toml")
                 .is_file()
@@ -399,12 +403,29 @@ fn imported_packages(module: &Module) -> HashSet<String> {
             let Item::Import(import) = item else {
                 return None;
             };
-            let path = match &import.kind {
-                ImportKind::Module { path, .. } => path,
-                ImportKind::From { module, .. } => module,
-            };
-            path.first().map(|root| root.name.clone())
+            Some(match &import.kind {
+                ImportKind::Module { path, .. } => vec![path
+                    .iter()
+                    .map(|part| part.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")],
+                ImportKind::From { module, names } => {
+                    let module = module
+                        .iter()
+                        .map(|part| part.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    let mut packages = vec![module.clone()];
+                    packages.extend(
+                        names
+                            .iter()
+                            .map(|name| format!("{module}.{}", name.name.name)),
+                    );
+                    packages
+                }
+            })
         })
+        .flatten()
         .collect()
 }
 

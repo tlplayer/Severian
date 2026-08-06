@@ -424,6 +424,8 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         classes: environment.classes,
         field_object: None,
         field_names: HashSet::new(),
+        field_types: HashMap::new(),
+        field_classes: HashMap::new(),
         object_classes: HashMap::new(),
         declared_return: function.return_type,
         task_results: HashMap::new(),
@@ -497,6 +499,19 @@ fn lower_class_function(
         classes: environment.classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
+        field_types: class
+            .fields
+            .iter()
+            .cloned()
+            .zip(class.field_types.iter().copied())
+            .collect(),
+        field_classes: class
+            .fields
+            .iter()
+            .cloned()
+            .zip(class.field_classes.iter().cloned())
+            .filter_map(|(field, class)| class.map(|class| (field, class)))
+            .collect(),
         object_classes: HashMap::from([("%self".into(), class.name.clone())]),
         task_results: HashMap::new(),
         channel_types: HashMap::new(),
@@ -539,6 +554,8 @@ struct LowerContext<'a> {
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,
+    field_types: HashMap<String, ValueType>,
+    field_classes: HashMap<String, String>,
     object_classes: HashMap<String, String>,
     task_results: HashMap<String, ValueType>,
     channel_types: HashMap<String, ValueType>,
@@ -1051,7 +1068,16 @@ impl LowerContext<'_> {
                     let field = self.string_address(name);
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                    (result, ValueType::Any)
+                    if let Some(class) = self.field_classes.get(name).cloned() {
+                        self.object_classes.insert(result.clone(), class);
+                    }
+                    let ty = self
+                        .field_types
+                        .get(name)
+                        .copied()
+                        .filter(|ty| *ty == ValueType::Tensor)
+                        .unwrap_or(ValueType::Any);
+                    (result, ty)
                 } else {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
@@ -1261,7 +1287,31 @@ impl LowerContext<'_> {
                 let field = self.string_address(member);
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                (result, ValueType::Any)
+                let metadata = self
+                    .object_classes
+                    .get(&object)
+                    .and_then(|class| {
+                        self.classes
+                            .iter()
+                            .find(|candidate| candidate.name == *class)
+                    })
+                    .and_then(|class| {
+                        class
+                            .fields
+                            .iter()
+                            .position(|field| field == member)
+                            .map(|index| {
+                                (class.field_types[index], class.field_classes[index].clone())
+                            })
+                    });
+                if let Some((_, Some(class))) = &metadata {
+                    self.object_classes.insert(result.clone(), class.clone());
+                }
+                let ty = metadata
+                    .map(|(ty, _)| ty)
+                    .filter(|ty| *ty == ValueType::Tensor)
+                    .unwrap_or(ValueType::Any);
+                (result, ty)
             }
             Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();

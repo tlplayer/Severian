@@ -52,3 +52,9 @@ and validates it against PyTorch and ONNX Runtime before reporting timing.
 reverse-mode/SGD step through MLIR, embedded ROCDL code objects, and HIP. It
 checks forward values and the first weight update against PyTorch ROCm, then
 reports warm in-process GPU latency for both implementations.
+
+`transformer-container/` builds the author-facing `model` and
+`model.neuralnet` packages before linking a native encoder. It compares warm
+in-process inference and fresh-process latency on the host with the identical
+executable inside a resource-limited OCI image, rejecting checksum or shape
+differences.

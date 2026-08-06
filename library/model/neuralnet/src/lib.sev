@@ -1,0 +1,65 @@
+import model
+
+trait Module:
+    forward(input: Tensor[f64]) -> Tensor[f64]
+
+class Linear: Module
+    weight: Tensor[f64]
+    bias: Tensor[f64]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        return model.add(model.matmul(input, weight), bias)
+
+class LayerNorm: Module
+    epsilon: float = 0.00001
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        return model.layerNorm(input, epsilon)
+
+class MultiheadAttention: Module
+    queryWeight: Tensor[f64]
+    keyWeight: Tensor[f64]
+    valueWeight: Tensor[f64]
+    outputWeight: Tensor[f64]
+    attentionScale: float
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        query = model.matmul(input, queryWeight)
+        key = model.matmul(input, keyWeight)
+        value = model.matmul(input, valueWeight)
+        context = model.scaledDotProductAttention(query, key, value, attentionScale)
+        return model.matmul(context, outputWeight)
+
+class TransformerEncoderLayer: Module
+    attention: MultiheadAttention
+    linear1: Linear
+    linear2: Linear
+    norm1: LayerNorm
+    norm2: LayerNorm
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        attended = attention.forward(input)
+        attentionResidual = model.add(input, attended)
+        residual = norm1.forward(attentionResidual)
+        hidden = model.relu(linear1.forward(residual))
+        projected = linear2.forward(hidden)
+        combined = model.add(residual, projected)
+        return norm2.forward(combined)
+
+test "Linear follows the conventional input weight bias order":
+    X = model.tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    weight = model.tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    bias = model.tensor([10.0, 20.0], [2])
+    layer = Linear(weight, bias)
+    assert(model.values(layer.forward(X)) == [11.0, 22.0, 13.0, 24.0])
+
+test "TransformerEncoderLayer composes attention residuals and FFN":
+    X = model.tensor([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
+    identity = model.tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    attention = MultiheadAttention(identity, identity, identity, identity, 0.7071067811865476)
+    linear1 = Linear(model.tensor([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4]), model.tensor([0.01, -0.02, 0.03, 0.04], [4]))
+    linear2 = Linear(model.tensor([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2]), model.tensor([0.0, 0.0], [2]))
+    layer = TransformerEncoderLayer(attention, linear1, linear2, LayerNorm(), LayerNorm())
+    output = layer.forward(X)
+    assert(model.shape(output) == [3, 2])
+    assert(model.values(output)[0] > 0.99)

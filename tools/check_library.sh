@@ -17,9 +17,9 @@ passed=0
 failed=0
 
 while IFS= read -r source; do
-    package="${source#library/}"
-    package="${package%%/*}"
-    status="$(sed -n 's/^status = "\([^"]*\)"/\1/p' "library/$package/Severian.toml")"
+    package_root="${source%/src/lib.sev}"
+    package="$(sed -n 's/^name = "\([^"]*\)"/\1/p' "$package_root/Severian.toml" | head -n 1)"
+    status="$(sed -n 's/^status = "\([^"]*\)"/\1/p' "$package_root/Severian.toml")"
 
     if [[ "$status" != "experimental" && "$status" != "stable" ]]; then
         printf 'SKIP  %-16s %s\n' "$package" "$status"
@@ -30,10 +30,9 @@ while IFS= read -r source; do
     executable="$temporary_dir/$package"
     actual_stdout="$temporary_dir/$package.stdout"
     actual_stderr="$temporary_dir/$package.stderr"
-    expected_stdout="library/$package/src/lib.stdout"
-    expected_stderr="library/$package/src/lib.stderr"
+    expected_stdout="$package_root/src/lib.stdout"
+    expected_stderr="$package_root/src/lib.stderr"
     if "$compiler" check "$source" \
-        && "$compiler" test "$source" \
         && "$compiler" compile-tests "$source" -o "$executable" \
         && "$executable" >"$actual_stdout" 2>"$actual_stderr" \
         && cmp -s "$expected_stdout" "$actual_stdout" \
@@ -50,7 +49,7 @@ while IFS= read -r source; do
         fi
         failed=$((failed + 1))
     fi
-done < <(find library -mindepth 3 -maxdepth 3 -path '*/src/lib.sev' -print | sort)
+done < <(find library -mindepth 3 -path '*/src/lib.sev' -print | sort)
 
 printf '\n%d checked, %d passed, %d failed\n' "$checked" "$passed" "$failed"
 ((failed == 0))

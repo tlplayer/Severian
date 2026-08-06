@@ -1,0 +1,12 @@
+[package]
+name = "transformer-container-benchmark"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "transformer-container-benchmark"
+path = "benchmark.sev"
+
+[dependencies]
+model = { path = "../../library/model", version = "0.1.0" }
+"model.neuralnet" = { path = "../../library/model/neuralnet", version = "0.1.0" }

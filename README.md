@@ -134,3 +134,14 @@ Run every library package that currently has an implementation with:
 ```sh
 tools/check_library.sh
 ```
+
+Author-facing model code uses the framework-neutral `model` namespace:
+
+```sev
+import model
+from model import neuralnet as nn
+```
+
+The native transformer and OCI deployment example is under
+`docs/examples/28-transformer-container`. Its host-versus-container benchmark
+is run with `python3 bench/transformer-container/run.py`.

@@ -139,6 +139,19 @@ extern void _mlir_ciface___sev_linalg_add(sev_memref_1d_f64 *, sev_memref_1d_f64
 void *__sev_tensor_add(void *left_raw, void *right_raw) {
   sev_tensor *left = left_raw;
   sev_tensor *right = right_raw;
+  if (left->rank == 2 && right->rank == 1 && left->shape[1] == right->shape[0]) {
+    sev_tensor *output = sev_tensor_allocate(left->rank, left->shape);
+    for (int64_t row = 0; row < left->shape[0]; ++row) {
+      for (int64_t column = 0; column < left->shape[1]; ++column) {
+        int64_t index = row * left->shape[1] + column;
+        output->data[index] = left->data[index] + right->data[column];
+      }
+    }
+    output->operation = SEV_TENSOR_ADD;
+    output->left = left;
+    output->right = right;
+    return output;
+  }
   if (left->rank != right->rank || left->size != right->size) abort();
   for (int64_t axis = 0; axis < left->rank; ++axis) if (left->shape[axis] != right->shape[axis]) abort();
   sev_tensor *output = sev_tensor_allocate(left->rank, left->shape);

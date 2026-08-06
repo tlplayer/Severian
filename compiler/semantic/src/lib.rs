@@ -416,6 +416,19 @@ pub fn analyze_with_packages(
             name: class.name.name.clone(),
             decorators: class_decorators,
             fields,
+            field_types: class
+                .fields
+                .iter()
+                .map(|field| field.ty.as_ref().map(lower_type).transpose())
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|ty| ty.unwrap_or(ValueType::Any))
+                .collect(),
+            field_classes: class
+                .fields
+                .iter()
+                .map(|field| field.ty.as_ref().and_then(class_type_name))
+                .collect(),
             field_defaults,
             constructors,
             methods,
@@ -426,6 +439,38 @@ pub fn analyze_with_packages(
         classes,
         functions,
     })
+}
+
+fn class_type_name(ty: &Type) -> Option<String> {
+    let Type::Named(path) = ty else { return None };
+    let name = path.segments.first()?.name.as_str();
+    if matches!(
+        name,
+        "int"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "float"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "string"
+            | "unit"
+            | "list"
+            | "map"
+            | "set"
+            | "Tensor"
+            | "Channel"
+            | "fn"
+            | "Result"
+            | "Option"
+    ) {
+        None
+    } else {
+        Some(name.to_owned())
+    }
 }
 
 fn imports_entire_module(module: &Module, module_name: &str) -> bool {

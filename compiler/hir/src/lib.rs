@@ -54,6 +54,8 @@ pub struct Class {
     pub name: String,
     pub decorators: Vec<Decorator>,
     pub fields: Vec<String>,
+    pub field_types: Vec<ValueType>,
+    pub field_classes: Vec<Option<String>>,
     pub field_defaults: Vec<Option<Expression>>,
     pub constructors: Vec<Function>,
     pub methods: Vec<Function>,

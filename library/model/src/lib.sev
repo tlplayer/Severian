@@ -1,0 +1,45 @@
+native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
+
+native("__sev_tensor_to_list") def values(input: Tensor[f64]) -> list[float]
+
+native("__sev_tensor_shape") def shape(input: Tensor[f64]) -> list[int]
+
+native("__sev_tensor_matmul") def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_add") def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_relu") def relu(input: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_transpose") def transpose(input: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_scale") def scale(input: Tensor[f64], factor: float) -> Tensor[f64]
+
+native("__sev_tensor_softmax_rows") def softmaxRows(input: Tensor[f64]) -> Tensor[f64]
+
+native("__sev_tensor_layer_norm") def layerNorm(input: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+
+def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
+    assert(dimension == -1 or dimension == 1)
+    return softmaxRows(input)
+
+def scaledDotProductAttention(
+    query: Tensor[f64],
+    key: Tensor[f64],
+    value: Tensor[f64],
+    attentionScale: float,
+) -> Tensor[f64]:
+    scores = scale(matmul(query, transpose(key)), attentionScale)
+    return matmul(softmax(scores), value)
+
+test "model tensors expose familiar operations":
+    X = tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    identity = tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    bias = tensor([10.0, 20.0], [2])
+    assert(values(matmul(X, identity)) == [1.0, 2.0, 3.0, 4.0])
+    assert(values(add(X, bias)) == [11.0, 22.0, 13.0, 24.0])
+    assert(shape(relu(X)) == [2, 2])
+
+test "scaled dot product attention retains token shape":
+    X = tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    output = scaledDotProductAttention(X, X, X, 0.7071067811865476)
+    assert(shape(output) == [2, 2])

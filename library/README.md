@@ -71,13 +71,15 @@ groups packages by subject.
 
 ## Numerical stack
 
-The experimental numerical stack separates portable algorithms from model
-notation and lowering policy. `tensor` owns kernels, shapes, parallel
-activation, and Jacobians; `neuralnet` builds layers from them; and `models`
-exports domain symbols such as `Relu` and `J` through Severian decorator symbol
-packs. `parallel` owns operation-local `simd`, `simt`, and `gpu` contracts used
-inside libraries. Compatible activation chains are fused automatically; model
-callers do not request fusion or select a backend.
+The experimental numerical stack separates author-facing model code from
+lowering policy. `model` exposes conventional tensor operations, and
+`from model import neuralnet as nn` exposes familiar layers such as `Linear`,
+`LayerNorm`, `MultiheadAttention`, and `TransformerEncoderLayer`. The lower-level
+`tensor`, `models`, and `neuralnet` packages own kernels, symbolic graphs,
+autodiff experiments, and compiler fixtures. `parallel` owns operation-local
+`simd`, `simt`, and `gpu` contracts used inside libraries. Compatible activation
+chains are fused automatically; model callers do not request fusion or select a
+backend.
 
 ## Data and infrastructure stack
 

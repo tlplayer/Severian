@@ -1,0 +1,13 @@
+[package]
+name = "model"
+version = "0.1.0"
+edition = "2026"
+description = "Author-facing tensor operations for Severian models"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "machine-learning"
+implementation = "native"
+status = "experimental"

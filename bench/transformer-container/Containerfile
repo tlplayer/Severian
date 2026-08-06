@@ -1,0 +1,6 @@
+FROM debian:bookworm-slim
+
+COPY target/debug/transformer-container-benchmark /usr/local/bin/transformer-container-benchmark
+
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/transformer-container-benchmark"]

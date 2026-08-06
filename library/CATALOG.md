@@ -7,7 +7,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Language foundation | `prelude`, `option`, `result`, `iteration` | language design |
 | Core data | `boolean`, `collections`, `text`, `bytes` | `boolean` started |
 | Numerics | `math`, `matrix`, `tensor`, `probability`, `statistics`, `random` | `math`, `matrix`, `tensor`, `probability` experimental |
-| Machine learning | `models`, `neuralnet`, `autodiff`, `optim` | `models`, `neuralnet` experimental |
+| Machine learning | `model`, `model.neuralnet`, `models`, `neuralnet`, `autodiff`, `optim` | author-facing `model` namespace plus lower-level `models` and `neuralnet` packages experimental |
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
 | Data formats | `json`, `csv`, `base64`, `binary` | `json` scalar/list baseline implemented |
 | Files and I/O | `io`, `file`, `path` | `io`, `file` native baseline implemented |

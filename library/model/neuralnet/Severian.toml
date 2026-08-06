@@ -1,0 +1,16 @@
+[package]
+name = "model.neuralnet"
+version = "0.1.0"
+edition = "2026"
+description = "Neural-network layers in the Severian model namespace"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+model = { path = "..", version = "0.1.0" }
+
+[package.metadata.library]
+category = "machine-learning"
+implementation = "source"
+status = "experimental"

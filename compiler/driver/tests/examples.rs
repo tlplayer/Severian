@@ -362,3 +362,55 @@ fn builds_and_executes_the_native_inference_node_vertically() {
     );
     assert_eq!(String::from_utf8(tests.stdout).unwrap(), "3 passed\n");
 }
+
+#[test]
+fn builds_model_submodules_and_runs_the_transformer_container_example() {
+    let package = examples_root().join("28-transformer-container");
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .current_dir(&package)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_log = String::from_utf8_lossy(&build.stdout);
+    let model = build_log.find("Built model ->").unwrap();
+    let neuralnet = build_log.find("Built model.neuralnet ->").unwrap();
+    let application = build_log
+        .find("Built transformer-container-example ->")
+        .unwrap();
+    assert!(model < neuralnet && neuralnet < application);
+
+    let executable = package.join("target/debug/transformer-container-example");
+    let output = Command::new(&executable).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        std::fs::read_to_string(package.join("main.stdout")).unwrap()
+    );
+
+    let compilation = compile_path(&package.join("main.sev")).unwrap();
+    let test_executable = std::env::temp_dir().join(format!(
+        "severian-transformer-container-tests-{}",
+        std::process::id()
+    ));
+    assert_eq!(
+        compile_native_tests(&compilation, &test_executable).unwrap(),
+        3
+    );
+    let tests = Command::new(&test_executable).output().unwrap();
+    let _ = std::fs::remove_file(test_executable);
+    assert!(
+        tests.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tests.stderr)
+    );
+    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "3 passed\n");
+}
