@@ -1,0 +1,406 @@
+import json
+
+class ModelConfig:
+    endpoint: string
+    model: string
+    contextTokens: int
+    outputTokens: int
+    temperature: float
+    timeoutMillis: int
+
+class AgentLimits:
+    attempts: int
+    commandTimeoutMillis: int
+    maxOutputBytes: int
+    compactAtTokens: int
+
+class ToolCall:
+    name: string
+    arguments: string
+
+class ModelReply:
+    content: string
+    toolCalls: list[ToolCall]
+    promptTokens: int
+    outputTokens: int
+    stopped: bool
+
+class CommandResult:
+    command: string
+    exitCode: int
+    stdout: string
+    stderr: string
+    timedOut: bool
+
+class AgentState:
+    goal: string
+    iteration: int
+    completed: list[string]
+    modifiedFiles: list[string]
+    failures: list[string]
+    nextAction: string
+
+class AgentResult:
+    success: bool
+    iterations: int
+    message: string
+    state: AgentState
+
+native("__sev_agent_model_request")
+def modelRequest(
+    endpoint: string,
+    model: string,
+    systemPrompt: string,
+    prompt: string,
+    contextTokens: int,
+    outputTokens: int,
+    temperature: float,
+    timeoutMillis: int,
+) -> Result[ModelReply, string]
+
+native("__sev_agent_execute")
+def executeCommand(
+    workspace: string,
+    command: string,
+    timeoutMillis: int,
+    maxOutputBytes: int,
+) -> Result[CommandResult, string]
+
+native("__sev_agent_read_file")
+def readFile(path: string) -> Result[string, string]
+
+native("__sev_agent_write_file")
+def writeFile(path: string, content: string) -> Result[int, string]
+
+native("__sev_agent_git_status")
+def gitStatus(workspace: string) -> Result[list[string], string]
+
+native("__sev_agent_reset_workspace")
+def resetWorkspace(workspace: string) -> Result[int, string]
+
+def defaultModelConfig() -> ModelConfig:
+    return ModelConfig(
+        "http://127.0.0.1:11434",
+        "qwen3.5:9b",
+        16384,
+        4096,
+        0.1,
+        120000,
+    )
+
+def defaultAgentLimits() -> AgentLimits:
+    return AgentLimits(
+        20,
+        600000,
+        1048576,
+        2048,
+    )
+
+def emptyState(goal: string) -> AgentState:
+    return AgentState(
+        goal,
+        0,
+        [],
+        [],
+        [],
+        "inspect the repository",
+    )
+
+def systemPrompt() -> string:
+    return "
+You are a Severian development agent.
+
+Use tools instead of describing your capabilities.
+Inspect the repository before modifying it.
+Make the smallest change that advances the goal.
+Run relevant tests after every change.
+Do not claim success unless verification passes.
+When blocked by the Severian compiler, isolate the smallest reproducer,
+add a regression test, fix the compiler, and continue.
+"
+
+def commandToolDescription() -> string:
+    return "
+execute(command: string)
+
+Runs a command inside the isolated workspace.
+Use it to inspect files, edit files, compile code, and run tests.
+"
+
+def statePrompt(state: AgentState) -> string:
+    prompt = "Goal:\n" + state.goal
+    prompt = prompt + "\n\nIteration: " + string(state.iteration)
+    prompt = prompt + "\n\nCompleted:\n"
+
+    for item in state.completed:
+        prompt = prompt + "- " + item + "\n"
+
+    prompt = prompt + "\nModified files:\n"
+
+    for path in state.modifiedFiles:
+        prompt = prompt + "- " + path + "\n"
+
+    prompt = prompt + "\nFailures:\n"
+
+    for failure in state.failures:
+        prompt = prompt + "- " + failure + "\n"
+
+    prompt = prompt + "\nNext action:\n" + state.nextAction
+    prompt = prompt + "\n\nUse a tool now. Do not only explain what you will do."
+
+    return prompt
+
+def compactState(state: AgentState) -> string:
+    return json.encode(state)
+
+def saveState(path: string, state: AgentState) -> Result[int, string]:
+    return writeFile(path, compactState(state))
+
+def loadState(path: string, goal: string) -> AgentState:
+    switch readFile(path):
+        ok content:
+            switch json.decode[AgentState](content):
+                ok state:
+                    return state
+                failure error:
+                    return emptyState(goal)
+        failure error:
+            return emptyState(goal)
+
+def appendFailure(state: AgentState, failure: string) -> AgentState:
+    failures := []
+
+    for previous in state.failures:
+        failures.append(previous)
+
+    failures.append(failure)
+
+    return AgentState(
+        state.goal,
+        state.iteration,
+        state.completed,
+        state.modifiedFiles,
+        failures,
+        state.nextAction,
+    )
+
+def advanceState(
+    state: AgentState,
+    completed: string,
+    modifiedFiles: list[string],
+    nextAction: string,
+) -> AgentState:
+    completedSteps := []
+
+    for previous in state.completed:
+        completedSteps.append(previous)
+
+    completedSteps.append(completed)
+
+    return AgentState(
+        state.goal,
+        state.iteration + 1,
+        completedSteps,
+        modifiedFiles,
+        [],
+        nextAction,
+    )
+
+def executeTool(
+    workspace: string,
+    call: ToolCall,
+    limits: AgentLimits,
+) -> CommandResult:
+    if call.name != "execute":
+        return CommandResult(
+            "",
+            1,
+            "",
+            "unsupported tool: " + call.name,
+            false,
+        )
+
+    switch json.decode[string](call.arguments):
+        ok command:
+            switch executeCommand(
+                workspace,
+                command,
+                limits.commandTimeoutMillis,
+                limits.maxOutputBytes,
+            ):
+                ok result:
+                    return result
+                failure error:
+                    return CommandResult(
+                        command,
+                        1,
+                        "",
+                        error,
+                        false,
+                    )
+        failure error:
+            return CommandResult(
+                "",
+                1,
+                "",
+                "invalid tool arguments: " + error,
+                false,
+            )
+
+def toolResultPrompt(result: CommandResult) -> string:
+    output = "Command: " + result.command
+    output = output + "\nExit code: " + string(result.exitCode)
+    output = output + "\nTimed out: " + string(result.timedOut)
+    output = output + "\n\nstdout:\n" + result.stdout
+    output = output + "\n\nstderr:\n" + result.stderr
+
+    if result.exitCode == 0 and not result.timedOut:
+        output = output + "\n\nContinue with the next tool call."
+    else:
+        output = output + "\n\nDiagnose the failure, make the smallest correction, and retry."
+
+    return output
+
+def verify(
+    workspace: string,
+    command: string,
+    limits: AgentLimits,
+) -> CommandResult:
+    switch executeCommand(
+        workspace,
+        command,
+        limits.commandTimeoutMillis,
+        limits.maxOutputBytes,
+    ):
+        ok result:
+            return result
+        failure error:
+            return CommandResult(
+                command,
+                1,
+                "",
+                error,
+                false,
+            )
+
+def runAgent(
+    workspace: string,
+    goal: string,
+    verificationCommand: string,
+    statePath: string,
+    config: ModelConfig = defaultModelConfig(),
+    limits: AgentLimits = defaultAgentLimits(),
+) -> AgentResult:
+    state = loadState(statePath, goal)
+
+    for attempt in range(0, limits.attempts):
+        state.iteration = attempt + 1
+        prompt = statePrompt(state)
+
+        switch modelRequest(
+            config.endpoint,
+            config.model,
+            systemPrompt() + "\n\n" + commandToolDescription(),
+            prompt,
+            config.contextTokens,
+            config.outputTokens,
+            config.temperature,
+            config.timeoutMillis,
+        ):
+            failure error:
+                state = appendFailure(state, error)
+                saveState(statePath, state)
+
+            ok reply:
+                if size(reply.toolCalls) == 0:
+                    state = appendFailure(
+                        state,
+                        "model stopped without using a tool: " + reply.content,
+                    )
+                    state.nextAction = "use the execute tool immediately"
+                    saveState(statePath, state)
+                else:
+                    for call in reply.toolCalls:
+                        result = executeTool(workspace, call, limits)
+
+                        switch modelRequest(
+                            config.endpoint,
+                            config.model,
+                            systemPrompt(),
+                            toolResultPrompt(result),
+                            config.contextTokens,
+                            config.outputTokens,
+                            config.temperature,
+                            config.timeoutMillis,
+                        ):
+                            ok followup:
+                                if result.exitCode != 0 or result.timedOut:
+                                    state = appendFailure(
+                                        state,
+                                        result.stderr,
+                                    )
+                            failure error:
+                                state = appendFailure(state, error)
+
+                    switch gitStatus(workspace):
+                        ok files:
+                            state.modifiedFiles = files
+                        failure error:
+                            state = appendFailure(state, error)
+
+                    verification = verify(
+                        workspace,
+                        verificationCommand,
+                        limits,
+                    )
+
+                    if verification.exitCode == 0 and not verification.timedOut:
+                        state = advanceState(
+                            state,
+                            "verification passed",
+                            state.modifiedFiles,
+                            "complete",
+                        )
+                        saveState(statePath, state)
+
+                        return AgentResult(
+                            true,
+                            attempt + 1,
+                            verification.stdout,
+                            state,
+                        )
+
+                    state = appendFailure(
+                        state,
+                        toolResultPrompt(verification),
+                    )
+                    state.nextAction = "fix the verification failure"
+                    saveState(statePath, state)
+
+    return AgentResult(
+        false,
+        limits.attempts,
+        "agent iteration limit reached",
+        state,
+    )
+
+test "default limits bound the agent loop":
+    limits = defaultAgentLimits()
+    assert(limits.attempts == 20)
+    assert(limits.commandTimeoutMillis == 600000)
+    assert(limits.compactAtTokens == 2048)
+
+test "agent state begins with repository inspection":
+    state = emptyState("build sev agent")
+    assert(state.goal == "build sev agent")
+    assert(state.iteration == 0)
+    assert(state.nextAction == "inspect the repository")
+
+test "unsupported tools fail without execution":
+    result = executeTool(
+        ".",
+        ToolCall("unknown", "\"value\""),
+        defaultAgentLimits(),
+    )
+    assert(result.exitCode == 1)
+    assert(result.stderr == "unsupported tool: unknown")

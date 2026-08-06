@@ -1,0 +1,339 @@
+import agent
+
+class HarnessConfig:
+    workspace: string
+    goal: string
+    verificationCommand: string
+    statePath: string
+    attempts: int
+
+class HarnessStep:
+    iteration: int
+    action: string
+    passed: bool
+    output: string
+
+class HarnessResult:
+    passed: bool
+    iterations: int
+    message: string
+    steps: list[HarnessStep]
+
+def config(
+    workspace: string,
+    goal: string,
+    verificationCommand: string,
+    statePath: string,
+    attempts: int,
+) -> HarnessConfig:
+    assert(workspace != "")
+    assert(goal != "")
+    assert(verificationCommand != "")
+    assert(statePath != "")
+    assert(attempts > 0)
+
+    return HarnessConfig(
+        workspace,
+        goal,
+        verificationCommand,
+        statePath,
+        attempts,
+    )
+
+def step(
+    iteration: int,
+    action: string,
+    passed: bool,
+    output: string,
+) -> HarnessStep:
+    return HarnessStep(
+        iteration,
+        action,
+        passed,
+        output,
+    )
+
+def successful(
+    iterations: int,
+    message: string,
+    steps: list[HarnessStep],
+) -> HarnessResult:
+    return HarnessResult(
+        true,
+        iterations,
+        message,
+        steps,
+    )
+
+def failed(
+    iterations: int,
+    message: string,
+    steps: list[HarnessStep],
+) -> HarnessResult:
+    return HarnessResult(
+        false,
+        iterations,
+        message,
+        steps,
+    )
+
+def verificationPassed(result: agent.CommandResult) -> bool:
+    return result.exitCode == 0 and not result.timedOut
+
+def verificationFailure(result: agent.CommandResult) -> string:
+    message = "verification failed"
+
+    if result.timedOut:
+        message = message + ": timeout"
+
+    if result.exitCode != 0:
+        message = message + ": exit " + string(result.exitCode)
+
+    if result.stderr != "":
+        message = message + "\n" + result.stderr
+
+    if result.stdout != "":
+        message = message + "\n" + result.stdout
+
+    return message
+
+def runVerification(
+    harness: HarnessConfig,
+    limits: agent.AgentLimits,
+) -> agent.CommandResult:
+    return agent.verify(
+        harness.workspace,
+        harness.verificationCommand,
+        limits,
+    )
+
+def runIteration(
+    harness: HarnessConfig,
+    iteration: int,
+    modelConfig: agent.ModelConfig,
+    limits: agent.AgentLimits,
+) -> HarnessStep:
+    result = agent.runAgent(
+        harness.workspace,
+        harness.goal,
+        harness.verificationCommand,
+        harness.statePath,
+        modelConfig,
+        limits,
+    )
+
+    if result.success:
+        return step(
+            iteration,
+            "agent",
+            true,
+            result.message,
+        )
+
+    return step(
+        iteration,
+        "agent",
+        false,
+        result.message,
+    )
+
+def run(
+    harness: HarnessConfig,
+    modelConfig: agent.ModelConfig,
+    limits: agent.AgentLimits,
+) -> HarnessResult:
+    steps := []
+
+    initial = runVerification(harness, limits)
+
+    if verificationPassed(initial):
+        steps.append(
+            step(
+                0,
+                "initial verification",
+                true,
+                initial.stdout,
+            )
+        )
+
+        return successful(
+            0,
+            "verification already passes",
+            steps,
+        )
+
+    steps.append(
+        step(
+            0,
+            "initial verification",
+            false,
+            verificationFailure(initial),
+        )
+    )
+
+    for iteration in range(1, harness.attempts + 1):
+        current = runIteration(
+            harness,
+            iteration,
+            modelConfig,
+            limits,
+        )
+
+        steps.append(current)
+
+        verification = runVerification(harness, limits)
+
+        if verificationPassed(verification):
+            steps.append(
+                step(
+                    iteration,
+                    "verification",
+                    true,
+                    verification.stdout,
+                )
+            )
+
+            return successful(
+                iteration,
+                "harness completed successfully",
+                steps,
+            )
+
+        steps.append(
+            step(
+                iteration,
+                "verification",
+                false,
+                verificationFailure(verification),
+            )
+        )
+
+    return failed(
+        harness.attempts,
+        "harness attempt limit reached",
+        steps,
+    )
+
+def defaultConfig(
+    workspace: string,
+    goal: string,
+    verificationCommand: string,
+) -> HarnessConfig:
+    return config(
+        workspace,
+        goal,
+        verificationCommand,
+        workspace + "/.sev/harness-state.json",
+        20,
+    )
+
+def runDefault(
+    workspace: string,
+    goal: string,
+    verificationCommand: string,
+) -> HarnessResult:
+    harness = defaultConfig(
+        workspace,
+        goal,
+        verificationCommand,
+    )
+
+    modelConfig = agent.defaultModelConfig()
+    limits = agent.defaultAgentLimits()
+
+    return run(
+        harness,
+        modelConfig,
+        limits,
+    )
+
+def summary(result: HarnessResult) -> string:
+    text = "passed: " + string(result.passed)
+    text = text + "\niterations: " + string(result.iterations)
+    text = text + "\nmessage: " + result.message
+
+    for current in result.steps:
+        text = text + "\n"
+        text = text + string(current.iteration)
+        text = text + " "
+        text = text + current.action
+        text = text + " passed="
+        text = text + string(current.passed)
+
+        if current.output != "":
+            text = text + "\n" + current.output
+
+    return text
+
+test "harness configuration preserves limits":
+    harness = config(
+        ".",
+        "implement agent support",
+        "sev test",
+        ".sev/harness-state.json",
+        5,
+    )
+
+    assert(harness.workspace == ".")
+    assert(harness.goal == "implement agent support")
+    assert(harness.verificationCommand == "sev test")
+    assert(harness.attempts == 5)
+
+test "successful harness result is explicit":
+    steps = [
+        step(
+            1,
+            "verification",
+            true,
+            "tests passed",
+        )
+    ]
+
+    result = successful(
+        1,
+        "complete",
+        steps,
+    )
+
+    assert(result.passed)
+    assert(result.iterations == 1)
+    assert(size(result.steps) == 1)
+
+test "failed harness result is explicit":
+    result = failed(
+        3,
+        "attempt limit reached",
+        [],
+    )
+
+    assert(not result.passed)
+    assert(result.iterations == 3)
+
+test "verification requires zero exit and no timeout":
+    passed = agent.CommandResult(
+        "sev test",
+        0,
+        "passed",
+        "",
+        false,
+    )
+
+    failedExit = agent.CommandResult(
+        "sev test",
+        1,
+        "",
+        "failed",
+        false,
+    )
+
+    timedOut = agent.CommandResult(
+        "sev test",
+        0,
+        "",
+        "",
+        true,
+    )
+
+    assert(verificationPassed(passed))
+    assert(not verificationPassed(failedExit))
+    assert(not verificationPassed(timedOut))
