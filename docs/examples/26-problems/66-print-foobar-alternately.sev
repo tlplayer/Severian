@@ -1,0 +1,39 @@
+# Track: Concurrency validation
+# Problem: 1115 - Print FooBar Alternately
+# Difficulty: medium
+# Tags: concurrency, channel, synchronization
+
+def emitFoo(count: int, fooGate: Channel[int], barGate: Channel[int], output: Channel[string]):
+    for _ in range(count):
+        await fooGate
+        emitted = async send "foo" with output
+        await emitted
+        opened = async send 1 with barGate
+        await opened
+
+def emitBar(count: int, barGate: Channel[int], fooGate: Channel[int], output: Channel[string]):
+    for _ in range(count):
+        await barGate
+        emitted = async send "bar" with output
+        await emitted
+        opened = async send 1 with fooGate
+        await opened
+
+def fooBar(count: int) -> list[string]:
+    fooGate = Channel[int] with Buffer(1)
+    barGate = Channel[int] with Buffer(1)
+    output = Channel[string] with Buffer(2)
+    seed = async send 1 with fooGate
+    fooTask = async emitFoo(count, fooGate, barGate, output) with self
+    barTask = async emitBar(count, barGate, fooGate, output) with self
+    result := []
+    for _ in range(count * 2):
+        result.append(await output)
+    await seed, fooTask, barTask
+    return result
+
+test "three alternations":
+    assert(fooBar(3) == ["foo", "bar", "foo", "bar", "foo", "bar"])
+
+test "single alternation":
+    assert(fooBar(1) == ["foo", "bar"])

@@ -1629,7 +1629,7 @@ fn lower_expression(
         }
         Expr::Channel(channel) => {
             let capacity = lower_expression(&channel.capacity, scope, signatures, aliases)?.0;
-            Ok((Expression::Channel(Box::new(capacity)), ValueType::Any))
+            Ok((Expression::Channel(Box::new(capacity)), ValueType::Channel))
         }
         Expr::Send(send) => {
             let value = lower_expression(&send.value, scope, signatures, aliases)?.0;
@@ -2495,6 +2495,7 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
                 "Tensor" => Ok(ValueType::Tensor),
+                "Channel" => Ok(ValueType::Channel),
                 "fn" => Ok(ValueType::Function),
                 "Result" => Ok(ValueType::Result),
                 "Option" => Ok(ValueType::Option),

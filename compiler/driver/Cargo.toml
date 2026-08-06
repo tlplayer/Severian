@@ -3,20 +3,22 @@ name = "severian-driver"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "The Severian compiler and sev command-line tool"
+readme = "../../README.md"
 
 [[bin]]
 name = "sev"
 path = "src/main.rs"
 
 [dependencies]
-severian-ast = { path = "../ast" }
-severian-backend = { path = "../backend" }
-severian-hir = { path = "../hir" }
-severian-lexer = { path = "../lexer" }
-severian-lowering = { path = "../lowering" }
-severian-mlir = { path = "../mlir" }
-severian-ownership = { path = "../ownership" }
-severian-package = { path = "../package" }
-severian-parser = { path = "../parser" }
-severian-passes = { path = "../passes" }
-severian-semantic = { path = "../semantic" }
+severian-ast = { version = "0.1.0", path = "../ast" }
+severian-backend = { version = "0.1.0", path = "../backend" }
+severian-hir = { version = "0.1.0", path = "../hir" }
+severian-lexer = { version = "0.1.0", path = "../lexer" }
+severian-lowering = { version = "0.1.0", path = "../lowering" }
+severian-mlir = { version = "0.1.0", path = "../mlir" }
+severian-ownership = { version = "0.1.0", path = "../ownership" }
+severian-package = { version = "0.1.0", path = "../package" }
+severian-parser = { version = "0.1.0", path = "../parser" }
+severian-passes = { version = "0.1.0", path = "../passes" }
+severian-semantic = { version = "0.1.0", path = "../semantic" }

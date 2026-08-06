@@ -122,6 +122,7 @@ pub enum ValueType {
     Map,
     Set,
     Tensor,
+    Channel,
     Function,
     Result,
     Option,

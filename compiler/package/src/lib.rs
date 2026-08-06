@@ -102,11 +102,23 @@ pub fn find_manifest(source: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// Resolves the first binary target for `sev build` from the nearest manifest.
-pub fn default_binary_source(directory: &Path) -> Result<PathBuf, PackageError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryTarget {
+    pub name: String,
+    pub source: PathBuf,
+    pub package_root: PathBuf,
+}
+
+/// Resolves the default binary target using Cargo-compatible `[package]` and
+/// `[[bin]]` manifest fields.
+pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageError> {
     let direct = directory.join("main.sev");
     if direct.is_file() {
-        return Ok(direct);
+        return Ok(BinaryTarget {
+            name: "main".into(),
+            source: direct,
+            package_root: directory.to_path_buf(),
+        });
     }
     let manifest_path = directory
         .ancestors()
@@ -119,25 +131,127 @@ pub fn default_binary_source(directory: &Path) -> Result<PathBuf, PackageError> 
             ))
         })?;
     let manifest = parse_manifest(&manifest_path)?;
-    let binary_path = manifest
+    let package_root = manifest_path
+        .parent()
+        .expect("a manifest path has a parent")
+        .to_path_buf();
+    if manifest.get("package").is_none() {
+        let member = manifest
+            .get("workspace")
+            .and_then(toml::Value::as_table)
+            .and_then(|workspace| workspace.get("members"))
+            .and_then(toml::Value::as_array)
+            .and_then(|members| members.first())
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| {
+                PackageError::Manifest(format!(
+                    "workspace manifest {} has no package or members",
+                    manifest_path.display()
+                ))
+            })?;
+        return default_binary_target(&package_root.join(member));
+    }
+    let binary = manifest
         .get("bin")
         .and_then(toml::Value::as_array)
         .and_then(|binaries| binaries.first())
-        .and_then(toml::Value::as_table)
+        .and_then(toml::Value::as_table);
+    let binary_path = binary
         .and_then(|binary| binary.get("path"))
         .and_then(toml::Value::as_str)
         .unwrap_or("src/main.sev");
-    let source = manifest_path
-        .parent()
-        .expect("a manifest path has a parent")
-        .join(binary_path);
+    let source = package_root.join(binary_path);
     if !source.is_file() {
         return Err(PackageError::Manifest(format!(
             "binary source {} does not exist",
             source.display()
         )));
     }
-    Ok(source)
+    let name = binary
+        .and_then(|binary| binary.get("name"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            manifest
+                .get("package")
+                .and_then(toml::Value::as_table)
+                .and_then(|package| package.get("name"))
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "main".into());
+    Ok(BinaryTarget {
+        name,
+        source,
+        package_root,
+    })
+}
+
+/// Resolves every binary built by `sev build` from the nearest package or
+/// workspace manifest. Workspace member syntax intentionally matches Cargo's
+/// string-array form.
+pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, PackageError> {
+    let direct = directory.join("main.sev");
+    if direct.is_file() {
+        return Ok(vec![default_binary_target(directory)?]);
+    }
+    let manifest_path = directory
+        .ancestors()
+        .map(|ancestor| ancestor.join("Severian.toml"))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            PackageError::Manifest(format!(
+                "could not find `main.sev` or Severian.toml from {}",
+                directory.display()
+            ))
+        })?;
+    let manifest = parse_manifest(&manifest_path)?;
+    if manifest.get("package").is_some() {
+        return Ok(vec![default_binary_target(directory)?]);
+    }
+    let root = manifest_path
+        .parent()
+        .expect("a manifest path has a parent");
+    let members = manifest
+        .get("workspace")
+        .and_then(toml::Value::as_table)
+        .and_then(|workspace| workspace.get("members"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            PackageError::Manifest(format!(
+                "workspace manifest {} has no members",
+                manifest_path.display()
+            ))
+        })?;
+    let mut targets = Vec::new();
+    for member in members {
+        let member = member.as_str().ok_or_else(|| {
+            PackageError::Manifest("workspace members must be paths encoded as strings".into())
+        })?;
+        let member_root = root.join(member);
+        let member_manifest_path = member_root.join("Severian.toml");
+        let member_manifest = parse_manifest(&member_manifest_path)?;
+        let has_binary = member_manifest.get("bin").is_some()
+            || member_root.join("src/main.sev").is_file()
+            || member_root.join("main.sev").is_file();
+        if has_binary {
+            let mut target = default_binary_target(&member_root)?;
+            target.package_root = root.to_path_buf();
+            targets.push(target);
+        }
+    }
+    if targets.is_empty() {
+        return Err(PackageError::Manifest(format!(
+            "workspace {} has no binary targets",
+            manifest_path.display()
+        )));
+    }
+    Ok(targets)
+}
+
+/// Resolves the first binary target for `sev build` from the nearest manifest.
+pub fn default_binary_source(directory: &Path) -> Result<PathBuf, PackageError> {
+    Ok(default_binary_target(directory)?.source)
 }
 
 pub fn load_path_dependency_sources(manifest_path: &Path) -> Result<Vec<String>, PackageError> {

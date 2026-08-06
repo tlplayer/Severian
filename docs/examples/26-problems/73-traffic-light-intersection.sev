@@ -1,0 +1,34 @@
+# Track: Concurrency validation
+# Problem: 1279 - Traffic Light Controlled Intersection
+# Difficulty: easy
+# Tags: concurrency, lock, simulation
+
+class Intersection:
+    activeRoad: int
+    crossings: int
+
+    def cross(road: int, car: int) -> int:
+        if activeRoad != road:
+            activeRoad = road
+        crossings += 1
+        return road * 100 + car
+
+def crossTraffic() -> list[int]:
+    intersection := Intersection(1, 0)
+    first = async intersection.cross(1, 1) with self and lock
+    second = async intersection.cross(2, 2) with self and lock
+    third = async intersection.cross(1, 3) with self and lock
+    fourth = async intersection.cross(2, 4) with self and lock
+    firstResult = await first
+    secondResult = await second
+    thirdResult = await third
+    fourthResult = await fourth
+    result = [firstResult, secondResult, thirdResult, fourthResult]
+    assert(intersection.crossings == 4)
+    return result
+
+test "cars cross on both roads":
+    assert(crossTraffic() == [101, 202, 103, 204])
+
+test "intersection remains reusable":
+    assert(crossTraffic().sum() == 610)

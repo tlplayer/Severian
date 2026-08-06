@@ -1,0 +1,53 @@
+# Track: Concurrency validation
+# Problem: 1116 - Print Zero Even Odd
+# Difficulty: medium
+# Tags: concurrency, channel, ordering
+
+def emitZero(n: int, zeroGate: Channel[int], oddGate: Channel[int], evenGate: Channel[int], output: Channel[int]):
+    for value in range(1, n + 1):
+        await zeroGate
+        emitted = async send 0 with output
+        await emitted
+        if value % 2 == 1:
+            opened = async send 1 with oddGate
+            await opened
+        else:
+            opened = async send 1 with evenGate
+            await opened
+
+def emitOdd(n: int, oddGate: Channel[int], zeroGate: Channel[int], output: Channel[int]):
+    for value in range(1, n + 1, 2):
+        await oddGate
+        emitted = async send value with output
+        await emitted
+        opened = async send 1 with zeroGate
+        await opened
+
+def emitEven(n: int, evenGate: Channel[int], zeroGate: Channel[int], output: Channel[int]):
+    for value in range(2, n + 1, 2):
+        await evenGate
+        emitted = async send value with output
+        await emitted
+        opened = async send 1 with zeroGate
+        await opened
+
+def zeroEvenOdd(n: int) -> list[int]:
+    zeroGate = Channel[int] with Buffer(1)
+    oddGate = Channel[int] with Buffer(1)
+    evenGate = Channel[int] with Buffer(1)
+    output = Channel[int] with Buffer(2)
+    seed = async send 1 with zeroGate
+    zeroTask = async emitZero(n, zeroGate, oddGate, evenGate, output) with self
+    oddTask = async emitOdd(n, oddGate, zeroGate, output) with self
+    evenTask = async emitEven(n, evenGate, zeroGate, output) with self
+    result := []
+    for _ in range(n * 2):
+        result.append(await output)
+    await seed, zeroTask, oddTask, evenTask
+    return result
+
+test "five values":
+    assert(zeroEvenOdd(5) == [0, 1, 0, 2, 0, 3, 0, 4, 0, 5])
+
+test "one value":
+    assert(zeroEvenOdd(1) == [0, 1])

@@ -1,0 +1,42 @@
+# Track: Concurrency validation
+# Problem: 1114 - Print in Order
+# Difficulty: easy
+# Tags: concurrency, channel, ordering
+
+def first(output: Channel[int], secondGate: Channel[int]):
+    emitted = async send 1 with output
+    await emitted
+    opened = async send 1 with secondGate
+    await opened
+
+def second(secondGate: Channel[int], output: Channel[int], thirdGate: Channel[int]):
+    await secondGate
+    emitted = async send 2 with output
+    await emitted
+    opened = async send 1 with thirdGate
+    await opened
+
+def third(thirdGate: Channel[int], output: Channel[int]):
+    await thirdGate
+    emitted = async send 3 with output
+    await emitted
+
+def ordered() -> list[int]:
+    output = Channel[int] with Buffer(3)
+    secondGate = Channel[int] with Buffer(1)
+    thirdGate = Channel[int] with Buffer(1)
+    thirdTask = async third(thirdGate, output) with self
+    secondTask = async second(secondGate, output, thirdGate) with self
+    firstTask = async first(output, secondGate) with self
+    firstValue = await output
+    secondValue = await output
+    thirdValue = await output
+    result = [firstValue, secondValue, thirdValue]
+    await firstTask, secondTask, thirdTask
+    return result
+
+test "reverse launch order":
+    assert(ordered() == [1, 2, 3])
+
+test "ordering is repeatable":
+    assert(ordered() == [1, 2, 3])

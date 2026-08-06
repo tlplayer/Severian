@@ -2095,8 +2095,13 @@ impl LowerContext<'_> {
                     }
                     return (String::new(), ValueType::Unit);
                 }
-                let (task, _) = self.lower_expression(value);
+                let (task, awaited_type) = self.lower_expression(value);
                 let return_type = self.task_results.remove(&task);
+                if awaited_type == ValueType::Channel {
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_channel_receive_ptr({task}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    return (result, ValueType::Any);
+                }
                 if let Some(channel_type) = self.channel_types.get(&task).copied() {
                     let result = self.fresh_value();
                     writeln!(
@@ -2137,7 +2142,7 @@ impl LowerContext<'_> {
                     "    {result} = llvm.call @__sev_channel_create({capacity}) : (i64) -> !llvm.ptr"
                 )
                 .unwrap();
-                (result, ValueType::Any)
+                (result, ValueType::Channel)
             }
             Expression::Send { value, channel } => {
                 let lowered = self.lower_expression(value);
@@ -5639,6 +5644,7 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Map
         | ValueType::Set
         | ValueType::Tensor
+        | ValueType::Channel
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
@@ -5674,6 +5680,7 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Map
         | ValueType::Set
         | ValueType::Tensor
+        | ValueType::Channel
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
@@ -5693,6 +5700,7 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Map
         | ValueType::Set
         | ValueType::Tensor
+        | ValueType::Channel
         | ValueType::Function
         | ValueType::Any
         | ValueType::Result

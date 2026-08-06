@@ -1,0 +1,29 @@
+# Track: LeetCode validation
+# Problem: 3345 - Smallest Divisible Digit Product I
+# Difficulty: easy
+# Tags: math, enumeration, number-theory
+
+def digitProduct(value: int) -> int:
+    if value == 0:
+        return 0
+    product := 1
+    remaining := value
+    while remaining > 0:
+        product *= remaining % 10
+        remaining = remaining / 10
+    return product
+
+def smallestNumber(start: int, divisor: int) -> int:
+    candidate := start
+    while digitProduct(candidate) % divisor != 0:
+        candidate += 1
+    return candidate
+
+test "already divisible":
+    assert(smallestNumber(10, 2) == 10)
+    assert(smallestNumber(22, 4) == 22)
+
+test "searches upward":
+    assert(smallestNumber(19, 2) == 20)
+    assert(smallestNumber(15, 3) == 16)
+    assert(smallestNumber(33, 8) == 38)

@@ -3,6 +3,7 @@ use severian_driver::{
     lower_to_rocdl, native_test_compilation, run, run_integration_tests, run_tests,
 };
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     if let Err(error) = execute(std::env::args().skip(1).collect()) {
@@ -11,21 +12,55 @@ fn main() {
     }
 }
 
-fn execute(mut args: Vec<String>) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("build") {
-        args[0] = "compile".into();
-        if args.get(1).is_none_or(|argument| argument.starts_with('-')) {
-            let directory = std::env::current_dir().map_err(|error| error.to_string())?;
-            let source = severian_package::default_binary_source(&directory)
-                .map_err(|error| error.to_string())?;
-            args.insert(1, source.to_string_lossy().into_owned());
+fn execute(args: Vec<String>) -> Result<(), String> {
+    if args
+        .first()
+        .is_some_and(|argument| argument.ends_with(".sev"))
+    {
+        let source = PathBuf::from(&args[0]);
+        if args.len() != 1 {
+            return Err(usage());
         }
+        return compile_and_run(&source);
     }
     let Some(command) = args.first().map(String::as_str) else {
         return Err(usage());
     };
 
     match command {
+        "build" if args.len() <= 2 => {
+            let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+            let targets = if let Some(source) = args.get(1) {
+                let source = PathBuf::from(source);
+                let name = source
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("main")
+                    .to_owned();
+                vec![severian_package::BinaryTarget {
+                    source,
+                    name,
+                    package_root: directory,
+                }]
+            } else {
+                severian_package::workspace_binary_targets(&directory)
+                    .map_err(|error| error.to_string())?
+            };
+            for target in targets {
+                let output = target
+                    .package_root
+                    .join("target")
+                    .join("debug")
+                    .join(&target.name);
+                if let Some(parent) = output.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                let compilation =
+                    compile_path(&target.source).map_err(|error| error.to_string())?;
+                compile_program_or_tests(&compilation, &output)?;
+                println!("{}", output.display());
+            }
+        }
         "check" if args.len() == 2 => {
             compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
         }
@@ -127,14 +162,55 @@ fn execute(mut args: Vec<String>) -> Result<(), String> {
 
 fn usage() -> String {
     concat!(
-        "usage: sev <build|check|emit-mlir|emit-test-mlir|compile|compile-tests|run|test> [source.sev] [options]\n",
-        "  build: compile source.sev, or the current package's first binary target\n",
+        "usage: sev [command] [source.sev] [options]\n",
+        "  sev source.sev: compile to a temporary native executable and run it\n",
+        "  build [source.sev]: compile into target/debug, using Severian.toml by default\n",
+        "  check source.sev: run the frontend and ownership checks\n",
         "  emit-mlir target options: --target rocm [--chip gfx1100]\n",
         "  compile options: [-o executable] [--target rocm [--chip gfx1101]]\n",
         "  compile-tests options: -o executable\n",
+        "  run source.sev: execute through the controlled development runtime\n",
         "  test options: --integration | --integration-only"
     )
     .into()
+}
+
+fn compile_program_or_tests(
+    compilation: &severian_driver::Compilation,
+    output: &Path,
+) -> Result<(), String> {
+    if compilation.hir.main().is_some() {
+        compile_native(compilation, output).map_err(|error| error.to_string())
+    } else if compilation.hir.test_count() > 0 {
+        compile_native_tests(compilation, output)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    } else {
+        Err("source has neither `main()` nor native tests".into())
+    }
+}
+
+fn compile_and_run(source: &Path) -> Result<(), String> {
+    let compilation = compile_path(source).map_err(|error| error.to_string())?;
+    let executable = std::env::temp_dir().join(format!(
+        "severian-run-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    compile_program_or_tests(&compilation, &executable)?;
+    let status = Command::new(&executable)
+        .status()
+        .map_err(|error| format!("could not run {}: {error}", executable.display()));
+    let _ = std::fs::remove_file(&executable);
+    let status = status?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("native executable exited with {status}"))
+    }
 }
 
 fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {

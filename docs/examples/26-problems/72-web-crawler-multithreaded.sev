@@ -1,0 +1,24 @@
+# Track: Concurrency validation
+# Problem: 1242 - Web Crawler Multithreaded
+# Difficulty: medium
+# Tags: concurrency, graph, depth-first-search
+
+def crawlPage(host: string, links: list[string]) -> list[string]:
+    return links.filter(|url| url.startsWith(host))
+
+def crawl(host: string, firstLinks: list[string], secondLinks: list[string], thirdLinks: list[string]) -> set[string]:
+    first = async crawlPage(host, firstLinks) with self
+    second = async crawlPage(host, secondLinks) with self
+    third = async crawlPage(host, thirdLinks) with self
+    firstResult = await first
+    secondResult = await second
+    thirdResult = await third
+    return firstResult.toSet().union(secondResult.toSet()).union(thirdResult.toSet())
+
+test "same-host pages are deduplicated":
+    pages = crawl("https://sev.dev", ["https://sev.dev/a", "https://other.dev/x"], ["https://sev.dev/b", "https://sev.dev/a"], ["https://sev.dev/c"])
+    assert(pages == {"https://sev.dev/a", "https://sev.dev/b", "https://sev.dev/c"})
+
+test "external links are rejected":
+    pages = crawl("https://sev.dev", ["https://other.dev/a"], ["https://else.dev/b"], [])
+    assert(size(pages) == 0)
