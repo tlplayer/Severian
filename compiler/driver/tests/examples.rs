@@ -312,3 +312,53 @@ fn lowers_locked_method_tasks_to_workers_and_awaits_each_tuple_member() {
     );
     assert_eq!(main.matches("llvm.call @__sev_task_await_unit").count(), 2);
 }
+
+#[test]
+fn builds_and_executes_the_native_inference_node_vertically() {
+    let package = examples_root().join("27-inference-orchestrator");
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .current_dir(&package)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_log = String::from_utf8_lossy(&build.stdout);
+    for package_name in ["tensor", "models", "network", "orchestrator"] {
+        assert!(
+            build_log.contains(&format!("Built {package_name} ->")),
+            "missing {package_name} library build in:\n{build_log}"
+        );
+    }
+
+    let executable = package.join("target/debug/inference-node-example");
+    let output = Command::new(&executable).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        std::fs::read_to_string(package.join("main.stdout")).unwrap()
+    );
+
+    let compilation = compile_path(&package.join("main.sev")).unwrap();
+    let test_executable =
+        std::env::temp_dir().join(format!("severian-inference-tests-{}", std::process::id()));
+    assert_eq!(
+        compile_native_tests(&compilation, &test_executable).unwrap(),
+        3
+    );
+    let tests = Command::new(&test_executable).output().unwrap();
+    let _ = std::fs::remove_file(test_executable);
+    assert!(
+        tests.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tests.stderr)
+    );
+    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "3 passed\n");
+}

@@ -109,6 +109,103 @@ pub struct BinaryTarget {
     pub package_root: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTarget {
+    pub name: String,
+    pub source: PathBuf,
+    pub artifact: PathBuf,
+    pub manifest: PathBuf,
+}
+
+pub fn nearest_manifest(directory: &Path) -> Option<PathBuf> {
+    directory
+        .ancestors()
+        .map(|ancestor| ancestor.join("Severian.toml"))
+        .find(|candidate| candidate.is_file())
+}
+
+pub fn workspace_manifests(directory: &Path) -> Result<Vec<PathBuf>, PackageError> {
+    let manifest_path = nearest_manifest(directory).ok_or_else(|| {
+        PackageError::Manifest(format!(
+            "could not find Severian.toml from {}",
+            directory.display()
+        ))
+    })?;
+    let manifest = parse_manifest(&manifest_path)?;
+    let Some(members) = manifest
+        .get("workspace")
+        .and_then(toml::Value::as_table)
+        .and_then(|workspace| workspace.get("members"))
+        .and_then(toml::Value::as_array)
+    else {
+        return Ok(vec![manifest_path]);
+    };
+    let root = manifest_path
+        .parent()
+        .expect("a manifest path has a parent");
+    members
+        .iter()
+        .map(|member| {
+            let member = member.as_str().ok_or_else(|| {
+                PackageError::Manifest("workspace members must be paths encoded as strings".into())
+            })?;
+            let path = root.join(member).join("Severian.toml");
+            if !path.is_file() {
+                return Err(PackageError::Manifest(format!(
+                    "workspace member manifest {} does not exist",
+                    path.display()
+                )));
+            }
+            Ok(path)
+        })
+        .collect()
+}
+
+pub fn library_build_plan(manifest_path: &Path) -> Result<Vec<LibraryTarget>, PackageError> {
+    let mut visited = HashSet::new();
+    let mut targets = Vec::new();
+    collect_library_targets(manifest_path, &mut visited, &mut targets)?;
+    Ok(targets)
+}
+
+pub fn write_library_artifact(target: &LibraryTarget) -> Result<(), PackageError> {
+    let source = std::fs::read_to_string(&target.source)?;
+    if let Some(parent) = target.artifact.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        &target.artifact,
+        format!(
+            "# severian-library-artifact v1\n# package {}\n{}",
+            target.name,
+            strip_package_tests(&source)
+        ),
+    )?;
+    Ok(())
+}
+
+fn strip_package_tests(source: &str) -> String {
+    let mut output = String::new();
+    let mut skipped_test_indent = None;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if let Some(test_indent) = skipped_test_indent {
+            if trimmed.is_empty() || indent > test_indent {
+                continue;
+            }
+            skipped_test_indent = None;
+        }
+        if (trimmed == "test:" || trimmed.starts_with("test ")) && trimmed.ends_with(':') {
+            skipped_test_indent = Some(indent);
+            continue;
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+    output
+}
+
 /// Resolves the default binary target using Cargo-compatible `[package]` and
 /// `[[bin]]` manifest fields.
 pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageError> {
@@ -207,6 +304,15 @@ pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, P
     };
     let manifest = parse_manifest(&manifest_path)?;
     if manifest.get("package").is_some() {
+        let root = manifest_path
+            .parent()
+            .expect("a manifest path has a parent");
+        let has_binary = manifest.get("bin").is_some()
+            || root.join("src/main.sev").is_file()
+            || root.join("main.sev").is_file();
+        if !has_binary {
+            return Ok(Vec::new());
+        }
         return Ok(vec![default_binary_target(directory)?]);
     }
     let root = manifest_path
@@ -239,12 +345,6 @@ pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, P
             target.package_root = root.to_path_buf();
             targets.push(target);
         }
-    }
-    if targets.is_empty() {
-        return Err(PackageError::Manifest(format!(
-            "workspace {} has no binary targets",
-            manifest_path.display()
-        )));
     }
     Ok(targets)
 }
@@ -608,14 +708,91 @@ fn load_manifest_dependencies(
             .parent()
             .ok_or_else(|| PackageError::Manifest("dependency manifest has no parent".into()))?
             .join(library_path(&dependency_package));
-        sources.push(std::fs::read_to_string(&source_path).map_err(|error| {
+        let artifact_path = library_artifact_path(
+            canonical_manifest
+                .parent()
+                .expect("a manifest path has a parent"),
+            declared_name,
+        );
+        let selected_path = if artifact_is_fresh(&artifact_path, &source_path, &canonical_manifest)
+        {
+            &artifact_path
+        } else {
+            &source_path
+        };
+        sources.push(std::fs::read_to_string(selected_path).map_err(|error| {
             PackageError::Manifest(format!(
                 "could not read library for `{dependency_name}` at {}: {error}",
-                source_path.display()
+                selected_path.display()
             ))
         })?);
     }
     Ok(())
+}
+
+fn collect_library_targets(
+    manifest_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    targets: &mut Vec<LibraryTarget>,
+) -> Result<(), PackageError> {
+    let canonical_manifest = manifest_path.canonicalize().map_err(|error| {
+        PackageError::Manifest(format!(
+            "package manifest {} is invalid: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    if !visited.insert(canonical_manifest.clone()) {
+        return Ok(());
+    }
+    let manifest = parse_manifest(&canonical_manifest)?;
+    let directory = canonical_manifest
+        .parent()
+        .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
+    if let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) {
+        for dependency in dependencies.values() {
+            let Some(path) = dependency
+                .as_table()
+                .and_then(|table| table.get("path"))
+                .and_then(toml::Value::as_str)
+            else {
+                continue;
+            };
+            collect_library_targets(
+                &directory.join(path).join("Severian.toml"),
+                visited,
+                targets,
+            )?;
+        }
+    }
+    if manifest.get("lib").is_some() {
+        let name = package_name(&manifest, &canonical_manifest)?.to_owned();
+        targets.push(LibraryTarget {
+            source: directory.join(library_path(&manifest)),
+            artifact: library_artifact_path(directory, &name),
+            name,
+            manifest: canonical_manifest,
+        });
+    }
+    Ok(())
+}
+
+fn library_artifact_path(directory: &Path, package: &str) -> PathBuf {
+    directory
+        .join("target")
+        .join("debug")
+        .join("deps")
+        .join(format!("lib{package}.sevi"))
+}
+
+fn artifact_is_fresh(artifact: &Path, source: &Path, manifest: &Path) -> bool {
+    let Ok(artifact_modified) = artifact.metadata().and_then(|metadata| metadata.modified()) else {
+        return false;
+    };
+    [source, manifest].iter().all(|path| {
+        path.metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| modified <= artifact_modified)
+    })
 }
 
 fn package_name<'a>(manifest: &'a toml::Value, path: &Path) -> Result<&'a str, PackageError> {

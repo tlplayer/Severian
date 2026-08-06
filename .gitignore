@@ -1,4 +1,5 @@
 /target/
+target/
 /bin/examples/
 /bench/.work/
 /bench/results.csv

@@ -1,0 +1,171 @@
+import models
+import network
+import orchestrator
+import tensor
+
+class InferenceRequest:
+    id: int
+    features: list[float]
+
+class InferenceResponse:
+    id: int
+    values: list[float]
+    attempt: int
+
+class InferenceBatch:
+    id: int
+    requests: list[InferenceRequest]
+    failFirst: bool
+
+class BatchResult:
+    batchId: int
+    ok: bool
+    responses: list[InferenceResponse]
+
+class NodeReport:
+    health: string
+    pressure: string
+    accepted: int
+    completed: int
+    batches: int
+    restarts: int
+    failedAttempts: int
+    responses: list[InferenceResponse]
+
+def predict(features: list[float]) -> list[float]:
+    input = tensor.ranked(features, [1, 2])
+    weights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    bias = tensor.ranked([-1.0, 1.0], [1, 2])
+    X = models.graphInput(input)
+    W = models.graphInput(weights)
+    B = models.graphInput(bias)
+    output = models.runGraph(models.graphRelu(models.graphAdd(models.graphMatmul(X, W), B)))
+    return tensor.rankedValues(output)
+
+def makeBatches(requests: list[InferenceRequest], batchSize: int, failureBatch: int) -> list[InferenceBatch]:
+    assert(batchSize > 0)
+    batches := []
+    for start in range(0, size(requests), batchSize):
+        end := start + batchSize
+        if end > size(requests):
+            end = size(requests)
+        batchId = size(batches)
+        batches.append(InferenceBatch(batchId, requests[start:end], batchId == failureBatch))
+    return batches
+
+def runBatch(workerId: int, batch: InferenceBatch, attempt: int) -> BatchResult:
+    if batch.failFirst and attempt == 1:
+        return BatchResult(batch.id, false, [])
+    responses := []
+    for request in batch.requests:
+        responses.append(InferenceResponse(request.id, predict(request.features), attempt))
+    return BatchResult(batch.id, true, responses)
+
+def poolWorker(workerId: int, jobs: Channel[InferenceBatch], results: Channel[BatchResult]):
+    while true:
+        batch = await jobs
+        if batch.id < 0:
+            return
+        result = runBatch(workerId, batch, 1)
+        delivered = async send result with results
+        await delivered
+
+def runNode(
+    requests: list[InferenceRequest],
+    batchSize: int,
+    queueCapacity: int,
+    failureBatch: int,
+) -> NodeReport:
+    assert(queueCapacity > 0)
+    batches = makeBatches(requests, batchSize, failureBatch)
+    jobs = Channel[InferenceBatch] with Buffer(queueCapacity)
+    results = Channel[BatchResult] with Buffer(queueCapacity)
+
+    firstWorker = async poolWorker(0, jobs, results) with self
+    secondWorker = async poolWorker(1, jobs, results) with self
+
+    for batch in batches:
+        queued = async send batch with jobs
+        await queued
+
+    firstStop = async send InferenceBatch(-1, [], false) with jobs
+    await firstStop
+    secondStop = async send InferenceBatch(-1, [], false) with jobs
+    await secondStop
+
+    rawResults := []
+    for _ in batches:
+        rawResults.append(await results)
+
+    await firstWorker, secondWorker
+
+    responses := []
+    restarts := 0
+    failedAttempts := 0
+    for result in rawResults:
+        if result.ok:
+            responses.extend(result.responses)
+        else:
+            failedAttempts += 1
+            restarts += 1
+            replacement = async runBatch(100 + restarts, batches[result.batchId], 2) with self
+            recovered = await replacement
+            assert(recovered.ok)
+            responses.extend(recovered.responses)
+
+    responses = responses.sorted(|response| response.id)
+    completed = size(responses)
+    return NodeReport(orchestrator.inferenceHealth(2, 2, completed, size(requests)), orchestrator.queuePressure(size(batches), queueCapacity), size(requests), completed, size(batches), restarts, failedAttempts, responses)
+
+def sampleRequests() -> list[InferenceRequest]:
+    return [InferenceRequest(1, [2.0, 3.0]), InferenceRequest(2, [-1.0, 0.0]), InferenceRequest(3, [4.0, -3.0]), InferenceRequest(4, [1.0, 1.0]), InferenceRequest(5, [0.0, 2.0]), InferenceRequest(6, [5.0, 5.0])]
+
+def transportProbe(message: string) -> string:
+    switch network.loopbackEcho(message):
+        ok echoed:
+            return "transport " + echoed
+        failure _:
+            return "transport unavailable"
+
+test "bounded batches recover a failed worker attempt":
+    report = runNode(sampleRequests(), 2, 2, 1)
+    assert(report.health == "ready")
+    assert(report.pressure == "saturated")
+    assert(report.accepted == 6)
+    assert(report.completed == 6)
+    assert(report.batches == 3)
+    assert(report.restarts == 1)
+    assert(report.failedAttempts == 1)
+    assert(report.responses[0].values == [1.0, 4.0])
+    assert(report.responses[1].values == [0.0, 1.0])
+    assert(report.responses[2].values == [3.0, 0.0])
+    assert(report.responses[2].attempt == 2)
+    assert(report.responses[3].attempt == 2)
+    assert(report.responses[5].values == [4.0, 6.0])
+
+test "partial final batches preserve every request":
+    requests = sampleRequests()[0:5]
+    report = runNode(requests, 2, 4, -1)
+    assert(report.health == "ready")
+    assert(report.pressure == "high")
+    assert(report.completed == 5)
+    assert(report.batches == 3)
+    assert(report.restarts == 0)
+
+test "transport probe reports native socket availability":
+    status = transportProbe("inference-ready")
+    assert(status == "transport inference-ready" or status == "transport unavailable")
+
+def main():
+    report = runNode(sampleRequests(), 2, 2, 1)
+    print(report.health)
+    print(report.pressure)
+    print("accepted", report.accepted)
+    print("completed", report.completed)
+    print("batches", report.batches)
+    print("restarts", report.restarts)
+    print("failed attempts", report.failedAttempts)
+    for response in report.responses:
+        print(response.id, response.values[0], response.values[1], response.attempt)
+    transportProbe("inference-ready")
+    print("transport checked")

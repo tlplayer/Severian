@@ -64,8 +64,10 @@ those tests and prints the real pass count.
 
 `sev build` reads Cargo-compatible `[package]`, `[[bin]]`, `[dependencies]`, and
 `[workspace] members` fields from `Severian.toml`. Package and workspace binaries
-are emitted under `target/debug`; `sev build source.sev` uses the source stem as
-the binary name.
+are emitted under `target/debug`. Path libraries are checked in dependency order
+and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
+those artifacts. Library-local tests are not linked into downstream application
+test binaries. `sev build source.sev` uses the source stem as the binary name.
 
 The CLI is also a conventional Cargo binary crate:
 

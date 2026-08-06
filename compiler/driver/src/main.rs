@@ -30,6 +30,30 @@ fn execute(args: Vec<String>) -> Result<(), String> {
     match command {
         "build" if args.len() <= 2 => {
             let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+            let manifests = if let Some(source) = args.get(1) {
+                severian_package::find_manifest(Path::new(source))
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                severian_package::workspace_manifests(&directory)
+                    .map_err(|error| error.to_string())?
+            };
+            let mut built_libraries = std::collections::HashSet::new();
+            for manifest in manifests {
+                let plan = severian_package::library_build_plan(&manifest)
+                    .map_err(|error| error.to_string())?;
+                for library in plan {
+                    if !built_libraries.insert(library.artifact.clone()) {
+                        continue;
+                    }
+                    compile_path(&library.source).map_err(|error| {
+                        format!("could not build library `{}`: {error}", library.name)
+                    })?;
+                    severian_package::write_library_artifact(&library)
+                        .map_err(|error| error.to_string())?;
+                    println!("Built {} -> {}", library.name, library.artifact.display());
+                }
+            }
             let targets = if let Some(source) = args.get(1) {
                 let source = PathBuf::from(source);
                 let name = source
@@ -57,8 +81,11 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 }
                 let compilation =
                     compile_path(&target.source).map_err(|error| error.to_string())?;
+                if compilation.hir.main().is_none() && compilation.hir.test_count() == 0 {
+                    continue;
+                }
                 compile_program_or_tests(&compilation, &output)?;
-                println!("{}", output.display());
+                println!("Built {} -> {}", target.name, output.display());
             }
         }
         "check" if args.len() == 2 => {

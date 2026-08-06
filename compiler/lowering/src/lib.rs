@@ -288,12 +288,17 @@ pub fn lower(program: &Program) -> Module {
             await_types.insert(method.return_type);
         }
     }
+    let mut declared_await_suffixes = HashSet::new();
     for ty in await_types {
         if ty != ValueType::Unit {
+            let suffix = task_type_suffix(ty);
+            if !declared_await_suffixes.insert(suffix) {
+                continue;
+            }
             writeln!(
                 output,
                 "  llvm.func @__sev_task_await_{}(!llvm.ptr) -> {}",
-                task_type_suffix(ty),
+                suffix,
                 mlir_type(ty)
             )
             .unwrap();
@@ -3512,6 +3517,24 @@ impl LowerContext<'_> {
             right = self.unbox_value((right, right_type), operand_type).0;
             right_type = operand_type;
         }
+        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
+            && matches!(
+                operand_type,
+                ValueType::List | ValueType::Tuple | ValueType::Set
+            )
+            && operand_type == right_type
+        {
+            let equal = self.fresh_value();
+            writeln!(self.output, "    {equal} = llvm.call @__sev_collection_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+            if op == BinaryOp::Equal {
+                return (equal, ValueType::Bool);
+            }
+            let one = self.fresh_value();
+            writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1").unwrap();
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
+            return (result, ValueType::Bool);
+        }
         if operand_type == ValueType::String && right_type == ValueType::String {
             if op == BinaryOp::Add {
                 let result = self.fresh_value();
@@ -5380,13 +5403,18 @@ int64_t __sev_host_page_size(void) {
         return_types.insert(ValueType::Unit);
     }
     source.push_str("typedef struct { pthread_t thread; } sev_task_unit;\n");
+    let mut declared_task_suffixes = HashSet::new();
     for ty in &return_types {
         if *ty != ValueType::Unit {
+            let suffix = task_type_suffix(*ty);
+            if !declared_task_suffixes.insert(suffix) {
+                continue;
+            }
             writeln!(
                 source,
                 "typedef struct {{ pthread_t thread; {} result; }} sev_task_{};",
                 c_type(*ty),
-                task_type_suffix(*ty)
+                suffix
             )
             .unwrap();
         }
@@ -5586,9 +5614,13 @@ int64_t __sev_host_page_size(void) {
         ));
     }
     source.push_str("void __sev_task_await_unit(void *raw) { sev_task_unit *task = raw; if (!task) abort(); pthread_join(task->thread, NULL); free(task); }\n");
+    let mut defined_await_suffixes = HashSet::new();
     for ty in return_types {
         let suffix = task_type_suffix(ty);
         if ty != ValueType::Unit {
+            if !defined_await_suffixes.insert(suffix) {
+                continue;
+            }
             writeln!(
                 source,
                 "{} __sev_task_await_{suffix}(void *raw) {{",

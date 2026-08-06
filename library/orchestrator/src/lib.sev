@@ -80,6 +80,29 @@ def healthStatus(successes: int, failures: int, healthyThreshold: int, failureTh
         return "healthy"
     return "probing"
 
+def queuePressure(queued: int, capacity: int) -> string:
+    assert(queued >= 0)
+    assert(capacity > 0)
+    if queued >= capacity:
+        return "saturated"
+    if queued * 4 >= capacity * 3:
+        return "high"
+    if queued * 2 >= capacity:
+        return "moderate"
+    return "low"
+
+def inferenceHealth(readyWorkers: int, desiredWorkers: int, completed: int, accepted: int) -> string:
+    if readyWorkers < desiredWorkers:
+        return "degraded"
+    if completed < accepted:
+        return "draining"
+    return "ready"
+
+def workerRecovery(workerId: int, generation: int, healthy: bool) -> string:
+    if healthy:
+        return "worker " + string(workerId) + " healthy generation " + string(generation)
+    return "restart worker " + string(workerId) + " generation " + string(generation + 1)
+
 def serviceAddress(workload: Workload, domain: string) -> string:
     return workload.name + "." + workload.namespace + ".svc." + domain + ":" + string(workload.port)
 
@@ -120,6 +143,16 @@ test "health checks have explicit thresholds":
     assert(healthStatus(3, 0, 3, 2) == "healthy")
     assert(healthStatus(0, 2, 3, 2) == "unhealthy")
     assert(healthStatus(1, 0, 3, 2) == "probing")
+
+test "inference pressure and recovery policy is deterministic":
+    assert(queuePressure(0, 8) == "low")
+    assert(queuePressure(4, 8) == "moderate")
+    assert(queuePressure(6, 8) == "high")
+    assert(queuePressure(8, 8) == "saturated")
+    assert(inferenceHealth(2, 2, 12, 12) == "ready")
+    assert(inferenceHealth(1, 2, 12, 12) == "degraded")
+    assert(inferenceHealth(2, 2, 10, 12) == "draining")
+    assert(workerRecovery(3, 1, false) == "restart worker 3 generation 2")
 
 test "service discovery and volumes are deterministic":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")

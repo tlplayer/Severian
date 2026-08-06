@@ -1766,10 +1766,11 @@ fn lower_call(
 ) -> Result<(Expression, ValueType), SemanticError> {
     if let Expr::Index(index) = call.callee.as_ref() {
         if let Expr::Identifier(callee) = index.object.as_ref() {
-            let canonical = aliases
+            let imported = aliases
                 .get(&callee.name)
                 .map(String::as_str)
                 .unwrap_or(&callee.name);
+            let canonical = resolve_linked_function(imported, signatures);
             if let Some(signature) = signatures.get(canonical) {
                 return lower_declared_call(call, canonical, signature, scope, signatures, aliases);
             }
@@ -1778,11 +1779,12 @@ fn lower_call(
             if let Expr::Identifier(object) = member.object.as_ref() {
                 if let Some(module) = aliases.get(&object.name) {
                     let function = format!("{module}.{}", member.member.name);
-                    let signature = signatures.get(&function).ok_or_else(|| {
+                    let canonical = resolve_linked_function(&function, signatures);
+                    let signature = signatures.get(canonical).ok_or_else(|| {
                         error(call.span, format!("unknown exported function `{function}`"))
                     })?;
                     return lower_declared_call(
-                        call, &function, signature, scope, signatures, aliases,
+                        call, canonical, signature, scope, signatures, aliases,
                     );
                 }
             }
@@ -1833,9 +1835,10 @@ fn lower_call(
             }
             if let Some(module) = aliases.get(&object.name) {
                 let function = format!("{module}.{}", member.member.name);
-                if let Some(signature) = signatures.get(&function) {
+                let canonical = resolve_linked_function(&function, signatures);
+                if let Some(signature) = signatures.get(canonical) {
                     return lower_declared_call(
-                        call, &function, signature, scope, signatures, aliases,
+                        call, canonical, signature, scope, signatures, aliases,
                     );
                 }
                 if let Some(class) = aliases.get(&format!("__module_class.{function}")) {
@@ -1903,10 +1906,15 @@ fn lower_call(
             ValueType::Any,
         ));
     };
-    let canonical = aliases
+    let imported = aliases
         .get(&callee.name)
         .map(String::as_str)
         .unwrap_or(&callee.name);
+    // Path dependencies are compiled into the same translation unit. Their
+    // functions therefore have source-level names, while `from package import`
+    // records a package-qualified alias. Prefer a real qualified interface when
+    // one exists, then fall back to the linked source implementation.
+    let canonical = resolve_linked_function(imported, signatures);
     if let Some(class) = canonical.strip_prefix("__class.") {
         let args = call
             .args
@@ -2083,6 +2091,21 @@ fn lower_call(
         callee.span,
         format!("unknown function `{}`", callee.name),
     ))
+}
+
+fn resolve_linked_function<'a>(
+    imported: &'a str,
+    signatures: &HashMap<String, Signature>,
+) -> &'a str {
+    if signatures.contains_key(imported) {
+        imported
+    } else {
+        imported
+            .rsplit_once('.')
+            .map(|(_, function)| function)
+            .filter(|function| signatures.contains_key(*function))
+            .unwrap_or(imported)
+    }
 }
 
 fn method_return_type(object: ValueType, method: &str) -> ValueType {

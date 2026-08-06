@@ -95,3 +95,71 @@ fn build_uses_the_manifest_name_and_target_debug_directory() {
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn build_compiles_library_artifacts_before_consuming_them() {
+    let root = std::env::temp_dir().join(format!(
+        "severian-vertical-build-test-{}",
+        std::process::id()
+    ));
+    let application = root.join("application");
+    let helper = root.join("helper");
+    std::fs::create_dir_all(application.join("src")).unwrap();
+    std::fs::create_dir_all(helper.join("src")).unwrap();
+    std::fs::write(
+        helper.join("Severian.toml"),
+        "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        helper.join("src/lib.sev"),
+        "def double(value: int) -> int:\n    return value * 2\n\ntest \"library-local\":\n    assert(double(3) == 6)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        application.join("Severian.toml"),
+        "[package]\nname = \"vertical-app\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[[bin]]\nname = \"vertical-app\"\npath = \"src/main.sev\"\n\n[dependencies]\nhelper = { path = \"../helper\", version = \"0.1.0\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        application.join("src/main.sev"),
+        "import helper\nfrom helper import double\n\ndef main():\n    print(helper.double(21))\n\ntest \"application-only\":\n    assert(double(4) == 8)\n",
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .current_dir(&application)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let artifact = helper.join("target/debug/deps/libhelper.sevi");
+    let artifact_source = std::fs::read_to_string(&artifact).unwrap();
+    assert!(artifact_source.contains("severian-library-artifact v1"));
+    assert!(!artifact_source.contains("library-local"));
+    let output = Command::new(application.join("target/debug/vertical-app"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+
+    let test_binary = application.join("target/debug/vertical-app-tests");
+    let compiled_tests = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("compile-tests")
+        .arg("src/main.sev")
+        .arg("-o")
+        .arg(&test_binary)
+        .current_dir(&application)
+        .output()
+        .unwrap();
+    assert!(compiled_tests.status.success());
+    assert!(String::from_utf8_lossy(&compiled_tests.stdout).contains("(1 native tests)"));
+    let tests = Command::new(test_binary).output().unwrap();
+    assert!(tests.status.success());
+    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "1 passed\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
