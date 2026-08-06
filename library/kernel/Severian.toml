@@ -1,0 +1,16 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2026"
+description = "Deterministic operating-system kernel policies and invariants"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
+[package.metadata.library]
+category = "operating-systems"
+implementation = "source"
+status = "experimental"

@@ -1,0 +1,11 @@
+kernel laboratory
+pages [-1, -1, 1, 1, 2, 0, 0, 0, 0, 0]
+mappings 2
+schedule [1, 2, 1, 2, 1, 2, 1, 2]
+syscall 1 1 true welcome to severian
+syscall 2 2 true shell ready
+syscall 3 2 true yielded
+syscall 4 3 false permission denied
+interrupts [timer, page-fault, keyboard]
+audit clean
+boot byte 83

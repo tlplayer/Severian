@@ -93,6 +93,15 @@ describe validated host plans above the explicit `platform` ABI, while
 host mutation remains a distinct executor boundary and is never performed by
 ordinary package tests.
 
+## Operating-system laboratory
+
+`kernel` provides hosted, deterministic OS policies for physical pages, virtual
+mappings, capabilities, processes, files, syscalls, interrupts, and scheduling.
+The executable under `docs/examples/29-operating-system` composes them with
+native channels and tasks. It is intentionally distinct from a freestanding,
+bootable target, whose missing ABI and architecture requirements are documented
+beside the example.
+
 Run all currently implemented library packages with:
 
 ```sh

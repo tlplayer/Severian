@@ -19,6 +19,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Security | `hash`, `crypto`, `tls` | provider policy required |
 | Data and storage | `pql`, `storage`, `database`, `compression`, `archive` | PQL validation, extensible storage plans, and executable database server experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
+| Operating systems | `kernel` | hosted kernel laboratory with memory, process, VFS, syscall, interrupt, and scheduler invariants experimental |
 | Orchestration | `orchestrator` | scheduling and reconciliation baseline experimental |
 | Development | `testing`, `benchmark`, `profile` | language design |
 

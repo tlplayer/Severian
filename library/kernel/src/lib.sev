@@ -1,0 +1,281 @@
+import platform
+
+class Allocation:
+    ok: bool
+    owners: list[int]
+    frames: list[int]
+    message: string
+
+class Mapping:
+    processId: int
+    virtualAddress: int
+    frame: int
+    writable: bool
+    executable: bool
+
+class MapResult:
+    ok: bool
+    mappings: list[Mapping]
+    message: string
+
+class Process:
+    id: int
+    name: string
+    state: string
+    priority: int
+    capabilities: list[string]
+
+class FileNode:
+    path: string
+    contents: string
+    owner: int
+    readable: bool
+    writable: bool
+
+class FileResult:
+    ok: bool
+    value: string
+    nodes: list[FileNode]
+
+class SyscallRequest:
+    id: int
+    process: Process
+    operation: string
+    argument: string
+
+class SyscallReply:
+    id: int
+    processId: int
+    ok: bool
+    value: string
+
+class KernelReport:
+    pageOwners: list[int]
+    mappings: list[Mapping]
+    schedule: list[int]
+    replies: list[SyscallReply]
+    interrupts: list[string]
+    audit: list[string]
+
+def pageSize() -> int:
+    return platform.hostPageSize()
+
+def hasCapability(process: Process, expected: string) -> bool:
+    for capability in process.capabilities:
+        if capability == expected:
+            return true
+    return false
+
+def initialPageOwners(totalPages: int, kernelPages: int) -> list[int]:
+    assert(totalPages > 0)
+    assert(kernelPages >= 0 and kernelPages <= totalPages)
+    owners := []
+    for frame in range(0, totalPages):
+        owners.append(-1 if frame < kernelPages else 0)
+    return owners
+
+def allocatePages(owners: list[int], count: int, processId: int) -> Allocation:
+    assert(count > 0)
+    assert(processId > 0)
+    updated = clone owners
+    frames := []
+    for frame in indices(updated):
+        if updated[frame] == 0 and size(frames) < count:
+            updated[frame] = processId
+            frames.append(frame)
+    if size(frames) != count:
+        return Allocation(false, clone owners, [], "out of physical memory")
+    return Allocation(true, updated, frames, "allocated")
+
+def releaseProcessPages(owners: list[int], processId: int) -> list[int]:
+    updated = clone owners
+    for frame in indices(updated):
+        if updated[frame] == processId:
+            updated[frame] = 0
+    return updated
+
+def frameOwnedBy(owners: list[int], frame: int, processId: int) -> bool:
+    return frame >= 0 and frame < size(owners) and owners[frame] == processId
+
+def mappingExists(mappings: list[Mapping], processId: int, virtualAddress: int) -> bool:
+    for mapping in mappings:
+        if mapping.processId == processId and mapping.virtualAddress == virtualAddress:
+            return true
+    return false
+
+def mapPage(
+    mappings: list[Mapping],
+    owners: list[int],
+    process: Process,
+    virtualAddress: int,
+    frame: int,
+    writable: bool,
+    executable: bool,
+) -> MapResult:
+    systemPageSize = pageSize()
+    if not hasCapability(process, "memory.map"):
+        return MapResult(false, clone mappings, "missing memory.map capability")
+    if virtualAddress < systemPageSize or virtualAddress % systemPageSize != 0:
+        return MapResult(false, clone mappings, "virtual address is not user-page aligned")
+    if writable and executable:
+        return MapResult(false, clone mappings, "W^X violation")
+    if not frameOwnedBy(owners, frame, process.id):
+        return MapResult(false, clone mappings, "process does not own frame")
+    if mappingExists(mappings, process.id, virtualAddress):
+        return MapResult(false, clone mappings, "virtual page is already mapped")
+    updated = clone mappings
+    updated.append(Mapping(process.id, virtualAddress, frame, writable, executable))
+    return MapResult(true, updated, "mapped")
+
+def runnableProcesses(processes: list[Process]) -> list[Process]:
+    ready := []
+    for process in processes:
+        if process.state == "ready":
+            ready.append(process)
+    return ready.sorted(|process| -process.priority)
+
+def roundRobinSchedule(processes: list[Process], quanta: int) -> list[int]:
+    ready = runnableProcesses(processes)
+    schedule := []
+    if size(ready) == 0:
+        return schedule
+    for tick in range(0, quanta):
+        schedule.append(ready[tick % size(ready)].id)
+    return schedule
+
+def findNode(nodes: list[FileNode], path: string) -> int:
+    for index in indices(nodes):
+        if nodes[index].path == path:
+            return index
+    return -1
+
+def readFile(nodes: list[FileNode], process: Process, path: string) -> FileResult:
+    if not hasCapability(process, "fs.read"):
+        return FileResult(false, "permission denied", clone nodes)
+    index = findNode(nodes, path)
+    if index < 0:
+        return FileResult(false, "not found", clone nodes)
+    if not nodes[index].readable:
+        return FileResult(false, "not readable", clone nodes)
+    return FileResult(true, nodes[index].contents, clone nodes)
+
+def writeFile(nodes: list[FileNode], process: Process, path: string, contents: string) -> FileResult:
+    if not hasCapability(process, "fs.write"):
+        return FileResult(false, "permission denied", clone nodes)
+    index = findNode(nodes, path)
+    if index < 0:
+        return FileResult(false, "not found", clone nodes)
+    if not nodes[index].writable:
+        return FileResult(false, "read-only filesystem", clone nodes)
+    updated = clone nodes
+    node = nodes[index]
+    updated[index] = FileNode(node.path, contents, node.owner, node.readable, node.writable)
+    return FileResult(true, contents, updated)
+
+def dispatchSyscall(request: SyscallRequest, nodes: list[FileNode]) -> SyscallReply:
+    if request.operation == "console.write":
+        if hasCapability(request.process, "console.write"):
+            return SyscallReply(request.id, request.process.id, true, request.argument)
+        return SyscallReply(request.id, request.process.id, false, "permission denied")
+    if request.operation == "fs.read":
+        result = readFile(nodes, request.process, request.argument)
+        return SyscallReply(request.id, request.process.id, result.ok, result.value)
+    if request.operation == "yield":
+        return SyscallReply(request.id, request.process.id, true, "yielded")
+    return SyscallReply(request.id, request.process.id, false, "unknown syscall")
+
+def syscallWorker(requests: Channel[SyscallRequest], replies: Channel[SyscallReply], nodes: list[FileNode]):
+    while true:
+        request = await requests
+        if request.id < 0:
+            return
+        reply = dispatchSyscall(request, nodes)
+        delivered = async send reply with replies
+        await delivered
+
+def runSyscalls(work: list[SyscallRequest], nodes: list[FileNode], capacity: int) -> list[SyscallReply]:
+    assert(capacity > 0)
+    requests = Channel[SyscallRequest] with Buffer(capacity)
+    replies = Channel[SyscallReply] with Buffer(capacity)
+    firstWorker = async syscallWorker(requests, replies, nodes) with self
+    secondWorker = async syscallWorker(requests, replies, nodes) with self
+    for request in work:
+        queued = async send request with requests
+        await queued
+    firstStop = async send SyscallRequest(-1, Process(-1, "stop", "stopped", 0, []), "stop", "") with requests
+    await firstStop
+    secondStop = async send SyscallRequest(-1, Process(-1, "stop", "stopped", 0, []), "stop", "") with requests
+    await secondStop
+    output := []
+    for _ in work:
+        output.append(await replies)
+    await firstWorker, secondWorker
+    return output.sorted(|reply| reply.id)
+
+def classifyInterrupt(vector: int) -> string:
+    if vector == 14:
+        return "page-fault"
+    if vector == 32:
+        return "timer"
+    if vector == 33:
+        return "keyboard"
+    return "unhandled-" + string(vector)
+
+def auditKernel(owners: list[int], mappings: list[Mapping], processes: list[Process]) -> list[string]:
+    audit := []
+    for mapping in mappings:
+        if mapping.writable and mapping.executable:
+            audit.append("W^X violation pid " + string(mapping.processId))
+        if not frameOwnedBy(owners, mapping.frame, mapping.processId):
+            audit.append("foreign frame pid " + string(mapping.processId))
+    for process in processes:
+        if process.id <= 0:
+            audit.append("invalid pid " + string(process.id))
+    return audit
+
+test "allocation is transactional under exhaustion":
+    owners = initialPageOwners(6, 2)
+    allocated = allocatePages(owners, 3, 7)
+    assert(allocated.ok)
+    assert(allocated.frames == [2, 3, 4])
+    failed = allocatePages(allocated.owners, 2, 8)
+    assert(not failed.ok)
+    assert(failed.owners == allocated.owners)
+
+test "page mappings enforce ownership alignment and W^X":
+    process = Process(7, "init", "ready", 10, ["memory.map"])
+    allocation = allocatePages(initialPageOwners(8, 2), 2, process.id)
+    pageSize = platform.hostPageSize()
+    mapped = mapPage([], allocation.owners, process, pageSize, allocation.frames[0], true, false)
+    assert(mapped.ok)
+    assert(not mapPage(mapped.mappings, allocation.owners, process, pageSize, allocation.frames[1], false, true).ok)
+    assert(not mapPage([], allocation.owners, process, pageSize * 2, allocation.frames[1], true, true).ok)
+
+test "scheduler excludes blocked processes and is deterministic":
+    processes = [Process(1, "init", "ready", 10, []), Process(2, "shell", "ready", 5, []), Process(3, "disk", "blocked", 50, [])]
+    assert(roundRobinSchedule(processes, 6) == [1, 2, 1, 2, 1, 2])
+
+test "VFS capabilities and immutable updates isolate writers":
+    nodes = [FileNode("/etc/motd", "hello", 1, true, true)]
+    reader = Process(2, "reader", "ready", 1, ["fs.read"])
+    writer = Process(3, "writer", "ready", 1, ["fs.write"])
+    assert(readFile(nodes, reader, "/etc/motd").value == "hello")
+    updated = writeFile(nodes, writer, "/etc/motd", "severian")
+    assert(updated.ok)
+    assert(nodes[0].contents == "hello")
+    assert(updated.nodes[0].contents == "severian")
+
+test "bounded syscall workers preserve reply identity and permissions":
+    nodes = [FileNode("/etc/motd", "welcome", 1, true, false)]
+    init = Process(1, "init", "ready", 10, ["console.write", "fs.read"])
+    guest = Process(2, "guest", "ready", 5, [])
+    replies = runSyscalls([SyscallRequest(2, guest, "console.write", "denied"), SyscallRequest(1, init, "fs.read", "/etc/motd"), SyscallRequest(3, init, "yield", "")], nodes, 3)
+    assert(replies[0].value == "welcome")
+    assert(not replies[1].ok)
+    assert(replies[2].value == "yielded")
+
+test "kernel audit recognizes clean state":
+    process = Process(1, "init", "ready", 10, ["memory.map"])
+    allocation = allocatePages(initialPageOwners(8, 2), 1, process.id)
+    mapped = mapPage([], allocation.owners, process, platform.hostPageSize(), allocation.frames[0], true, false)
+    assert(auditKernel(allocation.owners, mapped.mappings, [process]) == [])

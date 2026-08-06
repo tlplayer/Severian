@@ -65,6 +65,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_value_size(!llvm.ptr) -> i64\n",
             "  llvm.func @__sev_value_index(!llvm.ptr, i64) -> !llvm.ptr\n",
             "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
+            "  llvm.func @__sev_collection_clone(!llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_collection_push(!llvm.ptr, !llvm.ptr)\n",
             "  llvm.func @__sev_collection_get(!llvm.ptr, i64) -> !llvm.ptr\n",
             "  llvm.func @__sev_collection_slice(!llvm.ptr, i64, i64, i64) -> !llvm.ptr\n",

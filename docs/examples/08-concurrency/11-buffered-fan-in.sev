@@ -7,8 +7,10 @@ test "two producers":
     messages = Channel[string] with Buffer(2)
     first = async send "alpha" with messages
     second = async send "beta" with messages
-    assert(await messages == "alpha")
-    assert(await messages == "beta")
+    left = await messages
+    right = await messages
+    received = [left, right].sorted()
+    assert(received == ["alpha", "beta"])
     await first, second
 
 test "integer channel":

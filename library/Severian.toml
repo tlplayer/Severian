@@ -7,6 +7,7 @@ members = [
     "file",
     "io",
     "json",
+    "kernel",
     "hypervisor",
     "log",
     "math",

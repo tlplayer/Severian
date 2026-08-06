@@ -414,3 +414,54 @@ fn builds_model_submodules_and_runs_the_transformer_container_example() {
     );
     assert_eq!(String::from_utf8(tests.stdout).unwrap(), "3 passed\n");
 }
+
+#[test]
+fn builds_and_runs_the_operating_system_laboratory_vertically() {
+    let package = examples_root().join("29-operating-system");
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .current_dir(&package)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_log = String::from_utf8_lossy(&build.stdout);
+    let platform = build_log.find("Built platform ->").unwrap();
+    let kernel = build_log.find("Built kernel ->").unwrap();
+    let application = build_log.find("Built operating-system-example ->").unwrap();
+    assert!(platform < kernel && kernel < application);
+
+    let executable = package.join("target/debug/operating-system-example");
+    let output = Command::new(&executable).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        std::fs::read_to_string(package.join("main.stdout")).unwrap()
+    );
+
+    let compilation = compile_path(&package.join("main.sev")).unwrap();
+    assert!(compilation.mlir.as_str().contains("__sev_collection_clone"));
+    let test_executable = std::env::temp_dir().join(format!(
+        "severian-operating-system-tests-{}",
+        std::process::id()
+    ));
+    assert_eq!(
+        compile_native_tests(&compilation, &test_executable).unwrap(),
+        4
+    );
+    let tests = Command::new(&test_executable).output().unwrap();
+    let _ = std::fs::remove_file(test_executable);
+    assert!(
+        tests.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tests.stderr)
+    );
+    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "4 passed\n");
+}

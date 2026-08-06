@@ -4,7 +4,7 @@ mod tensor;
 
 use severian_hir::{
     AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,
-    MatchPattern, Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
+    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -77,6 +77,7 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_value_size(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_value_index(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_clone(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_push(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_collection_get(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_slice(!llvm.ptr, i64, i64, i64) -> !llvm.ptr\n",
@@ -1084,9 +1085,23 @@ impl LowerContext<'_> {
                     (result, ValueType::Any)
                 }
             }
-            // Ownership is a static property.  Runtime representation is
-            // unchanged; clone lowering can become type-directed once HIR
-            // carries concrete collection element types.
+            Expression::Ownership {
+                op: OwnershipOp::Clone,
+                value,
+            } => {
+                let (value, ty) = self.lower_expression(value);
+                if matches!(ty, ValueType::List | ValueType::Tuple | ValueType::Set) {
+                    let result = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @__sev_collection_clone({value}) : (!llvm.ptr) -> !llvm.ptr"
+                    )
+                    .unwrap();
+                    (result, ty)
+                } else {
+                    (value, ty)
+                }
+            }
             Expression::Ownership { value, .. } => self.lower_expression(value),
             Expression::Function(name) => {
                 let result = self.fresh_value();
@@ -2405,6 +2420,16 @@ impl LowerContext<'_> {
                         )
                         .unwrap();
                         self.lower_binary_values((zero, ty), BinaryOp::Sub, (value, ty))
+                    }
+                    UnaryOp::Negate if ty == ValueType::Any => {
+                        let zero = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                        )
+                        .unwrap();
+                        let zero = self.box_value((zero, ValueType::Int));
+                        self.lower_binary_values((zero, ValueType::Any), BinaryOp::Sub, (value, ty))
                     }
                     UnaryOp::Negate => {
                         let zero = self.fresh_value();
@@ -5000,6 +5025,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "bool __sev_value_equal(void *left, void *right) { return sev_value_equal(left, right); }\n",
         "bool __sev_value_less(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (!left || !right) abort(); if (left->kind == SEV_STRING && right->kind == SEV_STRING) return strcmp(left->as.string, right->as.string) < 0; return sev_number(left) < sev_number(right); }\n",
         "void *__sev_collection_new(int64_t kind) { sev_collection *value = sev_allocate(sizeof(*value)); value->kind = kind; return value; }\n",
+        "void *__sev_collection_clone(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); result->size = value->size; result->capacity = value->size; if (value->size > 0) { result->items = sev_allocate((size_t)value->size * sizeof(*result->items)); memcpy(result->items, value->items, (size_t)value->size * sizeof(*result->items)); } return result; }\n",
         "void __sev_collection_push(void *raw, void *item) { sev_collection *value = raw; if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->items = realloc(value->items, (size_t)value->capacity * sizeof(*value->items)); if (!value->items) abort(); } value->items[value->size++] = item; }\n",
         "void *__sev_collection_get(void *raw, int64_t index) { sev_collection *value = raw; if (!value) abort(); if (index < 0) index += value->size; if (index < 0 || index >= value->size) abort(); return value->items[index]; }\n",
         "void *__sev_collection_slice(void *raw, int64_t start, int64_t end, int64_t step) { sev_collection *value = raw; if (!value) abort(); sev_slice_bounds(value->size, &start, &end, &step); sev_collection *result = __sev_collection_new(value->kind); for (int64_t index = start; step > 0 ? index < end : index > end; index += step) __sev_collection_push(result, value->items[index]); return result; }\n",

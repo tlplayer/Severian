@@ -1,0 +1,11 @@
+[package]
+name = "operating-system-example"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "operating-system-example"
+path = "main.sev"
+
+[dependencies]
+kernel = { path = "../../../library/kernel", version = "0.1.0" }

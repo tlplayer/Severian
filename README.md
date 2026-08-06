@@ -145,3 +145,9 @@ from model import neuralnet as nn
 The native transformer and OCI deployment example is under
 `docs/examples/28-transformer-container`. Its host-versus-container benchmark
 is run with `python3 bench/transformer-container/run.py`.
+
+The operating-system example under `docs/examples/29-operating-system` is a
+hosted kernel laboratory that exercises memory ownership, mappings, process
+capabilities, a VFS, syscalls, interrupts, scheduling, and concurrent workers.
+Its documentation separately identifies the compiler and runtime work required
+for a genuinely freestanding boot target.
