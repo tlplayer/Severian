@@ -19,6 +19,24 @@ def dotProduct(left: list[int], right: list[int]) -> int:
         total += leftValue * rightValue
     return total
 
+def classify(value: int) -> string:
+    if value < 0:
+        return "negative"
+    else if value == 0:
+        return "zero"
+    else:
+        return "positive"
+
+def sumUntilNegative(values: list[int]) -> int:
+    total := 0
+    for value in values:
+        if value < 0:
+            break
+        if value == 0:
+            continue
+        total += value
+    return total
+
 test "string and reduction helpers":
     assert(normalizeFields("alpha,beta,gamma") == "alpha | beta | gamma")
     assert(normalizeFields("a,,b") == "a |  | b")
@@ -40,3 +58,77 @@ test "Python-style iteration and indexing":
     assert(all([true, true, true]))
     assert(not any([]))
     assert(all([]))
+
+test "slices ranges and richer collections":
+    assert([0, 1, 2, 3, 4][1:4] == [1, 2, 3])
+    assert([0, 1, 2, 3, 4][::2] == [0, 2, 4])
+    assert([0, 1, 2, 3][::-1] == [3, 2, 1, 0])
+    assert("severian"[1:7:2] == "eei")
+    assert(range(5) == [0, 1, 2, 3, 4])
+    assert(range(5, -1, -2) == [5, 3, 1])
+
+    queue := [2, 3]
+    queue.appendleft(1)
+    queue.extend([4, 5])
+    assert(queue.popleft() == 1)
+    assert(queue.pop(1) == 3)
+    queue.insert(1, 9)
+    queue.remove(4)
+    assert(queue == [2, 9, 5])
+
+    heap := []
+    heap.heapPush(5)
+    heap.heapPush(2)
+    heap.heapPush(7)
+    heap.heapPush(1)
+    assert(heap.heapPop() == 1)
+    assert(heap.heapPop() == 2)
+
+    counts = [2, 1, 2, 3, 2].frequencies()
+    assert(counts.get(2, 0) == 3)
+    assert(counts.get(8, 0) == 0)
+    defaults := {"known": 4}
+    assert(defaults.setDefault("known", 9) == 4)
+    assert(defaults.setDefault("new", 7) == 7)
+    assert(defaults["new"] == 7)
+
+    assert({1, 2}.union({2, 3}) == {1, 2, 3})
+    assert({1, 2}.intersection({2, 3}) == {2})
+    assert({1, 2}.symmetricDifference({2, 3}) == {1, 3})
+    assert("  Hello Severian  ".strip().lower() == "hello severian")
+    assert("banana".replace("na", "X") == "baXX")
+    assert("severian".startsWith("sev"))
+    assert("severian".endsWith("ian"))
+    assert("banana".find("nan") == 2)
+    assert("banana".count("an") == 2)
+
+    quotient, remainder = divmod(17, 5)
+    assert(quotient == 3 and remainder == 2)
+    assert(abs(-9) == 9)
+    assert(min(8, 3) == 3 and max(8, 3) == 8)
+    assert(classify(-1) == "negative")
+    assert(classify(0) == "zero")
+    assert(classify(1) == "positive")
+    assert(1 < 2 < 3)
+    assert(not (3 < 2 < 4))
+    assert(sumUntilNegative([2, 0, 5, -1, 100]) == 7)
+    assert([left + right for left, right in zip([1, 2], [10, 20])] == [11, 22])
+    assert([left * right for left in [1, 2] for right in [3, 4] if left * right > 3] == [4, 6, 8])
+    assert({value % 3 for value in range(6)} == {0, 1, 2})
+    squares = {value: value * value for value in range(4)}
+    assert(squares[0] == 0 and squares[2] == 4 and squares[3] == 9)
+    assert([3, 1, 2].sorted(true) == [3, 2, 1])
+    assert(size("aé🙂") == 3)
+    assert("aé🙂"[-1] == "🙂")
+    assert("aé🙂"[::-1] == "🙂éa")
+    assert("éé🙂".characters() == ["é", "é", "🙂"])
+    assert("éé🙂".frequencies()["é"] == 2)
+    offset = 3
+    addOffset = |value| value + offset
+    assert(addOffset(4) == 7)
+    assert([1, 2, 3].map(|value| value * 2) == [2, 4, 6])
+    assert([1, 2, 3, 4].filter(|value| value % 2 == 0) == [2, 4])
+    assert([1, 2, 3, 4].reduce(|total, value| total + value, 0) == 10)
+    assert([1, 2, 3, 4].reduce(|total, value| total * value) == 24)
+    assert(["aaa", "b", "cc"].sorted(|value| size(value)) == ["b", "cc", "aaa"])
+    assert(["aaa", "b", "cc"].sorted(|value| size(value), true) == ["aaa", "cc", "b"])

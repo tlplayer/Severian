@@ -3,11 +3,6 @@
 # Difficulty: hard
 # Tags: meet-in-the-middle, bitmask, enumeration, combinatorics
 
-def magnitude(value: int) -> int:
-    if value < 0:
-        return 0 - value
-    return value
-
 def subsetSums(values: list[int], start: int, end: int) -> list[int]:
     length = end - start
     combinationCount := 1
@@ -28,10 +23,10 @@ def minAbsDifference(values: list[int], goal: int) -> int:
     middle = size(values) / 2
     leftSums = subsetSums(values, 0, middle)
     rightSums = subsetSums(values, middle, size(values))
-    best := magnitude(goal)
+    best := abs(goal)
     for left in leftSums:
         for right in rightSums:
-            difference = magnitude(goal - left - right)
+            difference = abs(goal - left - right)
             if difference < best:
                 best = difference
     return best

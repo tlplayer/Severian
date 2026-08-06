@@ -6,10 +6,11 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class, Decorator as HirDecorator,
-    Expression, Function, FunctionContract as HirFunctionContract, Global, Instruction,
-    MatchPattern, OwnershipOp, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test,
-    TestMode as HirTestMode, UnaryOp, ValueType,
+    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class,
+    ComprehensionClause as HirComprehensionClause, Decorator as HirDecorator, Expression, Function,
+    FunctionContract as HirFunctionContract, Global, Instruction, MatchPattern, OwnershipOp,
+    Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, Test, TestMode as HirTestMode,
+    UnaryOp, ValueType,
 };
 use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
@@ -872,6 +873,15 @@ fn lower_block(
             Stmt::Expr(expression) => {
                 let (expression, expression_type) =
                     lower_expression(expression, scope, signatures, aliases)?;
+                if let Expression::MethodCall { object, method, .. } = &expression {
+                    if collection_shape_mutating_method(method) {
+                        if let Expression::Variable(name) = object.as_ref() {
+                            if let Some(binding) = scope.get_mut(name) {
+                                binding.collection_len = None;
+                            }
+                        }
+                    }
+                }
                 if expression_type == ValueType::Result {
                     return Err(error(
                         statement.span(),
@@ -936,8 +946,18 @@ fn lower_block(
                         let mut else_scope = scope.clone();
                         lower_block(block, &mut else_scope, return_type, signatures, aliases)?
                     }
-                    Some(ElseBranch::If(_)) => {
-                        return Err(error(statement.span, "else-if is not supported yet"))
+                    Some(ElseBranch::If(branch)) => {
+                        let mut else_scope = scope.clone();
+                        lower_block(
+                            &Block {
+                                span: branch.span,
+                                statements: vec![Stmt::If((**branch).clone())],
+                            },
+                            &mut else_scope,
+                            return_type,
+                            signatures,
+                            aliases,
+                        )?
                     }
                 };
                 instructions.push(Instruction::If {
@@ -983,6 +1003,7 @@ fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                propagate_unknown_collection_shapes(scope, &body_scope);
                 instructions.push(Instruction::While {
                     setup,
                     capabilities,
@@ -1025,6 +1046,7 @@ fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                propagate_unknown_collection_shapes(scope, &body_scope);
                 instructions.push(Instruction::For {
                     setup,
                     pattern,
@@ -1173,12 +1195,8 @@ fn lower_block(
                     instructions: body,
                 });
             }
-            _ => {
-                return Err(error(
-                    statement.span(),
-                    "statement is not supported in this compiler slice yet",
-                ))
-            }
+            Stmt::Break(_) => instructions.push(Instruction::Break),
+            Stmt::Continue(_) => instructions.push(Instruction::Continue),
         }
     }
     Ok(instructions)
@@ -1420,6 +1438,30 @@ fn lower_expression(
                 },
             ))
         }
+        Expr::Slice(slice) => {
+            let (object, object_type) =
+                lower_expression(&slice.object, scope, signatures, aliases)?;
+            let lower_bound = |bound: &Option<Box<Expr>>| {
+                bound
+                    .as_ref()
+                    .map(|bound| {
+                        let span = bound.span();
+                        let (bound, ty) = lower_expression(bound, scope, signatures, aliases)?;
+                        compatible(span, ty, ValueType::Int)?;
+                        Ok(Box::new(bound))
+                    })
+                    .transpose()
+            };
+            Ok((
+                Expression::Slice {
+                    object: Box::new(object),
+                    start: lower_bound(&slice.start)?,
+                    end: lower_bound(&slice.end)?,
+                    step: lower_bound(&slice.step)?,
+                },
+                object_type,
+            ))
+        }
         Expr::Member(member) => {
             let object = lower_expression(&member.object, scope, signatures, aliases)?.0;
             Ok((
@@ -1431,38 +1473,59 @@ fn lower_expression(
             ))
         }
         Expr::ListComprehension(comprehension) => {
-            let iterable = lower_expression(&comprehension.iterable, scope, signatures, aliases)?.0;
             let mut inner_scope = scope.clone();
-            inner_scope.insert(
-                comprehension.variable.name.clone(),
-                Binding {
-                    ty: ValueType::Any,
-                    function_return: None,
-                    collection_len: None,
-                    mutable: false,
-                    field: false,
-                    integer_max: None,
-                    known_integer: None,
-                },
-            );
+            let clauses = lower_comprehension_clauses(
+                &comprehension.clauses,
+                &mut inner_scope,
+                signatures,
+                aliases,
+            )?;
             let element =
                 lower_expression(&comprehension.element, &inner_scope, signatures, aliases)?.0;
-            let condition = comprehension
-                .condition
-                .as_ref()
-                .map(|condition| {
-                    lower_expression(condition, &inner_scope, signatures, aliases)
-                        .map(|(condition, _)| Box::new(condition))
-                })
-                .transpose()?;
             Ok((
                 Expression::ListComprehension {
                     element: Box::new(element),
-                    variable: comprehension.variable.name.clone(),
-                    iterable: Box::new(iterable),
-                    condition,
+                    clauses,
                 },
                 ValueType::List,
+            ))
+        }
+        Expr::SetComprehension(comprehension) => {
+            let mut inner_scope = scope.clone();
+            let clauses = lower_comprehension_clauses(
+                &comprehension.clauses,
+                &mut inner_scope,
+                signatures,
+                aliases,
+            )?;
+            let element =
+                lower_expression(&comprehension.element, &inner_scope, signatures, aliases)?.0;
+            Ok((
+                Expression::SetComprehension {
+                    element: Box::new(element),
+                    clauses,
+                },
+                ValueType::Set,
+            ))
+        }
+        Expr::MapComprehension(comprehension) => {
+            let mut inner_scope = scope.clone();
+            let clauses = lower_comprehension_clauses(
+                &comprehension.clauses,
+                &mut inner_scope,
+                signatures,
+                aliases,
+            )?;
+            let key = lower_expression(&comprehension.key, &inner_scope, signatures, aliases)?.0;
+            let value =
+                lower_expression(&comprehension.value, &inner_scope, signatures, aliases)?.0;
+            Ok((
+                Expression::MapComprehension {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                    clauses,
+                },
+                ValueType::Map,
             ))
         }
         Expr::If(conditional) => {
@@ -1594,6 +1657,39 @@ fn lower_expression(
                     value: Box::new(value),
                 },
                 ty,
+            ))
+        }
+        Expr::Lambda(lambda) => {
+            let severian_ast::LambdaBody::Expr(body) = &lambda.body else {
+                return Err(error(
+                    lambda.span,
+                    "lambda blocks require an expression body",
+                ));
+            };
+            let mut lambda_scope = scope.clone();
+            let mut params = Vec::new();
+            for parameter in &lambda.params {
+                lambda_scope.insert(
+                    parameter.name.name.clone(),
+                    Binding {
+                        ty: ValueType::Any,
+                        function_return: None,
+                        collection_len: None,
+                        mutable: false,
+                        field: false,
+                        integer_max: None,
+                        known_integer: None,
+                    },
+                );
+                params.push(parameter.name.name.clone());
+            }
+            let body = lower_expression(body, &lambda_scope, signatures, aliases)?.0;
+            Ok((
+                Expression::Lambda {
+                    params,
+                    body: Box::new(body),
+                },
+                ValueType::Function,
             ))
         }
         Expr::ChaosRule(rule) => {
@@ -1766,11 +1862,18 @@ fn lower_call(
             }
         }
         let (object, object_type) = lower_expression(&member.object, scope, signatures, aliases)?;
-        let args = call
+        let lowered_args = call
             .args
             .iter()
-            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
+            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases))
             .collect::<Result<Vec<_>, _>>()?;
+        validate_builtin_method(
+            call.span,
+            object_type,
+            &member.member.name,
+            &lowered_args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>(),
+        )?;
+        let args = lowered_args.into_iter().map(|(arg, _)| arg).collect();
         let return_type = method_return_type(object_type, &member.member.name);
         return Ok((
             Expression::MethodCall {
@@ -1829,6 +1932,8 @@ fn lower_call(
         "zip" => Some(("zip", ValueType::List)),
         "any" => Some(("any", ValueType::Bool)),
         "all" => Some(("all", ValueType::Bool)),
+        "abs" | "min" | "max" => Some((canonical, ValueType::Any)),
+        "divmod" => Some(("divmod", ValueType::Tuple)),
         "read" if !signatures.contains_key(&callee.name) => Some(("read", ValueType::Result)),
         "size" => Some(("size", ValueType::Int)),
         "present" => {
@@ -1880,11 +1985,48 @@ fn lower_call(
         _ => None,
     };
     if let Some((name, returns)) = builtin {
-        let args = call
+        let lowered = call
             .args
             .iter()
-            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
+            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases))
             .collect::<Result<Vec<_>, _>>()?;
+        let types = lowered.iter().map(|(_, ty)| *ty).collect::<Vec<_>>();
+        let valid_arity = match name {
+            "range" => (1..=3).contains(&lowered.len()),
+            "zip" => lowered.len() == 2,
+            "min" | "max" | "divmod" => lowered.len() == 2,
+            "print" | "panic" => !lowered.is_empty(),
+            _ => lowered.len() == 1,
+        };
+        if !valid_arity {
+            return Err(error(
+                call.span,
+                format!("builtin `{name}` received an invalid number of arguments"),
+            ));
+        }
+        if name == "range"
+            && types
+                .iter()
+                .any(|ty| !matches!(ty, ValueType::Int | ValueType::Any))
+        {
+            return Err(error(call.span, "`range` arguments must be integers"));
+        }
+        if matches!(name, "enumerate" | "any" | "all")
+            && !matches!(
+                types[0],
+                ValueType::List | ValueType::Tuple | ValueType::Set
+            )
+        {
+            return Err(error(call.span, format!("`{name}` expects an iterable")));
+        }
+        if name == "zip"
+            && types
+                .iter()
+                .any(|ty| !matches!(ty, ValueType::List | ValueType::Tuple | ValueType::Set))
+        {
+            return Err(error(call.span, "`zip` expects two iterables"));
+        }
+        let args = lowered.into_iter().map(|(arg, _)| arg).collect();
         return Ok((
             Expression::Call {
                 function: name.into(),
@@ -1946,15 +2088,120 @@ fn lower_call(
 fn method_return_type(object: ValueType, method: &str) -> ValueType {
     match (object, method) {
         (ValueType::String, "characters" | "words" | "split")
-        | (ValueType::List, "reversed" | "sorted")
+        | (ValueType::List, "reversed" | "sorted" | "map" | "filter")
         | (ValueType::Map, "keys" | "values")
         | (ValueType::Set, "toList") => ValueType::List,
-        (ValueType::String, "frequencies") => ValueType::Map,
+        (ValueType::String | ValueType::List, "frequencies") => ValueType::Map,
         (ValueType::List, "toSet") | (ValueType::Set, "difference") => ValueType::Set,
         (ValueType::List, "join") => ValueType::String,
-        (ValueType::String, "length") => ValueType::Int,
-        (ValueType::List, "append") => ValueType::Unit,
+        (ValueType::List, "reduce") => ValueType::Any,
+        (ValueType::String, "length" | "find" | "count") => ValueType::Int,
+        (ValueType::String, "startsWith" | "endsWith") => ValueType::Bool,
+        (ValueType::String, "strip" | "lower" | "upper" | "replace") => ValueType::String,
+        (
+            ValueType::List,
+            "append" | "appendleft" | "extend" | "insert" | "remove" | "heapPush",
+        ) => ValueType::Unit,
+        (ValueType::Set, "union" | "intersection" | "symmetricDifference") => ValueType::Set,
         _ => ValueType::Any,
+    }
+}
+
+fn collection_shape_mutating_method(method: &str) -> bool {
+    matches!(
+        method,
+        "append"
+            | "appendleft"
+            | "extend"
+            | "insert"
+            | "remove"
+            | "pop"
+            | "popleft"
+            | "heapPush"
+            | "heapPop"
+            | "clear"
+    )
+}
+
+fn validate_builtin_method(
+    span: Span,
+    object: ValueType,
+    method: &str,
+    args: &[ValueType],
+) -> Result<(), SemanticError> {
+    let arity = match (object, method) {
+        (ValueType::List, "pop") => Some(0..=1),
+        (ValueType::List, "sorted") => Some(0..=2),
+        (ValueType::List, "reduce") => Some(1..=2),
+        (
+            ValueType::List,
+            "append" | "appendleft" | "extend" | "remove" | "heapPush" | "join" | "map" | "filter",
+        ) => Some(1..=1),
+        (ValueType::List, "insert") => Some(2..=2),
+        (
+            ValueType::List,
+            "popleft" | "heapPop" | "last" | "reversed" | "sum" | "minimum" | "maximum"
+            | "frequencies" | "toSet",
+        ) => Some(0..=0),
+        (ValueType::Set, "union" | "intersection" | "difference" | "symmetricDifference") => {
+            Some(1..=1)
+        }
+        (ValueType::Set, "toList") => Some(0..=0),
+        (ValueType::Map, "get" | "setDefault") => Some(2..=2),
+        (ValueType::Map, "keys" | "values") => Some(0..=0),
+        (
+            ValueType::String,
+            "characters" | "words" | "frequencies" | "strip" | "lower" | "upper" | "length",
+        ) => Some(0..=0),
+        (ValueType::String, "split" | "startsWith" | "endsWith" | "find" | "count") => Some(1..=1),
+        (ValueType::String, "replace") => Some(2..=2),
+        _ => None,
+    };
+    if let Some(arity) = arity {
+        if !arity.contains(&args.len()) {
+            return Err(error(
+                span,
+                format!("method `{method}` received an invalid number of arguments"),
+            ));
+        }
+    }
+    if object == ValueType::List && matches!(method, "map" | "filter" | "reduce") {
+        if !matches!(args.first(), Some(ValueType::Function | ValueType::Any)) {
+            return Err(error(span, format!("method `{method}` expects a callable")));
+        }
+    }
+    if object == ValueType::List && method == "sorted" && !args.is_empty() {
+        if !matches!(
+            args[0],
+            ValueType::Bool | ValueType::Function | ValueType::Any
+        ) {
+            return Err(error(
+                span,
+                "method `sorted` expects a reverse flag or key callable",
+            ));
+        }
+        if args.len() == 2 && args[1] != ValueType::Bool && args[1] != ValueType::Any {
+            return Err(error(
+                span,
+                "method `sorted` expects a boolean reverse flag",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn propagate_unknown_collection_shapes(
+    outer: &mut HashMap<String, Binding>,
+    inner: &HashMap<String, Binding>,
+) {
+    for (name, binding) in outer.iter_mut() {
+        if binding.collection_len.is_some()
+            && inner
+                .get(name)
+                .is_some_and(|inner| inner.collection_len.is_none())
+        {
+            binding.collection_len = None;
+        }
     }
 }
 
@@ -2147,6 +2394,34 @@ fn lower_format_args(
         return Err(error(span, "formatted string has an unmatched `}`"));
     }
     Ok((args, arg_types))
+}
+
+fn lower_comprehension_clauses(
+    clauses: &[severian_ast::ComprehensionClause],
+    scope: &mut HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<Vec<HirComprehensionClause>, SemanticError> {
+    let mut lowered = Vec::new();
+    for clause in clauses {
+        let iterable = lower_expression(&clause.iterable, scope, signatures, aliases)?.0;
+        let pattern = lower_pattern(&clause.pattern, scope, aliases)?;
+        let condition = clause
+            .condition
+            .as_ref()
+            .map(|condition| {
+                let (condition, ty) = lower_expression(condition, scope, signatures, aliases)?;
+                compatible(clause.iterable.span(), ty, ValueType::Bool)?;
+                Ok(condition)
+            })
+            .transpose()?;
+        lowered.push(HirComprehensionClause {
+            pattern,
+            iterable,
+            condition,
+        });
+    }
+    Ok(lowered)
 }
 
 fn lower_collection(

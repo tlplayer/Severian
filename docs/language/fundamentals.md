@@ -73,6 +73,62 @@ while count < 3 with count := 0:
 The `with` setup runs once before the first condition check. Names introduced by
 the setup live only inside the loop condition and body.
 
+`for` loops accept any collection-producing expression. `range` has the same
+one-, two-, and three-argument forms as Python, including negative steps.
+`enumerate` and `zip` produce tuple elements that can be destructured directly.
+
+```sev
+for index, value in enumerate(values):
+    if value < 0:
+        continue
+    if index == 10:
+        break
+
+for index in range(size(values) - 1, -1, -1):
+    print(values[index])
+```
+
+Conditions support `else if`, chained comparisons, `in`, and `not in`.
+
+## Collections And Expressive Iteration
+
+Lists and strings support negative indexing and `[start:end:step]` slices.
+Omitted bounds and negative steps follow Python's indexing rules. Native string
+length, indexing, slicing, and character iteration operate on Unicode code
+points consistently.
+
+```sev
+tail = values[-1]
+middle = values[1:-1]
+evens = values[::2]
+backwards = "aé🙂"[::-1]
+```
+
+List, set, and map comprehensions accept destructuring, filters, and multiple
+`for` clauses.
+
+```sev
+sums = [left + right for left, right in zip(xs, ys)]
+products = [left * right for left in xs for right in ys if left != right]
+remainders = {value % 3 for value in range(10)}
+squares = {value: value * value for value in range(10)}
+```
+
+Expression lambdas use `|parameters| expression`. They can capture surrounding
+bindings and drive collection transforms and key sorting.
+
+```sev
+offset = 3
+shifted = values.map(|value| value + offset)
+positive = shifted.filter(|value| value > 0)
+total = positive.reduce(|sum, value| sum + value, 0)
+shortestFirst = words.sorted(|word| size(word))
+```
+
+Lists also provide deque operations (`appendleft`, `popleft`) and min-heap
+operations (`heapPush`, `heapPop`). Maps provide `get` and `setDefault`; sets
+provide union, intersection, difference, and symmetric difference.
+
 ## Functions
 
 Functions use Python-like `def` syntax with optional return annotations.

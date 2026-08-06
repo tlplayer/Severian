@@ -183,7 +183,9 @@ impl ModelGraphOptimization {
                 Instruction::Print(_)
                 | Instruction::Assert(_)
                 | Instruction::Return(_)
-                | Instruction::Evaluate(_) => {}
+                | Instruction::Evaluate(_)
+                | Instruction::Break
+                | Instruction::Continue => {}
             }
         }
     }

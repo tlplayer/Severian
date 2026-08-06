@@ -188,6 +188,8 @@ pub enum Instruction {
         resources: Vec<Expression>,
         instructions: Vec<Instruction>,
     },
+    Break,
+    Continue,
     Evaluate(Expression),
 }
 
@@ -221,6 +223,10 @@ pub enum Expression {
     String(String),
     Variable(String),
     Function(String),
+    Lambda {
+        params: Vec<String>,
+        body: Box<Expression>,
+    },
     Ownership {
         op: OwnershipOp,
         value: Box<Expression>,
@@ -232,6 +238,12 @@ pub enum Expression {
     Index {
         object: Box<Expression>,
         index: Box<Expression>,
+    },
+    Slice {
+        object: Box<Expression>,
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+        step: Option<Box<Expression>>,
     },
     Format {
         template: String,
@@ -273,9 +285,16 @@ pub enum Expression {
     },
     ListComprehension {
         element: Box<Expression>,
-        variable: String,
-        iterable: Box<Expression>,
-        condition: Option<Box<Expression>>,
+        clauses: Vec<ComprehensionClause>,
+    },
+    SetComprehension {
+        element: Box<Expression>,
+        clauses: Vec<ComprehensionClause>,
+    },
+    MapComprehension {
+        key: Box<Expression>,
+        value: Box<Expression>,
+        clauses: Vec<ComprehensionClause>,
     },
     Conditional {
         condition: Box<Expression>,
@@ -308,6 +327,13 @@ pub enum Expression {
         args: Vec<Expression>,
         return_type: ValueType,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComprehensionClause {
+    pub pattern: MatchPattern,
+    pub iterable: Expression,
+    pub condition: Option<Expression>,
 }
 
 fn visit_function_expressions_mut(
@@ -407,6 +433,7 @@ fn visit_instructions_mut(
                 }
                 visit_instructions_mut(instructions, visitor);
             }
+            Instruction::Break | Instruction::Continue => {}
         }
     }
 }
@@ -445,6 +472,17 @@ fn visit_expression_mut(expression: &mut Expression, visitor: &mut impl FnMut(&m
             visit_expression_mut(object, visitor);
             visit_expression_mut(index, visitor);
         }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            visit_expression_mut(object, visitor);
+            for bound in [start, end, step].into_iter().flatten() {
+                visit_expression_mut(bound, visitor);
+            }
+        }
         Expression::Member { object, .. }
         | Expression::Await(object)
         | Expression::Channel(object)
@@ -453,6 +491,7 @@ fn visit_expression_mut(expression: &mut Expression, visitor: &mut impl FnMut(&m
             visit_expression_mut(object, visitor);
         }
         Expression::Ownership { value, .. } => visit_expression_mut(value, visitor),
+        Expression::Lambda { body, .. } => visit_expression_mut(body, visitor),
         Expression::MethodCall { object, args, .. } => {
             visit_expression_mut(object, visitor);
             for arg in args {
@@ -464,16 +503,36 @@ fn visit_expression_mut(expression: &mut Expression, visitor: &mut impl FnMut(&m
             visit_expression_mut(value, visitor);
             visit_expression_mut(channel, visitor);
         }
-        Expression::ListComprehension {
-            element,
-            iterable,
-            condition,
-            ..
-        } => {
+        Expression::ListComprehension { element, clauses } => {
             visit_expression_mut(element, visitor);
-            visit_expression_mut(iterable, visitor);
-            if let Some(condition) = condition {
-                visit_expression_mut(condition, visitor);
+            for clause in clauses {
+                visit_expression_mut(&mut clause.iterable, visitor);
+                if let Some(condition) = &mut clause.condition {
+                    visit_expression_mut(condition, visitor);
+                }
+            }
+        }
+        Expression::SetComprehension { element, clauses } => {
+            visit_expression_mut(element, visitor);
+            for clause in clauses {
+                visit_expression_mut(&mut clause.iterable, visitor);
+                if let Some(condition) = &mut clause.condition {
+                    visit_expression_mut(condition, visitor);
+                }
+            }
+        }
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            visit_expression_mut(key, visitor);
+            visit_expression_mut(value, visitor);
+            for clause in clauses {
+                visit_expression_mut(&mut clause.iterable, visitor);
+                if let Some(condition) = &mut clause.condition {
+                    visit_expression_mut(condition, visitor);
+                }
             }
         }
         Expression::Conditional {

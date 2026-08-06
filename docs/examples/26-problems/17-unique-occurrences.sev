@@ -4,23 +4,8 @@
 # Tags: array, hash-table
 
 def uniqueOccurrences(values: list[int]) -> bool:
-    visited := []
-    frequencies := []
-
-    for value in values:
-        if value in visited:
-            pass = 0
-        else:
-            count := 0
-            for candidate in values:
-                if candidate == value:
-                    count += 1
-            if count in frequencies:
-                return false
-            visited.append(value)
-            frequencies.append(count)
-
-    return true
+    counts = values.frequencies()
+    return size(counts.values().toSet()) == size(counts)
 
 test "unique frequencies":
     assert(uniqueOccurrences([1, 2, 2, 1, 1, 3]))

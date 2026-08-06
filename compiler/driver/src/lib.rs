@@ -556,6 +556,7 @@ fn walk_instructions<'expression>(
                 }
                 walk_instructions(instructions, visit);
             }
+            Instruction::Break | Instruction::Continue => {}
         }
     }
 }
@@ -586,6 +587,17 @@ fn walk_expression<'expression>(
             walk_expression(object, visit);
             walk_expression(index, visit);
         }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            walk_expression(object, visit);
+            for bound in [start, end, step].into_iter().flatten() {
+                walk_expression(bound, visit);
+            }
+        }
         Expression::Member { object, .. }
         | Expression::Unary {
             expression: object, ..
@@ -604,16 +616,36 @@ fn walk_expression<'expression>(
             walk_expression(value, visit);
             walk_expression(channel, visit);
         }
-        Expression::ListComprehension {
-            element,
-            iterable,
-            condition,
-            ..
-        } => {
+        Expression::ListComprehension { element, clauses } => {
             walk_expression(element, visit);
-            walk_expression(iterable, visit);
-            if let Some(condition) = condition {
-                walk_expression(condition, visit);
+            for clause in clauses {
+                walk_expression(&clause.iterable, visit);
+                if let Some(condition) = &clause.condition {
+                    walk_expression(condition, visit);
+                }
+            }
+        }
+        Expression::SetComprehension { element, clauses } => {
+            walk_expression(element, visit);
+            for clause in clauses {
+                walk_expression(&clause.iterable, visit);
+                if let Some(condition) = &clause.condition {
+                    walk_expression(condition, visit);
+                }
+            }
+        }
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            walk_expression(key, visit);
+            walk_expression(value, visit);
+            for clause in clauses {
+                walk_expression(&clause.iterable, visit);
+                if let Some(condition) = &clause.condition {
+                    walk_expression(condition, visit);
+                }
             }
         }
         Expression::Conditional {
@@ -627,6 +659,7 @@ fn walk_expression<'expression>(
         }
         Expression::FusedPipeline { input, .. } => walk_expression(input, visit),
         Expression::Ownership { value, .. } => walk_expression(value, visit),
+        Expression::Lambda { body, .. } => walk_expression(body, visit),
         Expression::Call { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
@@ -674,6 +707,11 @@ enum Value {
     Bool(bool),
     String(String),
     Function(String),
+    Lambda {
+        params: Vec<String>,
+        body: Box<Expression>,
+        captures: HashMap<String, Value>,
+    },
     Matrix {
         rows: i64,
         columns: i64,
@@ -707,6 +745,8 @@ enum Value {
         hit: Rc<Cell<bool>>,
     },
     Unit,
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -743,6 +783,32 @@ fn execute_function(
         execute_instructions(program, &function.instructions, &mut variables, write_line)?
             .unwrap_or(Value::Unit),
     )
+}
+
+fn invoke_callable(
+    program: &Program,
+    callable: Value,
+    args: Vec<Value>,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<Value, CompileError> {
+    match callable {
+        Value::Function(function) => execute_function(program, &function, args, None, write_line),
+        Value::Lambda {
+            params,
+            body,
+            mut captures,
+        } => {
+            if params.len() != args.len() {
+                return Err(CompileError::Execution(format!(
+                    "lambda expects {} arguments",
+                    params.len()
+                )));
+            }
+            captures.extend(params.into_iter().zip(args));
+            evaluate(program, &body, &captures, write_line)
+        }
+        _ => Err(CompileError::Execution("value is not callable".into())),
+    }
 }
 
 fn initial_variables(
@@ -804,6 +870,8 @@ fn execute_instructions(
                     .transpose()
                     .map(|value| Some(value.unwrap_or(Value::Unit)));
             }
+            Instruction::Break => return Ok(Some(Value::Break)),
+            Instruction::Continue => return Ok(Some(Value::Continue)),
             Instruction::If {
                 condition,
                 then_instructions,
@@ -840,7 +908,11 @@ fn execute_instructions(
                     if let Some(value) =
                         execute_instructions(program, instructions, variables, write_line)?
                     {
-                        return Ok(Some(value));
+                        match value {
+                            Value::Break => break,
+                            Value::Continue => continue,
+                            value => return Ok(Some(value)),
+                        }
                     }
                 }
             }
@@ -874,6 +946,8 @@ fn execute_instructions(
                     variables.extend(bindings);
                     let result: Result<(), CompileError> =
                         match execute_instructions(program, instructions, variables, write_line) {
+                            Ok(Some(Value::Break)) => break,
+                            Ok(Some(Value::Continue)) => continue,
                             Ok(Some(value)) => return Ok(Some(value)),
                             Ok(None) => Ok(()),
                             Err(CompileError::ChaosThrow(_))
@@ -1221,11 +1295,44 @@ fn evaluate(
             .get(name)
             .cloned()
             .ok_or_else(|| CompileError::Execution(format!("unknown binding `{name}`"))),
+        Expression::Lambda { params, body } => Ok(Value::Lambda {
+            params: params.clone(),
+            body: body.clone(),
+            captures: variables.clone(),
+        }),
         Expression::Ownership { value, .. } => evaluate(program, value, variables, write_line),
         Expression::Index { object, index } => {
             let object = evaluate(program, object, variables, write_line)?;
             let index = evaluate(program, index, variables, write_line)?;
             index_value(object, index)
+        }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            let object = evaluate(program, object, variables, write_line)?;
+            let mut evaluate_bound =
+                |bound: &Option<Box<Expression>>| -> Result<Option<i64>, CompileError> {
+                    bound
+                        .as_ref()
+                        .map(
+                            |bound| match evaluate(program, bound, variables, write_line)? {
+                                Value::Int(value) => Ok(value),
+                                _ => Err(CompileError::Execution(
+                                    "slice bounds must be integers".into(),
+                                )),
+                            },
+                        )
+                        .transpose()
+                };
+            slice_value(
+                object,
+                evaluate_bound(start)?,
+                evaluate_bound(end)?,
+                evaluate_bound(step)?,
+            )
         }
         Expression::Format { template, .. } => {
             let mut formatted = template.clone();
@@ -1234,25 +1341,42 @@ fn evaluate(
             }
             Ok(Value::String(formatted))
         }
-        Expression::ListComprehension {
-            element,
-            variable,
-            iterable,
-            condition,
-        } => {
-            let iterable = evaluate(program, iterable, variables, write_line)?;
+        Expression::ListComprehension { element, clauses } => {
             let mut result = Vec::new();
-            for value in iterable_values(iterable)? {
-                let mut inner = variables.clone();
-                inner.insert(variable.clone(), value);
-                if let Some(condition) = condition {
-                    if !truthy(&evaluate(program, condition, &inner, write_line)?)? {
-                        continue;
-                    }
-                }
+            for inner in comprehension_bindings(program, clauses, variables, write_line)? {
                 result.push(evaluate(program, element, &inner, write_line)?);
             }
             Ok(Value::List(Rc::new(RefCell::new(result))))
+        }
+        Expression::SetComprehension { element, clauses } => {
+            let mut result = Vec::new();
+            for inner in comprehension_bindings(program, clauses, variables, write_line)? {
+                let value = evaluate(program, element, &inner, write_line)?;
+                if !result.contains(&value) {
+                    result.push(value);
+                }
+            }
+            Ok(Value::Set(result))
+        }
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            let mut result = Vec::new();
+            for inner in comprehension_bindings(program, clauses, variables, write_line)? {
+                let key = evaluate(program, key, &inner, write_line)?;
+                let value = evaluate(program, value, &inner, write_line)?;
+                if let Some((_, existing)) = result
+                    .iter_mut()
+                    .find(|(candidate, _): &&mut (Value, Value)| candidate == &key)
+                {
+                    *existing = value;
+                } else {
+                    result.push((key, value));
+                }
+            }
+            Ok(Value::Map(Rc::new(RefCell::new(result))))
         }
         Expression::Unary { op, expression } => {
             let value = evaluate(program, expression, variables, write_line)?;
@@ -1289,18 +1413,32 @@ fn evaluate(
             execute_call(program, function, args, chaos_event, write_line)
         }
         Expression::CallValue { callee, args, .. } => {
-            let Value::Function(function) = evaluate(program, callee, variables, write_line)?
-            else {
-                return Err(CompileError::Execution("value is not callable".into()));
-            };
+            let callable = evaluate(program, callee, variables, write_line)?;
             let args = evaluate_all(program, args, variables, write_line)?;
-            execute_function(
-                program,
-                &function,
-                args,
-                variables.get("__chaos_event").cloned(),
-                write_line,
-            )
+            match callable {
+                Value::Function(function) => execute_function(
+                    program,
+                    &function,
+                    args,
+                    variables.get("__chaos_event").cloned(),
+                    write_line,
+                ),
+                Value::Lambda {
+                    params,
+                    body,
+                    mut captures,
+                } => {
+                    if params.len() != args.len() {
+                        return Err(CompileError::Execution(format!(
+                            "lambda expects {} arguments",
+                            params.len()
+                        )));
+                    }
+                    captures.extend(params.into_iter().zip(args));
+                    evaluate(program, &body, &captures, write_line)
+                }
+                _ => Err(CompileError::Execution("value is not callable".into())),
+            }
         }
         Expression::Conditional {
             condition,
@@ -1432,10 +1570,29 @@ fn execute_call(
             )),
         },
         "range" => match args.as_slice() {
-            [Value::Int(start), Value::Int(end)] => Ok(Value::List(Rc::new(RefCell::new(
-                (*start..*end).map(Value::Int).collect(),
+            [Value::Int(end)] => Ok(Value::List(Rc::new(RefCell::new(
+                range_values(0, *end, 1)?
+                    .into_iter()
+                    .map(Value::Int)
+                    .collect(),
             )))),
-            _ => Err(CompileError::Execution("range expects two integers".into())),
+            [Value::Int(start), Value::Int(end)] => Ok(Value::List(Rc::new(RefCell::new(
+                range_values(*start, *end, 1)?
+                    .into_iter()
+                    .map(Value::Int)
+                    .collect(),
+            )))),
+            [Value::Int(start), Value::Int(end), Value::Int(step)] => {
+                Ok(Value::List(Rc::new(RefCell::new(
+                    range_values(*start, *end, *step)?
+                        .into_iter()
+                        .map(Value::Int)
+                        .collect(),
+                ))))
+            }
+            _ => Err(CompileError::Execution(
+                "range expects one to three integers".into(),
+            )),
         },
         "indices" => match args.as_slice() {
             [Value::List(values)] => Ok(Value::List(Rc::new(RefCell::new(
@@ -1488,6 +1645,41 @@ fn execute_call(
                     .all(|value| value),
             )),
             _ => Err(CompileError::Execution("all expects one iterable".into())),
+        },
+        "abs" => match args.as_slice() {
+            [Value::Int(value)] => {
+                Ok(Value::Int(value.checked_abs().ok_or_else(|| {
+                    CompileError::Execution("absolute value overflowed".into())
+                })?))
+            }
+            [Value::Float(value)] => Ok(Value::Float(f64::from_bits(*value).abs().to_bits())),
+            _ => Err(CompileError::Execution("abs expects one number".into())),
+        },
+        "min" | "max" => match args.as_slice() {
+            [left, right] => {
+                let ordering = controlled_value_ordering(left, right);
+                Ok(
+                    if (function == "min" && ordering.is_le())
+                        || (function == "max" && ordering.is_ge())
+                    {
+                        left.clone()
+                    } else {
+                        right.clone()
+                    },
+                )
+            }
+            _ => Err(CompileError::Execution(format!(
+                "{function} expects two values"
+            ))),
+        },
+        "divmod" => match args.as_slice() {
+            [Value::Int(left), Value::Int(right)] if *right != 0 => Ok(Value::Tuple(vec![
+                Value::Int(left.div_euclid(*right)),
+                Value::Int(left.rem_euclid(*right)),
+            ])),
+            _ => Err(CompileError::Execution(
+                "divmod expects two integers and a nonzero divisor".into(),
+            )),
         },
         "read" => Ok(Value::Variant {
             name: "ok".into(),
@@ -2020,13 +2212,131 @@ fn execute_method(
             return Ok(Value::Unit);
         }
         (Value::List(values), "pop") => {
-            if !args.is_empty() {
-                return Err(CompileError::Execution("pop expects no arguments".into()));
+            let mut values = values.borrow_mut();
+            if values.is_empty() {
+                return Err(CompileError::Execution("cannot pop an empty list".into()));
             }
-            return values
-                .borrow_mut()
-                .pop()
-                .ok_or_else(|| CompileError::Execution("cannot pop an empty list".into()));
+            let index = match args.as_slice() {
+                [] => values.len() - 1,
+                [Value::Int(index)] => normalize_index(*index, values.len(), "list")?,
+                _ => {
+                    return Err(CompileError::Execution(
+                        "pop expects an optional index".into(),
+                    ))
+                }
+            };
+            return Ok(values.remove(index));
+        }
+        (Value::List(values), "popleft") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "popleft expects no arguments".into(),
+                ));
+            }
+            if values.borrow().is_empty() {
+                return Err(CompileError::Execution("cannot pop an empty list".into()));
+            }
+            return Ok(values.borrow_mut().remove(0));
+        }
+        (Value::List(values), "appendleft") => {
+            let [value] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "appendleft expects one value".into(),
+                ));
+            };
+            values.borrow_mut().insert(0, value.clone());
+            return Ok(Value::Unit);
+        }
+        (Value::List(values), "extend") => {
+            let [value] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "extend expects one iterable".into(),
+                ));
+            };
+            values.borrow_mut().extend(iterable_values(value.clone())?);
+            return Ok(Value::Unit);
+        }
+        (Value::List(values), "insert") => {
+            let [Value::Int(index), value] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "insert expects an index and value".into(),
+                ));
+            };
+            let mut values = values.borrow_mut();
+            let length = values.len() as i64;
+            let index = if *index < 0 {
+                (length + index).max(0)
+            } else {
+                *index
+            };
+            values.insert(index.min(length) as usize, value.clone());
+            return Ok(Value::Unit);
+        }
+        (Value::List(values), "remove") => {
+            let [value] = args.as_slice() else {
+                return Err(CompileError::Execution("remove expects one value".into()));
+            };
+            let mut values = values.borrow_mut();
+            let index = values
+                .iter()
+                .position(|candidate| candidate == value)
+                .ok_or_else(|| CompileError::Execution("remove value was not present".into()))?;
+            values.remove(index);
+            return Ok(Value::Unit);
+        }
+        (Value::List(values), "heapPush") => {
+            let [value] = args.as_slice() else {
+                return Err(CompileError::Execution("heapPush expects one value".into()));
+            };
+            let mut values = values.borrow_mut();
+            values.push(value.clone());
+            let mut child = values.len() - 1;
+            while child > 0 {
+                let parent = (child - 1) / 2;
+                if controlled_value_ordering(&values[parent], &values[child]).is_le() {
+                    break;
+                }
+                values.swap(parent, child);
+                child = parent;
+            }
+            return Ok(Value::Unit);
+        }
+        (Value::List(values), "heapPop") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "heapPop expects no arguments".into(),
+                ));
+            }
+            let mut values = values.borrow_mut();
+            if values.is_empty() {
+                return Err(CompileError::Execution("cannot pop an empty heap".into()));
+            }
+            let last = values.pop().unwrap();
+            if values.is_empty() {
+                return Ok(last);
+            }
+            let result = std::mem::replace(&mut values[0], last);
+            let mut parent = 0;
+            loop {
+                let left = parent * 2 + 1;
+                if left >= values.len() {
+                    break;
+                }
+                let right = left + 1;
+                let child = if right < values.len()
+                    && controlled_value_ordering(&values[right], &values[left]).is_lt()
+                {
+                    right
+                } else {
+                    left
+                };
+                if controlled_value_ordering(&values[parent], &values[child]).is_le() {
+                    break;
+                }
+                values.swap(parent, child);
+                parent = child;
+            }
+            return Ok(result);
         }
         (Value::List(values), "last") => {
             if !args.is_empty() {
@@ -2044,14 +2354,87 @@ fn execute_method(
             return Ok(Value::List(Rc::new(RefCell::new(reversed))));
         }
         (Value::List(values), "sorted") => {
-            if !args.is_empty() {
-                return Err(CompileError::Execution(
-                    "sorted expects no arguments".into(),
-                ));
+            let (key, reverse) = match args.as_slice() {
+                [] => (None, false),
+                [Value::Bool(reverse)] => (None, *reverse),
+                [callable @ (Value::Function(_) | Value::Lambda { .. })] => (Some(callable), false),
+                [callable @ (Value::Function(_) | Value::Lambda { .. }), Value::Bool(reverse)] => {
+                    (Some(callable), *reverse)
+                }
+                _ => {
+                    return Err(CompileError::Execution(
+                        "sorted expects an optional key function and reverse boolean".into(),
+                    ))
+                }
+            };
+            let mut keyed = values
+                .borrow()
+                .iter()
+                .cloned()
+                .map(|value| {
+                    let key = key.map_or_else(
+                        || Ok(value.clone()),
+                        |key| {
+                            invoke_callable(program, key.clone(), vec![value.clone()], write_line)
+                        },
+                    )?;
+                    Ok((value, key))
+                })
+                .collect::<Result<Vec<_>, CompileError>>()?;
+            keyed.sort_by(|left, right| controlled_value_ordering(&left.1, &right.1));
+            if reverse {
+                keyed.reverse();
             }
-            let mut sorted = values.borrow().clone();
-            sorted.sort_by(controlled_value_ordering);
-            return Ok(Value::List(Rc::new(RefCell::new(sorted))));
+            return Ok(Value::List(Rc::new(RefCell::new(
+                keyed.into_iter().map(|(value, _)| value).collect(),
+            ))));
+        }
+        (Value::List(values), "map" | "filter") => {
+            let [callable @ (Value::Function(_) | Value::Lambda { .. })] = args.as_slice() else {
+                return Err(CompileError::Execution(format!(
+                    "{method} expects one function"
+                )));
+            };
+            let mut result = Vec::new();
+            for value in values.borrow().iter().cloned() {
+                let transformed =
+                    invoke_callable(program, callable.clone(), vec![value.clone()], write_line)?;
+                if method == "map" {
+                    result.push(transformed);
+                } else if truthy(&transformed)? {
+                    result.push(value);
+                }
+            }
+            return Ok(Value::List(Rc::new(RefCell::new(result))));
+        }
+        (Value::List(values), "reduce") => {
+            let (callable, mut accumulator, start) = match args.as_slice() {
+                [callable @ (Value::Function(_) | Value::Lambda { .. })] => {
+                    let first = values.borrow().first().cloned().ok_or_else(|| {
+                        CompileError::Execution(
+                            "reduce of an empty list needs an initial value".into(),
+                        )
+                    })?;
+                    (callable.clone(), first, 1)
+                }
+                [callable @ (Value::Function(_) | Value::Lambda { .. }), initial] => {
+                    (callable.clone(), initial.clone(), 0)
+                }
+                _ => {
+                    return Err(CompileError::Execution(
+                        "reduce expects a function and optional initial value".into(),
+                    ))
+                }
+            };
+            for value in values.borrow().iter().skip(start) {
+                accumulator = invoke_callable(
+                    program,
+                    callable.clone(),
+                    vec![accumulator, value.clone()],
+                    write_line,
+                )?;
+            }
+            return Ok(accumulator);
         }
         (Value::List(values), "join") => {
             let [Value::String(separator)] = args.as_slice() else {
@@ -2114,6 +2497,24 @@ fn execute_method(
             }
             return Ok(Value::Set(set));
         }
+        (Value::List(values), "frequencies") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "frequencies expects no arguments".into(),
+                ));
+            }
+            let mut entries: Vec<(Value, Value)> = Vec::new();
+            for value in values.borrow().iter() {
+                if let Some((_, Value::Int(count))) =
+                    entries.iter_mut().find(|(candidate, _)| candidate == value)
+                {
+                    *count += 1;
+                } else {
+                    entries.push((value.clone(), Value::Int(1)));
+                }
+            }
+            return Ok(Value::Map(Rc::new(RefCell::new(entries))));
+        }
         (Value::Set(values), "difference") => {
             let [Value::Set(excluded)] = args.as_slice() else {
                 return Err(CompileError::Execution("difference expects one set".into()));
@@ -2133,6 +2534,34 @@ fn execute_method(
                 ));
             }
             return Ok(Value::List(Rc::new(RefCell::new(values.clone()))));
+        }
+        (Value::Set(values), "union" | "intersection" | "symmetricDifference") => {
+            let [Value::Set(other)] = args.as_slice() else {
+                return Err(CompileError::Execution(format!("{method} expects one set")));
+            };
+            let result = match method {
+                "union" => values
+                    .iter()
+                    .chain(other)
+                    .fold(Vec::new(), |mut result, value| {
+                        if !result.contains(value) {
+                            result.push(value.clone());
+                        }
+                        result
+                    }),
+                "intersection" => values
+                    .iter()
+                    .filter(|value| other.contains(value))
+                    .cloned()
+                    .collect(),
+                _ => values
+                    .iter()
+                    .filter(|value| !other.contains(value))
+                    .chain(other.iter().filter(|value| !values.contains(value)))
+                    .cloned()
+                    .collect(),
+            };
+            return Ok(Value::Set(result));
         }
         (Value::List(values), "minimum" | "maximum") => {
             if !args.is_empty() {
@@ -2212,6 +2641,47 @@ fn execute_method(
             }
             return Ok(Value::Map(Rc::new(RefCell::new(entries))));
         }
+        (Value::String(text), "strip" | "lower" | "upper") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(format!(
+                    "{method} expects no arguments"
+                )));
+            }
+            return Ok(Value::String(match method {
+                "strip" => text.trim().to_owned(),
+                "lower" => text.to_lowercase(),
+                _ => text.to_uppercase(),
+            }));
+        }
+        (Value::String(text), "length") => {
+            if !args.is_empty() {
+                return Err(CompileError::Execution(
+                    "length expects no arguments".into(),
+                ));
+            }
+            return Ok(Value::Int(text.chars().count() as i64));
+        }
+        (Value::String(text), "startsWith" | "endsWith" | "find" | "count") => {
+            let [Value::String(needle)] = args.as_slice() else {
+                return Err(CompileError::Execution(format!(
+                    "{method} expects one string"
+                )));
+            };
+            return Ok(match method {
+                "startsWith" => Value::Bool(text.starts_with(needle)),
+                "endsWith" => Value::Bool(text.ends_with(needle)),
+                "find" => Value::Int(text.find(needle).map_or(-1, |index| index as i64)),
+                _ => Value::Int(text.matches(needle).count() as i64),
+            });
+        }
+        (Value::String(text), "replace") => {
+            let [Value::String(old), Value::String(new)] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "replace expects two strings".into(),
+                ));
+            };
+            return Ok(Value::String(text.replace(old, new)));
+        }
         (Value::Map(entries), "keys" | "values") => {
             if !args.is_empty() {
                 return Err(CompileError::Execution(format!(
@@ -2225,6 +2695,31 @@ fn execute_method(
                 .cloned()
                 .collect();
             return Ok(Value::List(Rc::new(RefCell::new(values))));
+        }
+        (Value::Map(entries), "get") => {
+            let [key, fallback] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "get expects a key and fallback".into(),
+                ));
+            };
+            return Ok(entries
+                .borrow()
+                .iter()
+                .find(|(candidate, _)| candidate == key)
+                .map_or_else(|| fallback.clone(), |(_, value)| value.clone()));
+        }
+        (Value::Map(entries), "setDefault") => {
+            let [key, fallback] = args.as_slice() else {
+                return Err(CompileError::Execution(
+                    "setDefault expects a key and fallback".into(),
+                ));
+            };
+            let mut entries = entries.borrow_mut();
+            if let Some((_, value)) = entries.iter().find(|(candidate, _)| candidate == key) {
+                return Ok(value.clone());
+            }
+            entries.push((key.clone(), fallback.clone()));
+            return Ok(fallback.clone());
         }
         (Value::Int(left), "less_than" | "lessThan") => {
             let [Value::Int(right)] = args.as_slice() else {
@@ -2447,6 +2942,70 @@ fn iterable_values(value: Value) -> Result<Vec<Value>, CompileError> {
     }
 }
 
+fn comprehension_bindings(
+    program: &Program,
+    clauses: &[severian_hir::ComprehensionClause],
+    variables: &HashMap<String, Value>,
+    write_line: &mut dyn FnMut(&str),
+) -> Result<Vec<HashMap<String, Value>>, CompileError> {
+    fn expand(
+        program: &Program,
+        clauses: &[severian_hir::ComprehensionClause],
+        depth: usize,
+        variables: HashMap<String, Value>,
+        write_line: &mut dyn FnMut(&str),
+        result: &mut Vec<HashMap<String, Value>>,
+    ) -> Result<(), CompileError> {
+        if depth == clauses.len() {
+            result.push(variables);
+            return Ok(());
+        }
+        let clause = &clauses[depth];
+        let iterable = evaluate(program, &clause.iterable, &variables, write_line)?;
+        for value in iterable_values(iterable)? {
+            let mut inner = variables.clone();
+            if !match_pattern(program, &value, &clause.pattern, &mut inner) {
+                return Err(CompileError::Execution(
+                    "comprehension pattern did not match".into(),
+                ));
+            }
+            if let Some(condition) = &clause.condition {
+                if !truthy(&evaluate(program, condition, &inner, write_line)?)? {
+                    continue;
+                }
+            }
+            expand(program, clauses, depth + 1, inner, write_line, result)?;
+        }
+        Ok(())
+    }
+
+    let mut result = Vec::new();
+    expand(
+        program,
+        clauses,
+        0,
+        variables.clone(),
+        write_line,
+        &mut result,
+    )?;
+    Ok(result)
+}
+
+fn range_values(start: i64, end: i64, step: i64) -> Result<Vec<i64>, CompileError> {
+    if step == 0 {
+        return Err(CompileError::Execution("range step cannot be zero".into()));
+    }
+    let mut values = Vec::new();
+    let mut value = start;
+    while if step > 0 { value < end } else { value > end } {
+        values.push(value);
+        value = value
+            .checked_add(step)
+            .ok_or_else(|| CompileError::Execution("range overflowed".into()))?;
+    }
+    Ok(values)
+}
+
 fn index_value(object: Value, index: Value) -> Result<Value, CompileError> {
     match (object, index) {
         (Value::List(values), Value::Int(index)) => {
@@ -2493,6 +3052,82 @@ fn normalize_index(index: i64, length: usize, kind: &str) -> Result<usize, Compi
         )));
     }
     Ok(index as usize)
+}
+
+fn slice_indices(
+    length: usize,
+    start: Option<i64>,
+    end: Option<i64>,
+    step: Option<i64>,
+) -> Result<Vec<usize>, CompileError> {
+    let length = i64::try_from(length)
+        .map_err(|_| CompileError::Execution("collection is too large to slice".into()))?;
+    let step = step.unwrap_or(1);
+    if step == 0 {
+        return Err(CompileError::Execution("slice step cannot be zero".into()));
+    }
+    let mut result = Vec::new();
+    if step > 0 {
+        let normalize = |value: i64| {
+            let value = if value < 0 { value + length } else { value };
+            value.clamp(0, length)
+        };
+        let mut index = start.map(normalize).unwrap_or(0);
+        let end = end.map(normalize).unwrap_or(length);
+        while index < end {
+            result.push(index as usize);
+            index += step;
+        }
+    } else {
+        let normalize = |value: i64| {
+            let value = if value < 0 { value + length } else { value };
+            value.clamp(-1, length - 1)
+        };
+        let mut index = start.map(normalize).unwrap_or(length - 1);
+        let end = end.map(normalize).unwrap_or(-1);
+        while index > end {
+            result.push(index as usize);
+            index += step;
+        }
+    }
+    Ok(result)
+}
+
+fn slice_value(
+    value: Value,
+    start: Option<i64>,
+    end: Option<i64>,
+    step: Option<i64>,
+) -> Result<Value, CompileError> {
+    match value {
+        Value::List(values) => {
+            let values = values.borrow();
+            let indices = slice_indices(values.len(), start, end, step)?;
+            Ok(Value::List(Rc::new(RefCell::new(
+                indices
+                    .into_iter()
+                    .map(|index| values[index].clone())
+                    .collect(),
+            ))))
+        }
+        Value::Tuple(values) => {
+            let indices = slice_indices(values.len(), start, end, step)?;
+            Ok(Value::Tuple(
+                indices
+                    .into_iter()
+                    .map(|index| values[index].clone())
+                    .collect(),
+            ))
+        }
+        Value::String(value) => {
+            let characters = value.chars().collect::<Vec<_>>();
+            let indices = slice_indices(characters.len(), start, end, step)?;
+            Ok(Value::String(
+                indices.into_iter().map(|index| characters[index]).collect(),
+            ))
+        }
+        _ => Err(CompileError::Execution("value is not sliceable".into())),
+    }
 }
 
 fn match_pattern(
@@ -2548,6 +3183,7 @@ fn display_value(value: &Value) -> String {
         Value::Bool(value) => value.to_string(),
         Value::String(value) => value.clone(),
         Value::Function(name) => format!("<function {name}>"),
+        Value::Lambda { .. } => "<lambda>".into(),
         Value::Matrix {
             rows,
             columns,
@@ -2615,6 +3251,7 @@ fn display_value(value: &Value) -> String {
             format!("when {function} {action} {}", display_value(value))
         }
         Value::Unit => "unit".into(),
+        Value::Break | Value::Continue => "<loop-control>".into(),
     }
 }
 

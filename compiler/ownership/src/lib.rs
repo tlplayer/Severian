@@ -208,6 +208,7 @@ impl Checker {
                 }
                 self.check_instructions(instructions)?;
             }
+            Instruction::Break | Instruction::Continue => {}
         }
         Ok(())
     }
@@ -349,6 +350,23 @@ impl Checker {
             } => {
                 self.check_expression(value, access)?;
             }
+            Expression::Lambda { params, body } => {
+                let previous = params
+                    .iter()
+                    .map(|param| (param.clone(), self.bindings.remove(param)))
+                    .collect::<Vec<_>>();
+                for param in params {
+                    self.define(param.clone(), None);
+                }
+                self.check_expression(body, Access::Read)?;
+                for (param, state) in previous {
+                    if let Some(state) = state {
+                        self.bindings.insert(param, state);
+                    } else {
+                        self.bindings.remove(&param);
+                    }
+                }
+            }
             Expression::List(values)
             | Expression::Tuple(values)
             | Expression::Set(values)
@@ -368,6 +386,17 @@ impl Checker {
             Expression::Index { object, index } => {
                 self.check_expression(object, access)?;
                 self.check_expression(index, Access::Read)?;
+            }
+            Expression::Slice {
+                object,
+                start,
+                end,
+                step,
+            } => {
+                self.check_expression(object, access)?;
+                for bound in [start, end, step].into_iter().flatten() {
+                    self.check_expression(bound, Access::Read)?;
+                }
             }
             Expression::Format { args, .. } => {
                 for arg in args {
@@ -394,25 +423,46 @@ impl Checker {
                 self.check_expression(value, Access::Read)?;
                 self.check_expression(channel, Access::Mutate)?;
             }
-            Expression::ListComprehension {
-                element,
-                variable,
-                iterable,
-                condition,
-            } => {
-                self.check_expression(iterable, Access::Read)?;
-                let previous = self
-                    .bindings
-                    .insert(variable.clone(), BindingState::default());
+            Expression::ListComprehension { element, clauses } => {
+                let previous = self.bindings.clone();
+                for clause in clauses {
+                    self.check_expression(&clause.iterable, Access::Read)?;
+                    define_pattern(self, &clause.pattern);
+                    if let Some(condition) = &clause.condition {
+                        self.check_expression(condition, Access::Read)?;
+                    }
+                }
                 self.check_expression(element, Access::Read)?;
-                if let Some(condition) = condition {
-                    self.check_expression(condition, Access::Read)?;
+                self.bindings = previous;
+            }
+            Expression::SetComprehension { element, clauses } => {
+                let previous = self.bindings.clone();
+                for clause in clauses {
+                    self.check_expression(&clause.iterable, Access::Read)?;
+                    define_pattern(self, &clause.pattern);
+                    if let Some(condition) = &clause.condition {
+                        self.check_expression(condition, Access::Read)?;
+                    }
                 }
-                if let Some(previous) = previous {
-                    self.bindings.insert(variable.clone(), previous);
-                } else {
-                    self.bindings.remove(variable);
+                self.check_expression(element, Access::Read)?;
+                self.bindings = previous;
+            }
+            Expression::MapComprehension {
+                key,
+                value,
+                clauses,
+            } => {
+                let previous = self.bindings.clone();
+                for clause in clauses {
+                    self.check_expression(&clause.iterable, Access::Read)?;
+                    define_pattern(self, &clause.pattern);
+                    if let Some(condition) = &clause.condition {
+                        self.check_expression(condition, Access::Read)?;
+                    }
                 }
+                self.check_expression(key, Access::Read)?;
+                self.check_expression(value, Access::Read)?;
+                self.bindings = previous;
             }
             Expression::Conditional {
                 condition,
@@ -476,7 +526,9 @@ impl Checker {
                 Access::Mutate if self.has_live_loan(&owner, None) => {
                     return Err(ownership_error(
                         "E0302",
-                        format!("owner `{owner}` cannot be mutated while a borrow is live"),
+                        format!(
+                            "owner `{owner}` cannot be mutated while a borrow is live. An owner cannot be structurally mutated while an immutable borrow is live."
+                        ),
                     ));
                 }
                 _ => {}
@@ -491,7 +543,9 @@ impl Checker {
         if state.moved {
             return Err(ownership_error(
                 "E0301",
-                format!("binding `{name}` cannot be used after its ownership was moved"),
+                format!(
+                    "binding `{name}` cannot be used after its ownership was moved. A binding cannot be read after ownership has moved to another binding."
+                ),
             ));
         }
         Ok(())
@@ -784,6 +838,7 @@ fn infer_instruction_effects(
                 }
                 infer_instruction_effects(instructions, parameters, effects);
             }
+            Instruction::Break | Instruction::Continue => {}
         }
     }
 }
@@ -844,6 +899,9 @@ fn infer_expression_effect(
         | Expression::Unary {
             expression: object, ..
         } => infer_expression_effect(object, access, parameters, effects),
+        Expression::Lambda { body, .. } => {
+            infer_expression_effect(body, Access::Read, parameters, effects)
+        }
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)
@@ -864,6 +922,17 @@ fn infer_expression_effect(
             infer_expression_effect(object, access, parameters, effects);
             infer_expression_effect(index, Access::Read, parameters, effects);
         }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            infer_expression_effect(object, access, parameters, effects);
+            for bound in [start, end, step].into_iter().flatten() {
+                infer_expression_effect(bound, Access::Read, parameters, effects);
+            }
+        }
         Expression::MethodCall {
             object,
             method,
@@ -883,16 +952,36 @@ fn infer_expression_effect(
             infer_expression_effect(value, Access::Read, parameters, effects);
             infer_expression_effect(channel, Access::Mutate, parameters, effects);
         }
-        Expression::ListComprehension {
-            element,
-            iterable,
-            condition,
-            ..
-        } => {
+        Expression::ListComprehension { element, clauses } => {
             infer_expression_effect(element, Access::Read, parameters, effects);
-            infer_expression_effect(iterable, Access::Read, parameters, effects);
-            if let Some(condition) = condition {
-                infer_expression_effect(condition, Access::Read, parameters, effects);
+            for clause in clauses {
+                infer_expression_effect(&clause.iterable, Access::Read, parameters, effects);
+                if let Some(condition) = &clause.condition {
+                    infer_expression_effect(condition, Access::Read, parameters, effects);
+                }
+            }
+        }
+        Expression::SetComprehension { element, clauses } => {
+            infer_expression_effect(element, Access::Read, parameters, effects);
+            for clause in clauses {
+                infer_expression_effect(&clause.iterable, Access::Read, parameters, effects);
+                if let Some(condition) = &clause.condition {
+                    infer_expression_effect(condition, Access::Read, parameters, effects);
+                }
+            }
+        }
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            infer_expression_effect(key, Access::Read, parameters, effects);
+            infer_expression_effect(value, Access::Read, parameters, effects);
+            for clause in clauses {
+                infer_expression_effect(&clause.iterable, Access::Read, parameters, effects);
+                if let Some(condition) = &clause.condition {
+                    infer_expression_effect(condition, Access::Read, parameters, effects);
+                }
             }
         }
         Expression::Conditional {
@@ -953,7 +1042,20 @@ fn define_pattern(checker: &mut Checker, pattern: &MatchPattern) {
 fn mutating_method(method: &str) -> bool {
     matches!(
         method,
-        "append" | "push" | "pop" | "remove" | "clear" | "insert" | "sort" | "reverse"
+        "append"
+            | "appendleft"
+            | "extend"
+            | "push"
+            | "pop"
+            | "popleft"
+            | "remove"
+            | "clear"
+            | "insert"
+            | "sort"
+            | "reverse"
+            | "heapPush"
+            | "heapPop"
+            | "setDefault"
     )
 }
 
@@ -1047,6 +1149,7 @@ fn count_instructions(instructions: &[Instruction], counts: &mut HashMap<String,
                 }
                 count_instructions(instructions, counts);
             }
+            Instruction::Break | Instruction::Continue => {}
         }
     }
 }
@@ -1076,6 +1179,7 @@ fn count_expression(expression: &Expression, counts: &mut HashMap<String, usize>
         | Expression::Unary {
             expression: value, ..
         } => count_expression(value, counts),
+        Expression::Lambda { body, .. } => count_expression(body, counts),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)
@@ -1101,6 +1205,17 @@ fn count_expression(expression: &Expression, counts: &mut HashMap<String, usize>
             count_expression(object, counts);
             count_expression(index, counts);
         }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            count_expression(object, counts);
+            for bound in [start, end, step].into_iter().flatten() {
+                count_expression(bound, counts);
+            }
+        }
         Expression::Format { args, .. } | Expression::Call { args, .. } => {
             for arg in args {
                 count_expression(arg, counts);
@@ -1116,16 +1231,36 @@ fn count_expression(expression: &Expression, counts: &mut HashMap<String, usize>
             count_expression(value, counts);
             count_expression(channel, counts);
         }
-        Expression::ListComprehension {
-            element,
-            iterable,
-            condition,
-            ..
-        } => {
+        Expression::ListComprehension { element, clauses } => {
             count_expression(element, counts);
-            count_expression(iterable, counts);
-            if let Some(condition) = condition {
-                count_expression(condition, counts);
+            for clause in clauses {
+                count_expression(&clause.iterable, counts);
+                if let Some(condition) = &clause.condition {
+                    count_expression(condition, counts);
+                }
+            }
+        }
+        Expression::SetComprehension { element, clauses } => {
+            count_expression(element, counts);
+            for clause in clauses {
+                count_expression(&clause.iterable, counts);
+                if let Some(condition) = &clause.condition {
+                    count_expression(condition, counts);
+                }
+            }
+        }
+        Expression::MapComprehension {
+            key,
+            value,
+            clauses,
+        } => {
+            count_expression(key, counts);
+            count_expression(value, counts);
+            for clause in clauses {
+                count_expression(&clause.iterable, counts);
+                if let Some(condition) = &clause.condition {
+                    count_expression(condition, counts);
+                }
             }
         }
         Expression::Conditional {

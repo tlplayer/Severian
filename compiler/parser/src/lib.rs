@@ -2,13 +2,14 @@
 
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
-    CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ConstructorDecl, Decorator,
-    DecoratorSymbol, DestructureLetStmt, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt,
-    FunctionContract, FunctionDecl, Ident, IfExpr, IfStmt, ImportDecl, ImportKind, ImportName,
-    IndexExpr, Item, LetKind, LetStmt, ListComprehensionExpr, Literal, MapEntry, MapExpr,
-    MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, Span, Stmt,
-    SwitchArm, SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod,
-    Type, TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ComprehensionClause,
+    ConstructorDecl, Decorator, DecoratorSymbol, DestructureLetStmt, ElseBranch, EnumDecl,
+    EnumVariant, Expr, Field, ForStmt, FunctionContract, FunctionDecl, Ident, IfExpr, IfStmt,
+    ImportDecl, ImportKind, ImportName, IndexExpr, Item, LambdaBody, LetKind, LetStmt,
+    ListComprehensionExpr, Literal, MapComprehensionExpr, MapEntry, MapExpr, MemberExpr, Module,
+    OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, SetComprehensionExpr, SliceExpr,
+    Span, Stmt, SwitchArm, SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl,
+    TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -37,6 +38,7 @@ pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
         current: 0,
         test_depth: 0,
         unsafe_depth: 0,
+        loop_depth: 0,
         task_contexts: Vec::new(),
     }
     .parse_module()
@@ -47,6 +49,7 @@ struct Parser<'tokens> {
     current: usize,
     test_depth: usize,
     unsafe_depth: usize,
+    loop_depth: usize,
     task_contexts: Vec<TaskContext>,
 }
 
@@ -718,6 +721,25 @@ impl Parser<'_> {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        if self.at(&TokenKind::Break) || self.at(&TokenKind::Continue) {
+            let token = self.advance().clone();
+            if self.loop_depth == 0 {
+                return Err(ParseError {
+                    span: token.span,
+                    message: "loop control is only valid inside a loop".into(),
+                });
+            }
+            let end = self
+                .expect_simple(TokenKind::Newline, "newline after loop control")?
+                .span
+                .end;
+            let span = Span::new(token.span.start, end);
+            return Ok(if token.kind == TokenKind::Break {
+                Stmt::Break(span)
+            } else {
+                Stmt::Continue(span)
+            });
+        }
         if self.at(&TokenKind::If) {
             return self.parse_if().map(Stmt::If);
         }
@@ -960,10 +982,16 @@ impl Parser<'_> {
         let then_block = self.parse_suite("if")?;
         let mut end = then_block.span.end;
         let else_branch = if self.take_simple(&TokenKind::Else).is_some() {
-            self.expect_simple(TokenKind::Colon, "`:` after else")?;
-            let block = self.parse_suite("else")?;
-            end = block.span.end;
-            Some(ElseBranch::Block(block))
+            if self.at(&TokenKind::If) {
+                let branch = self.parse_if()?;
+                end = branch.span.end;
+                Some(ElseBranch::If(Box::new(branch)))
+            } else {
+                self.expect_simple(TokenKind::Colon, "`:` after else")?;
+                let block = self.parse_suite("else")?;
+                end = block.span.end;
+                Some(ElseBranch::Block(block))
+            }
         } else {
             None
         };
@@ -1004,7 +1032,10 @@ impl Parser<'_> {
             None
         };
         self.expect_simple(TokenKind::Colon, "`:` after while")?;
-        let body = self.parse_suite("while")?;
+        self.loop_depth += 1;
+        let body = self.parse_suite("while");
+        self.loop_depth -= 1;
+        let body = body?;
         Ok(WhileStmt {
             span: Span::new(start, body.span.end),
             setup,
@@ -1067,7 +1098,10 @@ impl Parser<'_> {
             None
         };
         self.expect_simple(TokenKind::Colon, "`:` after for")?;
-        let body = self.parse_suite("for")?;
+        self.loop_depth += 1;
+        let body = self.parse_suite("for");
+        self.loop_depth -= 1;
+        let body = body?;
         let end = body.span.end;
         let loop_statement = Stmt::For(ForStmt {
             span: Span::new(start, body.span.end),
@@ -1285,7 +1319,8 @@ impl Parser<'_> {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
-        let mut expression = self.parse_addition()?;
+        let mut left = self.parse_addition()?;
+        let mut chain: Option<Expr> = None;
         loop {
             let negated_membership = self.at(&TokenKind::Not) && self.peek_kind(1, &TokenKind::In);
             let op = if self.take_simple(&TokenKind::Less).is_some() {
@@ -1306,8 +1341,9 @@ impl Parser<'_> {
                 None
             };
             let Some(op) = op else { break };
-            let comparison = binary(expression, op, self.parse_addition()?);
-            expression = if negated_membership {
+            let right = self.parse_addition()?;
+            let comparison = binary(left, op, right.clone());
+            let comparison = if negated_membership {
                 let span = comparison.span();
                 Expr::Unary(UnaryExpr {
                     span,
@@ -1317,8 +1353,13 @@ impl Parser<'_> {
             } else {
                 comparison
             };
+            chain = Some(match chain {
+                Some(previous) => binary(previous, BinaryOp::And, comparison),
+                None => comparison,
+            });
+            left = right;
         }
-        Ok(expression)
+        Ok(chain.unwrap_or(left))
     }
 
     fn parse_addition(&mut self) -> Result<Expr, ParseError> {
@@ -1565,13 +1606,47 @@ impl Parser<'_> {
                 });
             } else if self.take_simple(&TokenKind::LeftBracket).is_some() {
                 let start = expression.span().start;
-                let index = self.parse_expression()?;
-                let end = self.expect_simple(TokenKind::RightBracket, "`]`")?.span.end;
-                expression = Expr::Index(IndexExpr {
-                    span: Span::new(start, end),
-                    object: Box::new(expression),
-                    index: Box::new(index),
-                });
+                let first = if self.at(&TokenKind::Colon) {
+                    None
+                } else {
+                    Some(self.parse_expression()?)
+                };
+                if self.take_simple(&TokenKind::Colon).is_some() {
+                    let slice_end =
+                        if self.at(&TokenKind::Colon) || self.at(&TokenKind::RightBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expression()?))
+                        };
+                    let step = if self.take_simple(&TokenKind::Colon).is_some() {
+                        if self.at(&TokenKind::RightBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expression()?))
+                        }
+                    } else {
+                        None
+                    };
+                    let end = self.expect_simple(TokenKind::RightBracket, "`]`")?.span.end;
+                    expression = Expr::Slice(SliceExpr {
+                        span: Span::new(start, end),
+                        object: Box::new(expression),
+                        start: first.map(Box::new),
+                        end: slice_end,
+                        step,
+                    });
+                } else {
+                    let index = first.ok_or_else(|| ParseError {
+                        span: self.peek().span,
+                        message: "an index expression cannot be empty".into(),
+                    })?;
+                    let end = self.expect_simple(TokenKind::RightBracket, "`]`")?.span.end;
+                    expression = Expr::Index(IndexExpr {
+                        span: Span::new(start, end),
+                        object: Box::new(expression),
+                        index: Box::new(index),
+                    });
+                }
             } else if self.take_simple(&TokenKind::Dot).is_some() {
                 let start = expression.span().start;
                 let member = self.expect_identifier("member name")?;
@@ -1671,6 +1746,31 @@ impl Parser<'_> {
                 span: token.span,
                 value: false,
             })),
+            TokenKind::Pipe => {
+                let mut params = Vec::new();
+                if !self.at(&TokenKind::Pipe) {
+                    loop {
+                        let name = self.expect_identifier("lambda parameter")?;
+                        params.push(Parameter {
+                            span: name.span,
+                            name,
+                            ty: None,
+                            default: None,
+                        });
+                        if self.take_simple(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                self.expect_simple(TokenKind::Pipe, "`|` after lambda parameters")?;
+                let body = self.parse_expression()?;
+                Ok(Expr::Lambda(severian_ast::LambdaExpr {
+                    span: Span::new(token.span.start, body.span().end),
+                    params,
+                    return_type: None,
+                    body: LambdaBody::Expr(Box::new(body)),
+                }))
+            }
             TokenKind::LeftParen => self.parse_parenthesized(token.span.start),
             TokenKind::LeftBracket => self.parse_list(token.span.start),
             TokenKind::LeftBrace => self.parse_braces(token.span.start),
@@ -1711,23 +1811,12 @@ impl Parser<'_> {
         }
         let first = self.parse_expression()?;
         if self.take_simple(&TokenKind::For).is_some() {
-            let variable = self.expect_identifier("comprehension variable")?;
-            self.expect_simple(TokenKind::In, "`in`")?;
-            // The following `if` belongs to the comprehension unless an
-            // explicit conditional expression has already been grouped.
-            let iterable = self.parse_or()?;
-            let condition = if self.take_simple(&TokenKind::If).is_some() {
-                Some(Box::new(self.parse_expression()?))
-            } else {
-                None
-            };
+            let clauses = self.parse_comprehension_clauses()?;
             let end = self.expect_simple(TokenKind::RightBracket, "`]`")?.span.end;
             return Ok(Expr::ListComprehension(ListComprehensionExpr {
                 span: Span::new(start, end),
                 element: Box::new(first),
-                variable,
-                iterable: Box::new(iterable),
-                condition,
+                clauses,
             }));
         }
         let mut elements = vec![first];
@@ -1755,6 +1844,16 @@ impl Parser<'_> {
         let first = self.parse_expression()?;
         if self.take_simple(&TokenKind::Colon).is_some() {
             let value = self.parse_expression()?;
+            if self.take_simple(&TokenKind::For).is_some() {
+                let clauses = self.parse_comprehension_clauses()?;
+                let end = self.expect_simple(TokenKind::RightBrace, "`}`")?.span.end;
+                return Ok(Expr::MapComprehension(MapComprehensionExpr {
+                    span: Span::new(start, end),
+                    key: Box::new(first),
+                    value: Box::new(value),
+                    clauses,
+                }));
+            }
             let mut entries = vec![MapEntry {
                 span: Span::new(first.span().start, value.span().end),
                 key: first,
@@ -1779,6 +1878,15 @@ impl Parser<'_> {
                 entries,
             }))
         } else {
+            if self.take_simple(&TokenKind::For).is_some() {
+                let clauses = self.parse_comprehension_clauses()?;
+                let end = self.expect_simple(TokenKind::RightBrace, "`}`")?.span.end;
+                return Ok(Expr::SetComprehension(SetComprehensionExpr {
+                    span: Span::new(start, end),
+                    element: Box::new(first),
+                    clauses,
+                }));
+            }
             let mut elements = vec![first];
             while self.take_simple(&TokenKind::Comma).is_some() {
                 if self.at(&TokenKind::RightBrace) {
@@ -1792,6 +1900,58 @@ impl Parser<'_> {
                 elements,
             }))
         }
+    }
+
+    fn parse_comprehension_clauses(&mut self) -> Result<Vec<ComprehensionClause>, ParseError> {
+        let mut clauses = Vec::new();
+        loop {
+            let first = self.expect_identifier("comprehension variable")?;
+            let mut identifiers = vec![first];
+            while self.take_simple(&TokenKind::Comma).is_some() {
+                identifiers.push(self.expect_identifier("comprehension variable")?);
+            }
+            let pattern = if identifiers.len() == 1 {
+                let identifier = identifiers.pop().unwrap();
+                if identifier.name == "_" {
+                    Pattern::Wildcard(identifier.span)
+                } else {
+                    Pattern::Identifier(identifier)
+                }
+            } else {
+                Pattern::Tuple {
+                    span: Span::new(
+                        identifiers.first().unwrap().span.start,
+                        identifiers.last().unwrap().span.end,
+                    ),
+                    elements: identifiers
+                        .into_iter()
+                        .map(|identifier| {
+                            if identifier.name == "_" {
+                                Pattern::Wildcard(identifier.span)
+                            } else {
+                                Pattern::Identifier(identifier)
+                            }
+                        })
+                        .collect(),
+                }
+            };
+            self.expect_simple(TokenKind::In, "`in`")?;
+            let iterable = self.parse_or()?;
+            let condition = if self.take_simple(&TokenKind::If).is_some() {
+                Some(Box::new(self.parse_or()?))
+            } else {
+                None
+            };
+            clauses.push(ComprehensionClause {
+                pattern,
+                iterable: Box::new(iterable),
+                condition,
+            });
+            if self.take_simple(&TokenKind::For).is_none() {
+                break;
+            }
+        }
+        Ok(clauses)
     }
 
     fn take_assign_op(&mut self) -> Option<AssignOp> {

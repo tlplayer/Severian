@@ -382,10 +382,13 @@ pub enum Expr {
     Member(MemberExpr),
     List(CollectionExpr),
     ListComprehension(ListComprehensionExpr),
+    SetComprehension(SetComprehensionExpr),
+    MapComprehension(MapComprehensionExpr),
     Tuple(CollectionExpr),
     Map(MapExpr),
     Set(CollectionExpr),
     Index(IndexExpr),
+    Slice(SliceExpr),
     If(IfExpr),
     Switch(SwitchExpr),
     Lambda(LambdaExpr),
@@ -408,8 +411,11 @@ impl Expr {
             Expr::Member(node) => node.span,
             Expr::List(node) | Expr::Tuple(node) | Expr::Set(node) => node.span,
             Expr::ListComprehension(node) => node.span,
+            Expr::SetComprehension(node) => node.span,
+            Expr::MapComprehension(node) => node.span,
             Expr::Map(node) => node.span,
             Expr::Index(node) => node.span,
+            Expr::Slice(node) => node.span,
             Expr::If(node) => node.span,
             Expr::Switch(node) => node.span,
             Expr::Lambda(node) => node.span,
@@ -469,7 +475,27 @@ pub struct CollectionExpr {
 pub struct ListComprehensionExpr {
     pub span: Span,
     pub element: Box<Expr>,
-    pub variable: Ident,
+    pub clauses: Vec<ComprehensionClause>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetComprehensionExpr {
+    pub span: Span,
+    pub element: Box<Expr>,
+    pub clauses: Vec<ComprehensionClause>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapComprehensionExpr {
+    pub span: Span,
+    pub key: Box<Expr>,
+    pub value: Box<Expr>,
+    pub clauses: Vec<ComprehensionClause>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComprehensionClause {
+    pub pattern: Pattern,
     pub iterable: Box<Expr>,
     pub condition: Option<Box<Expr>>,
 }
@@ -492,6 +518,15 @@ pub struct IndexExpr {
     pub span: Span,
     pub object: Box<Expr>,
     pub index: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SliceExpr {
+    pub span: Span,
+    pub object: Box<Expr>,
+    pub start: Option<Box<Expr>>,
+    pub end: Option<Box<Expr>>,
+    pub step: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -14,10 +14,9 @@ def productExceptSelf(values: list[int]) -> list[int]:
         prefix *= value
 
     suffix := 1
-    while index >= 0 with index := size(values) - 1:
+    for index in range(size(values) - 1, -1, -1):
         output[index] *= suffix
         suffix *= values[index]
-        index -= 1
 
     return output
 

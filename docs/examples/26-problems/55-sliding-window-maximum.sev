@@ -5,21 +5,15 @@
 
 def maxSlidingWindow(values: list[int], width: int) -> list[int]:
     deque := []
-    head := 0
-    tail := 0
     result := []
-    for index in indices(values):
-        while tail > head and values[deque[tail - 1]] <= values[index]:
-            tail -= 1
-        if tail < size(deque):
-            deque[tail] = index
-        else:
-            deque.append(index)
-        tail += 1
-        if deque[head] <= index - width:
-            head += 1
+    for index, value in enumerate(values):
+        while size(deque) > 0 and values[deque.last()] <= value:
+            deque.pop()
+        if size(deque) > 0 and deque[0] <= index - width:
+            deque.popleft()
+        deque.append(index)
         if index + 1 >= width:
-            result.append(values[deque[head]])
+            result.append(values[deque[0]])
     return result
 
 test "standard windows":

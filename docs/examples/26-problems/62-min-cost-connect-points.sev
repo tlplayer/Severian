@@ -3,13 +3,8 @@
 # Difficulty: medium
 # Tags: minimum-spanning-tree, graph, greedy, geometry
 
-def absolute(value: int) -> int:
-    if value < 0:
-        return 0 - value
-    return value
-
 def manhattan(first: list[int], second: list[int]) -> int:
-    return absolute(first[0] - second[0]) + absolute(first[1] - second[1])
+    return abs(first[0] - second[0]) + abs(first[1] - second[1])
 
 def minCostConnectPoints(points: list[list[int]]) -> int:
     count = size(points)
