@@ -1,19 +1,30 @@
-use severian_hir::{Expression, Function, Instruction, OwnershipOp, Program, ValueType};
+use severian_hir::{Expression, Function, Instruction, OwnershipOp, Parameter, Program, ValueType};
+
+fn function(name: &str, params: &[&str], instructions: Vec<Instruction>) -> Function {
+    Function {
+        name: name.into(),
+        native_symbol: None,
+        decorators: vec![],
+        contract: None,
+        params: params
+            .iter()
+            .map(|name| Parameter {
+                name: (*name).into(),
+                ty: ValueType::Any,
+                default: None,
+            })
+            .collect(),
+        return_type: ValueType::Unit,
+        instructions,
+        tests: vec![],
+    }
+}
 
 fn program(instructions: Vec<Instruction>) -> Program {
     Program {
         globals: vec![],
         classes: vec![],
-        functions: vec![Function {
-            name: "main".into(),
-            native_symbol: None,
-            decorators: vec![],
-            contract: None,
-            params: vec![],
-            return_type: ValueType::Unit,
-            instructions,
-            tests: vec![],
-        }],
+        functions: vec![function("main", &[], instructions)],
     }
 }
 
@@ -138,4 +149,136 @@ fn rejects_use_after_move_on_only_one_branch() {
 
     let error = severian_ownership::check(&program).unwrap_err();
     assert!(error.message.contains("E0301"));
+}
+
+#[test]
+fn infers_that_a_function_consumes_its_parameter() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![
+            function(
+                "consume",
+                &["input"],
+                vec![Instruction::Let {
+                    name: "owned".into(),
+                    value: ownership(OwnershipOp::Move, "input"),
+                }],
+            ),
+            function(
+                "main",
+                &[],
+                vec![
+                    Instruction::Let {
+                        name: "value".into(),
+                        value: Expression::List(vec![]),
+                    },
+                    Instruction::Evaluate(Expression::Call {
+                        function: "consume".into(),
+                        args: vec![Expression::Variable("value".into())],
+                    }),
+                    Instruction::Print(Expression::Variable("value".into())),
+                ],
+            ),
+        ],
+    };
+
+    let error = severian_ownership::check(&program).unwrap_err();
+    assert!(error.message.contains("E0301"));
+}
+
+#[test]
+fn inferred_mutable_call_conflicts_with_a_live_view() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![
+            function(
+                "update",
+                &["values"],
+                vec![Instruction::Evaluate(Expression::MethodCall {
+                    object: Box::new(Expression::Variable("values".into())),
+                    method: "push".into(),
+                    args: vec![Expression::Integer(1)],
+                })],
+            ),
+            function(
+                "main",
+                &[],
+                vec![
+                    Instruction::Let {
+                        name: "values".into(),
+                        value: Expression::List(vec![]),
+                    },
+                    Instruction::Let {
+                        name: "snapshot".into(),
+                        value: ownership(OwnershipOp::View, "values"),
+                    },
+                    Instruction::Evaluate(Expression::Call {
+                        function: "update".into(),
+                        args: vec![Expression::Variable("values".into())],
+                    }),
+                    Instruction::Print(Expression::Variable("snapshot".into())),
+                ],
+            ),
+        ],
+    };
+
+    let error = severian_ownership::check(&program).unwrap_err();
+    assert!(error.message.contains("E0303"));
+}
+
+#[test]
+fn call_argument_loans_overlap_for_the_whole_call() {
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![
+            function("pair", &["left", "right"], vec![]),
+            function(
+                "main",
+                &[],
+                vec![
+                    Instruction::Let {
+                        name: "value".into(),
+                        value: Expression::List(vec![]),
+                    },
+                    Instruction::Evaluate(Expression::Call {
+                        function: "pair".into(),
+                        args: vec![
+                            ownership(OwnershipOp::Borrow, "value"),
+                            ownership(OwnershipOp::View, "value"),
+                        ],
+                    }),
+                ],
+            ),
+        ],
+    };
+
+    let error = severian_ownership::check(&program).unwrap_err();
+    assert!(error.message.contains("E0303"));
+}
+
+#[test]
+fn borrowed_alias_cannot_escape_through_return() {
+    let mut escaping = function(
+        "escaping",
+        &["value"],
+        vec![
+            Instruction::Let {
+                name: "alias".into(),
+                value: ownership(OwnershipOp::View, "value"),
+            },
+            Instruction::Return(Some(Expression::Variable("alias".into()))),
+        ],
+    );
+    escaping.return_type = ValueType::Any;
+    let program = Program {
+        globals: vec![],
+        classes: vec![],
+        functions: vec![escaping],
+    };
+
+    let error = severian_ownership::check(&program).unwrap_err();
+    assert!(error.message.contains("E0305"));
 }

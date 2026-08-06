@@ -11,7 +11,10 @@ use std::collections::HashMap;
 /// owners through control flow, treats a move on either branch as a move at the
 /// join, and keeps loans live until the last use of their binding.
 pub fn check(program: &Program) -> Result<(), OwnershipError> {
-    let mut globals = Checker::default();
+    let mut globals = Checker {
+        effects: infer_function_effects(program),
+        ..Checker::default()
+    };
     for global in &program.globals {
         globals.check_expression(&global.value, Access::Read)?;
         globals.define(global.name.clone(), None);
@@ -77,6 +80,13 @@ enum LoanKind {
     Mutable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ParameterEffect {
+    View,
+    Borrow,
+    Move,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Loan {
     owner: String,
@@ -93,6 +103,8 @@ struct BindingState {
 struct Checker {
     bindings: HashMap<String, BindingState>,
     remaining: HashMap<String, usize>,
+    temporary_loans: Vec<Loan>,
+    effects: HashMap<String, Vec<ParameterEffect>>,
 }
 
 impl Checker {
@@ -123,6 +135,7 @@ impl Checker {
             | Instruction::Evaluate(value) => self.check_expression(value, Access::Read)?,
             Instruction::Return(value) => {
                 if let Some(value) = value {
+                    self.ensure_return_does_not_escape_loan(value)?;
                     self.check_expression(value, Access::Read)?;
                 }
             }
@@ -352,11 +365,12 @@ impl Checker {
                 self.check_expression(object, access)?;
                 self.check_expression(index, Access::Read)?;
             }
-            Expression::Format { args, .. } | Expression::Call { args, .. } => {
+            Expression::Format { args, .. } => {
                 for arg in args {
                     self.check_expression(arg, Access::Read)?;
                 }
             }
+            Expression::Call { function, args } => self.check_call(function, args)?,
             Expression::MethodCall {
                 object,
                 method,
@@ -511,19 +525,408 @@ impl Checker {
     }
 
     fn has_live_loan(&self, owner: &str, kind: Option<LoanKind>) -> bool {
-        self.bindings.iter().any(|(name, state)| {
-            state.loan.as_ref().is_some_and(|loan| {
-                loan.owner == owner
-                    && kind.is_none_or(|kind| loan.kind == kind)
-                    && self.remaining.get(name).copied().unwrap_or(0) > 0
+        self.temporary_loans
+            .iter()
+            .any(|loan| loan.owner == owner && kind.is_none_or(|kind| loan.kind == kind))
+            || self.bindings.iter().any(|(name, state)| {
+                state.loan.as_ref().is_some_and(|loan| {
+                    loan.owner == owner
+                        && kind.is_none_or(|kind| loan.kind == kind)
+                        && self.remaining.get(name).copied().unwrap_or(0) > 0
+                })
             })
-        })
     }
 
     fn consume(&mut self, name: &str) {
         if let Some(remaining) = self.remaining.get_mut(name) {
             *remaining = remaining.saturating_sub(1);
         }
+    }
+
+    fn check_call(&mut self, function: &str, args: &[Expression]) -> Result<(), OwnershipError> {
+        let effects = self.effects.get(function).cloned().unwrap_or_default();
+        let loan_boundary = self.temporary_loans.len();
+
+        for (index, argument) in args.iter().enumerate() {
+            let effect = effects.get(index).copied().unwrap_or(ParameterEffect::View);
+            self.check_call_argument(function, index, argument, effect)?;
+        }
+
+        self.temporary_loans.truncate(loan_boundary);
+        Ok(())
+    }
+
+    fn check_call_argument(
+        &mut self,
+        function: &str,
+        index: usize,
+        argument: &Expression,
+        effect: ParameterEffect,
+    ) -> Result<(), OwnershipError> {
+        let (explicit, value) = match argument {
+            Expression::Ownership { op, value } => (Some(*op), value.as_ref()),
+            value => (None, value),
+        };
+        let Expression::Variable(source) = value else {
+            self.check_expression(argument, Access::Read)?;
+            return Ok(());
+        };
+
+        self.ensure_alive(source)?;
+        let owner = self.root_owner(source);
+        let requested = match explicit {
+            Some(OwnershipOp::View | OwnershipOp::AddressOf) => ParameterEffect::View,
+            Some(OwnershipOp::Borrow) => ParameterEffect::Borrow,
+            Some(OwnershipOp::Move) => ParameterEffect::Move,
+            Some(OwnershipOp::Clone) => {
+                self.check_variable(source, Access::Read)?;
+                return Ok(());
+            }
+            None => effect,
+        };
+
+        if requested < effect {
+            return Err(ownership_error(
+                "E0306",
+                format!(
+                    "argument {} to `{function}` requires {}, but `{source}` is only passed as {}",
+                    index + 1,
+                    effect_name(effect),
+                    effect_name(requested),
+                ),
+            ));
+        }
+
+        match requested {
+            ParameterEffect::View => {
+                self.ensure_can_borrow(&owner, LoanKind::Shared)?;
+                self.consume(source);
+                self.temporary_loans.push(Loan {
+                    owner,
+                    kind: LoanKind::Shared,
+                });
+            }
+            ParameterEffect::Borrow => {
+                self.ensure_can_borrow(&owner, LoanKind::Mutable)?;
+                self.consume(source);
+                self.temporary_loans.push(Loan {
+                    owner,
+                    kind: LoanKind::Mutable,
+                });
+            }
+            ParameterEffect::Move => {
+                self.ensure_unborrowed(&owner, "move")?;
+                self.bindings
+                    .get_mut(source)
+                    .ok_or_else(|| unknown(source))?
+                    .moved = true;
+                self.consume(source);
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_return_does_not_escape_loan(
+        &self,
+        expression: &Expression,
+    ) -> Result<(), OwnershipError> {
+        let borrowed = match expression {
+            Expression::Variable(name) => self
+                .bindings
+                .get(name)
+                .and_then(|state| state.loan.as_ref())
+                .map(|_| name.as_str()),
+            Expression::Ownership {
+                op: OwnershipOp::View | OwnershipOp::Borrow | OwnershipOp::AddressOf,
+                value,
+            } => match value.as_ref() {
+                Expression::Variable(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(name) = borrowed {
+            return Err(ownership_error(
+                "E0305",
+                format!("borrowed value `{name}` cannot escape through a return"),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn effect_name(effect: ParameterEffect) -> &'static str {
+    match effect {
+        ParameterEffect::View => "shared view",
+        ParameterEffect::Borrow => "exclusive borrow",
+        ParameterEffect::Move => "ownership transfer",
+    }
+}
+
+fn infer_function_effects(program: &Program) -> HashMap<String, Vec<ParameterEffect>> {
+    let mut effects = HashMap::new();
+    for function in &program.functions {
+        effects.insert(function.name.clone(), infer_parameter_effects(function));
+    }
+    for class in &program.classes {
+        for function in class.methods.iter().chain(&class.constructors) {
+            effects
+                .entry(function.name.clone())
+                .or_insert_with(|| infer_parameter_effects(function));
+        }
+    }
+    effects
+}
+
+fn infer_parameter_effects(function: &Function) -> Vec<ParameterEffect> {
+    let parameters = function
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| (parameter.name.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut effects = vec![ParameterEffect::View; function.params.len()];
+    infer_instruction_effects(&function.instructions, &parameters, &mut effects);
+    effects
+}
+
+fn infer_instruction_effects(
+    instructions: &[Instruction],
+    parameters: &HashMap<&str, usize>,
+    effects: &mut [ParameterEffect],
+) {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { value, .. }
+            | Instruction::TryLet { value, .. }
+            | Instruction::Print(value)
+            | Instruction::Assert(value)
+            | Instruction::Evaluate(value) => {
+                infer_expression_effect(value, Access::Read, parameters, effects)
+            }
+            Instruction::Assign { target, value, .. } => {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+                infer_expression_effect(target, Access::Mutate, parameters, effects);
+            }
+            Instruction::Return(value) => {
+                if let Some(value) = value {
+                    infer_expression_effect(value, Access::Read, parameters, effects);
+                }
+            }
+            Instruction::If {
+                condition,
+                then_instructions,
+                else_instructions,
+            } => {
+                infer_expression_effect(condition, Access::Read, parameters, effects);
+                infer_instruction_effects(then_instructions, parameters, effects);
+                infer_instruction_effects(else_instructions, parameters, effects);
+            }
+            Instruction::While {
+                setup,
+                capabilities,
+                condition,
+                instructions,
+            } => {
+                if let Some(setup) = setup {
+                    infer_instruction_effects(std::slice::from_ref(setup), parameters, effects);
+                }
+                for capability in capabilities {
+                    infer_expression_effect(capability, Access::Read, parameters, effects);
+                }
+                infer_expression_effect(condition, Access::Read, parameters, effects);
+                infer_instruction_effects(instructions, parameters, effects);
+            }
+            Instruction::For {
+                iterable,
+                instructions,
+                ..
+            } => {
+                infer_expression_effect(iterable, Access::Read, parameters, effects);
+                infer_instruction_effects(instructions, parameters, effects);
+            }
+            Instruction::Switch { value, arms } => {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+                infer_arm_effects(arms, parameters, effects);
+            }
+            Instruction::ChannelSwitch {
+                channels,
+                setup,
+                repeat_condition,
+                arms,
+            } => {
+                for channel in channels {
+                    infer_expression_effect(channel, Access::Read, parameters, effects);
+                }
+                if let Some(setup) = setup {
+                    infer_instruction_effects(std::slice::from_ref(setup), parameters, effects);
+                }
+                if let Some(condition) = repeat_condition {
+                    infer_expression_effect(condition, Access::Read, parameters, effects);
+                }
+                infer_arm_effects(arms, parameters, effects);
+            }
+            Instruction::With {
+                resources,
+                instructions,
+                ..
+            } => {
+                for resource in resources {
+                    infer_expression_effect(resource, Access::Read, parameters, effects);
+                }
+                infer_instruction_effects(instructions, parameters, effects);
+            }
+        }
+    }
+}
+
+fn infer_arm_effects(
+    arms: &[SwitchArm],
+    parameters: &HashMap<&str, usize>,
+    effects: &mut [ParameterEffect],
+) {
+    for arm in arms {
+        if let Some(source) = &arm.source {
+            infer_expression_effect(source, Access::Read, parameters, effects);
+        }
+        if let Some(guard) = &arm.guard {
+            infer_expression_effect(guard, Access::Read, parameters, effects);
+        }
+        infer_instruction_effects(&arm.instructions, parameters, effects);
+    }
+}
+
+fn infer_expression_effect(
+    expression: &Expression,
+    access: Access,
+    parameters: &HashMap<&str, usize>,
+    effects: &mut [ParameterEffect],
+) {
+    match expression {
+        Expression::Variable(name) => mark_parameter_effect(
+            name,
+            if access == Access::Mutate {
+                ParameterEffect::Borrow
+            } else {
+                ParameterEffect::View
+            },
+            parameters,
+            effects,
+        ),
+        Expression::Ownership { op, value } => {
+            let effect = match op {
+                OwnershipOp::Move => ParameterEffect::Move,
+                OwnershipOp::Borrow => ParameterEffect::Borrow,
+                OwnershipOp::View | OwnershipOp::Clone | OwnershipOp::AddressOf => {
+                    ParameterEffect::View
+                }
+            };
+            if let Expression::Variable(name) = value.as_ref() {
+                mark_parameter_effect(name, effect, parameters, effects);
+            } else {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Member { object, .. }
+        | Expression::Await(object)
+        | Expression::Channel(object)
+        | Expression::Task { value: object, .. }
+        | Expression::ChaosRule { value: object, .. }
+        | Expression::FusedPipeline { input: object, .. }
+        | Expression::Unary {
+            expression: object, ..
+        } => infer_expression_effect(object, access, parameters, effects),
+        Expression::List(values)
+        | Expression::Tuple(values)
+        | Expression::Set(values)
+        | Expression::PrintArgs(values)
+        | Expression::Construct { args: values, .. }
+        | Expression::Variant { fields: values, .. } => {
+            for value in values {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Map(entries) => {
+            for (key, value) in entries {
+                infer_expression_effect(key, Access::Read, parameters, effects);
+                infer_expression_effect(value, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Index { object, index } => {
+            infer_expression_effect(object, access, parameters, effects);
+            infer_expression_effect(index, Access::Read, parameters, effects);
+        }
+        Expression::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            let receiver_access = if mutating_method(method) {
+                Access::Mutate
+            } else {
+                Access::Read
+            };
+            infer_expression_effect(object, receiver_access, parameters, effects);
+            for arg in args {
+                infer_expression_effect(arg, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Send { value, channel } => {
+            infer_expression_effect(value, Access::Read, parameters, effects);
+            infer_expression_effect(channel, Access::Mutate, parameters, effects);
+        }
+        Expression::ListComprehension {
+            element,
+            iterable,
+            condition,
+            ..
+        } => {
+            infer_expression_effect(element, Access::Read, parameters, effects);
+            infer_expression_effect(iterable, Access::Read, parameters, effects);
+            if let Some(condition) = condition {
+                infer_expression_effect(condition, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => {
+            infer_expression_effect(condition, Access::Read, parameters, effects);
+            infer_expression_effect(then_expression, access, parameters, effects);
+            infer_expression_effect(else_expression, access, parameters, effects);
+        }
+        Expression::Binary { left, right, .. } => {
+            infer_expression_effect(left, Access::Read, parameters, effects);
+            infer_expression_effect(right, Access::Read, parameters, effects);
+        }
+        Expression::Format { args, .. } | Expression::Call { args, .. } => {
+            for arg in args {
+                infer_expression_effect(arg, Access::Read, parameters, effects);
+            }
+        }
+        Expression::CallValue { callee, args, .. } => {
+            infer_expression_effect(callee, Access::Read, parameters, effects);
+            for arg in args {
+                infer_expression_effect(arg, Access::Read, parameters, effects);
+            }
+        }
+        Expression::Integer(_)
+        | Expression::Float(_)
+        | Expression::Boolean(_)
+        | Expression::String(_)
+        | Expression::Function(_) => {}
+    }
+}
+
+fn mark_parameter_effect(
+    name: &str,
+    effect: ParameterEffect,
+    parameters: &HashMap<&str, usize>,
+    effects: &mut [ParameterEffect],
+) {
+    if let Some(index) = parameters.get(name) {
+        effects[*index] = effects[*index].max(effect);
     }
 }
 
