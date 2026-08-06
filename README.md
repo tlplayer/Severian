@@ -3,8 +3,7 @@
 Severian is a compiled systems language with Python-like syntax, Rust-like safety,
 and MLIR as the compiler backbone.
 
-The repository is being built piece by piece. The current focus is the language
-front end:
+The repository is being built piece by piece around a checked, native CPU core:
 
 - `compiler/ast`: source-level syntax tree nodes.
 - `library`: official Severian packages, manifests, documentation, and
@@ -38,11 +37,15 @@ def add(a: int, b: int) -> int:
 print(add(1, 2))
 ```
 
-## First Compiler Slice
+## Native Compiler Baseline
 
-The compiler currently accepts the first fixture, `01-hello.sev`, through the
-complete lexer, parser, AST, semantic, HIR, ownership, lowering, and driver
-pipeline.
+The compiler's mandatory acceptance suite currently takes every valid source
+under `docs/examples` through parsing, semantic analysis, ownership checking,
+MLIR, native linking, execution, and exact stdout verification. Expected-invalid
+programs must match diagnostic fixtures. The generated
+[`docs/NATIVE_STATUS.md`](docs/NATIVE_STATUS.md) is the single inventory of that
+evidence; specialized examples are a host-native baseline, not a claim that
+their external service, accelerator, or freestanding target is production-ready.
 
 ```sh
 cargo run -p severian-driver --bin sev -- check docs/examples/00-getting-started/01-hello.sev
@@ -73,6 +76,7 @@ The CLI is also a conventional Cargo binary crate:
 
 ```sh
 cargo install --path compiler/driver
+sev doctor
 sev --help
 ```
 
@@ -96,6 +100,13 @@ Run the ordered native acceptance harness with:
 
 ```sh
 tools/check_docs_examples.sh
+```
+
+Regenerate or CI-check the definitive per-group status table with:
+
+```sh
+python3 tools/example_status.py --write
+python3 tools/example_status.py --check
 ```
 
 The harness inventories every `.sev` file under `docs/examples`; there is no

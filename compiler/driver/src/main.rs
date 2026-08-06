@@ -1,6 +1,7 @@
 use severian_driver::{
     compile_native, compile_native_tests, compile_path, compile_rocm, detect_amd_gpu_chip,
-    lower_to_rocdl, native_test_compilation, run, run_integration_tests, run_tests,
+    inspect_toolchain, lower_to_rocdl, native_test_compilation, run, run_integration_tests,
+    run_tests,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +29,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
     };
 
     match command {
+        "doctor" if args.len() == 1 => doctor()?,
         "build" if args.len() <= 2 => {
             let directory = std::env::current_dir().map_err(|error| error.to_string())?;
             let manifests = if let Some(source) = args.get(1) {
@@ -191,6 +193,7 @@ fn usage() -> String {
     concat!(
         "usage: sev [command] [source.sev] [options]\n",
         "  sev source.sev: compile to a temporary native executable and run it\n",
+        "  doctor: verify the supported native and optional accelerator toolchains\n",
         "  build [source.sev]: compile into target/debug, using Severian.toml by default\n",
         "  check source.sev: run the frontend and ownership checks\n",
         "  emit-mlir target options: --target rocm [--chip gfx1100]\n",
@@ -200,6 +203,62 @@ fn usage() -> String {
         "  test options: --integration | --integration-only"
     )
     .into()
+}
+
+fn doctor() -> Result<(), String> {
+    let report = inspect_toolchain();
+    println!("Severian toolchain");
+    for tool in &report.tools {
+        let kind = if tool.required {
+            "required"
+        } else {
+            "optional"
+        };
+        match (&tool.path, &tool.version, tool.compatible) {
+            (Some(path), Some(version), true) => println!(
+                "  [ok]   {} ({kind}): {} — {version}",
+                tool.name,
+                path.display()
+            ),
+            (Some(path), Some(version), false) => println!(
+                "  [fail] {} ({kind}): {} — {version}; Severian supports major version 21",
+                tool.name,
+                path.display()
+            ),
+            (Some(path), None, _) => println!(
+                "  [fail] {} ({kind}): {} — version could not be read",
+                tool.name,
+                path.display()
+            ),
+            (None, _, _) => println!("  [fail] {} ({kind}): not found", tool.name),
+        }
+    }
+    if report.sqlite_available {
+        println!("  [ok]   SQLite (optional): link library available");
+    } else {
+        println!(
+            "  [skip] SQLite (optional): install sqlite3 development files for database programs"
+        );
+    }
+    match (&report.rocm_hip_library, &report.amd_gpu_chip) {
+        (Some(library), Some(chip)) => {
+            println!("  [ok]   ROCm (optional): {} ({chip})", library.display())
+        }
+        (Some(library), None) => println!(
+            "  [skip] ROCm (optional): {} found, no AMD GPU detected",
+            library.display()
+        ),
+        (None, Some(chip)) => {
+            println!("  [skip] ROCm (optional): {chip} detected, HIP runtime not found")
+        }
+        (None, None) => println!("  [skip] ROCm (optional): HIP runtime and AMD GPU not detected"),
+    }
+    if report.native_ready() {
+        println!("native compilation: ready");
+        Ok(())
+    } else {
+        Err("native compilation is not ready; install LLVM/MLIR 21 and Clang 21".into())
+    }
 }
 
 fn compile_program_or_tests(

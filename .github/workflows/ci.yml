@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checked-native-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install LLVM, MLIR, and native libraries
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y mlir-21-tools libsqlite3-dev
+
+      - name: Verify host toolchain
+        run: cargo run --locked -p severian-driver --bin sev -- doctor
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets
+
+      - name: Workspace tests
+        run: cargo test --locked --workspace
+
+      - name: Generated native status
+        run: python3 tools/example_status.py --check
+
+      - name: Official packages
+        run: tools/check_library.sh
+
+      - name: Benchmark correctness
+        run: tests/check_bench_examples.sh
+
+      - name: Release compiler
+        run: cargo build --locked --release -p severian-driver --bin sev

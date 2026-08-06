@@ -166,6 +166,10 @@ pub fn detect_amd_gpu_chip() -> Option<String> {
     severian_backend::detect_amd_gpu_chip()
 }
 
+pub fn inspect_toolchain() -> severian_backend::ToolchainReport {
+    severian_backend::inspect_toolchain()
+}
+
 /// Build a native executable whose entry point runs every non-integration test.
 ///
 /// This is deliberately unavailable for a test-free library: emitting a no-op

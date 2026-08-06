@@ -6,6 +6,122 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolStatus {
+    pub name: &'static str,
+    pub required: bool,
+    pub path: Option<PathBuf>,
+    pub version: Option<String>,
+    pub compatible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolchainReport {
+    pub tools: Vec<ToolStatus>,
+    pub sqlite_available: bool,
+    pub rocm_hip_library: Option<PathBuf>,
+    pub amd_gpu_chip: Option<String>,
+}
+
+impl ToolchainReport {
+    pub fn native_ready(&self) -> bool {
+        self.tools
+            .iter()
+            .filter(|tool| tool.required)
+            .all(|tool| tool.path.is_some() && tool.compatible)
+    }
+}
+
+/// Inspects the same programs and libraries used by native and ROCm lowering.
+/// MLIR 21 is the supported dialect/tool version; optional capabilities do not
+/// make the host-native toolchain unhealthy.
+pub fn inspect_toolchain() -> ToolchainReport {
+    let tools = vec![
+        inspect_tool(
+            "mlir-opt",
+            true,
+            &["mlir-opt", "mlir-opt-21", "/usr/lib/llvm-21/bin/mlir-opt"],
+            Some(21),
+        ),
+        inspect_tool(
+            "mlir-translate",
+            true,
+            &[
+                "mlir-translate",
+                "mlir-translate-21",
+                "/usr/lib/llvm-21/bin/mlir-translate",
+            ],
+            Some(21),
+        ),
+        inspect_tool(
+            "clang",
+            true,
+            &["clang", "clang-21", "/usr/bin/clang-21"],
+            Some(21),
+        ),
+    ];
+    let sqlite_available = find_tool(&["pkg-config"]).is_some_and(|tool| {
+        Command::new(tool)
+            .args(["--exists", "sqlite3"])
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+    ToolchainReport {
+        tools,
+        sqlite_available,
+        rocm_hip_library: find_hip_library(),
+        amd_gpu_chip: detect_amd_gpu_chip(),
+    }
+}
+
+fn inspect_tool(
+    name: &'static str,
+    required: bool,
+    candidates: &[&str],
+    supported_major: Option<u32>,
+) -> ToolStatus {
+    let path = find_tool(candidates);
+    let version = path.as_ref().and_then(|path| {
+        Command::new(path)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| {
+                let bytes = if output.stdout.is_empty() {
+                    &output.stderr
+                } else {
+                    &output.stdout
+                };
+                String::from_utf8_lossy(bytes)
+                    .lines()
+                    .next()
+                    .unwrap_or("unknown version")
+                    .trim()
+                    .to_owned()
+            })
+    });
+    let compatible = supported_major.is_none_or(|major| {
+        version
+            .as_deref()
+            .is_some_and(|version| version_mentions_major(version, major))
+    });
+    ToolStatus {
+        name,
+        required,
+        path,
+        version,
+        compatible,
+    }
+}
+
+fn version_mentions_major(version: &str, major: u32) -> bool {
+    version
+        .split(|character: char| !character.is_ascii_digit())
+        .find_map(|component| component.parse::<u32>().ok())
+        == Some(major)
+}
+
 #[derive(Debug)]
 pub struct BackendError(std::io::Error);
 
@@ -498,4 +614,16 @@ fn missing_tool(name: &str) -> BackendError {
         std::io::ErrorKind::NotFound,
         format!("required tool `{name}` was not found"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_mentions_major;
+
+    #[test]
+    fn recognizes_tool_version_major_without_matching_minor_numbers() {
+        assert!(version_mentions_major("Ubuntu LLVM version 21.1.8", 21));
+        assert!(version_mentions_major("clang version 21.0.0", 21));
+        assert!(!version_mentions_major("LLVM version 20.1.21", 21));
+    }
 }

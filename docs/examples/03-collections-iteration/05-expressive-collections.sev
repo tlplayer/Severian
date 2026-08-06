@@ -37,6 +37,13 @@ def sumUntilNegative(values: list[int]) -> int:
         total += value
     return total
 
+def main():
+    print(normalizeFields("alpha,beta,gamma"))
+    print(summarize([4, -2, 7, 1]))
+    print(weightedTotal([5, 10, 20]))
+    print(dotProduct([1, 2, 3], [4, 5]))
+    print(sumUntilNegative([2, 0, 5, -1, 100]))
+
 test "string and reduction helpers":
     assert(normalizeFields("alpha,beta,gamma") == "alpha | beta | gamma")
     assert(normalizeFields("a,,b") == "a |  | b")
