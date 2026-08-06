@@ -6,14 +6,12 @@
 # when no such index exists.
 
 def pivotIndex(values: list[int]) -> int:
-    for value in values with total := 0:
-        total += value
-
-    for index in indices(values) with left := 0:
-        right = total - left - values[index]
+    total = values.sum()
+    for index, value in enumerate(values) with left := 0:
+        right = total - left - value
         if left == right:
             return index
-        left += values[index]
+        left += value
 
     return -1
 

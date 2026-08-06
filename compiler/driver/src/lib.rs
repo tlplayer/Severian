@@ -1064,9 +1064,8 @@ fn assign(
             let index = evaluate(program, index, variables, write_line)?;
             match (object, index) {
                 (Value::List(values), Value::Int(index)) => {
-                    let index = usize::try_from(index)
-                        .map_err(|_| CompileError::Execution("negative list index".into()))?;
                     let mut values = values.borrow_mut();
+                    let index = normalize_index(index, values.len(), "list")?;
                     let slot = values.get_mut(index).ok_or_else(|| {
                         CompileError::Execution("list index out of bounds".into())
                     })?;
@@ -1445,6 +1444,50 @@ fn execute_call(
                     .collect(),
             )))),
             _ => Err(CompileError::Execution("indices expects a list".into())),
+        },
+        "enumerate" => match args.as_slice() {
+            [value] => Ok(Value::List(Rc::new(RefCell::new(
+                iterable_values(value.clone())?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| Value::Tuple(vec![Value::Int(index as i64), value]))
+                    .collect(),
+            )))),
+            _ => Err(CompileError::Execution(
+                "enumerate expects one iterable".into(),
+            )),
+        },
+        "zip" => match args.as_slice() {
+            [left, right] => Ok(Value::List(Rc::new(RefCell::new(
+                iterable_values(left.clone())?
+                    .into_iter()
+                    .zip(iterable_values(right.clone())?)
+                    .map(|(left, right)| Value::Tuple(vec![left, right]))
+                    .collect(),
+            )))),
+            _ => Err(CompileError::Execution("zip expects two iterables".into())),
+        },
+        "any" => match args.as_slice() {
+            [value] => Ok(Value::Bool(
+                iterable_values(value.clone())?
+                    .iter()
+                    .map(truthy)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .any(|value| value),
+            )),
+            _ => Err(CompileError::Execution("any expects one iterable".into())),
+        },
+        "all" => match args.as_slice() {
+            [value] => Ok(Value::Bool(
+                iterable_values(value.clone())?
+                    .iter()
+                    .map(truthy)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .all(|value| value),
+            )),
+            _ => Err(CompileError::Execution("all expects one iterable".into())),
         },
         "read" => Ok(Value::Variant {
             name: "ok".into(),
@@ -2406,19 +2449,30 @@ fn iterable_values(value: Value) -> Result<Vec<Value>, CompileError> {
 
 fn index_value(object: Value, index: Value) -> Result<Value, CompileError> {
     match (object, index) {
-        (Value::List(values), Value::Int(index)) => usize::try_from(index)
-            .ok()
-            .and_then(|index| values.borrow().get(index).cloned())
-            .ok_or_else(|| CompileError::Execution("list index out of bounds".into())),
-        (Value::Tuple(values), Value::Int(index)) => usize::try_from(index)
-            .ok()
-            .and_then(|index| values.get(index).cloned())
-            .ok_or_else(|| CompileError::Execution("tuple index out of bounds".into())),
-        (Value::String(value), Value::Int(index)) => usize::try_from(index)
-            .ok()
-            .and_then(|index| value.chars().nth(index))
-            .map(|character| Value::String(character.to_string()))
-            .ok_or_else(|| CompileError::Execution("string index out of bounds".into())),
+        (Value::List(values), Value::Int(index)) => {
+            let values = values.borrow();
+            let index = normalize_index(index, values.len(), "list")?;
+            values
+                .get(index)
+                .cloned()
+                .ok_or_else(|| CompileError::Execution("list index out of bounds".into()))
+        }
+        (Value::Tuple(values), Value::Int(index)) => {
+            let index = normalize_index(index, values.len(), "tuple")?;
+            values
+                .get(index)
+                .cloned()
+                .ok_or_else(|| CompileError::Execution("tuple index out of bounds".into()))
+        }
+        (Value::String(value), Value::Int(index)) => {
+            let length = value.chars().count();
+            let index = normalize_index(index, length, "string")?;
+            value
+                .chars()
+                .nth(index)
+                .map(|character| Value::String(character.to_string()))
+                .ok_or_else(|| CompileError::Execution("string index out of bounds".into()))
+        }
         (Value::Map(entries), key) => entries
             .borrow()
             .iter()
@@ -2427,6 +2481,18 @@ fn index_value(object: Value, index: Value) -> Result<Value, CompileError> {
             .ok_or_else(|| CompileError::Execution("map key not found".into())),
         _ => Err(CompileError::Execution("value is not indexable".into())),
     }
+}
+
+fn normalize_index(index: i64, length: usize, kind: &str) -> Result<usize, CompileError> {
+    let length = i64::try_from(length)
+        .map_err(|_| CompileError::Execution(format!("{kind} is too large to index")))?;
+    let index = if index < 0 { length + index } else { index };
+    if index < 0 || index >= length {
+        return Err(CompileError::Execution(format!(
+            "{kind} index out of bounds"
+        )));
+    }
+    Ok(index as usize)
 }
 
 fn match_pattern(

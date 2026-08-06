@@ -1287,6 +1287,7 @@ impl Parser<'_> {
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let mut expression = self.parse_addition()?;
         loop {
+            let negated_membership = self.at(&TokenKind::Not) && self.peek_kind(1, &TokenKind::In);
             let op = if self.take_simple(&TokenKind::Less).is_some() {
                 Some(BinaryOp::Less)
             } else if self.take_simple(&TokenKind::LessEqual).is_some() {
@@ -1297,11 +1298,25 @@ impl Parser<'_> {
                 Some(BinaryOp::GreaterEqual)
             } else if self.take_simple(&TokenKind::In).is_some() {
                 Some(BinaryOp::In)
+            } else if negated_membership {
+                self.advance();
+                self.advance();
+                Some(BinaryOp::In)
             } else {
                 None
             };
             let Some(op) = op else { break };
-            expression = binary(expression, op, self.parse_addition()?);
+            let comparison = binary(expression, op, self.parse_addition()?);
+            expression = if negated_membership {
+                let span = comparison.span();
+                Expr::Unary(UnaryExpr {
+                    span,
+                    op: UnaryOp::Not,
+                    expr: Box::new(comparison),
+                })
+            } else {
+                comparison
+            };
         }
         Ok(expression)
     }

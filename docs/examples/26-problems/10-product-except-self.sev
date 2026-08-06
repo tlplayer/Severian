@@ -9,9 +9,9 @@ def productExceptSelf(values: list[int]) -> list[int]:
         output.append(1)
 
     prefix := 1
-    for index in indices(values):
+    for index, value in enumerate(values):
         output[index] = prefix
-        prefix *= values[index]
+        prefix *= value
 
     suffix := 1
     while index >= 0 with index := size(values) - 1:

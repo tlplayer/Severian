@@ -7,8 +7,8 @@ def longestOnes(values: list[int], flips: int) -> int:
     zeroes := 0
     best := 0
 
-    for right in indices(values) with left := 0:
-        if values[right] == 0:
+    for right, value in enumerate(values) with left := 0:
+        if value == 0:
             zeroes += 1
         while zeroes > flips:
             if values[left] == 0:

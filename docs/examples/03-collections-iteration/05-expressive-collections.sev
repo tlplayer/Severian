@@ -9,6 +9,16 @@ def consumeStack(values: list[int]) -> list[int]:
     popped = values.pop()
     return [last, popped, values.last()]
 
+def weightedTotal(values: list[int]) -> int:
+    for index, value in enumerate(values) with total := 0:
+        total += index * value
+    return total
+
+def dotProduct(left: list[int], right: list[int]) -> int:
+    for leftValue, rightValue in zip(left, right) with total := 0:
+        total += leftValue * rightValue
+    return total
+
 test "string and reduction helpers":
     assert(normalizeFields("alpha,beta,gamma") == "alpha | beta | gamma")
     assert(normalizeFields("a,,b") == "a |  | b")
@@ -16,3 +26,17 @@ test "string and reduction helpers":
 
 test "stack helpers":
     assert(consumeStack([3, 5, 8]) == [8, 8, 5])
+
+test "Python-style iteration and indexing":
+    values := [10, 20, 30]
+    assert(values[-1] == 30)
+    values[-2] = 7
+    assert(values == [10, 7, 30])
+    assert("n"[-1] == "n")
+    assert(4 not in [1, 2, 3])
+    assert(weightedTotal([5, 10, 20]) == 50)
+    assert(dotProduct([1, 2, 3], [4, 5]) == 14)
+    assert(any([false, true, false]))
+    assert(all([true, true, true]))
+    assert(not any([]))
+    assert(all([]))

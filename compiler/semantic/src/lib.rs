@@ -1825,6 +1825,10 @@ fn lower_call(
         "string" => Some(("string", ValueType::String)),
         "range" => Some(("range", ValueType::List)),
         "indices" => Some(("indices", ValueType::List)),
+        "enumerate" => Some(("enumerate", ValueType::List)),
+        "zip" => Some(("zip", ValueType::List)),
+        "any" => Some(("any", ValueType::Bool)),
+        "all" => Some(("all", ValueType::Bool)),
         "read" if !signatures.contains_key(&callee.name) => Some(("read", ValueType::Result)),
         "size" => Some(("size", ValueType::Int)),
         "present" => {

@@ -34,6 +34,22 @@ fn rejects_a_missing_function_body() {
 }
 
 #[test]
+fn parses_negated_membership_as_a_comparison() {
+    let source = concat!(
+        "def absent(value: int, values: list[int]) -> bool:\n",
+        "    return value not in values\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::Return(statement) = &function.body.statements[0] else {
+        panic!("expected return");
+    };
+    assert!(matches!(statement.value.as_ref(), Some(Expr::Unary(_))));
+}
+
+#[test]
 fn parses_a_for_loop_setup_binding() {
     let source = concat!(
         "def sum(values: list[int]) -> int:\n",

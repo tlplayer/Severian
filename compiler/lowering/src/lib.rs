@@ -89,6 +89,10 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_collection_minimum(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_maximum(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_to_set(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_enumerate(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_zip(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_any(!llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_collection_all(!llvm.ptr) -> i1\n",
         "  llvm.func @__sev_set_difference(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_set_to_list(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_set_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
@@ -2046,6 +2050,49 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
                     return (result, ValueType::Int);
                 }
+                if function == "enumerate" {
+                    let (mut value, ty) = args.first().cloned().unwrap();
+                    if ty == ValueType::Any {
+                        value = self.unbox_value((value, ty), ValueType::List).0;
+                    }
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_collection_enumerate({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    return (result, ValueType::List);
+                }
+                if function == "zip" {
+                    let values = args
+                        .iter()
+                        .cloned()
+                        .map(|(value, ty)| {
+                            if ty == ValueType::Any {
+                                self.unbox_value((value, ty), ValueType::List).0
+                            } else {
+                                value
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let result = self.fresh_value();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_collection_zip({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", values[0], values[1]).unwrap();
+                    return (result, ValueType::List);
+                }
+                if function == "any" || function == "all" {
+                    let (mut value, ty) = args.first().cloned().unwrap();
+                    if ty == ValueType::Any {
+                        value = self.unbox_value((value, ty), ValueType::List).0;
+                    }
+                    let result = self.fresh_value();
+                    let runtime = if function == "any" {
+                        "__sev_collection_any"
+                    } else {
+                        "__sev_collection_all"
+                    };
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @{runtime}({value}) : (!llvm.ptr) -> i1"
+                    )
+                    .unwrap();
+                    return (result, ValueType::Bool);
+                }
                 if function.ends_with(".zero") && args.is_empty() {
                     let zero = self.fresh_value();
                     writeln!(
@@ -3314,6 +3361,23 @@ impl LowerContext<'_> {
             } else {
                 let item = self.fresh_value();
                 writeln!(self.output, "    {item} = llvm.call @__sev_collection_get({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                if let MatchPattern::Constructor { name, fields } = pattern {
+                    if name == "tuple" {
+                        let tuple = self
+                            .unbox_value((item.clone(), ValueType::Any), ValueType::Tuple)
+                            .0;
+                        for (position, field) in fields.iter().enumerate() {
+                            if let MatchPattern::Bind(name) = field {
+                                let position_value = self.fresh_value();
+                                writeln!(self.output, "    {position_value} = llvm.mlir.constant({position} : i64) : i64").unwrap();
+                                let field_value = self.fresh_value();
+                                writeln!(self.output, "    {field_value} = llvm.call @__sev_collection_get({tuple}, {position_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                                self.variables
+                                    .insert(name.clone(), (field_value, ValueType::Any));
+                            }
+                        }
+                    }
+                }
                 (item, ValueType::Any)
             }
         } else {
@@ -3925,7 +3989,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "int64_t __sev_strlen(void *raw) { const char *text = raw; int64_t size = 0; if (!text) abort(); while (text[size]) size += 1; return size; }\n",
         "void *__sev_string_concat(void *left_raw, void *right_raw) { const char *left = left_raw; const char *right = right_raw; size_t left_size = (size_t)__sev_strlen(left_raw); size_t right_size = (size_t)__sev_strlen(right_raw); char *result = sev_allocate(left_size + right_size + 1); memcpy(result, left, left_size); memcpy(result + left_size, right, right_size + 1); return result; }\n",
         "bool __sev_string_equal(void *left, void *right) { return strcmp(left, right) == 0; }\n",
-        "void *__sev_string_char_at(void *raw, int64_t index) { const char *text = raw; int64_t size = __sev_strlen(raw); if (index < 0 || index >= size) abort(); char *result = sev_allocate(2); result[0] = text[index]; result[1] = '\\0'; return result; }\n",
+        "void *__sev_string_char_at(void *raw, int64_t index) { const char *text = raw; int64_t size = __sev_strlen(raw); if (index < 0) index += size; if (index < 0 || index >= size) abort(); char *result = sev_allocate(2); result[0] = text[index]; result[1] = '\\0'; return result; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
         "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } }\n",
@@ -3935,8 +3999,8 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "bool __sev_value_less(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (!left || !right) abort(); if (left->kind == SEV_STRING && right->kind == SEV_STRING) return strcmp(left->as.string, right->as.string) < 0; return sev_number(left) < sev_number(right); }\n",
         "void *__sev_collection_new(int64_t kind) { sev_collection *value = sev_allocate(sizeof(*value)); value->kind = kind; return value; }\n",
         "void __sev_collection_push(void *raw, void *item) { sev_collection *value = raw; if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->items = realloc(value->items, (size_t)value->capacity * sizeof(*value->items)); if (!value->items) abort(); } value->items[value->size++] = item; }\n",
-        "void *__sev_collection_get(void *raw, int64_t index) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); return value->items[index]; }\n",
-        "void __sev_collection_set(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value || index < 0 || index >= value->size) abort(); value->items[index] = item; }\n",
+        "void *__sev_collection_get(void *raw, int64_t index) { sev_collection *value = raw; if (!value) abort(); if (index < 0) index += value->size; if (index < 0 || index >= value->size) abort(); return value->items[index]; }\n",
+        "void __sev_collection_set(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value) abort(); if (index < 0) index += value->size; if (index < 0 || index >= value->size) abort(); value->items[index] = item; }\n",
         "int64_t __sev_collection_size(void *raw) { sev_collection *value = raw; if (!value) abort(); return value->size; }\n",
         "int64_t __sev_value_size(void *raw) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_STRING) return __sev_strlen((void *)value->as.string); if (value->kind == SEV_COLLECTION) return __sev_collection_size(value->as.pointer); abort(); }\n",
         "void *__sev_value_index(void *raw, int64_t index) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_collection_get(value->as.pointer, index); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_char_at((void *)value->as.string, index)); abort(); }\n",
@@ -3964,6 +4028,10 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "void *__sev_collection_minimum(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); sev_value *best = value->items[0]; for (int64_t index = 1; index < value->size; ++index) if (__sev_value_less(value->items[index], best)) best = value->items[index]; return best; }\n",
         "void *__sev_collection_maximum(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); sev_value *best = value->items[0]; for (int64_t index = 1; index < value->size; ++index) if (__sev_value_less(best, value->items[index])) best = value->items[index]; return best; }\n",
         "void *__sev_collection_to_set(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(2); for (int64_t index = 0; index < value->size; ++index) { bool found = false; for (int64_t existing = 0; existing < result->size; ++existing) if (sev_value_equal(result->items[existing], value->items[index])) { found = true; break; } if (!found) __sev_collection_push(result, value->items[index]); } return result; }\n",
+        "void *__sev_collection_enumerate(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < value->size; ++index) { sev_collection *pair = __sev_collection_new(1); __sev_collection_push(pair, __sev_box_i64(index)); __sev_collection_push(pair, value->items[index]); __sev_collection_push(result, __sev_box_collection(pair)); } return result; }\n",
+        "void *__sev_collection_zip(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right) abort(); sev_collection *result = __sev_collection_new(0); int64_t size = left->size < right->size ? left->size : right->size; for (int64_t index = 0; index < size; ++index) { sev_collection *pair = __sev_collection_new(1); __sev_collection_push(pair, left->items[index]); __sev_collection_push(pair, right->items[index]); __sev_collection_push(result, __sev_box_collection(pair)); } return result; }\n",
+        "bool __sev_collection_any(void *raw) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) { sev_value *item = value->items[index]; if (!item || item->kind != SEV_BOOL) abort(); if (item->as.boolean) return true; } return false; }\n",
+        "bool __sev_collection_all(void *raw) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) { sev_value *item = value->items[index]; if (!item || item->kind != SEV_BOOL) abort(); if (!item->as.boolean) return false; } return true; }\n",
         "void *__sev_set_difference(void *raw, void *excluded_raw) { sev_collection *value = raw; sev_collection *excluded = excluded_raw; if (!value || !excluded) abort(); sev_collection *result = __sev_collection_new(2); for (int64_t index = 0; index < value->size; ++index) { bool found = false; for (int64_t other = 0; other < excluded->size; ++other) if (sev_value_equal(value->items[index], excluded->items[other])) { found = true; break; } if (!found) __sev_collection_push(result, value->items[index]); } return result; }\n",
         "void *__sev_set_to_list(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < value->size; ++index) __sev_collection_push(result, value->items[index]); return result; }\n",
         "void *__sev_string_frequencies(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); sev_map *result = __sev_map_new(); for (int64_t index = 0; index < size; ++index) { sev_value *key = __sev_box_string(sev_string_range(text, index, 1)); bool found = false; for (int64_t entry = 0; entry < result->size; ++entry) if (sev_value_equal(result->keys[entry], key)) { result->values[entry]->as.i64 += 1; found = true; break; } if (!found) __sev_map_insert(result, key, __sev_box_i64(1)); } return result; }\n",
