@@ -1,0 +1,38 @@
+# Track: LeetCode 75
+# Problem: 649 - Dota2 Senate
+# Difficulty: medium
+# Tags: string, queue, greedy, simulation
+
+def predictPartyVictory(senate: string) -> string:
+    radiant := []
+    dire := []
+    for index in range(0, size(senate)):
+        if senate[index] == "R":
+            radiant.append(index)
+        else:
+            dire.append(index)
+
+    radiantHead := 0
+    direHead := 0
+    turn := size(senate)
+    while radiantHead < size(radiant) and direHead < size(dire):
+        if radiant[radiantHead] < dire[direHead]:
+            radiant.append(turn)
+        else:
+            dire.append(turn)
+        radiantHead += 1
+        direHead += 1
+        turn += 1
+
+    if radiantHead < size(radiant):
+        return "Radiant"
+    return "Dire"
+
+test "radiant wins":
+    assert(predictPartyVictory("RD") == "Radiant")
+
+test "dire survives a cycle":
+    assert(predictPartyVictory("RDD") == "Dire")
+
+test "longer contest":
+    assert(predictPartyVictory("DRRDRDRDRDDRDRDR") == "Radiant")

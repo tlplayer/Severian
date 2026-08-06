@@ -33,7 +33,7 @@ fn lowers_primitive_prints_to_native_calls() {
 }
 
 #[test]
-fn lowers_boolean_and_without_replacing_it_with_false() {
+fn lowers_boolean_and_with_short_circuit_control_flow() {
     let program = Program {
         globals: vec![],
         classes: vec![],
@@ -54,7 +54,10 @@ fn lowers_boolean_and_without_replacing_it_with_false() {
     };
 
     let lowered = severian_lowering::lower(&program);
-    assert!(lowered.as_str().contains("llvm.and"));
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.cond_br"));
+    assert!(text.contains("llvm.br"));
+    assert!(!text.contains("llvm.and"));
 }
 
 #[test]

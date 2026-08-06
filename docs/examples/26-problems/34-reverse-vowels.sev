@@ -1,0 +1,39 @@
+# Track: LeetCode 75
+# Problem: 345 - Reverse Vowels of a String
+# Difficulty: easy
+# Tags: string, two-pointers
+
+def vowel(character: string) -> bool:
+    return character == "a" or character == "e" or character == "i" or character == "o" or character == "u" or character == "A" or character == "E" or character == "I" or character == "O" or character == "U"
+
+def reverseVowels(text: string) -> string:
+    characters := []
+    for index in range(0, size(text)):
+        characters.append(text[index])
+
+    right := size(characters) - 1
+    while left < right with left := 0:
+        while left < right and not vowel(characters[left]):
+            left += 1
+        while left < right and not vowel(characters[right]):
+            right -= 1
+        if left < right:
+            temporary = characters[left]
+            characters[left] = characters[right]
+            characters[right] = temporary
+            left += 1
+            right -= 1
+
+    result := ""
+    for character in characters:
+        result += character
+    return result
+
+test "hello":
+    assert(reverseVowels("hello") == "holle")
+
+test "mixed vowels":
+    assert(reverseVowels("leetcode") == "leotcede")
+
+test "preserves vowel case":
+    assert(reverseVowels("aA") == "Aa")

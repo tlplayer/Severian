@@ -1,0 +1,32 @@
+# Track: LeetCode 75
+# Problem: 1071 - Greatest Common Divisor of Strings
+# Difficulty: easy
+# Tags: string, math
+
+def gcd(left: int, right: int) -> int:
+    first := left
+    second := right
+    while second != 0:
+        remainder = first % second
+        first = second
+        second = remainder
+    return first
+
+def gcdOfStrings(first: string, second: string) -> string:
+    if first + second != second + first:
+        return ""
+
+    length = gcd(size(first), size(second))
+    result := ""
+    for index in range(0, length):
+        result += first[index]
+    return result
+
+test "one string divides the other":
+    assert(gcdOfStrings("ABCABC", "ABC") == "ABC")
+
+test "shared shorter divisor":
+    assert(gcdOfStrings("ABABAB", "ABAB") == "AB")
+
+test "no common divisor":
+    assert(gcdOfStrings("LEET", "CODE") == "")

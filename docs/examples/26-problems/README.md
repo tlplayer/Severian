@@ -62,8 +62,19 @@ without duplicating its source file.
 | `30-maximum-vowels.sev` | LeetCode 75: Maximum Vowels | String sliding window. |
 | `31-longest-common-subsequence.sev` | LeetCode 75: Longest Common Subsequence | One-row string DP. |
 | `32-edit-distance.sev` | LeetCode 75: Edit Distance | One-row edit DP. |
+| `33-gcd-of-strings.sev` | LeetCode 75: GCD of Strings | Euclidean arithmetic and string construction. |
+| `34-reverse-vowels.sev` | LeetCode 75: Reverse Vowels | Character lists and two pointers. |
+| `35-reverse-words.sev` | LeetCode 75: Reverse Words | Reverse scanning and whitespace normalization. |
+| `36-string-compression.sev` | LeetCode 75: String Compression | In-place character mutation. |
+| `37-max-k-sum-pairs.sev` | LeetCode 75: Max K-Sum Pairs | Pair consumption and logical removal. |
+| `38-equal-row-column-pairs.sev` | LeetCode 75: Equal Row and Column Pairs | Nested collection indexing. |
+| `39-determine-close-strings.sev` | LeetCode 75: Determine if Two Strings Are Close | Character-frequency equivalence without maps. |
+| `40-removing-stars.sev` | LeetCode 75: Removing Stars From a String | Logical stack truncation and string reconstruction. |
+| `41-dota2-senate.sev` | LeetCode 75: Dota2 Senate | Competing logical queues and cyclic scheduling. |
+| `42-nearest-exit.sev` | LeetCode 75: Nearest Exit from Entrance in Maze | Matrix mutation and breadth-first search. |
+| `43-rotting-oranges.sev` | LeetCode 75: Rotting Oranges | Multi-source breadth-first search. |
 
-Progress: **32 / 75** LeetCode 75 problems, **104** attached test cases.
+Progress: **43 / 75** LeetCode 75 problems, **137** attached test cases.
 
 ## Syntax observations
 
@@ -87,6 +98,11 @@ contrived example.
 - Stack algorithms currently manage a logical `top` cursor because lists do not
   yet expose a removal operation; the resulting control flow is noticeably
   noisier than the underlying algorithms.
+- Queue algorithms similarly keep a logical `head` cursor because removing the
+  first list element would otherwise require shifting the remaining values.
+- Matrix BFS is readable with parallel row, column, and distance queues, though
+  a tuple-valued queue would express the relationship between those values more
+  directly.
 
 When a syntax or library improvement lands, update the solution and retain a
 short note describing what became simpler.

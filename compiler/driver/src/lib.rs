@@ -1319,6 +1319,12 @@ fn evaluate(
         )),
         Expression::Binary { left, op, right } => {
             let left = evaluate(program, left, variables, write_line)?;
+            if matches!((op, &left), (BinaryOp::And, Value::Bool(false))) {
+                return Ok(Value::Bool(false));
+            }
+            if matches!((op, &left), (BinaryOp::Or, Value::Bool(true))) {
+                return Ok(Value::Bool(true));
+            }
             let right = evaluate(program, right, variables, write_line)?;
             evaluate_binary(left, *op, right)
         }

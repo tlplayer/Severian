@@ -95,3 +95,24 @@ fn evaluates_integer_and_fractional_powers() {
 
     assert_eq!(run_tests(&compilation.hir, |_| {}).unwrap(), 4);
 }
+
+#[test]
+fn logical_operators_short_circuit_their_right_operand() {
+    let source = concat!(
+        "def safeAnd(values: list[int]) -> bool:\n",
+        "    return false and values[1] == 0\n",
+        "\n",
+        "def safeOr(values: list[int]) -> bool:\n",
+        "    return true or values[1] == 0\n",
+        "\n",
+        "test \"short circuit and\":\n",
+        "    assert(not safeAnd([1]))\n",
+        "\n",
+        "test \"short circuit or\":\n",
+        "    assert(safeOr([1]))\n",
+    );
+    let compilation = compile_source(source).unwrap();
+
+    assert_eq!(run_tests(&compilation.hir, |_| {}).unwrap(), 2);
+    assert!(compilation.mlir.as_str().contains("llvm.cond_br"));
+}

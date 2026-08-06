@@ -1,0 +1,56 @@
+# Track: LeetCode 75
+# Problem: 994 - Rotting Oranges
+# Difficulty: medium
+# Tags: matrix, breadth-first-search, queue, graph
+
+def orangesRotting(grid: list[list[int]]) -> int:
+    rowQueue := []
+    columnQueue := []
+    minuteQueue := []
+    fresh := 0
+    for row in indices(grid):
+        for column in indices(grid[0]):
+            if grid[row][column] == 2:
+                rowQueue.append(row)
+                columnQueue.append(column)
+                minuteQueue.append(0)
+            else:
+                if grid[row][column] == 1:
+                    fresh += 1
+
+    rowSteps = [-1, 1, 0, 0]
+    columnSteps = [0, 0, -1, 1]
+    head := 0
+    elapsed := 0
+    while head < size(rowQueue):
+        row = rowQueue[head]
+        column = columnQueue[head]
+        minute = minuteQueue[head]
+        head += 1
+        if minute > elapsed:
+            elapsed = minute
+
+        for direction in range(0, 4):
+            nextRow = row + rowSteps[direction]
+            nextColumn = column + columnSteps[direction]
+            if nextRow >= 0 and nextRow < size(grid):
+                if nextColumn >= 0 and nextColumn < size(grid[0]):
+                    if grid[nextRow][nextColumn] == 1:
+                        grid[nextRow][nextColumn] = 2
+                        fresh -= 1
+                        rowQueue.append(nextRow)
+                        columnQueue.append(nextColumn)
+                        minuteQueue.append(minute + 1)
+
+    if fresh > 0:
+        return -1
+    return elapsed
+
+test "four minutes":
+    assert(orangesRotting([[2, 1, 1], [1, 1, 0], [0, 1, 1]]) == 4)
+
+test "isolated fresh orange":
+    assert(orangesRotting([[2, 1, 1], [0, 1, 1], [1, 0, 1]]) == -1)
+
+test "nothing fresh":
+    assert(orangesRotting([[0, 2]]) == 0)

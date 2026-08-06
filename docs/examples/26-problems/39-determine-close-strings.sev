@@ -1,0 +1,60 @@
+# Track: LeetCode 75
+# Problem: 1657 - Determine if Two Strings Are Close
+# Difficulty: medium
+# Tags: string, hash-table, sorting
+
+def countCharacter(text: string, wanted: string) -> int:
+    count := 0
+    for index in range(0, size(text)):
+        if text[index] == wanted:
+            count += 1
+    return count
+
+def uniqueCharacters(text: string) -> list[string]:
+    characters := []
+    for index in range(0, size(text)):
+        character = text[index]
+        if character in characters:
+            pass = 0
+        else:
+            characters.append(character)
+    return characters
+
+def closeStrings(first: string, second: string) -> bool:
+    if size(first) != size(second):
+        return false
+
+    firstCharacters = uniqueCharacters(first)
+    secondCharacters = uniqueCharacters(second)
+    if size(firstCharacters) != size(secondCharacters):
+        return false
+    for character in firstCharacters:
+        if character in secondCharacters:
+            pass = 0
+        else:
+            return false
+
+    used := []
+    for character in secondCharacters:
+        used.append(false)
+    for firstCharacter in firstCharacters:
+        frequency = countCharacter(first, firstCharacter)
+        matched := false
+        for secondIndex in indices(secondCharacters):
+            if not matched and not used[secondIndex]:
+                if countCharacter(second, secondCharacters[secondIndex]) == frequency:
+                    used[secondIndex] = true
+                    matched = true
+        if not matched:
+            return false
+    return true
+
+test "same transformations":
+    assert(closeStrings("abc", "bca"))
+
+test "different character sets":
+    assert(not closeStrings("a", "aa"))
+    assert(not closeStrings("cabbba", "aabbss"))
+
+test "frequency permutation":
+    assert(closeStrings("cabbba", "abbccc"))

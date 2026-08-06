@@ -1,0 +1,43 @@
+# Track: LeetCode 75
+# Problem: 1926 - Nearest Exit from Entrance in Maze
+# Difficulty: medium
+# Tags: matrix, breadth-first-search, queue, graph
+
+def nearestExit(maze: list[list[string]], entrance: list[int]) -> int:
+    rowQueue := [entrance[0]]
+    columnQueue := [entrance[1]]
+    distanceQueue := [0]
+    head := 0
+    maze[entrance[0]][entrance[1]] = "+"
+    rowSteps = [-1, 1, 0, 0]
+    columnSteps = [0, 0, -1, 1]
+
+    while head < size(rowQueue):
+        row = rowQueue[head]
+        column = columnQueue[head]
+        distance = distanceQueue[head]
+        head += 1
+
+        for direction in range(0, 4):
+            nextRow = row + rowSteps[direction]
+            nextColumn = column + columnSteps[direction]
+            if nextRow >= 0 and nextRow < size(maze):
+                if nextColumn >= 0 and nextColumn < size(maze[0]):
+                    if maze[nextRow][nextColumn] == ".":
+                        nextDistance = distance + 1
+                        if nextRow == 0 or nextRow == size(maze) - 1 or nextColumn == 0 or nextColumn == size(maze[0]) - 1:
+                            return nextDistance
+                        maze[nextRow][nextColumn] = "+"
+                        rowQueue.append(nextRow)
+                        columnQueue.append(nextColumn)
+                        distanceQueue.append(nextDistance)
+    return -1
+
+test "nearby side exit":
+    assert(nearestExit([["+", "+", ".", "+"], [".", ".", ".", "+"], ["+", "+", "+", "."]], [1, 2]) == 1)
+
+test "walk around walls":
+    assert(nearestExit([["+", "+", "+"], [".", ".", "."], ["+", "+", "+"]], [1, 0]) == 2)
+
+test "no exit":
+    assert(nearestExit([[".", "+"]], [0, 0]) == -1)

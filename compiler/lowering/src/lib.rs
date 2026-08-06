@@ -533,7 +533,10 @@ impl LowerContext<'_> {
                         };
                         self.variables.insert(name.clone(), lowered);
                     } else if let Expression::Index { object, index } = target {
-                        let (object, object_type) = self.lower_expression(object);
+                        let (mut object, object_type) = self.lower_expression(object);
+                        if object_type == ValueType::Any {
+                            object = self.unbox_value((object, object_type), ValueType::List).0;
+                        }
                         let index = self.lower_expression(index);
                         let right = self.lower_expression(value);
                         if object_type == ValueType::Map {
@@ -2080,6 +2083,30 @@ impl LowerContext<'_> {
             }
             Expression::Binary { left, op, right } => {
                 let left = self.lower_expression(left);
+                if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                    let (left, _) = self.unbox_value(left, ValueType::Bool);
+                    let right_block = self.fresh_block();
+                    let continue_block = self.fresh_block();
+                    let constant = self.fresh_value();
+                    let constant_value = i32::from(*op == BinaryOp::Or);
+                    writeln!(
+                        self.output,
+                        "    {constant} = llvm.mlir.constant({constant_value} : i1) : i1"
+                    )
+                    .unwrap();
+                    if *op == BinaryOp::And {
+                        writeln!(self.output, "    llvm.cond_br {left}, ^bb{right_block}, ^bb{continue_block}({constant} : i1)").unwrap();
+                    } else {
+                        writeln!(self.output, "    llvm.cond_br {left}, ^bb{continue_block}({constant} : i1), ^bb{right_block}").unwrap();
+                    }
+                    writeln!(self.output, "  ^bb{right_block}:").unwrap();
+                    let right = self.lower_expression(right);
+                    let (right, _) = self.unbox_value(right, ValueType::Bool);
+                    writeln!(self.output, "    llvm.br ^bb{continue_block}({right} : i1)").unwrap();
+                    let result = self.fresh_value();
+                    writeln!(self.output, "  ^bb{continue_block}({result}: i1):").unwrap();
+                    return (result, ValueType::Bool);
+                }
                 let right = self.lower_expression(right);
                 if *op == BinaryOp::Power {
                     return self.lower_power_values(left, right);
@@ -2906,6 +2933,12 @@ impl LowerContext<'_> {
         for (name, value, ty) in header_values {
             self.variables.insert(name, (value, ty));
         }
+        let carried_names = carried
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .collect::<HashSet<_>>();
+        self.variables
+            .retain(|name, _| carried_names.contains(name.as_str()));
         self.terminated = false;
     }
 
