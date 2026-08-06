@@ -3,8 +3,9 @@ name = "severian-lowering"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
-severian-hir = { path = "../hir" }
-severian-mlir = { path = "../mlir" }
-severian-platform = { path = "../platform" }
+severian-hir = { version = "0.1.0", path = "../hir" }
+severian-mlir = { version = "0.1.0", path = "../mlir" }
+severian-platform = { version = "0.1.0", path = "../platform" }

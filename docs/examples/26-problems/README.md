@@ -94,9 +94,19 @@ without duplicating its source file.
 | `62-min-cost-connect-points.sev` | Hard validation: Min Cost to Connect Points | Prim minimum spanning tree over Manhattan distance. |
 | `63-closest-subsequence-sum.sev` | Hard validation: Closest Subsequence Sum | Meet-in-the-middle subset enumeration. |
 | `64-reservoir-sampling.sev` | Hard validation: Random Pick Index | Seeded reservoir sampling over a stream. |
+| `65-print-in-order.sev` | Concurrency: Print in Order | Reverse-launched workers ordered by channel gates. |
+| `66-print-foobar-alternately.sev` | Concurrency: Print FooBar Alternately | Ping-pong channel synchronization. |
+| `67-print-zero-even-odd.sev` | Concurrency: Print Zero Even Odd | Three-worker gated scheduling. |
+| `68-building-h2o.sev` | Concurrency: Building H2O | Two-arrival barrier before oxygen release. |
+| `69-bounded-blocking-queue.sev` | Concurrency: Design Bounded Blocking Queue | Capacity blocking, wakeups, and FIFO delivery. |
+| `70-fizz-buzz-multithreaded.sev` | Concurrency: Fizz Buzz Multithreaded | Four coordinated workers and deterministic output. |
+| `71-dining-philosophers.sev` | Concurrency: The Dining Philosophers | Locked resource allocation without deadlock. |
+| `72-web-crawler-multithreaded.sev` | Concurrency: Web Crawler Multithreaded | Parallel same-host filtering and deduplication. |
+| `73-traffic-light-intersection.sev` | Concurrency: Traffic Light Controlled Intersection | Locked road switching and crossing accounting. |
+| `74-smallest-divisible-digit-product.sev` | LeetCode: Smallest Divisible Digit Product I | Digit arithmetic and upward enumeration. |
 
-Progress: **64** total problems, including **46 / 75** from LeetCode 75,
-with **200** attached test cases.
+Progress: **74** total problems, including **46 / 75** from LeetCode 75,
+with **220** attached test cases.
 
 ## Technique coverage
 
@@ -112,6 +122,9 @@ topological sorting, string matching and rolling hashes, game theory and
 minimax, merge/counting/bucket sorting, data streams, suffix arrays,
 quickselect, sweep lines, probability, minimum spanning trees,
 meet-in-the-middle, and reservoir sampling.
+The concurrency set additionally executes ordered task release, barriers,
+bounded blocking queues, condition-variable wakeups, channel fan-in, and locked
+shared mutation through native pthread-backed executables.
 
 ## Syntax observations
 

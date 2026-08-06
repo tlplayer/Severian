@@ -1,6 +1,7 @@
-use severian_driver::{compile_path, compile_source, run, run_tests};
+use severian_driver::{compile_native_tests, compile_path, compile_source, run, run_tests};
 use severian_hir::TestMode;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn examples_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/examples")
@@ -63,13 +64,46 @@ fn checks_and_runs_the_problem_gallery() {
     for fixture in severian_files(&directory) {
         let compilation =
             compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-        tests += run_tests(&compilation.hir, |_| {})
-            .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+        let native_concurrency_fixture = fixture
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.split('-').next())
+            .and_then(|prefix| prefix.parse::<usize>().ok())
+            .is_some_and(|prefix| prefix >= 65);
+        if native_concurrency_fixture {
+            let executable = std::env::temp_dir().join(format!(
+                "severian-problem-native-{}-{compiled}",
+                std::process::id()
+            ));
+            let count = compile_native_tests(&compilation, &executable)
+                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+            let output = Command::new(&executable)
+                .output()
+                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+            let _ = std::fs::remove_file(&executable);
+            assert!(
+                output.status.success(),
+                "{} exited with {}: {}",
+                fixture.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                format!("{count} passed\n"),
+                "{} did not execute its native tests",
+                fixture.display()
+            );
+            tests += count;
+        } else {
+            tests += run_tests(&compilation.hir, |_| {})
+                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+        }
         compiled += 1;
     }
 
-    assert_eq!(compiled, 64);
-    assert_eq!(tests, 200);
+    assert_eq!(compiled, 74);
+    assert_eq!(tests, 220);
 }
 
 #[test]

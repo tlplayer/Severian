@@ -113,23 +113,23 @@ pub struct BinaryTarget {
 /// `[[bin]]` manifest fields.
 pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageError> {
     let direct = directory.join("main.sev");
-    if direct.is_file() {
-        return Ok(BinaryTarget {
-            name: "main".into(),
-            source: direct,
-            package_root: directory.to_path_buf(),
-        });
-    }
     let manifest_path = directory
         .ancestors()
         .map(|ancestor| ancestor.join("Severian.toml"))
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            PackageError::Manifest(format!(
-                "could not find `main.sev` or Severian.toml from {}",
-                directory.display()
-            ))
-        })?;
+        .find(|candidate| candidate.is_file());
+    let Some(manifest_path) = manifest_path else {
+        if direct.is_file() {
+            return Ok(BinaryTarget {
+                name: "main".into(),
+                source: direct,
+                package_root: directory.to_path_buf(),
+            });
+        }
+        return Err(PackageError::Manifest(format!(
+            "could not find `main.sev` or Severian.toml from {}",
+            directory.display()
+        )));
+    };
     let manifest = parse_manifest(&manifest_path)?;
     let package_root = manifest_path
         .parent()
@@ -192,19 +192,19 @@ pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageEr
 /// string-array form.
 pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, PackageError> {
     let direct = directory.join("main.sev");
-    if direct.is_file() {
-        return Ok(vec![default_binary_target(directory)?]);
-    }
     let manifest_path = directory
         .ancestors()
         .map(|ancestor| ancestor.join("Severian.toml"))
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            PackageError::Manifest(format!(
-                "could not find `main.sev` or Severian.toml from {}",
-                directory.display()
-            ))
-        })?;
+        .find(|candidate| candidate.is_file());
+    let Some(manifest_path) = manifest_path else {
+        if direct.is_file() {
+            return Ok(vec![default_binary_target(directory)?]);
+        }
+        return Err(PackageError::Manifest(format!(
+            "could not find `main.sev` or Severian.toml from {}",
+            directory.display()
+        )));
+    };
     let manifest = parse_manifest(&manifest_path)?;
     if manifest.get("package").is_some() {
         return Ok(vec![default_binary_target(directory)?]);

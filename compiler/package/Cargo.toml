@@ -3,9 +3,10 @@ name = "severian-package"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
-severian-ast = { path = "../ast" }
-severian-lexer = { path = "../lexer" }
-severian-parser = { path = "../parser" }
+severian-ast = { version = "0.1.0", path = "../ast" }
+severian-lexer = { version = "0.1.0", path = "../lexer" }
+severian-parser = { version = "0.1.0", path = "../parser" }
 toml = "1.1.3"

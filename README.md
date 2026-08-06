@@ -50,6 +50,35 @@ cargo run -p severian-driver --bin sev -- compile docs/examples/00-getting-start
 cargo run -p severian-driver --bin sev -- run docs/examples/00-getting-started/01-hello.sev
 ```
 
+Once `sev` is installed, a source path by itself provides the Python-like
+development loop while still executing compiled native code:
+
+```sh
+sev program.sev
+```
+
+`sev` compiles to a temporary executable, runs it with inherited standard
+input/output, propagates a failing exit status, and removes the temporary file.
+If a source has tests but no `main`, the generated native entry point executes
+those tests and prints the real pass count.
+
+`sev build` reads Cargo-compatible `[package]`, `[[bin]]`, `[dependencies]`, and
+`[workspace] members` fields from `Severian.toml`. Package and workspace binaries
+are emitted under `target/debug`; `sev build source.sev` uses the source stem as
+the binary name.
+
+The CLI is also a conventional Cargo binary crate:
+
+```sh
+cargo install --path compiler/driver
+sev --help
+```
+
+Internal compiler dependencies carry both local `path` entries and registry
+versions, so the compiler crates can be published in dependency order and the
+final `severian-driver` package can provide the `sev` executable through a Cargo
+registry.
+
 `compile` verifies the emitted MLIR, translates its LLVM dialect to LLVM IR, and
 links a native executable named `a.out` by default. Use `-o executable` to choose
 another path. `emit-mlir` prints the intermediate MLIR for inspection, while
