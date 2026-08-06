@@ -1,0 +1,26 @@
+# Track: LeetCode 75
+# Problem: 739 - Daily Temperatures
+# Difficulty: medium
+# Tags: array, search
+
+def daysUntilWarmer(temperatures: list[int], day: int) -> int:
+    while candidate < size(temperatures) with candidate := day + 1:
+        if temperatures[candidate] > temperatures[day]:
+            return candidate - day
+        candidate += 1
+    return 0
+
+def dailyTemperatures(temperatures: list[int]) -> list[int]:
+    answer := []
+    for day in indices(temperatures):
+        answer.append(daysUntilWarmer(temperatures, day))
+    return answer
+
+test "representative forecast":
+    assert(dailyTemperatures([73, 74, 75, 71, 69, 72, 76, 73]) == [1, 1, 4, 2, 1, 1, 0, 0])
+
+test "steadily warming":
+    assert(dailyTemperatures([30, 40, 50, 60]) == [1, 1, 1, 0])
+
+test "steadily cooling":
+    assert(dailyTemperatures([60, 50, 40]) == [0, 0, 0])

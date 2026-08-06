@@ -1,0 +1,30 @@
+# Track: LeetCode 75
+# Problem: 724 - Find Pivot Index
+# Difficulty: easy
+# Tags: array, prefix-sum
+# Return the first index whose left-hand sum equals its right-hand sum, or -1
+# when no such index exists.
+
+def pivotIndex(values: list[int]) -> int:
+    for value in values with total := 0:
+        total += value
+
+    for index in indices(values) with left := 0:
+        right = total - left - values[index]
+        if left == right:
+            return index
+        left += values[index]
+
+    return -1
+
+test "pivot in the middle":
+    assert(pivotIndex([1, 7, 3, 6, 5, 6]) == 3)
+
+test "no pivot":
+    assert(pivotIndex([1, 2, 3]) == -1)
+
+test "first index is the pivot":
+    assert(pivotIndex([2, 1, -1]) == 0)
+
+test "single value":
+    assert(pivotIndex([9]) == 0)

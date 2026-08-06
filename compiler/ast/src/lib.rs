@@ -331,6 +331,7 @@ pub struct WhileStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub span: Span,
+    pub setup: Option<Box<Stmt>>,
     pub pattern: Pattern,
     pub iterable: Expr,
     pub body: Block,

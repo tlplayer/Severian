@@ -1,0 +1,30 @@
+# Track: LeetCode 75
+# Problem: 1004 - Max Consecutive Ones III
+# Difficulty: medium
+# Tags: array, sliding-window
+
+def longestOnes(values: list[int], flips: int) -> int:
+    zeroes := 0
+    best := 0
+
+    for right in indices(values) with left := 0:
+        if values[right] == 0:
+            zeroes += 1
+        while zeroes > flips:
+            if values[left] == 0:
+                zeroes -= 1
+            left += 1
+        length = right - left + 1
+        if length > best:
+            best = length
+
+    return best
+
+test "two flips":
+    assert(longestOnes([1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0], 2) == 6)
+
+test "three flips":
+    assert(longestOnes([0, 0, 1, 1, 1, 0, 0], 3) == 6)
+
+test "no flips":
+    assert(longestOnes([1, 1, 0, 1], 0) == 2)

@@ -1,0 +1,35 @@
+# Track: LeetCode 75
+# Problem: 790 - Domino and Tromino Tiling
+# Difficulty: medium
+# Tags: dynamic-programming, math
+
+def numTilings(n: int) -> int:
+    if n == 1:
+        return 1
+    if n == 2:
+        return 2
+
+    threeBack := 1
+    twoBack := 1
+    oneBack := 2
+
+    while width <= n with width := 3:
+        current = (2 * oneBack + threeBack) % 1000000007
+        threeBack = twoBack
+        twoBack = oneBack
+        oneBack = current
+        width += 1
+
+    return oneBack
+
+test "one column":
+    assert(numTilings(1) == 1)
+
+test "three columns":
+    assert(numTilings(3) == 5)
+
+test "five columns":
+    assert(numTilings(5) == 24)
+
+test "larger board":
+    assert(numTilings(30) == 312342182)

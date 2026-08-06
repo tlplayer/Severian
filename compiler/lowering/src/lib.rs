@@ -65,6 +65,7 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_value_string(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_string_char_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_less(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
@@ -515,7 +516,17 @@ impl LowerContext<'_> {
                             continue;
                         }
                         let lowered = if *op == AssignmentOp::Assign {
-                            right
+                            match self.variables.get(name).map(|(_, ty)| *ty) {
+                                Some(expected)
+                                    if expected != ValueType::Any && right.1 == ValueType::Any =>
+                                {
+                                    self.unbox_value(right, expected)
+                                }
+                                Some(ValueType::Any) if right.1 != ValueType::Any => {
+                                    (self.box_value(right), ValueType::Any)
+                                }
+                                _ => right,
+                            }
                         } else {
                             let left = self.variables.get(name).cloned().unwrap_or(right.clone());
                             self.lower_binary_values(left, assignment_binary(*op), right)
@@ -829,10 +840,16 @@ impl LowerContext<'_> {
                     self.lower_while(condition, instructions);
                 }
                 Instruction::For {
+                    setup,
                     pattern,
                     iterable,
                     instructions,
-                } => self.lower_for(pattern, iterable, instructions),
+                } => {
+                    if let Some(setup) = setup {
+                        self.lower_instructions(std::slice::from_ref(setup));
+                    }
+                    self.lower_for(pattern, iterable, instructions)
+                }
                 Instruction::Switch { value, arms } => self.lower_switch(value, arms),
                 Instruction::ChannelSwitch {
                     channels,
@@ -1638,6 +1655,10 @@ impl LowerContext<'_> {
                 if object_type == ValueType::Map {
                     let key = self.box_value(index);
                     writeln!(self.output, "    {result} = llvm.call @__sev_map_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                } else if object_type == ValueType::String {
+                    let index = self.unbox_value(index, ValueType::Int).0;
+                    writeln!(self.output, "    {result} = llvm.call @__sev_string_char_at({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                    return (result, ValueType::String);
                 } else {
                     let index = self.unbox_value(index, ValueType::Int).0;
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_get({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
@@ -1829,6 +1850,15 @@ impl LowerContext<'_> {
                 }
                 if function == "size" {
                     let (mut value, ty) = args.first().cloned().unwrap();
+                    if ty == ValueType::String {
+                        let result = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @__sev_strlen({value}) : (!llvm.ptr) -> i64"
+                        )
+                        .unwrap();
+                        return (result, ValueType::Int);
+                    }
                     if ty == ValueType::Any {
                         value = self.unbox_value((value, ty), ValueType::List).0;
                     }
@@ -2268,7 +2298,7 @@ impl LowerContext<'_> {
         op: BinaryOp,
         (mut right, mut right_type): (String, ValueType),
     ) -> (String, ValueType) {
-        if op == BinaryOp::In && right_type == ValueType::Set {
+        if op == BinaryOp::In && matches!(right_type, ValueType::List | ValueType::Set) {
             let left = self.box_value((left, operand_type));
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
@@ -3201,10 +3231,14 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
                 collect_strings(instructions, strings);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    collect_strings(std::slice::from_ref(setup), strings);
+                }
                 collect_expression_strings(iterable, strings);
                 collect_strings(instructions, strings);
             }
@@ -3454,10 +3488,14 @@ fn collect_task_names(instructions: &[Instruction], names: &mut Vec<String>) {
                 collect_task_names(instructions, names);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    collect_task_names(std::slice::from_ref(setup), names);
+                }
                 collect_task_names_expression(iterable, names);
                 collect_task_names(instructions, names);
             }
@@ -3676,6 +3714,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "int64_t __sev_strlen(void *raw) { const char *text = raw; int64_t size = 0; if (!text) abort(); while (text[size]) size += 1; return size; }\n",
         "void *__sev_string_concat(void *left_raw, void *right_raw) { const char *left = left_raw; const char *right = right_raw; size_t left_size = (size_t)__sev_strlen(left_raw); size_t right_size = (size_t)__sev_strlen(right_raw); char *result = sev_allocate(left_size + right_size + 1); memcpy(result, left, left_size); memcpy(result + left_size, right, right_size + 1); return result; }\n",
         "bool __sev_string_equal(void *left, void *right) { return strcmp(left, right) == 0; }\n",
+        "void *__sev_string_char_at(void *raw, int64_t index) { const char *text = raw; int64_t size = __sev_strlen(raw); if (index < 0 || index >= size) abort(); char *result = sev_allocate(2); result[0] = text[index]; result[1] = '\\0'; return result; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
         "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } }\n",

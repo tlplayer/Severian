@@ -34,6 +34,24 @@ fn rejects_a_missing_function_body() {
 }
 
 #[test]
+fn parses_a_for_loop_setup_binding() {
+    let source = concat!(
+        "def sum(values: list[int]) -> int:\n",
+        "    for value in values with total := 0:\n",
+        "        total += value\n",
+        "    return total\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::For(statement) = &function.body.statements[0] else {
+        panic!("expected for loop");
+    };
+    assert!(matches!(statement.setup.as_deref(), Some(Stmt::Let(_))));
+}
+
+#[test]
 fn parses_an_explicit_native_abi_declaration() {
     let source = concat!(
         "native(\"__sev_file_read\") def fileRead(\n",

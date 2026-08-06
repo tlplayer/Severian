@@ -1,0 +1,32 @@
+# Track: LeetCode 75
+# Problem: 1456 - Maximum Number of Vowels in a Substring of Given Length
+# Difficulty: medium
+# Tags: string, sliding-window
+
+def isVowel(character: string) -> bool:
+    return character == "a" or character == "e" or character == "i" or character == "o" or character == "u"
+
+def maxVowels(text: string, width: int) -> int:
+    vowels := 0
+    for index in range(0, width):
+        if isVowel(text[index]):
+            vowels += 1
+
+    best := vowels
+    for right in range(width, size(text)):
+        if isVowel(text[right]):
+            vowels += 1
+        if isVowel(text[right - width]):
+            vowels -= 1
+        if vowels > best:
+            best = vowels
+    return best
+
+test "representative window":
+    assert(maxVowels("abciiidef", 3) == 3)
+
+test "single vowel":
+    assert(maxVowels("leetcode", 3) == 2)
+
+test "no vowels":
+    assert(maxVowels("rhythms", 4) == 0)

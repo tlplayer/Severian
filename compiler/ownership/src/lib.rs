@@ -163,10 +163,14 @@ impl Checker {
                 self.check_branches([instructions.as_slice()])?;
             }
             Instruction::For {
+                setup,
                 pattern,
                 iterable,
                 instructions,
             } => {
+                if let Some(setup) = setup {
+                    self.check_instruction(setup)?;
+                }
                 self.check_expression(iterable, Access::Read)?;
                 let mut branch = self.clone();
                 define_pattern(&mut branch, pattern);
@@ -738,10 +742,14 @@ fn infer_instruction_effects(
                 infer_instruction_effects(instructions, parameters, effects);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    infer_instruction_effects(std::slice::from_ref(setup), parameters, effects);
+                }
                 infer_expression_effect(iterable, Access::Read, parameters, effects);
                 infer_instruction_effects(instructions, parameters, effects);
             }
@@ -997,10 +1005,14 @@ fn count_instructions(instructions: &[Instruction], counts: &mut HashMap<String,
                 count_instructions(instructions, counts);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    count_instructions(std::slice::from_ref(setup), counts);
+                }
                 count_expression(iterable, counts);
                 count_instructions(instructions, counts);
             }

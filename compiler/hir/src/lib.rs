@@ -168,6 +168,7 @@ pub enum Instruction {
         instructions: Vec<Instruction>,
     },
     For {
+        setup: Option<Box<Instruction>>,
         pattern: MatchPattern,
         iterable: Expression,
         instructions: Vec<Instruction>,
@@ -364,10 +365,14 @@ fn visit_instructions_mut(
                 visit_instructions_mut(instructions, visitor);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    visit_instructions_mut(std::slice::from_mut(setup), visitor);
+                }
                 visit_expression_mut(iterable, visitor);
                 visit_instructions_mut(instructions, visitor);
             }

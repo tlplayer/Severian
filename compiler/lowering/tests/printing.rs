@@ -96,6 +96,7 @@ fn lowers_integer_range_for_to_control_flow() {
             params: vec![],
             return_type: ValueType::Unit,
             instructions: vec![Instruction::For {
+                setup: None,
                 pattern: MatchPattern::Bind("value".into()),
                 iterable: Expression::Call {
                     function: "range".into(),

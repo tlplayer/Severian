@@ -991,6 +991,23 @@ fn lower_block(
                 });
             }
             Stmt::For(statement) => {
+                let setup = statement
+                    .setup
+                    .as_ref()
+                    .map(|setup| {
+                        let lowered = lower_block(
+                            &Block {
+                                span: setup.span(),
+                                statements: vec![(**setup).clone()],
+                            },
+                            scope,
+                            return_type,
+                            signatures,
+                            aliases,
+                        )?;
+                        Ok(Box::new(lowered.into_iter().next().unwrap()))
+                    })
+                    .transpose()?;
                 if inclusive_collection_range(&statement.iterable) {
                     return Err(error(
                         statement.iterable.span(),
@@ -1009,6 +1026,7 @@ fn lower_block(
                     aliases,
                 )?;
                 instructions.push(Instruction::For {
+                    setup,
                     pattern,
                     iterable,
                     instructions: body,
@@ -1387,14 +1405,19 @@ fn lower_expression(
                     ));
                 }
             }
-            let object = lower_expression(&index.object, scope, signatures, aliases)?.0;
+            let (object, object_type) =
+                lower_expression(&index.object, scope, signatures, aliases)?;
             let index_value = lower_expression(&index.index, scope, signatures, aliases)?.0;
             Ok((
                 Expression::Index {
                     object: Box::new(object),
                     index: Box::new(index_value),
                 },
-                ValueType::Any,
+                if object_type == ValueType::String {
+                    ValueType::String
+                } else {
+                    ValueType::Any
+                },
             ))
         }
         Expr::Member(member) => {

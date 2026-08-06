@@ -1,0 +1,34 @@
+# Track: LeetCode 75
+# Problem: 1143 - Longest Common Subsequence
+# Difficulty: medium
+# Tags: string, dynamic-programming
+
+def larger(left: int, right: int) -> int:
+    if left > right:
+        return left
+    return right
+
+def longestCommonSubsequence(first: string, second: string) -> int:
+    row := [0]
+    while size(row) <= size(second):
+        row.append(0)
+
+    for firstIndex in range(0, size(first)):
+        diagonal := 0
+        for secondIndex in range(0, size(second)):
+            previous = row[secondIndex + 1]
+            if first[firstIndex] == second[secondIndex]:
+                row[secondIndex + 1] = diagonal + 1
+            else:
+                row[secondIndex + 1] = larger(row[secondIndex + 1], row[secondIndex])
+            diagonal = previous
+    return row[size(second)]
+
+test "shared subsequence":
+    assert(longestCommonSubsequence("abcde", "ace") == 3)
+
+test "identical strings":
+    assert(longestCommonSubsequence("abc", "abc") == 3)
+
+test "disjoint strings":
+    assert(longestCommonSubsequence("abc", "def") == 0)

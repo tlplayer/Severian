@@ -1,0 +1,32 @@
+# Track: LeetCode 75
+# Problem: 746 - Min Cost Climbing Stairs
+# Difficulty: easy
+# Tags: array, dynamic-programming
+# Return the minimum cost of stepping beyond the final stair when each move may
+# advance by one or two positions.
+
+def minimum(left: int, right: int) -> int:
+    if left < right:
+        return left
+    return right
+
+def minCostClimbingStairs(cost: list[int]) -> int:
+    twoBack := cost[0]
+    oneBack := cost[1]
+
+    while index < size(cost) with index := 2:
+        current = cost[index] + minimum(twoBack, oneBack)
+        twoBack = oneBack
+        oneBack = current
+        index += 1
+
+    return minimum(twoBack, oneBack)
+
+test "three stairs":
+    assert(minCostClimbingStairs([10, 15, 20]) == 15)
+
+test "alternating expensive stairs":
+    assert(minCostClimbingStairs([1, 100, 1, 1, 1, 100, 1, 1, 100, 1]) == 6)
+
+test "free stairs":
+    assert(minCostClimbingStairs([0, 0]) == 0)

@@ -1,0 +1,50 @@
+# Track: LeetCode 75
+# Problem: 735 - Asteroid Collision
+# Difficulty: medium
+# Tags: array, stack, simulation
+
+def asteroidCollision(asteroids: list[int]) -> list[int]:
+    stack := []
+    top := 0
+
+    for asteroid in asteroids:
+        alive := true
+        checking := true
+        while checking:
+            if top == 0:
+                checking = false
+            else:
+                previous = stack[top - 1]
+                if asteroid > 0:
+                    checking = false
+                else:
+                    if previous < 0:
+                        checking = false
+                    else:
+                        if previous < 0 - asteroid:
+                            top -= 1
+                        else:
+                            if previous == 0 - asteroid:
+                                top -= 1
+                            alive = false
+                            checking = false
+        if alive:
+            if top < size(stack):
+                stack[top] = asteroid
+            else:
+                stack.append(asteroid)
+            top += 1
+
+    result := []
+    for index in range(0, top):
+        result.append(stack[index])
+    return result
+
+test "right asteroid survives":
+    assert(asteroidCollision([5, 10, -5]) == [5, 10])
+
+test "equal asteroids disappear":
+    assert(asteroidCollision([8, -8]) == [])
+
+test "moving apart":
+    assert(asteroidCollision([10, 2, -5]) == [10])

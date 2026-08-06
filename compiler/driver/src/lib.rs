@@ -498,10 +498,14 @@ fn walk_instructions<'expression>(
                 walk_instructions(instructions, visit);
             }
             Instruction::For {
+                setup,
                 iterable,
                 instructions,
                 ..
             } => {
+                if let Some(setup) = setup {
+                    walk_instructions(std::slice::from_ref(setup), visit);
+                }
                 walk_expression(iterable, visit);
                 walk_instructions(instructions, visit);
             }
@@ -841,10 +845,19 @@ fn execute_instructions(
                 }
             }
             Instruction::For {
+                setup,
                 pattern,
                 iterable,
                 instructions,
             } => {
+                if let Some(setup) = setup {
+                    execute_instructions(
+                        program,
+                        std::slice::from_ref(setup),
+                        variables,
+                        write_line,
+                    )?;
+                }
                 let values = iterable_values(evaluate(program, iterable, variables, write_line)?)?;
                 for value in values {
                     let active_hit = if let Value::ChaosRule { hit, .. } = &value {
@@ -2176,6 +2189,11 @@ fn index_value(object: Value, index: Value) -> Result<Value, CompileError> {
             .ok()
             .and_then(|index| values.get(index).cloned())
             .ok_or_else(|| CompileError::Execution("tuple index out of bounds".into())),
+        (Value::String(value), Value::Int(index)) => usize::try_from(index)
+            .ok()
+            .and_then(|index| value.chars().nth(index))
+            .map(|character| Value::String(character.to_string()))
+            .ok_or_else(|| CompileError::Execution("string index out of bounds".into())),
         (Value::Map(entries), key) => entries
             .borrow()
             .iter()

@@ -43,6 +43,7 @@ paths while staying Severian-first:
 | `23-data-infrastructure` | PQL-backed controller state, scheduling, and desired-state reconciliation. |
 | `24-database-server` | Real SQLite-backed TCP server, SQL execution, and iterable result rows. |
 | `25-transformer-rocm` | Compiled transformer graphs, explicit GPU regions, autodiff, and executable AMD ROCDL. |
+| `26-problems` | Interview-style and programming-challenge solutions with executable tests and syntax observations. |
 | `bugs` | Invalid-and-fixed safety contracts for future diagnostic tests. |
 
 For now these are syntax fixtures that define the language target. Once the

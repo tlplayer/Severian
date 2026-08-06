@@ -1041,15 +1041,28 @@ impl Parser<'_> {
         };
         self.expect_simple(TokenKind::In, "`in`")?;
         let iterable = self.parse_expression()?;
+        let mut setup = None;
         let placement = if self.take_simple(&TokenKind::With).is_some() {
-            let placement = self.expect_identifier("for execution placement")?;
-            if !matches!(placement.name.as_str(), "gpu" | "simd") {
+            let name = self.expect_identifier("for setup binding or execution placement")?;
+            if self.take_simple(&TokenKind::ChangeableEqual).is_some() {
+                let value = self.parse_expression()?;
+                setup = Some(Box::new(Stmt::Let(LetStmt {
+                    span: Span::new(name.span.start, value.span().end),
+                    kind: LetKind::Changeable,
+                    name,
+                    ty: None,
+                    value: Some(value),
+                })));
+                None
+            } else if matches!(name.name.as_str(), "gpu" | "simd") {
+                Some(name)
+            } else {
                 return Err(ParseError {
-                    span: placement.span,
-                    message: "a for loop supports only `with gpu` or `with simd`".into(),
+                    span: name.span,
+                    message: "a for loop `with` clause requires `name := value`, `gpu`, or `simd`"
+                        .into(),
                 });
             }
-            Some(placement)
         } else {
             None
         };
@@ -1058,6 +1071,7 @@ impl Parser<'_> {
         let end = body.span.end;
         let loop_statement = Stmt::For(ForStmt {
             span: Span::new(start, body.span.end),
+            setup,
             pattern,
             iterable,
             body,

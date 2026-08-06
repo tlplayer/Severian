@@ -1,0 +1,38 @@
+# Track: LeetCode 75
+# Problem: 72 - Edit Distance
+# Difficulty: medium
+# Tags: string, dynamic-programming
+
+def minimum3(first: int, second: int, third: int) -> int:
+    result := first
+    if second < result:
+        result = second
+    if third < result:
+        result = third
+    return result
+
+def minDistance(first: string, second: string) -> int:
+    row := [0]
+    while size(row) <= size(second):
+        row.append(size(row))
+
+    for firstIndex in range(0, size(first)):
+        diagonal := row[0]
+        row[0] = firstIndex + 1
+        for secondIndex in range(0, size(second)):
+            above = row[secondIndex + 1]
+            if first[firstIndex] == second[secondIndex]:
+                row[secondIndex + 1] = diagonal
+            else:
+                row[secondIndex + 1] = 1 + minimum3(diagonal, above, row[secondIndex])
+            diagonal = above
+    return row[size(second)]
+
+test "horse to ros":
+    assert(minDistance("horse", "ros") == 3)
+
+test "intention to execution":
+    assert(minDistance("intention", "execution") == 5)
+
+test "empty source":
+    assert(minDistance("", "abc") == 3)

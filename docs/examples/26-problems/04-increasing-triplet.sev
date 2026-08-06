@@ -1,0 +1,40 @@
+# Track: LeetCode 75
+# Problem: 334 - Increasing Triplet Subsequence
+# Difficulty: medium
+# Tags: array, greedy
+# Return true when three values appear in strictly increasing index and value
+# order. The values do not need to be adjacent.
+
+def increasingTriplet(values: list[int]) -> bool:
+    first := 0
+    second := 0
+    hasFirst := false
+    hasSecond := false
+
+    for value in values:
+        if not hasFirst or value <= first:
+            first = value
+            hasFirst = true
+        else:
+            if not hasSecond or value <= second:
+                second = value
+                hasSecond = true
+            else:
+                return true
+
+    return false
+
+test "increasing input":
+    assert(increasingTriplet([1, 2, 3, 4, 5]))
+
+test "decreasing input":
+    assert(not increasingTriplet([5, 4, 3, 2, 1]))
+
+test "non-adjacent triplet":
+    assert(increasingTriplet([2, 1, 5, 0, 4, 6]))
+
+test "duplicates are not strictly increasing":
+    assert(not increasingTriplet([1, 1, 1, 1]))
+
+test "short input":
+    assert(not increasingTriplet([1, 2]))

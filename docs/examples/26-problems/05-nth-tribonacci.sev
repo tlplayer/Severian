@@ -1,0 +1,34 @@
+# Track: LeetCode 75
+# Problem: 1137 - N-th Tribonacci Number
+# Difficulty: easy
+# Tags: dynamic-programming, math
+# Return the requested value in the sequence where each value is the sum of the
+# preceding three values.
+
+def tribonacci(n: int) -> int:
+    if n == 0:
+        return 0
+    if n == 1 or n == 2:
+        return 1
+
+    first := 0
+    second := 1
+    third := 1
+
+    while index <= n with index := 3:
+        next = first + second + third
+        first = second
+        second = third
+        third = next
+        index += 1
+
+    return third
+
+test "zero":
+    assert(tribonacci(0) == 0)
+
+test "first recurrence":
+    assert(tribonacci(4) == 4)
+
+test "representative value":
+    assert(tribonacci(25) == 1389537)

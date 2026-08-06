@@ -1,0 +1,30 @@
+# Track: LeetCode 75
+# Problem: 1493 - Longest Subarray of 1s After Deleting One Element
+# Difficulty: medium
+# Tags: array, sliding-window
+
+def longestSubarray(values: list[int]) -> int:
+    zeroes := 0
+    best := 0
+
+    for right in indices(values) with left := 0:
+        if values[right] == 0:
+            zeroes += 1
+        while zeroes > 1:
+            if values[left] == 0:
+                zeroes -= 1
+            left += 1
+        length = right - left
+        if length > best:
+            best = length
+
+    return best
+
+test "one deletion joins runs":
+    assert(longestSubarray([1, 1, 0, 1]) == 3)
+
+test "several zeroes":
+    assert(longestSubarray([0, 1, 1, 1, 0, 1, 1, 0, 1]) == 5)
+
+test "all ones still deletes one":
+    assert(longestSubarray([1, 1, 1]) == 2)

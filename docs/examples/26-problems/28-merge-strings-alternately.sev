@@ -1,0 +1,26 @@
+# Track: LeetCode 75
+# Problem: 1768 - Merge Strings Alternately
+# Difficulty: easy
+# Tags: string, two-pointers
+
+def mergeAlternately(first: string, second: string) -> string:
+    merged := ""
+    limit := size(first)
+    if size(second) > limit:
+        limit = size(second)
+
+    for index in range(0, limit):
+        if index < size(first):
+            merged += first[index]
+        if index < size(second):
+            merged += second[index]
+    return merged
+
+test "equal lengths":
+    assert(mergeAlternately("abc", "pqr") == "apbqcr")
+
+test "longer second string":
+    assert(mergeAlternately("ab", "pqrs") == "apbqrs")
+
+test "empty first string":
+    assert(mergeAlternately("", "xyz") == "xyz")

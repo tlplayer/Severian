@@ -1,0 +1,31 @@
+# Track: LeetCode 75
+# Problem: 238 - Product of Array Except Self
+# Difficulty: medium
+# Tags: array, prefix-product, math
+
+def productExceptSelf(values: list[int]) -> list[int]:
+    output := []
+    for _ in values:
+        output.append(1)
+
+    prefix := 1
+    for index in indices(values):
+        output[index] = prefix
+        prefix *= values[index]
+
+    suffix := 1
+    while index >= 0 with index := size(values) - 1:
+        output[index] *= suffix
+        suffix *= values[index]
+        index -= 1
+
+    return output
+
+test "positive values":
+    assert(productExceptSelf([1, 2, 3, 4]) == [24, 12, 8, 6])
+
+test "contains zero":
+    assert(productExceptSelf([-1, 1, 0, -3, 3]) == [0, 0, 9, 0, 0])
+
+test "two values":
+    assert(productExceptSelf([2, 5]) == [5, 2])

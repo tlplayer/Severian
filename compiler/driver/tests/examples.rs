@@ -55,6 +55,24 @@ fn checks_all_concurrency_examples_through_the_frontend() {
 }
 
 #[test]
+fn checks_and_runs_the_problem_gallery() {
+    let directory = examples_root().join("26-problems");
+    let mut compiled = 0;
+    let mut tests = 0;
+
+    for fixture in severian_files(&directory) {
+        let compilation =
+            compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+        tests += run_tests(&compilation.hir, |_| {})
+            .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
+        compiled += 1;
+    }
+
+    assert_eq!(compiled, 32);
+    assert_eq!(tests, 104);
+}
+
+#[test]
 fn runs_channel_switches_generated_defaults_and_unsafe_addressing() {
     let root = examples_root();
 

@@ -1,0 +1,23 @@
+# Track: LeetCode 75
+# Problem: 162 - Find Peak Element
+# Difficulty: medium
+# Tags: array, binary-search
+
+def findPeakElement(values: list[int]) -> int:
+    high := size(values) - 1
+    while low < high with low := 0:
+        middle = low + (high - low) / 2
+        if values[middle] > values[middle + 1]:
+            high = middle
+        else:
+            low = middle + 1
+    return low
+
+test "single peak":
+    assert(findPeakElement([1, 2, 3, 1]) == 2)
+
+test "peak at start":
+    assert(findPeakElement([3, 2, 1]) == 0)
+
+test "single value":
+    assert(findPeakElement([7]) == 0)
