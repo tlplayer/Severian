@@ -1,0 +1,59 @@
+def solve(task_id: int, tasks, context_graph, model, goal: str):
+    task := tasks.get(task_id)
+
+    tasks.activate(task_id)
+
+    for dependency_id in task.dependencies():
+        if not tasks.solved(dependency_id):
+            solve(
+                dependency_id,
+                tasks,
+                context_graph,
+                model,
+                goal
+            )
+
+    context := compile_context(
+        goal,
+        task_id,
+        tasks,
+        context_graph
+    )
+
+    result := model.run(context)
+
+    tasks.complete(task_id, result)
+    context_graph.add_result(task_id, result)
+
+    return result
+
+def dependencies(graph, node_id: int) -> list[int]:
+    result := []
+
+    for edge in graph.edges(node_id):
+        if edge.relation() == "requires":
+            result.append(edge.target())
+
+    return result
+
+def dfs(root_id: int, graph):
+    stack := []
+    stack.append(root_id)
+
+    while len(stack) > 0:
+        node_id := stack.pop()
+
+        if graph.solved(node_id):
+            continue
+
+        children := graph.dependencies(node_id)
+
+        if len(children) == 0:
+            solve_node(node_id, graph)
+            continue
+
+        stack.append(node_id)
+
+        for child_id in children:
+            if not graph.solved(child_id):
+                stack.append(child_id)

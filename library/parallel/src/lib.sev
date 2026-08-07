@@ -1,6 +1,0 @@
-def workerCount(requested: int) -> int:
-    assert(requested > 0)
-    return requested
-
-test "parallel plans require at least one worker":
-    assert(workerCount(4) == 4)
