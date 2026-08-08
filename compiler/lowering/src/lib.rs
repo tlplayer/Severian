@@ -155,8 +155,6 @@ pub fn lower(program: &Program) -> Module {
         "  llvm.func @__sev_variant_is(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_variant_field(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_print_variant(!llvm.ptr)\n\n",
-        "  llvm.func @__sev_builtin_read(!llvm.ptr) -> !llvm.ptr\n",
-        "  llvm.func @__sev_builtin_http_get(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_int_parse(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
         "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
@@ -2730,11 +2728,6 @@ impl LowerContext<'_> {
                         .unwrap();
                         return (result, return_type);
                     }
-                    if function.contains('.') {
-                        let result = self.fresh_value();
-                        writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
-                        return (result, ValueType::Any);
-                    }
                 }
                 let values = args
                     .iter()
@@ -5114,8 +5107,6 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && strcmp(value->tag, tag) == 0; }\n",
         "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value) abort(); return value->field; }\n",
         "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
-        "void *__sev_builtin_read(void *path) { (void)path; return __sev_box_string(\"settings\"); }\n",
-        "void *__sev_builtin_http_get(void *url) { (void)url; return __sev_box_string(\"response\"); }\n",
         "void *__sev_builtin_int_parse(void *text) { char *end = NULL; long value = strtol(text, &end, 10); if (!text || end == text || *end != '\\0') abort(); return __sev_box_i64(value); }\n",
         "\n",
     ));
