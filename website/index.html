@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Severian — Compiled systems programming without the ceremony</title>
+
+    <meta
+        name="description"
+        content="Severian is a compiled systems language with Python-like syntax, Rust-like safety, structured concurrency, tensors, and MLIR as its compiler backbone."
+    >
+
+    <style>
+        :root {
+            color-scheme: dark;
+
+            --bg: #08090a;
+            --bg-soft: #0d0f11;
+            --panel: #101316;
+            --panel-hover: #14181c;
+
+            --border: #252a30;
+            --border-light: #343b43;
+
+            --text: #f3f4f6;
+            --muted: #929aa5;
+            --muted-light: #bcc3cc;
+
+            --accent: #d7ff64;
+            --accent-dark: #101500;
+
+            --blue: #70b7ff;
+            --purple: #c19cff;
+            --orange: #ffb86b;
+            --red: #ff7b72;
+
+            --max-width: 1180px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            background:
+                radial-gradient(
+                    circle at 50% -20%,
+                    rgba(215, 255, 100, 0.08),
+                    transparent 36rem
+                ),
+                var(--bg);
+
+            color: var(--text);
+
+            font-family:
+                Inter,
+                ui-sans-serif,
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+
+            line-height: 1.6;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .container {
+            width: min(calc(100% - 48px), var(--max-width));
+            margin: 0 auto;
+        }
+
+        /* NAV */
+
+        nav {
+            height: 72px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            background: rgba(8,9,10,0.82);
+            backdrop-filter: blur(14px);
+
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-inner {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            font-size: 15px;
+        }
+
+        .brand span {
+            color: var(--accent);
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+
+            font-size: 14px;
+            color: var(--muted-light);
+        }
+
+        .nav-links a:hover {
+            color: white;
+        }
+
+        .github-button {
+            border: 1px solid var(--border-light);
+            padding: 8px 14px;
+            border-radius: 7px;
+            color: white !important;
+        }
+
+        .github-button:hover {
+            background: var(--panel-hover);
+        }
+
+        /* HERO */
+
+        .hero {
+            padding: 128px 0 100px;
+        }
+
+        .eyebrow {
+            color: var(--accent);
+            font-family: monospace;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            margin: 0;
+
+            max-width: 1000px;
+
+            font-size: clamp(58px, 8vw, 108px);
+            line-height: 0.91;
+            letter-spacing: -0.065em;
+            font-weight: 750;
+        }
+
+        .hero-highlight {
+            color: var(--muted);
+        }
+
+        .hero-description {
+            max-width: 720px;
+            margin-top: 38px;
+
+            color: var(--muted-light);
+            font-size: clamp(18px, 2vw, 22px);
+            line-height: 1.55;
+        }
+
+        .hero-actions {
+            margin-top: 38px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+
+            padding: 12px 20px;
+            border-radius: 7px;
+
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .button-primary {
+            background: var(--accent);
+            color: #090b05;
+        }
+
+        .button-primary:hover {
+            filter: brightness(0.94);
+        }
+
+        .button-secondary {
+            border: 1px solid var(--border-light);
+            background: var(--panel);
+        }
+
+        .button-secondary:hover {
+            background: var(--panel-hover);
+        }
+
+        /* CODE */
+
+        .hero-code {
+            margin-top: 80px;
+
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+
+            background: #0b0d0f;
+        }
+
+        .code-title {
+            height: 45px;
+
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            padding: 0 18px;
+
+            border-bottom: 1px solid var(--border);
+
+            color: var(--muted);
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .code-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .code-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #34383d;
+        }
+
+        pre {
+            margin: 0;
+            padding: 28px;
+
+            overflow-x: auto;
+
+            font-family:
+                "SFMono-Regular",
+                Consolas,
+                "Liberation Mono",
+                monospace;
+
+            font-size: 15px;
+            line-height: 1.8;
+        }
+
+        .kw {
+            color: var(--purple);
+        }
+
+        .type {
+            color: var(--blue);
+        }
+
+        .string {
+            color: var(--orange);
+        }
+
+        .special {
+            color: var(--accent);
+        }
+
+        .comment {
+            color: #626973;
+        }
+
+        /* SECTIONS */
+
+        section {
+            padding: 100px 0;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .section-label {
+            color: var(--accent);
+            font-family: monospace;
+            font-size: 12px;
+            letter-spacing: 0.13em;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+        }
+
+        h2 {
+            margin: 0;
+            max-width: 850px;
+
+            font-size: clamp(38px, 5vw, 64px);
+            line-height: 1.03;
+            letter-spacing: -0.045em;
+        }
+
+        .section-intro {
+            max-width: 720px;
+            margin-top: 24px;
+
+            color: var(--muted-light);
+            font-size: 18px;
+        }
+
+        /* WHY */
+
+        .problem-grid {
+            margin-top: 54px;
+
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+
+            background: var(--border);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .problem {
+            padding: 32px;
+            background: var(--bg-soft);
+        }
+
+        .problem-number {
+            color: var(--accent);
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .problem h3 {
+            font-size: 20px;
+            margin: 22px 0 10px;
+        }
+
+        .problem p {
+            color: var(--muted);
+            margin: 0;
+            font-size: 15px;
+        }
+
+        /* PRINCIPLES */
+
+        .principles {
+            margin-top: 60px;
+        }
+
+        .principle {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+
+            padding: 35px 0;
+
+            border-top: 1px solid var(--border);
+        }
+
+        .principle:last-child {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .principle-name {
+            font-family: monospace;
+            color: var(--accent);
+            font-size: 14px;
+        }
+
+        .principle-content h3 {
+            margin: 0 0 10px;
+            font-size: 24px;
+        }
+
+        .principle-content p {
+            color: var(--muted);
+            max-width: 700px;
+            margin: 0;
+        }
+
+        /* FEATURE GRID */
+
+        .features {
+            margin-top: 56px;
+
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .feature {
+            padding: 30px;
+
+            border: 1px solid var(--border);
+            border-radius: 10px;
+
+            background: var(--bg-soft);
+        }
+
+        .feature:hover {
+            border-color: var(--border-light);
+            background: var(--panel);
+        }
+
+        .feature-tag {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--accent);
+        }
+
+        .feature h3 {
+            font-size: 22px;
+            margin: 18px 0 10px;
+        }
+
+        .feature p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+        }
+
+        .mini-code {
+            margin-top: 22px;
+
+            background: #090b0c;
+            border: 1px solid var(--border);
+            border-radius: 7px;
+
+            padding: 16px;
+
+            color: #d8dde4;
+
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.65;
+
+            overflow-x: auto;
+        }
+
+        /* COMPILER */
+
+        .pipeline {
+            margin-top: 60px;
+
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+        }
+
+        .pipeline-step {
+            padding: 22px 14px;
+            text-align: center;
+
+            background: var(--bg-soft);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .pipeline-arrow {
+            color: var(--muted);
+            display: none;
+        }
+
+        /* TARGET */
+
+        .vision-box {
+            margin-top: 60px;
+            padding: 48px;
+
+            border: 1px solid var(--border);
+            border-radius: 12px;
+
+            background:
+                radial-gradient(
+                    circle at 100% 0,
+                    rgba(215,255,100,0.08),
+                    transparent 30rem
+                ),
+                var(--bg-soft);
+        }
+
+        .vision-box blockquote {
+            margin: 0;
+
+            font-size: clamp(28px, 4vw, 48px);
+            line-height: 1.18;
+            letter-spacing: -0.035em;
+            max-width: 900px;
+        }
+
+        .vision-box p {
+            color: var(--muted);
+            margin: 26px 0 0;
+            max-width: 800px;
+        }
+
+        /* INSTALL */
+
+        .install-box {
+            margin-top: 48px;
+
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 30px;
+
+            padding: 25px 28px;
+
+            border: 1px solid var(--border);
+            background: var(--bg-soft);
+            border-radius: 10px;
+
+            font-family: monospace;
+        }
+
+        .install-command {
+            overflow-x: auto;
+            white-space: nowrap;
+            color: var(--muted-light);
+        }
+
+        .install-command span {
+            color: var(--accent);
+        }
+
+        .copy-button {
+            background: transparent;
+            color: var(--muted-light);
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        .copy-button:hover {
+            color: white;
+        }
+
+        /* STATUS */
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+
+            margin-top: 35px;
+
+            font-family: monospace;
+            font-size: 13px;
+            color: var(--muted-light);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+        }
+
+        /* FOOTER */
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 45px 0 60px;
+        }
+
+        .footer-inner {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 24px;
+        }
+
+        .footer-links a:hover {
+            color: white;
+        }
+
+        /* MOBILE */
+
+        @media (max-width: 850px) {
+            .nav-links .desktop-link {
+                display: none;
+            }
+
+            .hero {
+                padding-top: 90px;
+            }
+
+            .problem-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .features {
+                grid-template-columns: 1fr;
+            }
+
+            .principle {
+                grid-template-columns: 1fr;
+                gap: 14px;
+            }
+
+            .pipeline {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .vision-box {
+                padding: 30px;
+            }
+
+            .install-box {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .footer-inner {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 20px;
+            }
+        }
+
+        @media (max-width: 500px) {
+            .container {
+                width: min(calc(100% - 30px), var(--max-width));
+            }
+
+            h1 {
+                font-size: 54px;
+            }
+
+            .pipeline {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<nav>
+    <div class="container nav-inner">
+        <a class="brand" href="#">
+            SEVERIAN<span>.</span>
+        </a>
+
+        <div class="nav-links">
+            <a class="desktop-link" href="#why">Why Severian</a>
+            <a class="desktop-link" href="#language">Language</a>
+            <a class="desktop-link" href="#compiler">Compiler</a>
+
+            <a
+                class="github-button"
+                href="https://github.com/tlplayer/Severian"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                GitHub ↗
+            </a>
+        </div>
+    </div>
+</nav>
+
+
+<main>
+
+    <!-- HERO -->
+
+    <header class="hero">
+        <div class="container">
+
+            <div class="eyebrow">
+                A compiled systems language
+            </div>
+
+            <h1>
+                Readable code.<br>
+                <span class="hero-highlight">Systems semantics.</span>
+            </h1>
+
+            <p class="hero-description">
+                Severian combines Python-like syntax with static typing,
+                ownership and memory safety, structured concurrency, native
+                compilation, tensors, and an MLIR compiler backbone.
+            </p>
+
+            <div class="hero-actions">
+                <a
+                    class="button button-primary"
+                    href="https://github.com/tlplayer/Severian"
+                >
+                    Explore Severian
+                </a>
+
+                <a
+                    class="button button-secondary"
+                    href="https://github.com/tlplayer/Severian/tree/main/docs/examples"
+                >
+                    View examples
+                </a>
+            </div>
+
+            <div class="status">
+                <span class="status-dot"></span>
+                Early-stage compiler under active development
+            </div>
+
+
+            <div class="hero-code">
+
+                <div class="code-title">
+                    <div class="code-dots">
+                        <span class="code-dot"></span>
+                        <span class="code-dot"></span>
+                        <span class="code-dot"></span>
+                    </div>
+
+                    <span>hello.sev</span>
+                </div>
+
+<pre><span class="kw">def</span> add(a: <span class="type">int</span>, b: <span class="type">int</span>) -> <span class="type">int</span>:
+    <span class="kw">return</span> a + b
+
+print(add(1, 2))
+
+
+<span class="kw">test</span>:
+    assert(add(1, 2) == 3)</pre>
+
+            </div>
+
+        </div>
+    </header>
+
+
+    <!-- WHY -->
+
+    <section id="why">
+        <div class="container">
+
+            <div class="section-label">Why Severian</div>
+
+            <h2>
+                High-level code should not require giving up low-level control.
+            </h2>
+
+            <p class="section-intro">
+                Modern AI and infrastructure software often crosses several
+                programming models: scripting, native code, concurrency,
+                accelerators, networking, and deployment. Severian is an
+                attempt to make those concerns part of one language instead
+                of a collection of disconnected layers.
+            </p>
+
+
+            <div class="problem-grid">
+
+                <div class="problem">
+                    <div class="problem-number">01 / READABILITY</div>
+
+                    <h3>Keep the source small.</h3>
+
+                    <p>
+                        Indentation, concise declarations, comprehensions,
+                        familiar imports, negative indexing, slices, and
+                        expression-oriented syntax keep ordinary programs
+                        readable.
+                    </p>
+                </div>
+
+
+                <div class="problem">
+                    <div class="problem-number">02 / SAFETY</div>
+
+                    <h3>Make dangerous behavior visible.</h3>
+
+                    <p>
+                        The compiler reasons about ownership, mutation,
+                        task lifetimes, shape stability, errors, and
+                        capabilities instead of treating them as conventions.
+                    </p>
+                </div>
+
+
+                <div class="problem">
+                    <div class="problem-number">03 / PERFORMANCE</div>
+
+                    <h3>Compile the program.</h3>
+
+                    <p>
+                        Severian lowers checked programs through MLIR and LLVM
+                        rather than requiring an interpreter to remain in the
+                        execution path.
+                    </p>
+                </div>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- DESIGN -->
+
+    <section>
+        <div class="container">
+
+            <div class="section-label">Design center</div>
+
+            <h2>
+                Familiar where possible. Explicit where it matters.
+            </h2>
+
+
+            <div class="principles">
+
+                <div class="principle">
+                    <div class="principle-name">Python</div>
+
+                    <div class="principle-content">
+                        <h3>Readable surface syntax</h3>
+
+                        <p>
+                            Functions, indentation, imports, collections,
+                            slicing and iteration are intentionally familiar
+                            to Python programmers.
+                        </p>
+                    </div>
+                </div>
+
+
+                <div class="principle">
+                    <div class="principle-name">Rust</div>
+
+                    <div class="principle-content">
+                        <h3>Ownership and memory safety</h3>
+
+                        <p>
+                            Severian infers ownership operations where
+                            possible while retaining explicit
+                            <code>view</code>, <code>borrow</code>,
+                            <code>clone</code> and <code>move</code>
+                            operations when ownership needs to be stated.
+                        </p>
+                    </div>
+                </div>
+
+
+                <div class="principle">
+                    <div class="principle-name">Go</div>
+
+                    <div class="principle-content">
+                        <h3>Direct concurrency</h3>
+
+                        <p>
+                            Async tasks, channels and synchronization are
+                            language concepts. Task ownership and mutable
+                            access are checked instead of being hidden in
+                            library conventions.
+                        </p>
+                    </div>
+                </div>
+
+
+                <div class="principle">
+                    <div class="principle-name">MLIR</div>
+
+                    <div class="principle-content">
+                        <h3>A compiler designed for multiple targets</h3>
+
+                        <p>
+                            The compiler retains structured information
+                            through HIR and MLIR so native execution,
+                            vectorization, tensors and accelerator lowering
+                            do not have to begin from opaque source code.
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- LANGUAGE -->
+
+    <section id="language">
+        <div class="container">
+
+            <div class="section-label">Language</div>
+
+            <h2>
+                Systems features without systems-language noise.
+            </h2>
+
+            <div class="features">
+
+                <!-- OWNERSHIP -->
+
+                <article class="feature">
+                    <div class="feature-tag">OWNERSHIP</div>
+
+                    <h3>Inference first. Explicit when needed.</h3>
+
+                    <p>
+                        The compiler can infer ordinary ownership behavior,
+                        while code can state exactly what should happen at
+                        important boundaries.
+                    </p>
+
+                    <div class="mini-code">
+numbers := [1, 2, 3]<br><br>
+readonly = <span class="special">view</span> numbers<br>
+writable = <span class="special">borrow</span> numbers<br>
+copy = <span class="special">clone</span> numbers<br>
+owned = <span class="special">move</span> copy
+                    </div>
+                </article>
+
+
+                <!-- CONCURRENCY -->
+
+                <article class="feature">
+                    <div class="feature-tag">CONCURRENCY</div>
+
+                    <h3>Task lifetime is part of the program.</h3>
+
+                    <p>
+                        Async work states who owns the task. Mutable shared
+                        state requires explicit synchronization.
+                    </p>
+
+                    <div class="mini-code">
+worker = <span class="special">async</span> fetch(url) <span class="special">with self</span><br>
+body = <span class="special">await</span> worker
+                    </div>
+                </article>
+
+
+                <!-- ERRORS -->
+
+                <article class="feature">
+                    <div class="feature-tag">ERRORS</div>
+
+                    <h3>Recoverable errors are values.</h3>
+
+                    <p>
+                        Results are visible in the type system. The
+                        <code>?=</code> operator binds success and propagates
+                        failure.
+                    </p>
+
+                    <div class="mini-code">
+def load(path: Path) -> Result[string, IOError]:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data <span class="special">?=</span> read(path)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return data
+                    </div>
+                </article>
+
+
+                <!-- TENSORS -->
+
+                <article class="feature">
+                    <div class="feature-tag">TENSORS</div>
+
+                    <h3>Shape information reaches the compiler.</h3>
+
+                    <p>
+                        Ranked tensors retain scalar type and dimensions
+                        through the typed compiler representation.
+                    </p>
+
+                    <div class="mini-code">
+def encode(<br>
+&nbsp;&nbsp;input: Tensor[f32, dynamic, 768]<br>
+) -> Tensor[f32, dynamic, 768]:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return input
+                    </div>
+                </article>
+
+
+                <!-- GPU -->
+
+                <article class="feature">
+                    <div class="feature-tag">PLACEMENT</div>
+
+                    <h3>Say where parallel work belongs.</h3>
+
+                    <p>
+                        Data-parallel regions can carry placement information
+                        for GPU or SIMD lowering without replacing the source
+                        language with another kernel language.
+                    </p>
+
+                    <div class="mini-code">
+<span class="special">with gpu:</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;for index in indices(values):<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;values[index] += 1<br><br>
+
+for index in indices(values) <span class="special">with simd</span>:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;values[index] += 1
+                    </div>
+                </article>
+
+
+                <!-- TESTS -->
+
+                <article class="feature">
+                    <div class="feature-tag">TESTING</div>
+
+                    <h3>Tests live beside behavior.</h3>
+
+                    <p>
+                        Functions can carry ordinary tests as well as
+                        property, benchmark and chaos testing modes.
+                    </p>
+
+                    <div class="mini-code">
+def add(a: int, b: int) -> int:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;return a + b<br><br>
+
+<span class="special">test:</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;assert(add(1, 2) == 3)
+                    </div>
+                </article>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- COMPILER -->
+
+    <section id="compiler">
+        <div class="container">
+
+            <div class="section-label">Compiler</div>
+
+            <h2>
+                Source code becomes a native executable.
+            </h2>
+
+            <p class="section-intro">
+                The compiler pipeline is designed to preserve semantic
+                information long enough to perform safety analysis and
+                structured optimization before native linking.
+            </p>
+
+
+            <div class="pipeline">
+
+                <div class="pipeline-step">
+                    .sev<br>source
+                </div>
+
+                <div class="pipeline-step">
+                    AST
+                </div>
+
+                <div class="pipeline-step">
+                    HIR
+                </div>
+
+                <div class="pipeline-step">
+                    MLIR
+                </div>
+
+                <div class="pipeline-step">
+                    LLVM
+                </div>
+
+                <div class="pipeline-step">
+                    native<br>binary
+                </div>
+
+            </div>
+
+
+            <div class="hero-code">
+                <div class="code-title">
+                    <span>terminal</span>
+                    <span>sev</span>
+                </div>
+
+<pre><span class="comment"># Check a program</span>
+$ sev check program.sev
+
+<span class="comment"># Compile a native executable</span>
+$ sev compile program.sev
+
+<span class="comment"># Python-like development loop, compiled execution</span>
+$ sev program.sev
+
+<span class="comment"># Inspect compiler IR</span>
+$ sev emit-mlir program.sev</pre>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- WHY THIS IDEA -->
+
+    <section>
+        <div class="container">
+
+            <div class="section-label">The idea</div>
+
+            <h2>
+                The stack should get simpler, not larger.
+            </h2>
+
+            <div class="vision-box">
+
+                <blockquote>
+                    Write application code, systems code, concurrent code
+                    and numerical code in one readable language — then give
+                    the compiler enough information to make it fast and safe.
+                </blockquote>
+
+                <p>
+                    AI infrastructure increasingly combines model code,
+                    networking, concurrency, containers, distributed systems,
+                    native libraries and accelerator execution. Severian's
+                    design asks whether those layers can share one coherent
+                    type system, ownership model, compiler and package
+                    workflow instead of requiring developers to cross
+                    multiple language boundaries.
+                </p>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- PACKAGING -->
+
+    <section>
+        <div class="container">
+
+            <div class="section-label">Tooling</div>
+
+            <h2>
+                One language. One tool.
+            </h2>
+
+            <p class="section-intro">
+                <code>sev</code> is intended to provide a standard workflow
+                for checking, compiling, running, testing, building,
+                documenting and packaging Severian programs.
+            </p>
+
+
+            <div class="hero-code">
+                <div class="code-title">
+                    <span>Severian.toml</span>
+                    <span>package</span>
+                </div>
+
+<pre>[package]
+name = <span class="string">"my-app"</span>
+version = <span class="string">"0.1.0"</span>
+edition = <span class="string">"2026"</span>
+
+[dependencies]
+geometry = { path = <span class="string">"../geometry"</span> }</pre>
+
+            </div>
+
+        </div>
+    </section>
+
+
+    <!-- GET STARTED -->
+
+    <section id="start">
+        <div class="container">
+
+            <div class="section-label">Get started</div>
+
+            <h2>
+                Build Severian from source.
+            </h2>
+
+            <p class="section-intro">
+                The compiler is currently under active development. The
+                repository contains the compiler, official library,
+                language examples, benchmarks and test infrastructure.
+            </p>
+
+
+            <div class="install-box">
+
+                <div
+                    class="install-command"
+                    id="install-command"
+                >
+                    <span>$</span>
+                    git clone https://github.com/tlplayer/Severian.git
+                </div>
+
+                <button
+                    class="copy-button"
+                    onclick="copyInstall()"
+                    id="copy-button"
+                >
+                    Copy
+                </button>
+
+            </div>
+
+
+            <div class="hero-actions">
+
+                <a
+                    class="button button-primary"
+                    href="https://github.com/tlplayer/Severian"
+                >
+                    View on GitHub
+                </a>
+
+                <a
+                    class="button button-secondary"
+                    href="https://github.com/tlplayer/Severian/blob/main/README.md"
+                >
+                    Read the language guide
+                </a>
+
+            </div>
+
+        </div>
+    </section>
+
+</main>
+
+
+<footer>
+    <div class="container footer-inner">
+
+        <div>
+            SEVERIAN
+        </div>
+
+        <div class="footer-links">
+            <a href="https://github.com/tlplayer/Severian">GitHub</a>
+
+            <a href="https://github.com/tlplayer/Severian/tree/main/docs">
+                Docs
+            </a>
+
+            <a href="https://github.com/tlplayer/Severian/blob/main/LICENSE.md">
+                License
+            </a>
+        </div>
+
+    </div>
+</footer>
+
+
+<script>
+    function copyInstall() {
+        const command =
+            "git clone https://github.com/tlplayer/Severian.git";
+
+        navigator.clipboard.writeText(command);
+
+        const button = document.getElementById("copy-button");
+
+        button.textContent = "Copied";
+
+        setTimeout(() => {
+            button.textContent = "Copy";
+        }, 1500);
+    }
+</script>
+
+</body>
+</html>
