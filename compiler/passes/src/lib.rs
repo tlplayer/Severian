@@ -5,6 +5,13 @@ use severian_package::{FusionAlias, FusionRule, GraphOperation, GraphRule};
 use std::collections::HashMap;
 use std::fmt;
 
+pub mod canonicalize;
+pub mod control_flow;
+pub mod dataflow;
+pub mod inlining;
+pub mod iree;
+pub mod loops;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassError {
     pub pass: &'static str,
@@ -50,6 +57,8 @@ pub fn standard_pipeline(
     aliases: impl IntoIterator<Item = FusionAlias>,
 ) -> PassManager {
     let mut pipeline = PassManager::default();
+    pipeline.add(dataflow::LocalDataflow);
+    pipeline.add(loops::LoopSimplification);
     let fusion = ElementwiseFusion::new(rules, aliases);
     if !fusion.rules.is_empty() || !fusion.configuration_errors.is_empty() {
         pipeline.add(fusion);

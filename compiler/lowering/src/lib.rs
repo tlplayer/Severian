@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
 
-mod tensor;
+pub mod coverage;
+pub mod debug;
+pub mod gpu;
+pub mod llvm;
+pub mod location;
+pub mod stablehlo;
+pub mod tensor;
 
 use severian_hir::{
     AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,

@@ -2,6 +2,9 @@
 members = [
     "compiler/ast",
     "compiler/backend",
+    "compiler/build",
+    "compiler/coverage",
+    "compiler/diagnostics",
     "compiler/driver",
     "compiler/hir",
     "compiler/lexer",
@@ -12,7 +15,10 @@ members = [
     "compiler/parser",
     "compiler/passes",
     "compiler/platform",
+    "compiler/runtime",
     "compiler/semantic",
+    "compiler/source",
+    "compiler/xla",
 ]
 resolver = "2"
 

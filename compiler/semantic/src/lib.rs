@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod analysis;
+pub mod source_map;
+
 use severian_ast::{
     AssignOp as AstAssignOp, BinaryOp as AstBinaryOp, Block, ElseBranch, Expr, ImportKind, Item,
     LetKind, Literal, Module, OwnershipOp as AstOwnershipOp, Pattern, Span, Stmt, Type, TypeArg,

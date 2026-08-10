@@ -1,9 +1,9 @@
 [package]
-name = "severian-runtime"
+name = "severian-source"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-severian-hir = { version = "0.1.0", path = "../hir" }
+severian-ast = { version = "0.1.0", path = "../ast" }

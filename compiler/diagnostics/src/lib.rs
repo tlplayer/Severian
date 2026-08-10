@@ -3,7 +3,9 @@
 pub mod coverage;
 pub mod dead_code;
 pub mod doctor;
+pub mod explain;
 pub mod lint;
+pub mod render;
 pub mod verify;
 
 use std::path::PathBuf;

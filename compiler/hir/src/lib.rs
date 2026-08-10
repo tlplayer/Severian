@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod source;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub globals: Vec<Global>,

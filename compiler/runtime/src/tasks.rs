@@ -1,4 +1,4 @@
-use super::abi::{mlir_type, LoweredValue};
+use crate::lowering_abi::{mlir_type, LoweredValue};
 use severian_hir::{TaskPlacement, ValueType};
 
 #[derive(Debug, Clone)]

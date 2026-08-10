@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{write_mlir, Artifact, ArtifactKind, ArtifactLayout},
+    artifact::{write_mlir, write_stablehlo, Artifact, ArtifactKind, ArtifactLayout},
     options::{CompileOptions, EmitKind},
     pipeline::PipelinePlan,
     target::{BackendFamily, DriverTarget},
@@ -118,6 +118,9 @@ fn emit_amd(
     options: &CompileOptions,
     layout: &ArtifactLayout,
 ) -> Result<Option<Artifact>, CompileError> {
+    if options.run_iree_passes {
+        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
+    }
     let DriverTarget::Amd { architecture, .. } = &options.target else {
         unreachable!();
     };
@@ -154,9 +157,12 @@ fn emit_amd(
 
 fn emit_nvidia(
     compilation: &Compilation,
-    _options: &CompileOptions,
+    options: &CompileOptions,
     layout: &ArtifactLayout,
 ) -> Result<Option<Artifact>, CompileError> {
+    if options.run_iree_passes {
+        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
+    }
     let _ = write_mlir(&compilation.mlir, &layout.source_mlir)?;
 
     Err(CompileError::Optimization(
@@ -166,9 +172,9 @@ fn emit_nvidia(
 }
 
 fn emit_xla(
-    _compilation: &Compilation,
+    compilation: &Compilation,
     options: &CompileOptions,
-    _layout: &ArtifactLayout,
+    layout: &ArtifactLayout,
 ) -> Result<Option<Artifact>, CompileError> {
     let DriverTarget::Xla {
         platform,
@@ -185,16 +191,35 @@ fn emit_xla(
         (None, None) => "default PJRT device".into(),
     };
 
+    let mut xla_hir = compilation.optimized_hir.clone();
+    severian_xla::optimization_pipeline()
+        .run(&mut xla_hir)
+        .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    let _plan = severian_xla::XlaOptimizationPlan::analyze(&xla_hir);
+    let lowered = severian_lowering::stablehlo::lower_program(&xla_hir)
+        .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    let stablehlo = severian_xla::StableHloModule::from_text(lowered.as_str());
+
+    if options.emit == EmitKind::StableHlo {
+        return write_stablehlo(&stablehlo, &layout.output)
+            .map(Some)
+            .map_err(CompileError::Io);
+    }
+
+    let _ = write_stablehlo(&stablehlo, &layout.stablehlo)?;
     Err(CompileError::Optimization(format!(
-        "XLA target `{destination}` is planned; wire severian_lowering::lower_stablehlo(program) into severian_xla::XlaClient here"
+        "StableHLO for XLA target `{destination}` is ready, but selecting/loading a PJRT plugin requires an explicit plugin path that DriverTarget does not yet represent"
     )))
 }
 
 fn emit_spirv(
     compilation: &Compilation,
-    _options: &CompileOptions,
+    options: &CompileOptions,
     layout: &ArtifactLayout,
 ) -> Result<Option<Artifact>, CompileError> {
+    if options.run_iree_passes {
+        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
+    }
     let _ = write_mlir(&compilation.mlir, &layout.source_mlir)?;
 
     Err(CompileError::Optimization(

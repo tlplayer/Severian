@@ -22,4 +22,6 @@ severian-ownership = { version = "0.1.0", path = "../ownership" }
 severian-package = { version = "0.1.0", path = "../package" }
 severian-parser = { version = "0.1.0", path = "../parser" }
 severian-passes = { version = "0.1.0", path = "../passes" }
+severian-platform = { version = "0.1.0", path = "../platform" }
 severian-semantic = { version = "0.1.0", path = "../semantic" }
+severian-xla = { version = "0.1.0", path = "../xla" }

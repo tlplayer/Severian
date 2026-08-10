@@ -1,5 +1,16 @@
 #![forbid(unsafe_code)]
 
+pub mod artifact;
+pub mod compile;
+pub mod options;
+pub mod pipeline;
+pub mod target;
+
+pub use compile::{compile, CompileInput, CompileOutput, CompileRequest};
+pub use options::{CompileOptions as DriverCompileOptions, EmitKind, OptimizationLevel};
+pub use pipeline::{PipelinePlan, PipelineStage};
+pub use target::{BackendFamily, DriverTarget, TargetParseError};
+
 use severian_ast::{Module as AstModule, Span};
 use severian_hir::{
     AssignmentOp, BinaryOp, ChaosAction, Expression, Function, Instruction, MatchPattern, Program,
@@ -14,9 +25,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Compilation {
     pub hir: Program,
+    pub effects: severian_semantic::analysis::effects::EffectAnalysis,
+    pub types: severian_semantic::analysis::types::TypeAnalysis,
+    pub ownership: severian_ownership::analysis::OwnershipAnalysis,
+    pub optimized_hir: Program,
     pub mlir: Module,
 }
 
@@ -97,7 +112,10 @@ fn compile_ast(
             message: error.message,
         }
     })?;
-    severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
+    let effects = severian_semantic::analysis::effects::analyze(&hir);
+    let types = severian_semantic::analysis::types::analyze(&hir);
+    let ownership = severian_ownership::check_with_analysis(&hir)
+        .map_err(|error| CompileError::Ownership(error.message))?;
     let mut optimized_hir = hir.clone();
     let fusion_rules = interfaces
         .iter()
@@ -113,7 +131,7 @@ fn compile_ast(
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
     let mlir = severian_lowering::lower(&optimized_hir);
 
-    Ok(Compilation { hir, mlir })
+    Ok(Compilation { hir, effects, types, ownership, optimized_hir, mlir })
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
@@ -246,6 +264,10 @@ pub fn native_test_compilation(
     });
     let native = Compilation {
         mlir: severian_lowering::lower(&hir),
+        effects: severian_semantic::analysis::effects::analyze(&hir),
+        types: severian_semantic::analysis::types::analyze(&hir),
+        ownership: severian_ownership::analysis::analyze(&hir),
+        optimized_hir: hir.clone(),
         hir,
     };
     Ok((native, count))
