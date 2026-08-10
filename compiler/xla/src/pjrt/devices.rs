@@ -4,7 +4,6 @@ use super::{
     api,
     compile::RawClient,
     error,
-    memory::{memory_info, RawMemoryInfo},
 };
 use crate::Result;
 use std::ptr::NonNull;
@@ -16,8 +15,6 @@ pub struct RawDeviceInfo {
     pub local_hardware_id: Option<i32>,
     pub kind: String,
     pub addressable: bool,
-    pub default_memory_id: Option<i32>,
-    pub memories: Vec<RawMemoryInfo>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,51 +69,13 @@ impl RawDevice {
             None
         };
 
-        let memories = self.addressable_memories(client)?
-            .into_iter()
-            .map(|memory| memory_info(client, memory))
-            .collect::<Result<Vec<_>>>()?;
-
-        let default_memory_id = self.default_memory(client)?
-            .map(|memory| memory_info(client, memory).map(|info| info.id))
-            .transpose()?;
-
         Ok(RawDeviceInfo {
             id,
             process_index,
             local_hardware_id,
             kind,
             addressable,
-            default_memory_id,
-            memories,
         })
-    }
-
-    pub fn addressable_memories(self, client: &RawClient) -> Result<Vec<*mut api::PJRT_Memory>> {
-        let api = client.plugin().api();
-        let mut args = api::PJRT_Device_AddressableMemories_Args {
-            struct_size: api::struct_size::<api::PJRT_Device_AddressableMemories_Args>(),
-            extension_start: api::null_extension(),
-            device: self.raw(),
-            memories: std::ptr::null(),
-            num_memories: 0,
-        };
-        let result = unsafe { (api.PJRT_Device_AddressableMemories)(&mut args) };
-        unsafe { error::check(api, result)? };
-        pointer_array(args.memories, args.num_memories)
-    }
-
-    pub fn default_memory(self, client: &RawClient) -> Result<Option<*mut api::PJRT_Memory>> {
-        let api = client.plugin().api();
-        let mut args = api::PJRT_Device_DefaultMemory_Args {
-            struct_size: api::struct_size::<api::PJRT_Device_DefaultMemory_Args>(),
-            extension_start: api::null_extension(),
-            device: self.raw(),
-            memory: std::ptr::null_mut(),
-        };
-        let result = unsafe { (api.PJRT_Device_DefaultMemory)(&mut args) };
-        unsafe { error::check(api, result)? };
-        Ok((!args.memory.is_null()).then_some(args.memory))
     }
 }
 
@@ -162,10 +121,6 @@ impl RawClient {
             .ok_or_else(|| crate::XlaError::Pjrt(
                 "PJRT client has no addressable devices".into(),
             ))
-    }
-
-    pub fn device_infos(&self) -> Result<Vec<RawDeviceInfo>> {
-        self.devices()?.into_iter().map(|device| device.info(self)).collect()
     }
 }
 

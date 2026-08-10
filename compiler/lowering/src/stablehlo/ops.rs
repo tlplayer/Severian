@@ -219,6 +219,8 @@ impl StableHloEmitter {
             list(rhs_contracting),
             lhs.ty,
             rhs.ty,
+            result = result,
+            ty = ty,
         ));
 
         MlirValue::new(result, ty)

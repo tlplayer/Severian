@@ -1,7 +1,7 @@
 use crate::{
     cache::{BuildCache, CacheStatus},
     fingerprint::{fingerprint_node, Fingerprint},
-    graph::{BuildGraph, GraphError},
+    graph::BuildGraph,
     node::{BuildNode, BuildNodeId},
 };
 use std::collections::HashMap;

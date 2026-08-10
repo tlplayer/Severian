@@ -73,6 +73,7 @@ impl BuildProfile {
             name: "coverage".into(),
             optimization: 0,
             debug: DebugInfo::Full,
+            lto: LtoMode::Off,
             incremental: false,
             overflow_checks: true,
             assertions: true,

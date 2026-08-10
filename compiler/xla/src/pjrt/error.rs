@@ -1,6 +1,6 @@
 use super::api;
 use crate::XlaError;
-use std::{ffi::CStr, ptr::NonNull};
+use std::ptr::NonNull;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PjrtStatus {

@@ -41,7 +41,3 @@ pub(crate) fn id_from_handle(handle: *mut c_void) -> usize {
 pub(crate) fn null_handle() -> *mut c_void {
     std::ptr::null_mut()
 }
-
-pub(crate) fn is_null_handle(handle: *mut c_void) -> bool {
-    handle.is_null()
-}

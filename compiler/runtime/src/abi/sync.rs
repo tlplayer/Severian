@@ -1,4 +1,4 @@
-use super::{handle_from_id, id_from_handle, next_handle_id, null_handle};
+use super::{handle_from_id, id_from_handle, next_handle_id};
 use crate::sync::{Permit, Semaphore};
 use std::{
     collections::HashMap,

@@ -31,7 +31,6 @@ pub enum XlaError {
     PluginLoad(String),
     Pjrt(String),
     Compilation(String),
-    Execution(String),
     Unsupported(String),
 }
 
@@ -44,7 +43,6 @@ impl fmt::Display for XlaError {
             Self::PluginLoad(message) => write!(f, "PJRT plugin load error: {message}"),
             Self::Pjrt(message) => write!(f, "PJRT error: {message}"),
             Self::Compilation(message) => write!(f, "XLA compilation error: {message}"),
-            Self::Execution(message) => write!(f, "XLA execution error: {message}"),
             Self::Unsupported(message) => write!(f, "unsupported XLA feature: {message}"),
         }
     }

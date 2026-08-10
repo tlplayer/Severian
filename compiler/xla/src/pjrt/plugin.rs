@@ -13,7 +13,7 @@ pub struct RawPjrtPlugin {
 
 struct PluginInner {
     path: PathBuf,
-    library: NativeLibrary,
+    _library: NativeLibrary,
     api: NonNull<api::PJRT_Api>,
 }
 
@@ -41,7 +41,7 @@ impl RawPjrtPlugin {
         let plugin = Self {
             inner: Arc::new(PluginInner {
                 path,
-                library,
+                _library: library,
                 api,
             }),
         };

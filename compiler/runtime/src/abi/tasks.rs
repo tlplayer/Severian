@@ -1,6 +1,6 @@
 use super::{handle_from_id, id_from_handle, next_handle_id, null_handle};
 use crate::{
-    task::{Placement, TaskError, TaskHandle, TaskResult},
+    task::{Placement, TaskError, TaskHandle},
     Runtime, RuntimeConfig,
 };
 use std::{

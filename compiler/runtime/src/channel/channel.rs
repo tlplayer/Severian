@@ -44,7 +44,7 @@ struct Inner<T> {
 }
 
 pub struct Channel<T> {
-    inner: Arc<Inner<T>>,
+    _inner: Arc<Inner<T>>,
 }
 
 impl<T> Channel<T> {

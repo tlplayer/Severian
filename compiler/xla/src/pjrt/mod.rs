@@ -16,15 +16,10 @@ pub(crate) mod api;
 pub(crate) mod compile;
 pub(crate) mod devices;
 pub(crate) mod error;
-pub(crate) mod events;
-pub(crate) mod execute;
 pub(crate) mod host_buffer;
-pub(crate) mod memory;
-pub(crate) mod platform;
 pub(crate) mod plugin;
-pub(crate) mod topology;
 
 pub use buffer::{Buffer, ElementType, HostBuffer, Shape};
 pub use client::{PjrtClient, PjrtPlugin};
-pub use device::{Device, DeviceKind, MemorySpace};
+pub use device::{Device, DeviceKind};
 pub use executable::LoadedExecutable;

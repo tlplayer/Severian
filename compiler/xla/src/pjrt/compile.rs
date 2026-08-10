@@ -29,14 +29,6 @@ pub struct RawLoadedExecutable {
 unsafe impl Send for RawLoadedExecutable {}
 unsafe impl Sync for RawLoadedExecutable {}
 
-pub struct RawExecutable {
-    plugin: RawPjrtPlugin,
-    executable: NonNull<api::PJRT_Executable>,
-}
-
-unsafe impl Send for RawExecutable {}
-unsafe impl Sync for RawExecutable {}
-
 impl RawClient {
     pub fn create(plugin: RawPjrtPlugin) -> Result<Self> {
         let api = plugin.api();
@@ -111,7 +103,7 @@ impl RawClient {
         let mut code = module.bytes().to_vec();
         let format = b"mlir";
 
-        let mut program = api::PJRT_Program {
+        let program = api::PJRT_Program {
             struct_size: api::struct_size::<api::PJRT_Program>(),
             extension_start: api::null_extension(),
             code: code.as_mut_ptr().cast::<c_char>(),
@@ -165,34 +157,6 @@ impl RawLoadedExecutable {
         self.executable.as_ptr()
     }
 
-    pub fn plugin(&self) -> &RawPjrtPlugin {
-        &self.plugin
-    }
-
-    pub fn executable_metadata(&self) -> Result<RawExecutable> {
-        let api = self.plugin.api();
-        let mut args = api::PJRT_LoadedExecutable_GetExecutable_Args {
-            struct_size: api::struct_size::<api::PJRT_LoadedExecutable_GetExecutable_Args>(),
-            extension_start: api::null_extension(),
-            loaded_executable: self.raw(),
-            executable: std::ptr::null_mut(),
-        };
-
-        let result = unsafe { (api.PJRT_LoadedExecutable_GetExecutable)(&mut args) };
-        unsafe { error::check(api, result)? };
-
-        let executable = NonNull::new(args.executable)
-            .ok_or_else(|| error::invalid_raw_pointer("PJRT_Executable"))?;
-
-        Ok(RawExecutable {
-            plugin: self.plugin.clone(),
-            executable,
-        })
-    }
-
-    pub fn num_outputs(&self) -> Result<usize> {
-        self.executable_metadata()?.num_outputs()
-    }
 }
 
 impl Drop for RawLoadedExecutable {
@@ -205,36 +169,6 @@ impl Drop for RawLoadedExecutable {
         };
 
         let error = unsafe { (api.PJRT_LoadedExecutable_Destroy)(&mut args) };
-        let _ = unsafe { error::check(api, error) };
-    }
-}
-
-impl RawExecutable {
-    pub fn num_outputs(&self) -> Result<usize> {
-        let api = self.plugin.api();
-        let mut args = api::PJRT_Executable_NumOutputs_Args {
-            struct_size: api::struct_size::<api::PJRT_Executable_NumOutputs_Args>(),
-            extension_start: api::null_extension(),
-            executable: self.executable.as_ptr(),
-            num_outputs: 0,
-        };
-
-        let result = unsafe { (api.PJRT_Executable_NumOutputs)(&mut args) };
-        unsafe { error::check(api, result)? };
-        Ok(args.num_outputs)
-    }
-}
-
-impl Drop for RawExecutable {
-    fn drop(&mut self) {
-        let api = self.plugin.api();
-        let mut args = api::PJRT_Executable_Destroy_Args {
-            struct_size: api::struct_size::<api::PJRT_Executable_Destroy_Args>(),
-            extension_start: api::null_extension(),
-            executable: self.executable.as_ptr(),
-        };
-
-        let error = unsafe { (api.PJRT_Executable_Destroy)(&mut args) };
         let _ = unsafe { error::check(api, error) };
     }
 }

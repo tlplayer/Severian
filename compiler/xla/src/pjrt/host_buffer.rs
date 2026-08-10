@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     pjrt::buffer::{ElementType, HostBuffer, Shape},
-    Result, XlaError,
+    Result,
 };
 use std::{
     ffi::c_void,
@@ -72,14 +72,6 @@ impl RawClient {
 }
 
 impl RawBuffer {
-    pub(crate) unsafe fn from_raw_parts(
-        plugin: super::plugin::RawPjrtPlugin,
-        buffer: NonNull<api::PJRT_Buffer>,
-        shape: Shape,
-    ) -> Self {
-        Self { plugin, buffer, shape }
-    }
-
     pub fn raw(&self) -> *mut api::PJRT_Buffer {
         self.buffer.as_ptr()
     }
@@ -88,49 +80,6 @@ impl RawBuffer {
         &self.shape
     }
 
-    pub fn to_host(&self) -> Result<HostBuffer> {
-        let api = self.plugin.api();
-
-        let mut query = api::PJRT_Buffer_ToHostBuffer_Args {
-            struct_size: api::struct_size::<api::PJRT_Buffer_ToHostBuffer_Args>(),
-            extension_start: api::null_extension(),
-            src: self.raw(),
-            host_layout: std::ptr::null_mut(),
-            dst: std::ptr::null_mut(),
-            dst_size: 0,
-            event: std::ptr::null_mut(),
-        };
-
-        let result = unsafe { (api.PJRT_Buffer_ToHostBuffer)(&mut query) };
-        unsafe { error::check(api, result)? };
-
-        if !query.event.is_null() {
-            // Size-query calls are allowed to return an event. Complete and
-            // destroy it before issuing the real copy.
-            await_and_destroy_event(api, query.event)?;
-        }
-
-        let mut bytes = vec![0u8; query.dst_size];
-
-        let mut copy = api::PJRT_Buffer_ToHostBuffer_Args {
-            struct_size: api::struct_size::<api::PJRT_Buffer_ToHostBuffer_Args>(),
-            extension_start: api::null_extension(),
-            src: self.raw(),
-            host_layout: std::ptr::null_mut(),
-            dst: bytes.as_mut_ptr().cast::<c_void>(),
-            dst_size: bytes.len(),
-            event: std::ptr::null_mut(),
-        };
-
-        let result = unsafe { (api.PJRT_Buffer_ToHostBuffer)(&mut copy) };
-        unsafe { error::check(api, result)? };
-
-        if !copy.event.is_null() {
-            await_and_destroy_event(api, copy.event)?;
-        }
-
-        HostBuffer::new(self.shape.clone(), bytes)
-    }
 }
 
 impl Drop for RawBuffer {
@@ -162,27 +111,6 @@ pub fn element_type_to_raw(element: ElementType) -> api::PJRT_Buffer_Type {
         ElementType::BF16 => api::PJRT_BUFFER_TYPE_BF16,
         ElementType::F32 => api::PJRT_BUFFER_TYPE_F32,
         ElementType::F64 => api::PJRT_BUFFER_TYPE_F64,
-    }
-}
-
-pub fn raw_to_element_type(raw: api::PJRT_Buffer_Type) -> Result<ElementType> {
-    match raw {
-        api::PJRT_BUFFER_TYPE_PRED => Ok(ElementType::Pred),
-        api::PJRT_BUFFER_TYPE_S8 => Ok(ElementType::S8),
-        api::PJRT_BUFFER_TYPE_S16 => Ok(ElementType::S16),
-        api::PJRT_BUFFER_TYPE_S32 => Ok(ElementType::S32),
-        api::PJRT_BUFFER_TYPE_S64 => Ok(ElementType::S64),
-        api::PJRT_BUFFER_TYPE_U8 => Ok(ElementType::U8),
-        api::PJRT_BUFFER_TYPE_U16 => Ok(ElementType::U16),
-        api::PJRT_BUFFER_TYPE_U32 => Ok(ElementType::U32),
-        api::PJRT_BUFFER_TYPE_U64 => Ok(ElementType::U64),
-        api::PJRT_BUFFER_TYPE_F16 => Ok(ElementType::F16),
-        api::PJRT_BUFFER_TYPE_BF16 => Ok(ElementType::BF16),
-        api::PJRT_BUFFER_TYPE_F32 => Ok(ElementType::F32),
-        api::PJRT_BUFFER_TYPE_F64 => Ok(ElementType::F64),
-        other => Err(XlaError::Unsupported(format!(
-            "PJRT buffer element type {other} is not represented by Severian yet"
-        ))),
     }
 }
 

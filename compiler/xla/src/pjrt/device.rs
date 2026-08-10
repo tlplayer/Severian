@@ -12,13 +12,6 @@ pub enum DeviceKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemorySpace {
-    pub id: i32,
-    pub kind: String,
-    pub capacity_bytes: Option<u64>,
-}
-
 #[derive(Clone)]
 pub struct Device {
     raw: RawDevice,
@@ -30,7 +23,6 @@ pub struct Device {
     pub platform: String,
     pub description: String,
     pub addressable: bool,
-    pub memory_spaces: Vec<MemorySpace>,
 }
 
 impl Device {
@@ -41,7 +33,6 @@ impl Device {
             local_hardware_id,
             kind,
             addressable,
-            memories,
             ..
         } = raw.info(&client)?;
         let normalized_kind = kind.to_ascii_lowercase();
@@ -68,11 +59,6 @@ impl Device {
             platform: client.platform_name()?,
             description: kind,
             addressable,
-            memory_spaces: memories.into_iter().map(|memory| MemorySpace {
-                id: memory.id,
-                kind: memory.kind,
-                capacity_bytes: None,
-            }).collect(),
         })
     }
 

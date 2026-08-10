@@ -2,7 +2,7 @@ use crate::{
     toolchain::{find_required_tool, run_tool, Tool},
     BackendError,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct LlvmLoweringOptions {

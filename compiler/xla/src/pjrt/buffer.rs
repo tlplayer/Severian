@@ -108,7 +108,5 @@ pub struct Buffer {
 impl Buffer {
     pub(crate) fn from_raw(raw: RawBuffer) -> Self { Self { raw } }
 
-    pub(crate) fn raw(&self) -> &RawBuffer { &self.raw }
-
     pub fn shape(&self) -> &Shape { self.raw.shape() }
 }
