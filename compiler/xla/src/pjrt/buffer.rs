@@ -1,8 +1,5 @@
-use super::device::DeviceId;
+use super::host_buffer::RawBuffer;
 use crate::{Result, XlaError};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BufferId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ElementType {
@@ -104,16 +101,14 @@ impl HostBuffer {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct Buffer {
-    pub id: BufferId,
-    pub device: DeviceId,
-    pub shape: Shape,
-    pub ready: bool,
+    raw: RawBuffer,
 }
 
 impl Buffer {
-    pub fn is_ready(&self) -> bool {
-        self.ready
-    }
+    pub(crate) fn from_raw(raw: RawBuffer) -> Self { Self { raw } }
+
+    pub(crate) fn raw(&self) -> &RawBuffer { &self.raw }
+
+    pub fn shape(&self) -> &Shape { self.raw.shape() }
 }

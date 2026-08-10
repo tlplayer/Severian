@@ -28,9 +28,6 @@ use std::rc::Rc;
 #[derive(Debug, Clone)]
 pub struct Compilation {
     pub hir: Program,
-    pub effects: severian_semantic::analysis::effects::EffectAnalysis,
-    pub types: severian_semantic::analysis::types::TypeAnalysis,
-    pub ownership: severian_ownership::analysis::OwnershipAnalysis,
     pub optimized_hir: Program,
     pub mlir: Module,
 }
@@ -112,9 +109,7 @@ fn compile_ast(
             message: error.message,
         }
     })?;
-    let effects = severian_semantic::analysis::effects::analyze(&hir);
-    let types = severian_semantic::analysis::types::analyze(&hir);
-    let ownership = severian_ownership::check_with_analysis(&hir)
+    severian_ownership::check(&hir)
         .map_err(|error| CompileError::Ownership(error.message))?;
     let mut optimized_hir = hir.clone();
     let fusion_rules = interfaces
@@ -131,7 +126,7 @@ fn compile_ast(
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
     let mlir = severian_lowering::lower(&optimized_hir);
 
-    Ok(Compilation { hir, effects, types, ownership, optimized_hir, mlir })
+    Ok(Compilation { hir, optimized_hir, mlir })
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
@@ -164,24 +159,6 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
     severian_backend::compile_native(&compilation.hir, &compilation.mlir, output)
         .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
-}
-
-pub fn compile_rocm(
-    compilation: &Compilation,
-    output: &Path,
-    chip: &str,
-) -> Result<(), CompileError> {
-    severian_backend::compile_rocm(&compilation.hir, &compilation.mlir, output, chip)
-        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
-}
-
-pub fn lower_to_rocdl(compilation: &Compilation, chip: &str) -> Result<Module, CompileError> {
-    severian_backend::lower_to_rocdl(&compilation.mlir, chip)
-        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
-}
-
-pub fn detect_amd_gpu_chip() -> Option<String> {
-    severian_backend::detect_amd_gpu_chip()
 }
 
 pub fn inspect_toolchain() -> severian_backend::ToolchainReport {
@@ -264,9 +241,6 @@ pub fn native_test_compilation(
     });
     let native = Compilation {
         mlir: severian_lowering::lower(&hir),
-        effects: severian_semantic::analysis::effects::analyze(&hir),
-        types: severian_semantic::analysis::types::analyze(&hir),
-        ownership: severian_ownership::analysis::analyze(&hir),
         optimized_hir: hir.clone(),
         hir,
     };

@@ -1,7 +1,6 @@
 use severian_driver::{
-    compile_native, compile_native_tests, compile_path, compile_rocm, detect_amd_gpu_chip,
-    inspect_toolchain, lower_to_rocdl, native_test_compilation, run, run_integration_tests,
-    run_tests,
+    compile_native, compile_native_tests, compile_path, inspect_toolchain,
+    native_test_compilation, run, run_integration_tests, run_tests,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -98,19 +97,6 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
             print!("{}", compilation.mlir);
         }
-        "emit-mlir" if args.len() >= 4 && args[2] == "--target" && args[3] == "rocm" => {
-            let chip = option_value(&args[4..], "--chip")
-                .map(str::to_owned)
-                .or_else(detect_amd_gpu_chip)
-                .ok_or_else(|| {
-                    "could not detect an AMD GPU; pass `--chip gfx…` or set SEVERIAN_AMDGPU_CHIP"
-                        .to_string()
-                })?;
-            let compilation =
-                compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
-            let module = lower_to_rocdl(&compilation, &chip).map_err(|error| error.to_string())?;
-            print!("{module}");
-        }
         "emit-test-mlir" if args.len() == 2 => {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
@@ -118,10 +104,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 native_test_compilation(&compilation).map_err(|error| error.to_string())?;
             print!("{}", native.mlir);
         }
-        "compile"
-            if (args.len() == 2 || args.len() == 4)
-                && option_value(&args[2..], "--target") != Some("rocm") =>
-        {
+        "compile" if args.len() == 2 || args.len() == 4 => {
             let input = Path::new(&args[1]);
             let output = match args.as_slice() {
                 [_, _, flag, output] if flag == "-o" => PathBuf::from(output),
@@ -131,22 +114,6 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             let compilation = compile_path(input).map_err(|error| error.to_string())?;
             compile_native(&compilation, &output).map_err(|error| error.to_string())?;
             println!("{}", output.display());
-        }
-        "compile" if args.len() >= 4 && option_value(&args[2..], "--target") == Some("rocm") => {
-            let input = Path::new(&args[1]);
-            let output = option_value(&args[2..], "-o")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("a.out"));
-            let chip = option_value(&args[2..], "--chip")
-                .map(str::to_owned)
-                .or_else(detect_amd_gpu_chip)
-                .ok_or_else(|| {
-                    "could not detect an AMD GPU; pass `--chip gfx…` or set SEVERIAN_AMDGPU_CHIP"
-                        .to_string()
-                })?;
-            let compilation = compile_path(input).map_err(|error| error.to_string())?;
-            compile_rocm(&compilation, &output, &chip).map_err(|error| error.to_string())?;
-            println!("{} ({chip})", output.display());
         }
         "compile-tests" if args.len() == 4 && args[2] == "-o" => {
             let compilation =
@@ -193,11 +160,11 @@ fn usage() -> String {
     concat!(
         "usage: sev [command] [source.sev] [options]\n",
         "  sev source.sev: compile to a temporary native executable and run it\n",
-        "  doctor: verify the supported native and optional accelerator toolchains\n",
+        "  doctor: verify the supported native toolchain\n",
         "  build [source.sev]: compile into target/debug, using Severian.toml by default\n",
         "  check source.sev: run the frontend and ownership checks\n",
-        "  emit-mlir target options: --target rocm [--chip gfx1100]\n",
-        "  compile options: [-o executable] [--target rocm [--chip gfx1101]]\n",
+        "  emit-mlir source.sev: emit native-path MLIR\n",
+        "  compile options: [-o executable]\n",
         "  compile-tests options: -o executable\n",
         "  run source.sev: execute through the controlled development runtime\n",
         "  test options: --integration | --integration-only"
@@ -239,19 +206,6 @@ fn doctor() -> Result<(), String> {
         println!(
             "  [skip] SQLite (optional): install sqlite3 development files for database programs"
         );
-    }
-    match (&report.rocm_hip_library, &report.amd_gpu_chip) {
-        (Some(library), Some(chip)) => {
-            println!("  [ok]   ROCm (optional): {} ({chip})", library.display())
-        }
-        (Some(library), None) => println!(
-            "  [skip] ROCm (optional): {} found, no AMD GPU detected",
-            library.display()
-        ),
-        (None, Some(chip)) => {
-            println!("  [skip] ROCm (optional): {chip} detected, HIP runtime not found")
-        }
-        (None, None) => println!("  [skip] ROCm (optional): HIP runtime and AMD GPU not detected"),
     }
     if report.native_ready() {
         println!("native compilation: ready");
@@ -297,10 +251,4 @@ fn compile_and_run(source: &Path) -> Result<(), String> {
     } else {
         Err(format!("native executable exited with {status}"))
     }
-}
-
-fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find(|pair| pair[0] == option)
-        .map(|pair| pair[1].as_str())
 }

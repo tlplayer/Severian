@@ -9,14 +9,9 @@ pub enum PipelineStage {
     Parse,
     Semantic,
     Ownership,
-    EffectAnalysis,
-    TypeAnalysis,
     GenericOptimization,
-    XlaOptimization,
-    IreePlanning,
     LowerLinalg,
     LowerStableHlo,
-    LowerGpu,
     Bufferize,
     LowerLlvm,
     CompileXla,
@@ -38,8 +33,6 @@ impl PipelinePlan {
             PipelineStage::Parse,
             PipelineStage::Semantic,
             PipelineStage::Ownership,
-            PipelineStage::EffectAnalysis,
-            PipelineStage::TypeAnalysis,
         ];
 
         if options.run_generic_passes {
@@ -47,7 +40,7 @@ impl PipelinePlan {
         }
 
         match options.target.family() {
-            BackendFamily::Native | BackendFamily::Llvm => {
+            BackendFamily::Native => {
                 stages.extend([
                     PipelineStage::LowerLinalg,
                     PipelineStage::Bufferize,
@@ -63,9 +56,6 @@ impl PipelinePlan {
             }
 
             BackendFamily::Xla => {
-                if options.run_xla_passes {
-                    stages.push(PipelineStage::XlaOptimization);
-                }
                 stages.extend([
                     PipelineStage::LowerStableHlo,
                     PipelineStage::CompileXla,
@@ -73,24 +63,6 @@ impl PipelinePlan {
                 ]);
             }
 
-            BackendFamily::Nvidia | BackendFamily::Amd | BackendFamily::Spirv => {
-                if options.run_iree_passes {
-                    stages.push(PipelineStage::IreePlanning);
-                }
-
-                stages.extend([
-                    PipelineStage::LowerGpu,
-                    PipelineStage::Bufferize,
-                    PipelineStage::LowerLlvm,
-                ]);
-
-                if matches!(options.emit, EmitKind::Executable | EmitKind::SharedLibrary) {
-                    stages.extend([
-                        PipelineStage::LinkRuntime,
-                        PipelineStage::LinkNative,
-                    ]);
-                }
-            }
         }
 
         Self {
@@ -119,14 +91,9 @@ impl PipelineStage {
             Self::Parse => "parse",
             Self::Semantic => "semantic",
             Self::Ownership => "ownership",
-            Self::EffectAnalysis => "effects",
-            Self::TypeAnalysis => "types",
             Self::GenericOptimization => "optimize",
-            Self::XlaOptimization => "xla-optimize",
-            Self::IreePlanning => "iree-plan",
             Self::LowerLinalg => "linalg",
             Self::LowerStableHlo => "stablehlo",
-            Self::LowerGpu => "gpu",
             Self::Bufferize => "bufferize",
             Self::LowerLlvm => "llvm",
             Self::CompileXla => "xla-compile",

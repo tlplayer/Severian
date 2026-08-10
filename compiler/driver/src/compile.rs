@@ -76,13 +76,8 @@ fn emit_compilation(
     }
 
     match options.target.family() {
-        BackendFamily::Native | BackendFamily::Llvm => {
-            emit_native(compilation, options, layout)
-        }
-        BackendFamily::Amd => emit_amd(compilation, options, layout),
-        BackendFamily::Nvidia => emit_nvidia(compilation, options, layout),
+        BackendFamily::Native => emit_native(compilation, options, layout),
         BackendFamily::Xla => emit_xla(compilation, options, layout),
-        BackendFamily::Spirv => emit_spirv(compilation, options, layout),
     }
 }
 
@@ -113,64 +108,6 @@ fn emit_native(
     }
 }
 
-fn emit_amd(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    if options.run_iree_passes {
-        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
-    }
-    let DriverTarget::Amd { architecture, .. } = &options.target else {
-        unreachable!();
-    };
-
-    let chip = architecture
-        .clone()
-        .or_else(crate::detect_amd_gpu_chip)
-        .ok_or_else(|| {
-            CompileError::Optimization(
-                "AMD target requires a gfx architecture; pass `rocm:gfx1100` or configure detection"
-                    .into(),
-            )
-        })?;
-
-    match options.emit {
-        EmitKind::Executable => {
-            crate::compile_rocm(compilation, &layout.output, &chip)?;
-            Ok(Some(Artifact::new(ArtifactKind::Executable, &layout.output)))
-        }
-
-        EmitKind::Mlir => unreachable!(),
-
-        EmitKind::LlvmIr | EmitKind::Object | EmitKind::SharedLibrary => {
-            let module = crate::lower_to_rocdl(compilation, &chip)?;
-            std::fs::write(&layout.output, module.as_str())?;
-            Ok(Some(Artifact::new(ArtifactKind::Mlir, &layout.output)))
-        }
-
-        EmitKind::StableHlo => Err(CompileError::Optimization(
-            "direct AMD target does not emit StableHLO; use `xla:gpu` for the XLA path".into(),
-        )),
-    }
-}
-
-fn emit_nvidia(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    if options.run_iree_passes {
-        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
-    }
-    let _ = write_mlir(&compilation.mlir, &layout.source_mlir)?;
-
-    Err(CompileError::Optimization(
-        "NVIDIA target selected, but severian-backend still needs the NVVM/CUDA artifact implementation"
-            .into(),
-    ))
-}
-
 fn emit_xla(
     compilation: &Compilation,
     options: &CompileOptions,
@@ -191,12 +128,7 @@ fn emit_xla(
         (None, None) => "default PJRT device".into(),
     };
 
-    let mut xla_hir = compilation.optimized_hir.clone();
-    severian_xla::optimization_pipeline()
-        .run(&mut xla_hir)
-        .map_err(|error| CompileError::Optimization(error.to_string()))?;
-    let _plan = severian_xla::XlaOptimizationPlan::analyze(&xla_hir);
-    let lowered = severian_lowering::stablehlo::lower_program(&xla_hir)
+    let lowered = severian_lowering::stablehlo::lower_program(&compilation.optimized_hir)
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
     let stablehlo = severian_xla::StableHloModule::from_text(lowered.as_str());
 
@@ -210,19 +142,4 @@ fn emit_xla(
     Err(CompileError::Optimization(format!(
         "StableHLO for XLA target `{destination}` is ready, but selecting/loading a PJRT plugin requires an explicit plugin path that DriverTarget does not yet represent"
     )))
-}
-
-fn emit_spirv(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    if options.run_iree_passes {
-        let _plan = severian_passes::iree::IreePlan::analyze(&compilation.optimized_hir);
-    }
-    let _ = write_mlir(&compilation.mlir, &layout.source_mlir)?;
-
-    Err(CompileError::Optimization(
-        "SPIR-V target selected, but the backend still needs SPIR-V binary/link emission".into(),
-    ))
 }

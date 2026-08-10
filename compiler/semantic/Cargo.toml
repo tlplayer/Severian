@@ -9,7 +9,6 @@ repository.workspace = true
 severian-ast = { version = "0.1.0", path = "../ast" }
 severian-hir = { version = "0.1.0", path = "../hir" }
 severian-package = { version = "0.1.0", path = "../package" }
-severian-source = { version = "0.1.0", path = "../source" }
 
 [dev-dependencies]
 severian-lexer = { version = "0.1.0", path = "../lexer" }

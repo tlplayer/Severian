@@ -1,7 +1,5 @@
 #![forbid(unsafe_code)]
 
-pub mod analysis;
-
 use severian_hir::{
     Expression, Function, Instruction, MatchPattern, OwnershipOp, Program, SwitchArm,
 };
@@ -13,10 +11,6 @@ use std::collections::HashMap;
 /// owners through control flow, treats a move on either branch as a move at the
 /// join, and keeps loans live until the last use of their binding.
 pub fn check(program: &Program) -> Result<(), OwnershipError> {
-    check_with_analysis(program).map(|_| ())
-}
-
-pub fn check_with_analysis(program: &Program) -> Result<analysis::OwnershipAnalysis, OwnershipError> {
     let mut globals = Checker {
         effects: infer_function_effects(program),
         ..Checker::default()
@@ -38,7 +32,7 @@ pub fn check_with_analysis(program: &Program) -> Result<analysis::OwnershipAnaly
         }
     }
 
-    Ok(analysis::analyze(program))
+    Ok(())
 }
 
 fn check_function(

@@ -1,4 +1,4 @@
-use crate::lowering_abi::LoweredValue;
+use super::abi::LoweredValue;
 use severian_hir::ValueType;
 
 pub fn emit_mutex_create(result: &str) -> (LoweredValue, String) {

@@ -24,8 +24,6 @@ pub struct CompileOptions {
     pub keep_intermediates: bool,
     pub verify: bool,
     pub run_generic_passes: bool,
-    pub run_xla_passes: bool,
-    pub run_iree_passes: bool,
     pub debug_symbols: bool,
     pub strip: bool,
 }
@@ -40,8 +38,6 @@ impl Default for CompileOptions {
             keep_intermediates: false,
             verify: true,
             run_generic_passes: true,
-            run_xla_passes: true,
-            run_iree_passes: true,
             debug_symbols: false,
             strip: false,
         }
@@ -54,26 +50,6 @@ impl CompileOptions {
     pub fn xla() -> Self {
         Self {
             target: DriverTarget::Xla { platform: None, device_ordinal: None },
-            ..Self::default()
-        }
-    }
-
-    pub fn rocm(chip: impl Into<String>) -> Self {
-        Self {
-            target: DriverTarget::Amd {
-                architecture: Some(chip.into()),
-                device_ordinal: None,
-            },
-            ..Self::default()
-        }
-    }
-
-    pub fn cuda(architecture: impl Into<String>) -> Self {
-        Self {
-            target: DriverTarget::Nvidia {
-                architecture: Some(architecture.into()),
-                device_ordinal: None,
-            },
             ..Self::default()
         }
     }

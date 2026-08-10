@@ -4,7 +4,7 @@ use super::{
     plugin::RawPjrtPlugin,
 };
 use crate::{
-    pipeline::CompileOptions,
+    pipeline::{CompileOptions, OptimizationLevel},
     stablehlo::StableHloModule,
     Result, XlaError,
 };
@@ -120,7 +120,7 @@ impl RawClient {
             format_size: format.len(),
         };
 
-        let serialized_options = serialized_compile_options(options);
+        let serialized_options = serialized_compile_options(options)?;
 
         let api = self.plugin.api();
         let mut args = api::PJRT_Client_Compile_Args {
@@ -239,24 +239,23 @@ impl Drop for RawExecutable {
     }
 }
 
-/// Placeholder serialization boundary.
-///
 /// `PJRT_Client_Compile` consumes an XLA CompileOptionsProto serialization.
-/// An empty protobuf is a valid default instance. Once Severian needs explicit
-/// replicas/partitions/SPMD knobs, Codex can generate this message through
-/// prost or XLA's generated protobuf bindings without changing the raw bridge.
-fn serialized_compile_options(options: &CompileOptions) -> Vec<u8> {
-    if options.num_replicas == 1
+/// An empty protobuf is the canonical default instance. Non-default options
+/// remain unsupported until the crate owns generated XLA protobuf bindings.
+fn serialized_compile_options(options: &CompileOptions) -> Result<Vec<u8>> {
+    if options.optimization == OptimizationLevel::O2
+        && options.num_replicas == 1
         && options.num_partitions == 1
         && !options.parameter_is_tupled_arguments
         && !options.use_spmd_partitioning
         && options.device_ordinal.is_none()
         && options.debug_options.is_empty()
     {
-        Vec::new()
+        Ok(Vec::new())
     } else {
-        // Do not emit a made-up protobuf encoding. This intentionally leaves
-        // non-default compile options for the generated protobuf glue.
-        Vec::new()
+        Err(XlaError::Unsupported(
+            "non-default XLA compile options require generated CompileOptionsProto bindings"
+                .into(),
+        ))
     }
 }

@@ -1,43 +1,11 @@
-use super::{
-    buffer::Buffer,
-    device::{Device, DeviceId},
-};
+use super::compile::RawLoadedExecutable;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ExecutableId(pub u64);
-
-#[derive(Debug, Clone)]
 pub struct LoadedExecutable {
-    pub id: ExecutableId,
-    pub name: String,
-    pub platform: String,
-    pub num_replicas: usize,
-    pub num_partitions: usize,
-    pub addressable_devices: Vec<Device>,
+    raw: RawLoadedExecutable,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExecuteOptions {
-    pub launch_id: u64,
-    pub device: Option<DeviceId>,
-    pub untuple_result: bool,
-    pub strict_shape_checking: bool,
-}
+impl LoadedExecutable {
+    pub(crate) fn from_raw(raw: RawLoadedExecutable) -> Self { Self { raw } }
 
-impl Default for ExecuteOptions {
-    fn default() -> Self {
-        Self {
-            launch_id: 0,
-            device: None,
-            untuple_result: true,
-            strict_shape_checking: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ExecutionResult {
-    pub outputs: Vec<Buffer>,
-    pub device: Option<DeviceId>,
-    pub complete: bool,
+    pub(crate) fn raw(&self) -> &RawLoadedExecutable { &self.raw }
 }

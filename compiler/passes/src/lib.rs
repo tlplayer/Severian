@@ -5,11 +5,7 @@ use severian_package::{FusionAlias, FusionRule, GraphOperation, GraphRule};
 use std::collections::HashMap;
 use std::fmt;
 
-pub mod canonicalize;
-pub mod control_flow;
 pub mod dataflow;
-pub mod inlining;
-pub mod iree;
 pub mod loops;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

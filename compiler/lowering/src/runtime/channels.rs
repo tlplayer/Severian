@@ -1,4 +1,4 @@
-use crate::lowering_abi::LoweredValue;
+use super::abi::LoweredValue;
 use severian_hir::ValueType;
 use std::fmt::Write;
 

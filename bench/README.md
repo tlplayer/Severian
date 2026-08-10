@@ -48,11 +48,6 @@ the nested elementwise graph through the model/tensor library calls.
 generates an equivalent four-shard native Severian program from its weights,
 and validates it against PyTorch and ONNX Runtime before reporting timing.
 
-`transformer-rocm/` compiles and executes a complete float64 encoder and its
-reverse-mode/SGD step through MLIR, embedded ROCDL code objects, and HIP. It
-checks forward values and the first weight update against PyTorch ROCm, then
-reports warm in-process GPU latency for both implementations.
-
 `transformer-container/` builds the author-facing `model` and
 `model.neuralnet` packages before linking a native encoder. It compares warm
 in-process inference and fresh-process latency on the host with the identical

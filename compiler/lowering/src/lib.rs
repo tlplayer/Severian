@@ -5,6 +5,7 @@ pub mod debug;
 pub mod gpu;
 pub mod llvm;
 pub mod location;
+pub mod runtime;
 pub mod stablehlo;
 pub mod tensor;
 

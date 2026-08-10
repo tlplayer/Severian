@@ -1,4 +1,4 @@
-use crate::lowering_abi::{mlir_type, task_type_suffix, LoweredValue};
+use super::abi::{mlir_type, task_type_suffix, LoweredValue};
 use severian_hir::ValueType;
 
 #[derive(Debug, Clone)]

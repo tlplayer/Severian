@@ -42,7 +42,6 @@ paths while staying Severian-first:
 | `22-ranked-tensors` | Contiguous ranked tensors executing MLIR linalg kernels through the tensor package. |
 | `23-data-infrastructure` | PQL-backed controller state, scheduling, and desired-state reconciliation. |
 | `24-database-server` | Real SQLite-backed TCP server, SQL execution, and iterable result rows. |
-| `25-transformer-rocm` | Compiled transformer graphs, explicit GPU regions, autodiff, and executable AMD ROCDL. |
 | `26-problems` | Interview-style and programming-challenge solutions with executable tests and syntax observations. |
 | `27-inference-orchestrator` | A vertically built native inference node with tensor/model execution, bounded worker queues, retry policy, health reporting, and a TCP transport probe. |
 | `28-transformer-container` | An author-facing transformer built with `model` and `model.neuralnet`, plus a resource-bounded OCI deployment of the same native executable. |

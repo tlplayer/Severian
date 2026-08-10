@@ -10,25 +10,14 @@
 //! Raw PJRT C ABI details remain isolated inside crate-private `pjrt` modules.
 
 pub mod client;
-pub mod algebraic;
-pub(crate) mod cache;
-pub(crate) mod executable;
-pub mod fusion;
-pub mod layout;
-pub mod memory;
-pub mod optimization;
-pub(crate) mod options;
 pub mod pipeline;
 pub mod pjrt;
-pub mod scheduling;
 pub mod stablehlo;
 
 pub use client::XlaClient;
 pub use pipeline::{CompileOptions, XlaPipeline};
-pub use optimization::{pipeline as optimization_pipeline, FunctionOptimizationPlan, XlaOptimizationPlan};
 pub use pjrt::{
-    Buffer, BufferId, Device, DeviceId, ExecuteOptions, ExecutionResult, HostBuffer,
-    LoadedExecutable, PjrtClient, PjrtPlugin,
+    Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient, PjrtPlugin,
 };
 pub use stablehlo::{StableHloFormat, StableHloModule};
 
