@@ -1,7 +1,11 @@
-use severian_hir::{Expression, Function, Instruction, OwnershipOp, Parameter, Program, ValueType};
+use severian_hir::{
+    CallTarget, Expression, Function, FunctionId, Instruction, OwnershipOp, Parameter, Program,
+    ValueType,
+};
 
 fn function(name: &str, params: &[&str], instructions: Vec<Instruction>) -> Function {
     Function {
+        id: FunctionId::from_name(name),
         name: name.into(),
         native_symbol: None,
         decorators: vec![],
@@ -174,7 +178,7 @@ fn infers_that_a_function_consumes_its_parameter() {
                         value: Expression::List(vec![]),
                     },
                     Instruction::Evaluate(Expression::Call {
-                        function: "consume".into(),
+                        target: CallTarget::source("consume"),
                         args: vec![Expression::Variable("value".into())],
                     }),
                     Instruction::Print(Expression::Variable("value".into())),
@@ -215,7 +219,7 @@ fn inferred_mutable_call_conflicts_with_a_live_view() {
                         value: ownership(OwnershipOp::View, "values"),
                     },
                     Instruction::Evaluate(Expression::Call {
-                        function: "update".into(),
+                        target: CallTarget::source("update"),
                         args: vec![Expression::Variable("values".into())],
                     }),
                     Instruction::Print(Expression::Variable("snapshot".into())),
@@ -244,7 +248,7 @@ fn call_argument_loans_overlap_for_the_whole_call() {
                         value: Expression::List(vec![]),
                     },
                     Instruction::Evaluate(Expression::Call {
-                        function: "pair".into(),
+                        target: CallTarget::source("pair"),
                         args: vec![
                             ownership(OwnershipOp::Borrow, "value"),
                             ownership(OwnershipOp::View, "value"),

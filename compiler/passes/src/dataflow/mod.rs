@@ -40,9 +40,8 @@ impl Facts {
         self.values.remove(name);
 
         // A copy fact whose value references `name` is now stale.
-        self.values.retain(|_, value| {
-            !matches!(value, Expression::Variable(source) if source == name)
-        });
+        self.values
+            .retain(|_, value| !matches!(value, Expression::Variable(source) if source == name));
     }
 
     fn bind(&mut self, name: String, value: &Expression) {
@@ -82,7 +81,7 @@ fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
             Instruction::Assign { target, value, .. } => {
                 substitute_expression(value, facts, &mut HashSet::new());
 
-                if let Expression::Variable(name) = target {
+                if let Expression::Variable(name) = target.kind() {
                     facts.invalidate(name);
                 } else {
                     substitute_expression(target, facts, &mut HashSet::new());
@@ -258,6 +257,7 @@ fn substitute_expression(
     visiting: &mut HashSet<String>,
 ) {
     match expression {
+        Expression::Typed { expression, .. } => substitute_expression(expression, facts, visiting),
         Expression::Variable(name) => {
             if !visiting.insert(name.clone()) {
                 return;
@@ -466,4 +466,3 @@ fn assigned_names(instructions: &[Instruction]) -> HashSet<String> {
 
     names
 }
-

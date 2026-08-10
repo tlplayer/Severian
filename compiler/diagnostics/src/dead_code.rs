@@ -69,9 +69,7 @@ pub fn analyze(program: &Program) -> DeadCodeReport {
 
     let never_called_native_symbols = functions
         .iter()
-        .filter(|(name, function)| {
-            function.native_symbol.is_some() && !reachable.contains(*name)
-        })
+        .filter(|(name, function)| function.native_symbol.is_some() && !reachable.contains(*name))
         .filter_map(|(_, function)| function.native_symbol.clone())
         .collect();
 
@@ -101,15 +99,11 @@ pub fn diagnostics(program: &Program) -> DiagnosticBag {
 
 fn is_exported(function: &Function) -> bool {
     function.decorators.iter().any(|decorator| {
-        decorator.package == "export"
-            || decorator.symbols.iter().any(|symbol| symbol == "export")
+        decorator.package == "export" || decorator.symbols.iter().any(|symbol| symbol == "export")
     })
 }
 
-fn collect_instruction_calls(
-    instructions: &[Instruction],
-    calls: &mut BTreeSet<String>,
-) {
+fn collect_instruction_calls(instructions: &[Instruction], calls: &mut BTreeSet<String>) {
     for instruction in instructions {
         match instruction {
             Instruction::Let { value, .. }
@@ -223,13 +217,11 @@ fn collect_instruction_calls(
     }
 }
 
-fn collect_expression_calls(
-    expression: &Expression,
-    calls: &mut BTreeSet<String>,
-) {
+fn collect_expression_calls(expression: &Expression, calls: &mut BTreeSet<String>) {
     match expression {
-        Expression::Call { function, args } => {
-            calls.insert(function.clone());
+        Expression::Typed { expression, .. } => collect_expression_calls(expression, calls),
+        Expression::Call { target, args } => {
+            calls.insert(target.name.clone());
             for argument in args {
                 collect_expression_calls(argument, calls);
             }
@@ -281,10 +273,10 @@ fn collect_expression_calls(
         | Expression::Channel(body)
         | Expression::ChaosRule { value: body, .. }
         | Expression::FusedPipeline { input: body, .. }
-        | Expression::Unary { expression: body, .. }
-        | Expression::Member { object: body, .. } => {
-            collect_expression_calls(body, calls)
+        | Expression::Unary {
+            expression: body, ..
         }
+        | Expression::Member { object: body, .. } => collect_expression_calls(body, calls),
 
         Expression::MethodCall { object, args, .. } => {
             collect_expression_calls(object, calls);

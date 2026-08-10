@@ -7,6 +7,9 @@ description = "Author-facing tensor operations for Severian models"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+tensor = { path = "../tensor", version = "0.1.0" }
+
 [package.metadata.library]
 category = "machine-learning"
 implementation = "native"
@@ -14,4 +17,5 @@ status = "experimental"
 
 [package.metadata.compiler]
 symbols = { Relu = "reluList", FastSigmoid = "fastSigmoidList", FastTanh = "fastTanhList", Swish = "swishList", J = "jacobianList" }
+fusion-aliases = { reluList = "tensor.relu", fastSigmoidList = "tensor.fastSigmoid", fastTanhList = "tensor.fastTanh", swishList = "tensor.swish" }
 graph-operations = { graphInput = "input", graphRelu = "relu", graphAdd = "add", graphMatmul = "matmul", runGraph = "run" }

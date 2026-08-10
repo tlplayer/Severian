@@ -39,11 +39,7 @@ pub fn run(program: &Program, config: &LintConfig) -> DiagnosticBag {
     bag
 }
 
-fn lint_function(
-    function: &Function,
-    config: &LintConfig,
-    bag: &mut DiagnosticBag,
-) {
+fn lint_function(function: &Function, config: &LintConfig, bag: &mut DiagnosticBag) {
     let mut defined = BTreeSet::new();
     let mut used = BTreeSet::new();
 
@@ -116,7 +112,13 @@ fn collect_bindings_and_uses(
                 instructions,
             } => {
                 if let Some(setup) = setup {
-                    collect_bindings_and_uses(std::slice::from_ref(setup.as_ref()), defined, used, config, bag);
+                    collect_bindings_and_uses(
+                        std::slice::from_ref(setup.as_ref()),
+                        defined,
+                        used,
+                        config,
+                        bag,
+                    );
                 }
                 for capability in capabilities {
                     inspect_expression(capability, used, config, bag, false);
@@ -132,7 +134,13 @@ fn collect_bindings_and_uses(
                 ..
             } => {
                 if let Some(setup) = setup {
-                    collect_bindings_and_uses(std::slice::from_ref(setup.as_ref()), defined, used, config, bag);
+                    collect_bindings_and_uses(
+                        std::slice::from_ref(setup.as_ref()),
+                        defined,
+                        used,
+                        config,
+                        bag,
+                    );
                 }
                 inspect_expression(iterable, used, config, bag, false);
                 collect_bindings_and_uses(instructions, defined, used, config, bag);
@@ -161,7 +169,13 @@ fn collect_bindings_and_uses(
                     inspect_expression(channel, used, config, bag, false);
                 }
                 if let Some(setup) = setup {
-                    collect_bindings_and_uses(std::slice::from_ref(setup.as_ref()), defined, used, config, bag);
+                    collect_bindings_and_uses(
+                        std::slice::from_ref(setup.as_ref()),
+                        defined,
+                        used,
+                        config,
+                        bag,
+                    );
                 }
                 if let Some(condition) = repeat_condition {
                     inspect_expression(condition, used, config, bag, false);
@@ -195,6 +209,9 @@ fn inspect_expression(
     discarded: bool,
 ) {
     match expression {
+        Expression::Typed { expression, .. } => {
+            inspect_expression(expression, used, config, bag, discarded)
+        }
         Expression::Variable(name) => {
             used.insert(name.clone());
         }
@@ -226,7 +243,10 @@ fn inspect_expression(
             op: OwnershipOp::Clone,
             value,
         } => {
-            if matches!(value.as_ref(), Expression::Integer(_) | Expression::Float(_) | Expression::Boolean(_)) {
+            if matches!(
+                value.as_ref(),
+                Expression::Integer(_) | Expression::Float(_) | Expression::Boolean(_)
+            ) {
                 emit(
                     bag,
                     config,
@@ -280,7 +300,9 @@ fn inspect_expression(
         | Expression::Channel(body)
         | Expression::ChaosRule { value: body, .. }
         | Expression::FusedPipeline { input: body, .. }
-        | Expression::Unary { expression: body, .. }
+        | Expression::Unary {
+            expression: body, ..
+        }
         | Expression::Member { object: body, .. } => {
             inspect_expression(body, used, config, bag, false)
         }

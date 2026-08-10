@@ -6,11 +6,12 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, ChaosAction as HirChaosAction, Class,
+    AssignmentOp, BinaryOp, CallTarget, ChaosAction as HirChaosAction, Class,
     ComprehensionClause as HirComprehensionClause, Decorator as HirDecorator, Expression, Function,
-    FunctionContract as HirFunctionContract, Global, Instruction, MatchPattern, OwnershipOp,
-    Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension,
-    TensorElementType, TensorType, Test, TestMode as HirTestMode, UnaryOp, ValueType,
+    FunctionContract as HirFunctionContract, FunctionId, Global, HirId, Instruction, MatchPattern,
+    OwnershipOp, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension,
+    TensorElementType, TensorType, Test, TestMode as HirTestMode, TypeDefinitionId, UnaryOp,
+    ValueType, VariantId,
 };
 use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
@@ -36,6 +37,7 @@ impl std::error::Error for SemanticError {}
 
 #[derive(Clone)]
 struct Signature {
+    target: CallTarget,
     params: Vec<SignatureParameter>,
     returns: ValueType,
 }
@@ -179,16 +181,17 @@ pub fn analyze_with_packages(
                 }
                 continue;
             }
-            let (name, params, return_type) = match item {
+            let (name, native_symbol, params, return_type) = match item {
                 Item::Function(function) => (
                     &function.name,
+                    function.native_symbol.as_deref(),
                     function.params.as_slice(),
                     function.return_type.as_ref(),
                 ),
                 _ => continue,
             };
             let key = format!("{module_name}.{}", name.name);
-            let signature = lower_signature(params, return_type)?;
+            let signature = lower_signature(&key, native_symbol, params, return_type)?;
             if signatures.insert(key.clone(), signature.clone()).is_some() {
                 return Err(error(
                     name.span,
@@ -201,9 +204,10 @@ pub fn analyze_with_packages(
         }
     }
     for item in &module.items {
-        let (name, params, return_type) = match item {
+        let (name, native_symbol, params, return_type) = match item {
             Item::Function(function) => (
                 &function.name,
+                function.native_symbol.as_deref(),
                 function.params.as_slice(),
                 function.return_type.as_ref(),
             ),
@@ -215,7 +219,7 @@ pub fn analyze_with_packages(
                 format!("function `{}` must use lowerCamelCase", name.name),
             ));
         }
-        let signature = lower_signature(params, return_type)?;
+        let signature = lower_signature(&name.name, native_symbol, params, return_type)?;
         if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
                 name.span,
@@ -329,6 +333,7 @@ pub fn analyze_with_packages(
             });
         }
         functions.push(Function {
+            id: FunctionId::from_name(&function.name.name),
             name: function.name.name.clone(),
             native_symbol: function.native_symbol.clone(),
             decorators,
@@ -413,6 +418,7 @@ pub fn analyze_with_packages(
             )?);
         }
         classes.push(Class {
+            id: TypeDefinitionId::from_name(&class.name.name),
             name: class.name.name.clone(),
             decorators: class_decorators,
             fields,
@@ -576,6 +582,7 @@ fn lower_class_function(
         });
     }
     Ok(Function {
+        id: FunctionId::from_name(&format!("{class_name}.{name}")),
         name: name.into(),
         native_symbol: None,
         decorators: decorator_metadata(source_decorators),
@@ -918,9 +925,9 @@ fn lower_block(
             Stmt::Expr(expression) => {
                 let (expression, expression_type) =
                     lower_expression(expression, scope, signatures, aliases)?;
-                if let Expression::MethodCall { object, method, .. } = &expression {
+                if let Expression::MethodCall { object, method, .. } = expression.kind() {
                     if collection_shape_mutating_method(method) {
-                        if let Expression::Variable(name) = object.as_ref() {
+                        if let Expression::Variable(name) = object.kind() {
                             if let Some(binding) = scope.get_mut(name) {
                                 binding.collection_len = None;
                             }
@@ -933,16 +940,24 @@ fn lower_block(
                         "E0801: A recoverable error must be propagated, handled, or explicitly discarded with a reason.",
                     ));
                 }
-                match expression {
-                    Expression::Call { function, mut args } if function == "print" => {
+                match expression.kind() {
+                    Expression::Call { target, args } if target.name == "print" => {
+                        let mut args = args.clone();
                         let value = if args.len() == 1 {
                             args.remove(0)
                         } else {
-                            Expression::PrintArgs(args)
+                            Expression::Typed {
+                                id: HirId::from_source_range(
+                                    statement.span().start,
+                                    statement.span().end,
+                                ),
+                                ty: ValueType::Tuple,
+                                expression: Box::new(Expression::PrintArgs(args)),
+                            }
                         };
                         instructions.push(Instruction::Print(value));
                     }
-                    expression => instructions.push(Instruction::Evaluate(expression)),
+                    _ => instructions.push(Instruction::Evaluate(expression)),
                 }
             }
             Stmt::Assert(assertion) => {
@@ -962,6 +977,7 @@ fn lower_block(
                 let value = match (return_type, actual, value) {
                     (ValueType::Result, ValueType::Result, value) => value,
                     (ValueType::Result, _, Some(value)) => Some(Expression::Variant {
+                        variant_id: VariantId::from_name("ok"),
                         name: "ok".into(),
                         fields: vec![value],
                     }),
@@ -1253,6 +1269,24 @@ fn lower_expression(
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
 ) -> Result<(Expression, ValueType), SemanticError> {
+    let (lowered, ty) = lower_expression_kind(expression, scope, signatures, aliases)?;
+    let span = expression.span();
+    Ok((
+        Expression::Typed {
+            id: HirId::from_source_range(span.start, span.end),
+            ty,
+            expression: Box::new(lowered),
+        },
+        ty,
+    ))
+}
+
+fn lower_expression_kind(
+    expression: &Expr,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<(Expression, ValueType), SemanticError> {
     match expression {
         Expr::Literal(Literal::Integer { value, .. }) => {
             Ok((Expression::Integer(*value), ValueType::Int))
@@ -1277,6 +1311,7 @@ fn lower_expression(
             } else if identifier.name == "invalid" {
                 Ok((
                     Expression::Variant {
+                        variant_id: VariantId::from_name("invalid"),
                         name: "invalid".into(),
                         fields: Vec::new(),
                     },
@@ -1285,6 +1320,7 @@ fn lower_expression(
             } else if identifier.name == "absent" {
                 Ok((
                     Expression::Variant {
+                        variant_id: VariantId::from_name("absent"),
                         name: "absent".into(),
                         fields: Vec::new(),
                     },
@@ -1293,6 +1329,7 @@ fn lower_expression(
             } else if identifier.name == "None" {
                 Ok((
                     Expression::Variant {
+                        variant_id: VariantId::from_name("None"),
                         name: "None".into(),
                         fields: Vec::new(),
                     },
@@ -1306,6 +1343,7 @@ fn lower_expression(
             {
                 Ok((
                     Expression::Variant {
+                        variant_id: VariantId::from_name(&identifier.name),
                         name: identifier.name.clone(),
                         fields: Vec::new(),
                     },
@@ -1371,11 +1409,11 @@ fn lower_expression(
                     }
                     return Ok((
                         Expression::Call {
-                            function: if package == Some("matrix") {
-                                "matrix.multiply".into()
+                            target: CallTarget::source(if package == Some("matrix") {
+                                "matrix.multiply"
                             } else {
-                                "math.matrixMultiply".into()
-                            },
+                                "math.matrixMultiply"
+                            }),
                             args: vec![left, right],
                         },
                         ValueType::Any,
@@ -1390,11 +1428,11 @@ fn lower_expression(
                     }
                     return Ok((
                         Expression::Call {
-                            function: if signatures.contains_key("cross") {
-                                "cross".into()
+                            target: CallTarget::source(if signatures.contains_key("cross") {
+                                "cross"
                             } else {
-                                "matrix.cross".into()
-                            },
+                                "matrix.cross"
+                            }),
                             args: vec![left, right],
                         },
                         ValueType::List,
@@ -1740,7 +1778,7 @@ fn lower_expression(
         Expr::ChaosRule(rule) => {
             let (function, return_type) =
                 lower_expression(&rule.function, scope, signatures, aliases)?;
-            let Expression::Function(function) = function else {
+            let Expression::Function(function) = function.into_kind() else {
                 return Err(error(
                     rule.function.span(),
                     "chaos injection target must be a function",
@@ -1847,7 +1885,7 @@ fn lower_call(
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok((
                     Expression::Call {
-                        function: "int.parse".into(),
+                        target: CallTarget::source("int.parse"),
                         args,
                     },
                     ValueType::Result,
@@ -1863,7 +1901,7 @@ fn lower_call(
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok((
                     Expression::Call {
-                        function: "http.get".into(),
+                        target: CallTarget::source("http.get"),
                         args,
                     },
                     ValueType::Result,
@@ -1872,7 +1910,7 @@ fn lower_call(
             if member.member.name == "zero" && !scope.contains_key(&object.name) {
                 return Ok((
                     Expression::Call {
-                        function: "Number.zero".into(),
+                        target: CallTarget::source("Number.zero"),
                         args: Vec::new(),
                     },
                     ValueType::Any,
@@ -1897,6 +1935,7 @@ fn lower_call(
                         .collect::<Result<Vec<_>, _>>()?;
                     return Ok((
                         Expression::Construct {
+                            type_id: TypeDefinitionId::from_name(class),
                             class: class.clone(),
                             args,
                         },
@@ -1968,6 +2007,7 @@ fn lower_call(
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((
             Expression::Construct {
+                type_id: TypeDefinitionId::from_name(class),
                 class: class.into(),
                 args,
             },
@@ -1999,6 +2039,7 @@ fn lower_call(
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok((
                 Expression::Variant {
+                    variant_id: VariantId::from_name("present"),
                     name: "present".into(),
                     fields,
                 },
@@ -2015,6 +2056,7 @@ fn lower_call(
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok((
                 Expression::Variant {
+                    variant_id: VariantId::from_name("failure"),
                     name: "failure".into(),
                     fields,
                 },
@@ -2082,7 +2124,7 @@ fn lower_call(
         let args = lowered.into_iter().map(|(arg, _)| arg).collect();
         return Ok((
             Expression::Call {
-                function: name.into(),
+                target: CallTarget::source(name),
                 args,
             },
             returns,
@@ -2126,6 +2168,7 @@ fn lower_call(
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((
             Expression::Variant {
+                variant_id: VariantId::from_name(&callee.name),
                 name: callee.name.clone(),
                 fields,
             },
@@ -2339,7 +2382,11 @@ fn lower_declared_call(
     };
     Ok((
         Expression::Call {
-            function: runtime_function.into(),
+            target: if runtime_function == linked_function {
+                signature.target.clone()
+            } else {
+                CallTarget::source(runtime_function)
+            },
             args,
         },
         signature.returns,
@@ -2507,6 +2554,8 @@ fn lower_collection(
 }
 
 fn lower_signature(
+    name: &str,
+    native_symbol: Option<&str>,
     params: &[severian_ast::Parameter],
     return_type: Option<&Type>,
 ) -> Result<Signature, SemanticError> {
@@ -2529,7 +2578,16 @@ fn lower_signature(
         .map(lower_type)
         .transpose()?
         .unwrap_or(ValueType::Unit);
-    Ok(Signature { params, returns })
+    let target = match native_symbol {
+        Some(symbol) => CallTarget::native(name, symbol),
+        None => CallTarget::source(name),
+    }
+    .with_signature(params.iter().map(|param| param.ty), returns);
+    Ok(Signature {
+        target,
+        params,
+        returns,
+    })
 }
 
 fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
@@ -2681,10 +2739,11 @@ fn always_returns(instructions: &[Instruction]) -> bool {
             !arms.is_empty() && arms.iter().all(|arm| always_returns(&arm.instructions))
         }
         Instruction::With { instructions, .. } => always_returns(instructions),
-        Instruction::While {
-            condition: Expression::Boolean(true),
-            ..
-        } => true,
+        Instruction::While { condition, .. }
+            if matches!(condition.kind(), Expression::Boolean(true)) =>
+        {
+            true
+        }
         _ => false,
     })
 }

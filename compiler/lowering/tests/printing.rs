@@ -1,5 +1,6 @@
 use severian_hir::{
-    BinaryOp, Expression, Function, Instruction, MatchPattern, Program, TaskPlacement, ValueType,
+    BinaryOp, CallTarget, Expression, Function, FunctionId, Instruction, MatchPattern, Program,
+    TaskPlacement, ValueType,
 };
 
 #[test]
@@ -8,6 +9,7 @@ fn lowers_primitive_prints_to_native_calls() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],
@@ -38,6 +40,7 @@ fn lowers_boolean_and_with_short_circuit_control_flow() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],
@@ -66,6 +69,7 @@ fn lowers_conditional_expressions_to_native_selects() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],
@@ -92,6 +96,7 @@ fn lowers_integer_range_for_to_control_flow() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],
@@ -102,7 +107,7 @@ fn lowers_integer_range_for_to_control_flow() {
                 setup: None,
                 pattern: MatchPattern::Bind("value".into()),
                 iterable: Expression::Call {
-                    function: "range".into(),
+                    target: CallTarget::source("range"),
                     args: vec![Expression::Integer(0), Expression::Integer(3)],
                 },
                 instructions: vec![Instruction::Print(Expression::Variable("value".into()))],
@@ -125,6 +130,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
         classes: vec![],
         functions: vec![
             Function {
+                id: FunctionId::from_name("consume"),
                 name: "consume".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -135,6 +141,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
                 tests: vec![],
             },
             Function {
+                id: FunctionId::from_name("main"),
                 name: "main".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -142,7 +149,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
                 params: vec![],
                 return_type: ValueType::Unit,
                 instructions: vec![Instruction::Evaluate(Expression::Call {
-                    function: "consume".into(),
+                    target: CallTarget::source("consume"),
                     args: vec![],
                 })],
                 tests: vec![],
@@ -164,6 +171,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
         classes: vec![],
         functions: vec![
             Function {
+                id: FunctionId::from_name("work"),
                 name: "work".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -174,6 +182,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
                 tests: vec![],
             },
             Function {
+                id: FunctionId::from_name("main"),
                 name: "main".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -184,7 +193,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
                     name: "task".into(),
                     value: Expression::Task {
                         value: Box::new(Expression::Call {
-                            function: "work".into(),
+                            target: CallTarget::source("work"),
                             args: vec![],
                         }),
                         placement: TaskPlacement::Local,
@@ -208,6 +217,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
         classes: vec![],
         functions: vec![
             Function {
+                id: FunctionId::from_name("work"),
                 name: "work".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -218,6 +228,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
                 tests: vec![],
             },
             Function {
+                id: FunctionId::from_name("main"),
                 name: "main".into(),
                 native_symbol: None,
                 decorators: vec![],
@@ -228,7 +239,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
                     name: "task".into(),
                     value: Expression::Task {
                         value: Box::new(Expression::Call {
-                            function: "work".into(),
+                            target: CallTarget::source("work"),
                             args: vec![],
                         }),
                         placement: TaskPlacement::Gpu,
@@ -251,6 +262,7 @@ fn compares_dynamic_collection_values_by_value() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],

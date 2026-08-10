@@ -184,7 +184,8 @@ pub fn lower(program: &Program) -> Module {
         .unwrap();
     }
 
-    let native_symbols = program
+    let native_call_signatures = native_call_signatures(program);
+    let mut native_symbols = program
         .functions
         .iter()
         .filter_map(|function| {
@@ -194,6 +195,9 @@ pub fn lower(program: &Program) -> Module {
                 .map(|symbol| (function.name.clone(), symbol.clone()))
         })
         .collect::<HashMap<_, _>>();
+    for signature in native_call_signatures.values() {
+        native_symbols.insert(signature.name.clone(), signature.symbol.clone());
+    }
     for function in program
         .functions
         .iter()
@@ -213,6 +217,30 @@ pub fn lower(program: &Program) -> Module {
         output.push(')');
         if function.return_type != ValueType::Unit {
             write!(output, " -> {}", mlir_type(function.return_type)).unwrap();
+        }
+        output.push('\n');
+    }
+    let locally_declared_symbols = program
+        .functions
+        .iter()
+        .filter_map(|function| function.native_symbol.as_deref())
+        .collect::<HashSet<_>>();
+    for signature in native_call_signatures.values() {
+        if locally_declared_symbols.contains(signature.symbol.as_str())
+            || is_predeclared_native_symbol(&signature.symbol)
+        {
+            continue;
+        }
+        write!(output, "  llvm.func @{}(", signature.symbol).unwrap();
+        for (index, parameter) in signature.params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(mlir_type(*parameter));
+        }
+        output.push(')');
+        if signature.returns != ValueType::Unit {
+            write!(output, " -> {}", mlir_type(signature.returns)).unwrap();
         }
         output.push('\n');
     }
@@ -592,7 +620,7 @@ impl LowerContext<'_> {
                     self.variables.insert(name.clone(), lowered);
                 }
                 Instruction::Assign { target, op, value } => {
-                    if let Expression::Variable(name) = target {
+                    if let Expression::Variable(name) = target.kind() {
                         let right = self.lower_expression(value);
                         if self.field_names.contains(name) && !self.variables.contains_key(name) {
                             let object = self.field_object.clone().unwrap();
@@ -626,7 +654,7 @@ impl LowerContext<'_> {
                             self.lower_binary_values(left, assignment_binary(*op), right)
                         };
                         self.variables.insert(name.clone(), lowered);
-                    } else if let Expression::Index { object, index } = target {
+                    } else if let Expression::Index { object, index } = target.kind() {
                         let (mut object, object_type) = self.lower_expression(object);
                         if object_type == ValueType::Any {
                             object = self.unbox_value((object, object_type), ValueType::List).0;
@@ -1023,6 +1051,17 @@ impl LowerContext<'_> {
 
     fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
         match expression {
+            Expression::Typed { ty, expression, .. } => {
+                let (value, lowered_type) = self.lower_expression(expression);
+                (
+                    value,
+                    if lowered_type == ValueType::Any {
+                        *ty
+                    } else {
+                        lowered_type
+                    },
+                )
+            }
             Expression::Integer(value) => {
                 let result = self.fresh_value();
                 writeln!(
@@ -1233,7 +1272,7 @@ impl LowerContext<'_> {
                 .unwrap();
                 (String::new(), ValueType::Unit)
             }
-            Expression::Construct { class, args } => {
+            Expression::Construct { class, args, .. } => {
                 let class_name = self.string_address(class);
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_object_new({class_name}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
@@ -1996,7 +2035,7 @@ impl LowerContext<'_> {
                 }
             }
             Expression::Task { value, placement } => {
-                if let Expression::Send { value, channel } = value.as_ref() {
+                if let Expression::Send { value, channel } = value.kind() {
                     let lowered = self.lower_expression(value);
                     let value_type = lowered.1;
                     let value = self.box_value(lowered);
@@ -2015,7 +2054,7 @@ impl LowerContext<'_> {
                     object,
                     method,
                     args,
-                } = value.as_ref()
+                } = value.kind()
                 {
                     let (object, _) = self.lower_expression(object);
                     let Some(class) = self.object_classes.get(&object).cloned() else {
@@ -2106,17 +2145,17 @@ impl LowerContext<'_> {
                         .insert(result.clone(), definition.return_type);
                     return (result, ValueType::Any);
                 }
-                let Expression::Call { function, args } = value.as_ref() else {
+                let Expression::Call { target, args } = value.kind() else {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 };
-                let linked_function = linked_source_function(function, self.function_returns);
+                let linked_function = linked_source_function(&target.name, self.function_returns);
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_call_arguments(linked_function, args);
+                let args = self.coerce_resolved_call_arguments(target, linked_function, args);
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -2127,10 +2166,11 @@ impl LowerContext<'_> {
                     .map(|(_, ty)| mlir_type(*ty))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let return_type = self
-                    .function_returns
-                    .get(linked_function)
-                    .copied()
+                let return_type = target
+                    .signature
+                    .as_ref()
+                    .map(|signature| signature.returns)
+                    .or_else(|| self.function_returns.get(linked_function).copied())
                     .unwrap_or(ValueType::Any);
                 let result = self.fresh_value();
                 let mut attributes = Vec::new();
@@ -2164,7 +2204,7 @@ impl LowerContext<'_> {
                 (result, ValueType::Any)
             }
             Expression::Await(value) => {
-                if let Expression::Tuple(tasks) = value.as_ref() {
+                if let Expression::Tuple(tasks) = value.kind() {
                     for task in tasks {
                         self.lower_expression(&Expression::Await(Box::new(task.clone())));
                     }
@@ -2234,7 +2274,7 @@ impl LowerContext<'_> {
                 self.task_results.insert(result.clone(), ValueType::Unit);
                 (result, ValueType::Any)
             }
-            Expression::Variant { name, fields } => {
+            Expression::Variant { name, fields, .. } => {
                 let tag = self.string_address(name);
                 let field = if fields.len() > 1 {
                     let kind = self.fresh_value();
@@ -2457,13 +2497,14 @@ impl LowerContext<'_> {
                     }
                 }
             }
-            Expression::Call { function, args } => {
+            Expression::Call { target, args } => {
+                let function = &target.name;
                 let linked_function = linked_source_function(function, self.function_returns);
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_call_arguments(linked_function, args);
+                let args = self.coerce_resolved_call_arguments(target, linked_function, args);
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
@@ -2749,13 +2790,16 @@ impl LowerContext<'_> {
                 let return_type = match function.as_str() {
                     "sqrt" | "float" => ValueType::Float,
                     "size" => ValueType::Int,
-                    _ => self
-                        .function_returns
-                        .get(linked_function)
-                        .copied()
+                    _ => target
+                        .signature
+                        .as_ref()
+                        .map(|signature| signature.returns)
+                        .or_else(|| self.function_returns.get(linked_function).copied())
                         .unwrap_or(ValueType::Any),
                 };
-                let symbol = if function == "sqrt" {
+                let symbol = if let Some(symbol) = &target.native_symbol {
+                    symbol.clone()
+                } else if function == "sqrt" {
                     "llvm.sqrt.f64".to_owned()
                 } else {
                     self.native_symbols
@@ -2986,6 +3030,38 @@ impl LowerContext<'_> {
             .collect()
     }
 
+    fn coerce_resolved_call_arguments(
+        &mut self,
+        target: &severian_hir::CallTarget,
+        linked_function: &str,
+        arguments: Vec<(String, ValueType)>,
+    ) -> Vec<(String, ValueType)> {
+        let parameters = target
+            .signature
+            .as_ref()
+            .map(|signature| signature.parameters.clone())
+            .or_else(|| self.function_params.get(linked_function).cloned());
+        let Some(parameters) = parameters else {
+            return arguments;
+        };
+        arguments
+            .into_iter()
+            .enumerate()
+            .map(|(index, argument)| {
+                let Some(expected) = parameters.get(index).copied() else {
+                    return argument;
+                };
+                if argument.1 == ValueType::Any && expected != ValueType::Any {
+                    self.unbox_value(argument, expected)
+                } else if expected == ValueType::Any && argument.1 != ValueType::Any {
+                    (self.box_value(argument), ValueType::Any)
+                } else {
+                    argument
+                }
+            })
+            .collect()
+    }
+
     fn unbox_value(
         &mut self,
         (value, ty): (String, ValueType),
@@ -3074,7 +3150,7 @@ impl LowerContext<'_> {
             }
             return result;
         }
-        if let Expression::Function(function) = callable {
+        if let Expression::Function(function) = callable.kind() {
             let return_type = self
                 .function_returns
                 .get(function)
@@ -3947,13 +4023,13 @@ impl LowerContext<'_> {
             self.lower_instructions(std::slice::from_ref(setup));
         }
         for channel in channels {
-            let Expression::Variable(channel_name) = channel else {
+            let Expression::Variable(channel_name) = channel.kind() else {
                 continue;
             };
             let Some(arm) = arms.iter().find(|arm| {
                 matches!(
                     arm.source.as_ref(),
-                    Some(Expression::Variable(source)) if source == channel_name
+                    Some(source) if matches!(source.kind(), Expression::Variable(name) if name == channel_name)
                 )
             }) else {
                 continue;
@@ -4134,9 +4210,9 @@ impl LowerContext<'_> {
         let mut collection = None;
         let mut yields_indices = false;
         let mut map_collection = false;
-        let (start, end) = match iterable {
-            Expression::Call { function, args }
-                if function == "range" && (1..=2).contains(&args.len()) =>
+        let (start, end) = match iterable.kind() {
+            Expression::Call { target, args }
+                if target.name == "range" && (1..=2).contains(&args.len()) =>
             {
                 if args.len() == 1 {
                     let start = self.fresh_value();
@@ -4157,7 +4233,7 @@ impl LowerContext<'_> {
                     )
                 }
             }
-            Expression::Call { function, args } if function == "indices" && args.len() == 1 => {
+            Expression::Call { target, args } if target.name == "indices" && args.len() == 1 => {
                 let (mut value, value_type) = self.lower_expression(&args[0]);
                 if value_type == ValueType::Any {
                     value = self.unbox_value((value, value_type), ValueType::List).0;
@@ -4546,6 +4622,7 @@ fn collect_pattern_strings(pattern: &MatchPattern, strings: &mut Vec<String>) {
 
 fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>) {
     match expression {
+        Expression::Typed { expression, .. } => collect_expression_strings(expression, strings),
         Expression::String(value) => strings.push(value.clone()),
         Expression::Lambda { body, .. } => collect_expression_strings(body, strings),
         Expression::Binary { left, right, .. } => {
@@ -4646,7 +4723,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(value, strings);
             }
         }
-        Expression::Construct { class, args } => {
+        Expression::Construct { class, args, .. } => {
             strings.push(class.clone());
             for value in args {
                 collect_expression_strings(value, strings);
@@ -4662,7 +4739,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(arg, strings);
             }
         }
-        Expression::Variant { name, fields } => {
+        Expression::Variant { name, fields, .. } => {
             strings.push(name.clone());
             for field in fields {
                 collect_expression_strings(field, strings);
@@ -4830,9 +4907,10 @@ fn collect_task_names(instructions: &[Instruction], names: &mut Vec<String>) {
 
 fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String>) {
     match expression {
+        Expression::Typed { expression, .. } => collect_task_names_expression(expression, names),
         Expression::Task { value, .. } => {
-            if let Expression::Call { function, .. } = value.as_ref() {
-                names.push(function.clone());
+            if let Expression::Call { target, .. } = value.kind() {
+                names.push(target.name.clone());
             }
             collect_task_names_expression(value, names);
         }
@@ -5721,11 +5799,16 @@ int64_t __sev_host_page_size(void) {
             source.push_str("  free(task);\n  return result;\n}\n");
         }
     }
-    let native_symbols = program
+    let mut native_symbols = program
         .functions
         .iter()
-        .filter_map(|function| function.native_symbol.as_deref())
+        .filter_map(|function| function.native_symbol.clone())
         .collect::<HashSet<_>>();
+    native_symbols.extend(
+        native_call_signatures(program)
+            .into_values()
+            .map(|signature| signature.symbol),
+    );
     let has_model_graph = native_symbols
         .iter()
         .any(|symbol| symbol.starts_with("__sev_model_graph_"));
@@ -5782,6 +5865,47 @@ fn source_function_symbol(name: &str) -> String {
 
 fn class_function_symbol(class: &str, method: &str) -> String {
     format!("__sev_method_{class}_{method}")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeCallSignature {
+    name: String,
+    symbol: String,
+    params: Vec<ValueType>,
+    returns: ValueType,
+}
+
+fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignature> {
+    let mut signatures = HashMap::new();
+    let mut scanned = program.clone();
+    scanned.visit_expressions_mut(&mut |expression| {
+        let Expression::Typed {
+            ty,
+            expression: kind,
+            ..
+        } = expression
+        else {
+            return;
+        };
+        let Expression::Call { target, args } = kind.as_ref() else {
+            return;
+        };
+        let Some(symbol) = &target.native_symbol else {
+            return;
+        };
+        signatures
+            .entry(symbol.clone())
+            .or_insert_with(|| NativeCallSignature {
+                name: target.name.clone(),
+                symbol: symbol.clone(),
+                params: args
+                    .iter()
+                    .map(|argument| argument.ty().unwrap_or(ValueType::Any))
+                    .collect(),
+                returns: *ty,
+            });
+    });
+    signatures
 }
 
 fn is_predeclared_native_symbol(symbol: &str) -> bool {

@@ -1,5 +1,44 @@
 #![forbid(unsafe_code)]
 
+macro_rules! stable_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name(pub u64);
+
+        impl $name {
+            pub fn from_name(name: &str) -> Self {
+                Self(stable_name_hash(name))
+            }
+        }
+    };
+}
+
+stable_id!(FunctionId);
+stable_id!(TypeDefinitionId);
+stable_id!(VariantId);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HirId(pub u64);
+
+impl HirId {
+    pub const fn from_source_range(start: usize, end: usize) -> Self {
+        Self(((start as u64) << 32) ^ end as u64)
+    }
+
+    pub const fn synthetic(value: u64) -> Self {
+        Self(u64::MAX - value)
+    }
+}
+
+fn stable_name_hash(name: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in name.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub globals: Vec<Global>,
@@ -51,6 +90,7 @@ impl Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Class {
+    pub id: TypeDefinitionId,
     pub name: String,
     pub decorators: Vec<Decorator>,
     pub fields: Vec<String>,
@@ -69,6 +109,7 @@ pub struct Global {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
+    pub id: FunctionId,
     pub name: String,
     pub native_symbol: Option<String>,
     pub decorators: Vec<Decorator>,
@@ -307,6 +348,11 @@ pub enum MatchPattern {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expression {
+    Typed {
+        id: HirId,
+        ty: ValueType,
+        expression: Box<Expression>,
+    },
     Integer(i64),
     Float(u64),
     Boolean(bool),
@@ -342,6 +388,7 @@ pub enum Expression {
     },
     PrintArgs(Vec<Expression>),
     Construct {
+        type_id: TypeDefinitionId,
         class: String,
         args: Vec<Expression>,
     },
@@ -355,6 +402,7 @@ pub enum Expression {
         args: Vec<Expression>,
     },
     Variant {
+        variant_id: VariantId,
         name: String,
         fields: Vec<Expression>,
     },
@@ -409,7 +457,7 @@ pub enum Expression {
         right: Box<Expression>,
     },
     Call {
-        function: String,
+        target: CallTarget,
         args: Vec<Expression>,
     },
     CallValue {
@@ -417,6 +465,88 @@ pub enum Expression {
         args: Vec<Expression>,
         return_type: ValueType,
     },
+}
+
+impl Expression {
+    pub fn kind(&self) -> &Self {
+        match self {
+            Self::Typed { expression, .. } => expression.kind(),
+            expression => expression,
+        }
+    }
+
+    pub fn ty(&self) -> Option<ValueType> {
+        match self {
+            Self::Typed { ty, .. } => Some(*ty),
+            _ => None,
+        }
+    }
+
+    pub fn hir_id(&self) -> Option<HirId> {
+        match self {
+            Self::Typed { id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn into_kind(self) -> Self {
+        match self {
+            Self::Typed { expression, .. } => expression.into_kind(),
+            expression => expression,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallTarget {
+    pub id: FunctionId,
+    pub name: String,
+    pub native_symbol: Option<String>,
+    pub signature: Option<FunctionType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionType {
+    pub parameters: Vec<ValueType>,
+    pub returns: ValueType,
+}
+
+impl CallTarget {
+    pub fn source(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            id: FunctionId::from_name(&name),
+            name,
+            native_symbol: None,
+            signature: None,
+        }
+    }
+
+    pub fn native(name: impl Into<String>, native_symbol: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            id: FunctionId::from_name(&name),
+            name,
+            native_symbol: Some(native_symbol.into()),
+            signature: None,
+        }
+    }
+
+    pub fn with_signature(
+        mut self,
+        parameters: impl IntoIterator<Item = ValueType>,
+        returns: ValueType,
+    ) -> Self {
+        self.signature = Some(FunctionType {
+            parameters: parameters.into_iter().collect(),
+            returns,
+        });
+        self
+    }
+
+    pub fn lowering_symbol(&self) -> &str {
+        self.native_symbol.as_deref().unwrap_or(&self.name)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,6 +672,7 @@ fn visit_arms_mut(arms: &mut [SwitchArm], visitor: &mut impl FnMut(&mut Expressi
 
 fn visit_expression_mut(expression: &mut Expression, visitor: &mut impl FnMut(&mut Expression)) {
     match expression {
+        Expression::Typed { expression, .. } => visit_expression_mut(expression, visitor),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

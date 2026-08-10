@@ -1,4 +1,4 @@
-use severian_hir::{Expression, Function, Instruction, Program, ValueType};
+use severian_hir::{Expression, Function, FunctionId, Instruction, Program, ValueType};
 
 #[test]
 fn lowers_hello_to_mlir_text() {
@@ -6,6 +6,7 @@ fn lowers_hello_to_mlir_text() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],

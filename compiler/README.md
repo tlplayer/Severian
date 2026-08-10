@@ -55,11 +55,13 @@ to be retained in HIR. PJRT execution is not exposed yet; plugin selection in
 the driver will require an explicit path or Severian environment variable and
 will not scan the filesystem implicitly.
 
-The next HIR foundation pass will introduce `HirId`, `FunctionId`,
-`TypeDefinitionId`, `VariantId`, stable resolved call targets, and typed
-expressions. The current name-based HIR is transitional and should not gain new
-identity maps. MIR, MIR-based passes, and IREE support remain future work rather
-than empty active compiler modules.
+HIR v2 owns semantic identity and type information: expressions carry `HirId`
+and their resolved `ValueType`; functions, type definitions, and variants carry
+stable IDs; resolved call targets retain their full function signature and
+native ABI symbol where one exists. Lowering must consume that information
+directly instead of rebuilding types or package identity from names. MIR,
+MIR-based passes, and IREE support remain future work rather than empty active
+compiler modules.
 
 Direct GPU lowering and ROCm backend implementation remain as inactive
 low-level code because they contain real MLIR/ROCDL lowering work. They are not

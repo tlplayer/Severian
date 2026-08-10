@@ -1,5 +1,5 @@
 use crate::{compile_native, Compilation, CompileError};
-use severian_hir::{Expression, Function, Instruction, Program, TestMode};
+use severian_hir::{Expression, Function, FunctionId, Instruction, Program, TestMode};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -68,6 +68,7 @@ pub fn native_test_compilation(
     let mut hir = compilation.hir.clone();
     hir.functions.retain(|function| function.name != "main");
     hir.functions.push(Function {
+        id: FunctionId::from_name("main"),
         name: "main".into(),
         native_symbol: None,
         decorators: Vec::new(),
@@ -112,8 +113,8 @@ fn reachable_dependencies<'program>(
 
 fn collect_called_functions(instructions: &[Instruction], calls: &mut Vec<String>) {
     walk_instructions(instructions, &mut |expression| {
-        if let Expression::Call { function, .. } = expression {
-            calls.push(function.clone());
+        if let Expression::Call { target, .. } = expression {
+            calls.push(target.name.clone());
         }
     });
 }
@@ -231,6 +232,7 @@ fn walk_expression<'expression>(
 ) {
     visit(expression);
     match expression {
+        Expression::Typed { expression, .. } => walk_expression(expression, visit),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

@@ -11,12 +11,12 @@ fn resolves_print_and_lowers_hello_to_hir() {
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
 
-    assert_eq!(
-        hir.main().unwrap().instructions,
-        vec![Instruction::Print(Expression::String(
-            "hello, severian".into()
-        ))]
-    );
+    let Instruction::Print(value) = &hir.main().unwrap().instructions[0] else {
+        panic!("expected print instruction");
+    };
+    assert_eq!(value.ty(), Some(ValueType::String));
+    assert!(value.hir_id().is_some());
+    assert_eq!(value.kind(), &Expression::String("hello, severian".into()));
 }
 
 #[test]
@@ -31,10 +31,11 @@ fn retains_typed_conditional_expressions_in_hir() {
     let source = "def reluValue(x: float) -> float:\n    return 0.0 if x < 0.0 else x\n";
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
-    assert!(matches!(
-        &hir.functions[0].instructions[0],
-        Instruction::Return(Some(Expression::Conditional { .. }))
-    ));
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected a return value");
+    };
+    assert_eq!(value.ty(), Some(ValueType::Float));
+    assert!(matches!(value.kind(), Expression::Conditional { .. }));
 }
 
 #[test]
@@ -83,11 +84,10 @@ fn retains_local_task_placement_after_validating_its_import() {
     let Instruction::With { instructions, .. } = &hir.main().unwrap().instructions[0] else {
         panic!("expected task context");
     };
-    let Instruction::Let {
-        value: Expression::Task { placement, .. },
-        ..
-    } = &instructions[0]
-    else {
+    let Instruction::Let { value, .. } = &instructions[0] else {
+        panic!("expected a task binding");
+    };
+    let Expression::Task { placement, .. } = value.kind() else {
         panic!("expected a task binding");
     };
     assert_eq!(*placement, TaskPlacement::Local);
@@ -127,11 +127,10 @@ fn retains_parallel_placement_after_validating_the_import() {
     let Instruction::With { instructions, .. } = &hir.main().unwrap().instructions[0] else {
         panic!("expected task context");
     };
-    let Instruction::Let {
-        value: Expression::Task { placement, .. },
-        ..
-    } = &instructions[0]
-    else {
+    let Instruction::Let { value, .. } = &instructions[0] else {
+        panic!("expected task binding");
+    };
+    let Expression::Task { placement, .. } = value.kind() else {
         panic!("expected task binding");
     };
     assert_eq!(*placement, TaskPlacement::Simd);
@@ -242,6 +241,39 @@ fn type_checks_calls_against_imported_package_interfaces() {
 }
 
 #[test]
+fn resolved_package_calls_retain_identity_and_signature() {
+    let interface =
+        parse(&lex("def square(value: float) -> float:\n    return value * value\n").unwrap())
+            .unwrap();
+    let module = parse(
+        &lex(concat!(
+            "import math\n",
+            "\n",
+            "def apply(value: float) -> float:\n",
+            "    return math.square(value)\n",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let hir = analyze_with_interfaces(&module, &[("math".into(), interface)]).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected package call return");
+    };
+    let Expression::Call { target, .. } = value.kind() else {
+        panic!("expected resolved package call");
+    };
+    assert_eq!(target.name, "math.square");
+    assert_eq!(
+        target.id,
+        severian_hir::FunctionId::from_name("math.square")
+    );
+    let signature = target.signature.as_ref().expect("resolved signature");
+    assert_eq!(signature.parameters, [ValueType::Float]);
+    assert_eq!(signature.returns, ValueType::Float);
+}
+
+#[test]
 fn retains_formatted_string_operands_for_native_lowering() {
     let source = concat!(
         "def describe(label: string, value: float) -> string:\n",
@@ -250,11 +282,14 @@ fn retains_formatted_string_operands_for_native_lowering() {
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
 
-    let Instruction::Return(Some(Expression::Format {
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected a formatted return value")
+    };
+    let Expression::Format {
         template,
         args,
         arg_types,
-    })) = &hir.functions[0].instructions[0]
+    } = value.kind()
     else {
         panic!("expected a formatted return value")
     };
@@ -278,9 +313,10 @@ fn retains_first_class_function_return_types() {
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
 
-    let Instruction::Return(Some(Expression::CallValue { return_type, .. })) =
-        &hir.functions[0].instructions[0]
-    else {
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected an indirect function call")
+    };
+    let Expression::CallValue { return_type, .. } = value.kind() else {
         panic!("expected an indirect function call")
     };
     assert_eq!(*return_type, ValueType::Int);

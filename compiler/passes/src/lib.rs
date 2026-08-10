@@ -112,9 +112,10 @@ impl ModelGraphOptimization {
         definitions: &HashMap<String, String>,
     ) -> Option<String> {
         match expression {
+            Expression::Typed { expression, .. } => self.signature(expression, definitions),
             Expression::Variable(name) => definitions.get(name).cloned(),
-            Expression::Call { function, args } => {
-                let operation = self.rules.get(function)?;
+            Expression::Call { target, args } => {
+                let operation = self.rules.get(&target.name)?;
                 if *operation == GraphOperation::Run {
                     return None;
                 }
@@ -271,17 +272,17 @@ impl ElementwiseFusion {
     }
 
     fn rewrite(&self, expression: &mut Expression) {
-        let Expression::Call { function, args } = expression else {
+        let Expression::Call { target, args } = expression else {
             return;
         };
-        let Some(outer) = self.rules.get(function) else {
+        let Some(outer) = self.rules.get(&target.name) else {
             return;
         };
         if args.len() != 1 {
             return;
         }
 
-        let replacement = match &args[0] {
+        let replacement = match args[0].kind() {
             Expression::FusedPipeline {
                 input,
                 runtime_symbol,
@@ -296,9 +297,9 @@ impl ElementwiseFusion {
                 Some((input.as_ref().clone(), operations))
             }
             Expression::Call {
-                function: inner,
+                target: inner,
                 args: inner_args,
-            } if inner_args.len() == 1 => self.rules.get(inner).and_then(|inner| {
+            } if inner_args.len() == 1 => self.rules.get(&inner.name).and_then(|inner| {
                 (inner.runtime_symbol == outer.runtime_symbol
                     && inner.packing_bits == outer.packing_bits
                     && outer.max_chain >= 2)
@@ -338,7 +339,7 @@ impl Pass for ElementwiseFusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_hir::{Function, ValueType};
+    use severian_hir::{CallTarget, Function, FunctionId, ValueType};
 
     #[test]
     fn fusion_is_driven_by_package_rules_not_function_names() {
@@ -346,6 +347,7 @@ mod tests {
             globals: Vec::new(),
             classes: Vec::new(),
             functions: vec![Function {
+                id: FunctionId::from_name("forward"),
                 name: "forward".into(),
                 native_symbol: None,
                 decorators: Vec::new(),
@@ -353,9 +355,9 @@ mod tests {
                 params: Vec::new(),
                 return_type: ValueType::List,
                 instructions: vec![severian_hir::Instruction::Return(Some(Expression::Call {
-                    function: "custom.curve".into(),
+                    target: CallTarget::source("custom.curve"),
                     args: vec![Expression::Call {
-                        function: "custom.clip".into(),
+                        target: CallTarget::source("custom.clip"),
                         args: vec![Expression::Variable("X".into())],
                     }],
                 }))],
@@ -428,7 +430,7 @@ mod tests {
         let call = || Expression::Call {
             // Package function bodies carry the local spelling after linking;
             // user call sites may carry the qualified spelling.
-            function: "graphMatmul".into(),
+            target: CallTarget::source("graphMatmul"),
             args: vec![
                 Expression::Variable("input".into()),
                 Expression::Variable("weights".into()),
@@ -438,6 +440,7 @@ mod tests {
             globals: Vec::new(),
             classes: Vec::new(),
             functions: vec![Function {
+                id: FunctionId::from_name("forward"),
                 name: "forward".into(),
                 native_symbol: None,
                 decorators: Vec::new(),

@@ -8,8 +8,8 @@ pub mod ops;
 
 pub use ops::{MlirValue, StableHloEmitter};
 
-use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_hir::{Expression, Function, Instruction, Program, ValueType};
+use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_mlir::Module;
 use std::fmt::{self, Write};
 
@@ -29,27 +29,40 @@ pub enum StableHloLoweringError {
         actual: Option<u8>,
     },
     NoTensorFunctions,
-    UnsupportedFunction { function: String, reason: String },
+    UnsupportedFunction {
+        function: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for StableHloLoweringError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedOperation(operation) =>
-                write!(formatter, "unsupported StableHLO operation `{operation}`"),
-            Self::InvalidArity { operation, expected, actual } => write!(
+            Self::UnsupportedOperation(operation) => {
+                write!(formatter, "unsupported StableHLO operation `{operation}`")
+            }
+            Self::InvalidArity {
+                operation,
+                expected,
+                actual,
+            } => write!(
                 formatter,
                 "StableHLO operation `{operation}` expects {expected} arguments, got {actual}",
             ),
-            Self::InvalidRank { operation, expected, actual } => write!(
+            Self::InvalidRank {
+                operation,
+                expected,
+                actual,
+            } => write!(
                 formatter,
                 "StableHLO operation `{operation}` expects rank {expected}, got {actual:?}",
             ),
-            Self::NoTensorFunctions => formatter.write_str(
-                "XLA lowering requires at least one function with a tensor result",
+            Self::NoTensorFunctions => formatter
+                .write_str("XLA lowering requires at least one function with a tensor result"),
+            Self::UnsupportedFunction { function, reason } => write!(
+                formatter,
+                "cannot lower tensor function `{function}` to StableHLO: {reason}"
             ),
-            Self::UnsupportedFunction { function, reason } =>
-                write!(formatter, "cannot lower tensor function `{function}` to StableHLO: {reason}"),
         }
     }
 }
@@ -58,11 +71,10 @@ impl std::error::Error for StableHloLoweringError {}
 
 /// Lowers the currently representable whole-program tensor boundary.
 ///
-/// HIR preserves tensor element/rank/shape information on signatures, but not
-/// on every expression. Consequently this accepts the unambiguous subset: a
-/// tensor function whose body directly returns one supported tensor call over
-/// tensor parameters. Other shapes fail explicitly until typed expression
-/// results are retained in HIR.
+/// Typed HIR preserves tensor information and resolved call targets. This
+/// initial whole-program path accepts tensor functions whose bodies directly
+/// return one supported tensor operation over tensor parameters; composing
+/// general tensor control flow belongs to the forthcoming MIR lowering.
 pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError> {
     let tensor_functions = program
         .functions
@@ -81,11 +93,10 @@ pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError
     Ok(Module::new(output))
 }
 
-fn lower_function(
-    function: &Function,
-    output: &mut String,
-) -> Result<(), StableHloLoweringError> {
-    let ValueType::Tensor(result_type) = function.return_type else { unreachable!() };
+fn lower_function(function: &Function, output: &mut String) -> Result<(), StableHloLoweringError> {
+    let ValueType::Tensor(result_type) = function.return_type else {
+        unreachable!()
+    };
     let mut arguments = Vec::with_capacity(function.params.len());
     for (index, parameter) in function.params.iter().enumerate() {
         let ValueType::Tensor(tensor) = parameter.ty else {
@@ -94,38 +105,47 @@ fn lower_function(
                 reason: format!("parameter `{}` is not a tensor", parameter.name),
             });
         };
-        arguments.push((parameter.name.as_str(), argument(format!("%arg{index}"), tensor)));
+        arguments.push((
+            parameter.name.as_str(),
+            argument(format!("%arg{index}"), tensor),
+        ));
     }
 
-    let [Instruction::Return(Some(Expression::Call { function: operation, args }))] =
-        function.instructions.as_slice()
-    else {
+    let [Instruction::Return(Some(returned))] = function.instructions.as_slice() else {
         return Err(StableHloLoweringError::UnsupportedFunction {
             function: function.name.clone(),
-            reason: "HIR does not retain typed intermediate expressions; expected a direct return of a tensor call".into(),
+            reason: "expected a direct return of a tensor call".into(),
+        });
+    };
+    let Expression::Call { target, args } = returned.kind() else {
+        return Err(StableHloLoweringError::UnsupportedFunction {
+            function: function.name.clone(),
+            reason: "expected a direct return of a tensor call".into(),
         });
     };
 
     let operands = args
         .iter()
-        .map(|expression| match expression {
+        .map(|expression| match expression.kind() {
             Expression::Variable(name) => arguments
                 .iter()
                 .find(|(parameter, _)| *parameter == name.as_str())
                 .map(|(_, value)| value.clone())
                 .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
                     function: function.name.clone(),
-                    reason: format!("tensor operand `{name}` is not a parameter with a retained type"),
+                    reason: format!(
+                        "tensor operand `{name}` is not a parameter with a retained type"
+                    ),
                 }),
             _ => Err(StableHloLoweringError::UnsupportedFunction {
                 function: function.name.clone(),
-                reason: "tensor call operands need retained HIR expression types".into(),
+                reason: "tensor call operands must currently be function parameters".into(),
             }),
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut emitter = StableHloEmitter::new();
-    let result = lower_tensor_call(operation, &operands, result_type, &mut emitter)?;
+    let result = lower_tensor_call(&target.name, &operands, result_type, &mut emitter)?;
     let signature = arguments
         .iter()
         .enumerate()
@@ -137,7 +157,8 @@ fn lower_function(
         "  func.func @{}({signature}) -> {} {{",
         function.name,
         tensor_type(result_type),
-    ).expect("writing to a String cannot fail");
+    )
+    .expect("writing to a String cannot fail");
     output.push_str(emitter.as_str());
     writeln!(output, "    return {} : {}", result.name, result.ty)
         .expect("writing to a String cannot fail");
@@ -181,15 +202,7 @@ pub fn lower_tensor_call(
         "matmul" | "matrix_multiply" | "tensor_matmul" => {
             require_arity(&op, args, 2)?;
             require_rank(&op, result_type, 2)?;
-            Ok(emitter.dot_general(
-                &args[0],
-                &args[1],
-                &[],
-                &[],
-                &[1],
-                &[0],
-                result_type,
-            ))
+            Ok(emitter.dot_general(&args[0], &args[1], &[], &[], &[1], &[0], result_type))
         }
 
         "relu" | "tensor_relu" => {
@@ -202,19 +215,10 @@ pub fn lower_tensor_call(
         // axis metadata from semantic/HIR lowering before they can be emitted
         // without guessing. Keep them explicit instead of silently producing
         // wrong dimensions.
-        "reshape"
-        | "transpose"
-        | "broadcast"
-        | "broadcast_in_dim"
-        | "sum"
-        | "reduce"
-        | "mean"
-        | "softmax"
-        | "layer_norm"
-        | "layernorm"
-        | "conv"
-        | "convolution"
-        | "attention" => Err(StableHloLoweringError::UnsupportedOperation(op)),
+        "reshape" | "transpose" | "broadcast" | "broadcast_in_dim" | "sum" | "reduce" | "mean"
+        | "softmax" | "layer_norm" | "layernorm" | "conv" | "convolution" | "attention" => {
+            Err(StableHloLoweringError::UnsupportedOperation(op))
+        }
 
         _ => Err(StableHloLoweringError::UnsupportedOperation(op)),
     }
@@ -232,10 +236,7 @@ pub fn scalar_tensor(element: TensorElementType) -> TensorType {
     }
 }
 
-fn scalar_zero(
-    result_type: TensorType,
-    emitter: &mut StableHloEmitter,
-) -> MlirValue {
+fn scalar_zero(result_type: TensorType, emitter: &mut StableHloEmitter) -> MlirValue {
     let scalar = scalar_tensor(result_type.element);
     let zero = match result_type.element {
         TensorElementType::F32 | TensorElementType::F64 => "0.0",

@@ -266,11 +266,11 @@ impl Checker {
         destination: &str,
         expression: &Expression,
     ) -> Result<Option<Loan>, OwnershipError> {
-        let Expression::Ownership { op, value } = expression else {
+        let Expression::Ownership { op, value } = expression.kind() else {
             self.check_expression(expression, Access::Read)?;
             return Ok(None);
         };
-        let Expression::Variable(source) = value.as_ref() else {
+        let Expression::Variable(source) = value.kind() else {
             self.check_expression(value, Access::Read)?;
             return Ok(None);
         };
@@ -326,7 +326,7 @@ impl Checker {
                 op: OwnershipOp::Move,
                 value,
             } => {
-                if let Expression::Variable(name) = value.as_ref() {
+                if let Expression::Variable(name) = value.kind() {
                     self.ensure_alive(name)?;
                     let owner = self.root_owner(name);
                     self.ensure_unborrowed(&owner, "move")?;
@@ -404,7 +404,8 @@ impl Checker {
                     self.check_expression(arg, Access::Read)?;
                 }
             }
-            Expression::Call { function, args } => self.check_call(function, args)?,
+            Expression::Call { target, args } => self.check_call(&target.name, args)?,
+            Expression::Typed { expression, .. } => self.check_expression(expression, access)?,
             Expression::MethodCall {
                 object,
                 method,
@@ -622,11 +623,11 @@ impl Checker {
         argument: &Expression,
         effect: ParameterEffect,
     ) -> Result<(), OwnershipError> {
-        let (explicit, value) = match argument {
+        let (explicit, value) = match argument.kind() {
             Expression::Ownership { op, value } => (Some(*op), value.as_ref()),
             value => (None, value),
         };
-        let Expression::Variable(source) = value else {
+        let Expression::Variable(source) = value.kind() else {
             self.check_expression(argument, Access::Read)?;
             return Ok(());
         };
@@ -689,7 +690,7 @@ impl Checker {
         &self,
         expression: &Expression,
     ) -> Result<(), OwnershipError> {
-        let borrowed = match expression {
+        let borrowed = match expression.kind() {
             Expression::Variable(name) => self
                 .bindings
                 .get(name)
@@ -698,7 +699,7 @@ impl Checker {
             Expression::Ownership {
                 op: OwnershipOp::View | OwnershipOp::Borrow | OwnershipOp::AddressOf,
                 value,
-            } => match value.as_ref() {
+            } => match value.kind() {
                 Expression::Variable(name) => Some(name.as_str()),
                 _ => None,
             },
@@ -867,6 +868,9 @@ fn infer_expression_effect(
     effects: &mut [ParameterEffect],
 ) {
     match expression {
+        Expression::Typed { expression, .. } => {
+            infer_expression_effect(expression, access, parameters, effects)
+        }
         Expression::Variable(name) => mark_parameter_effect(
             name,
             if access == Access::Mutate {
@@ -885,7 +889,7 @@ fn infer_expression_effect(
                     ParameterEffect::View
                 }
             };
-            if let Expression::Variable(name) = value.as_ref() {
+            if let Expression::Variable(name) = value.kind() {
                 mark_parameter_effect(name, effect, parameters, effects);
             } else {
                 infer_expression_effect(value, Access::Read, parameters, effects);
@@ -1169,6 +1173,7 @@ fn count_arms(arms: &[SwitchArm], counts: &mut HashMap<String, usize>) {
 
 fn count_expression(expression: &Expression, counts: &mut HashMap<String, usize>) {
     match expression {
+        Expression::Typed { expression, .. } => count_expression(expression, counts),
         Expression::Variable(name) => *counts.entry(name.clone()).or_default() += 1,
         Expression::Ownership { value, .. }
         | Expression::Member { object: value, .. }

@@ -1,6 +1,6 @@
 use severian_hir::{
-    Expression, Function, Instruction, Program, TensorDimension, TensorElementType, TensorType,
-    ValueType,
+    Expression, Function, FunctionId, Instruction, Program, TensorDimension, TensorElementType,
+    TensorType, ValueType,
 };
 
 #[test]
@@ -9,6 +9,7 @@ fn finds_the_main_function() {
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
+            id: FunctionId::from_name("main"),
             name: "main".into(),
             native_symbol: None,
             decorators: vec![],

@@ -12,26 +12,26 @@ fn library_root() -> PathBuf {
 
 #[test]
 fn loads_package_owned_symbols_and_fusion_contracts() {
-    let module = parse("import models\n");
+    let module = parse("import model\nimport tensor\n");
     let interfaces = load_official_interfaces(&module, &library_root()).unwrap();
-    let models = interfaces
+    let model = interfaces
         .iter()
-        .find(|interface| interface.name == "models")
+        .find(|interface| interface.name == "model")
         .unwrap();
 
-    assert_eq!(models.compiler.symbols["Relu"], "activation");
-    assert!(models
+    assert_eq!(model.compiler.symbols["Relu"], "reluList");
+    assert!(model
         .compiler
         .fusion_aliases
         .iter()
-        .any(|alias| { alias.function == "models.activation" && alias.target == "tensor.relu" }));
-    assert!(models.compiler.graph_rules.iter().any(|rule| {
-        rule.function == "models.graphMatmul" && rule.operation == GraphOperation::Matmul
+        .any(|alias| { alias.function == "model.reluList" && alias.target == "tensor.relu" }));
+    assert!(model.compiler.graph_rules.iter().any(|rule| {
+        rule.function == "model.graphMatmul" && rule.operation == GraphOperation::Matmul
     }));
     let tensor = interfaces
         .iter()
         .find(|interface| interface.name == "tensor")
-        .expect("models transitively imports tensor");
+        .expect("tensor interface is loaded alongside model");
     assert!(tensor.compiler.fusion_rules.iter().any(|rule| {
         rule.function == "tensor.relu"
             && rule.runtime_symbol == "__sev_fused_activations"
@@ -41,10 +41,9 @@ fn loads_package_owned_symbols_and_fusion_contracts() {
 
 #[test]
 fn loads_only_reachable_official_interfaces() {
-    let module = parse("import probability\nimport application_package\n");
+    let module = parse("import matrix\nimport application_package\n");
     let interfaces = load_official_interfaces(&module, &library_root()).unwrap();
 
     assert_eq!(interfaces.len(), 1);
-    assert_eq!(interfaces[0].name, "probability");
-    assert_eq!(interfaces[0].compiler.symbols["P"], "probability");
+    assert_eq!(interfaces[0].name, "matrix");
 }

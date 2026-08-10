@@ -104,11 +104,7 @@ fn verify_function(function: &Function, bag: &mut DiagnosticBag) {
     }
 }
 
-fn verify_instructions(
-    instructions: &[Instruction],
-    bag: &mut DiagnosticBag,
-    loop_depth: usize,
-) {
+fn verify_instructions(instructions: &[Instruction], bag: &mut DiagnosticBag, loop_depth: usize) {
     for instruction in instructions {
         match instruction {
             Instruction::Break | Instruction::Continue if loop_depth == 0 => {
@@ -232,9 +228,7 @@ fn verify_instructions(
 fn verify_expression(expression: &Expression, bag: &mut DiagnosticBag) {
     match expression {
         Expression::Format {
-            args,
-            arg_types,
-            ..
+            args, arg_types, ..
         } if args.len() != arg_types.len() => {
             bag.push(Diagnostic::error(
                 "verify::format-arguments",
@@ -286,6 +280,7 @@ fn verify_type(ty: ValueType, bag: &mut DiagnosticBag) {
 fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression)) {
     visitor(expression);
     match expression {
+        Expression::Typed { expression, .. } => walk_expression(expression, visitor),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)
@@ -324,7 +319,9 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
         | Expression::Channel(body)
         | Expression::ChaosRule { value: body, .. }
         | Expression::FusedPipeline { input: body, .. }
-        | Expression::Unary { expression: body, .. }
+        | Expression::Unary {
+            expression: body, ..
+        }
         | Expression::Member { object: body, .. } => walk_expression(body, visitor),
         Expression::MethodCall { object, args, .. } => {
             walk_expression(object, visitor);
