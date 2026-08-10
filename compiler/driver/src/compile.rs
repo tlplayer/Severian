@@ -1,145 +1,118 @@
-use crate::{
-    artifact::{write_mlir, write_stablehlo, Artifact, ArtifactKind, ArtifactLayout},
-    options::{CompileOptions, EmitKind},
-    pipeline::PipelinePlan,
-    target::{BackendFamily, DriverTarget},
-    Compilation, CompileError,
-};
-use std::path::Path;
+use crate::CompileError;
+use severian_ast::Module as AstModule;
+use severian_hir::Program;
+use severian_mlir::Module;
+use severian_package::PackageInterface;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
-pub struct CompileRequest<'a> {
-    pub source: CompileInput<'a>,
-    pub options: CompileOptions,
+pub struct Compilation {
+    pub hir: Program,
+    pub optimized_hir: Program,
+    pub mlir: Module,
+}
+pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
+    let ast = parse_source(source)?;
+    compile_ast(&ast, &[])
 }
 
-#[derive(Debug, Clone)]
-pub enum CompileInput<'a> {
-    Source(&'a str),
-    Path(&'a Path),
+fn parse_source(source: &str) -> Result<AstModule, CompileError> {
+    let tokens = severian_lexer::lex(source).map_err(|error| CompileError::Frontend {
+        stage: "lexer",
+        span: error.span,
+        message: error.message,
+    })?;
+    let ast = severian_parser::parse(&tokens).map_err(|error| CompileError::Frontend {
+        stage: "parser",
+        span: error.span,
+        message: error.message,
+    })?;
+    Ok(ast)
 }
 
-#[derive(Debug, Clone)]
-pub struct CompileOutput {
-    pub compilation: Compilation,
-    pub pipeline: PipelinePlan,
-    pub artifact: Option<Artifact>,
-}
+fn compile_ast(
+    ast: &AstModule,
+    interfaces: &[PackageInterface],
+) -> Result<Compilation, CompileError> {
+    let hir = check_ast(ast, interfaces)?;
+    let mut optimized_hir = hir.clone();
+    let fusion_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_rules.iter().cloned());
+    let fusion_aliases = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_aliases.iter().cloned());
+    let graph_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.graph_rules.iter().cloned());
+    severian_passes::standard_pipeline_with_graph(fusion_rules, fusion_aliases, graph_rules)
+        .run(&mut optimized_hir)
+        .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    let mlir = severian_lowering::lower(&optimized_hir);
 
-pub fn compile(request: CompileRequest<'_>) -> Result<CompileOutput, CompileError> {
-    let pipeline = PipelinePlan::build(&request.options);
-
-    let compilation = match request.source {
-        CompileInput::Source(source) => crate::compile_source(source)?,
-        CompileInput::Path(path) => crate::compile_path(path)?,
-    };
-
-    let source_path = match request.source {
-        CompileInput::Path(path) => Some(path),
-        CompileInput::Source(_) => None,
-    };
-
-    let output = request.options.output_path(source_path);
-    let layout = ArtifactLayout::new(&output)?;
-
-    let artifact = emit_compilation(&compilation, &request.options, &layout)?;
-
-    if !request.options.keep_intermediates {
-        layout.cleanup();
-    }
-
-    Ok(CompileOutput {
-        compilation,
-        pipeline,
-        artifact,
+    Ok(Compilation {
+        hir,
+        optimized_hir,
+        mlir,
     })
 }
 
-fn emit_compilation(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    match options.emit {
-        EmitKind::Mlir => {
-            std::fs::write(&layout.output, compilation.mlir.as_str())?;
-            return Ok(Some(Artifact::new(ArtifactKind::Mlir, &layout.output)));
+fn check_ast(ast: &AstModule, interfaces: &[PackageInterface]) -> Result<Program, CompileError> {
+    let hir = severian_semantic::analyze_with_packages(ast, interfaces).map_err(|error| {
+        CompileError::Frontend {
+            stage: "semantic",
+            span: error.span,
+            message: error.message,
         }
-
-        EmitKind::StableHlo if !options.target.is_xla() => {
-            return Err(CompileError::Optimization(
-                "StableHLO emission requires an XLA target".into(),
-            ));
-        }
-
-        _ => {}
-    }
-
-    match options.target.family() {
-        BackendFamily::Native => emit_native(compilation, options, layout),
-        BackendFamily::Xla => emit_xla(compilation, options, layout),
-    }
+    })?;
+    severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
+    Ok(hir)
 }
 
-fn emit_native(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    match options.emit {
-        EmitKind::Executable => {
-            crate::compile_native(compilation, &layout.output)?;
-            Ok(Some(Artifact::new(ArtifactKind::Executable, &layout.output)))
-        }
-
-        EmitKind::Mlir => unreachable!(),
-
-        EmitKind::LlvmIr | EmitKind::Object | EmitKind::SharedLibrary => {
-            let _ = write_mlir(&compilation.mlir, &layout.source_mlir)?;
-            Err(CompileError::Optimization(format!(
-                "{:?} emission needs the backend intermediate-artifact API",
-                options.emit
-            )))
-        }
-
-        EmitKind::StableHlo => Err(CompileError::Optimization(
-            "native target does not emit StableHLO".into(),
-        )),
-    }
+pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
+    let (ast, interfaces) = frontend_path(path)?;
+    compile_ast(&ast, &interfaces)
 }
 
-fn emit_xla(
-    compilation: &Compilation,
-    options: &CompileOptions,
-    layout: &ArtifactLayout,
-) -> Result<Option<Artifact>, CompileError> {
-    let DriverTarget::Xla {
-        platform,
-        device_ordinal,
-    } = &options.target
-    else {
-        unreachable!();
+pub fn check_path(path: &Path) -> Result<Program, CompileError> {
+    let (ast, interfaces) = frontend_path(path)?;
+    check_ast(&ast, &interfaces)
+}
+
+fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>), CompileError> {
+    let source = std::fs::read_to_string(path)?;
+    let Some(manifest_path) = severian_package::find_manifest(path) else {
+        let ast = parse_source(&source)?;
+        let interfaces = load_official_interfaces(&ast)?;
+        return Ok((ast, interfaces));
     };
-
-    let destination = match (platform, device_ordinal) {
-        (Some(platform), Some(device)) => format!("{platform}@{device}"),
-        (Some(platform), None) => platform.clone(),
-        (None, Some(device)) => format!("device {device}"),
-        (None, None) => "default PJRT device".into(),
-    };
-
-    let lowered = severian_lowering::stablehlo::lower_program(&compilation.optimized_hir)
-        .map_err(|error| CompileError::Optimization(error.to_string()))?;
-    let stablehlo = severian_xla::StableHloModule::from_text(lowered.as_str());
-
-    if options.emit == EmitKind::StableHlo {
-        return write_stablehlo(&stablehlo, &layout.output)
-            .map(Some)
-            .map_err(CompileError::Io);
+    let mut interfaces = severian_package::load_path_dependency_interfaces(&manifest_path)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
+    let ast = parse_source(&source)?;
+    for interface in load_official_interfaces(&ast)? {
+        if !interfaces
+            .iter()
+            .any(|existing| existing.name == interface.name)
+        {
+            interfaces.push(interface);
+        }
     }
+    Ok((ast, interfaces))
+}
 
-    let _ = write_stablehlo(&stablehlo, &layout.stablehlo)?;
-    Err(CompileError::Optimization(format!(
-        "StableHLO for XLA target `{destination}` is ready, but selecting/loading a PJRT plugin requires an explicit plugin path that DriverTarget does not yet represent"
-    )))
+fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>, CompileError> {
+    let library_root = std::env::var_os("SEVERIAN_LIBRARY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library"));
+    severian_package::load_official_interfaces(module, &library_root)
+        .map_err(|error| CompileError::Package(error.to_string()))
+}
+
+pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
+    severian_backend::compile_native(&compilation.hir, &compilation.mlir, output)
+        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+}
+
+pub fn inspect_toolchain() -> severian_backend::ToolchainReport {
+    severian_backend::inspect_toolchain()
 }

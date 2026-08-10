@@ -45,7 +45,8 @@ The workspace keeps language concerns separated:
   linker.
 - `runtime` owns native runtime symbols and behavior only. Compiler-side
   runtime-call emission lives under `lowering::runtime`.
-- `driver` composes the stages and provides the CLI and controlled evaluator.
+- `driver` composes the stages and provides the CLI. It has no interpreter or
+  evaluator; execution always means launching a compiled artifact.
 
 The native path remains the default. The XLA path is selected independently
 for tensor/ML workloads; StableHLO emission is wired for directly returned,
@@ -64,9 +65,9 @@ Direct GPU lowering and ROCm backend implementation remain as inactive
 low-level code because they contain real MLIR/ROCDL lowering work. They are not
 driver targets in the current Native/XLA architecture.
 
-The controlled evaluator runs the checked, unoptimized HIR. Native compilation
-runs an optimized clone through lowering, so backend-only operations do not
-have a second model-specific implementation in the evaluator.
+`sev check` stops after semantic and ownership checks. `sev build`, `sev run`,
+and `sev test` continue through lowering and the native backend; `run` and
+`test` use the resulting OS executable as the only source of execution truth.
 
 ## Local commands
 
