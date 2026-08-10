@@ -1,0 +1,15 @@
+import parallel
+import tensor
+
+def reluBackward(
+    input: Tensor[f64],
+    upstream: Tensor[f64],
+) -> Tensor[f64]:
+    with gpu:
+        return tensor.rankedReluBackward(input, upstream)
+
+test "gpu relu backward masks inactive values":
+    input = tensor.ranked([-2.0, 0.0, 3.0, 4.0], [4])
+    upstream = tensor.ranked([10.0, 20.0, 30.0, 40.0], [4])
+    result = reluBackward(input, upstream)
+    assert(tensor.rankedValues(result) == [0.0, 0.0, 30.0, 40.0])

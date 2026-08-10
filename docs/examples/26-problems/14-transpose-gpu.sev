@@ -1,0 +1,20 @@
+import parallel
+import tensor
+
+def transpose(value: Tensor[f64]) -> Tensor[f64]:
+    with gpu:
+        return tensor.rankedTranspose(value)
+
+test "gpu transpose swaps matrix axes":
+    value = tensor.ranked(
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        [2, 3],
+    )
+    result = transpose(value)
+    assert(tensor.rankedShape(result) == [3, 2])
+    assert(tensor.rankedValues(result) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
+
+test "transpose twice restores values":
+    value = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    result = transpose(transpose(value))
+    assert(tensor.rankedValues(result) == [1.0, 2.0, 3.0, 4.0])

@@ -1,0 +1,23 @@
+import parallel
+import tensor
+
+def attention(
+    query: Tensor[f64],
+    key: Tensor[f64],
+    value: Tensor[f64],
+) -> Tensor[f64]:
+    with gpu:
+        key_transposed = tensor.rankedTranspose(key)
+        scores = tensor.rankedMatmul(query, key_transposed)
+        probabilities = tensor.rankedSoftmaxRows(scores)
+        return tensor.rankedMatmul(probabilities, value)
+
+test "zero query and key produce a uniform weighted value":
+    query = tensor.ranked([0.0, 0.0, 0.0, 0.0], [2, 2])
+    key = tensor.ranked([0.0, 0.0, 0.0, 0.0], [2, 2])
+    value = tensor.ranked([2.0, 4.0, 6.0, 8.0], [2, 2])
+
+    result = attention(query, key, value)
+
+    assert(tensor.rankedShape(result) == [2, 2])
+    assert(tensor.rankedValues(result) == [4.0, 6.0, 4.0, 6.0])

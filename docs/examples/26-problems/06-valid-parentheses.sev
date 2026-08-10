@@ -1,0 +1,38 @@
+def validParentheses(text: string) -> bool:
+    stack := []
+
+    for character in text:
+        if character == "(" or character == "[" or character == "{":
+            stack.append(character)
+            continue
+
+        if size(stack) == 0:
+            return false
+
+        opening = stack[-1]
+
+        if character == ")" and opening != "(":
+            return false
+        if character == "]" and opening != "[":
+            return false
+        if character == "}" and opening != "{":
+            return false
+
+        stack.pop()
+
+    return size(stack) == 0
+
+test "accepts balanced nesting":
+    assert(validParentheses("([]{})"))
+
+test "accepts an empty string":
+    assert(validParentheses(""))
+
+test "rejects crossed nesting":
+    assert(not validParentheses("([)]"))
+
+test "rejects an unmatched close":
+    assert(not validParentheses("]"))
+
+test "rejects an unmatched open":
+    assert(not validParentheses("(("))

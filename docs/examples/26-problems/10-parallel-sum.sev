@@ -1,0 +1,25 @@
+def sumRange(values: list[int], start: int, end: int) -> int:
+    total := 0
+    for index in range(start, end):
+        total += values[index]
+    return total
+
+def parallelSum(values: list[int]) -> int:
+    middle = size(values) / 2
+
+    left_task = async sumRange(values, 0, middle) with self
+    right_task = async sumRange(values, middle, size(values)) with self
+
+    left = await left_task
+    right = await right_task
+
+    return left + right
+
+test "joins two structured tasks":
+    assert(parallelSum([1, 2, 3, 4, 5, 6, 7, 8]) == 36)
+
+test "handles an odd number of values":
+    assert(parallelSum([1, 2, 3, 4, 5]) == 15)
+
+test "handles empty input":
+    assert(parallelSum([]) == 0)

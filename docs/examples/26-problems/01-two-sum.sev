@@ -1,0 +1,19 @@
+def twoSum(values: list[int], target: int) -> list[int]:
+    for left_index in range(0, size(values)):
+        for right_index in range(left_index + 1, size(values)):
+            if values[left_index] + values[right_index] == target:
+                return [left_index, right_index]
+
+    return []
+
+test "finds the first matching pair":
+    assert(twoSum([2, 7, 11, 15], 9) == [0, 1])
+
+test "finds a pair away from the front":
+    assert(twoSum([3, 2, 4], 6) == [1, 2])
+
+test "uses different positions for equal values":
+    assert(twoSum([3, 3], 6) == [0, 1])
+
+test "returns an empty list when no pair exists":
+    assert(twoSum([1, 2, 3], 99) == [])

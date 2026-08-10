@@ -1,0 +1,31 @@
+def maximumSubarray(values: list[int]) -> int:
+    if size(values) == 0:
+        return 0
+
+    current := values[0]
+    best := values[0]
+
+    for index in range(1, size(values)):
+        extended = current + values[index]
+
+        if values[index] > extended:
+            current = values[index]
+        else:
+            current = extended
+
+        if current > best:
+            best = current
+
+    return best
+
+test "classic maximum subarray":
+    assert(maximumSubarray([-2, 1, -3, 4, -1, 2, 1, -5, 4]) == 6)
+
+test "all negative values":
+    assert(maximumSubarray([-8, -3, -6, -2, -5, -4]) == -2)
+
+test "single value":
+    assert(maximumSubarray([7]) == 7)
+
+test "empty input":
+    assert(maximumSubarray([]) == 0)

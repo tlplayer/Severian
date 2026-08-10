@@ -1,0 +1,23 @@
+import parallel
+import tensor
+
+def matrixMultiply(
+    left: Tensor[f64],
+    right: Tensor[f64],
+) -> Tensor[f64]:
+    with gpu:
+        return tensor.rankedMatmul(left, right)
+
+test "gpu two by two matrix multiplication":
+    left = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
+    right = tensor.ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
+    result = matrixMultiply(left, right)
+    assert(tensor.rankedShape(result) == [2, 2])
+    assert(tensor.rankedValues(result) == [19.0, 22.0, 43.0, 50.0])
+
+test "gpu rectangular matrix multiplication":
+    left = tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    right = tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [3, 2])
+    result = matrixMultiply(left, right)
+    assert(tensor.rankedShape(result) == [2, 2])
+    assert(tensor.rankedValues(result) == [22.0, 28.0, 49.0, 64.0])

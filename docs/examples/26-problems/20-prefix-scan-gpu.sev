@@ -1,0 +1,19 @@
+import parallel
+
+def prefixScan(values: list[int]) -> list[int]:
+    output := clone values
+
+    with gpu:
+        for index in range(1, size(output)):
+            output[index] += output[index - 1]
+
+    return output
+
+test "gpu placement must preserve scan dependencies":
+    assert(prefixScan([1, 2, 3, 4, 5]) == [1, 3, 6, 10, 15])
+
+test "scan handles cancellation":
+    assert(prefixScan([5, -5, 7, -7]) == [5, 0, 7, 0])
+
+test "scan handles one value":
+    assert(prefixScan([9]) == [9])

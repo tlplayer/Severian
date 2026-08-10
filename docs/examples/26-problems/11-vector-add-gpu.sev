@@ -1,0 +1,15 @@
+import parallel
+import tensor
+
+def vectorAdd(
+    left: Tensor[f64],
+    right: Tensor[f64],
+) -> Tensor[f64]:
+    with gpu:
+        return tensor.rankedAdd(left, right)
+
+test "gpu vector addition":
+    left = tensor.ranked([1.0, 2.0, 3.0, 4.0], [4])
+    right = tensor.ranked([10.0, 20.0, 30.0, 40.0], [4])
+    result = vectorAdd(left, right)
+    assert(tensor.rankedValues(result) == [11.0, 22.0, 33.0, 44.0])

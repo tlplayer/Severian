@@ -1,0 +1,16 @@
+import parallel
+import tensor
+
+def layerNormalize(value: Tensor[f64]) -> Tensor[f64]:
+    with gpu:
+        return tensor.rankedLayerNorm(value)
+
+test "constant rows normalize to zero":
+    value = tensor.ranked([2.0, 2.0, -3.0, -3.0], [2, 2])
+    result = layerNormalize(value)
+    assert(tensor.rankedValues(result) == [0.0, 0.0, 0.0, 0.0])
+
+test "shape is preserved":
+    value = tensor.ranked([5.0, 5.0, 5.0, 5.0], [2, 2])
+    result = layerNormalize(value)
+    assert(tensor.rankedShape(result) == [2, 2])

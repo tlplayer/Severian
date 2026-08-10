@@ -1,0 +1,25 @@
+def moveZeroes(values: list[int]):
+    write_index := 0
+
+    for read_index in indices(values):
+        if values[read_index] != 0:
+            values[write_index] = values[read_index]
+            write_index += 1
+
+    for index in range(write_index, size(values)):
+        values[index] = 0
+
+test "moves zeroes without resizing":
+    values := [0, 1, 0, 3, 12]
+    moveZeroes(borrow values)
+    assert(values == [1, 3, 12, 0, 0])
+
+test "preserves an already dense list":
+    values := [1, 2, 3]
+    moveZeroes(borrow values)
+    assert(values == [1, 2, 3])
+
+test "handles all zeroes":
+    values := [0, 0, 0]
+    moveZeroes(borrow values)
+    assert(values == [0, 0, 0])

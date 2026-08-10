@@ -1,0 +1,27 @@
+def binarySearch(values: list[int], target: int) -> int:
+    left := 0
+    right := size(values) - 1
+
+    while left <= right:
+        middle = (left + right) / 2
+
+        if values[middle] == target:
+            return middle
+        else if values[middle] < target:
+            left = middle + 1
+        else:
+            right = middle - 1
+
+    return -1
+
+test "finds the first element":
+    assert(binarySearch([1, 3, 5, 7, 9], 1) == 0)
+
+test "finds a middle element":
+    assert(binarySearch([1, 3, 5, 7, 9], 5) == 2)
+
+test "finds the final element":
+    assert(binarySearch([1, 3, 5, 7, 9], 9) == 4)
+
+test "returns minus one when absent":
+    assert(binarySearch([1, 3, 5, 7, 9], 4) == -1)
