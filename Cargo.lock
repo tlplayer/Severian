@@ -228,9 +228,7 @@ dependencies = [
  "severian-package",
  "severian-parser",
  "severian-passes",
- "severian-platform",
  "severian-semantic",
- "severian-xla",
 ]
 
 [[package]]
