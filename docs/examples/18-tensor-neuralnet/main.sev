@@ -1,11 +1,9 @@
 import tensor
-import neuralnet
 
 def portableForward(input: list[float]) -> list[float]:
-    return denseRelu([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], input)
+    return tensor.parallelRelu(input)
 
 def main():
-    input = [2.0, 4.0]
+    input = [-2.0, 3.0, -4.0, 5.0]
     print(portableForward(input))
-    print(parallelRelu([-2.0, 3.0, -4.0, 5.0]))
-    print(denseReluInputJacobian([1.0, 0.0, 0.0, 1.0], 2, 2, [0.0, -3.0], input))
+    print(tensor.parallelRelu(input))

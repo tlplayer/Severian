@@ -1,33 +1,21 @@
 import distributed
-import tensor
-import neuralnet
 
-def buildInput(count: int) -> list[float]:
-    values := []
-    middle = count / 2
-    for index in range(0, count):
-        values.append(float(index - middle))
-    return values
-
-def ones(count: int) -> list[float]:
-    values := []
-    for _ in range(0, count):
-        values.append(1.0)
-    return values
-
-def sumValues(values: list[float]) -> float:
-    total := 0.0
-    for value in values:
-        total += value
-    return total
+def reluShard(values: list[float], workers: int, worker: int) -> list[float]:
+    output := []
+    start = distributed.shardStart(size(values), workers, worker)
+    end = distributed.shardEnd(size(values), workers, worker)
+    for index in range(start, end):
+        if values[index] > 0.0:
+            output.append(values[index])
+        else:
+            output.append(0.0)
+    return output
 
 def main():
-    count = 65536
-    input = buildInput(count)
-    upstream = ones(count)
-    activations = distributedReluForward(input, 4)
-    gradients = distributedReluBackward(input, upstream, 4)
+    values = [-3.0, 2.0, -1.0, 4.0, 5.0, -2.0, 7.0, -8.0]
+    print(distributed.shardStart(size(values), 4, 2))
+    print(distributed.shardEnd(size(values), 4, 2))
+    print(reluShard(values, 4, 2))
 
-    print(size(activations))
-    print(sumValues(activations))
-    print(sumValues(gradients))
+test "distributed shards retain deterministic ownership":
+    assert(reluShard([-3.0, 2.0, -1.0, 4.0], 2, 1) == [0.0, 4.0])

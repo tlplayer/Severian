@@ -1,6 +1,7 @@
 use severian_driver::{compile_native, compile_native_tests, compile_path};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn examples_root() -> PathBuf {
@@ -52,6 +53,55 @@ impl Drop for TemporaryExecutable {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
+}
+
+struct NativeOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+fn run_native(executable: &Path) -> std::io::Result<NativeOutput> {
+    const OUTPUT_LIMIT: u64 = 1024 * 1024;
+    let mut child = Command::new("timeout")
+        .arg("5")
+        .arg(executable)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout
+            .take(OUTPUT_LIMIT + 1)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr
+            .take(OUTPUT_LIMIT + 1)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes)
+    });
+    let status = child.wait()?;
+    let mut stdout = stdout_reader
+        .join()
+        .expect("stdout reader must not panic")?;
+    let mut stderr = stderr_reader
+        .join()
+        .expect("stderr reader must not panic")?;
+    let truncated = stdout.len() > OUTPUT_LIMIT as usize || stderr.len() > OUTPUT_LIMIT as usize;
+    stdout.truncate(OUTPUT_LIMIT as usize);
+    stderr.truncate(OUTPUT_LIMIT as usize);
+    Ok(NativeOutput {
+        status,
+        stdout,
+        stderr,
+        truncated,
+    })
 }
 
 #[test]
@@ -138,11 +188,7 @@ fn every_example_is_a_verified_native_executable() {
             continue;
         }
 
-        let output = match Command::new("timeout")
-            .arg("5")
-            .arg(executable.path())
-            .output()
-        {
+        let output = match run_native(executable.path()) {
             Ok(output) => output,
             Err(error) => {
                 failures.push(format!(
@@ -152,6 +198,12 @@ fn every_example_is_a_verified_native_executable() {
                 continue;
             }
         };
+        if output.truncated {
+            failures.push(format!(
+                "{}: native output exceeded the 1 MiB safety limit",
+                relative.display()
+            ));
+        }
         if !output.status.success() {
             failures.push(format!(
                 "{}: native executable exited with {}; stderr: {}",

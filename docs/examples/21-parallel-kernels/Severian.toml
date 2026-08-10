@@ -10,4 +10,4 @@ path = "main.sev"
 [dependencies]
 matrix = { path = "../../../library/matrix", version = "0.1.0" }
 tensor = { path = "../../../library/tensor", version = "0.1.0" }
-models = { path = "../../../library/models", version = "0.1.0" }
+model = { path = "../../../library/model", version = "0.1.0" }

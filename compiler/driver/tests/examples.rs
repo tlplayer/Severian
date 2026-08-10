@@ -1,5 +1,4 @@
-use severian_driver::{compile_native_tests, compile_path, compile_source, run, run_tests};
-use severian_hir::TestMode;
+use severian_driver::{compile_native_tests, compile_path, compile_source};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,163 +17,11 @@ fn severian_files(directory: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn checks_and_tests_frontend_example_directories() {
-    let root = examples_root();
-    let directories = [
-        "00-getting-started",
-        "01-values-control",
-        "02-functions-modules",
-        "03-collections-iteration",
-        "04-classes-traits",
-        "05-ownership-borrowing",
-        "06-results-patterns",
-        "07-generics-constraints",
-    ];
-
-    let mut compiled = 0;
-    let mut severian_tests = 0;
-    for directory in directories {
-        for fixture in severian_files(&root.join(directory)) {
-            let compilation = compile_path(&fixture)
-                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-            severian_tests += run_tests(&compilation.hir, |_| {})
-                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-            compiled += 1;
-        }
-    }
-
-    assert_eq!(compiled, 28);
-    assert_eq!(severian_tests, 15);
-}
-
-#[test]
 fn checks_all_concurrency_examples_through_the_frontend() {
     let directory = examples_root().join("08-concurrency");
     for fixture in severian_files(&directory) {
         compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
     }
-}
-
-#[test]
-fn checks_and_runs_the_problem_gallery() {
-    let directory = examples_root().join("26-problems");
-    let mut compiled = 0;
-    let mut tests = 0;
-
-    for fixture in severian_files(&directory) {
-        let compilation =
-            compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-        let native_concurrency_fixture = fixture
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.split('-').next())
-            .and_then(|prefix| prefix.parse::<usize>().ok())
-            .is_some_and(|prefix| prefix >= 65);
-        if native_concurrency_fixture {
-            let executable = std::env::temp_dir().join(format!(
-                "severian-problem-native-{}-{compiled}",
-                std::process::id()
-            ));
-            let count = compile_native_tests(&compilation, &executable)
-                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-            let output = Command::new(&executable)
-                .output()
-                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-            let _ = std::fs::remove_file(&executable);
-            assert!(
-                output.status.success(),
-                "{} exited with {}: {}",
-                fixture.display(),
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert_eq!(
-                String::from_utf8_lossy(&output.stdout),
-                format!("{count} passed\n"),
-                "{} did not execute its native tests",
-                fixture.display()
-            );
-            tests += count;
-        } else {
-            tests += run_tests(&compilation.hir, |_| {})
-                .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-        }
-        compiled += 1;
-    }
-
-    assert_eq!(compiled, 74);
-    assert_eq!(tests, 220);
-}
-
-#[test]
-fn runs_channel_switches_generated_defaults_and_unsafe_addressing() {
-    let root = examples_root();
-
-    let channel_switch = compile_path(&root.join("08-concurrency/08-channel-switch.sev")).unwrap();
-    let mut output = Vec::new();
-    run(&channel_switch.hir, |line| output.push(line.to_owned())).unwrap();
-    assert_eq!(output, ["message: hello", "command: refresh"]);
-
-    let generated_defaults =
-        compile_path(&root.join("13-method-mutation/02-mutation-contract-placeholder.sev"))
-            .unwrap();
-    assert_eq!(run_tests(&generated_defaults.hir, |_| {}).unwrap(), 1);
-
-    let unsafe_addressing =
-        compile_path(&root.join("09-systems-unsafe/01-isolated-pointer.sev")).unwrap();
-    assert_eq!(run_tests(&unsafe_addressing.hir, |_| {}).unwrap(), 2);
-
-    let enum_basics = compile_path(&root.join("12-enums-aliases/01-enum-basics.sev")).unwrap();
-    assert_eq!(run_tests(&enum_basics.hir, |_| {}).unwrap(), 1);
-}
-
-#[test]
-fn compiles_and_classifies_the_test_gallery() {
-    let directory = examples_root().join("15-tests");
-    let mut modes = Vec::new();
-    let mut tests = 0;
-
-    for fixture in severian_files(&directory) {
-        let compilation =
-            compile_path(&fixture).unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-        tests += run_tests(&compilation.hir, |_| {})
-            .unwrap_or_else(|error| panic!("{}: {error}", fixture.display()));
-        for function in &compilation.hir.functions {
-            for test in &function.tests {
-                modes.extend(test.modes.iter().copied());
-            }
-        }
-    }
-
-    assert_eq!(tests, 8);
-    assert!(modes.contains(&TestMode::Property));
-    assert!(modes.contains(&TestMode::Bench));
-    assert!(modes.contains(&TestMode::Chaos));
-    assert!(modes.contains(&TestMode::Integration));
-}
-
-#[test]
-fn resolves_path_dependencies_from_severian_manifests() {
-    let root = examples_root().join("14-packages");
-    let library = compile_path(&root.join("geometry/src/lib.sev")).unwrap();
-    assert_eq!(run_tests(&library.hir, |_| {}).unwrap(), 1);
-
-    let application = compile_path(&root.join("app/src/main.sev")).unwrap();
-    let mut output = Vec::new();
-    run(&application.hir, |line| output.push(line.to_owned())).unwrap();
-    assert_eq!(output, ["5"]);
-}
-
-#[test]
-fn resolves_model_decorator_symbols_to_package_functions() {
-    let fixture = examples_root().join("20-model-symbols/main.sev");
-    let compilation = compile_path(&fixture).unwrap();
-    let mut output = Vec::new();
-    run(&compilation.hir, |line| output.push(line.to_owned())).unwrap();
-    assert_eq!(
-        output,
-        ["[0, 0, 3]", "[0.5]", "[0, 0, 0, 0, 0, 0, 0, 0, 1]",]
-    );
 }
 
 #[test]
@@ -217,24 +64,6 @@ fn ranked_tensor_example_emits_real_linalg_kernels() {
     assert!(mlir.contains("llvm.call @__sev_tensor_matmul"));
     assert!(mlir.contains("llvm.call @__sev_tensor_add"));
     assert!(mlir.contains("llvm.call @__sev_tensor_relu"));
-}
-
-#[test]
-fn resolves_qualified_package_classes_across_the_data_infrastructure_stack() {
-    let fixture = examples_root().join("23-data-infrastructure/main.sev");
-    let compilation = compile_path(&fixture).unwrap();
-    let mut output = Vec::new();
-    run(&compilation.hir, |line| output.push(line.to_owned())).unwrap();
-
-    assert_eq!(
-        output,
-        [
-            "[\"api-0 -> node-a\", \"api-1 -> node-b\", \"api-2 -> node-a\", \"rollout v1->v2\", \"scale 2->3\", \"repair 1\"]",
-            "SELECT id, action FROM controller_events WHERE namespace = $1",
-        ]
-    );
-    assert!(compilation.mlir.as_str().contains("__sev_unbox_ptr"));
-    assert!(compilation.mlir.as_str().contains("__sev_unbox_i64"));
 }
 
 #[test]

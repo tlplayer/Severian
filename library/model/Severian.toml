@@ -11,3 +11,7 @@ path = "src/lib.sev"
 category = "machine-learning"
 implementation = "native"
 status = "experimental"
+
+[package.metadata.compiler]
+symbols = { Relu = "reluList", FastSigmoid = "fastSigmoidList", FastTanh = "fastTanhList", Swish = "swishList", J = "jacobianList" }
+graph-operations = { graphInput = "input", graphRelu = "relu", graphAdd = "add", graphMatmul = "matmul", runGraph = "run" }

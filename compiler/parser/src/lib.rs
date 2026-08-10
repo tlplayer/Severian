@@ -129,6 +129,9 @@ impl Parser<'_> {
                         if self.take_simple(&TokenKind::Comma).is_none() {
                             break;
                         }
+                        if self.at(&TokenKind::RightParen) {
+                            break;
+                        }
                     }
                 }
                 self.expect_simple(TokenKind::RightParen, "`)` after enum variant")?;
@@ -1611,6 +1614,9 @@ impl Parser<'_> {
                             value,
                         });
                         if self.take_simple(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        if self.at(&TokenKind::RightParen) {
                             break;
                         }
                     }

@@ -1,0 +1,118 @@
+use crate::CompileError;
+use severian_ast::Module as AstModule;
+use severian_hir::Program;
+use severian_mlir::Module;
+use severian_package::PackageInterface;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone)]
+pub struct Compilation {
+    pub hir: Program,
+    pub optimized_hir: Program,
+    pub mlir: Module,
+}
+pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
+    let ast = parse_source(source)?;
+    compile_ast(&ast, &[])
+}
+
+fn parse_source(source: &str) -> Result<AstModule, CompileError> {
+    let tokens = severian_lexer::lex(source).map_err(|error| CompileError::Frontend {
+        stage: "lexer",
+        span: error.span,
+        message: error.message,
+    })?;
+    let ast = severian_parser::parse(&tokens).map_err(|error| CompileError::Frontend {
+        stage: "parser",
+        span: error.span,
+        message: error.message,
+    })?;
+    Ok(ast)
+}
+
+fn compile_ast(
+    ast: &AstModule,
+    interfaces: &[PackageInterface],
+) -> Result<Compilation, CompileError> {
+    let hir = check_ast(ast, interfaces)?;
+    let mut optimized_hir = hir.clone();
+    let fusion_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_rules.iter().cloned());
+    let fusion_aliases = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.fusion_aliases.iter().cloned());
+    let graph_rules = interfaces
+        .iter()
+        .flat_map(|interface| interface.compiler.graph_rules.iter().cloned());
+    severian_passes::standard_pipeline_with_graph(fusion_rules, fusion_aliases, graph_rules)
+        .run(&mut optimized_hir)
+        .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    let mlir = severian_lowering::lower(&optimized_hir);
+
+    Ok(Compilation {
+        hir,
+        optimized_hir,
+        mlir,
+    })
+}
+
+fn check_ast(ast: &AstModule, interfaces: &[PackageInterface]) -> Result<Program, CompileError> {
+    let hir = severian_semantic::analyze_with_packages(ast, interfaces).map_err(|error| {
+        CompileError::Frontend {
+            stage: "semantic",
+            span: error.span,
+            message: error.message,
+        }
+    })?;
+    severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
+    Ok(hir)
+}
+
+pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
+    let (ast, interfaces) = frontend_path(path)?;
+    compile_ast(&ast, &interfaces)
+}
+
+pub fn check_path(path: &Path) -> Result<Program, CompileError> {
+    let (ast, interfaces) = frontend_path(path)?;
+    check_ast(&ast, &interfaces)
+}
+
+fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>), CompileError> {
+    let source = std::fs::read_to_string(path)?;
+    let Some(manifest_path) = severian_package::find_manifest(path) else {
+        let ast = parse_source(&source)?;
+        let interfaces = load_official_interfaces(&ast)?;
+        return Ok((ast, interfaces));
+    };
+    let mut interfaces = severian_package::load_path_dependency_interfaces(&manifest_path)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
+    let ast = parse_source(&source)?;
+    for interface in load_official_interfaces(&ast)? {
+        if !interfaces
+            .iter()
+            .any(|existing| existing.name == interface.name)
+        {
+            interfaces.push(interface);
+        }
+    }
+    Ok((ast, interfaces))
+}
+
+fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>, CompileError> {
+    let library_root = std::env::var_os("SEVERIAN_LIBRARY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library"));
+    severian_package::load_official_interfaces(module, &library_root)
+        .map_err(|error| CompileError::Package(error.to_string()))
+}
+
+pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
+    severian_backend::compile_native(&compilation.hir, &compilation.mlir, output)
+        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+}
+
+pub fn inspect_toolchain() -> severian_backend::ToolchainReport {
+    severian_backend::inspect_toolchain()
+}

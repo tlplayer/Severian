@@ -361,6 +361,60 @@ pub fn load_path_dependency_sources(manifest_path: &Path) -> Result<Vec<String>,
     Ok(sources)
 }
 
+pub fn load_path_dependency_interfaces(
+    manifest_path: &Path,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let mut visited = HashSet::new();
+    let mut interfaces = Vec::new();
+    collect_path_dependency_interfaces(manifest_path, &mut visited, &mut interfaces)?;
+    interfaces.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(interfaces)
+}
+
+fn collect_path_dependency_interfaces(
+    manifest_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    interfaces: &mut Vec<PackageInterface>,
+) -> Result<(), PackageError> {
+    let manifest = parse_manifest(manifest_path)?;
+    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
+        return Ok(());
+    };
+    let root = manifest_path
+        .parent()
+        .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
+    for (dependency_name, dependency) in dependencies {
+        let Some(path) = dependency
+            .as_table()
+            .and_then(|table| table.get("path"))
+            .and_then(toml::Value::as_str)
+        else {
+            continue;
+        };
+        let directory = root.join(path).canonicalize().map_err(|error| {
+            PackageError::Manifest(format!(
+                "dependency `{dependency_name}` has invalid path `{}`: {error}",
+                root.join(path).display()
+            ))
+        })?;
+        let dependency_manifest = directory.join("Severian.toml");
+        let canonical_manifest = dependency_manifest.canonicalize()?;
+        if !visited.insert(canonical_manifest.clone()) {
+            continue;
+        }
+        let dependency = parse_manifest(&canonical_manifest)?;
+        let declared_name = package_name(&dependency, &canonical_manifest)?;
+        if declared_name != dependency_name {
+            return Err(PackageError::Manifest(format!(
+                "dependency `{dependency_name}` resolves to package `{declared_name}`"
+            )));
+        }
+        collect_path_dependency_interfaces(&canonical_manifest, visited, interfaces)?;
+        interfaces.push(load_interface(dependency_name, &directory)?);
+    }
+    Ok(())
+}
+
 pub fn load_official_interfaces(
     module: &Module,
     library_root: &Path,

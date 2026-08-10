@@ -1,6 +1,6 @@
-import models
+import model
 
-@models(Relu, FastSigmoid, J)
+@model(Relu, FastSigmoid, J)
 def main():
     X = [-2.0, 0.0, 3.0]
     values = Relu(X)

@@ -9,4 +9,3 @@ path = "main.sev"
 
 [dependencies]
 tensor = { path = "../../../library/tensor", version = "0.1.0" }
-neuralnet = { path = "../../../library/neuralnet", version = "0.1.0" }

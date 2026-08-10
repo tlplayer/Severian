@@ -117,6 +117,7 @@ struct Lexer<'source> {
     source: &'source str,
     tokens: Vec<Token>,
     indents: Vec<usize>,
+    delimiter_depth: usize,
 }
 
 impl<'source> Lexer<'source> {
@@ -125,6 +126,7 @@ impl<'source> Lexer<'source> {
             source,
             tokens: Vec::new(),
             indents: vec![0],
+            delimiter_depth: 0,
         }
     }
 
@@ -144,13 +146,17 @@ impl<'source> Lexer<'source> {
             }
 
             if !content.is_empty() && !content.starts_with('#') {
-                self.emit_indentation(indentation, offset)?;
+                if self.delimiter_depth == 0 {
+                    self.emit_indentation(indentation, offset)?;
+                }
                 self.lex_line(content, offset + indentation)?;
-                let end = offset + line.len();
-                self.tokens.push(Token {
-                    kind: TokenKind::Newline,
-                    span: Span::new(end, end + usize::from(segment.ends_with('\n'))),
-                });
+                if self.delimiter_depth == 0 {
+                    let end = offset + line.len();
+                    self.tokens.push(Token {
+                        kind: TokenKind::Newline,
+                        span: Span::new(end, end + usize::from(segment.ends_with('\n'))),
+                    });
+                }
             }
 
             offset += segment.len();
@@ -210,12 +216,30 @@ impl<'source> Lexer<'source> {
             match bytes[index] {
                 b' ' | b'\r' => index += 1,
                 b'#' => break,
-                b'(' => self.push_simple(TokenKind::LeftParen, base, &mut index),
-                b')' => self.push_simple(TokenKind::RightParen, base, &mut index),
-                b'[' => self.push_simple(TokenKind::LeftBracket, base, &mut index),
-                b']' => self.push_simple(TokenKind::RightBracket, base, &mut index),
-                b'{' => self.push_simple(TokenKind::LeftBrace, base, &mut index),
-                b'}' => self.push_simple(TokenKind::RightBrace, base, &mut index),
+                b'(' => {
+                    self.delimiter_depth += 1;
+                    self.push_simple(TokenKind::LeftParen, base, &mut index);
+                }
+                b')' => {
+                    self.delimiter_depth = self.delimiter_depth.saturating_sub(1);
+                    self.push_simple(TokenKind::RightParen, base, &mut index);
+                }
+                b'[' => {
+                    self.delimiter_depth += 1;
+                    self.push_simple(TokenKind::LeftBracket, base, &mut index);
+                }
+                b']' => {
+                    self.delimiter_depth = self.delimiter_depth.saturating_sub(1);
+                    self.push_simple(TokenKind::RightBracket, base, &mut index);
+                }
+                b'{' => {
+                    self.delimiter_depth += 1;
+                    self.push_simple(TokenKind::LeftBrace, base, &mut index);
+                }
+                b'}' => {
+                    self.delimiter_depth = self.delimiter_depth.saturating_sub(1);
+                    self.push_simple(TokenKind::RightBrace, base, &mut index);
+                }
                 b':' if bytes.get(index + 1) == Some(&b'=') => {
                     self.push_double(TokenKind::ChangeableEqual, base, &mut index)
                 }

@@ -18,6 +18,60 @@ native("__sev_tensor_softmax_rows") def softmaxRows(input: Tensor[f64]) -> Tenso
 
 native("__sev_tensor_layer_norm") def layerNorm(input: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
+def reluList(input: list[float]) -> list[float]:
+    output := []
+    for value in input:
+        if value > 0.0:
+            output.append(value)
+        else:
+            output.append(0.0)
+    return output
+
+def fastSigmoidList(input: list[float]) -> list[float]:
+    output := []
+    for value in input:
+        output.append(value / (1.0 + abs(value)))
+    return output
+
+def fastTanhList(input: list[float]) -> list[float]:
+    output := []
+    for value in input:
+        output.append(value / (1.0 + abs(value)))
+    return output
+
+def swishList(input: list[float]) -> list[float]:
+    output := []
+    for value in input:
+        output.append(value * (0.5 + value / (2.0 * (1.0 + abs(value)))))
+    return output
+
+def jacobianList(input: list[float]) -> list[list[float]]:
+    output := []
+    for row in range(0, size(input)):
+        values := []
+        for column in range(0, size(input)):
+            if row == column:
+                values.append(1.0)
+            else:
+                values.append(0.0)
+        output.append(values)
+    return output
+
+def graphInput(input: Tensor[f64]) -> Tensor[f64]:
+    return input
+
+def graphRelu(input: Tensor[f64]) -> Tensor[f64]:
+    return relu(input)
+
+def graphAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    return add(left, right)
+
+def graphMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    return matmul(left, right)
+
+def runGraph(input: Tensor[f64]) -> Tensor[f64]:
+    return input
+
 def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     assert(dimension == -1 or dimension == 1)
     return softmaxRows(input)

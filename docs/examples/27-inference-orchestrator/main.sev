@@ -1,4 +1,4 @@
-import models
+import model
 import network
 import orchestrator
 import tensor
@@ -36,10 +36,10 @@ def predict(features: list[float]) -> list[float]:
     input = tensor.ranked(features, [1, 2])
     weights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
     bias = tensor.ranked([-1.0, 1.0], [1, 2])
-    X = models.graphInput(input)
-    W = models.graphInput(weights)
-    B = models.graphInput(bias)
-    output = models.runGraph(models.graphRelu(models.graphAdd(models.graphMatmul(X, W), B)))
+    X = model.graphInput(input)
+    W = model.graphInput(weights)
+    B = model.graphInput(bias)
+    output = model.runGraph(model.graphRelu(model.graphAdd(model.graphMatmul(X, W), B)))
     return tensor.rankedValues(output)
 
 def makeBatches(requests: list[InferenceRequest], batchSize: int, failureBatch: int) -> list[InferenceBatch]:

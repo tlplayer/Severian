@@ -9,5 +9,3 @@ path = "main.sev"
 
 [dependencies]
 distributed = { path = "../../../library/distributed", version = "0.1.0" }
-tensor = { path = "../../../library/tensor", version = "0.1.0" }
-neuralnet = { path = "../../../library/neuralnet", version = "0.1.0" }

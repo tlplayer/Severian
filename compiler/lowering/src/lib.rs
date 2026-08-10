@@ -2926,7 +2926,9 @@ impl LowerContext<'_> {
             .strings
             .iter()
             .position(|candidate| candidate == value)
-            .expect("native metadata strings are collected before lowering");
+            .unwrap_or_else(|| {
+                panic!("native metadata string `{value}` was not collected before lowering")
+            });
         let result = self.fresh_value();
         writeln!(
             self.output,
@@ -4433,10 +4435,13 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
         match instruction {
             Instruction::Let { value, .. }
             | Instruction::TryLet { value, .. }
-            | Instruction::Assign { value, .. }
             | Instruction::Print(value)
             | Instruction::Assert(value)
             | Instruction::Evaluate(value) => collect_expression_strings(value, strings),
+            Instruction::Assign { target, value, .. } => {
+                collect_expression_strings(target, strings);
+                collect_expression_strings(value, strings);
+            }
             Instruction::Return(Some(value)) => collect_expression_strings(value, strings),
             Instruction::Return(None) => {}
             Instruction::If {
@@ -4636,12 +4641,21 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
                 collect_expression_strings(arg, strings);
             }
         }
-        Expression::PrintArgs(values) | Expression::Construct { args: values, .. } => {
+        Expression::PrintArgs(values) => {
             for value in values {
                 collect_expression_strings(value, strings);
             }
         }
-        Expression::Member { object, .. } => collect_expression_strings(object, strings),
+        Expression::Construct { class, args } => {
+            strings.push(class.clone());
+            for value in args {
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::Member { object, member } => {
+            strings.push(member.clone());
+            collect_expression_strings(object, strings);
+        }
         Expression::MethodCall { object, args, .. } => {
             collect_expression_strings(object, strings);
             for arg in args {

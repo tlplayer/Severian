@@ -1,8 +1,17 @@
-from io import print as write
+import file
 
 def main():
     distance = 9.0 ** .5
-    write(distance)
+    print(distance)
+
+    with file.open("test.txt", "w+") as f:
+        f.write(distance)
+        f.seek(0)
+        file_distance = f.read()
+
+    file.delete("test.txt")
+
+    print(file_distance)
 
 test with integration "imported output":
     main()

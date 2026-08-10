@@ -219,6 +219,7 @@ version = "0.1.0"
 dependencies = [
  "severian-ast",
  "severian-backend",
+ "severian-diagnostics",
  "severian-hir",
  "severian-lexer",
  "severian-lowering",
