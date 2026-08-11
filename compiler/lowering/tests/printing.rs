@@ -1,6 +1,6 @@
 use severian_hir::{
-    BinaryOp, CallTarget, Expression, Function, FunctionId, Instruction, MatchPattern, Program,
-    TaskPlacement, ValueType,
+    BinaryOp, CallTarget, Decorator, Expression, Function, FunctionId, HirId, Instruction,
+    MatchPattern, Parameter, Program, TaskPlacement, TensorElementType, TensorType, ValueType,
 };
 
 #[test]
@@ -295,4 +295,68 @@ fn compares_dynamic_collection_values_by_value() {
     let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     assert!(lowered.as_str().contains("llvm.call @__sev_value_less"));
     assert!(!lowered.as_str().contains("llvm.icmp \"sgt\" %v"));
+}
+
+#[test]
+fn reports_unranked_tensor_regions_instead_of_panicking() {
+    let tensor = ValueType::Tensor(TensorType::dynamic(TensorElementType::F64));
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("contract"),
+            name: "contract".into(),
+            native_symbol: None,
+            decorators: vec![Decorator {
+                package: "tensor".into(),
+                symbols: vec![],
+            }],
+            contract: None,
+            params: vec![
+                Parameter {
+                    name: "left".into(),
+                    ty: tensor,
+                    default: None,
+                },
+                Parameter {
+                    name: "right".into(),
+                    ty: tensor,
+                    default: None,
+                },
+            ],
+            return_type: tensor,
+            instructions: vec![Instruction::Return(Some(Expression::Typed {
+                id: HirId::synthetic(1),
+                ty: tensor,
+                expression: Box::new(Expression::Call {
+                    target: CallTarget::native("tensor.rankedMatmul", "__sev_tensor_matmul")
+                        .with_signature([tensor, tensor], tensor),
+                    args: vec![
+                        Expression::Typed {
+                            id: HirId::synthetic(2),
+                            ty: tensor,
+                            expression: Box::new(Expression::Variable("left".into())),
+                        },
+                        Expression::Typed {
+                            id: HirId::synthetic(3),
+                            ty: tensor,
+                            expression: Box::new(Expression::Variable("right".into())),
+                        },
+                    ],
+                }),
+            }))],
+            tests: vec![],
+        }],
+    };
+
+    let error = severian_lowering::native_bridge_source(&program).unwrap_err();
+    assert!(matches!(
+        error,
+        severian_lowering::stablehlo::StableHloLoweringError::InvalidRank {
+            expected: 2,
+            actual: None,
+            ..
+        }
+    ));
 }

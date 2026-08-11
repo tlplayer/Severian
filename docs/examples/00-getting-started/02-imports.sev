@@ -2,16 +2,16 @@ import file
 
 def main():
     distance = 9.0 ** .5
-    print(distance)
-
-    with file.open("test.txt", "w+") as f:
-        f.write(distance)
-        f.seek(0)
-        file_distance = f.read()
-
-    file.delete("test.txt")
-
-    print(file_distance)
+    path = "/tmp/severian-getting-started-imports.txt"
+    switch file.write(path, string(distance)):
+        ok:
+            switch file.read(path):
+                ok file_distance:
+                    print(file_distance)
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)
 
 test with integration "imported output":
     main()

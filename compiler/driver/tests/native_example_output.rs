@@ -1,4 +1,5 @@
 use severian_driver::{compile_native, compile_native_tests, compile_path};
+use severian_xla::{PjrtPlugin, XlaError};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -118,6 +119,17 @@ fn every_example_is_a_verified_native_executable() {
         })
         .collect::<Vec<_>>();
     let mut failures = Vec::new();
+    let pjrt_available = match PjrtPlugin::load_rocm() {
+        Ok(_) => true,
+        Err(XlaError::PluginLoad(message))
+            if std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN").is_none()
+                && message.contains("not found") =>
+        {
+            false
+        }
+        Err(error) => panic!("configured PJRT plugin is unusable: {error}"),
+    };
+    let loopback_available = std::net::TcpListener::bind(("127.0.0.1", 0)).is_ok();
 
     for (index, fixture) in fixtures.iter().enumerate() {
         let relative = fixture.strip_prefix(&root).unwrap();
@@ -194,6 +206,27 @@ fn every_example_is_a_verified_native_executable() {
                 "{}: native compilation failed: {error}",
                 relative.display()
             ));
+            continue;
+        }
+        let requires_pjrt = compilation.optimized_hir.functions.iter().any(|function| {
+            function
+                .decorators
+                .iter()
+                .any(|decorator| decorator.package == "tensor")
+        });
+        if requires_pjrt && !pjrt_available {
+            eprintln!(
+                "skipping optional PJRT execution for {}; native compilation succeeded",
+                relative.display()
+            );
+            continue;
+        }
+        let requires_loopback = source.contains("database.start(");
+        if requires_loopback && !loopback_available {
+            eprintln!(
+                "skipping loopback-restricted execution for {}; native compilation succeeded",
+                relative.display()
+            );
             continue;
         }
 

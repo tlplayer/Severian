@@ -1,5 +1,5 @@
 use severian_xla::{
-    CompileOptions, HostBuffer, PjrtClient, PjrtPlugin, StableHloModule, XlaClient,
+    CompileOptions, HostBuffer, PjrtClient, PjrtPlugin, StableHloModule, XlaClient, XlaError,
 };
 
 const MATMUL: &str = r#"
@@ -31,7 +31,17 @@ module {
 
 #[test]
 fn stablehlo_matmul_executes_on_amd_gpu() -> Result<(), Box<dyn std::error::Error>> {
-    let plugin = PjrtPlugin::load_rocm()?;
+    let plugin = match PjrtPlugin::load_rocm() {
+        Ok(plugin) => plugin,
+        Err(XlaError::PluginLoad(message))
+            if std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN").is_none()
+                && message.contains("not found") =>
+        {
+            eprintln!("skipping AMD GPU integration test: {message}");
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
     let client = PjrtClient::new(plugin)?;
     let platform = client.platform_name()?;
     let addressable_count = client.addressable_devices()?.len();

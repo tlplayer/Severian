@@ -33,7 +33,8 @@ pub fn compile_native(
         &LlvmLoweringOptions::native(),
     )?;
 
-    let bridge = severian_lowering::native_bridge_source(program);
+    let bridge = severian_lowering::native_bridge_source(program)
+        .map_err(|error| BackendError(std::io::Error::other(error)))?;
     let bridge_path = if bridge.is_empty() {
         None
     } else {

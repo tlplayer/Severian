@@ -1,7 +1,7 @@
 import tensor
 
 @tensor(X)
-def contract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def contract(left: Tensor[f64, dynamic, dynamic], right: Tensor[f64, dynamic, dynamic]) -> Tensor[f64, dynamic, dynamic]:
     return left X right
 
 test:

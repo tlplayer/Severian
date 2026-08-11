@@ -1,4 +1,4 @@
-def read() -> Result[list[int], IOError] | None:
+def read() -> Result[list[int], IOError]:
     # A real implementation reaches a system-call chaos point here.
     return [65, 66, 67]
 

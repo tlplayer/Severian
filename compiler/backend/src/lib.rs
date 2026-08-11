@@ -284,10 +284,9 @@ pub fn compile_rocm(
                 llvm_ir.as_path(),
             ],
         )?;
-        std::fs::write(
-            &platform_source,
-            severian_lowering::rocm_bridge_source(program),
-        )?;
+        let bridge = severian_lowering::rocm_bridge_source(program)
+            .map_err(|error| BackendError(std::io::Error::other(error)))?;
+        std::fs::write(&platform_source, bridge)?;
         run_tool(
             clang,
             &[

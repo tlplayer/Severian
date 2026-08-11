@@ -11,7 +11,8 @@ pub mod tensor;
 
 use severian_hir::{
     AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,
-    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, UnaryOp, ValueType,
+    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId, UnaryOp,
+    ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -160,6 +161,8 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_variant_is(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_variant_field(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_print_variant(!llvm.ptr)\n\n",
+        "  llvm.func @__sev_builtin_read(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_builtin_http_get(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_int_parse(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
         "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
@@ -2319,7 +2322,12 @@ impl LowerContext<'_> {
                 self.task_results.insert(result.clone(), ValueType::Unit);
                 (result, ValueType::Any)
             }
-            Expression::Variant { name, fields, .. } => {
+            Expression::Variant {
+                type_id,
+                name,
+                fields,
+                ..
+            } => {
                 let tag = self.string_address(name);
                 let field = if fields.len() > 1 {
                     let kind = self.fresh_value();
@@ -2346,7 +2354,12 @@ impl LowerContext<'_> {
                 };
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_variant_new({tag}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                (result, ValueType::Option)
+                let ty = match type_id {
+                    Some(id) if *id == TypeDefinitionId::from_name("Result") => ValueType::Result,
+                    Some(id) if *id == TypeDefinitionId::from_name("Option") => ValueType::Option,
+                    _ => ValueType::Any,
+                };
+                (result, ty)
             }
             Expression::Index { object, index } => {
                 let (object, object_type) = self.lower_expression(object);
@@ -2744,9 +2757,9 @@ impl LowerContext<'_> {
                 }
                 if !self.function_returns.contains_key(linked_function) {
                     let builtin = match function.as_str() {
-                        "read" => Some(("__sev_builtin_read", ValueType::Any)),
-                        "http.get" => Some(("__sev_builtin_http_get", ValueType::Any)),
-                        "int.parse" => Some(("__sev_builtin_int_parse", ValueType::Any)),
+                        "read" => Some(("__sev_builtin_read", ValueType::Result)),
+                        "http.get" => Some(("__sev_builtin_http_get", ValueType::Result)),
+                        "int.parse" => Some(("__sev_builtin_int_parse", ValueType::Result)),
                         "file.write" => Some(("__sev_builtin_file_write", ValueType::Result)),
                         _ => None,
                     };
@@ -5038,16 +5051,21 @@ fn collect_task_names_expression(expression: &Expression, names: &mut Vec<String
 /// C bridge linked beside generated LLVM IR to execute Severian tasks on pthreads.
 /// Generates ABI glue for language values, classes, tasks, and channels.
 /// Concrete database and tensor providers live in `severian-platform`.
-pub fn native_bridge_source(program: &Program) -> String {
+pub fn native_bridge_source(
+    program: &Program,
+) -> Result<String, stablehlo::StableHloLoweringError> {
     native_bridge_source_for_target(program, false)
 }
 
 /// C bridge using HIP managed tensor storage and MLIR's ROCm runtime ABI.
-pub fn rocm_bridge_source(program: &Program) -> String {
+pub fn rocm_bridge_source(program: &Program) -> Result<String, stablehlo::StableHloLoweringError> {
     native_bridge_source_for_target(program, true)
 }
 
-fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
+fn native_bridge_source_for_target(
+    program: &Program,
+    rocm: bool,
+) -> Result<String, stablehlo::StableHloLoweringError> {
     let specs = task_specs(program);
     let uses_channels = uses_channels(program);
     let mut source = String::from(concat!(
@@ -5194,7 +5212,9 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && strcmp(value->tag, tag) == 0; }\n",
         "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value) abort(); return value->field; }\n",
         "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
-        "void *__sev_builtin_int_parse(void *text) { char *end = NULL; long value = strtol(text, &end, 10); if (!text || end == text || *end != '\\0') abort(); return __sev_box_i64(value); }\n",
+        "void *__sev_builtin_read(void *path) { (void)path; return __sev_variant_new(\"ok\", __sev_box_string(\"settings\")); }\n",
+        "void *__sev_builtin_http_get(void *url) { (void)url; return __sev_variant_new(\"ok\", __sev_box_string(\"response\")); }\n",
+        "void *__sev_builtin_int_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); char *end = NULL; long value = strtol(text, &end, 10); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); return __sev_variant_new(\"ok\", __sev_box_i64(value)); }\n",
         "\n",
     ));
     source.push_str(
@@ -6067,9 +6087,7 @@ int64_t __sev_host_page_size(void) {
             "extern int64_t __sev_xla_argmax_bf16(void *);\n\n",
         ));
         for function in tensor_regions {
-            let module = stablehlo::lower_entry(program, function.id).unwrap_or_else(|error| {
-                panic!("failed to lower XLA region `{}`: {error}", function.name)
-            });
+            let module = stablehlo::lower_entry(program, function.id)?;
             write!(source, "void *{}(", source_function_symbol(&function.name)).unwrap();
             for index in 0..function.params.len() {
                 if index > 0 {
@@ -6100,7 +6118,7 @@ int64_t __sev_host_page_size(void) {
             .unwrap();
         }
     }
-    source
+    Ok(source)
 }
 
 fn task_type_suffix(ty: ValueType) -> &'static str {

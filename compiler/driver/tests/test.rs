@@ -1,5 +1,14 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
+
+static NATIVE_CLI_LOCK: Mutex<()> = Mutex::new(());
+
+fn native_cli_lock() -> std::sync::MutexGuard<'static, ()> {
+    NATIVE_CLI_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -18,6 +27,7 @@ fn checks_the_hello_fixture() {
 
 #[test]
 fn runs_the_hello_fixture() {
+    let _lock = native_cli_lock();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("run")
         .arg(fixture())
@@ -32,6 +42,7 @@ fn runs_the_hello_fixture() {
 
 #[test]
 fn direct_source_invocation_compiles_and_runs_native_code() {
+    let _lock = native_cli_lock();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg(fixture())
         .output()
@@ -49,6 +60,7 @@ fn direct_source_invocation_compiles_and_runs_native_code() {
 
 #[test]
 fn direct_source_invocation_executes_native_tests_when_main_is_absent() {
+    let _lock = native_cli_lock();
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/examples/26-problems/06-min-cost-climbing-stairs.sev");
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))

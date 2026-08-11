@@ -139,6 +139,8 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_variant_is(!llvm.ptr, !llvm.ptr) -> i1\n",
             "  llvm.func @__sev_variant_field(!llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_print_variant(!llvm.ptr)\n\n",
+            "  llvm.func @__sev_builtin_read(!llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_builtin_http_get(!llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_builtin_int_parse(!llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
             "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",

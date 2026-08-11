@@ -458,14 +458,20 @@ fn run_targets(input: &Path) -> Result<(), String> {
     }
     for target in targets {
         let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
-        if compilation.hir.main().is_none() {
-            return Err(format!("{} has no main function", target.source.display()));
-        }
         let output = artifact_path(&target, EmitMode::Executable);
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        compile_native(&compilation, &output).map_err(|error| error.to_string())?;
+        if compilation.hir.main().is_some() {
+            compile_native(&compilation, &output).map_err(|error| error.to_string())?;
+        } else if compilation.hir.test_count() > 0 {
+            compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
+        } else {
+            return Err(format!(
+                "{} has neither a main function nor native tests",
+                target.source.display()
+            ));
+        }
         let mut command = Command::new(&output);
         let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
             function
