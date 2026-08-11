@@ -1,27 +1,28 @@
 import math
+import tensor
 from model import neuralnet as nn
 
-native("sev_print_i64") def nativePrint(value: i64)
+native("sev_print_i64") def native_print(value: i64)
 
 @tensor(target, amd, ^)
-class HTTPServer:
+class HttpServer:
     port: int
 
-    def HTTPServer(port: int):
-        self.port = port
+    def HttpServer(initial_port: int):
+        port = initial_port
 
-    def runServer(input_tensor: Tensor[f32, dynamic, 768]) -> Result[int, IOError]:
+    def run_server(input_tensor: Tensor[f32, dynamic, 768]) -> Result[int, IoError]:
         values := [1, 2, 3]
         values_view = view values
-        writable = borrow values
-        copied = clone values
+        mutable_values := [1, 2, 3]
+        writable = borrow mutable_values
+        copy_source = [1, 2, 3]
+        copied = clone copy_source
         owned = move copied
-        worker = async print(f"port={self.port}") with runtime
+        worker = async print(f"port={port}") with runtime
         await worker
         score = 3.0 ** 2.0
-        cross = left ^ right
-        product = left X right
-        return size(values_view) + int(score)
+        return size(values_view)
 
     test with integration "native output":
         assert(size([1, 2, 3]) == 3)

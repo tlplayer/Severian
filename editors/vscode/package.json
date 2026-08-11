@@ -4,11 +4,16 @@
   "description": "Syntax highlighting and editor behavior for the Severian programming language.",
   "version": "0.2.0",
   "publisher": "severian",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
     "url": "https://github.com/tlplayer/Severian.git"
   },
+  "homepage": "https://github.com/tlplayer/Severian/tree/main/editors/vscode#readme",
+  "bugs": {
+    "url": "https://github.com/tlplayer/Severian/issues"
+  },
+  "qna": "https://github.com/tlplayer/Severian/discussions",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -21,6 +26,14 @@
     "mlir",
     "programming language"
   ],
+  "scripts": {
+    "check": "python3 tests/check_grammar.py",
+    "package": "vsce package --out severian-language.vsix",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "3.6.2"
+  },
   "contributes": {
     "languages": [
       {

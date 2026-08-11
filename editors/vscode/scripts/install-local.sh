@@ -19,7 +19,7 @@ if ! command -v npx >/dev/null 2>&1; then
 fi
 
 rm -f severian-language.vsix
-npx --yes @vscode/vsce package --out severian-language.vsix
+npx --yes @vscode/vsce@3.6.2 package --out severian-language.vsix
 "$editor" --install-extension severian-language.vsix --force
 
 echo "Installed Severian Language. Reload the editor window, then open a .sev file."
