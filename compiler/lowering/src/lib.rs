@@ -617,8 +617,25 @@ impl LowerContext<'_> {
                     self.variables.insert(name.clone(), lowered);
                 }
                 Instruction::TryLet { name, value } => {
-                    let lowered = self.lower_expression(value);
-                    self.variables.insert(name.clone(), lowered);
+                    let (result, _) = self.lower_expression(value);
+                    let ok_tag = self.string_address("ok");
+                    let succeeded = self.fresh_value();
+                    writeln!(self.output, "    {succeeded} = llvm.call @__sev_variant_is({result}, {ok_tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                    let success_block = self.fresh_block();
+                    let failure_block = self.fresh_block();
+                    writeln!(self.output, "    llvm.cond_br {succeeded}, ^bb{success_block}, ^bb{failure_block}").unwrap();
+                    writeln!(self.output, "  ^bb{failure_block}:").unwrap();
+                    if self.declared_return == ValueType::Result {
+                        writeln!(self.output, "    llvm.return {result} : !llvm.ptr").unwrap();
+                    } else {
+                        writeln!(self.output, "    llvm.call @abort() : () -> ()").unwrap();
+                        writeln!(self.output, "    llvm.unreachable").unwrap();
+                    }
+                    writeln!(self.output, "  ^bb{success_block}:").unwrap();
+                    let payload = self.fresh_value();
+                    writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    self.variables.insert(name.clone(), (payload, ValueType::Any));
+                    self.terminated = false;
                 }
                 Instruction::Assign { target, op, value } => {
                     if let Expression::Variable(name) = target.kind() {
@@ -1939,7 +1956,20 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|arg| self.lower_expression(arg))
                     .collect::<Vec<_>>();
-                let Some(class) = self.object_classes.get(&object).cloned() else {
+                let inferred_classes = self
+                    .classes
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.methods.iter().any(|definition| {
+                            definition.name == *method && definition.params.len() == args.len()
+                        })
+                    })
+                    .map(|candidate| candidate.name.clone())
+                    .collect::<Vec<_>>();
+                let class = self.object_classes.get(&object).cloned().or_else(|| {
+                    (inferred_classes.len() == 1).then(|| inferred_classes[0].clone())
+                });
+                let Some(class) = class else {
                     if method == "draw" {
                         writeln!(
                             self.output,
@@ -5453,9 +5483,9 @@ void *__sev_json_decode(void *text_raw) {
 
 void *__sev_json_object_get(void *value_raw, void *key_raw) {
   sev_value *boxed = value_raw;
-  if (!boxed) { fprintf(stderr, "json object get: null\n"); abort(); }
+  if (!boxed) abort();
   sev_map *map = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
-  if (!map || map->kind != 3) { fprintf(stderr, "json object get: kind %ld boxed %d\n", map ? map->kind : -1, boxed->kind); abort(); }
+  if (!map || map->kind != 3) abort();
   return __sev_map_get(map, __sev_box_string(key_raw));
 }
 
@@ -5511,12 +5541,12 @@ void *__sev_json_as_int_list(void *value_raw) {
 
 void *__sev_json_as_string_list(void *value_raw) {
   sev_value *boxed = value_raw;
-  if (!boxed) { fprintf(stderr, "json string list: null\n"); abort(); }
+  if (!boxed) abort();
   sev_collection *values = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
-  if (!values) { fprintf(stderr, "json string list: null collection\n"); abort(); }
-  if (values->kind == 3) { fprintf(stderr, "json string list: object\n"); abort(); }
+  if (!values) abort();
+  if (values->kind == 3) abort();
   for (int64_t index = 0; index < values->size; ++index)
-    if (!values->items[index] || values->items[index]->kind != SEV_STRING) { fprintf(stderr, "json string list: item %ld kind %d\n", index, values->items[index] ? values->items[index]->kind : -1); abort(); }
+    if (!values->items[index] || values->items[index]->kind != SEV_STRING) abort();
   return values;
 }
 

@@ -1,0 +1,49 @@
+{
+  "checkpoint": "Qwen/Qwen2.5-3B-Instruct",
+  "revision": "14d7620ba47cf51be0b176e14e27e38a34d4ff88",
+  "gpu": {
+    "pjrt_platform": "rocm",
+    "description": "AMD Radeon RX 7700",
+    "isa": "gfx1101",
+    "addressable_devices": 1,
+    "driver": "7.14.60850",
+    "runtime": "7.14.60850"
+  },
+  "checkpoint_validation": {
+    "tensors": 434,
+    "shards": 2,
+    "payload_bytes": 6171877376,
+    "bf16_payload_bytes": 6171877376
+  },
+  "tests": {
+    "pjrt_matmul": {
+      "inputs_is_on_cpu": false,
+      "output_is_on_cpu": false,
+      "result": [19.0, 22.0, 43.0, 50.0]
+    },
+    "embedding_gather": {
+      "token": 42,
+      "bf16_values": 2048,
+      "bytes_compared": 4096,
+      "gpu_matches_checkpoint_bytes": true
+    },
+    "layer0_q_projection": {
+      "max_absolute_error": 0.0,
+      "mean_absolute_error": 0.0
+    },
+    "full_36_layer_single_token": {
+      "all_weights_gpu_resident": true,
+      "all_layer_outputs_gpu_resident": true,
+      "input_token": 42,
+      "next_token": 25852,
+      "max_logit_bf16": 14.4375
+    },
+    "pytorch_eager_reference": {
+      "gpu": "AMD Radeon Graphics",
+      "input_token": 42,
+      "next_token": 25852,
+      "max_logit_bf16": 13.6875,
+      "peak_vram_bytes": 6319548928
+    }
+  }
+}

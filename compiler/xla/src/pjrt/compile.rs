@@ -175,9 +175,17 @@ impl Drop for RawLoadedExecutable {
     }
 }
 
-/// `PJRT_Client_Compile` consumes an XLA CompileOptionsProto serialization.
-/// An empty protobuf is the canonical default instance. Non-default options
-/// remain unsupported until the crate owns generated XLA protobuf bindings.
+/// `PJRT_Client_Compile` consumes an XLA `CompileOptionsProto` serialization.
+/// XLA's C++ defaults are not protobuf defaults: an absent nested
+/// `ExecutableBuildOptionsProto` leaves replica/partition counts at zero and
+/// aborts device assignment. Encode the two required fields explicitly:
+///
+/// ```text
+/// CompileOptionsProto.executable_build_options (field 3) {
+///   num_replicas  (field 4)
+///   num_partitions (field 5)
+/// }
+/// ```
 fn serialized_compile_options(options: &CompileOptions) -> Result<Vec<u8>> {
     if options.optimization == OptimizationLevel::O2
         && options.num_replicas == 1
@@ -187,11 +195,43 @@ fn serialized_compile_options(options: &CompileOptions) -> Result<Vec<u8>> {
         && options.device_ordinal.is_none()
         && options.debug_options.is_empty()
     {
-        Ok(Vec::new())
+        let mut build_options = Vec::new();
+        encode_varint_field(&mut build_options, 4, options.num_replicas as u64);
+        encode_varint_field(&mut build_options, 5, options.num_partitions as u64);
+        let mut result = vec![(3 << 3) | 2];
+        encode_varint(&mut result, build_options.len() as u64);
+        result.extend(build_options);
+        Ok(result)
     } else {
         Err(XlaError::Compilation(
             "this PJRT plugin bridge currently accepts the canonical default CompileOptionsProto; requested non-default fields cannot be serialized losslessly"
                 .into(),
         ))
+    }
+}
+
+fn encode_varint_field(output: &mut Vec<u8>, field: u64, value: u64) {
+    encode_varint(output, field << 3);
+    encode_varint(output, value);
+}
+
+fn encode_varint(output: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        output.push((value as u8 & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    output.push(value as u8);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_compile_options_encode_single_replica_and_partition() {
+        assert_eq!(
+            serialized_compile_options(&CompileOptions::default()).unwrap(),
+            [0x1a, 0x04, 0x20, 0x01, 0x28, 0x01],
+        );
     }
 }

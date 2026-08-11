@@ -1,4 +1,5 @@
 import file
+import json
 import qwen2
 import qwen2_config
 import safetensor_weights
@@ -32,7 +33,7 @@ def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     assert(config.tieWordEmbeddings)
 
     print("process_start_ns", processStart)
-    print("checkpoint_tensor_count", size(store.keys()))
+    print("checkpoint_tensor_count", size(json.objectKeys(store.weightMap)))
     print("loaded_layers", size(weights.layers))
     return weights
 

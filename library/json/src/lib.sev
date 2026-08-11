@@ -50,13 +50,8 @@ test "object decoding produces ordinary maps":
 
 test "typed object accessors decode model configuration fields":
     document ?= decode[Any]("{\"architectures\":[\"Qwen2ForCausalLM\"],\"layers\":36,\"epsilon\":1e-6,\"tied\":true}")
-    print("json accessor strings")
     architectures = asStringList(objectGet(document, "architectures"))
-    print("json accessor first", architectures[0])
     assert(architectures == ["Qwen2ForCausalLM"])
-    print("json accessor int")
     assert(asInt(objectGet(document, "layers")) == 36)
-    print("json accessor float")
     assert(asFloat(objectGet(document, "epsilon")) == 0.000001)
-    print("json accessor bool")
     assert(asBool(objectGet(document, "tied")))

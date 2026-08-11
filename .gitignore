@@ -4,6 +4,7 @@ target/
 /bench/.work/
 /bench/results.csv
 /benchmarks/inference/.venv/
+/benchmarks/inference/.venv-pytorch/
 /benchmarks/inference/models/
 /benchmarks/inference/results/
 __pycache__/
