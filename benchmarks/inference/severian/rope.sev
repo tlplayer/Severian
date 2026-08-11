@@ -1,0 +1,31 @@
+import tensor
+
+class RopeValues:
+    cosine: Tensor[f32]
+    sine: Tensor[f32]
+
+def rotaryValues(positionFrequencies: Tensor[f32]) -> RopeValues:
+    # Frequencies are built from position * theta^(-2i/head_dimension) by the
+    # caller so sequence length remains dynamic and prompt-independent.
+    return RopeValues(
+        tensor.cosineF32(positionFrequencies),
+        tensor.sineF32(positionFrequencies),
+    )
+
+def rotateHalf(value: Tensor[f32], halfDimension: int) -> Tensor[f32]:
+    first = tensor.sliceF32(value, [0, 0, 0, 0], [-1, -1, -1, halfDimension], [1, 1, 1, 1])
+    second = tensor.sliceF32(value, [0, 0, 0, halfDimension], [-1, -1, -1, halfDimension * 2], [1, 1, 1, 1])
+    negativeSecond = tensor.scaleF32(second, -1.0)
+    return tensor.concatenateF32([negativeSecond, first], 3)
+
+def applyRotary(
+    value: Tensor[bf16],
+    rope: RopeValues,
+    halfDimension: int,
+) -> Tensor[bf16]:
+    valueF32 = tensor.bf16ToF32(value)
+    cosine = tensor.broadcastLikeF32(rope.cosine, valueF32)
+    sine = tensor.broadcastLikeF32(rope.sine, valueF32)
+    direct = tensor.multiplyF32(valueF32, cosine)
+    rotated = tensor.multiplyF32(rotateHalf(valueF32, halfDimension), sine)
+    return tensor.f32ToBf16(tensor.addF32(direct, rotated))

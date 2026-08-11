@@ -6,6 +6,30 @@ def decode[type](text: string) -> Result[type, JsonError]:
 def encode[type](value: type) -> string:
     return platform.jsonEncode(value)
 
+def objectGet(value: Any, key: string) -> Any:
+    return platform.jsonObjectGet(value, key)
+
+def objectKeys(value: Any) -> list[string]:
+    return platform.jsonObjectKeys(value)
+
+def asString(value: Any) -> string:
+    return platform.jsonAsString(value)
+
+def asInt(value: Any) -> int:
+    return platform.jsonAsInt(value)
+
+def asFloat(value: Any) -> float:
+    return platform.jsonAsFloat(value)
+
+def asBool(value: Any) -> bool:
+    return platform.jsonAsBool(value)
+
+def asIntList(value: Any) -> list[int]:
+    return platform.jsonAsIntList(value)
+
+def asStringList(value: Any) -> list[string]:
+    return platform.jsonAsStringList(value)
+
 test "integer decoding":
     switch decode[int]("42"):
         ok value:
@@ -15,3 +39,24 @@ test "integer decoding":
 
 test "compact list encoding":
     assert(encode([1, 2, 3]) == "[1,2,3]")
+
+test "object decoding produces ordinary maps":
+    switch decode[map]("{\"hidden_size\":2048,\"torch_dtype\":\"bfloat16\"}"):
+        ok value:
+            assert(objectGet(value, "hidden_size") == 2048)
+            assert(objectGet(value, "torch_dtype") == "bfloat16")
+        failure error:
+            assert(false, error)
+
+test "typed object accessors decode model configuration fields":
+    document ?= decode[Any]("{\"architectures\":[\"Qwen2ForCausalLM\"],\"layers\":36,\"epsilon\":1e-6,\"tied\":true}")
+    print("json accessor strings")
+    architectures = asStringList(objectGet(document, "architectures"))
+    print("json accessor first", architectures[0])
+    assert(architectures == ["Qwen2ForCausalLM"])
+    print("json accessor int")
+    assert(asInt(objectGet(document, "layers")) == 36)
+    print("json accessor float")
+    assert(asFloat(objectGet(document, "epsilon")) == 0.000001)
+    print("json accessor bool")
+    assert(asBool(objectGet(document, "tied")))

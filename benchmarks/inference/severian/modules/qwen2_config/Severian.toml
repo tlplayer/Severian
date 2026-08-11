@@ -1,0 +1,10 @@
+[package]
+name = "qwen2_config"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "../../qwen2_config.sev"
+
+[dependencies]
+json = { path = "../../../../../library/json", version = "0.1.0" }

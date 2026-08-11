@@ -1,0 +1,13 @@
+[package]
+name = "decoder_layer"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "../../decoder_layer.sev"
+
+[dependencies]
+attention = { path = "../attention", version = "0.1.0" }
+mlp = { path = "../mlp", version = "0.1.0" }
+rope = { path = "../rope", version = "0.1.0" }
+tensor = { path = "../../../../../library/tensor", version = "0.1.0" }

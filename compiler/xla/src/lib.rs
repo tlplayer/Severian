@@ -12,6 +12,7 @@
 pub mod client;
 pub mod pipeline;
 pub mod pjrt;
+pub mod safetensors;
 pub mod stablehlo;
 
 pub use client::XlaClient;
@@ -20,6 +21,9 @@ pub use pjrt::{
     Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient, PjrtPlugin,
 };
 pub use stablehlo::{StableHloFormat, StableHloModule};
+pub use safetensors::{
+    SafeTensorDType, SafeTensorEntry, SafeTensorStore, SafeTensorValidation,
+};
 
 use std::{fmt, io};
 

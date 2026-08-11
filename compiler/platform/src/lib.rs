@@ -2,6 +2,7 @@
 
 mod database;
 mod model_graph;
+mod safetensors;
 mod tensor;
 
 pub mod cpu;
@@ -22,6 +23,10 @@ pub fn database_source() -> &'static str {
 /// Existing platform runtime source surface.
 pub fn model_graph_source(rocm: bool) -> String {
     model_graph::source(rocm)
+}
+
+pub fn safetensors_source() -> &'static str {
+    safetensors::source()
 }
 
 /// Existing platform runtime source surface.

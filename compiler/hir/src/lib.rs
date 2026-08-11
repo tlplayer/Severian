@@ -175,6 +175,7 @@ pub enum ValueType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TensorElementType {
+    BF16,
     F32,
     F64,
     I32,

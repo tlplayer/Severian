@@ -176,10 +176,6 @@ impl RawBuffer {
         Ok(bytes)
     }
 
-    pub(crate) fn plugin(&self) -> &super::plugin::RawPjrtPlugin {
-        &self.plugin
-    }
-
 }
 
 impl Drop for RawBuffer {

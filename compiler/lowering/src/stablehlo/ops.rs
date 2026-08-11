@@ -281,6 +281,8 @@ impl StableHloEmitter {
             list(rhs_contracting),
             lhs.ty,
             rhs.ty,
+            result = result,
+            ty = ty,
         ));
 
         MlirValue::from_tensor(result, result_type)

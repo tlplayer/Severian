@@ -71,14 +71,14 @@ pub fn reduce_min(
 
 fn zero_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::F32 | TensorElementType::F64 => "0.0",
+        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "0.0",
         TensorElementType::I32 | TensorElementType::I64 => "0",
     }
 }
 
 fn minimum_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::F32 | TensorElementType::F64 => "-inf",
+        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "-inf",
         TensorElementType::I32 => "-2147483648",
         TensorElementType::I64 => "-9223372036854775808",
     }
@@ -86,7 +86,7 @@ fn minimum_literal(element: TensorElementType) -> &'static str {
 
 fn maximum_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::F32 | TensorElementType::F64 => "inf",
+        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "inf",
         TensorElementType::I32 => "2147483647",
         TensorElementType::I64 => "9223372036854775807",
     }

@@ -1,0 +1,112 @@
+import attention
+import decoder_layer
+import mlp
+import qwen2_config
+import rope
+import safetensor_weights
+import tensor
+
+class Qwen2Weights:
+    embedding: Tensor[bf16]
+    layers: list[decoder_layer.Qwen2DecoderWeights]
+    finalNorm: Tensor[bf16]
+
+class Qwen2State:
+    hidden: Tensor[bf16]
+    caches: list[attention.KvCache]
+
+class Qwen2Output:
+    logits: Tensor[bf16]
+    caches: list[attention.KvCache]
+
+def loadAttentionWeights(
+    store: tensor.SafeTensorStore,
+    prefix: string,
+) -> Result[attention.Qwen2AttentionWeights, IOError]:
+    query ?= store.get(prefix + ".q_proj.weight")
+    queryBias ?= store.get(prefix + ".q_proj.bias")
+    key ?= store.get(prefix + ".k_proj.weight")
+    keyBias ?= store.get(prefix + ".k_proj.bias")
+    value ?= store.get(prefix + ".v_proj.weight")
+    valueBias ?= store.get(prefix + ".v_proj.bias")
+    output ?= store.get(prefix + ".o_proj.weight")
+    return attention.Qwen2AttentionWeights(
+        query.bf16(), queryBias.bf16(),
+        key.bf16(), keyBias.bf16(),
+        value.bf16(), valueBias.bf16(),
+        output.bf16(),
+    )
+
+def loadMlpWeights(
+    store: tensor.SafeTensorStore,
+    prefix: string,
+) -> Result[mlp.Qwen2MlpWeights, IOError]:
+    gate ?= store.get(prefix + ".gate_proj.weight")
+    up ?= store.get(prefix + ".up_proj.weight")
+    down ?= store.get(prefix + ".down_proj.weight")
+    return mlp.Qwen2MlpWeights(gate.bf16(), up.bf16(), down.bf16())
+
+def loadQwen2Weights(
+    store: tensor.SafeTensorStore,
+    numLayers: int,
+) -> Result[Qwen2Weights, IOError]:
+    embeddingEntry ?= store.get("model.embed_tokens.weight")
+    layers := []
+    for layer in range(0, numLayers):
+        prefix = "model.layers." + string(layer)
+        inputNorm ?= store.get(prefix + ".input_layernorm.weight")
+        postNorm ?= store.get(prefix + ".post_attention_layernorm.weight")
+        attentionWeights ?= loadAttentionWeights(store, prefix + ".self_attn")
+        mlpWeights ?= loadMlpWeights(store, prefix + ".mlp")
+        layers.append(decoder_layer.Qwen2DecoderWeights(
+            inputNorm.bf16(),
+            attentionWeights,
+            postNorm.bf16(),
+            mlpWeights,
+        ))
+    finalNorm ?= store.get("model.norm.weight")
+    return Qwen2Weights(embeddingEntry.bf16(), layers, finalNorm.bf16())
+
+def embed(inputIds: Tensor[i64], weights: Qwen2Weights) -> Tensor[bf16]:
+    return tensor.gatherBf16(weights.embedding, inputIds)
+
+def logits(hidden: Tensor[bf16], weights: Qwen2Weights) -> Tensor[bf16]:
+    # Qwen2.5-3B-Instruct has tie_word_embeddings=true, so the embedding table
+    # is the LM head. No invented second projection is allocated.
+    projection = tensor.transposeBf16(weights.embedding, [1, 0])
+    return tensor.matmulBf16(hidden, projection)
+
+def forward(
+    inputIds: Tensor[i64],
+    weights: Qwen2Weights,
+    caches: list[attention.KvCache],
+    rotary: rope.RopeValues,
+    causalMask: Tensor[f32],
+    position: int,
+    config: qwen2_config.Qwen2Config,
+) -> Qwen2Output:
+    assert(size(weights.layers) == config.numHiddenLayers)
+    assert(size(caches) == config.numHiddenLayers)
+    hidden := embed(inputIds, weights)
+    updatedCaches := []
+    for layer in range(0, config.numHiddenLayers):
+        result = decoder_layer.decoderLayer(
+            hidden,
+            weights.layers[layer],
+            caches[layer],
+            rotary,
+            causalMask,
+            position,
+            config.rmsNormEpsilon,
+            config.numAttentionHeads,
+            config.numKeyValueHeads,
+            config.headDimension(),
+        )
+        hidden = result.hidden
+        updatedCaches.append(result.cache)
+    hidden = decoder_layer.rmsNorm(
+        hidden,
+        weights.finalNorm,
+        config.rmsNormEpsilon,
+    )
+    return Qwen2Output(logits(hidden, weights), updatedCaches)

@@ -6,6 +6,47 @@ def read(path: string) -> Result[string, IOError]:
 def write(path: string, contents: string) -> Result[unit, IOError]:
     return platform.fileWrite(path, contents)
 
+def open(path: string, mode: string = "rb") -> Result[Any, IOError]:
+    if mode != "rb":
+        return failure(IOError("binary file mode must be rb"))
+    return platform.fileOpenBinary(path)
+
+def readBytes(handle: Any, count: int) -> Result[list[int], IOError]:
+    return platform.fileReadBytes(handle, count)
+
+def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
+    return platform.fileReadExact(handle, count)
+
+def utf8(bytes: list[int]) -> Result[string, IOError]:
+    return platform.bytesUtf8(bytes)
+
+def seek(handle: Any, offset: int) -> Result[unit, IOError]:
+    return platform.fileSeek(handle, offset)
+
+def bytes(handle: Any) -> Result[int, IOError]:
+    return platform.fileSize(handle)
+
+def close(handle: Any) -> Result[unit, IOError]:
+    return platform.fileClose(handle)
+
+def map(path: string) -> Result[Any, IOError]:
+    return platform.fileMap(path)
+
+def mappedBytes(mapping: Any) -> int:
+    return platform.fileMappedSize(mapping)
+
+def unmap(mapping: Any) -> Result[unit, IOError]:
+    return platform.fileUnmap(mapping)
+
+def littleEndianU64(bytes: list[int]) -> int:
+    assert(size(bytes) == 8, "u64 requires exactly eight bytes")
+    value := 0
+    multiplier := 1
+    for byte in bytes:
+        value += byte * multiplier
+        multiplier *= 256
+    return value
+
 test "native file round trip":
     path = "/tmp/severian-library-file-roundtrip.txt"
     switch write(path, "severian file runtime"):
@@ -13,6 +54,36 @@ test "native file round trip":
             switch read(path):
                 ok contents:
                     assert(contents == "severian file runtime")
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)
+
+test "binary file supports exact reads seeking and sizing":
+    path = "/tmp/severian-library-file-binary.bin"
+    switch write(path, "ABCDEFGH"):
+        ok:
+            switch open(path):
+                ok handle:
+                    switch platform.fileSize(handle):
+                        ok length:
+                            assert(length == 8)
+                        failure error:
+                            assert(false, error)
+                    switch seek(handle, 2):
+                        ok:
+                            switch readExact(handle, 3):
+                                ok bytes:
+                                    assert(bytes == [67, 68, 69])
+                                failure error:
+                                    assert(false, error)
+                        failure error:
+                            assert(false, error)
+                    switch close(handle):
+                        ok:
+                            assert(true)
+                        failure error:
+                            assert(false, error)
                 failure error:
                     assert(false, error)
         failure error:

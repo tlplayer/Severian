@@ -4997,6 +4997,8 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "#include <time.h>\n",
         "#include <sys/socket.h>\n",
         "#include <sys/ioctl.h>\n",
+        "#include <sys/mman.h>\n",
+        "#include <sys/stat.h>\n",
         "#include <sys/syscall.h>\n",
         "#include <unistd.h>\n",
         "#include <regex.h>\n",
@@ -5004,7 +5006,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
-        "typedef struct { int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
+        "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
         "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
@@ -5065,7 +5067,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "void *__sev_fused_activations(void *raw, int64_t packed, int64_t count) { sev_collection *input = raw; if (!input) abort(); sev_collection *output = __sev_collection_new(0); for (int64_t index = 0; index < input->size; ++index) { double value = sev_number(input->items[index]); for (int64_t stage = 0; stage < count; ++stage) { switch ((packed >> (stage * 4)) & 15) { case 1: value = value < 0.0 ? 0.0 : value; break; case 2: value = sev_fast_sigmoid(value); break; case 3: value = sev_fast_tanh(value); break; case 4: { double cubic = value * value * value; double curved = 0.7978845608 * (value + 0.044715 * cubic); value = 0.5 * value * (1.0 + sev_fast_tanh(curved)); break; } case 5: value = value * sev_fast_sigmoid(value); break; default: abort(); } } __sev_collection_push(output, __sev_box_f64(value)); } return output; }\n",
         "bool __sev_set_contains(void *raw, void *item) { sev_collection *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->items[i], item)) return true; return false; }\n",
         "void __sev_set_add(void *raw, void *item) { if (!__sev_set_contains(raw, item)) __sev_collection_push(raw, item); }\n",
-        "void *__sev_map_new(void) { return sev_allocate(sizeof(sev_map)); }\n",
+        "void *__sev_map_new(void) { sev_map *value = sev_allocate(sizeof(*value)); value->kind = 3; return value; }\n",
         "void __sev_map_insert(void *raw, void *key, void *item) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->keys = realloc(value->keys, (size_t)value->capacity * sizeof(*value->keys)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->keys || !value->values) abort(); } value->keys[value->size] = key; value->values[value->size++] = item; }\n",
         "void *__sev_map_get(void *raw, void *key) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) return value->values[i]; abort(); }\n",
         "int64_t __sev_map_size(void *raw) { sev_map *value = raw; if (!value) abort(); return value->size; }\n",
@@ -5133,6 +5135,128 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         r#"
 static void *sev_failure(const char *message) {
   return __sev_variant_new("failure", __sev_box_string((void *)message));
+}
+
+typedef struct { FILE *stream; bool closed; } sev_binary_file;
+typedef struct { int fd; unsigned char *data; size_t size; bool unmapped; } sev_mapped_file;
+
+void *__sev_file_open_binary(void *path_raw) {
+  FILE *stream = fopen((const char *)path_raw, "rb");
+  if (!stream) return sev_failure("could not open binary file");
+  sev_binary_file *file = sev_allocate(sizeof(*file));
+  file->stream = stream;
+  return __sev_variant_new("ok", file);
+}
+
+static void *sev_file_read_bytes(void *handle_raw, int64_t count, bool exact) {
+  sev_binary_file *file = handle_raw;
+  if (!file || file->closed || !file->stream) return sev_failure("binary file is closed");
+  if (count < 0 || (uint64_t)count > SIZE_MAX) return sev_failure("invalid binary read size");
+  unsigned char *bytes = sev_allocate((size_t)count);
+  size_t received = fread(bytes, 1, (size_t)count, file->stream);
+  if (ferror(file->stream) || (exact && received != (size_t)count)) {
+    free(bytes);
+    return sev_failure(exact ? "unexpected end of binary file" : "binary file read failed");
+  }
+  sev_collection *result = __sev_collection_new(0);
+  for (size_t index = 0; index < received; ++index)
+    __sev_collection_push(result, __sev_box_i64(bytes[index]));
+  free(bytes);
+  return __sev_variant_new("ok", __sev_box_collection(result));
+}
+
+void *__sev_file_read_bytes(void *handle_raw, int64_t count) {
+  return sev_file_read_bytes(handle_raw, count, false);
+}
+
+void *__sev_file_read_exact(void *handle_raw, int64_t count) {
+  return sev_file_read_bytes(handle_raw, count, true);
+}
+
+void *__sev_bytes_utf8(void *bytes_raw) {
+  sev_collection *bytes = bytes_raw;
+  if (!bytes || bytes->size < 0 || (uint64_t)bytes->size > SIZE_MAX - 1)
+    return sev_failure("invalid byte buffer");
+  char *text = sev_allocate((size_t)bytes->size + 1);
+  for (int64_t index = 0; index < bytes->size; ++index) {
+    int64_t byte = __sev_unbox_i64(bytes->items[index]);
+    if (byte < 0 || byte > 255) {
+      free(text);
+      return sev_failure("byte value is outside 0..255");
+    }
+    text[index] = (char)byte;
+  }
+  return __sev_variant_new("ok", __sev_box_string(text));
+}
+
+void *__sev_file_seek(void *handle_raw, int64_t offset) {
+  sev_binary_file *file = handle_raw;
+  if (!file || file->closed || !file->stream) return sev_failure("binary file is closed");
+  if (offset < 0 || fseeko(file->stream, (off_t)offset, SEEK_SET) != 0)
+    return sev_failure("could not seek binary file");
+  return __sev_variant_new("ok", NULL);
+}
+
+void *__sev_file_size(void *handle_raw) {
+  sev_binary_file *file = handle_raw;
+  if (!file || file->closed || !file->stream) return sev_failure("binary file is closed");
+  off_t position = ftello(file->stream);
+  if (position < 0 || fseeko(file->stream, 0, SEEK_END) != 0)
+    return sev_failure("could not seek binary file");
+  off_t size = ftello(file->stream);
+  if (size < 0 || fseeko(file->stream, position, SEEK_SET) != 0)
+    return sev_failure("could not size binary file");
+  return __sev_variant_new("ok", __sev_box_i64((int64_t)size));
+}
+
+void *__sev_file_close(void *handle_raw) {
+  sev_binary_file *file = handle_raw;
+  if (!file || file->closed || !file->stream) return sev_failure("binary file is closed");
+  int status = fclose(file->stream);
+  file->stream = NULL;
+  file->closed = true;
+  if (status != 0) return sev_failure("could not close binary file");
+  return __sev_variant_new("ok", NULL);
+}
+
+
+void *__sev_file_map(void *path_raw) {
+  int fd = open((const char *)path_raw, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return sev_failure("could not open mapped file");
+  struct stat status;
+  if (fstat(fd, &status) != 0 || status.st_size < 0) {
+    close(fd);
+    return sev_failure("could not stat mapped file");
+  }
+  size_t size = (size_t)status.st_size;
+  void *data = size == 0 ? NULL : mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if (size != 0 && data == MAP_FAILED) {
+    close(fd);
+    return sev_failure("could not map file");
+  }
+  sev_mapped_file *mapping = sev_allocate(sizeof(*mapping));
+  mapping->fd = fd;
+  mapping->data = data;
+  mapping->size = size;
+  return __sev_variant_new("ok", mapping);
+}
+
+int64_t __sev_file_mapped_size(void *mapping_raw) {
+  sev_mapped_file *mapping = mapping_raw;
+  if (!mapping || mapping->unmapped || mapping->size > INT64_MAX) abort();
+  return (int64_t)mapping->size;
+}
+
+void *__sev_file_unmap(void *mapping_raw) {
+  sev_mapped_file *mapping = mapping_raw;
+  if (!mapping || mapping->unmapped) return sev_failure("mapped file is already unmapped");
+  int map_status = mapping->size == 0 ? 0 : munmap(mapping->data, mapping->size);
+  int close_status = close(mapping->fd);
+  mapping->unmapped = true;
+  mapping->data = NULL;
+  mapping->size = 0;
+  if (map_status != 0 || close_status != 0) return sev_failure("could not unmap file");
+  return __sev_variant_new("ok", NULL);
 }
 
 void *__sev_file_write(void *path_raw, void *text_raw) {
@@ -5213,6 +5337,18 @@ static void sev_json_encode_value(sev_json_buffer *buffer, sev_value *value) {
       return;
     case SEV_COLLECTION: {
       sev_collection *collection = value->as.pointer;
+      if (collection->kind == 3) {
+        sev_map *map = value->as.pointer;
+        sev_json_character(buffer, '{');
+        for (int64_t index = 0; index < map->size; ++index) {
+          if (index) sev_json_character(buffer, ',');
+          sev_json_encode_value(buffer, map->keys[index]);
+          sev_json_character(buffer, ':');
+          sev_json_encode_value(buffer, map->values[index]);
+        }
+        sev_json_character(buffer, '}');
+        return;
+      }
       sev_json_character(buffer, '[');
       for (int64_t index = 0; index < collection->size; ++index) {
         if (index) sev_json_character(buffer, ',');
@@ -5271,6 +5407,29 @@ static sev_value *sev_json_parse_value(const char **cursor) {
     ++*cursor;
     return __sev_box_collection(values);
   }
+  if (**cursor == '{') {
+    ++*cursor;
+    sev_map *object = __sev_map_new();
+    sev_json_space(cursor);
+    if (**cursor != '}') {
+      while (true) {
+        sev_value *key = sev_json_parse_value(cursor);
+        if (!key || key->kind != SEV_STRING) return NULL;
+        sev_json_space(cursor);
+        if (**cursor != ':') return NULL;
+        ++*cursor;
+        sev_value *value = sev_json_parse_value(cursor);
+        if (!value) return NULL;
+        __sev_map_insert(object, key, value);
+        sev_json_space(cursor);
+        if (**cursor != ',') break;
+        ++*cursor;
+      }
+    }
+    if (**cursor != '}') return NULL;
+    ++*cursor;
+    return __sev_box_collection(object);
+  }
   if (strncmp(*cursor, "true", 4) == 0) { *cursor += 4; return __sev_box_bool(true); }
   if (strncmp(*cursor, "false", 5) == 0) { *cursor += 5; return __sev_box_bool(false); }
   char *end = NULL;
@@ -5290,6 +5449,75 @@ void *__sev_json_decode(void *text_raw) {
   sev_json_space(&cursor);
   if (!value || *cursor) return sev_failure("invalid JSON");
   return __sev_variant_new("ok", value);
+}
+
+void *__sev_json_object_get(void *value_raw, void *key_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed) { fprintf(stderr, "json object get: null\n"); abort(); }
+  sev_map *map = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
+  if (!map || map->kind != 3) { fprintf(stderr, "json object get: kind %ld boxed %d\n", map ? map->kind : -1, boxed->kind); abort(); }
+  return __sev_map_get(map, __sev_box_string(key_raw));
+}
+
+void *__sev_json_object_keys(void *value_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer) abort();
+  sev_map *map = boxed->as.pointer;
+  if (map->kind != 3) abort();
+  sev_collection *keys = __sev_collection_new(0);
+  for (int64_t index = 0; index < map->size; ++index) {
+    if (!map->keys[index] || map->keys[index]->kind != SEV_STRING) abort();
+    __sev_collection_push(keys, map->keys[index]);
+  }
+  return keys;
+}
+
+void *__sev_json_as_string(void *value_raw) {
+  sev_value *value = value_raw;
+  if (!value || value->kind != SEV_STRING) abort();
+  return (void *)value->as.string;
+}
+
+int64_t __sev_json_as_int(void *value_raw) {
+  sev_value *value = value_raw;
+  if (!value || value->kind != SEV_INT) abort();
+  return value->as.i64;
+}
+
+double __sev_json_as_float(void *value_raw) {
+  sev_value *value = value_raw;
+  if (!value) abort();
+  if (value->kind == SEV_FLOAT) return value->as.f64;
+  if (value->kind == SEV_INT) return (double)value->as.i64;
+  abort();
+}
+
+bool __sev_json_as_bool(void *value_raw) {
+  sev_value *value = value_raw;
+  if (!value || value->kind != SEV_BOOL) abort();
+  return value->as.boolean;
+}
+
+void *__sev_json_as_int_list(void *value_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed) abort();
+  sev_collection *values = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
+  if (!values) abort();
+  if (values->kind == 3) abort();
+  for (int64_t index = 0; index < values->size; ++index)
+    if (!values->items[index] || values->items[index]->kind != SEV_INT) abort();
+  return values;
+}
+
+void *__sev_json_as_string_list(void *value_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed) { fprintf(stderr, "json string list: null\n"); abort(); }
+  sev_collection *values = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
+  if (!values) { fprintf(stderr, "json string list: null collection\n"); abort(); }
+  if (values->kind == 3) { fprintf(stderr, "json string list: object\n"); abort(); }
+  for (int64_t index = 0; index < values->size; ++index)
+    if (!values->items[index] || values->items[index]->kind != SEV_STRING) { fprintf(stderr, "json string list: item %ld kind %d\n", index, values->items[index] ? values->items[index]->kind : -1); abort(); }
+  return values;
 }
 
 void __sev_log_info(void *message) {
@@ -5749,6 +5977,9 @@ int64_t __sev_host_page_size(void) {
         native_symbols.contains("__sev_tensor_backward_mse"),
         rocm,
     ));
+    if native_symbols.contains("__sev_safetensor_bf16_view") {
+        source.push_str(severian_platform::safetensors_source());
+    }
     if has_model_graph {
         source.push_str(&severian_platform::model_graph_source(rocm));
     }

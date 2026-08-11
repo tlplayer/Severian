@@ -2,6 +2,26 @@ native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 
 native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]
 
+native("__sev_file_open_binary") def fileOpenBinary(path: string) -> Result[Any, IOError]
+
+native("__sev_file_read_bytes") def fileReadBytes(handle: Any, count: int) -> Result[list[int], IOError]
+
+native("__sev_file_read_exact") def fileReadExact(handle: Any, count: int) -> Result[list[int], IOError]
+
+native("__sev_bytes_utf8") def bytesUtf8(bytes: list[int]) -> Result[string, IOError]
+
+native("__sev_file_seek") def fileSeek(handle: Any, offset: int) -> Result[unit, IOError]
+
+native("__sev_file_size") def fileSize(handle: Any) -> Result[int, IOError]
+
+native("__sev_file_close") def fileClose(handle: Any) -> Result[unit, IOError]
+
+native("__sev_file_map") def fileMap(path: string) -> Result[Any, IOError]
+
+native("__sev_file_mapped_size") def fileMappedSize(mapping: Any) -> int
+
+native("__sev_file_unmap") def fileUnmap(mapping: Any) -> Result[unit, IOError]
+
 test "native file ABI":
     path = "/tmp/severian-platform-roundtrip.txt"
     switch fileWrite(path, "platform ABI"):
@@ -24,6 +44,22 @@ test "native JSON decode ABI":
             assert(false, error)
 
 native("__sev_json_encode") def jsonEncode(value: Any) -> string
+
+native("__sev_json_object_get") def jsonObjectGet(value: Any, key: string) -> Any
+
+native("__sev_json_object_keys") def jsonObjectKeys(value: Any) -> list[string]
+
+native("__sev_json_as_string") def jsonAsString(value: Any) -> string
+
+native("__sev_json_as_int") def jsonAsInt(value: Any) -> int
+
+native("__sev_json_as_float") def jsonAsFloat(value: Any) -> float
+
+native("__sev_json_as_bool") def jsonAsBool(value: Any) -> bool
+
+native("__sev_json_as_int_list") def jsonAsIntList(value: Any) -> list[int]
+
+native("__sev_json_as_string_list") def jsonAsStringList(value: Any) -> list[string]
 
 test "native JSON encode ABI":
     assert(jsonEncode([1, 2, 3]) == "[1,2,3]")

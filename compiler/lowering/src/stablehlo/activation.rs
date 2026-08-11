@@ -9,7 +9,7 @@ pub fn relu(
 ) -> MlirValue {
     let zero = emitter.splat(
         match tensor_type.element {
-            TensorElementType::F32 | TensorElementType::F64 => "0.0",
+            TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "0.0",
             TensorElementType::I32 | TensorElementType::I64 => "0",
         },
         tensor_type,

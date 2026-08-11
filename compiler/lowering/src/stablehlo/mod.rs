@@ -19,6 +19,7 @@ pub use reduction::StableHloReduction;
 use severian_hir::{Expression, Function, Instruction, Program, ValueType};
 use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_mlir::Module;
+use std::collections::HashMap;
 use std::fmt::{self, Write};
 
 use crate::tensor::tensor_type;
@@ -80,9 +81,9 @@ impl std::error::Error for StableHloLoweringError {}
 /// Lowers the currently representable whole-program tensor boundary.
 ///
 /// Typed HIR preserves tensor information and resolved call targets. This
-/// initial whole-program path accepts tensor functions whose bodies directly
-/// return one supported tensor operation over tensor parameters; composing
-/// general tensor control flow belongs to the forthcoming MIR lowering.
+/// whole-program path accepts straight-line tensor SSA, including nested calls,
+/// local bindings, reassignment, and placement regions. Control flow remains a
+/// MIR concern, but model kernels no longer have to be single-expression shims.
 pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError> {
     let tensor_functions = program
         .functions
@@ -109,6 +110,7 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
         unreachable!()
     };
     let mut arguments = Vec::with_capacity(function.params.len());
+    let mut values = HashMap::new();
     for (index, parameter) in function.params.iter().enumerate() {
         let ValueType::Tensor(tensor) = parameter.ty else {
             return Err(StableHloLoweringError::UnsupportedFunction {
@@ -116,51 +118,25 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
                 reason: format!("parameter `{}` is not a tensor", parameter.name),
             });
         };
-        arguments.push((
-            parameter.name.as_str(),
-            argument(format!("%arg{index}"), tensor),
-        ));
+        let value = argument(format!("%arg{index}"), tensor);
+        arguments.push(value.clone());
+        values.insert(parameter.name.clone(), value);
     }
-
-    let Some(returned) = direct_tensor_return(&function.instructions) else {
-        return Err(StableHloLoweringError::UnsupportedFunction {
-            function: function.name.clone(),
-            reason: "expected a direct return of a tensor call".into(),
-        });
-    };
-    let Expression::Call { target, args } = returned.kind() else {
-        return Err(StableHloLoweringError::UnsupportedFunction {
-            function: function.name.clone(),
-            reason: "expected a direct return of a tensor call".into(),
-        });
-    };
-
-    let operands = args
-        .iter()
-        .map(|expression| match expression.kind() {
-            Expression::Variable(name) => arguments
-                .iter()
-                .find(|(parameter, _)| *parameter == name.as_str())
-                .map(|(_, value)| value.clone())
-                .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
-                    function: function.name.clone(),
-                    reason: format!(
-                        "tensor operand `{name}` is not a parameter with a retained type"
-                    ),
-                }),
-            _ => Err(StableHloLoweringError::UnsupportedFunction {
-                function: function.name.clone(),
-                reason: "tensor call operands must currently be function parameters".into(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
     let mut emitter = StableHloEmitter::new();
-    let result = lower_tensor_call(&target.name, &operands, result_type, &mut emitter)?;
+    let result = lower_straight_line(
+        &function.name,
+        &function.instructions,
+        &mut values,
+        &mut emitter,
+    )?
+    .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+        function: function.name.clone(),
+        reason: "tensor function has no returned value".into(),
+    })?;
     let signature = arguments
         .iter()
         .enumerate()
-        .map(|(index, (_, value))| format!("%arg{index}: {}", value.ty))
+        .map(|(index, value)| format!("%arg{index}: {}", value.ty))
         .collect::<Vec<_>>()
         .join(", ");
     writeln!(
@@ -177,11 +153,88 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
     Ok(())
 }
 
-fn direct_tensor_return(instructions: &[Instruction]) -> Option<&Expression> {
-    match instructions {
-        [Instruction::Return(Some(value))] => Some(value),
-        [Instruction::With { instructions, .. }] => direct_tensor_return(instructions),
-        _ => None,
+fn lower_straight_line(
+    function: &str,
+    instructions: &[Instruction],
+    values: &mut HashMap<String, MlirValue>,
+    emitter: &mut StableHloEmitter,
+) -> Result<Option<MlirValue>, StableHloLoweringError> {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+                let value = lower_expression(function, value, values, emitter)?;
+                values.insert(name.clone(), value);
+            }
+            Instruction::Assign { target, op, value } => {
+                if !matches!(op, severian_hir::AssignmentOp::Assign) {
+                    return Err(StableHloLoweringError::UnsupportedFunction {
+                        function: function.into(),
+                        reason: "compound tensor assignment must be normalized before StableHLO".into(),
+                    });
+                }
+                let Expression::Variable(name) = target.kind() else {
+                    return Err(StableHloLoweringError::UnsupportedFunction {
+                        function: function.into(),
+                        reason: "tensor assignment target must be a local variable".into(),
+                    });
+                };
+                let value = lower_expression(function, value, values, emitter)?;
+                values.insert(name.clone(), value);
+            }
+            Instruction::Return(Some(value)) => {
+                return lower_expression(function, value, values, emitter).map(Some);
+            }
+            Instruction::With { instructions, .. } => {
+                if let Some(result) = lower_straight_line(function, instructions, values, emitter)? {
+                    return Ok(Some(result));
+                }
+            }
+            Instruction::Assert(_) | Instruction::Evaluate(_) => {}
+            other => {
+                return Err(StableHloLoweringError::UnsupportedFunction {
+                    function: function.into(),
+                    reason: format!("unsupported tensor control-flow instruction {other:?}"),
+                });
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn lower_expression(
+    function: &str,
+    expression: &Expression,
+    values: &HashMap<String, MlirValue>,
+    emitter: &mut StableHloEmitter,
+) -> Result<MlirValue, StableHloLoweringError> {
+    match expression.kind() {
+        Expression::Variable(name) => values.get(name).cloned().ok_or_else(|| {
+            StableHloLoweringError::UnsupportedFunction {
+                function: function.into(),
+                reason: format!("unknown tensor SSA value `{name}`"),
+            }
+        }),
+        Expression::Call { target, args } => {
+            let result_type = match expression.ty() {
+                Some(ValueType::Tensor(tensor)) => tensor,
+                other => {
+                    return Err(StableHloLoweringError::UnsupportedFunction {
+                        function: function.into(),
+                        reason: format!("tensor call `{}` has non-tensor type {other:?}", target.name),
+                    });
+                }
+            };
+            let operands = args
+                .iter()
+                .filter(|argument| matches!(argument.ty(), Some(ValueType::Tensor(_))))
+                .map(|argument| lower_expression(function, argument, values, emitter))
+                .collect::<Result<Vec<_>, _>>()?;
+            lower_tensor_call(&target.name, &operands, result_type, emitter)
+        }
+        other => Err(StableHloLoweringError::UnsupportedFunction {
+            function: function.into(),
+            reason: format!("unsupported tensor expression {other:?}"),
+        }),
     }
 }
 
@@ -196,6 +249,11 @@ pub fn lower_tensor_call(
         .map(|(_, leaf)| leaf)
         .unwrap_or(function)
         .to_ascii_lowercase();
+    let op = op
+        .strip_suffix("bf16")
+        .or_else(|| op.strip_suffix("f32"))
+        .unwrap_or(&op)
+        .to_string();
 
     match op.as_str() {
         "add" | "rankedadd" | "tensor_add" => {
@@ -253,8 +311,14 @@ pub fn lower_tensor_call(
             Ok(emitter.transpose(&args[0], &[1, 0], result_type))
         }
 
-        "broadcast" | "broadcast_in_dim" | "tensor_broadcast" => {
-            require_arity(&op, args, 1)?;
+        "broadcast" | "broadcastlike" | "broadcast_in_dim" | "tensor_broadcast" => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(StableHloLoweringError::InvalidArity {
+                    operation: op,
+                    expected: 1,
+                    actual: args.len(),
+                });
+            }
             let input_rank = args[0]
                 .tensor_type()
                 .and_then(|tensor| tensor.rank)
@@ -304,13 +368,13 @@ pub fn lower_tensor_call(
             Ok(emitter.logistic(&args[0], result_type))
         }
 
-        "sum" | "reduce_sum" | "tensor_sum" => {
+        "sum" | "sumlast" | "reduce_sum" | "tensor_sum" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_sum(emitter, &args[0], &axes, result_type))
         }
 
-        "max" | "reduce_max" | "tensor_max" => {
+        "max" | "maxlast" | "reduce_max" | "tensor_max" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_max(emitter, &args[0], &axes, result_type))
@@ -322,7 +386,7 @@ pub fn lower_tensor_call(
             Ok(reduction::reduce_min(emitter, &args[0], &axes, result_type))
         }
 
-        "mean" | "reduce_mean" | "tensor_mean" => {
+        "mean" | "meanlast" | "reduce_mean" | "tensor_mean" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             let count = static_reduction_count(&op, &args[0], &axes)?;
@@ -389,6 +453,11 @@ pub fn lower_tensor_call(
                 hidden_size,
                 1e-5,
             ))
+        }
+
+        "bf16to" | "f32to" | "to" | "convert" => {
+            require_arity(&op, args, 1)?;
+            Ok(emitter.convert(&args[0], result_type))
         }
 
         // These are structurally represented in StableHLO but need shape or

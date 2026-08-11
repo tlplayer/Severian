@@ -1,0 +1,9 @@
+{
+  "model": "Qwen/Qwen2.5-3B-Instruct",
+  "revision": "14d7620ba47cf51be0b176e14e27e38a34d4ff88",
+  "local_directory": "benchmarks/inference/models/Qwen2.5-3B-Instruct",
+  "dtype": "bfloat16",
+  "shards": 2,
+  "tensors": 434,
+  "payload_bytes": 6171877376
+}

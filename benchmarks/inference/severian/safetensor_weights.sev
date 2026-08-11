@@ -1,0 +1,4 @@
+import tensor
+
+def openSafeTensorStore(modelDirectory: string) -> Result[tensor.SafeTensorStore, IOError]:
+    return tensor.openSafetensors(modelDirectory)

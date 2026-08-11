@@ -3,6 +3,9 @@ target/
 /bin/examples/
 /bench/.work/
 /bench/results.csv
+/benchmarks/inference/.venv/
+/benchmarks/inference/models/
+/benchmarks/inference/results/
 __pycache__/
 /bench/onnx-gold/generated/
 *.mlir

@@ -18,6 +18,7 @@ pub enum TensorLoweringTarget {
 
 pub fn element_type(element: TensorElementType) -> &'static str {
     match element {
+        TensorElementType::BF16 => "bf16",
         TensorElementType::F32 => "f32",
         TensorElementType::F64 => "f64",
         TensorElementType::I32 => "i32",

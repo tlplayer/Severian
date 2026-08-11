@@ -48,6 +48,8 @@ pub fn conv2d_nchw(
         batch_group_count,
         input.ty,
         kernel.ty,
+        result = result,
+        result_ty = result_ty,
     ));
     MlirValue::from_tensor(result, result_type)
 }

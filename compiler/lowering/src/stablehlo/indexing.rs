@@ -211,6 +211,8 @@ impl StableHloEmitter {
             operand.name, start_indices.name, list(offset_dims),
             list(collapsed_slice_dims), list(start_index_map), index_vector_dim,
             list(slice_sizes), operand.ty, start_indices.ty,
+            result = result,
+            result_ty = result_ty,
         ));
         MlirValue::from_tensor(result, result_type)
     }

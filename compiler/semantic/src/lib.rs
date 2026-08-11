@@ -2633,6 +2633,7 @@ fn lower_tensor_type(path: &severian_ast::TypePath) -> Result<TensorType, Semant
     let element = match path.args.first().and_then(TypeArg::as_type) {
         Some(Type::Named(element)) => match element.segments.first().map(|part| part.name.as_str())
         {
+            Some("bf16" | "bfloat16") => TensorElementType::BF16,
             Some("f32") => TensorElementType::F32,
             Some("f64" | "float") => TensorElementType::F64,
             Some("i32") => TensorElementType::I32,
@@ -2640,7 +2641,7 @@ fn lower_tensor_type(path: &severian_ast::TypePath) -> Result<TensorType, Semant
             _ => {
                 return Err(error(
                     path.span,
-                    "tensor elements must be f32, f64, i32, or i64",
+                    "tensor elements must be bf16, f32, f64, i32, or i64",
                 ))
             }
         },

@@ -6,7 +6,7 @@ use crate::{
 };
 use severian_hir::Program;
 use severian_mlir::Module;
-use std::path::Path;
+use std::{ffi::OsString, path::Path};
 
 /// Host-native compilation.
 ///
@@ -56,6 +56,11 @@ pub fn compile_native(
             pthread: bridge_path.is_some(),
             math: true,
             optimization: 3,
+            additional_arguments: vec![
+                OsString::from("-ffunction-sections"),
+                OsString::from("-fdata-sections"),
+                OsString::from("-Wl,--gc-sections"),
+            ],
             ..NativeLinkOptions::default()
         },
     )

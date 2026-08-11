@@ -101,6 +101,16 @@ impl HostBuffer {
         }
         Self::new(shape, bytes)
     }
+
+    pub fn from_bf16_bytes(
+        dimensions: impl Into<Vec<i64>>,
+        bytes: &[u8],
+    ) -> Result<Self> {
+        Self::new(
+            Shape::new(ElementType::BF16, dimensions),
+            bytes.to_vec(),
+        )
+    }
 }
 
 pub struct Buffer {

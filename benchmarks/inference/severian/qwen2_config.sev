@@ -1,0 +1,57 @@
+import json
+
+class Qwen2Config:
+    architecture: string
+    modelType: string
+    vocabSize: int
+    hiddenSize: int
+    intermediateSize: int
+    numHiddenLayers: int
+    numAttentionHeads: int
+    numKeyValueHeads: int
+    rmsNormEpsilon: float
+    ropeTheta: float
+    maxPositionEmbeddings: int
+    tieWordEmbeddings: bool
+    dtype: string
+
+    def headDimension() -> int:
+        return hiddenSize / numAttentionHeads
+
+    def kvRepeat() -> int:
+        return numAttentionHeads / numKeyValueHeads
+
+def parseQwen2Config(text: string) -> Result[Qwen2Config, JsonError]:
+    document ?= json.decode[Any](text)
+    architectures = json.objectGet(document, "architectures")
+    architectureNames = json.asStringList(architectures)
+    assert(size(architectureNames) > 0)
+
+    config = Qwen2Config(
+        architectureNames[0],
+        json.asString(json.objectGet(document, "model_type")),
+        json.asInt(json.objectGet(document, "vocab_size")),
+        json.asInt(json.objectGet(document, "hidden_size")),
+        json.asInt(json.objectGet(document, "intermediate_size")),
+        json.asInt(json.objectGet(document, "num_hidden_layers")),
+        json.asInt(json.objectGet(document, "num_attention_heads")),
+        json.asInt(json.objectGet(document, "num_key_value_heads")),
+        json.asFloat(json.objectGet(document, "rms_norm_eps")),
+        json.asFloat(json.objectGet(document, "rope_theta")),
+        json.asInt(json.objectGet(document, "max_position_embeddings")),
+        json.asBool(json.objectGet(document, "tie_word_embeddings")),
+        json.asString(json.objectGet(document, "torch_dtype")),
+    )
+    assert(config.modelType == "qwen2")
+    assert(config.architecture == "Qwen2ForCausalLM")
+    assert(config.dtype == "bfloat16")
+    assert(config.headDimension() > 0)
+    assert(config.kvRepeat() > 0)
+    return config
+
+test "Qwen2.5 3B configuration is read and derived":
+    text = "{\"architectures\":[\"Qwen2ForCausalLM\"],\"model_type\":\"qwen2\",\"vocab_size\":151936,\"hidden_size\":2048,\"intermediate_size\":11008,\"num_hidden_layers\":36,\"num_attention_heads\":16,\"num_key_value_heads\":2,\"rms_norm_eps\":0.000001,\"rope_theta\":1000000.0,\"max_position_embeddings\":32768,\"tie_word_embeddings\":true,\"torch_dtype\":\"bfloat16\"}"
+    config ?= parseQwen2Config(text)
+    assert(config.headDimension() == 128)
+    assert(config.kvRepeat() == 8)
+    assert(config.numHiddenLayers == 36)

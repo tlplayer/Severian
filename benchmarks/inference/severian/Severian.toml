@@ -1,0 +1,14 @@
+[package]
+name = "qwen2-severian-benchmark"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "qwen2-severian-benchmark"
+path = "benchmark.sev"
+
+[dependencies]
+file = { path = "../../../library/file", version = "0.1.0" }
+qwen2 = { path = "modules/qwen2", version = "0.1.0" }
+qwen2_config = { path = "modules/qwen2_config", version = "0.1.0" }
+safetensor_weights = { path = "modules/safetensor_weights", version = "0.1.0" }
