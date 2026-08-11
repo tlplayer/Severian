@@ -4,7 +4,7 @@ All implementations consume `models/Qwen2.5-3B-Instruct` at revision
 `14d7620ba47cf51be0b176e14e27e38a34d4ff88`. Run `download_model.py` once;
 never copy or convert the checkpoint per framework.
 
-`prepare_inputs.py` writes the common 128/512/2048-token compute workloads.
+`prepare_inputs.py` writes the common 128/256/512/2048-token compute workloads.
 The harness rejects a sample unless it includes the GPU identity, readiness and
 first-token timestamps, peak VRAM, and actual generated token IDs. Raw samples
 belong under `results/`; summarized tables must be derived from those files and

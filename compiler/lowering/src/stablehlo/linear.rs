@@ -31,7 +31,10 @@ pub fn linear_last_dimension(
             .rank
             .expect("linear projection requires a ranked tensor"),
     );
-    assert!(rank > 0, "linear projection requires rank greater than zero");
+    assert!(
+        rank > 0,
+        "linear projection requires rank greater than zero"
+    );
     emitter.dot_general(input, weight, &[], &[], &[rank - 1], &[0], result_type)
 }
 

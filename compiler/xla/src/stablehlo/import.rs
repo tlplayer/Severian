@@ -68,9 +68,7 @@ fn run_deserializer(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            XlaError::StableHloTool(format!(
-                "failed to start {stablehlo_translate}: {error}"
-            ))
+            XlaError::StableHloTool(format!("failed to start {stablehlo_translate}: {error}"))
         })?;
 
     child

@@ -43,16 +43,11 @@ pub fn detect_devices() -> Vec<GpuDevice> {
 
     let text = String::from_utf8_lossy(&output.stdout);
 
-    text.lines()
-        .filter_map(parse_device_line)
-        .collect()
+    text.lines().filter_map(parse_device_line).collect()
 }
 
 fn parse_device_line(line: &str) -> Option<GpuDevice> {
-    let fields = line
-        .split(',')
-        .map(str::trim)
-        .collect::<Vec<_>>();
+    let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
 
     if fields.len() < 5 {
         return None;

@@ -1,7 +1,7 @@
 use severian_hir::{TensorElementType, TensorType};
 
-use crate::tensor::tensor_type;
 use super::scalar_tensor;
+use crate::tensor::tensor_type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MlirValue {
@@ -63,11 +63,7 @@ impl StableHloEmitter {
         self.text.push('\n');
     }
 
-    pub fn constant_scalar(
-        &mut self,
-        literal: &str,
-        result_type: TensorType,
-    ) -> MlirValue {
+    pub fn constant_scalar(&mut self, literal: &str, result_type: TensorType) -> MlirValue {
         let result = self.fresh();
         let ty = tensor_type(result_type);
         self.line(format!(
@@ -89,12 +85,7 @@ impl StableHloEmitter {
         }
     }
 
-    pub fn add(
-        &mut self,
-        lhs: &MlirValue,
-        rhs: &MlirValue,
-        result_type: TensorType,
-    ) -> MlirValue {
+    pub fn add(&mut self, lhs: &MlirValue, rhs: &MlirValue, result_type: TensorType) -> MlirValue {
         self.binary("add", lhs, rhs, result_type)
     }
 
@@ -159,17 +150,10 @@ impl StableHloEmitter {
         MlirValue::from_tensor(result, result_type)
     }
 
-    pub fn negate(
-        &mut self,
-        input: &MlirValue,
-        result_type: TensorType,
-    ) -> MlirValue {
+    pub fn negate(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
         let result = self.fresh();
         let ty = tensor_type(result_type);
-        self.line(format!(
-            "{result} = stablehlo.negate {} : {ty}",
-            input.name
-        ));
+        self.line(format!("{result} = stablehlo.negate {} : {ty}", input.name));
         MlirValue::from_tensor(result, result_type)
     }
 
@@ -211,11 +195,7 @@ impl StableHloEmitter {
         MlirValue::from_tensor(result, result_type)
     }
 
-    pub fn reshape(
-        &mut self,
-        input: &MlirValue,
-        result_type: TensorType,
-    ) -> MlirValue {
+    pub fn reshape(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
         let result = self.fresh();
         let ty = tensor_type(result_type);
         self.line(format!(
@@ -296,11 +276,7 @@ impl StableHloEmitter {
         MlirValue::from_tensor(result, result_type)
     }
 
-    pub fn convert(
-        &mut self,
-        input: &MlirValue,
-        result_type: TensorType,
-    ) -> MlirValue {
+    pub fn convert(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
         let result = self.fresh();
         let ty = tensor_type(result_type);
         self.line(format!(

@@ -93,8 +93,9 @@ impl Poller {
             return;
         };
 
-        let relevant =
-            (interest.readable && event.readable) || (interest.writable && event.writable) || event.error;
+        let relevant = (interest.readable && event.readable)
+            || (interest.writable && event.writable)
+            || event.error;
 
         if relevant {
             state.ready.push_back(event);

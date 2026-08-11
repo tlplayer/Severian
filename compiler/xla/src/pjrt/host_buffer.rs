@@ -1,16 +1,9 @@
-use super::{
-    api,
-    compile::RawClient,
-    error,
-};
+use super::{api, compile::RawClient, error};
 use crate::{
     pjrt::buffer::{ElementType, HostBuffer, Shape},
     Result,
 };
-use std::{
-    ffi::c_void,
-    ptr::NonNull,
-};
+use std::{ffi::c_void, ptr::NonNull};
 
 pub struct RawBuffer {
     plugin: super::plugin::RawPjrtPlugin,
@@ -76,8 +69,8 @@ impl RawBuffer {
         plugin: super::plugin::RawPjrtPlugin,
         buffer: *mut api::PJRT_Buffer,
     ) -> Result<Self> {
-        let buffer = NonNull::new(buffer)
-            .ok_or_else(|| error::invalid_raw_pointer("PJRT_Buffer"))?;
+        let buffer =
+            NonNull::new(buffer).ok_or_else(|| error::invalid_raw_pointer("PJRT_Buffer"))?;
         let api = plugin.api();
 
         let mut type_args = api::PJRT_Buffer_ElementType_Args {
@@ -104,13 +97,8 @@ impl RawBuffer {
         let dimensions = if dimensions_args.num_dims == 0 {
             Vec::new()
         } else {
-            unsafe {
-                std::slice::from_raw_parts(
-                    dimensions_args.dims,
-                    dimensions_args.num_dims,
-                )
-            }
-            .to_vec()
+            unsafe { std::slice::from_raw_parts(dimensions_args.dims, dimensions_args.num_dims) }
+                .to_vec()
         };
 
         Ok(Self {
@@ -175,7 +163,6 @@ impl RawBuffer {
         await_and_destroy_event(api, args.event)?;
         Ok(bytes)
     }
-
 }
 
 impl Drop for RawBuffer {

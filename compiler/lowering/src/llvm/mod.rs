@@ -57,7 +57,10 @@ pub fn pass_pipeline(options: &LlvmLoweringOptions) -> String {
         "convert-scf-to-cf".into(),
         "convert-math-to-llvm".into(),
         "convert-arith-to-llvm".into(),
-        format!("finalize-memref-to-llvm{{index-bitwidth={}}}", options.index_bitwidth),
+        format!(
+            "finalize-memref-to-llvm{{index-bitwidth={}}}",
+            options.index_bitwidth
+        ),
         "convert-func-to-llvm".into(),
         "convert-cf-to-llvm".into(),
         "reconcile-unrealized-casts".into(),

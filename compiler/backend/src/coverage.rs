@@ -69,9 +69,7 @@ pub fn discover_profile_runtime(clang: &Path) -> Result<PathBuf, BackendError> {
     Ok(path)
 }
 
-pub fn verify_instrumented_binary(
-    binary: &Path,
-) -> Result<(), BackendError> {
+pub fn verify_instrumented_binary(binary: &Path) -> Result<(), BackendError> {
     let output = Command::new("nm").arg(binary).output()?;
 
     if !output.status.success() {

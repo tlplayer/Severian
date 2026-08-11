@@ -17,10 +17,7 @@ pub enum SelectResult<T> {
 ///
 /// This is deliberately independent of channel internals. A later optimized
 /// runtime can replace this with registered waiters while preserving the API.
-pub fn select<T>(
-    cases: &[SelectCase<'_, T>],
-    poll_interval: Duration,
-) -> SelectResult<T> {
+pub fn select<T>(cases: &[SelectCase<'_, T>], poll_interval: Duration) -> SelectResult<T> {
     let mut start = 0usize;
 
     loop {

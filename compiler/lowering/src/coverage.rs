@@ -83,8 +83,5 @@ impl<'a> CoverageLowering<'a> {
 }
 
 pub fn required_llvm_runtime_symbols() -> &'static [&'static str] {
-    &[
-        "__llvm_profile_runtime",
-        "__llvm_profile_register_function",
-    ]
+    &["__llvm_profile_runtime", "__llvm_profile_register_function"]
 }

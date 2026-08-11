@@ -1,8 +1,8 @@
 use super::{
     api,
     buffer::Buffer,
-    compile::RawLoadedExecutable,
     compile::RawClient,
+    compile::RawLoadedExecutable,
     device::Device,
     error,
     host_buffer::{await_and_destroy_event, RawBuffer},
@@ -54,7 +54,10 @@ pub(crate) fn execute(
     if get_args.executable.is_null() {
         return Err(error::invalid_raw_pointer("PJRT_Executable"));
     }
-    let executable = BorrowedExecutable { api, raw: get_args.executable };
+    let executable = BorrowedExecutable {
+        api,
+        raw: get_args.executable,
+    };
 
     let mut outputs_args = api::PJRT_Executable_NumOutputs_Args {
         struct_size: api::struct_size::<api::PJRT_Executable_NumOutputs_Args>(),

@@ -85,7 +85,10 @@ fn detect_with_rocm_smi() -> Option<Vec<GpuDevice>> {
     let names = text
         .lines()
         .filter(|line| line.contains("Card series") || line.contains("Card model"))
-        .filter_map(|line| line.split_once(':').map(|(_, value)| value.trim().to_owned()))
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(_, value)| value.trim().to_owned())
+        })
         .collect::<Vec<_>>();
 
     Some(

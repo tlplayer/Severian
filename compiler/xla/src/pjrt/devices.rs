@@ -1,10 +1,6 @@
 //! PJRT device discovery and owned device metadata.
 
-use super::{
-    api,
-    compile::RawClient,
-    error,
-};
+use super::{api, compile::RawClient, error};
 use crate::Result;
 use std::ptr::NonNull;
 
@@ -28,8 +24,7 @@ unsafe impl Sync for RawDevice {}
 impl RawDevice {
     pub(crate) fn from_raw(raw: *mut api::PJRT_Device) -> Result<Self> {
         Ok(Self {
-            raw: NonNull::new(raw)
-                .ok_or_else(|| error::invalid_raw_pointer("PJRT_Device"))?,
+            raw: NonNull::new(raw).ok_or_else(|| error::invalid_raw_pointer("PJRT_Device"))?,
         })
     }
 
@@ -118,9 +113,7 @@ impl RawClient {
         self.addressable_devices()?
             .into_iter()
             .next()
-            .ok_or_else(|| crate::XlaError::Pjrt(
-                "PJRT client has no addressable devices".into(),
-            ))
+            .ok_or_else(|| crate::XlaError::Pjrt("PJRT client has no addressable devices".into()))
     }
 }
 
@@ -170,9 +163,8 @@ fn description_kind(
     if args.device_kind.is_null() {
         return Ok(String::new());
     }
-    let bytes = unsafe {
-        std::slice::from_raw_parts(args.device_kind.cast::<u8>(), args.device_kind_size)
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(args.device_kind.cast::<u8>(), args.device_kind_size) };
     Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
@@ -201,7 +193,9 @@ fn local_hardware_id(api: &api::PJRT_Api, device: *mut api::PJRT_Device) -> Resu
 }
 
 fn pointer_array<T>(pointer: *const *mut T, len: usize) -> Result<Vec<*mut T>> {
-    if len == 0 { return Ok(Vec::new()); }
+    if len == 0 {
+        return Ok(Vec::new());
+    }
     if pointer.is_null() {
         return Err(error::invalid_raw_pointer("PJRT pointer array"));
     }

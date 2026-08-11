@@ -1,15 +1,19 @@
 use severian_hir::{TensorDimension, TensorType};
 
-use super::{reduction::mean, MlirValue, StableHloEmitter, StableHloLoweringError, StableHloReduction};
+use super::{
+    reduction::mean, MlirValue, StableHloEmitter, StableHloLoweringError, StableHloReduction,
+};
 
 pub fn last_axis_reduced_type(
     input_type: TensorType,
 ) -> Result<TensorType, StableHloLoweringError> {
-    let rank = input_type.rank.ok_or_else(|| StableHloLoweringError::InvalidRank {
-        operation: "last-axis reduction".into(),
-        expected: 1,
-        actual: None,
-    })?;
+    let rank = input_type
+        .rank
+        .ok_or_else(|| StableHloLoweringError::InvalidRank {
+            operation: "last-axis reduction".into(),
+            expected: 1,
+            actual: None,
+        })?;
     if rank == 0 {
         return Err(StableHloLoweringError::InvalidRank {
             operation: "last-axis reduction".into(),
@@ -55,8 +59,7 @@ pub fn softmax_last_axis(
         StableHloReduction::Add,
         reduced_type,
     );
-    let denominator =
-        emitter.broadcast_in_dim(&denominator, &broadcast_dimensions, input_type);
+    let denominator = emitter.broadcast_in_dim(&denominator, &broadcast_dimensions, input_type);
     emitter.divide(&exponentials, &denominator, input_type)
 }
 
@@ -104,8 +107,7 @@ pub fn layer_norm(
     let epsilon = emitter.splat(&epsilon.to_string(), reduced_type);
     let variance = emitter.add(&variance, &epsilon, reduced_type);
     let inverse_stddev = emitter.rsqrt(&variance, reduced_type);
-    let inverse_stddev =
-        emitter.broadcast_in_dim(&inverse_stddev, &outer_dimensions, input_type);
+    let inverse_stddev = emitter.broadcast_in_dim(&inverse_stddev, &outer_dimensions, input_type);
     let normalized = emitter.multiply(&centered, &inverse_stddev, input_type);
     let weight = emitter.broadcast_in_dim(weight, &[rank - 1], input_type);
     let bias = emitter.broadcast_in_dim(bias, &[rank - 1], input_type);

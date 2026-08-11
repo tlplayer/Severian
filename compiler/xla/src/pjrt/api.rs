@@ -410,22 +410,16 @@ pub type ErrorDestroy = unsafe extern "C" fn(*mut PJRT_Error_Destroy_Args);
 pub type ErrorMessage = unsafe extern "C" fn(*mut PJRT_Error_Message_Args);
 pub type PluginInitialize =
     unsafe extern "C" fn(*mut PJRT_Plugin_Initialize_Args) -> *mut PJRT_Error;
-pub type EventDestroy =
-    unsafe extern "C" fn(*mut PJRT_Event_Destroy_Args) -> *mut PJRT_Error;
-pub type EventAwait =
-    unsafe extern "C" fn(*mut PJRT_Event_Await_Args) -> *mut PJRT_Error;
-pub type ClientCreate =
-    unsafe extern "C" fn(*mut PJRT_Client_Create_Args) -> *mut PJRT_Error;
-pub type ClientDestroy =
-    unsafe extern "C" fn(*mut PJRT_Client_Destroy_Args) -> *mut PJRT_Error;
+pub type EventDestroy = unsafe extern "C" fn(*mut PJRT_Event_Destroy_Args) -> *mut PJRT_Error;
+pub type EventAwait = unsafe extern "C" fn(*mut PJRT_Event_Await_Args) -> *mut PJRT_Error;
+pub type ClientCreate = unsafe extern "C" fn(*mut PJRT_Client_Create_Args) -> *mut PJRT_Error;
+pub type ClientDestroy = unsafe extern "C" fn(*mut PJRT_Client_Destroy_Args) -> *mut PJRT_Error;
 pub type ClientPlatformName =
     unsafe extern "C" fn(*mut PJRT_Client_PlatformName_Args) -> *mut PJRT_Error;
-pub type ClientDevices =
-    unsafe extern "C" fn(*mut PJRT_Client_Devices_Args) -> *mut PJRT_Error;
+pub type ClientDevices = unsafe extern "C" fn(*mut PJRT_Client_Devices_Args) -> *mut PJRT_Error;
 pub type ClientAddressableDevices =
     unsafe extern "C" fn(*mut PJRT_Client_AddressableDevices_Args) -> *mut PJRT_Error;
-pub type ClientCompile =
-    unsafe extern "C" fn(*mut PJRT_Client_Compile_Args) -> *mut PJRT_Error;
+pub type ClientCompile = unsafe extern "C" fn(*mut PJRT_Client_Compile_Args) -> *mut PJRT_Error;
 pub type ClientBufferFromHostBuffer =
     unsafe extern "C" fn(*mut PJRT_Client_BufferFromHostBuffer_Args) -> *mut PJRT_Error;
 pub type DeviceGetDescription =
@@ -452,18 +446,15 @@ pub type LoadedExecutableAddressableDevices =
     unsafe extern "C" fn(*mut PJRT_LoadedExecutable_AddressableDevices_Args) -> *mut PJRT_Error;
 pub type LoadedExecutableExecute =
     unsafe extern "C" fn(*mut PJRT_LoadedExecutable_Execute_Args) -> *mut PJRT_Error;
-pub type BufferDestroy =
-    unsafe extern "C" fn(*mut PJRT_Buffer_Destroy_Args) -> *mut PJRT_Error;
+pub type BufferDestroy = unsafe extern "C" fn(*mut PJRT_Buffer_Destroy_Args) -> *mut PJRT_Error;
 pub type BufferElementType =
     unsafe extern "C" fn(*mut PJRT_Buffer_ElementType_Args) -> *mut PJRT_Error;
 pub type BufferDimensions =
     unsafe extern "C" fn(*mut PJRT_Buffer_Dimensions_Args) -> *mut PJRT_Error;
-pub type BufferDevice =
-    unsafe extern "C" fn(*mut PJRT_Buffer_Device_Args) -> *mut PJRT_Error;
+pub type BufferDevice = unsafe extern "C" fn(*mut PJRT_Buffer_Device_Args) -> *mut PJRT_Error;
 pub type BufferToHostBuffer =
     unsafe extern "C" fn(*mut PJRT_Buffer_ToHostBuffer_Args) -> *mut PJRT_Error;
-pub type BufferIsOnCpu =
-    unsafe extern "C" fn(*mut PJRT_Buffer_IsOnCpu_Args) -> *mut PJRT_Error;
+pub type BufferIsOnCpu = unsafe extern "C" fn(*mut PJRT_Buffer_IsOnCpu_Args) -> *mut PJRT_Error;
 
 /// Prefix of PJRT_Api through PJRT_Buffer_ToHostBuffer.
 ///

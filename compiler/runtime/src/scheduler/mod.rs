@@ -86,12 +86,7 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn spawn(
-        &self,
-        name: Option<String>,
-        placement: Placement,
-        body: TaskFn,
-    ) -> TaskHandle {
+    pub fn spawn(&self, name: Option<String>, placement: Placement, body: TaskFn) -> TaskHandle {
         let (task, handle) = Task::new(name, placement, body);
         task.set_state(TaskState::Runnable);
         self.spawned.fetch_add(1, Ordering::Relaxed);
@@ -143,11 +138,8 @@ impl Runtime {
         name: impl Into<String>,
         body: impl FnOnce(crate::task::TaskContext) -> crate::task::TaskResult + Send + 'static,
     ) -> TaskHandle {
-        self.scheduler.spawn(
-            Some(name.into()),
-            Placement::Default,
-            Box::new(body),
-        )
+        self.scheduler
+            .spawn(Some(name.into()), Placement::Default, Box::new(body))
     }
 
     pub fn spawn_on(

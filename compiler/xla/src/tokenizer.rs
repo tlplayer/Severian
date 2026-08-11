@@ -33,7 +33,10 @@ fn bytes_to_unicode() -> (Vec<char>, HashMap<char, u8>) {
         .chain(0xA1..=0xAC)
         .chain(0xAE..=0xFF)
         .collect::<Vec<_>>();
-    let mut codepoints = bytes.iter().map(|&byte| u32::from(byte)).collect::<Vec<_>>();
+    let mut codepoints = bytes
+        .iter()
+        .map(|&byte| u32::from(byte))
+        .collect::<Vec<_>>();
     let mut extra = 0_u32;
     for byte in 0_u8..=255 {
         if !bytes.contains(&byte) {
@@ -115,7 +118,12 @@ impl ByteBpe {
                     .iter()
                     .find(|suffix| rest.starts_with(**suffix))
                     .map(|suffix| suffix.len())
-                    .or_else(|| ["re", "ve", "ll"].iter().find(|suffix| rest.starts_with(**suffix)).map(|_| 2));
+                    .or_else(|| {
+                        ["re", "ve", "ll"]
+                            .iter()
+                            .find(|suffix| rest.starts_with(**suffix))
+                            .map(|_| 2)
+                    });
                 if let Some(width) = width {
                     cursor += 1 + width;
                     pieces.push(&text[positions[start]..positions[cursor]]);
@@ -299,12 +307,18 @@ mod tests {
 
     #[test]
     fn qwen_reference_phrase() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/inference/models/Qwen2.5-3B-Instruct");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/inference/models/Qwen2.5-3B-Instruct"
+        );
         if !std::path::Path::new(path).join("vocab.json").exists() {
             return;
         }
         let tokenizer = ByteBpe::load(path).unwrap();
-        assert_eq!(tokenizer.encode("Roses are red,"), [49, 19696, 525, 2518, 11]);
+        assert_eq!(
+            tokenizer.encode("Roses are red,"),
+            [49, 19696, 525, 2518, 11]
+        );
         assert_eq!(tokenizer.decode(&[348]), " v");
     }
 }

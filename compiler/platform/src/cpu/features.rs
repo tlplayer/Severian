@@ -54,18 +54,13 @@ impl CpuFeature {
 
     pub const fn vector_bits(self) -> Option<u16> {
         match self {
-            Self::Sse2
-            | Self::Sse3
-            | Self::Ssse3
-            | Self::Sse41
-            | Self::Sse42
-            | Self::Neon => Some(128),
+            Self::Sse2 | Self::Sse3 | Self::Ssse3 | Self::Sse41 | Self::Sse42 | Self::Neon => {
+                Some(128)
+            }
             Self::Avx | Self::Avx2 => Some(256),
-            Self::Avx512F
-            | Self::Avx512Bw
-            | Self::Avx512Dq
-            | Self::Avx512Vl
-            | Self::Avx512Vnni => Some(512),
+            Self::Avx512F | Self::Avx512Bw | Self::Avx512Dq | Self::Avx512Vl | Self::Avx512Vnni => {
+                Some(512)
+            }
             Self::Sve | Self::Sve2 => None,
             Self::Fma
             | Self::Bmi1
@@ -83,23 +78,57 @@ pub fn detect_features() -> Vec<CpuFeature> {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if std::arch::is_x86_feature_detected!("sse2") { features.push(CpuFeature::Sse2); }
-        if std::arch::is_x86_feature_detected!("sse3") { features.push(CpuFeature::Sse3); }
-        if std::arch::is_x86_feature_detected!("ssse3") { features.push(CpuFeature::Ssse3); }
-        if std::arch::is_x86_feature_detected!("sse4.1") { features.push(CpuFeature::Sse41); }
-        if std::arch::is_x86_feature_detected!("sse4.2") { features.push(CpuFeature::Sse42); }
-        if std::arch::is_x86_feature_detected!("avx") { features.push(CpuFeature::Avx); }
-        if std::arch::is_x86_feature_detected!("avx2") { features.push(CpuFeature::Avx2); }
-        if std::arch::is_x86_feature_detected!("avx512f") { features.push(CpuFeature::Avx512F); }
-        if std::arch::is_x86_feature_detected!("avx512bw") { features.push(CpuFeature::Avx512Bw); }
-        if std::arch::is_x86_feature_detected!("avx512dq") { features.push(CpuFeature::Avx512Dq); }
-        if std::arch::is_x86_feature_detected!("avx512vl") { features.push(CpuFeature::Avx512Vl); }
-        if std::arch::is_x86_feature_detected!("avx512vnni") { features.push(CpuFeature::Avx512Vnni); }
-        if std::arch::is_x86_feature_detected!("fma") { features.push(CpuFeature::Fma); }
-        if std::arch::is_x86_feature_detected!("bmi1") { features.push(CpuFeature::Bmi1); }
-        if std::arch::is_x86_feature_detected!("bmi2") { features.push(CpuFeature::Bmi2); }
-        if std::arch::is_x86_feature_detected!("aes") { features.push(CpuFeature::Aes); }
-        if std::arch::is_x86_feature_detected!("sha") { features.push(CpuFeature::Sha); }
+        if std::arch::is_x86_feature_detected!("sse2") {
+            features.push(CpuFeature::Sse2);
+        }
+        if std::arch::is_x86_feature_detected!("sse3") {
+            features.push(CpuFeature::Sse3);
+        }
+        if std::arch::is_x86_feature_detected!("ssse3") {
+            features.push(CpuFeature::Ssse3);
+        }
+        if std::arch::is_x86_feature_detected!("sse4.1") {
+            features.push(CpuFeature::Sse41);
+        }
+        if std::arch::is_x86_feature_detected!("sse4.2") {
+            features.push(CpuFeature::Sse42);
+        }
+        if std::arch::is_x86_feature_detected!("avx") {
+            features.push(CpuFeature::Avx);
+        }
+        if std::arch::is_x86_feature_detected!("avx2") {
+            features.push(CpuFeature::Avx2);
+        }
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            features.push(CpuFeature::Avx512F);
+        }
+        if std::arch::is_x86_feature_detected!("avx512bw") {
+            features.push(CpuFeature::Avx512Bw);
+        }
+        if std::arch::is_x86_feature_detected!("avx512dq") {
+            features.push(CpuFeature::Avx512Dq);
+        }
+        if std::arch::is_x86_feature_detected!("avx512vl") {
+            features.push(CpuFeature::Avx512Vl);
+        }
+        if std::arch::is_x86_feature_detected!("avx512vnni") {
+            features.push(CpuFeature::Avx512Vnni);
+        }
+        if std::arch::is_x86_feature_detected!("fma") {
+            features.push(CpuFeature::Fma);
+        }
+        if std::arch::is_x86_feature_detected!("bmi1") {
+            features.push(CpuFeature::Bmi1);
+        }
+        if std::arch::is_x86_feature_detected!("bmi2") {
+            features.push(CpuFeature::Bmi2);
+        }
+        if std::arch::is_x86_feature_detected!("aes") {
+            features.push(CpuFeature::Aes);
+        }
+        if std::arch::is_x86_feature_detected!("sha") {
+            features.push(CpuFeature::Sha);
+        }
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -135,5 +164,8 @@ pub fn detect_features() -> Vec<CpuFeature> {
 }
 
 pub fn maximum_fixed_vector_bits(features: &[CpuFeature]) -> Option<u16> {
-    features.iter().filter_map(|feature| feature.vector_bits()).max()
+    features
+        .iter()
+        .filter_map(|feature| feature.vector_bits())
+        .max()
 }

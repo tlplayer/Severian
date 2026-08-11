@@ -25,8 +25,7 @@ struct TaskRecord {
 fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
-        Runtime::new(RuntimeConfig::default())
-            .expect("failed to initialize Severian runtime")
+        Runtime::new(RuntimeConfig::default()).expect("failed to initialize Severian runtime")
     })
 }
 
@@ -81,10 +80,7 @@ pub type BoolTaskEntry = extern "C" fn(*mut c_void) -> bool;
 pub type UnitTaskEntry = extern "C" fn(*mut c_void);
 
 #[no_mangle]
-pub extern "C" fn __sev_task_spawn_ptr(
-    entry: PtrTaskEntry,
-    context: *mut c_void,
-) -> *mut c_void {
+pub extern "C" fn __sev_task_spawn_ptr(entry: PtrTaskEntry, context: *mut c_void) -> *mut c_void {
     let context = id_from_handle(context);
     spawn_value("abi-ptr-task", move || {
         TaskValue::Pointer(id_from_handle(entry(handle_from_id(context))))
@@ -92,10 +88,7 @@ pub extern "C" fn __sev_task_spawn_ptr(
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_task_spawn_i64(
-    entry: I64TaskEntry,
-    context: *mut c_void,
-) -> *mut c_void {
+pub extern "C" fn __sev_task_spawn_i64(entry: I64TaskEntry, context: *mut c_void) -> *mut c_void {
     let context = id_from_handle(context);
     spawn_value("abi-i64-task", move || {
         TaskValue::I64(entry(handle_from_id(context)))
@@ -103,10 +96,7 @@ pub extern "C" fn __sev_task_spawn_i64(
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_task_spawn_f64(
-    entry: F64TaskEntry,
-    context: *mut c_void,
-) -> *mut c_void {
+pub extern "C" fn __sev_task_spawn_f64(entry: F64TaskEntry, context: *mut c_void) -> *mut c_void {
     let context = id_from_handle(context);
     spawn_value("abi-f64-task", move || {
         TaskValue::F64(entry(handle_from_id(context)))
@@ -114,10 +104,7 @@ pub extern "C" fn __sev_task_spawn_f64(
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_task_spawn_bool(
-    entry: BoolTaskEntry,
-    context: *mut c_void,
-) -> *mut c_void {
+pub extern "C" fn __sev_task_spawn_bool(entry: BoolTaskEntry, context: *mut c_void) -> *mut c_void {
     let context = id_from_handle(context);
     spawn_value("abi-bool-task", move || {
         TaskValue::Bool(entry(handle_from_id(context)))
@@ -125,10 +112,7 @@ pub extern "C" fn __sev_task_spawn_bool(
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_task_spawn_unit(
-    entry: UnitTaskEntry,
-    context: *mut c_void,
-) -> *mut c_void {
+pub extern "C" fn __sev_task_spawn_unit(entry: UnitTaskEntry, context: *mut c_void) -> *mut c_void {
     let context = id_from_handle(context);
     spawn_value("abi-unit-task", move || {
         entry(handle_from_id(context));
@@ -179,9 +163,7 @@ pub extern "C" fn __sev_task_await_ptr(handle: *mut c_void) -> *mut c_void {
 #[no_mangle]
 pub extern "C" fn __sev_task_cancel(handle: *mut c_void) -> bool {
     let id = id_from_handle(handle);
-    let guard = tasks()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let guard = tasks().lock().unwrap_or_else(|poison| poison.into_inner());
     let Some(record) = guard.get(&id) else {
         return false;
     };

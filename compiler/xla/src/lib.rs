@@ -12,20 +12,16 @@
 pub mod client;
 pub mod pipeline;
 pub mod pjrt;
+mod runtime;
 pub mod safetensors;
 pub mod stablehlo;
-mod runtime;
 mod tokenizer;
 
 pub use client::XlaClient;
 pub use pipeline::{CompileOptions, XlaPipeline};
-pub use pjrt::{
-    Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient, PjrtPlugin,
-};
+pub use pjrt::{Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient, PjrtPlugin};
+pub use safetensors::{SafeTensorDType, SafeTensorEntry, SafeTensorStore, SafeTensorValidation};
 pub use stablehlo::{StableHloFormat, StableHloModule};
-pub use safetensors::{
-    SafeTensorDType, SafeTensorEntry, SafeTensorStore, SafeTensorValidation,
-};
 
 use std::{fmt, io};
 

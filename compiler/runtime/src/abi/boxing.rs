@@ -52,10 +52,9 @@ pub(crate) fn value_equal(left: *mut c_void, right: *mut c_void) -> bool {
         (Some(BoxedValue::Bool(a)), Some(BoxedValue::Bool(b))) => a == b,
         (Some(BoxedValue::Pointer(a)), Some(BoxedValue::Pointer(b)))
         | (Some(BoxedValue::StringPointer(a)), Some(BoxedValue::StringPointer(b)))
-        | (
-            Some(BoxedValue::CollectionPointer(a)),
-            Some(BoxedValue::CollectionPointer(b)),
-        ) => a == b,
+        | (Some(BoxedValue::CollectionPointer(a)), Some(BoxedValue::CollectionPointer(b))) => {
+            a == b
+        }
         _ => left == right,
     }
 }
@@ -114,7 +113,13 @@ pub extern "C" fn __sev_unbox_f64(value: *mut c_void) -> f64 {
     match snapshot(value) {
         Some(BoxedValue::F64(value)) => value,
         Some(BoxedValue::I64(value)) => value as f64,
-        Some(BoxedValue::Bool(value)) => if value { 1.0 } else { 0.0 },
+        Some(BoxedValue::Bool(value)) => {
+            if value {
+                1.0
+            } else {
+                0.0
+            }
+        }
         _ => 0.0,
     }
 }

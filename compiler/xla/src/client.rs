@@ -1,8 +1,6 @@
 use crate::{
     pipeline::{CompileOptions, XlaPipeline},
-    pjrt::{
-        Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient,
-    },
+    pjrt::{Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient},
     stablehlo::StableHloModule,
     Result,
 };

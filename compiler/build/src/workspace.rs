@@ -31,10 +31,14 @@ impl std::fmt::Display for WorkspaceError {
 impl std::error::Error for WorkspaceError {}
 
 impl From<ManifestError> for WorkspaceError {
-    fn from(error: ManifestError) -> Self { Self::Manifest(error) }
+    fn from(error: ManifestError) -> Self {
+        Self::Manifest(error)
+    }
 }
 impl From<std::io::Error> for WorkspaceError {
-    fn from(error: std::io::Error) -> Self { Self::Io(error) }
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +59,13 @@ impl Workspace {
             .build
             .target_directory
             .clone()
-            .map(|path| if path.is_absolute() { path } else { root.join(path) })
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    root.join(path)
+                }
+            })
             .unwrap_or_else(|| root.join(DEFAULT_TARGET_DIRECTORY));
 
         let mut member_paths = BTreeSet::new();

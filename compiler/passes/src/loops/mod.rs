@@ -164,4 +164,3 @@ fn is_empty_literal(expression: &Expression) -> bool {
             if values.is_empty()
     ) || matches!(expression, Expression::Map(entries) if entries.is_empty())
 }
-

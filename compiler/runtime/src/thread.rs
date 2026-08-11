@@ -9,7 +9,10 @@ pub struct RuntimeThread {
 }
 
 impl RuntimeThread {
-    pub fn spawn(name: impl Into<String>, body: impl FnOnce() + Send + 'static) -> io::Result<Self> {
+    pub fn spawn(
+        name: impl Into<String>,
+        body: impl FnOnce() + Send + 'static,
+    ) -> io::Result<Self> {
         let name = name.into();
         let handle = thread::Builder::new().name(name.clone()).spawn(body)?;
         Ok(Self {

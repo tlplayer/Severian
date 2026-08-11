@@ -48,7 +48,9 @@ pub enum StableHloLoweringError {
 impl fmt::Display for StableHloLoweringError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownFunction(id) => write!(formatter, "unknown StableHLO entry function {id:?}"),
+            Self::UnknownFunction(id) => {
+                write!(formatter, "unknown StableHLO entry function {id:?}")
+            }
             Self::UnsupportedOperation(operation) => {
                 write!(formatter, "unsupported StableHLO operation `{operation}`")
             }
@@ -115,10 +117,7 @@ pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError
 /// Lowers one resolved Severian function as a single StableHLO/XLA region.
 /// Calls to other source functions are inlined by `FunctionId`; native tensor
 /// functions remain generic StableHLO intrinsics.
-pub fn lower_entry(
-    program: &Program,
-    entry: FunctionId,
-) -> Result<Module, StableHloLoweringError> {
+pub fn lower_entry(program: &Program, entry: FunctionId) -> Result<Module, StableHloLoweringError> {
     let context = LoweringContext::new(program);
     let function = context
         .functions
@@ -219,7 +218,8 @@ fn lower_straight_line(
                 if !matches!(op, severian_hir::AssignmentOp::Assign) {
                     return Err(StableHloLoweringError::UnsupportedFunction {
                         function: function.into(),
-                        reason: "compound tensor assignment must be normalized before StableHLO".into(),
+                        reason: "compound tensor assignment must be normalized before StableHLO"
+                            .into(),
                     });
                 }
                 let Expression::Variable(name) = target.kind() else {
@@ -275,12 +275,15 @@ fn lower_expression(
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
     match expression.kind() {
-        Expression::Variable(name) => values.get(name).cloned().ok_or_else(|| {
-            StableHloLoweringError::UnsupportedFunction {
-                function: function.into(),
-                reason: format!("unknown tensor SSA value `{name}`"),
-            }
-        }),
+        Expression::Variable(name) => {
+            values
+                .get(name)
+                .cloned()
+                .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+                    function: function.into(),
+                    reason: format!("unknown tensor SSA value `{name}`"),
+                })
+        }
         Expression::Call { target, args } => {
             let result_type = match expected_type.or_else(|| match expression.ty() {
                 Some(ValueType::Tensor(tensor)) if tensor.rank.is_some() => Some(tensor),
@@ -290,7 +293,10 @@ fn lower_expression(
                 other => {
                     return Err(StableHloLoweringError::UnsupportedFunction {
                         function: function.into(),
-                        reason: format!("tensor call `{}` has non-tensor type {other:?}", target.name),
+                        reason: format!(
+                            "tensor call `{}` has non-tensor type {other:?}",
+                            target.name
+                        ),
                     });
                 }
             };
@@ -433,18 +439,19 @@ fn lower_tensor_intrinsic(
             let ids = args[1]
                 .tensor_type()
                 .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
-            let table_rank = table.rank.ok_or_else(|| {
-                StableHloLoweringError::UnsupportedFunction {
-                    function: target.name.clone(),
-                    reason: "gather requires a ranked embedding table".into(),
-                }
-            })?;
-            let index_rank = ids.rank.ok_or_else(|| {
-                StableHloLoweringError::UnsupportedFunction {
-                    function: target.name.clone(),
-                    reason: "gather requires ranked indices".into(),
-                }
-            })?;
+            let table_rank =
+                table
+                    .rank
+                    .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+                        function: target.name.clone(),
+                        reason: "gather requires a ranked embedding table".into(),
+                    })?;
+            let index_rank =
+                ids.rank
+                    .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+                        function: target.name.clone(),
+                        reason: "gather requires ranked indices".into(),
+                    })?;
             if table_rank != 2 {
                 return Err(StableHloLoweringError::InvalidRank {
                     operation: op,
@@ -453,10 +460,14 @@ fn lower_tensor_intrinsic(
                 });
             }
             let TensorDimension::Static(vocabulary_size) = table.dimensions[0] else {
-                return Err(StableHloLoweringError::UnsupportedOperation(target.name.clone()));
+                return Err(StableHloLoweringError::UnsupportedOperation(
+                    target.name.clone(),
+                ));
             };
             let TensorDimension::Static(embedding_size) = table.dimensions[1] else {
-                return Err(StableHloLoweringError::UnsupportedOperation(target.name.clone()));
+                return Err(StableHloLoweringError::UnsupportedOperation(
+                    target.name.clone(),
+                ));
             };
             Ok(indexing::embedding_lookup(
                 emitter,
@@ -510,12 +521,32 @@ fn lower_tensor_intrinsic(
                 .into_iter()
                 .map(|start| emitter.scalar(&start.to_string(), TensorElementType::I64))
                 .collect::<Vec<_>>();
-            Ok(emitter.dynamic_update_slice(
-                &args[0],
-                &args[1],
-                &starts,
-                result_type,
-            ))
+            Ok(emitter.dynamic_update_slice(&args[0], &args[1], &starts, result_type))
+        }
+        "dynamicupdatesliceaxis" => {
+            require_arity(&op, args, 3)?;
+            let axis = integer_argument(source_args.get(3), &target.name)?;
+            let rank = args[0]
+                .tensor_type()
+                .and_then(|tensor| tensor.rank)
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            if axis >= u64::from(rank) {
+                return Err(StableHloLoweringError::UnsupportedFunction {
+                    function: target.name.clone(),
+                    reason: format!("axis {axis} is outside rank {rank}"),
+                });
+            }
+            let scalar_index = emitter.reshape(&args[2], scalar_tensor(TensorElementType::I64));
+            let starts = (0..u64::from(rank))
+                .map(|dimension| {
+                    if dimension == axis {
+                        scalar_index.clone()
+                    } else {
+                        emitter.scalar("0", TensorElementType::I64)
+                    }
+                })
+                .collect::<Vec<_>>();
+            Ok(emitter.dynamic_update_slice(&args[0], &args[1], &starts, result_type))
         }
         "dynamicslice" => {
             require_arity(&op, args, 1)?;
@@ -798,7 +829,6 @@ pub fn lower_tensor_call(
             ))
         }
 
-
         "rms_norm" | "rmsnorm" | "tensor_rms_norm" => {
             require_arity(&op, args, 2)?;
             let input_type = args[0]
@@ -867,12 +897,13 @@ fn reduced_suffix_axes(
             function: operation.into(),
             reason: "reduction input is missing ranked tensor metadata".into(),
         })?;
-    let result_rank = result_type.rank.ok_or_else(|| {
-        StableHloLoweringError::UnsupportedFunction {
-            function: operation.into(),
-            reason: "reduction result is missing ranked tensor metadata".into(),
-        }
-    })?;
+    let result_rank =
+        result_type
+            .rank
+            .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+                function: operation.into(),
+                reason: "reduction result is missing ranked tensor metadata".into(),
+            })?;
     if result_rank >= input_rank {
         return Err(StableHloLoweringError::UnsupportedFunction {
             function: operation.into(),
@@ -899,24 +930,25 @@ fn static_reduction_count(
         })?;
     let dimensions = shape.split('x').collect::<Vec<_>>();
     axes.iter().try_fold(1u64, |count, &axis| {
-        let dimension = dimensions
-            .get(axis as usize)
-            .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+        let dimension = dimensions.get(axis as usize).ok_or_else(|| {
+            StableHloLoweringError::UnsupportedFunction {
                 function: operation.into(),
                 reason: format!("axis {axis} is outside type {}", input.ty),
-            })?;
-        let dimension = dimension.parse::<u64>().map_err(|_| {
-            StableHloLoweringError::UnsupportedFunction {
-                function: operation.into(),
-                reason: "mean/norm requires static reduced dimensions".into(),
             }
         })?;
-        count.checked_mul(dimension).ok_or_else(|| {
-            StableHloLoweringError::UnsupportedFunction {
+        let dimension =
+            dimension
+                .parse::<u64>()
+                .map_err(|_| StableHloLoweringError::UnsupportedFunction {
+                    function: operation.into(),
+                    reason: "mean/norm requires static reduced dimensions".into(),
+                })?;
+        count
+            .checked_mul(dimension)
+            .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
                 function: operation.into(),
                 reason: "reduction element count overflow".into(),
-            }
-        })
+            })
     })
 }
 

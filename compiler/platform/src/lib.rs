@@ -11,9 +11,7 @@ pub mod target;
 
 pub use cpu::{CpuFeature, CpuTarget};
 pub use gpu::{GpuDevice, GpuTarget, GpuVendor};
-pub use target::{
-    Architecture, Backend, OperatingSystem, Target, TargetError, TargetKind,
-};
+pub use target::{Architecture, Backend, OperatingSystem, Target, TargetError, TargetKind};
 
 /// Existing platform runtime source surface.
 pub fn database_source() -> &'static str {

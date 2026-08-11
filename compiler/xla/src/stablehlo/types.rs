@@ -128,9 +128,7 @@ impl StableHloModule {
 
     pub fn validate_basic(&self) -> Result<()> {
         if self.bytes.is_empty() {
-            return Err(XlaError::InvalidStableHlo(
-                "module contains no data".into(),
-            ));
+            return Err(XlaError::InvalidStableHlo("module contains no data".into()));
         }
 
         if self.format == StableHloFormat::Text {

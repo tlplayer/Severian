@@ -7,7 +7,7 @@ from transformers import AutoTokenizer
 ROOT = Path(__file__).parent
 MODEL = ROOT / "models" / "Qwen2.5-3B-Instruct"
 OUTPUT = ROOT / "inputs.json"
-LENGTHS = (128, 512, 2048)
+LENGTHS = (128, 256, 512, 2048)
 
 
 def exact_length(tokenizer, target: int) -> tuple[list[int], str]:
@@ -30,7 +30,7 @@ def main() -> None:
         records[str(length)] = {
             "input_ids": input_ids,
             "prompt_text": prompt,
-            "output_tokens": 128,
+            "output_tokens": 32 if length == 256 else 128,
         }
     OUTPUT.write_text(json.dumps(records, separators=(",", ":")) + "\n")
 

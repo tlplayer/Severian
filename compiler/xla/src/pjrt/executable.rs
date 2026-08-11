@@ -1,4 +1,8 @@
-use super::{buffer::Buffer, compile::{RawClient, RawLoadedExecutable}, device::Device};
+use super::{
+    buffer::Buffer,
+    compile::{RawClient, RawLoadedExecutable},
+    device::Device,
+};
 use crate::Result;
 use std::sync::Arc;
 

@@ -203,8 +203,7 @@ fn lower_hir(program: &Program) -> Module {
         .filter(|function| function.native_symbol.is_some())
     {
         let symbol = function.native_symbol.as_ref().unwrap();
-        if is_predeclared_native_symbol(symbol)
-            || !declared_native_symbols.insert(symbol.as_str())
+        if is_predeclared_native_symbol(symbol) || !declared_native_symbols.insert(symbol.as_str())
         {
             continue;
         }
@@ -228,7 +227,12 @@ fn lower_hir(program: &Program) -> Module {
                 .iter()
                 .any(|decorator| decorator.package == "tensor")
     }) {
-        write!(output, "  llvm.func @{}(", source_function_symbol(&function.name)).unwrap();
+        write!(
+            output,
+            "  llvm.func @{}(",
+            source_function_symbol(&function.name)
+        )
+        .unwrap();
         for (index, parameter) in function.params.iter().enumerate() {
             if index > 0 {
                 output.push_str(", ");
@@ -644,7 +648,11 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {succeeded} = llvm.call @__sev_variant_is({result}, {ok_tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
                     let success_block = self.fresh_block();
                     let failure_block = self.fresh_block();
-                    writeln!(self.output, "    llvm.cond_br {succeeded}, ^bb{success_block}, ^bb{failure_block}").unwrap();
+                    writeln!(
+                        self.output,
+                        "    llvm.cond_br {succeeded}, ^bb{success_block}, ^bb{failure_block}"
+                    )
+                    .unwrap();
                     writeln!(self.output, "  ^bb{failure_block}:").unwrap();
                     if self.declared_return == ValueType::Result {
                         writeln!(self.output, "    llvm.return {result} : !llvm.ptr").unwrap();
@@ -655,7 +663,8 @@ impl LowerContext<'_> {
                     writeln!(self.output, "  ^bb{success_block}:").unwrap();
                     let payload = self.fresh_value();
                     writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
-                    self.variables.insert(name.clone(), (payload, ValueType::Any));
+                    self.variables
+                        .insert(name.clone(), (payload, ValueType::Any));
                     self.terminated = false;
                 }
                 Instruction::Assign { target, op, value } => {
@@ -779,7 +788,11 @@ impl LowerContext<'_> {
                             .unwrap();
                         }
                         ValueType::Any => {
-                            writeln!(self.output, "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()").unwrap();
+                            writeln!(
+                                self.output,
+                                "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()"
+                            )
+                            .unwrap();
                         }
                         ValueType::List | ValueType::Tuple | ValueType::Set => {
                             writeln!(self.output, "    llvm.call @__sev_print_collection({value}) : (!llvm.ptr) -> ()").unwrap();
@@ -1987,9 +2000,10 @@ impl LowerContext<'_> {
                     })
                     .map(|candidate| candidate.name.clone())
                     .collect::<Vec<_>>();
-                let class = self.object_classes.get(&object).cloned().or_else(|| {
-                    (inferred_classes.len() == 1).then(|| inferred_classes[0].clone())
-                });
+                let class =
+                    self.object_classes.get(&object).cloned().or_else(|| {
+                        (inferred_classes.len() == 1).then(|| inferred_classes[0].clone())
+                    });
                 let Some(class) = class else {
                     if method == "draw" {
                         writeln!(
@@ -2697,7 +2711,8 @@ impl LowerContext<'_> {
                     .unwrap();
                     return (result, ValueType::Bool);
                 }
-                if target.native_symbol.is_none() && function.ends_with(".zero") && args.is_empty() {
+                if target.native_symbol.is_none() && function.ends_with(".zero") && args.is_empty()
+                {
                     let zero = self.fresh_value();
                     writeln!(
                         self.output,
@@ -2912,11 +2927,7 @@ impl LowerContext<'_> {
             writeln!(self.output, "  ^bb{right_block}:").unwrap();
             let right = self.lower_expression(operand);
             let (right, _) = self.unbox_value(right, ValueType::Bool);
-            writeln!(
-                self.output,
-                "    llvm.br ^bb{continue_block}({right} : i1)"
-            )
-            .unwrap();
+            writeln!(self.output, "    llvm.br ^bb{continue_block}({right} : i1)").unwrap();
             let result = self.fresh_value();
             writeln!(self.output, "  ^bb{continue_block}({result}: i1):").unwrap();
             value = (result, ValueType::Bool);
@@ -4223,7 +4234,11 @@ impl LowerContext<'_> {
                     .unwrap();
                     map_collection = true;
                 } else if iterable_type == ValueType::String {
-                    writeln!(self.output, "    {end} = llvm.call @__sev_string_length({value}) : (!llvm.ptr) -> i64").unwrap();
+                    writeln!(
+                        self.output,
+                        "    {end} = llvm.call @__sev_string_length({value}) : (!llvm.ptr) -> i64"
+                    )
+                    .unwrap();
                     string_collection = true;
                 } else {
                     writeln!(self.output, "    {end} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
@@ -6052,8 +6067,9 @@ int64_t __sev_host_page_size(void) {
             "extern int64_t __sev_xla_argmax_bf16(void *);\n\n",
         ));
         for function in tensor_regions {
-            let module = stablehlo::lower_entry(program, function.id)
-                .unwrap_or_else(|error| panic!("failed to lower XLA region `{}`: {error}", function.name));
+            let module = stablehlo::lower_entry(program, function.id).unwrap_or_else(|error| {
+                panic!("failed to lower XLA region `{}`: {error}", function.name)
+            });
             write!(source, "void *{}(", source_function_symbol(&function.name)).unwrap();
             for index in 0..function.params.len() {
                 if index > 0 {
@@ -6173,10 +6189,7 @@ fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignat
 }
 
 fn is_predeclared_native_symbol(symbol: &str) -> bool {
-    matches!(
-        symbol,
-        "__sev_regex_matches"
-    )
+    matches!(symbol, "__sev_regex_matches")
 }
 
 fn c_type(ty: ValueType) -> &'static str {

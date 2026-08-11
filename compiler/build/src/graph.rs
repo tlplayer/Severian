@@ -10,11 +10,17 @@ pub enum GraphError {
 impl std::fmt::Display for GraphError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingNode(id) => write!(formatter, "build graph references missing node {}", id.0),
+            Self::MissingNode(id) => {
+                write!(formatter, "build graph references missing node {}", id.0)
+            }
             Self::Cycle(nodes) => write!(
                 formatter,
                 "build graph contains a cycle involving {}",
-                nodes.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(", ")
+                nodes
+                    .iter()
+                    .map(|id| id.0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         }
     }
@@ -110,7 +116,10 @@ impl BuildGraph {
         Ok(order)
     }
 
-    pub fn transitive_dependents(&self, roots: &[BuildNodeId]) -> Result<Vec<BuildNodeId>, GraphError> {
+    pub fn transitive_dependents(
+        &self,
+        roots: &[BuildNodeId],
+    ) -> Result<Vec<BuildNodeId>, GraphError> {
         let mut reverse = HashMap::<BuildNodeId, Vec<BuildNodeId>>::new();
         for node in &self.nodes {
             for dependency in &node.dependencies {

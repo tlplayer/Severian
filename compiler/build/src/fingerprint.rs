@@ -1,11 +1,6 @@
 use crate::node::{BuildNode, BuildStage};
 use sha2::{Digest, Sha256};
-use std::{
-    fmt,
-    fs,
-    io,
-    path::Path,
-};
+use std::{fmt, fs, io, path::Path};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fingerprint(pub [u8; 32]);

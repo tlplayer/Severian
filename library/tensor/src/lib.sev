@@ -149,6 +149,7 @@ native("__sev_tensor_f32_broadcast") def broadcastF32(value: Tensor[f32], shape:
 native("__sev_tensor_bf16_gather") def gatherBf16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
 native("__sev_tensor_bf16_dynamic_slice") def dynamicSliceBf16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
 native("__sev_tensor_bf16_dynamic_update_slice") def dynamicUpdateSliceBf16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
+native("__sev_tensor_bf16_dynamic_update_slice_axis") def dynamicUpdateSliceAxisBf16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
 native("__sev_tensor_f32_scale") def scaleF32(value: Tensor[f32], scale: float) -> Tensor[f32]
 native("__sev_tensor_f32_cosine") def cosineF32(value: Tensor[f32]) -> Tensor[f32]
 native("__sev_tensor_f32_sine") def sineF32(value: Tensor[f32]) -> Tensor[f32]

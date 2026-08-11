@@ -1,5 +1,5 @@
-use super::host_buffer::RawBuffer;
 use super::compile::RawClient;
+use super::host_buffer::RawBuffer;
 use crate::{Result, XlaError};
 use std::sync::Arc;
 
@@ -102,14 +102,8 @@ impl HostBuffer {
         Self::new(shape, bytes)
     }
 
-    pub fn from_bf16_bytes(
-        dimensions: impl Into<Vec<i64>>,
-        bytes: &[u8],
-    ) -> Result<Self> {
-        Self::new(
-            Shape::new(ElementType::BF16, dimensions),
-            bytes.to_vec(),
-        )
+    pub fn from_bf16_bytes(dimensions: impl Into<Vec<i64>>, bytes: &[u8]) -> Result<Self> {
+        Self::new(Shape::new(ElementType::BF16, dimensions), bytes.to_vec())
     }
 }
 
@@ -120,18 +114,27 @@ pub struct Buffer {
 
 impl Buffer {
     pub(crate) fn from_raw(raw: RawBuffer, client: Arc<RawClient>) -> Self {
-        Self { raw, _client: client }
+        Self {
+            raw,
+            _client: client,
+        }
     }
 
-    pub fn shape(&self) -> &Shape { self.raw.shape() }
+    pub fn shape(&self) -> &Shape {
+        self.raw.shape()
+    }
 
-    pub fn is_on_cpu(&self) -> Result<bool> { self.raw.is_on_cpu() }
+    pub fn is_on_cpu(&self) -> Result<bool> {
+        self.raw.is_on_cpu()
+    }
 
     pub fn is_on_device(&self, device: &super::device::Device) -> Result<bool> {
         Ok(self.raw.device()? == device.raw().raw())
     }
 
-    pub fn to_host_bytes(&self) -> Result<Vec<u8>> { self.raw.to_host() }
+    pub fn to_host_bytes(&self) -> Result<Vec<u8>> {
+        self.raw.to_host()
+    }
 
     pub fn to_f32(&self) -> Result<Vec<f32>> {
         if self.shape().element_type != ElementType::F32 {
@@ -144,5 +147,7 @@ impl Buffer {
             .collect())
     }
 
-    pub(crate) fn raw(&self) -> &RawBuffer { &self.raw }
+    pub(crate) fn raw(&self) -> &RawBuffer {
+        &self.raw
+    }
 }

@@ -69,9 +69,11 @@ pub fn render(
                 file.location(source.end_byte),
             ) {
                 output.push('\n');
-                let first = start.line.saturating_sub(options.context_lines as u32).max(1);
-                let last = (end.line + options.context_lines as u32)
-                    .min(file.line_count() as u32);
+                let first = start
+                    .line
+                    .saturating_sub(options.context_lines as u32)
+                    .max(1);
+                let last = (end.line + options.context_lines as u32).min(file.line_count() as u32);
 
                 for line in first..=last {
                     if let Some(text) = file.line(line) {
@@ -100,11 +102,7 @@ pub fn render(
     }
 
     for related in &diagnostic.related {
-        output.push_str(&format!(
-            "\n note[{}]: {}",
-            related.code.0,
-            related.message
-        ));
+        output.push_str(&format!("\n note[{}]: {}", related.code.0, related.message));
     }
 
     output.trim_end().to_owned()

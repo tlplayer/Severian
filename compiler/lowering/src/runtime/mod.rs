@@ -20,6 +20,5 @@ pub use sync::{
     emit_semaphore_release,
 };
 pub use tasks::{
-    emit_task_spawn, placement_attributes, task_spawn_declaration, TaskSpawnLowering,
-    TaskSpawnSpec,
+    emit_task_spawn, placement_attributes, task_spawn_declaration, TaskSpawnLowering, TaskSpawnSpec,
 };

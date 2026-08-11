@@ -49,10 +49,7 @@ pub unsafe fn status_from_error(
     Some(PjrtStatus { message })
 }
 
-pub unsafe fn check(
-    api: &api::PJRT_Api,
-    error: *mut api::PJRT_Error,
-) -> crate::Result<()> {
+pub unsafe fn check(api: &api::PJRT_Api, error: *mut api::PJRT_Error) -> crate::Result<()> {
     match status_from_error(api, error) {
         None => Ok(()),
         Some(status) => Err(status.into_xla_error()),

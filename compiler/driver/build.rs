@@ -25,5 +25,8 @@ fn main() {
     fs::copy(&runtime, out.join("libseverian_xla.a"))
         .expect("copying the XLA runtime into the sev binary assets must succeed");
     println!("cargo:rerun-if-changed={}", xla_manifest.display());
-    println!("cargo:rerun-if-changed={}", manifest.join("../xla/src").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest.join("../xla/src").display()
+    );
 }

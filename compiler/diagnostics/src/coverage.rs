@@ -41,12 +41,7 @@ pub fn check_thresholds(
     bag
 }
 
-fn check(
-    bag: &mut DiagnosticBag,
-    category: &str,
-    actual: f64,
-    required: Option<f64>,
-) {
+fn check(bag: &mut DiagnosticBag, category: &str, actual: f64, required: Option<f64>) {
     let Some(required) = required else {
         return;
     };

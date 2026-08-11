@@ -18,8 +18,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         validation.payload_bytes,
         validation.bf16_payload_bytes,
     );
-    println!("embedding={:?} {:?}", embedding.entry().dtype, embedding.entry().shape);
-    println!("layer0_q={:?} {:?}", first_query.entry().dtype, first_query.entry().shape);
-    println!("layer35_q={:?} {:?}", last_query.entry().dtype, last_query.entry().shape);
+    println!(
+        "embedding={:?} {:?}",
+        embedding.entry().dtype,
+        embedding.entry().shape
+    );
+    println!(
+        "layer0_q={:?} {:?}",
+        first_query.entry().dtype,
+        first_query.entry().shape
+    );
+    println!(
+        "layer35_q={:?} {:?}",
+        last_query.entry().dtype,
+        last_query.entry().shape
+    );
     Ok(())
 }

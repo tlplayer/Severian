@@ -96,27 +96,30 @@ impl SafeTensorStore {
     pub fn open(model_directory: impl AsRef<Path>) -> Result<Self> {
         let model_directory = model_directory.as_ref().to_path_buf();
         let index_path = model_directory.join("model.safetensors.index.json");
-        let index: Value = serde_json::from_slice(&std::fs::read(&index_path)?)
-            .map_err(|error| XlaError::Pjrt(format!(
-                "invalid Safetensors index {}: {error}",
-                index_path.display()
-            )))?;
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(&index_path)?).map_err(|error| {
+                XlaError::Pjrt(format!(
+                    "invalid Safetensors index {}: {error}",
+                    index_path.display()
+                ))
+            })?;
         let raw_map = index
             .get("weight_map")
             .and_then(Value::as_object)
-            .ok_or_else(|| XlaError::Pjrt(
-                "Safetensors index is missing object `weight_map`".into(),
-            ))?;
+            .ok_or_else(|| {
+                XlaError::Pjrt("Safetensors index is missing object `weight_map`".into())
+            })?;
         let mut weight_map = BTreeMap::new();
         for (name, shard) in raw_map {
-            let shard = shard.as_str().ok_or_else(|| XlaError::Pjrt(format!(
-                "Safetensors shard for `{name}` is not a string"
-            )))?;
+            let shard = shard.as_str().ok_or_else(|| {
+                XlaError::Pjrt(format!("Safetensors shard for `{name}` is not a string"))
+            })?;
             let shard = PathBuf::from(shard);
-            if shard.is_absolute() || shard.components().any(|part| matches!(
-                part,
-                std::path::Component::ParentDir
-            )) {
+            if shard.is_absolute()
+                || shard
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
                 return Err(XlaError::Pjrt(format!(
                     "unsafe Safetensors shard path `{}`",
                     shard.display()
@@ -138,13 +141,17 @@ impl SafeTensorStore {
 
     pub fn get(&self, name: &str) -> Result<MappedTensor> {
         let shard = self.weight_map.get(name).ok_or_else(|| {
-            XlaError::Pjrt(format!("tensor `{name}` is absent from the checkpoint index"))
+            XlaError::Pjrt(format!(
+                "tensor `{name}` is absent from the checkpoint index"
+            ))
         })?;
         let entries = self.shard_entries(shard)?;
-        let entry = entries.get(name).cloned().ok_or_else(|| XlaError::Pjrt(format!(
-            "tensor `{name}` is indexed in {} but absent from its header",
-            shard.display()
-        )))?;
+        let entry = entries.get(name).cloned().ok_or_else(|| {
+            XlaError::Pjrt(format!(
+                "tensor `{name}` is indexed in {} but absent from its header",
+                shard.display()
+            ))
+        })?;
         let mapping = self.shard_mapping(shard)?;
         Ok(MappedTensor { entry, mapping })
     }
@@ -159,14 +166,20 @@ impl SafeTensorStore {
             let tensor = self.get(name)?;
             let bytes = u64::try_from(tensor.bytes().len())
                 .map_err(|_| XlaError::Pjrt("tensor payload byte count overflow".into()))?;
-            payload_bytes = payload_bytes.checked_add(bytes)
+            payload_bytes = payload_bytes
+                .checked_add(bytes)
                 .ok_or_else(|| XlaError::Pjrt("checkpoint payload byte count overflow".into()))?;
             if tensor.entry.dtype == SafeTensorDType::BF16 {
-                bf16_payload_bytes = bf16_payload_bytes.checked_add(bytes)
+                bf16_payload_bytes = bf16_payload_bytes
+                    .checked_add(bytes)
                     .ok_or_else(|| XlaError::Pjrt("BF16 payload byte count overflow".into()))?;
             }
         }
-        let shards = self.weight_map.values().collect::<std::collections::BTreeSet<_>>().len();
+        let shards = self
+            .weight_map
+            .values()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         Ok(SafeTensorValidation {
             tensors: names.len(),
             shards,
@@ -200,9 +213,9 @@ impl SafeTensorStore {
         let file = File::open(&path)?;
         // SAFETY: the mapping is read-only, owns an independent file-backed VM
         // region, and is retained by Arc for every returned tensor view.
-        let mapping = Arc::new(unsafe { MmapOptions::new().map(&file) }.map_err(|error| {
-            XlaError::Io(error)
-        })?);
+        let mapping = Arc::new(
+            unsafe { MmapOptions::new().map(&file) }.map_err(|error| XlaError::Io(error))?,
+        );
         self.mappings
             .lock()
             .unwrap()
@@ -224,7 +237,8 @@ impl SafeTensorStore {
         let header_size = u64::from_le_bytes(mapping[..8].try_into().unwrap());
         let header_size = usize::try_from(header_size)
             .map_err(|_| XlaError::Pjrt("Safetensors header is too large".into()))?;
-        let data_start = 8usize.checked_add(header_size)
+        let data_start = 8usize
+            .checked_add(header_size)
             .ok_or_else(|| XlaError::Pjrt("Safetensors header size overflow".into()))?;
         if data_start > mapping.len() {
             return Err(XlaError::Pjrt(format!(
@@ -233,60 +247,93 @@ impl SafeTensorStore {
             )));
         }
         let header: Value = serde_json::from_slice(&mapping[8..data_start]).map_err(|error| {
-            XlaError::Pjrt(format!("invalid Safetensors header {}: {error}", shard.display()))
+            XlaError::Pjrt(format!(
+                "invalid Safetensors header {}: {error}",
+                shard.display()
+            ))
         })?;
-        let object = header.as_object().ok_or_else(|| {
-            XlaError::Pjrt("Safetensors header root must be an object".into())
-        })?;
+        let object = header
+            .as_object()
+            .ok_or_else(|| XlaError::Pjrt("Safetensors header root must be an object".into()))?;
         let mut entries = BTreeMap::new();
         for (name, metadata) in object {
             if name == "__metadata__" {
                 continue;
             }
-            let metadata = metadata.as_object().ok_or_else(|| XlaError::Pjrt(format!(
-                "metadata for tensor `{name}` is not an object"
-            )))?;
+            let metadata = metadata.as_object().ok_or_else(|| {
+                XlaError::Pjrt(format!("metadata for tensor `{name}` is not an object"))
+            })?;
             let dtype = SafeTensorDType::parse(
-                metadata.get("dtype").and_then(Value::as_str).ok_or_else(|| {
-                    XlaError::Pjrt(format!("tensor `{name}` has no dtype"))
-                })?,
+                metadata
+                    .get("dtype")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has no dtype")))?,
             )?;
-            let shape = metadata.get("shape").and_then(Value::as_array).ok_or_else(|| {
-                XlaError::Pjrt(format!("tensor `{name}` has no shape"))
-            })?.iter().map(|dimension| {
-                dimension.as_i64().filter(|value| *value >= 0).ok_or_else(|| {
-                    XlaError::Pjrt(format!("tensor `{name}` has an invalid dimension"))
+            let shape = metadata
+                .get("shape")
+                .and_then(Value::as_array)
+                .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has no shape")))?
+                .iter()
+                .map(|dimension| {
+                    dimension
+                        .as_i64()
+                        .filter(|value| *value >= 0)
+                        .ok_or_else(|| {
+                            XlaError::Pjrt(format!("tensor `{name}` has an invalid dimension"))
+                        })
                 })
-            }).collect::<Result<Vec<_>>>()?;
-            let offsets = metadata.get("data_offsets").and_then(Value::as_array)
+                .collect::<Result<Vec<_>>>()?;
+            let offsets = metadata
+                .get("data_offsets")
+                .and_then(Value::as_array)
                 .filter(|offsets| offsets.len() == 2)
                 .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has invalid offsets")))?;
-            let relative_start = offsets[0].as_u64().and_then(|value| usize::try_from(value).ok())
-                .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has invalid start offset")))?;
-            let relative_end = offsets[1].as_u64().and_then(|value| usize::try_from(value).ok())
+            let relative_start = offsets[0]
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| {
+                    XlaError::Pjrt(format!("tensor `{name}` has invalid start offset"))
+                })?;
+            let relative_end = offsets[1]
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
                 .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has invalid end offset")))?;
-            let start = data_start.checked_add(relative_start)
+            let start = data_start
+                .checked_add(relative_start)
                 .ok_or_else(|| XlaError::Pjrt("tensor offset overflow".into()))?;
-            let end = data_start.checked_add(relative_end)
+            let end = data_start
+                .checked_add(relative_end)
                 .ok_or_else(|| XlaError::Pjrt("tensor offset overflow".into()))?;
             let elements = shape.iter().try_fold(1usize, |count, &dimension| {
-                count.checked_mul(dimension as usize)
+                count
+                    .checked_mul(dimension as usize)
                     .ok_or_else(|| XlaError::Pjrt("tensor element count overflow".into()))
             })?;
-            let expected = elements.checked_mul(dtype.byte_width())
+            let expected = elements
+                .checked_mul(dtype.byte_width())
                 .ok_or_else(|| XlaError::Pjrt("tensor byte size overflow".into()))?;
             if start > end || end > mapping.len() || end - start != expected {
                 return Err(XlaError::Pjrt(format!(
                     "tensor `{name}` byte range does not match its dtype and shape"
                 )));
             }
-            entries.insert(name.clone(), SafeTensorEntry {
-                name: name.clone(), dtype, shape, start, end,
-                shard: shard.to_path_buf(),
-            });
+            entries.insert(
+                name.clone(),
+                SafeTensorEntry {
+                    name: name.clone(),
+                    dtype,
+                    shape,
+                    start,
+                    end,
+                    shard: shard.to_path_buf(),
+                },
+            );
         }
         let entries = Arc::new(entries);
-        self.entries.lock().unwrap().insert(shard.to_path_buf(), Arc::clone(&entries));
+        self.entries
+            .lock()
+            .unwrap()
+            .insert(shard.to_path_buf(), Arc::clone(&entries));
         Ok(entries)
     }
 }
@@ -311,7 +358,9 @@ mod tests {
         .unwrap();
         let header = r#"{"model.weight":{"dtype":"BF16","shape":[2,2],"data_offsets":[0,8]}}"#;
         let mut shard = File::create(directory.join("model-00001-of-00001.safetensors")).unwrap();
-        shard.write_all(&(header.len() as u64).to_le_bytes()).unwrap();
+        shard
+            .write_all(&(header.len() as u64).to_le_bytes())
+            .unwrap();
         shard.write_all(header.as_bytes()).unwrap();
         let payload = [0x80, 0x3f, 0x00, 0x40, 0x40, 0x40, 0x80, 0x40];
         shard.write_all(&payload).unwrap();

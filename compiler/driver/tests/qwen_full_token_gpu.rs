@@ -1,8 +1,8 @@
 use severian_driver::compile_path;
 use severian_lowering::stablehlo::lower_entry;
 use severian_xla::{
-    Buffer, CompileOptions, HostBuffer, PjrtClient, PjrtPlugin, SafeTensorStore,
-    StableHloModule, XlaClient,
+    Buffer, CompileOptions, HostBuffer, PjrtClient, PjrtPlugin, SafeTensorStore, StableHloModule,
+    XlaClient,
 };
 use std::path::{Path, PathBuf};
 
@@ -36,7 +36,11 @@ fn rope_values(cosine: bool) -> Vec<f32> {
         let frequencies = (0..64)
             .map(|index| {
                 let angle = position as f32 * 1_000_000.0_f32.powf(-(index as f32) / 64.0);
-                if cosine { angle.cos() } else { angle.sin() }
+                if cosine {
+                    angle.cos()
+                } else {
+                    angle.sin()
+                }
             })
             .collect::<Vec<_>>();
         values.extend_from_slice(&frequencies);
@@ -49,9 +53,8 @@ fn rope_values(cosine: bool) -> Vec<f32> {
 fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let compilation = compile_path(
-        &workspace.join("benchmarks/inference/severian/qwen_kernels.sev"),
-    )?;
+    let compilation =
+        compile_path(&workspace.join("benchmarks/inference/severian/qwen_kernels.sev"))?;
     let entry = |name: &str| {
         compilation
             .optimized_hir
@@ -73,16 +76,17 @@ fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
         "stablehlo.transpose",
         "stablehlo.broadcast_in_dim",
     ] {
-        assert!(layer_hlo.as_str().contains(operation), "missing {operation}");
+        assert!(
+            layer_hlo.as_str().contains(operation),
+            "missing {operation}"
+        );
     }
     assert!(!layer_hlo.as_str().contains("custom_call"));
     assert!(embedding_hlo.as_str().contains("stablehlo.gather"));
 
     let model = std::env::var_os("SEVERIAN_QWEN_MODEL")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            workspace.join("benchmarks/inference/models/Qwen2.5-3B-Instruct")
-        });
+        .unwrap_or_else(|| workspace.join("benchmarks/inference/models/Qwen2.5-3B-Instruct"));
     let store = SafeTensorStore::open(model)?;
     let plugin = PjrtPlugin::load_rocm()?;
     let client = PjrtClient::new(plugin)?;
@@ -94,17 +98,10 @@ fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
         &StableHloModule::from_text(embedding_hlo.as_str()),
         &options,
     )?;
-    let layer_exe = xla.compile(
-        &StableHloModule::from_text(layer_hlo.as_str()),
-        &options,
-    )?;
-    let final_exe = xla.compile(
-        &StableHloModule::from_text(logits_hlo.as_str()),
-        &options,
-    )?;
+    let layer_exe = xla.compile(&StableHloModule::from_text(layer_hlo.as_str()), &options)?;
+    let final_exe = xla.compile(&StableHloModule::from_text(logits_hlo.as_str()), &options)?;
 
-    let embedding =
-        store.upload_bf16(xla.pjrt(), "model.embed_tokens.weight", Some(&device))?;
+    let embedding = store.upload_bf16(xla.pjrt(), "model.embed_tokens.weight", Some(&device))?;
     let final_norm = store.upload_bf16(xla.pjrt(), "model.norm.weight", Some(&device))?;
     let mut padded_ids = PROMPT_IDS.to_vec();
     padded_ids.resize(PREFILL_CAPACITY, 0);
@@ -133,12 +130,7 @@ fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
         .collect::<Vec<_>>();
     let mask = xla.upload_to(
         HostBuffer::from_f32(
-            [
-                1,
-                1,
-                PREFILL_CAPACITY as i64,
-                PREFILL_CAPACITY as i64,
-            ],
+            [1, 1, PREFILL_CAPACITY as i64, PREFILL_CAPACITY as i64],
             &mask_values,
         )?,
         &device,
@@ -185,9 +177,7 @@ fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
     }
     println!("all 36 layers GPU resident");
 
-    let mut hidden = embed_exe
-        .execute(&[&embedding, &ids], &device)?
-        .remove(0);
+    let mut hidden = embed_exe.execute(&[&embedding, &ids], &device)?.remove(0);
     for (index, layer) in layers.iter().enumerate() {
         hidden = layer_exe
             .execute(

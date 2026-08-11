@@ -1,0 +1,312 @@
+import file
+import json
+import qwen2
+import qwen2_config
+import qwen_decode_kernels
+import qwen_prefill_kernels
+import safetensor_weights
+
+native("__sev_monotonic_ns") def monotonicNs() -> int
+
+class RequestState:
+    id: int
+    keyCaches: list[Tensor[bf16]]
+    valueCaches: list[Tensor[bf16]]
+    token: int
+    outputTokens: list[int]
+    tokenTimesNs: list[int]
+    startedNs: int
+    firstTokenNs: int
+    completedNs: int
+
+def prefillRequest(
+    requestId: int,
+    startedNs: int,
+    weights: qwen2.Qwen2Weights,
+    inputIds: Tensor[i64],
+    cosine: Tensor[f32],
+    sine: Tensor[f32],
+    mask: Tensor[f32],
+    cacheIndex: Tensor[i64],
+) -> RequestState:
+    keyCaches := []
+    valueCaches := []
+    hidden := qwen_prefill_kernels.embeddingKernel(weights.embedding, inputIds)
+    for layerIndex in range(0, 36):
+        layer = weights.layers[layerIndex]
+        emptyKey = qwen_prefill_kernels.emptyCache()
+        keyCache = qwen_prefill_kernels.prefillKeyCacheKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.key,
+            layer.attention.keyBias,
+            cosine,
+            sine,
+            emptyKey,
+            cacheIndex,
+        )
+        qwen_prefill_kernels.releaseBf16(emptyKey)
+        emptyValue = qwen_prefill_kernels.emptyCache()
+        valueCache = qwen_prefill_kernels.prefillValueCacheKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.value,
+            layer.attention.valueBias,
+            emptyValue,
+            cacheIndex,
+        )
+        qwen_prefill_kernels.releaseBf16(emptyValue)
+        nextHidden = qwen_prefill_kernels.qwen2LayerKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.query,
+            layer.attention.queryBias,
+            layer.attention.key,
+            layer.attention.keyBias,
+            layer.attention.value,
+            layer.attention.valueBias,
+            layer.attention.output,
+            layer.postAttentionNorm,
+            layer.mlp.gate,
+            layer.mlp.up,
+            layer.mlp.down,
+            cosine,
+            sine,
+            mask,
+        )
+        qwen_prefill_kernels.releaseBf16(hidden)
+        hidden = nextHidden
+        keyCaches.append(keyCache)
+        valueCaches.append(valueCache)
+    logits = qwen_prefill_kernels.lastLogitsKernel(hidden, weights.finalNorm, weights.embedding)
+    token = qwen_prefill_kernels.argmaxBf16(logits)
+    firstTokenNs = monotonicNs()
+    qwen_prefill_kernels.releaseBf16(logits)
+    qwen_prefill_kernels.releaseBf16(hidden)
+    return RequestState(
+        requestId,
+        keyCaches,
+        valueCaches,
+        token,
+        [token],
+        [firstTokenNs],
+        startedNs,
+        firstTokenNs,
+        0,
+    )
+
+def decodeRequest(
+    state: RequestState,
+    weights: qwen2.Qwen2Weights,
+    cosine: Tensor[f32],
+    sine: Tensor[f32],
+    mask: Tensor[f32],
+    cacheIndex: Tensor[i64],
+) -> RequestState:
+    inputIds = qwen_decode_kernels.inputToken(state.token)
+    hidden := qwen_decode_kernels.embeddingKernel(weights.embedding, inputIds)
+    qwen_decode_kernels.releaseI64(inputIds)
+    for layerIndex in range(0, 36):
+        layer = weights.layers[layerIndex]
+        oldKey = state.keyCaches[layerIndex]
+        keyCache = qwen_decode_kernels.updateKeyCacheKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.key,
+            layer.attention.keyBias,
+            cosine,
+            sine,
+            oldKey,
+            cacheIndex,
+        )
+        qwen_decode_kernels.releaseBf16(oldKey)
+        state.keyCaches[layerIndex] = keyCache
+        oldValue = state.valueCaches[layerIndex]
+        valueCache = qwen_decode_kernels.updateValueCacheKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.value,
+            layer.attention.valueBias,
+            oldValue,
+            cacheIndex,
+        )
+        qwen_decode_kernels.releaseBf16(oldValue)
+        state.valueCaches[layerIndex] = valueCache
+        nextHidden = qwen_decode_kernels.qwen2LayerKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.query,
+            layer.attention.queryBias,
+            layer.attention.output,
+            layer.postAttentionNorm,
+            layer.mlp.gate,
+            layer.mlp.up,
+            layer.mlp.down,
+            keyCache,
+            valueCache,
+            cosine,
+            sine,
+            mask,
+        )
+        qwen_decode_kernels.releaseBf16(hidden)
+        hidden = nextHidden
+    logits = qwen_decode_kernels.logitsKernel(hidden, weights.finalNorm, weights.embedding)
+    token = qwen_decode_kernels.argmaxBf16(logits)
+    tokenTimeNs = monotonicNs()
+    qwen_decode_kernels.releaseBf16(logits)
+    qwen_decode_kernels.releaseBf16(hidden)
+    state.outputTokens.append(token)
+    state.tokenTimesNs.append(tokenTimeNs)
+    return RequestState(
+        state.id,
+        state.keyCaches,
+        state.valueCaches,
+        token,
+        state.outputTokens,
+        state.tokenTimesNs,
+        state.startedNs,
+        state.firstTokenNs,
+        tokenTimeNs,
+    )
+
+def releaseRequest(state: RequestState):
+    for layerIndex in range(0, 36):
+        qwen_decode_kernels.releaseBf16(state.keyCaches[layerIndex])
+        qwen_decode_kernels.releaseBf16(state.valueCaches[layerIndex])
+
+def runWave(
+    firstRequestId: int,
+    requestCount: int,
+    emitMeasurements: bool,
+    weights: qwen2.Qwen2Weights,
+    inputIds: Tensor[i64],
+    prefillCosine: Tensor[f32],
+    prefillSine: Tensor[f32],
+    prefillMask: Tensor[f32],
+    prefillIndex: Tensor[i64],
+):
+    waveStartNs = monotonicNs()
+    states := []
+    for offset in range(0, requestCount):
+        states.append(prefillRequest(
+            firstRequestId + offset,
+            waveStartNs,
+            weights,
+            inputIds,
+            prefillCosine,
+            prefillSine,
+            prefillMask,
+            prefillIndex,
+        ))
+    for position in range(256, 287):
+        cosine = qwen_decode_kernels.ropeCosine(position)
+        sine = qwen_decode_kernels.ropeSine(position)
+        mask = qwen_decode_kernels.causalMask(position)
+        cacheIndex = qwen_decode_kernels.cacheIndex(position)
+        for requestIndex in range(0, requestCount):
+            states[requestIndex] = decodeRequest(
+                states[requestIndex], weights, cosine, sine, mask, cacheIndex,
+            )
+        qwen_decode_kernels.releaseF32(cosine)
+        qwen_decode_kernels.releaseF32(sine)
+        qwen_decode_kernels.releaseF32(mask)
+        qwen_decode_kernels.releaseI64(cacheIndex)
+    for state in states:
+        assert(size(state.outputTokens) == 32)
+        assert(size(state.tokenTimesNs) == 32)
+        if emitMeasurements:
+            print(
+                "request_measurement",
+                state.id,
+                state.startedNs,
+                state.firstTokenNs,
+                state.completedNs,
+                json.encode(state.outputTokens),
+                json.encode(state.tokenTimesNs),
+            )
+        releaseRequest(state)
+
+def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
+    modelPath = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
+    processStartNs = monotonicNs()
+    configText ?= file.read(modelPath + "/config.json")
+    config ?= qwen2_config.parseQwen2Config(configText)
+    store ?= safetensor_weights.openSafeTensorStore(modelPath)
+    weights ?= qwen2.loadQwen2Weights(store, config.numHiddenLayers)
+    weightsMappedNs = monotonicNs()
+    assert(config.vocabSize == 151936)
+    assert(config.hiddenSize == 2048)
+    assert(config.intermediateSize == 11008)
+    assert(config.numHiddenLayers == 36)
+    assert(config.numAttentionHeads == 16)
+    assert(config.numKeyValueHeads == 2)
+    assert(config.headDimension() == 128)
+    assert(config.tieWordEmbeddings)
+
+    fixtureText ?= file.read("benchmarks/inference/inputs.json")
+    fixtureDocument ?= json.decode[Any](fixtureText)
+    fixture = json.objectGet(fixtureDocument, "256")
+    promptTokens = json.asIntList(json.objectGet(fixture, "input_ids"))
+    outputTokens = json.asInt(json.objectGet(fixture, "output_tokens"))
+    assert(size(promptTokens) == 256)
+    assert(outputTokens == 32)
+
+    inputIds = qwen_prefill_kernels.inputTokens(promptTokens)
+    prefillCosine = qwen_prefill_kernels.ropeCosine()
+    prefillSine = qwen_prefill_kernels.ropeSine()
+    prefillMask = qwen_prefill_kernels.causalMask()
+    prefillIndex = qwen_prefill_kernels.cacheIndex(0)
+
+    warmupStartNs = monotonicNs()
+    runWave(
+        -1,
+        1,
+        false,
+        weights,
+        inputIds,
+        prefillCosine,
+        prefillSine,
+        prefillMask,
+        prefillIndex,
+    )
+    modelReadyNs = monotonicNs()
+    benchmarkStartNs = modelReadyNs
+    for wave in range(0, 5):
+        runWave(
+            wave * 16,
+            16,
+            true,
+            weights,
+            inputIds,
+            prefillCosine,
+            prefillSine,
+            prefillMask,
+            prefillIndex,
+        )
+    benchmarkEndNs = monotonicNs()
+
+    print("process_start_ns", processStartNs)
+    print("weights_mapped_ns", weightsMappedNs)
+    print("warmup_start_ns", warmupStartNs)
+    print("model_ready_ns", modelReadyNs)
+    print("benchmark_start_ns", benchmarkStartNs)
+    print("benchmark_end_ns", benchmarkEndNs)
+    print("input_tokens", 256)
+    print("output_tokens", 32)
+    print("request_count", 80)
+    print("concurrency", 16)
+    print("scheduler", "round_robin_batch_one")
+
+    qwen_prefill_kernels.releaseI64(inputIds)
+    qwen_prefill_kernels.releaseF32(prefillCosine)
+    qwen_prefill_kernels.releaseF32(prefillSine)
+    qwen_prefill_kernels.releaseF32(prefillMask)
+    qwen_prefill_kernels.releaseI64(prefillIndex)
+    return weights
+
+def main():
+    switch runBenchmark():
+        ok weights:
+            assert(size(weights.layers) == 36)
+        failure error:
+            assert(false, error)

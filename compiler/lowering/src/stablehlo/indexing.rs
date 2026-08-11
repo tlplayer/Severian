@@ -48,11 +48,22 @@ impl StableHloEmitter {
         dimension: u64,
         result_type: TensorType,
     ) -> MlirValue {
-        assert!(!inputs.is_empty(), "concatenate requires at least one input");
+        assert!(
+            !inputs.is_empty(),
+            "concatenate requires at least one input"
+        );
         let result = self.fresh();
         let result_ty = tensor_type(result_type);
-        let operands = inputs.iter().map(|value| value.name.as_str()).collect::<Vec<_>>().join(", ");
-        let input_types = inputs.iter().map(|value| value.ty.as_str()).collect::<Vec<_>>().join(", ");
+        let operands = inputs
+            .iter()
+            .map(|value| value.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let input_types = inputs
+            .iter()
+            .map(|value| value.ty.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         self.line(format!(
             "{result} = \"stablehlo.concatenate\"({operands}) {{dimension = {dimension} : i64}} : ({input_types}) -> {result_ty}"
         ));
@@ -113,7 +124,8 @@ impl StableHloEmitter {
         input_types.extend(starts.iter().map(|value| value.ty.as_str()));
         self.line(format!(
             "{result} = \"stablehlo.dynamic_update_slice\"({}) : ({}) -> {result_ty}",
-            operands.join(", "), input_types.join(", "),
+            operands.join(", "),
+            input_types.join(", "),
         ));
         MlirValue::from_tensor(result, result_type)
     }
@@ -129,8 +141,7 @@ impl StableHloEmitter {
         let result_ty = tensor_type(result_type);
         self.line(format!(
             "{result} = \"stablehlo.select\"({}, {}, {}) : ({}, {}, {}) -> {result_ty}",
-            predicate.name, on_true.name, on_false.name,
-            predicate.ty, on_true.ty, on_false.ty,
+            predicate.name, on_true.name, on_false.name, predicate.ty, on_true.ty, on_false.ty,
         ));
         MlirValue::from_tensor(result, result_type)
     }
@@ -208,16 +219,21 @@ impl StableHloEmitter {
                 "index_vector_dim = {}>, slice_sizes = array<i64: {}>, ",
                 "indices_are_sorted = false}} : ({}, {}) -> {result_ty}"
             ),
-            operand.name, start_indices.name, list(offset_dims),
-            list(collapsed_slice_dims), list(start_index_map), index_vector_dim,
-            list(slice_sizes), operand.ty, start_indices.ty,
+            operand.name,
+            start_indices.name,
+            list(offset_dims),
+            list(collapsed_slice_dims),
+            list(start_index_map),
+            index_vector_dim,
+            list(slice_sizes),
+            operand.ty,
+            start_indices.ty,
             result = result,
             result_ty = result_ty,
         ));
         MlirValue::from_tensor(result, result_type)
     }
 }
-
 
 /// Embedding lookup is an ordinary gather over the vocabulary dimension.
 pub fn embedding_lookup(

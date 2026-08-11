@@ -16,10 +16,7 @@ pub struct ChannelSelectLowering {
     pub mlir: String,
 }
 
-pub fn emit_channel_create(
-    result_name: &str,
-    capacity: &str,
-) -> (LoweredValue, String) {
+pub fn emit_channel_create(result_name: &str, capacity: &str) -> (LoweredValue, String) {
     (
         LoweredValue::new(result_name, ValueType::Channel),
         format!(
@@ -41,10 +38,7 @@ pub fn emit_channel_send(
     )
 }
 
-pub fn emit_channel_receive(
-    result_name: &str,
-    channel: &str,
-) -> (LoweredValue, String) {
+pub fn emit_channel_receive(result_name: &str, channel: &str) -> (LoweredValue, String) {
     (
         LoweredValue::new(result_name, ValueType::Any),
         format!(
@@ -100,16 +94,8 @@ pub fn emit_channel_select(
     let one = format!("{record_name}_one");
     let boxed_index = format!("{record_name}_boxed_index");
 
-    writeln!(
-        mlir,
-        "    {zero} = llvm.mlir.constant(0 : i64) : i64"
-    )
-    .unwrap();
-    writeln!(
-        mlir,
-        "    {one} = llvm.mlir.constant(1 : i64) : i64"
-    )
-    .unwrap();
+    writeln!(mlir, "    {zero} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+    writeln!(mlir, "    {one} = llvm.mlir.constant(1 : i64) : i64").unwrap();
     writeln!(
         mlir,
         "    {boxed_index} = llvm.call @__sev_collection_get({record_name}, {zero}) : (!llvm.ptr, i64) -> !llvm.ptr"

@@ -2,10 +2,7 @@ use crate::{
     toolchain::{find_required_tool, run_tool, Tool},
     BackendError,
 };
-use std::{
-    ffi::OsString,
-    path::Path,
-};
+use std::{ffi::OsString, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugEmission {
@@ -51,10 +48,7 @@ impl DebugBackendOptions {
     }
 }
 
-pub fn materialize_debug_scopes(
-    input: &Path,
-    output: &Path,
-) -> Result<(), BackendError> {
+pub fn materialize_debug_scopes(input: &Path, output: &Path) -> Result<(), BackendError> {
     let mlir_opt = find_required_tool(Tool::MlirOpt)?;
 
     run_tool(

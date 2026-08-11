@@ -45,20 +45,11 @@ pub fn full_self_attention(
     let value = emitter.transpose(&value, &[0, 2, 1, 3], types.qkv);
     let key = emitter.transpose(&key, &[0, 1, 3, 2], types.key_transposed);
 
-    let scores = emitter.dot_general(
-        &query,
-        &key,
-        &[0, 1],
-        &[0, 1],
-        &[3],
-        &[2],
-        types.scores,
-    );
+    let scores = emitter.dot_general(&query, &key, &[0, 1], &[0, 1], &[3], &[2], types.scores);
     let scale = emitter.splat(&(head_dimension as f64).sqrt().to_string(), types.scores);
     let scores = emitter.divide(&scores, &scale, types.scores);
     let scores = emitter.add(&scores, causal_mask, types.scores);
-    let probabilities =
-        softmax_last_axis(emitter, &scores, types.scores, types.reduced_scores);
+    let probabilities = softmax_last_axis(emitter, &scores, types.scores, types.reduced_scores);
     let context = emitter.dot_general(
         &probabilities,
         &value,

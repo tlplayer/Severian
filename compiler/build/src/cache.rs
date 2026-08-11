@@ -1,7 +1,6 @@
 use crate::{fingerprint::Fingerprint, node::BuildNode};
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -29,11 +28,7 @@ impl BuildCache {
         &self.root
     }
 
-    pub fn status(
-        &self,
-        node: &BuildNode,
-        fingerprint: Fingerprint,
-    ) -> io::Result<CacheStatus> {
+    pub fn status(&self, node: &BuildNode, fingerprint: Fingerprint) -> io::Result<CacheStatus> {
         if !node.stage.cacheable() {
             return Ok(CacheStatus::Uncacheable);
         }
@@ -45,9 +40,7 @@ impl BuildCache {
         let path = self.fingerprint_path(node);
         let existing = match fs::read_to_string(path) {
             Ok(value) => value,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(CacheStatus::Dirty)
-            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(CacheStatus::Dirty),
             Err(error) => return Err(error),
         };
 
@@ -58,11 +51,7 @@ impl BuildCache {
         })
     }
 
-    pub fn commit(
-        &self,
-        node: &BuildNode,
-        fingerprint: Fingerprint,
-    ) -> io::Result<()> {
+    pub fn commit(&self, node: &BuildNode, fingerprint: Fingerprint) -> io::Result<()> {
         if !node.stage.cacheable() {
             return Ok(());
         }

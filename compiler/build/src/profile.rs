@@ -170,11 +170,21 @@ fn apply(section: &ProfileSection, profile: &mut BuildProfile) -> Result<(), Str
             _ => return Err("lto must be false, true, off, thin, or fat".into()),
         };
     }
-    if let Some(value) = section.incremental { profile.incremental = value; }
-    if let Some(value) = section.overflow_checks { profile.overflow_checks = value; }
-    if let Some(value) = section.assertions { profile.assertions = value; }
-    if let Some(value) = section.runtime_checks { profile.runtime_checks = value; }
-    if let Some(value) = section.coverage { profile.coverage = value; }
+    if let Some(value) = section.incremental {
+        profile.incremental = value;
+    }
+    if let Some(value) = section.overflow_checks {
+        profile.overflow_checks = value;
+    }
+    if let Some(value) = section.assertions {
+        profile.assertions = value;
+    }
+    if let Some(value) = section.runtime_checks {
+        profile.runtime_checks = value;
+    }
+    if let Some(value) = section.coverage {
+        profile.coverage = value;
+    }
     if let Some(value) = &section.sanitizer {
         profile.sanitizer = Some(match value.as_str() {
             "address" => Sanitizer::Address,

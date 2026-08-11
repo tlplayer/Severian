@@ -3,7 +3,11 @@ use severian_source::{SourceMap, SourceSpan};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MlirLocation {
     Unknown,
-    FileLineColumn { file: String, line: u32, column: u32 },
+    FileLineColumn {
+        file: String,
+        line: u32,
+        column: u32,
+    },
     FileRange {
         file: String,
         start_line: u32,
@@ -11,15 +15,24 @@ pub enum MlirLocation {
         end_line: u32,
         end_column: u32,
     },
-    Named { name: String, child: Box<MlirLocation> },
+    Named {
+        name: String,
+        child: Box<MlirLocation>,
+    },
     Fused(Vec<MlirLocation>),
 }
 
 impl MlirLocation {
     pub fn from_source(sources: &SourceMap, span: SourceSpan) -> Self {
-        let Some(file) = sources.file(span.file) else { return Self::Unknown; };
-        let Some(start) = file.location(span.bytes.start) else { return Self::Unknown; };
-        let Some(end) = file.location(span.bytes.end) else { return Self::Unknown; };
+        let Some(file) = sources.file(span.file) else {
+            return Self::Unknown;
+        };
+        let Some(start) = file.location(span.bytes.start) else {
+            return Self::Unknown;
+        };
+        let Some(end) = file.location(span.bytes.end) else {
+            return Self::Unknown;
+        };
 
         if start.line == end.line && start.column == end.column {
             Self::FileLineColumn {
@@ -39,12 +52,16 @@ impl MlirLocation {
     }
 
     pub fn named(name: impl Into<String>, child: MlirLocation) -> Self {
-        Self::Named { name: name.into(), child: Box::new(child) }
+        Self::Named {
+            name: name.into(),
+            child: Box::new(child),
+        }
     }
 
     pub fn fused(locations: impl IntoIterator<Item = MlirLocation>) -> Self {
         Self::Fused(
-            locations.into_iter()
+            locations
+                .into_iter()
                 .filter(|location| !matches!(location, Self::Unknown))
                 .collect(),
         )
@@ -83,12 +100,15 @@ impl MlirLocation {
 }
 
 pub fn attach_location(operation: &str, location: &MlirLocation) -> String {
-    if operation.trim().is_empty() { return operation.to_owned(); }
+    if operation.trim().is_empty() {
+        return operation.to_owned();
+    }
     format!("{} {}", operation.trim_end(), location.render())
 }
 
 fn inner(location: &MlirLocation) -> String {
-    location.render()
+    location
+        .render()
         .strip_prefix("loc(")
         .and_then(|value| value.strip_suffix(')'))
         .unwrap_or("?")

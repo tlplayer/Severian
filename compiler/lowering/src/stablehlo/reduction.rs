@@ -46,7 +46,13 @@ pub fn reduce_sum(
     result_type: TensorType,
 ) -> MlirValue {
     let zero = emitter.scalar(zero_literal(result_type.element), result_type.element);
-    emitter.reduce(input, &zero, dimensions, StableHloReduction::Add, result_type)
+    emitter.reduce(
+        input,
+        &zero,
+        dimensions,
+        StableHloReduction::Add,
+        result_type,
+    )
 }
 
 pub fn reduce_max(
@@ -56,7 +62,13 @@ pub fn reduce_max(
     result_type: TensorType,
 ) -> MlirValue {
     let initial = emitter.scalar(minimum_literal(result_type.element), result_type.element);
-    emitter.reduce(input, &initial, dimensions, StableHloReduction::Maximum, result_type)
+    emitter.reduce(
+        input,
+        &initial,
+        dimensions,
+        StableHloReduction::Maximum,
+        result_type,
+    )
 }
 
 pub fn reduce_min(
@@ -66,7 +78,13 @@ pub fn reduce_min(
     result_type: TensorType,
 ) -> MlirValue {
     let initial = emitter.scalar(maximum_literal(result_type.element), result_type.element);
-    emitter.reduce(input, &initial, dimensions, StableHloReduction::Minimum, result_type)
+    emitter.reduce(
+        input,
+        &initial,
+        dimensions,
+        StableHloReduction::Minimum,
+        result_type,
+    )
 }
 
 fn zero_literal(element: TensorElementType) -> &'static str {

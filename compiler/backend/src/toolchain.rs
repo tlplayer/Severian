@@ -39,11 +39,7 @@ impl Tool {
 
     pub fn candidates(self) -> &'static [&'static str] {
         match self {
-            Self::MlirOpt => &[
-                "mlir-opt",
-                "mlir-opt-21",
-                "/usr/lib/llvm-21/bin/mlir-opt",
-            ],
+            Self::MlirOpt => &["mlir-opt", "mlir-opt-21", "/usr/lib/llvm-21/bin/mlir-opt"],
             Self::MlirTranslate => &[
                 "mlir-translate",
                 "mlir-translate-21",
@@ -56,11 +52,7 @@ impl Tool {
                 "/usr/lib/llvm-21/bin/ld.lld",
                 "/opt/rocm/llvm/bin/ld.lld",
             ],
-            Self::Ptxas => &[
-                "ptxas",
-                "/usr/local/cuda/bin/ptxas",
-                "/opt/cuda/bin/ptxas",
-            ],
+            Self::Ptxas => &["ptxas", "/usr/local/cuda/bin/ptxas", "/opt/cuda/bin/ptxas"],
             Self::NvidiaSmi => &["nvidia-smi", "/usr/bin/nvidia-smi"],
             Self::AmdGpuArch => &[
                 "amdgpu-arch",

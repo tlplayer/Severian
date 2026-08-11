@@ -7,11 +7,17 @@ edition = "2026"
 name = "qwen2-severian-benchmark"
 path = "benchmark.sev"
 
+[[bin]]
+name = "qwen2-severian-serving-benchmark"
+path = "serving_benchmark.sev"
+
 [dependencies]
 file = { path = "../../../library/file", version = "0.1.0" }
 qwen2 = { path = "modules/qwen2", version = "0.1.0" }
 qwen2_config = { path = "modules/qwen2_config", version = "0.1.0" }
 qwen_kernels = { path = "modules/qwen_kernels", version = "0.1.0" }
+qwen_prefill_kernels = { path = "modules/qwen_prefill_kernels", version = "0.1.0" }
+qwen_decode_kernels = { path = "modules/qwen_decode_kernels", version = "0.1.0" }
 qwen_tokenizer = { path = "modules/qwen_tokenizer", version = "0.1.0" }
 safetensor_weights = { path = "modules/safetensor_weights", version = "0.1.0" }
 tensor = { path = "../../../library/tensor", version = "0.1.0" }

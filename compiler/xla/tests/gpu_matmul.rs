@@ -44,10 +44,7 @@ fn stablehlo_matmul_executes_on_amd_gpu() -> Result<(), Box<dyn std::error::Erro
     let xla = XlaClient::new(client);
     let mut compile_options = CompileOptions::default();
     compile_options.portable_artifact = false;
-    let executable = xla.compile(
-        &StableHloModule::from_text(MATMUL),
-        &compile_options,
-    )?;
+    let executable = xla.compile(&StableHloModule::from_text(MATMUL), &compile_options)?;
     println!("StableHLO compile success");
 
     let a = xla.upload_to(
@@ -72,7 +69,10 @@ fn stablehlo_matmul_executes_on_amd_gpu() -> Result<(), Box<dyn std::error::Erro
     let output = outputs.remove(0);
     println!("output IsOnCpu: {}", output.is_on_cpu()?);
     assert!(!output.is_on_cpu()?, "output is resident on the CPU");
-    assert!(output.is_on_device(&device)?, "output is on a different device");
+    assert!(
+        output.is_on_device(&device)?,
+        "output is on a different device"
+    );
 
     let result = output.to_f32()?;
     println!("result: {result:?}");

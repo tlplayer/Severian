@@ -37,17 +37,11 @@ pub fn llvm_debug_passes(options: &DebugLoweringOptions) -> Vec<&'static str> {
     vec!["--llvm-di-scope-for-llvm-func"]
 }
 
-pub fn function_location(
-    name: &str,
-    source: MlirLocation,
-) -> MlirLocation {
+pub fn function_location(name: &str, source: MlirLocation) -> MlirLocation {
     MlirLocation::named(name, source)
 }
 
-pub fn inline_location(
-    callee: MlirLocation,
-    caller: MlirLocation,
-) -> String {
+pub fn inline_location(callee: MlirLocation, caller: MlirLocation) -> String {
     format!(
         "loc(callsite({} at {}))",
         inner_location(&callee),

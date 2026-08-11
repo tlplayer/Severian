@@ -99,27 +99,22 @@ pub fn target_attribute(options: &GpuLoweringOptions) -> String {
     match options.backend {
         GpuBackend::Nvidia => {
             let chip = options.architecture.as_deref().unwrap_or("sm_80");
-            format!(
-                "#nvvm.target<chip = \"{chip}\", features = \"+ptx80\", O = 2>"
-            )
+            format!("#nvvm.target<chip = \"{chip}\", features = \"+ptx80\", O = 2>")
         }
 
         GpuBackend::Amd => {
             let chip = options.architecture.as_deref().unwrap_or("gfx1100");
-            format!(
-                "#rocdl.target<chip = \"{chip}\", O = 2>"
-            )
+            format!("#rocdl.target<chip = \"{chip}\", O = 2>")
         }
 
-        GpuBackend::Spirv => "#spirv.target_env<#spirv.vce<v1.3, [Shader], []>, #spirv.resource_limits<>>".into(),
+        GpuBackend::Spirv => {
+            "#spirv.target_env<#spirv.vce<v1.3, [Shader], []>, #spirv.resource_limits<>>".into()
+        }
     }
 }
 
 pub fn workgroup_attribute(size: WorkgroupSize) -> String {
-    format!(
-        "workgroup_size = [{}, {}, {}]",
-        size.x, size.y, size.z
-    )
+    format!("workgroup_size = [{}, {}, {}]", size.x, size.y, size.z)
 }
 
 pub fn is_accelerator_backend(backend: GpuBackend) -> bool {

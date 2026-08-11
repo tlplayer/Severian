@@ -36,7 +36,9 @@ pub(crate) fn collection_values(handle: *mut c_void) -> Vec<usize> {
         .unwrap_or_default()
 }
 
-pub(crate) fn collection_from_handles(values: impl IntoIterator<Item = *mut c_void>) -> *mut c_void {
+pub(crate) fn collection_from_handles(
+    values: impl IntoIterator<Item = *mut c_void>,
+) -> *mut c_void {
     insert_collection(RuntimeCollection {
         values: values.into_iter().map(id_from_handle).collect(),
     })
@@ -44,7 +46,11 @@ pub(crate) fn collection_from_handles(values: impl IntoIterator<Item = *mut c_vo
 
 fn normalize_index(index: i64, len: usize) -> Option<usize> {
     let len = i64::try_from(len).ok()?;
-    let normalized = if index < 0 { len.checked_add(index)? } else { index };
+    let normalized = if index < 0 {
+        len.checked_add(index)?
+    } else {
+        index
+    };
     if normalized < 0 || normalized >= len {
         None
     } else {
@@ -108,11 +114,7 @@ pub extern "C" fn __sev_collection_get(collection: *mut c_void, index: i64) -> *
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_collection_set(
-    collection: *mut c_void,
-    index: i64,
-    value: *mut c_void,
-) {
+pub extern "C" fn __sev_collection_set(collection: *mut c_void, index: i64, value: *mut c_void) {
     let mut guard = collections()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
@@ -172,11 +174,7 @@ pub extern "C" fn __sev_collection_last(collection: *mut c_void) -> *mut c_void 
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_collection_insert(
-    collection: *mut c_void,
-    index: i64,
-    value: *mut c_void,
-) {
+pub extern "C" fn __sev_collection_insert(collection: *mut c_void, index: i64, value: *mut c_void) {
     let mut guard = collections()
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
@@ -185,8 +183,14 @@ pub extern "C" fn __sev_collection_insert(
     };
 
     let len = collection.values.len() as i64;
-    let index = if index < 0 { (len + index).max(0) } else { index };
-    let index = usize::try_from(index).unwrap_or(collection.values.len()).min(collection.values.len());
+    let index = if index < 0 {
+        (len + index).max(0)
+    } else {
+        index
+    };
+    let index = usize::try_from(index)
+        .unwrap_or(collection.values.len())
+        .min(collection.values.len());
     collection.values.insert(index, id_from_handle(value));
 }
 
@@ -209,10 +213,7 @@ pub extern "C" fn __sev_collection_remove(collection: *mut c_void, value: *mut c
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_collection_extend(
-    destination: *mut c_void,
-    source: *mut c_void,
-) {
+pub extern "C" fn __sev_collection_extend(destination: *mut c_void, source: *mut c_void) {
     let source_values = collection_values(source);
     if let Some(destination) = collections()
         .lock()
@@ -231,10 +232,7 @@ pub extern "C" fn __sev_collection_reversed(collection: *mut c_void) -> *mut c_v
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_collection_equal(
-    left: *mut c_void,
-    right: *mut c_void,
-) -> bool {
+pub extern "C" fn __sev_collection_equal(left: *mut c_void, right: *mut c_void) -> bool {
     let left = collection_values(left);
     let right = collection_values(right);
 
@@ -331,10 +329,7 @@ pub extern "C" fn __sev_collection_all(collection: *mut c_void) -> bool {
 }
 
 #[no_mangle]
-pub extern "C" fn __sev_collection_heap_push(
-    collection: *mut c_void,
-    value: *mut c_void,
-) {
+pub extern "C" fn __sev_collection_heap_push(collection: *mut c_void, value: *mut c_void) {
     __sev_collection_push(collection, value);
 
     let mut guard = collections()

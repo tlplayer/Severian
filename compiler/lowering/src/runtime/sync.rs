@@ -39,10 +39,7 @@ pub fn emit_rwlock_write_unlock(lock: &str) -> String {
     format!("    llvm.call @__sev_rwlock_write_unlock({lock}) : (!llvm.ptr) -> ()\n")
 }
 
-pub fn emit_semaphore_create(
-    result: &str,
-    permits: &str,
-) -> (LoweredValue, String) {
+pub fn emit_semaphore_create(result: &str, permits: &str) -> (LoweredValue, String) {
     (
         LoweredValue::new(result, ValueType::Any),
         format!(
@@ -51,10 +48,7 @@ pub fn emit_semaphore_create(
     )
 }
 
-pub fn emit_semaphore_acquire(
-    result: &str,
-    semaphore: &str,
-) -> (LoweredValue, String) {
+pub fn emit_semaphore_acquire(result: &str, semaphore: &str) -> (LoweredValue, String) {
     (
         LoweredValue::new(result, ValueType::Bool),
         format!(
@@ -64,7 +58,5 @@ pub fn emit_semaphore_acquire(
 }
 
 pub fn emit_semaphore_release(semaphore: &str) -> String {
-    format!(
-        "    llvm.call @__sev_semaphore_release({semaphore}) : (!llvm.ptr) -> ()\n"
-    )
+    format!("    llvm.call @__sev_semaphore_release({semaphore}) : (!llvm.ptr) -> ()\n")
 }

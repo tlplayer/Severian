@@ -10,9 +10,7 @@ pub struct XlaKernelArtifact {
     pub stablehlo: StableHloModule,
 }
 
-pub fn collect_xla_kernels(
-    program: &Program,
-) -> Result<Vec<XlaKernelArtifact>, CompileError> {
+pub fn collect_xla_kernels(program: &Program) -> Result<Vec<XlaKernelArtifact>, CompileError> {
     program
         .functions
         .iter()
@@ -40,10 +38,10 @@ pub struct XlaExecutionContext {
 
 impl XlaExecutionContext {
     pub fn rocm() -> Result<Self, CompileError> {
-        let plugin = PjrtPlugin::load_rocm()
-            .map_err(|error| CompileError::Execution(error.to_string()))?;
-        let pjrt = PjrtClient::new(plugin)
-            .map_err(|error| CompileError::Execution(error.to_string()))?;
+        let plugin =
+            PjrtPlugin::load_rocm().map_err(|error| CompileError::Execution(error.to_string()))?;
+        let pjrt =
+            PjrtClient::new(plugin).map_err(|error| CompileError::Execution(error.to_string()))?;
         let device = pjrt
             .amd_gpu_device()
             .map_err(|error| CompileError::Execution(error.to_string()))?;

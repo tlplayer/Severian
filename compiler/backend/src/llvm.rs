@@ -119,11 +119,7 @@ pub fn translate_llvm_dialect_to_ir(
     )
 }
 
-pub fn optimize_llvm_ir(
-    input: &Path,
-    output: &Path,
-    level: u8,
-) -> Result<(), BackendError> {
+pub fn optimize_llvm_ir(input: &Path, output: &Path, level: u8) -> Result<(), BackendError> {
     let optimizer = find_required_tool(Tool::Opt)?;
     run_tool(
         &optimizer,

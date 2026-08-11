@@ -1,17 +1,10 @@
-use super::{
-    api,
-    error,
-    plugin::RawPjrtPlugin,
-};
+use super::{api, error, plugin::RawPjrtPlugin};
 use crate::{
     pipeline::{CompileOptions, OptimizationLevel},
     stablehlo::StableHloModule,
     Result, XlaError,
 };
-use std::{
-    ffi::c_char,
-    ptr::NonNull,
-};
+use std::{ffi::c_char, ptr::NonNull};
 
 pub struct RawClient {
     plugin: RawPjrtPlugin,
@@ -81,10 +74,7 @@ impl RawClient {
         }
 
         let bytes = unsafe {
-            std::slice::from_raw_parts(
-                args.platform_name.cast::<u8>(),
-                args.platform_name_size,
-            )
+            std::slice::from_raw_parts(args.platform_name.cast::<u8>(), args.platform_name_size)
         };
 
         Ok(String::from_utf8_lossy(bytes).into_owned())
@@ -157,8 +147,9 @@ impl RawLoadedExecutable {
         self.executable.as_ptr()
     }
 
-    pub(crate) fn plugin(&self) -> &RawPjrtPlugin { &self.plugin }
-
+    pub(crate) fn plugin(&self) -> &RawPjrtPlugin {
+        &self.plugin
+    }
 }
 
 impl Drop for RawLoadedExecutable {

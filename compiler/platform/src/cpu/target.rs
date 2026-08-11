@@ -31,10 +31,7 @@ impl CpuTarget {
         }
     }
 
-    pub fn generic(
-        architecture: Architecture,
-        operating_system: OperatingSystem,
-    ) -> Self {
+    pub fn generic(architecture: Architecture, operating_system: OperatingSystem) -> Self {
         Self {
             architecture,
             operating_system,
@@ -73,10 +70,7 @@ impl CpuTarget {
     }
 }
 
-fn native_llvm_triple(
-    architecture: Architecture,
-    operating_system: OperatingSystem,
-) -> String {
+fn native_llvm_triple(architecture: Architecture, operating_system: OperatingSystem) -> String {
     let architecture = match architecture {
         Architecture::X86_64 => "x86_64",
         Architecture::Aarch64 => "aarch64",

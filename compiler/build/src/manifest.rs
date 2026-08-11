@@ -153,7 +153,10 @@ impl Manifest {
 
     pub fn to_package(&self, root: impl Into<PathBuf>) -> Result<Package, ManifestError> {
         let root = root.into();
-        let package = self.package.as_ref().ok_or(ManifestError::MissingPackageName)?;
+        let package = self
+            .package
+            .as_ref()
+            .ok_or(ManifestError::MissingPackageName)?;
         let dependencies = self
             .dependencies
             .iter()

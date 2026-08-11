@@ -158,7 +158,10 @@ impl Task {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
         let state = self.state();
-        if matches!(state, TaskState::Created | TaskState::Runnable | TaskState::Parked) {
+        if matches!(
+            state,
+            TaskState::Created | TaskState::Runnable | TaskState::Parked
+        ) {
             self.set_state(TaskState::Cancelled);
             self.completion.finish(Err(TaskError::Cancelled));
         }
@@ -172,7 +175,11 @@ impl Task {
         }
 
         self.set_state(TaskState::Running);
-        let body = self.body.lock().unwrap_or_else(|poison| poison.into_inner()).take();
+        let body = self
+            .body
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
 
         let Some(body) = body else {
             if !self.state().is_terminal() {
@@ -214,7 +221,10 @@ struct Completion {
 
 impl Completion {
     fn finish(&self, result: TaskResult) {
-        let mut slot = self.result.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut slot = self
+            .result
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         if slot.is_none() {
             *slot = Some(result);
             self.ready.notify_all();

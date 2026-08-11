@@ -54,9 +54,7 @@ impl GpuTarget {
                 target.device_ordinal = Some(device.ordinal);
                 Ok(target)
             }
-            GpuVendor::Unknown => Err(TargetError::InvalidGpuTarget(
-                device.name.clone(),
-            )),
+            GpuVendor::Unknown => Err(TargetError::InvalidGpuTarget(device.name.clone())),
         }
     }
 

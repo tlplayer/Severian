@@ -16,10 +16,7 @@ pub struct TaskSpawnLowering {
     pub mlir: String,
 }
 
-pub fn emit_task_spawn(
-    result_name: impl Into<String>,
-    spec: &TaskSpawnSpec,
-) -> TaskSpawnLowering {
+pub fn emit_task_spawn(result_name: impl Into<String>, spec: &TaskSpawnSpec) -> TaskSpawnLowering {
     let result_name = result_name.into();
 
     let values = spec
@@ -75,10 +72,7 @@ pub fn placement_attributes(placement: TaskPlacement) -> String {
     }
 }
 
-pub fn task_spawn_declaration(
-    function: &str,
-    parameter_types: &[ValueType],
-) -> String {
+pub fn task_spawn_declaration(function: &str, parameter_types: &[ValueType]) -> String {
     let parameters = parameter_types
         .iter()
         .copied()
@@ -86,7 +80,5 @@ pub fn task_spawn_declaration(
         .collect::<Vec<_>>()
         .join(", ");
 
-    format!(
-        "  llvm.func @__sev_task_spawn_{function}({parameters}) -> !llvm.ptr\n"
-    )
+    format!("  llvm.func @__sev_task_spawn_{function}({parameters}) -> !llvm.ptr\n")
 }

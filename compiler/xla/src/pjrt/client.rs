@@ -15,10 +15,14 @@ pub struct PjrtPlugin {
 
 impl PjrtPlugin {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        Ok(Self { raw: RawPjrtPlugin::load(path)? })
+        Ok(Self {
+            raw: RawPjrtPlugin::load(path)?,
+        })
     }
 
-    pub fn path(&self) -> &Path { self.raw.path() }
+    pub fn path(&self) -> &Path {
+        self.raw.path()
+    }
 
     /// Loads the ROCm PJRT plugin selected for Severian.
     ///
@@ -60,20 +64,26 @@ pub struct PjrtClient {
 
 impl PjrtClient {
     pub fn new(plugin: PjrtPlugin) -> Result<Self> {
-        Ok(Self { raw: Arc::new(RawClient::create(plugin.raw)?) })
+        Ok(Self {
+            raw: Arc::new(RawClient::create(plugin.raw)?),
+        })
     }
 
-    pub fn platform_name(&self) -> Result<String> { self.raw.platform_name() }
+    pub fn platform_name(&self) -> Result<String> {
+        self.raw.platform_name()
+    }
 
     pub fn devices(&self) -> Result<Vec<Device>> {
-        self.raw.devices()?
+        self.raw
+            .devices()?
             .into_iter()
             .map(|device| Device::from_raw(device, Arc::clone(&self.raw)))
             .collect()
     }
 
     pub fn addressable_devices(&self) -> Result<Vec<Device>> {
-        self.raw.addressable_devices()?
+        self.raw
+            .addressable_devices()?
             .into_iter()
             .map(|device| Device::from_raw(device, Arc::clone(&self.raw)))
             .collect()
@@ -83,9 +93,7 @@ impl PjrtClient {
         self.addressable_devices()?
             .into_iter()
             .find(|device| device.kind == super::device::DeviceKind::AmdGpu)
-            .ok_or_else(|| crate::XlaError::Pjrt(
-                "PJRT client has no addressable AMD GPU".into(),
-            ))
+            .ok_or_else(|| crate::XlaError::Pjrt("PJRT client has no addressable AMD GPU".into()))
     }
 
     pub fn default_device(&self) -> Result<Device> {
@@ -102,11 +110,7 @@ impl PjrtClient {
             .map(|executable| LoadedExecutable::from_raw(executable, Arc::clone(&self.raw)))
     }
 
-    pub fn buffer_from_host(
-        &self,
-        host: HostBuffer,
-        device: Option<&Device>,
-    ) -> Result<Buffer> {
+    pub fn buffer_from_host(&self, host: HostBuffer, device: Option<&Device>) -> Result<Buffer> {
         let selected = match device {
             Some(device) => device.raw(),
             None => self.raw.default_device()?,

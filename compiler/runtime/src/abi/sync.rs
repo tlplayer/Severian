@@ -57,15 +57,24 @@ impl AbiRwLock {
     }
 
     fn read_lock(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         while state.writer || state.waiting_writers > 0 {
-            state = self.ready.wait(state).unwrap_or_else(|poison| poison.into_inner());
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(|poison| poison.into_inner());
         }
         state.readers += 1;
     }
 
     fn read_unlock(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         state.readers = state.readers.saturating_sub(1);
         if state.readers == 0 {
             self.ready.notify_all();
@@ -73,17 +82,26 @@ impl AbiRwLock {
     }
 
     fn write_lock(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         state.waiting_writers += 1;
         while state.writer || state.readers > 0 {
-            state = self.ready.wait(state).unwrap_or_else(|poison| poison.into_inner());
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(|poison| poison.into_inner());
         }
         state.waiting_writers = state.waiting_writers.saturating_sub(1);
         state.writer = true;
     }
 
     fn write_unlock(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         state.writer = false;
         self.ready.notify_all();
     }

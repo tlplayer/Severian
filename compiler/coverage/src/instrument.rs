@@ -20,10 +20,7 @@ pub struct CoverageInstrumentationPlan {
 }
 
 impl CoverageInstrumentationPlan {
-    pub fn new(
-        target_directory: impl AsRef<Path>,
-        binary_name: &str,
-    ) -> Self {
+    pub fn new(target_directory: impl AsRef<Path>, binary_name: &str) -> Self {
         let coverage_directory = target_directory.as_ref().join("coverage");
         Self {
             mode: CoverageMode::Full,

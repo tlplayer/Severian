@@ -1,4 +1,7 @@
-use super::{compile::RawClient, devices::{RawDevice, RawDeviceInfo}};
+use super::{
+    compile::RawClient,
+    devices::{RawDevice, RawDeviceInfo},
+};
 use crate::Result;
 use std::sync::Arc;
 
@@ -62,7 +65,9 @@ impl Device {
         })
     }
 
-    pub(crate) fn raw(&self) -> RawDevice { self.raw }
+    pub(crate) fn raw(&self) -> RawDevice {
+        self.raw
+    }
 
     pub fn is_gpu(&self) -> bool {
         matches!(self.kind, DeviceKind::NvidiaGpu | DeviceKind::AmdGpu)

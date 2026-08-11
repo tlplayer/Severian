@@ -170,16 +170,10 @@ pub extern "C" fn __sev_channel_select_ptr(
 
     match select(&cases, Duration::from_micros(50)) {
         SelectResult::Received { case_index, value } => {
-            collection_from_handles([
-                __sev_box_i64(case_index as i64),
-                handle_from_id(value),
-            ])
+            collection_from_handles([__sev_box_i64(case_index as i64), handle_from_id(value)])
         }
         SelectResult::Closed { case_index } => {
-            collection_from_handles([
-                __sev_box_i64(case_index as i64),
-                null_handle(),
-            ])
+            collection_from_handles([__sev_box_i64(case_index as i64), null_handle()])
         }
         SelectResult::Default { .. } => null_handle(),
     }
