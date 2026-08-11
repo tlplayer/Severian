@@ -3,6 +3,7 @@ use severian_ast::Module as AstModule;
 use severian_hir::Program;
 use severian_mlir::Module;
 use severian_package::PackageInterface;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -66,15 +67,18 @@ fn link_package_hir(
     interfaces: &[PackageInterface],
 ) -> Result<(), CompileError> {
     for interface in interfaces {
-        let dependency = severian_semantic::analyze_with_packages(&interface.module, interfaces)
-            .map_err(|error| CompileError::Frontend {
-                stage: "semantic",
-                span: error.span,
-                message: format!("package `{}`: {}", interface.name, error.message),
-            })?;
+        let mut dependency =
+            severian_semantic::analyze_with_packages(&interface.module, interfaces).map_err(
+                |error| CompileError::Frontend {
+                    stage: "semantic",
+                    span: error.span,
+                    message: format!("package `{}`: {}", interface.name, error.message),
+                },
+            )?;
         severian_ownership::check(&dependency).map_err(|error| {
             CompileError::Ownership(format!("package `{}`: {}", interface.name, error.message))
         })?;
+        qualify_package_functions(&mut dependency, &interface.name);
 
         for global in dependency.globals {
             if !program
@@ -105,6 +109,31 @@ fn link_package_hir(
         }
     }
     Ok(())
+}
+
+fn qualify_package_functions(program: &mut Program, package: &str) {
+    let local_names = program
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
+        .collect::<HashSet<_>>();
+    for function in &mut program.functions {
+        function.name = format!("{package}.{}", function.name);
+        function.id = severian_hir::FunctionId::from_name(&function.name);
+    }
+    program.visit_expressions_mut(&mut |expression| match expression {
+        severian_hir::Expression::Call { target, .. } if local_names.contains(&target.name) => {
+            target.name = format!("{package}.{}", target.name);
+            target.id = severian_hir::FunctionId::from_name(&target.name);
+        }
+        severian_hir::Expression::Function(name) if local_names.contains(name) => {
+            *name = format!("{package}.{name}");
+        }
+        severian_hir::Expression::ChaosRule { function, .. } if local_names.contains(function) => {
+            *function = format!("{package}.{function}");
+        }
+        _ => {}
+    });
 }
 
 fn check_ast(ast: &AstModule, interfaces: &[PackageInterface]) -> Result<Program, CompileError> {

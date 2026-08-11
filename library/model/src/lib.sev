@@ -1,3 +1,5 @@
+import tensor
+
 native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
 
 native("__sev_tensor_to_list") def values(input: Tensor[f64]) -> list[float]
@@ -30,7 +32,7 @@ def reluList(input: list[float]) -> list[float]:
 def fastSigmoidList(input: list[float]) -> list[float]:
     output := []
     for value in input:
-        output.append(value / (1.0 + abs(value)))
+        output.append(0.5 + value / (2.0 * (1.0 + abs(value))))
     return output
 
 def fastTanhList(input: list[float]) -> list[float]:
@@ -45,16 +47,14 @@ def swishList(input: list[float]) -> list[float]:
         output.append(value * (0.5 + value / (2.0 * (1.0 + abs(value)))))
     return output
 
-def jacobianList(input: list[float]) -> list[list[float]]:
+def jacobianList(input: list[float]) -> list[float]:
     output := []
     for row in range(0, size(input)):
-        values := []
         for column in range(0, size(input)):
             if row == column:
-                values.append(1.0)
+                output.append(1.0)
             else:
-                values.append(0.0)
-        output.append(values)
+                output.append(0.0)
     return output
 
 def graphInput(input: Tensor[f64]) -> Tensor[f64]:

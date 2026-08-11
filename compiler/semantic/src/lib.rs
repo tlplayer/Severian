@@ -1990,15 +1990,34 @@ fn lower_call(
             ValueType::Any,
         ));
     };
-    let imported = aliases
-        .get(&callee.name)
-        .map(String::as_str)
-        .unwrap_or(&callee.name);
+    let imported = if signatures.contains_key(&callee.name) {
+        callee.name.as_str()
+    } else {
+        aliases
+            .get(&callee.name)
+            .map(String::as_str)
+            .unwrap_or(&callee.name)
+    };
     // Path dependencies are compiled into the same translation unit. Their
     // functions therefore have source-level names, while `from package import`
     // records a package-qualified alias. Prefer a real qualified interface when
     // one exists, then fall back to the linked source implementation.
     let canonical = resolve_linked_function(imported, signatures);
+    if let Some(class) = aliases.get(&format!("__module_class.{imported}")) {
+        let args = call
+            .args
+            .iter()
+            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok((
+            Expression::Construct {
+                type_id: TypeDefinitionId::from_name(class),
+                class: class.clone(),
+                args,
+            },
+            ValueType::Any,
+        ));
+    }
     if let Some(class) = canonical.strip_prefix("__class.") {
         let args = call
             .args
@@ -2621,6 +2640,7 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
+                "Matrix" => Ok(ValueType::Matrix),
                 "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
                 "Channel" => Ok(ValueType::Channel),
                 "fn" => Ok(ValueType::Function),

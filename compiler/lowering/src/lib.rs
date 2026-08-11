@@ -304,7 +304,7 @@ fn lower_hir(program: &Program) -> Module {
     let uses_channels = uses_channels(program);
     let mut await_types = HashSet::new();
     for task in &task_specs {
-        write!(output, "  llvm.func @__sev_task_spawn_{}(", task.function).unwrap();
+        write!(output, "  llvm.func @__sev_task_spawn_{}(", task.symbol).unwrap();
         for (index, ty) in task.params.iter().enumerate() {
             if index > 0 {
                 output.push_str(", ");
@@ -746,6 +746,9 @@ impl LowerContext<'_> {
                             )
                             .unwrap();
                         }
+                        ValueType::Matrix => {
+                            writeln!(self.output, "    llvm.call @__sev_matrix_print({value}) : (!llvm.ptr) -> ()").unwrap();
+                        }
                         ValueType::Any => {
                             if self
                                 .object_classes
@@ -776,7 +779,7 @@ impl LowerContext<'_> {
                 }
                 Instruction::Evaluate(expression) => {
                     let (value, _) = self.lower_expression(expression);
-                    if matches!(expression, Expression::Task { .. }) {
+                    if matches!(expression.kind(), Expression::Task { .. }) {
                         if let Some(return_type) = self.task_results.remove(&value) {
                             if return_type == ValueType::Unit {
                                 writeln!(self.output, "    llvm.call @__sev_task_await_unit({value}) : (!llvm.ptr) -> ()").unwrap();
@@ -1348,7 +1351,7 @@ impl LowerContext<'_> {
                 {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_matrix_shape({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
-                    return (result, ValueType::Any);
+                    return (result, ValueType::List);
                 }
                 let field = self.string_address(member);
                 let result = self.fresh_value();
@@ -1978,7 +1981,7 @@ impl LowerContext<'_> {
                     }
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
-                    return (result, ValueType::Any);
+                    return (result, ValueType::Matrix);
                 };
                 let symbol = class_function_symbol(&class, method);
                 let method_definition = self
@@ -2202,9 +2205,10 @@ impl LowerContext<'_> {
                 } else {
                     format!(" {{{}}}", attributes.join(", "))
                 };
+                let task_symbol = mangle_symbol_component(linked_function);
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call @__sev_task_spawn_{linked_function}({values}){placement_attribute} : ({types}) -> !llvm.ptr"
+                    "    {result} = llvm.call @__sev_task_spawn_{task_symbol}({values}){placement_attribute} : ({types}) -> !llvm.ptr"
                 )
                 .unwrap();
                 self.task_results.insert(result.clone(), return_type);
@@ -2740,7 +2744,7 @@ impl LowerContext<'_> {
                         _ => unreachable!(),
                     }
                     self.object_classes.insert(result.clone(), "Matrix".into());
-                    return (result, ValueType::Any);
+                    return (result, ValueType::Matrix);
                 }
                 if function == "probability.probability" {
                     let result = self.fresh_value();
@@ -3555,22 +3559,24 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
             return (result, ValueType::Bool);
         }
-        if self
-            .object_classes
-            .get(&left)
-            .is_some_and(|class| class == "Matrix")
+        if operand_type == ValueType::Matrix
+            || self
+                .object_classes
+                .get(&left)
+                .is_some_and(|class| class == "Matrix")
         {
             if op == BinaryOp::Mul && right_type == ValueType::Float {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({left}, {right}) : (!llvm.ptr, f64) -> !llvm.ptr").unwrap();
                 self.object_classes.insert(result.clone(), "Matrix".into());
-                return (result, ValueType::Any);
+                return (result, ValueType::Matrix);
             }
             if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-                && self
-                    .object_classes
-                    .get(&right)
-                    .is_some_and(|class| class == "Matrix")
+                && (right_type == ValueType::Matrix
+                    || self
+                        .object_classes
+                        .get(&right)
+                        .is_some_and(|class| class == "Matrix"))
             {
                 let equal = self.fresh_value();
                 writeln!(self.output, "    {equal} = llvm.call @__sev_matrix_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
@@ -4237,6 +4243,7 @@ impl LowerContext<'_> {
         let mut collection = None;
         let mut yields_indices = false;
         let mut map_collection = false;
+        let mut string_collection = false;
         let (start, end) = match iterable.kind() {
             Expression::Call { target, args }
                 if target.name == "range" && (1..=2).contains(&args.len()) =>
@@ -4300,6 +4307,9 @@ impl LowerContext<'_> {
                     )
                     .unwrap();
                     map_collection = true;
+                } else if iterable_type == ValueType::String {
+                    writeln!(self.output, "    {end} = llvm.call @__sev_string_length({value}) : (!llvm.ptr) -> i64").unwrap();
+                    string_collection = true;
                 } else {
                     writeln!(self.output, "    {end} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
                 }
@@ -4409,6 +4419,10 @@ impl LowerContext<'_> {
                     }
                 }
                 (value, ValueType::Any)
+            } else if string_collection {
+                let item = self.fresh_value();
+                writeln!(self.output, "    {item} = llvm.call @__sev_string_char_at({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                (item, ValueType::String)
             } else {
                 let item = self.fresh_value();
                 writeln!(self.output, "    {item} = llvm.call @__sev_collection_get({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
@@ -4808,6 +4822,7 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TaskSpec {
     function: String,
+    symbol: String,
     params: Vec<ValueType>,
     return_type: ValueType,
 }
@@ -4831,6 +4846,7 @@ fn task_specs(program: &Program) -> Vec<TaskSpec> {
         .filter_map(|name| {
             let function = functions.get(name.as_str())?;
             Some(TaskSpec {
+                symbol: mangle_symbol_component(&name),
                 function: name,
                 params: function.params.iter().map(|param| param.ty).collect(),
                 return_type: function.return_type,
@@ -5244,7 +5260,7 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "void *__sev_object_get(void *raw, void *name) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); }\n\n",
         "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && strcmp(value->class_name, class_name) == 0; }\n\n",
         "void *__sev_matrix_new(int64_t rows, int64_t columns, double fill) { sev_matrix *value = sev_allocate(sizeof(*value)); value->rows = rows; value->columns = columns; value->fill = fill; return value; }\n",
-        "void *__sev_matrix_shape(void *raw) { sev_matrix *value = raw; if (!value) abort(); sev_collection *shape = __sev_collection_new(0); __sev_collection_push(shape, __sev_box_i64(value->rows)); __sev_collection_push(shape, __sev_box_i64(value->columns)); return __sev_box_collection(shape); }\n",
+        "void *__sev_matrix_shape(void *raw) { sev_matrix *value = raw; if (!value) abort(); sev_collection *shape = __sev_collection_new(0); __sev_collection_push(shape, __sev_box_i64(value->rows)); __sev_collection_push(shape, __sev_box_i64(value->columns)); return shape; }\n",
         "void *__sev_matrix_multiply(void *left_raw, void *right_raw) { sev_matrix *left = left_raw; sev_matrix *right = right_raw; if (!left || !right || left->columns != right->rows) abort(); return __sev_matrix_new(left->rows, right->columns, left->fill * right->fill); }\n",
         "void *__sev_matrix_scale(void *raw, double factor) { sev_matrix *value = raw; if (!value) abort(); return __sev_matrix_new(value->rows, value->columns, value->fill * factor); }\n",
         "bool __sev_matrix_equal(void *left_raw, void *right_raw) { sev_matrix *left = left_raw; sev_matrix *right = right_raw; return left && right && left->rows == right->rows && left->columns == right->columns && left->fill == right->fill; }\n",
@@ -5657,14 +5673,14 @@ int64_t __sev_host_page_size(void) {
         for (index, ty) in spec.params.iter().enumerate() {
             writeln!(source, "  {} arg_{index};", c_type(*ty)).unwrap();
         }
-        writeln!(source, "}} sev_task_frame_{};", spec.function).unwrap();
+        writeln!(source, "}} sev_task_frame_{};", spec.symbol).unwrap();
         writeln!(
             source,
             "static void *__sev_task_worker_{}(void *raw) {{",
-            spec.function
+            spec.symbol
         )
         .unwrap();
-        writeln!(source, "  sev_task_frame_{} *task = raw;", spec.function).unwrap();
+        writeln!(source, "  sev_task_frame_{} *task = raw;", spec.symbol).unwrap();
         let args = (0..spec.params.len())
             .map(|index| format!("task->arg_{index}"))
             .collect::<Vec<_>>()
@@ -5675,7 +5691,7 @@ int64_t __sev_host_page_size(void) {
             writeln!(source, "  task->base.result = {function_symbol}({args});").unwrap();
         }
         source.push_str("  return NULL;\n}\n");
-        write!(source, "void *__sev_task_spawn_{}(", spec.function).unwrap();
+        write!(source, "void *__sev_task_spawn_{}(", spec.symbol).unwrap();
         for (index, ty) in spec.params.iter().enumerate() {
             if index > 0 {
                 source.push_str(", ");
@@ -5689,14 +5705,14 @@ int64_t __sev_host_page_size(void) {
         writeln!(
             source,
             "  sev_task_frame_{} *task = calloc(1, sizeof(*task));",
-            spec.function
+            spec.symbol
         )
         .unwrap();
         source.push_str("  if (!task) abort();\n");
         for index in 0..spec.params.len() {
             writeln!(source, "  task->arg_{index} = arg_{index};").unwrap();
         }
-        writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_task_worker_{}, task) != 0) abort();", spec.function).unwrap();
+        writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_task_worker_{}, task) != 0) abort();", spec.symbol).unwrap();
         source.push_str("  return task;\n}\n\n");
     }
     for class in &program.classes {
@@ -5893,6 +5909,7 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
@@ -5906,8 +5923,20 @@ fn source_function_symbol(name: &str) -> String {
     if name == "main" {
         "main".into()
     } else {
-        format!("__sev_fn_{name}")
+        format!("__sev_fn_{}", mangle_symbol_component(name))
     }
+}
+
+fn mangle_symbol_component(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn class_function_symbol(class: &str, method: &str) -> String {
@@ -5976,6 +6005,7 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
@@ -5996,6 +6026,7 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
+        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
