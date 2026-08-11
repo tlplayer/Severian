@@ -71,6 +71,10 @@ pub struct ImportDecl {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportKind {
+    Local {
+        path: String,
+        alias: Option<Ident>,
+    },
     Module {
         path: Vec<Ident>,
         alias: Option<Ident>,

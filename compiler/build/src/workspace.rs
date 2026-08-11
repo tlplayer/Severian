@@ -1,7 +1,7 @@
 use crate::{
     manifest::{Manifest, ManifestError},
     package::Package,
-    DEFAULT_TARGET_DIRECTORY, LEGACY_MANIFEST_FILE, MANIFEST_FILE,
+    DEFAULT_TARGET_DIRECTORY, MANIFEST_FILE,
 };
 use std::{
     collections::BTreeSet,
@@ -135,10 +135,6 @@ fn find_workspace_root(start: &Path) -> Result<PathBuf, std::io::Error> {
 }
 
 fn manifest_in(directory: &Path) -> Option<PathBuf> {
-    let preferred = directory.join(MANIFEST_FILE);
-    if preferred.is_file() {
-        return Some(preferred);
-    }
-    let legacy = directory.join(LEGACY_MANIFEST_FILE);
-    legacy.is_file().then_some(legacy)
+    let manifest = directory.join(MANIFEST_FILE);
+    manifest.is_file().then_some(manifest)
 }

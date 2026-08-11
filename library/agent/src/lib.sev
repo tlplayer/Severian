@@ -46,8 +46,7 @@ class AgentResult:
     message: string
     state: AgentState
 
-native("__sev_agent_model_request")
-def modelRequest(
+native("__sev_agent_model_request") def modelRequest(
     endpoint: string,
     model: string,
     systemPrompt: string,
@@ -58,25 +57,20 @@ def modelRequest(
     timeoutMillis: int,
 ) -> Result[ModelReply, string]
 
-native("__sev_agent_execute")
-def executeCommand(
+native("__sev_agent_execute") def executeCommand(
     workspace: string,
     command: string,
     timeoutMillis: int,
     maxOutputBytes: int,
 ) -> Result[CommandResult, string]
 
-native("__sev_agent_read_file")
-def readFile(path: string) -> Result[string, string]
+native("__sev_agent_read_file") def readFile(path: string) -> Result[string, string]
 
-native("__sev_agent_write_file")
-def writeFile(path: string, content: string) -> Result[int, string]
+native("__sev_agent_write_file") def writeFile(path: string, content: string) -> Result[int, string]
 
-native("__sev_agent_git_status")
-def gitStatus(workspace: string) -> Result[list[string], string]
+native("__sev_agent_git_status") def gitStatus(workspace: string) -> Result[list[string], string]
 
-native("__sev_agent_reset_workspace")
-def resetWorkspace(workspace: string) -> Result[int, string]
+native("__sev_agent_reset_workspace") def resetWorkspace(workspace: string) -> Result[int, string]
 
 def defaultModelConfig() -> ModelConfig:
     return ModelConfig(
@@ -107,7 +101,7 @@ def emptyState(goal: string) -> AgentState:
     )
 
 def systemPrompt() -> string:
-    return "
+    return """
 You are a Severian development agent.
 
 Use tools instead of describing your capabilities.
@@ -117,18 +111,18 @@ Run relevant tests after every change.
 Do not claim success unless verification passes.
 When blocked by the Severian compiler, isolate the smallest reproducer,
 add a regression test, fix the compiler, and continue.
-"
+"""
 
 def commandToolDescription() -> string:
-    return "
+    return """
 execute(command: string)
 
 Runs a command inside the isolated workspace.
 Use it to inspect files, edit files, compile code, and run tests.
-"
+"""
 
 def statePrompt(state: AgentState) -> string:
-    prompt = "Goal:\n" + state.goal
+    prompt := "Goal:\n" + state.goal
     prompt = prompt + "\n\nIteration: " + string(state.iteration)
     prompt = prompt + "\n\nCompleted:\n"
 
@@ -155,6 +149,13 @@ def compactState(state: AgentState) -> string:
 
 def saveState(path: string, state: AgentState) -> Result[int, string]:
     return writeFile(path, compactState(state))
+
+def persistState(path: string, state: AgentState):
+    switch saveState(path, state):
+        ok bytesWritten:
+            return
+        failure error:
+            print("warning: could not persist agent state: " + error)
 
 def loadState(path: string, goal: string) -> AgentState:
     switch readFile(path):
@@ -206,6 +207,21 @@ def advanceState(
         nextAction,
     )
 
+def replaceState(
+    state: AgentState,
+    iteration: int,
+    modifiedFiles: list[string],
+    nextAction: string,
+) -> AgentState:
+    return AgentState(
+        state.goal,
+        iteration,
+        state.completed,
+        modifiedFiles,
+        state.failures,
+        nextAction,
+    )
+
 def executeTool(
     workspace: string,
     call: ToolCall,
@@ -248,7 +264,7 @@ def executeTool(
             )
 
 def toolResultPrompt(result: CommandResult) -> string:
-    output = "Command: " + result.command
+    output := "Command: " + result.command
     output = output + "\nExit code: " + string(result.exitCode)
     output = output + "\nTimed out: " + string(result.timedOut)
     output = output + "\n\nstdout:\n" + result.stdout
@@ -291,10 +307,15 @@ def runAgent(
     config: ModelConfig = defaultModelConfig(),
     limits: AgentLimits = defaultAgentLimits(),
 ) -> AgentResult:
-    state = loadState(statePath, goal)
+    state := loadState(statePath, goal)
 
     for attempt in range(0, limits.attempts):
-        state.iteration = attempt + 1
+        state = replaceState(
+            state,
+            attempt + 1,
+            state.modifiedFiles,
+            state.nextAction,
+        )
         prompt = statePrompt(state)
 
         switch modelRequest(
@@ -309,7 +330,7 @@ def runAgent(
         ):
             failure error:
                 state = appendFailure(state, error)
-                saveState(statePath, state)
+                persistState(statePath, state)
 
             ok reply:
                 if size(reply.toolCalls) == 0:
@@ -317,8 +338,13 @@ def runAgent(
                         state,
                         "model stopped without using a tool: " + reply.content,
                     )
-                    state.nextAction = "use the execute tool immediately"
-                    saveState(statePath, state)
+                    state = replaceState(
+                        state,
+                        state.iteration,
+                        state.modifiedFiles,
+                        "use the execute tool immediately",
+                    )
+                    persistState(statePath, state)
                 else:
                     for call in reply.toolCalls:
                         result = executeTool(workspace, call, limits)
@@ -344,7 +370,12 @@ def runAgent(
 
                     switch gitStatus(workspace):
                         ok files:
-                            state.modifiedFiles = files
+                            state = replaceState(
+                                state,
+                                state.iteration,
+                                files,
+                                state.nextAction,
+                            )
                         failure error:
                             state = appendFailure(state, error)
 
@@ -361,7 +392,7 @@ def runAgent(
                             state.modifiedFiles,
                             "complete",
                         )
-                        saveState(statePath, state)
+                        persistState(statePath, state)
 
                         return AgentResult(
                             true,
@@ -374,8 +405,13 @@ def runAgent(
                         state,
                         toolResultPrompt(verification),
                     )
-                    state.nextAction = "fix the verification failure"
-                    saveState(statePath, state)
+                    state = replaceState(
+                        state,
+                        state.iteration,
+                        state.modifiedFiles,
+                        "fix the verification failure",
+                    )
+                    persistState(statePath, state)
 
     return AgentResult(
         false,

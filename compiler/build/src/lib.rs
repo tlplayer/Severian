@@ -25,6 +25,5 @@ pub use profile::{BuildProfile, DebugInfo, LtoMode, Sanitizer};
 pub use workspace::{Workspace, WorkspaceError};
 
 pub const MANIFEST_FILE: &str = "package.toml";
-pub const LEGACY_MANIFEST_FILE: &str = "Severian.toml";
-pub const LOCK_FILE: &str = "Severian.lock";
+pub const LOCK_FILE: &str = "sev.lock";
 pub const DEFAULT_TARGET_DIRECTORY: &str = "target";

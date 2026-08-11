@@ -173,7 +173,7 @@ test "persistent databases survive reconnect":
         failure error:
             assert(false, error)
 
-test "database server accepts remote execute and query clients":
+test with integration "database server accepts remote execute and query clients":
     switch start(":memory:"):
         ok server:
             switch connect(address(server)):

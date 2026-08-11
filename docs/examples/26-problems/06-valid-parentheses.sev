@@ -30,6 +30,7 @@ test "accepts an empty string":
 
 test "rejects crossed nesting":
     assert(not validParentheses("([)]"))
+    assert(not validParentheses("(]"))
 
 test "rejects an unmatched close":
     assert(not validParentheses("]"))

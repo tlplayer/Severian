@@ -6,7 +6,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILE: &str = "package.toml";
-pub const LEGACY_MANIFEST_FILE: &str = "Severian.toml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionRule {
@@ -120,10 +119,6 @@ pub struct LibraryTarget {
 
 pub fn nearest_manifest(directory: &Path) -> Option<PathBuf> {
     directory.ancestors().find_map(manifest_in)
-}
-
-pub fn is_legacy_manifest(path: &Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()) == Some(LEGACY_MANIFEST_FILE)
 }
 
 pub fn workspace_manifests(directory: &Path) -> Result<Vec<PathBuf>, PackageError> {
@@ -369,6 +364,169 @@ pub fn load_path_dependency_interfaces(
     Ok(interfaces)
 }
 
+/// Loads quoted source imports from a project root. Quoted imports are never
+/// resolved through the package registry or the official library directory.
+pub fn load_local_interfaces(
+    module: &Module,
+    project_root: &Path,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let has_local_imports = module.items.iter().any(|item| {
+        matches!(
+            item,
+            Item::Import(import) if matches!(import.kind, ImportKind::Local { .. })
+        )
+    });
+    if !has_local_imports {
+        return Ok(Vec::new());
+    }
+    let project_root = if project_root.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        project_root
+    };
+    let project_root = project_root.canonicalize().map_err(|error| {
+        PackageError::Manifest(format!(
+            "local import root {} is invalid: {error}",
+            project_root.display()
+        ))
+    })?;
+    let mut visited = HashSet::new();
+    let mut names = HashMap::new();
+    let mut interfaces = Vec::new();
+    collect_local_interfaces(
+        module,
+        &project_root,
+        &mut visited,
+        &mut names,
+        &mut interfaces,
+    )?;
+    interfaces.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(interfaces)
+}
+
+fn collect_local_interfaces(
+    module: &Module,
+    project_root: &Path,
+    visited: &mut HashSet<PathBuf>,
+    names: &mut HashMap<String, PathBuf>,
+    interfaces: &mut Vec<PackageInterface>,
+) -> Result<(), PackageError> {
+    for item in &module.items {
+        let Item::Import(import) = item else {
+            continue;
+        };
+        let ImportKind::Local { path, alias } = &import.kind else {
+            continue;
+        };
+        let module_name = local_import_module_name(path).ok_or_else(|| {
+            PackageError::Manifest(format!("local import path `{path}` is empty or invalid"))
+        })?;
+        if alias.is_none() && local_import_exposed_name(path).is_none() {
+            return Err(PackageError::Manifest(format!(
+                "local import `{path}` needs an identifier alias"
+            )));
+        }
+        let source_path = resolve_local_import(project_root, path)?;
+        if let Some(existing) = names.get(&module_name) {
+            if existing != &source_path {
+                return Err(PackageError::Manifest(format!(
+                    "local imports {} and {} both resolve to module `{module_name}`",
+                    existing.display(),
+                    source_path.display()
+                )));
+            }
+        } else {
+            names.insert(module_name.clone(), source_path.clone());
+        }
+        if !visited.insert(source_path.clone()) {
+            continue;
+        }
+        let source = std::fs::read_to_string(&source_path).map_err(|error| {
+            PackageError::Manifest(format!(
+                "could not read local import {}: {error}",
+                source_path.display()
+            ))
+        })?;
+        let tokens = severian_lexer::lex(&source).map_err(|error| PackageError::Frontend {
+            package: module_name.clone(),
+            stage: "lexer",
+            span: error.span,
+            message: error.message,
+        })?;
+        let imported = severian_parser::parse(&tokens).map_err(|error| PackageError::Frontend {
+            package: module_name.clone(),
+            stage: "parser",
+            span: error.span,
+            message: error.message,
+        })?;
+        collect_local_interfaces(&imported, project_root, visited, names, interfaces)?;
+        interfaces.push(PackageInterface {
+            name: module_name,
+            module: imported,
+            compiler: CompilerMetadata::default(),
+            source_path,
+            source,
+        });
+    }
+    Ok(())
+}
+
+fn resolve_local_import(project_root: &Path, import: &str) -> Result<PathBuf, PackageError> {
+    let relative = Path::new(import);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(PackageError::Manifest(format!(
+            "local import `{import}` must stay within the project root"
+        )));
+    }
+    let mut candidate = project_root.join(relative);
+    if candidate.extension().is_none() {
+        candidate.set_extension("sev");
+    }
+    let canonical = candidate.canonicalize().map_err(|error| {
+        PackageError::Manifest(format!(
+            "local import `{import}` does not resolve to {}: {error}",
+            candidate.display()
+        ))
+    })?;
+    if !canonical.starts_with(project_root) || !canonical.is_file() {
+        return Err(PackageError::Manifest(format!(
+            "local import `{import}` must resolve to a .sev file within {}",
+            project_root.display()
+        )));
+    }
+    Ok(canonical)
+}
+
+pub fn local_import_module_name(path: &str) -> Option<String> {
+    let path = path.replace('\\', "/");
+    let path = path.strip_suffix(".sev").unwrap_or(&path);
+    let parts = path
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join("."))
+}
+
+pub fn local_import_exposed_name(path: &str) -> Option<String> {
+    let module = local_import_module_name(path)?;
+    let name = module.rsplit('.').next()?;
+    let mut bytes = name.bytes();
+    let valid = bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric());
+    valid.then(|| name.to_owned())
+}
+
 fn collect_path_dependency_interfaces(
     manifest_path: &Path,
     visited: &mut HashSet<PathBuf>,
@@ -454,6 +612,7 @@ fn imported_packages(module: &Module) -> HashSet<String> {
                 return None;
             };
             Some(match &import.kind {
+                ImportKind::Local { .. } => Vec::new(),
                 ImportKind::Module { path, .. } => vec![path
                     .iter()
                     .map(|part| part.name.as_str())
@@ -896,10 +1055,6 @@ fn parse_manifest(path: &Path) -> Result<toml::Value, PackageError> {
 }
 
 fn manifest_in(directory: &Path) -> Option<PathBuf> {
-    let preferred = directory.join(MANIFEST_FILE);
-    if preferred.is_file() {
-        return Some(preferred);
-    }
-    let legacy = directory.join(LEGACY_MANIFEST_FILE);
-    legacy.is_file().then_some(legacy)
+    let manifest = directory.join(MANIFEST_FILE);
+    manifest.is_file().then_some(manifest)
 }

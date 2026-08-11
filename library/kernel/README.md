@@ -11,4 +11,4 @@ concurrency invariants now. A boot protocol, freestanding ABI, linker script,
 interrupt stubs, architecture context switching, and device drivers remain
 requirements for a bootable target.
 
-The complete executable laboratory is in `docs/examples/29-operating-system`.
+The complete executable laboratory is in `docs/lab/operating_system`.

@@ -294,13 +294,27 @@ impl Parser<'_> {
     fn parse_import(&mut self) -> Result<ImportDecl, ParseError> {
         let start = self.peek().span.start;
         let kind = if self.take_simple(&TokenKind::Import).is_some() {
-            let path = self.parse_path()?;
-            let alias = if self.take_simple(&TokenKind::As).is_some() {
-                Some(self.expect_identifier("import alias")?)
-            } else {
-                None
+            let local_path = match &self.peek().kind {
+                TokenKind::String(path) => Some(path.clone()),
+                _ => None,
             };
-            ImportKind::Module { path, alias }
+            if let Some(path) = local_path {
+                self.advance();
+                let alias = if self.take_simple(&TokenKind::As).is_some() {
+                    Some(self.expect_identifier("import alias")?)
+                } else {
+                    None
+                };
+                ImportKind::Local { path, alias }
+            } else {
+                let path = self.parse_path()?;
+                let alias = if self.take_simple(&TokenKind::As).is_some() {
+                    Some(self.expect_identifier("import alias")?)
+                } else {
+                    None
+                };
+                ImportKind::Module { path, alias }
+            }
         } else {
             self.expect_simple(TokenKind::From, "`from`")?;
             let module = self.parse_path()?;
@@ -514,9 +528,13 @@ impl Parser<'_> {
             let segments = self.parse_path()?;
             let name_start = segments.first().unwrap().span.start;
             let name_end = segments.last().unwrap().span.end;
-            self.expect_simple(TokenKind::LeftParen, "`(` after decorator name")?;
             let mut symbols = Vec::new();
-            if !self.at(&TokenKind::RightParen) {
+            let end = if self.take_simple(&TokenKind::LeftParen).is_some() {
+                if self.at(&TokenKind::RightParen) {
+                    return Err(self.error(
+                        "empty decorator arguments are not allowed; write the decorator without `()`",
+                    ));
+                }
                 loop {
                     let token = self.advance().clone();
                     let spelling = match token.kind {
@@ -542,11 +560,12 @@ impl Parser<'_> {
                         break;
                     }
                 }
-            }
-            let end = self
-                .expect_simple(TokenKind::RightParen, "`)` after decorator symbols")?
-                .span
-                .end;
+                self.expect_simple(TokenKind::RightParen, "`)` after decorator symbols")?
+                    .span
+                    .end
+            } else {
+                name_end
+            };
             self.expect_simple(TokenKind::Newline, "newline after decorator")?;
             decorators.push(Decorator {
                 span: Span::new(start, end),

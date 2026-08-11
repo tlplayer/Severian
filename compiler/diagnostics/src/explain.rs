@@ -26,12 +26,12 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
         Explanation {
             code: "N003",
             title: "Type naming",
-            text: "Concrete types use PascalCase unless a registered scientific spelling or the leading-acronym disambiguation rule applies.",
+            text: "Concrete types use PascalCase, such as TensorShape and HttpServer, unless a registered scientific spelling such as ReLU applies.",
         },
         Explanation {
             code: "N004",
             title: "Constant naming",
-            text: "Top-level typed constants use UPPER_SNAKE_CASE.",
+            text: "Top-level typed constants use SCREAMING_SNAKE_CASE.",
         },
         Explanation {
             code: "N005",

@@ -236,7 +236,7 @@ fn builds_model_submodules_and_runs_the_transformer_container_example() {
 
 #[test]
 fn builds_and_runs_the_operating_system_laboratory_vertically() {
-    let package = examples_root().join("29-operating-system");
+    let package = examples_root().join("../lab/operating_system");
     let build = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("build")
         .current_dir(&package)
@@ -250,10 +250,10 @@ fn builds_and_runs_the_operating_system_laboratory_vertically() {
     let build_log = String::from_utf8_lossy(&build.stdout);
     let platform = build_log.find("Built platform ->").unwrap();
     let kernel = build_log.find("Built kernel ->").unwrap();
-    let application = build_log.find("Built operating-system-example ->").unwrap();
+    let application = build_log.find("Built operating-system-lab ->").unwrap();
     assert!(platform < kernel && kernel < application);
 
-    let executable = package.join("target/debug/operating-system-example");
+    let executable = package.join("target/debug/operating-system-lab");
     let output = Command::new(&executable).output().unwrap();
     assert!(
         output.status.success(),

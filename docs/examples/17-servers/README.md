@@ -7,9 +7,8 @@ long-running concurrency APIs.
 - `await listener.accept()` returns a move-only `TCPConnection`.
 - `with` deterministically closes listeners and connections at scope exit.
 - `connection.split()` creates independently owned reader and writer halves.
-- Functions and methods use `lowerCamelCase`; variables, parameters, and fields
-  use `snake_case`; class, trait, enum, and enum-variant names use
-  `UpperCamelCase`.
+- Functions, methods, variables, parameters, and fields use `snake_case`;
+  class, trait, enum, and enum-variant names use `PascalCase`.
 - `Channel[type] with Buffer(capacity)` creates a bounded channel.
 - Cloning a channel clones an endpoint, never the queued values.
 - Dropping the final sending endpoint closes the channel.

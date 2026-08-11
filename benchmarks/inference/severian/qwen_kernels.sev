@@ -275,11 +275,11 @@ def qwenMlp(value: Tensor[bf16, 1, 32, 2048], gateWeight: Tensor[bf16, 11008, 20
     activated = mlpMultiply(gate, mlpSigmoid(gate))
     return mlpDown(mlpMultiply(activated, up), transposeDownWeight(downWeight))
 
-@tensor()
+@tensor
 def embeddingKernel(embedding: Tensor[bf16, 151936, 2048], inputIds: Tensor[i64, 1, 32]) -> Tensor[bf16, 1, 32, 2048]:
     return tensor.gatherBf16(embedding, inputIds)
 
-@tensor()
+@tensor
 def qwen2LayerKernel(
     hidden: Tensor[bf16, 1, 32, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -325,6 +325,6 @@ def qwen2LayerKernel(
 def logitsProjection(value: Tensor[bf16, 1, 32, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 32, 151936]:
     return tensor.matmulBf16(value, embedding)
 
-@tensor()
+@tensor
 def logitsKernel(hidden: Tensor[bf16, 1, 32, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 32, 151936]:
     return logitsProjection(qwenRmsNorm(hidden, normWeight), transposeEmbedding(embedding))

@@ -167,6 +167,11 @@ impl Checker<'_> {
                     }
                 }
                 Item::Import(import) => match &import.kind {
+                    ImportKind::Local { alias, .. } => {
+                        if let Some(alias) = alias {
+                            self.name(alias, Role::Module);
+                        }
+                    }
                     ImportKind::Module { path, alias } => {
                         for segment in path {
                             self.name(segment, Role::Module);
@@ -359,7 +364,18 @@ impl Checker<'_> {
             Expr::Call(call) => {
                 if let Expr::Member(member) = call.callee.as_ref() {
                     if !is_coordinate_accessor(&member.member.name) {
-                        self.name_without_fix(&member.member, Role::Function);
+                        let role = if member
+                            .member
+                            .name
+                            .chars()
+                            .next()
+                            .is_some_and(char::is_uppercase)
+                        {
+                            Role::Type
+                        } else {
+                            Role::Function
+                        };
+                        self.name_without_fix(&member.member, role);
                     }
                     self.expression(&member.object);
                 } else {
@@ -602,23 +618,7 @@ fn expected_type_name(name: &str) -> String {
         return canonical.to_owned();
     }
 
-    let words = words(name);
-    let leading_acronyms = words
-        .iter()
-        .take_while(|word| is_known_acronym(word))
-        .count();
-    if leading_acronyms > 0 && name.starts_with(&words[0].to_ascii_uppercase()) {
-        if leading_acronyms == 1 {
-            return words.concat().to_ascii_lowercase();
-        }
-        return words
-            .iter()
-            .map(|word| word.to_ascii_lowercase())
-            .collect::<Vec<_>>()
-            .join("_");
-    }
-
-    words
+    words(name)
         .iter()
         .map(|word| {
             let mut characters = word.chars();
@@ -640,11 +640,20 @@ fn to_snake_case(name: &str) -> String {
     }
     let prefix = if name.starts_with('_') { "_" } else { "" };
     let trimmed = name.trim_start_matches('_');
-    let converted = words(trimmed)
+    let words = words(trimmed);
+    let leading_acronyms = words
+        .iter()
+        .take_while(|word| is_known_acronym(word))
+        .count();
+    let mut normalized = words
         .iter()
         .map(|word| word.to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join("_");
+        .collect::<Vec<_>>();
+    if leading_acronyms == 1 && normalized.len() > 1 {
+        let semantic_word = normalized.remove(1);
+        normalized[0].push_str(&semantic_word);
+    }
+    let converted = normalized.join("_");
     format!("{prefix}{converted}")
 }
 
@@ -662,7 +671,13 @@ fn words(name: &str) -> Vec<String> {
         while index < chunk.len() {
             if let Some(acronym) = known_acronyms()
                 .iter()
-                .filter(|acronym| chunk[index..].starts_with(**acronym))
+                .filter(|acronym| {
+                    if !chunk[index..].starts_with(**acronym) {
+                        return false;
+                    }
+                    let next = index + acronym.len();
+                    next == chunk.len() || chunk.as_bytes()[next].is_ascii_uppercase()
+                })
                 .max_by_key(|acronym| acronym.len())
             {
                 output.push((*acronym).to_owned());
@@ -708,6 +723,7 @@ fn known_acronyms() -> &'static [&'static str] {
         "JSON",
         "CSV",
         "TCP",
+        "TPS",
         "UDP",
         "URL",
         "URI",
@@ -832,11 +848,26 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_pascal_case_imported_constructors() {
+        let source = concat!(
+            "import kernel\n",
+            "def main():\n",
+            "    process = kernel.Process(1)\n",
+            "    print(process)\n",
+        );
+        let (report, _) = lint(source);
+        assert_eq!(report.diagnostics.warning_count(), 0);
+    }
+
+    #[test]
     fn tokenizes_adjacent_acronyms_explicitly() {
-        assert_eq!(expected_type_name("HTTPServer"), "httpserver");
-        assert_eq!(expected_type_name("HTTPRPCServer"), "http_rpc_server");
-        assert_eq!(expected_type_name("XLAGPUExecutable"), "xla_gpu_executable");
+        assert_eq!(expected_type_name("HTTPServer"), "HttpServer");
+        assert_eq!(expected_type_name("HTTPRPCServer"), "HttpRpcServer");
+        assert_eq!(expected_type_name("XLAGPUExecutable"), "XlaGpuExecutable");
         assert_eq!(expected_type_name("TransformerBlock"), "TransformerBlock");
+        assert_eq!(to_snake_case("HTTPServer"), "httpserver");
+        assert_eq!(to_snake_case("HTTPTPSServer"), "http_tps_server");
+        assert_eq!(to_snake_case("XLAGPUClient"), "xla_gpu_client");
     }
 
     #[test]

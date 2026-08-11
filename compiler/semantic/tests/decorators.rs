@@ -16,6 +16,17 @@ fn retains_decorator_symbol_packs_after_validating_the_import() {
 }
 
 #[test]
+fn retains_a_bare_imported_decorator() {
+    let source = "import tensor\n\n@tensor\ndef transform(value: int) -> int:\n    return value\n";
+    let tokens = severian_lexer::lex(source).unwrap();
+    let module = severian_parser::parse(&tokens).unwrap();
+    let program = severian_semantic::analyze(&module).unwrap();
+
+    assert_eq!(program.functions[0].decorators[0].package, "tensor");
+    assert!(program.functions[0].decorators[0].symbols.is_empty());
+}
+
+#[test]
 fn rejects_a_decorator_whose_package_was_not_imported() {
     let source = concat!(
         "@math(X)\n",

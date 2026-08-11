@@ -38,6 +38,8 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             build_command(&build_args).map(|_| ())
         }
         "doctor" if args.len() == 1 => doctor(),
+        "new" if args.len() == 2 => new_project(Path::new(&args[1])),
+        "init" if args.len() <= 2 => init_project(args.get(1).map_or(Path::new("."), Path::new)),
         "check" if args.len() == 2 => check_targets(Path::new(&args[1])),
         "lint" => lint_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
@@ -65,6 +67,55 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         }
         _ => Err(usage()),
     }
+}
+
+fn new_project(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Err(format!(
+            "cannot create `{}` because it already exists",
+            path.display()
+        ));
+    }
+    fs::create_dir_all(path).map_err(|error| error.to_string())?;
+    init_project(path)
+}
+
+fn init_project(path: &Path) -> Result<(), String> {
+    fs::create_dir_all(path).map_err(|error| error.to_string())?;
+    if path.join("package.toml").exists() {
+        return Err(format!("{} already contains package.toml", path.display()));
+    }
+    let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    let name = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("severian-app")
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    fs::write(
+        path.join("package.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n"),
+    )
+    .map_err(|error| error.to_string())?;
+    fs::write(path.join("sev.lock"), "version = 1\npackages = []\n")
+        .map_err(|error| error.to_string())?;
+    let source_directory = path.join("src");
+    fs::create_dir_all(&source_directory).map_err(|error| error.to_string())?;
+    let main = source_directory.join("main.sev");
+    if !main.exists() {
+        fs::write(&main, "def main():\n    print(\"hello, severian\")\n")
+            .map_err(|error| error.to_string())?;
+    }
+    println!("Initialized {}", path.display());
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,7 +310,6 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
             return Err(format!("{} is not a Severian source file", input.display()));
         }
         let manifest = severian_package::find_manifest(input);
-        warn_legacy_manifest(manifest.as_deref());
         let package_root = manifest
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .or_else(|| input.parent().map(Path::to_path_buf))
@@ -279,7 +329,6 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
         return Err(format!("{} does not exist", input.display()));
     }
     let manifest = severian_package::nearest_manifest(input);
-    warn_legacy_manifest(manifest.as_deref());
     if manifest.is_some() || input.join("main.sev").is_file() {
         return severian_package::workspace_binary_targets(input)
             .map_err(|error| error.to_string());
@@ -302,14 +351,6 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
             }
         })
         .collect())
-}
-
-fn warn_legacy_manifest(manifest: Option<&Path>) {
-    if manifest.is_some_and(severian_package::is_legacy_manifest) {
-        eprintln!(
-            "warning[N007]: `Severian.toml` is a compatibility filename; prefer `package.toml`"
-        );
-    }
 }
 
 fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -1219,6 +1260,8 @@ fn usage() -> String {
     [
         "usage: sev <command> [project-or-source] [options]",
         "  doctor                         diagnose native and optional toolchains",
+        "  new <path>                     create a project with package.toml and sev.lock",
+        "  init [path]                    initialize a project in an existing directory",
         "  check <path>                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  build [path] [--emit KIND] [--target native|xla]",

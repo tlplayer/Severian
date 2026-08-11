@@ -67,7 +67,7 @@ def generate_severian(model_path: Path, features: np.ndarray):
 
     source = f'''import distributed
 import tensor
-import models
+import model as model_decorators
 import parallel
 
 def appendValues(target: list[float], source: list[float]):
@@ -80,7 +80,7 @@ def repeatInputs(base: list[float], repeats: int) -> list[float]:
         appendValues(inputs, base)
     return inputs
 
-@models(Relu)
+@model_decorators(Relu)
 def inferChunk(
     inputs: list[float],
     start: int,
@@ -94,8 +94,8 @@ def inferChunk(
     for sample in range(start, end):
         offset = sample * 4
         features = [inputs[offset], inputs[offset + 1], inputs[offset + 2], inputs[offset + 3]]
-        hidden = Relu(add(matVec(hiddenWeights, 12, 4, features), hiddenBias))
-        appendValues(logits, add(matVec(outputWeights, 3, 12, hidden), outputBias))
+        hidden = Relu(tensor.add(tensor.matVec(hiddenWeights, 12, 4, features), hiddenBias))
+        appendValues(logits, tensor.add(tensor.matVec(outputWeights, 3, 12, hidden), outputBias))
     return logits
 
 def inferBatch(
@@ -108,10 +108,10 @@ def inferBatch(
     outputBias: list[float],
 ) -> list[float]:
     with self and local:
-        first = async inferChunk(inputs, shardStart(samples, workers, 0), shardEnd(samples, workers, 0), hiddenWeights, hiddenBias, outputWeights, outputBias)
-        second = async inferChunk(inputs, shardStart(samples, workers, 1), shardEnd(samples, workers, 1), hiddenWeights, hiddenBias, outputWeights, outputBias)
-        third = async inferChunk(inputs, shardStart(samples, workers, 2), shardEnd(samples, workers, 2), hiddenWeights, hiddenBias, outputWeights, outputBias)
-        fourth = async inferChunk(inputs, shardStart(samples, workers, 3), shardEnd(samples, workers, 3), hiddenWeights, hiddenBias, outputWeights, outputBias)
+        first = async inferChunk(inputs, distributed.shardStart(samples, workers, 0), distributed.shardEnd(samples, workers, 0), hiddenWeights, hiddenBias, outputWeights, outputBias)
+        second = async inferChunk(inputs, distributed.shardStart(samples, workers, 1), distributed.shardEnd(samples, workers, 1), hiddenWeights, hiddenBias, outputWeights, outputBias)
+        third = async inferChunk(inputs, distributed.shardStart(samples, workers, 2), distributed.shardEnd(samples, workers, 2), hiddenWeights, hiddenBias, outputWeights, outputBias)
+        fourth = async inferChunk(inputs, distributed.shardStart(samples, workers, 3), distributed.shardEnd(samples, workers, 3), hiddenWeights, hiddenBias, outputWeights, outputBias)
         firstValues = await first
         secondValues = await second
         thirdValues = await third

@@ -8,8 +8,8 @@ where its spelling is already widely recognized.
 | --- | --- | --- | --- |
 | variables, parameters, fields | `snake_case` | `hidden_state`, `token_count`, `x` | `N001` |
 | functions and methods | `snake_case` | `load_model`, `matrix_multiply` | `N002` |
-| types, classes, traits, variants | `PascalCase` | `Tensor`, `ModelConfig` | `N003` |
-| constants | `UPPER_SNAKE_CASE` | `MAX_TOKENS`, `DEFAULT_PORT` | `N004` |
+| types, classes, traits, variants | `PascalCase` | `Tensor`, `TensorShape`, `HttpServer` | `N003` |
+| constants | `SCREAMING_SNAKE_CASE` | `MAX_TOKENS`, `DEFAULT_PORT` | `N004` |
 | packages, modules, import aliases | `snake_case` | `safe_tensor`, `model_runtime` | `N005` |
 | decorators | `snake_case` | `@tensor`, `@parallel` | `N006` |
 
@@ -26,17 +26,20 @@ Functional forms remain lowercase: `relu`, `gelu`, `softmax`, and
 `cross_entropy`.
 
 The technical registry is deliberately small: `BERT`, `GPT`, `CUDA`, `ROCm`,
-`MLIR`, `XLA`, `StableHLO`, and `PJRT`. For acronym-derived concrete names, one
-leading acronym may fuse with the following word, while adjacent acronym
+`MLIR`, `XLA`, `StableHLO`, and `PJRT`. PascalCase types use readable title-case
+acronyms, such as `HttpServer`. In ordinary snake-case names, one leading
+acronym may fuse with the following semantic word, while adjacent acronym
 concepts require explicit boundaries:
 
 ```text
-HTTPServer       -> httpserver
-HTTPRPCServer    -> http_rpc_server
-XLAGPUExecutable -> xla_gpu_executable
+HTTPServer    -> httpserver
+HTTPTPSServer -> http_tps_server
+XLAGPUClient  -> xla_gpu_client
 ```
 
-Ordinary words are not clipped. The package is `system`, not `sys`; any future
-implementation-block syntax is reserved as `implement`, never `impl`. `elif`,
-legacy `else if`, and `Severian.toml` are compatibility spellings covered by
-`N007` during their migration windows.
+Ordinary words are not clipped: use `statement`, `expression`, `platform`, and
+`configuration` instead of arbitrary abbreviations. The package is `system`,
+not `sys`; any future implementation-block syntax is reserved as `implement`,
+never `impl`. `elif`
+and legacy `else if` are compatibility spellings covered by `N007` during
+their migration windows. The sole package manifest name is `package.toml`.

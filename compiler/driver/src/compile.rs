@@ -184,23 +184,68 @@ pub fn check_path(path: &Path) -> Result<Program, CompileError> {
 
 fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
     let source = std::fs::read_to_string(path)?;
-    let Some(manifest_path) = severian_package::find_manifest(path) else {
-        let ast = parse_source(&source)?;
-        let interfaces = load_official_interfaces(&ast)?;
-        return Ok((ast, interfaces, source));
-    };
-    let mut interfaces = severian_package::load_path_dependency_interfaces(&manifest_path)
-        .map_err(|error| CompileError::Package(error.to_string()))?;
     let ast = parse_source(&source)?;
-    for interface in load_official_interfaces(&ast)? {
-        if !interfaces
-            .iter()
-            .any(|existing| existing.name == interface.name)
-        {
-            interfaces.push(interface);
+    let manifest_path = severian_package::find_manifest(path);
+    let project_root = manifest_path
+        .as_deref()
+        .and_then(Path::parent)
+        .or_else(|| path.parent())
+        .unwrap_or_else(|| Path::new("."));
+    let project_root = if project_root.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        project_root
+    };
+    let mut interfaces = if let Some(manifest_path) = &manifest_path {
+        severian_package::load_path_dependency_interfaces(manifest_path)
+            .map_err(|error| CompileError::Package(error.to_string()))?
+    } else {
+        Vec::new()
+    };
+    let local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
+    for interface in &local_interfaces {
+        for official in load_official_interfaces(&interface.module)? {
+            insert_interface(&mut interfaces, official)?;
         }
     }
+    for interface in local_interfaces {
+        insert_interface(&mut interfaces, interface)?;
+    }
+    for interface in load_official_interfaces(&ast)? {
+        insert_interface(&mut interfaces, interface)?;
+    }
     Ok((ast, interfaces, source))
+}
+
+fn insert_interface(
+    interfaces: &mut Vec<PackageInterface>,
+    interface: PackageInterface,
+) -> Result<(), CompileError> {
+    if let Some(existing) = interfaces
+        .iter()
+        .find(|existing| existing.name == interface.name)
+    {
+        let same_source = existing.source_path == interface.source_path
+            || matches!(
+                (
+                    existing.source_path.canonicalize(),
+                    interface.source_path.canonicalize(),
+                ),
+                (Ok(existing), Ok(incoming)) if existing == incoming
+            );
+        if !same_source {
+            return Err(CompileError::Package(format!(
+                "module `{}` resolves to both {} and {}",
+                interface.name,
+                existing.source_path.display(),
+                interface.source_path.display()
+            )));
+        }
+    } else {
+        interfaces.push(interface);
+    }
+    Ok(())
 }
 
 fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>, CompileError> {

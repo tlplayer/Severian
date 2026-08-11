@@ -29,3 +29,4 @@ test "handles duplicates":
 
 test "handles an empty side":
     assert(mergeSorted([], [1, 2]) == [1, 2])
+    assert(mergeSorted([1, 2], []) == [1, 2])

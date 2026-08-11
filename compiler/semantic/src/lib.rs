@@ -15,7 +15,7 @@ use severian_hir::{
     TestMode as HirTestMode, TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType,
     VariantDefinition, VariantId,
 };
-use severian_package::PackageInterface;
+use severian_package::{local_import_exposed_name, local_import_module_name, PackageInterface};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
@@ -119,17 +119,14 @@ pub fn analyze_with_packages(
             if !is_upper_camel_case(&enumeration.name.name) {
                 return Err(error(
                     enumeration.name.span,
-                    format!("enum `{}` must use UpperCamelCase", enumeration.name.name),
+                    format!("enum `{}` must use PascalCase", enumeration.name.name),
                 ));
             }
             for variant in &enumeration.variants {
                 if !is_upper_camel_case(&variant.name.name) {
                     return Err(error(
                         variant.name.span,
-                        format!(
-                            "enum variant `{}` must use UpperCamelCase",
-                            variant.name.name
-                        ),
+                        format!("enum variant `{}` must use PascalCase", variant.name.name),
                     ));
                 }
                 aliases.insert(
@@ -920,14 +917,19 @@ fn imports_entire_module(module: &Module, module_name: &str) -> bool {
         let Item::Import(import) = item else {
             return false;
         };
-        let ImportKind::Module { path, .. } = &import.kind else {
-            return false;
-        };
-        path.iter()
-            .map(|part| part.name.as_str())
-            .collect::<Vec<_>>()
-            .join(".")
-            == module_name
+        match &import.kind {
+            ImportKind::Local { path, .. } => {
+                local_import_module_name(path).as_deref() == Some(module_name)
+            }
+            ImportKind::Module { path, .. } => {
+                path.iter()
+                    .map(|part| part.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
+                    == module_name
+            }
+            ImportKind::From { .. } => false,
+        }
     })
 }
 
@@ -1074,6 +1076,18 @@ fn collect_imports(module: &Module) -> HashMap<String, String> {
     for item in &module.items {
         let Item::Import(import) = item else { continue };
         match &import.kind {
+            ImportKind::Local { path, alias } => {
+                let Some(canonical) = local_import_module_name(path) else {
+                    continue;
+                };
+                let exposed = alias
+                    .as_ref()
+                    .map(|alias| alias.name.clone())
+                    .or_else(|| local_import_exposed_name(path));
+                if let Some(exposed) = exposed {
+                    aliases.insert(exposed, canonical);
+                }
+            }
             ImportKind::Module { path, alias } => {
                 let canonical = path
                     .iter()
@@ -1136,16 +1150,20 @@ fn collect_imported_modules(module: &Module) -> HashSet<String> {
             let Item::Import(import) = item else {
                 return None;
             };
-            let ImportKind::Module { path, alias } = &import.kind else {
-                return None;
-            };
-            Some(
-                alias
+            match &import.kind {
+                ImportKind::Local { path, alias } => alias
                     .as_ref()
-                    .unwrap_or_else(|| path.first().unwrap())
-                    .name
-                    .clone(),
-            )
+                    .map(|alias| alias.name.clone())
+                    .or_else(|| local_import_exposed_name(path)),
+                ImportKind::Module { path, alias } => Some(
+                    alias
+                        .as_ref()
+                        .unwrap_or_else(|| path.first().unwrap())
+                        .name
+                        .clone(),
+                ),
+                ImportKind::From { .. } => None,
+            }
         })
         .collect()
 }

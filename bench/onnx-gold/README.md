@@ -38,7 +38,7 @@ Severian now gives the ONNX activation its model-domain spelling while making
 execution topology and lifetime visible:
 
 ```sev
-@models(Relu)
+@model_decorators(Relu)
 def inferChunk(...):
     hidden = Relu(add(matVec(hiddenWeights, 12, 4, features), hiddenBias))
 

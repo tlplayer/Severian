@@ -75,7 +75,7 @@ native("__sev_network_listen") def networkListen(address: string) -> Result[TCPL
 
 native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
 
-test "native network ABI":
+test with integration "native network ABI":
     switch networkLoopbackEcho("platform loopback"):
         ok echoed:
             assert(echoed == "platform loopback")

@@ -3932,6 +3932,9 @@ impl LowerContext<'_> {
 
     fn lower_switch(&mut self, value: &Expression, arms: &[SwitchArm]) {
         let (value, _) = self.lower_expression(value);
+        let incoming = self.variables.clone();
+        let mut carried = incoming.keys().cloned().collect::<Vec<_>>();
+        carried.sort();
         let exit = self.fresh_block();
         for arm in arms {
             let body = self.fresh_block();
@@ -4027,7 +4030,34 @@ impl LowerContext<'_> {
             self.terminated = false;
             self.lower_instructions(&arm.instructions);
             if !self.terminated {
-                writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
+                let values = carried
+                    .iter()
+                    .map(|name| {
+                        self.variables
+                            .get(name)
+                            .unwrap_or_else(|| &incoming[name])
+                            .0
+                            .as_str()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = carried
+                    .iter()
+                    .map(|name| {
+                        mlir_type(
+                            self.variables
+                                .get(name)
+                                .unwrap_or_else(|| &incoming[name])
+                                .1,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if values.is_empty() {
+                    writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
+                } else {
+                    writeln!(self.output, "    llvm.br ^bb{exit}({values} : {types})").unwrap();
+                }
             }
             for (name, previous) in bound {
                 if let Some(previous) = previous {
@@ -4037,10 +4067,39 @@ impl LowerContext<'_> {
                 }
             }
             writeln!(self.output, "  ^bb{next}:").unwrap();
+            self.variables = incoming.clone();
             self.terminated = false;
         }
-        writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
-        writeln!(self.output, "  ^bb{exit}:").unwrap();
+        let values = carried
+            .iter()
+            .map(|name| incoming[name].0.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let types = carried
+            .iter()
+            .map(|name| mlir_type(incoming[name].1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if values.is_empty() {
+            writeln!(self.output, "    llvm.br ^bb{exit}").unwrap();
+        } else {
+            writeln!(self.output, "    llvm.br ^bb{exit}({values} : {types})").unwrap();
+        }
+        let arguments = carried
+            .iter()
+            .map(|name| (self.fresh_value(), incoming[name].1))
+            .collect::<Vec<_>>();
+        let signature = arguments
+            .iter()
+            .map(|(value, ty)| format!("{value}: {}", mlir_type(*ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if signature.is_empty() {
+            writeln!(self.output, "  ^bb{exit}:").unwrap();
+        } else {
+            writeln!(self.output, "  ^bb{exit}({signature}):").unwrap();
+        }
+        self.variables = carried.into_iter().zip(arguments).collect();
         self.terminated = false;
     }
 
@@ -5150,8 +5209,10 @@ fn native_bridge_source_for_target(
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
-        "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
-        "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
+        "#define SEV_OBJECT_MAGIC UINT64_C(0x5345564f424a4543)\n",
+        "#define SEV_VARIANT_MAGIC UINT64_C(0x5345565641524941)\n",
+        "typedef struct { uint64_t magic; const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
+        "typedef struct { uint64_t magic; const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
         "void __sev_coverage_hit(int64_t id) { const char *path = getenv(\"SEVERIAN_COVERAGE_FILE\"); if (!path || !*path) return; int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666); if (fd < 0) abort(); char line[32]; int size = snprintf(line, sizeof(line), \"%lu\\n\", (uint64_t)id); if (size <= 0 || write(fd, line, (size_t)size) != size) { close(fd); abort(); } close(fd); }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
@@ -5264,14 +5325,14 @@ fn native_bridge_source_for_target(
         "void __sev_print_newline(void) { fputc('\\n', stdout); }\n",
         "static void sev_print_collection_inline(void *raw) { sev_collection *value = raw; char open = value->kind == 1 ? '(' : value->kind == 2 ? '{' : '['; char close = value->kind == 1 ? ')' : value->kind == 2 ? '}' : ']'; fputc(open, stdout); for (int64_t i = 0; i < value->size; ++i) { if (i) fputs(\", \", stdout); __sev_print_value_inline(value->items[i]); } fputc(close, stdout); }\n",
         "void __sev_print_collection(void *raw) { sev_print_collection_inline(raw); fputc('\\n', stdout); }\n",
-        "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->class_name = class_name; pthread_mutex_init(&value->mutex, NULL); return value; }\n",
-        "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
-        "void *__sev_object_get(void *raw, void *name) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); }\n\n",
-        "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && strcmp(value->class_name, class_name) == 0; }\n\n",
-        "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->tag = tag; value->field = field; return value; }\n",
-        "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && strcmp(value->tag, tag) == 0; }\n",
-        "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value) abort(); return value->field; }\n",
-        "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
+        "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->magic = SEV_OBJECT_MAGIC; value->class_name = class_name; pthread_mutex_init(&value->mutex, NULL); return value; }\n",
+        "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC) abort(); for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
+        "void *__sev_object_get(void *raw, void *name) { if (!raw || !name) abort(); uint64_t magic = *(uint64_t *)raw; if (magic == SEV_OBJECT_MAGIC) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); } if (magic == SEV_VARIANT_MAGIC) { sev_variant *value = raw; if (strcmp(name, \"message\") == 0 && value->field) return value->field; } abort(); }\n\n",
+        "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && value->magic == SEV_OBJECT_MAGIC && strcmp(value->class_name, class_name) == 0; }\n\n",
+        "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->magic = SEV_VARIANT_MAGIC; value->tag = tag; value->field = field; return value; }\n",
+        "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && value->magic == SEV_VARIANT_MAGIC && strcmp(value->tag, tag) == 0; }\n",
+        "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value || value->magic != SEV_VARIANT_MAGIC) abort(); return value->field; }\n",
+        "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value || value->magic != SEV_VARIANT_MAGIC) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
         "void *__sev_builtin_read(void *path) { (void)path; return __sev_variant_new(\"ok\", __sev_box_string(\"settings\")); }\n",
         "void *__sev_builtin_http_get(void *url) { (void)url; return __sev_variant_new(\"ok\", __sev_box_string(\"response\")); }\n",
         "void *__sev_builtin_int_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); char *end = NULL; long value = strtol(text, &end, 10); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); return __sev_variant_new(\"ok\", __sev_box_i64(value)); }\n",

@@ -84,7 +84,7 @@ sev --help
 
 `sev lint [path]` enforces naming by semantic role: variables, functions,
 modules, packages, and decorators use `snake_case`; types use `PascalCase`;
-and constants use `UPPER_SNAKE_CASE`. `sev lint --fix [path]` applies only
+and constants use `SCREAMING_SNAKE_CASE`. `sev lint --fix [path]` applies only
 collision-free file-wide renames and direct compatibility spelling fixes.
 External member names are diagnosed but are not automatically rewritten.
 
@@ -218,11 +218,11 @@ The native transformer and OCI deployment example is under
 `docs/examples/28-transformer-container`. Its host-versus-container benchmark
 is run with `python3 bench/transformer-container/run.py`.
 
-The operating-system example under `docs/examples/29-operating-system` is a
-hosted kernel laboratory that exercises memory ownership, mappings, process
-capabilities, a VFS, syscalls, interrupts, scheduling, and concurrent workers.
-Its documentation separately identifies the compiler and runtime work required
-for a genuinely freestanding boot target.
+The operating-system work under `docs/lab/operating_system` is an experimental
+kernel laboratory for memory ownership, mappings, process capabilities, a VFS,
+syscalls, interrupts, scheduling, and concurrent workers. Proven components can
+be deliberately ported into production packages; incomplete experiments remain
+isolated in the lab.
 
 # Language Fundamentals
 
@@ -288,15 +288,33 @@ dedicated unboxed runtime ABI and kernels.
 
 ### Naming
 
-Severian uses casing to make a name's role visible without extra punctuation.
+Severian uses casing to communicate semantic role instead of forcing one casing
+onto every name.
 
-- Classes, traits, and enums use `UpperCamelCase`: `ChatEvent`, `TCPConnection`.
-  Canonical initialisms stay capitalized inside type names, as in `TCP`, `IO`,
-  and `HTTP`.
-- Enum variants use `UpperCamelCase`: `Join`, `Say`, `Leave`.
-- Functions and methods use `lowerCamelCase`: `runHub`, `readLine`.
-- Variables, parameters, and fields use `snake_case`: `client_id`, `next_job_id`.
-- Primitive types remain lowercase: `int`, `float`, `string`.
+| Role | Convention | Examples |
+| --- | --- | --- |
+| variables, parameters, fields | `snake_case` | `token_count`, `hidden_state` |
+| functions and methods | `snake_case` | `load_model`, `matrix_multiply` |
+| types, classes, traits, variants | `PascalCase` | `TensorShape`, `TransformerBlock`, `HttpServer` |
+| constants | `SCREAMING_SNAKE_CASE` | `MAX_THREADS`, `DEFAULT_BUFFER_SIZE` |
+| packages, modules, import aliases | lowercase `snake_case` | `tensor`, `safe_tensor`, `distributed_system` |
+
+Canonical mathematical and ML names preserve established notation when the
+name itself matters: `ReLU`, `GELU`, and `LSTM` are valid named operators or
+types, while ordinary callable APIs remain `relu()` and `gelu()`.
+
+Acronyms should remain readable without becoming acronym soup. A single acronym
+may fuse with its semantic word (`httpserver`), while adjacent acronym concepts
+use boundaries: `http_tps_server` and `xla_gpu_client`, not `xlagpuclient`.
+Standard domain names such as XLA, GPU, HTTP, MLIR, HIR, and IR are acceptable;
+ordinary words stay complete: `statement`, `expression`, `platform`, and
+`configuration`, not arbitrary compressed forms.
+
+The deliberate mixed-case exception is coordinate/property access where the
+letter is mathematical notation: `getX()`, `getY()`, and `getZ()`. It does not
+extend to ordinary APIs.
+
+Primitive types remain lowercase: `int`, `float`, and `string`.
 
 The linter reports names that do not follow the convention. A variant arm may
 omit its field list; the fields declared by that variant are then bound under
@@ -440,9 +458,12 @@ test modes.
 
 ## Imports
 
-Severian uses Python-style imports.
+Quoted imports resolve project-relative source files; named imports resolve
+through the package system. A quoted path may include or omit `.sev`.
 
 ```sev
+import "helpers.sev"
+import "local/geometry" as geometry
 import math
 import io as console
 
@@ -456,7 +477,7 @@ standard Cargo-style layout:
 
 ```text
 package.toml
-Severian.lock
+sev.lock
 src/lib.sev
 src/main.sev
 tests/

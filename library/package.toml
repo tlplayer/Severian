@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent",
     "container",
     "database",
     "distributed",
@@ -8,6 +9,7 @@ members = [
     "json",
     "kernel",
     "hypervisor",
+    "harness",
     "log",
     "math",
     "model",

@@ -6,7 +6,7 @@ def listen(address: string) -> Result[TCPListener, IOError]:
 def loopbackEcho(message: string) -> Result[string, IOError]:
     return platform.networkLoopbackEcho(message)
 
-test "native TCP loopback":
+test with integration "native TCP loopback":
     switch loopbackEcho("severian network runtime"):
         ok echoed:
             assert(echoed == "severian network runtime")

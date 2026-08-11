@@ -97,10 +97,10 @@ ordinary package tests.
 
 `kernel` provides hosted, deterministic OS policies for physical pages, virtual
 mappings, capabilities, processes, files, syscalls, interrupts, and scheduling.
-The executable under `docs/examples/29-operating-system` composes them with
+The executable under `docs/lab/operating_system` composes them with
 native channels and tasks. It is intentionally distinct from a freestanding,
 bootable target, whose missing ABI and architecture requirements are documented
-beside the example.
+beside the lab.
 
 Run all currently implemented library packages with:
 

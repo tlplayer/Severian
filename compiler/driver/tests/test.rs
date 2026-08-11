@@ -76,6 +76,48 @@ fn direct_source_invocation_executes_native_tests_when_main_is_absent() {
 }
 
 #[test]
+fn direct_source_invocation_resolves_project_relative_imports() {
+    let _lock = native_cli_lock();
+    let root =
+        std::env::temp_dir().join(format!("severian-local-import-test-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("local")).unwrap();
+    std::fs::write(
+        root.join("helpers.sev"),
+        "def double(value: int) -> int:\n    return value * 2\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("local/math.sev"),
+        "def increment(value: int) -> int:\n    return value + 1\n",
+    )
+    .unwrap();
+    let main = root.join("main.sev");
+    std::fs::write(
+        &main,
+        concat!(
+            "import \"helpers.sev\"\n",
+            "import \"local/math\" as local_math\n",
+            "\n",
+            "def main():\n",
+            "    print(helpers.double(local_math.increment(20)))\n",
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg(&main)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn build_uses_the_manifest_name_and_target_debug_directory() {
     let root = std::env::temp_dir().join(format!("severian-build-test-{}", std::process::id()));
     let source_directory = root.join("src");
@@ -105,6 +147,43 @@ fn build_uses_the_manifest_name_and_target_debug_directory() {
     let output = Command::new(&executable).output().unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn new_creates_and_runs_a_native_severian_project() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!("severian-new-test-{}", std::process::id()));
+    let created = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("new")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(root.join("package.toml").is_file());
+    assert!(root.join("sev.lock").is_file());
+    assert!(!std::fs::read_to_string(root.join("package.toml"))
+        .unwrap()
+        .contains("license"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "hello, severian\n"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

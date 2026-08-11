@@ -6,7 +6,7 @@ lockfile, one standard package manager, and one build/test/doc command family.
 ```text
 package/
 ├── package.toml
-├── Severian.lock
+├── sev.lock
 ├── src/
 │   ├── lib.sev
 │   └── main.sev

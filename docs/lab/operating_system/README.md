@@ -1,5 +1,11 @@
 # Operating-system kernel laboratory
 
+The bootable follow-on is an original, clean-room Unix-like teaching kernel.
+Its staged implementation and assurance gates are documented in
+[`UNIX_LAB_ROADMAP.md`](UNIX_LAB_ROADMAP.md). This direction uses public
+university lab requirements as a syllabus and does not copy another kernel's
+source or license into Severian.
+
 This example builds the `platform` and `kernel` packages first, consumes their
 artifacts, and links a native executable that composes:
 
@@ -15,9 +21,9 @@ artifacts, and links a native executable that composes:
 Build and execute it:
 
 ```sh
-cd docs/examples/29-operating-system
+cd docs/lab/operating_system
 sev build
-./target/debug/operating-system-example
+./target/debug/operating-system-lab
 sev compile-tests main.sev -o /tmp/severian-os-tests
 /tmp/severian-os-tests
 ```

@@ -6,7 +6,7 @@ from model import linear
 
 def main():
     train = data.readCsv("train.csv")
-    test = data.readCsv("test.csv")
+    testData = data.readCsv("test.csv")
 
     features = [
         "Pclass",
@@ -36,12 +36,12 @@ def main():
 
     pipeline.fit(train, target="Survived")
 
-    predictions = pipeline.predict(test)
+    predictions = pipeline.predict(testData)
 
     data.writeCsv(
         "submission.csv",
         {
-            "PassengerId": test["PassengerId"],
+            "PassengerId": testData["PassengerId"],
             "Survived": predictions,
         },
     )

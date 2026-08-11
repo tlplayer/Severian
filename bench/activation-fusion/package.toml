@@ -12,4 +12,4 @@ name = "materialized"
 path = "materialized.sev"
 
 [dependencies]
-models = { path = "../../library/models", version = "0.1.0" }
+model = { path = "../../library/model", version = "0.1.0" }

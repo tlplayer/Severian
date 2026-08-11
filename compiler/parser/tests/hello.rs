@@ -303,6 +303,51 @@ fn parses_imported_decorator_symbol_packs() {
 }
 
 #[test]
+fn parses_bare_decorators_without_arguments() {
+    let source = concat!(
+        "import tensor\n",
+        "\n",
+        "@tensor\n",
+        "def transform(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[1] else {
+        panic!("expected decorated function");
+    };
+    assert_eq!(function.decorators[0].name.segments[0].name, "tensor");
+    assert!(function.decorators[0].symbols.is_empty());
+}
+
+#[test]
+fn rejects_empty_decorator_parentheses() {
+    let source = "import tensor\n\n@tensor()\ndef transform():\n    return\n";
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert!(error.message.contains("write the decorator without `()`"));
+}
+
+#[test]
+fn parses_quoted_local_imports_with_optional_aliases() {
+    let module =
+        parse(&lex("import \"helpers.sev\"\nimport \"local/math\" as m\n").unwrap()).unwrap();
+    let Item::Import(first) = &module.items[0] else {
+        panic!("expected local import");
+    };
+    assert!(matches!(
+        &first.kind,
+        severian_ast::ImportKind::Local { path, alias: None } if path == "helpers.sev"
+    ));
+    let Item::Import(second) = &module.items[1] else {
+        panic!("expected aliased local import");
+    };
+    assert!(matches!(
+        &second.kind,
+        severian_ast::ImportKind::Local { path, alias: Some(alias) }
+            if path == "local/math" && alias.name == "m"
+    ));
+}
+
+#[test]
 fn parses_piecewise_conditional_expressions() {
     let source = "def reluValue(x: float) -> float:\n    return 0.0 if x < 0.0 else x\n";
     let module = parse(&lex(source).unwrap()).unwrap();

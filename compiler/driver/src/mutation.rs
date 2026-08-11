@@ -14,9 +14,7 @@ pub fn count(compilation: &Compilation) -> usize {
     let mut program = production_program(compilation);
     let mut count = 0;
     program.visit_expressions_mut(&mut |expression| {
-        if mutation(expression).is_some() {
-            count += 1;
-        }
+        count += mutations(expression).len();
     });
     count
 }
@@ -27,20 +25,21 @@ pub fn apply(compilation: &Compilation, wanted: usize) -> Option<(Compilation, M
     let mut current = 0;
     let mut selected = None;
     hir.visit_expressions_mut(&mut |expression| {
-        let Some((id, replacement, description)) = mutation(expression) else {
+        let candidates = mutations(expression);
+        if selected.is_some() || wanted < current || wanted >= current + candidates.len() {
+            current += candidates.len();
             return;
-        };
-        if current == wanted {
-            let (file, line) = location(&sources, id);
-            *expression = replacement;
-            selected = Some(Mutation {
-                index: wanted,
-                description,
-                file,
-                line,
-            });
         }
-        current += 1;
+        let (id, replacement, description) = candidates[wanted - current].clone();
+        let (file, line) = location(&sources, id);
+        *expression = replacement;
+        selected = Some(Mutation {
+            index: wanted,
+            description,
+            file,
+            line,
+        });
+        current += candidates.len();
     });
     let mutation = selected?;
     let mir = severian_mir::lower(&hir);
@@ -69,60 +68,133 @@ fn production_program(compilation: &Compilation) -> severian_hir::Program {
     program
 }
 
-fn mutation(expression: &Expression) -> Option<(HirId, Expression, String)> {
+fn mutations(expression: &Expression) -> Vec<(HirId, Expression, String)> {
     let Expression::Typed {
         id,
         ty,
         expression: inner,
     } = expression
     else {
-        return None;
+        return Vec::new();
     };
-    let (replacement, description) = match inner.as_ref() {
-        Expression::Boolean(value) => (
+    let candidates = match inner.as_ref() {
+        Expression::Boolean(value) => vec![(
             Expression::Boolean(!value),
-            format!("{} -> {}", value, !value),
-        ),
-        Expression::Binary { left, op, right } => {
-            let replacement = replacement_op(*op)?;
-            (
-                Expression::Binary {
-                    left: left.clone(),
-                    op: replacement,
-                    right: right.clone(),
-                },
-                format!("{} -> {}", op_name(*op), op_name(replacement)),
-            )
+            format!("boolean {value} -> {}", !value),
+        )],
+        Expression::Integer(value) => vec![if *value == 0 {
+            (Expression::Integer(1), "integer 0 -> 1".into())
+        } else {
+            (Expression::Integer(0), format!("integer {value} -> 0"))
+        }],
+        Expression::Float(value) => {
+            let number = f64::from_bits(*value);
+            let replacement: f64 = if number == 0.0 { 1.0 } else { 0.0 };
+            vec![(
+                Expression::Float(replacement.to_bits()),
+                format!("float {number} -> {replacement}"),
+            )]
         }
-        _ => return None,
+        Expression::Binary { left, op, right } => replacement_ops(*op)
+            .into_iter()
+            .map(|replacement| {
+                (
+                    Expression::Binary {
+                        left: left.clone(),
+                        op: replacement,
+                        right: right.clone(),
+                    },
+                    format!("{} -> {}", op_name(*op), op_name(replacement)),
+                )
+            })
+            .collect(),
+        Expression::Unary { op, expression } => vec![(
+            expression.as_ref().clone(),
+            format!("remove unary {}", unary_name(*op)),
+        )],
+        Expression::Conditional {
+            condition,
+            then_expression,
+            else_expression,
+        } => vec![
+            (
+                Expression::Conditional {
+                    condition: Box::new(Expression::Unary {
+                        op: severian_hir::UnaryOp::Not,
+                        expression: condition.clone(),
+                    }),
+                    then_expression: then_expression.clone(),
+                    else_expression: else_expression.clone(),
+                },
+                "negate conditional condition".into(),
+            ),
+            (
+                Expression::Conditional {
+                    condition: condition.clone(),
+                    then_expression: else_expression.clone(),
+                    else_expression: then_expression.clone(),
+                },
+                "swap conditional branches".into(),
+            ),
+        ],
+        Expression::Call { .. } | Expression::CallValue { .. } => default_value(*ty)
+            .map(|replacement| vec![(replacement, "replace call result with default".into())])
+            .unwrap_or_default(),
+        _ => Vec::new(),
     };
-    Some((
-        *id,
-        Expression::Typed {
-            id: *id,
-            ty: *ty,
-            expression: Box::new(replacement),
-        },
-        description,
-    ))
+    candidates
+        .into_iter()
+        .map(|(replacement, description)| {
+            (
+                *id,
+                Expression::Typed {
+                    id: *id,
+                    ty: *ty,
+                    expression: Box::new(replacement),
+                },
+                description,
+            )
+        })
+        .collect()
 }
 
-fn replacement_op(op: BinaryOp) -> Option<BinaryOp> {
-    Some(match op {
-        BinaryOp::Add => BinaryOp::Sub,
-        BinaryOp::Sub => BinaryOp::Add,
-        BinaryOp::Mul => BinaryOp::Div,
-        BinaryOp::Div => BinaryOp::Mul,
-        BinaryOp::Equal => BinaryOp::NotEqual,
-        BinaryOp::NotEqual => BinaryOp::Equal,
-        BinaryOp::Less => BinaryOp::LessEqual,
-        BinaryOp::LessEqual => BinaryOp::Less,
-        BinaryOp::Greater => BinaryOp::GreaterEqual,
-        BinaryOp::GreaterEqual => BinaryOp::Greater,
-        BinaryOp::And => BinaryOp::Or,
-        BinaryOp::Or => BinaryOp::And,
-        BinaryOp::Mod | BinaryOp::Power | BinaryOp::In => return None,
+fn replacement_ops(op: BinaryOp) -> Vec<BinaryOp> {
+    match op {
+        BinaryOp::Add => vec![BinaryOp::Sub],
+        BinaryOp::Sub => vec![BinaryOp::Add],
+        BinaryOp::Mul => vec![BinaryOp::Div],
+        BinaryOp::Div => vec![BinaryOp::Mul],
+        BinaryOp::Mod => vec![BinaryOp::Div],
+        BinaryOp::Power => vec![BinaryOp::Mul],
+        BinaryOp::Equal => vec![BinaryOp::NotEqual],
+        BinaryOp::NotEqual => vec![BinaryOp::Equal],
+        BinaryOp::Less => vec![BinaryOp::LessEqual, BinaryOp::GreaterEqual],
+        BinaryOp::LessEqual => vec![BinaryOp::Less, BinaryOp::Greater],
+        BinaryOp::Greater => vec![BinaryOp::GreaterEqual, BinaryOp::LessEqual],
+        BinaryOp::GreaterEqual => vec![BinaryOp::Greater, BinaryOp::Less],
+        BinaryOp::And => vec![BinaryOp::Or],
+        BinaryOp::Or => vec![BinaryOp::And],
+        BinaryOp::In => Vec::new(),
+    }
+}
+
+fn default_value(ty: severian_hir::ValueType) -> Option<Expression> {
+    use severian_hir::ValueType;
+    Some(match ty {
+        ValueType::Bool => Expression::Boolean(false),
+        ValueType::Int => Expression::Integer(0),
+        ValueType::Float => Expression::Float(0.0f64.to_bits()),
+        ValueType::String => Expression::String(String::new()),
+        ValueType::List => Expression::List(Vec::new()),
+        _ => return None,
     })
+}
+
+fn unary_name(op: severian_hir::UnaryOp) -> &'static str {
+    match op {
+        severian_hir::UnaryOp::Negate => "-",
+        severian_hir::UnaryOp::Not => "not",
+    }
 }
 
 fn op_name(op: BinaryOp) -> &'static str {
@@ -172,9 +244,18 @@ mod tests {
     #[test]
     fn comparison_mutations_cross_the_boundary() {
         assert_eq!(
-            replacement_op(BinaryOp::Greater),
-            Some(BinaryOp::GreaterEqual)
+            replacement_ops(BinaryOp::Greater),
+            [BinaryOp::GreaterEqual, BinaryOp::LessEqual]
         );
-        assert_eq!(replacement_op(BinaryOp::LessEqual), Some(BinaryOp::Less));
+        assert_eq!(
+            replacement_ops(BinaryOp::LessEqual),
+            [BinaryOp::Less, BinaryOp::Greater]
+        );
+    }
+
+    #[test]
+    fn arithmetic_mutations_cover_modulo_and_power() {
+        assert_eq!(replacement_ops(BinaryOp::Mod), [BinaryOp::Div]);
+        assert_eq!(replacement_ops(BinaryOp::Power), [BinaryOp::Mul]);
     }
 }

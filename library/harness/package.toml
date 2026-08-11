@@ -1,0 +1,16 @@
+[package]
+name = "harness"
+version = "0.1.0"
+edition = "2026"
+description = "Deterministic verification harness for Severian development agents"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+agent = { path = "../agent", version = "0.1.0" }
+
+[package.metadata.library]
+category = "automation"
+implementation = "source"
+status = "experimental"

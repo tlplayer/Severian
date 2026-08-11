@@ -280,11 +280,11 @@ def qwenMlp(value: Tensor[bf16, 1, 256, 2048], gateWeight: Tensor[bf16, 11008, 2
     activated = mlpMultiply(gate, mlpSigmoid(gate))
     return mlpDown(mlpMultiply(activated, up), transposeDownWeight(downWeight))
 
-@tensor()
+@tensor
 def embeddingKernel(embedding: Tensor[bf16, 151936, 2048], inputIds: Tensor[i64, 1, 256]) -> Tensor[bf16, 1, 256, 2048]:
     return tensor.gatherBf16(embedding, inputIds)
 
-@tensor()
+@tensor
 def qwen2LayerKernel(
     hidden: Tensor[bf16, 1, 256, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -330,7 +330,7 @@ def qwen2LayerKernel(
 def logitsProjection(value: Tensor[bf16, 1, 256, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 256, 151936]:
     return tensor.matmulBf16(value, embedding)
 
-@tensor()
+@tensor
 def logitsKernel(hidden: Tensor[bf16, 1, 256, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 256, 151936]:
     return logitsProjection(qwenRmsNorm(hidden, normWeight), transposeEmbedding(embedding))
 
@@ -384,12 +384,12 @@ def prefillKvToBf16(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[bf16, 1, 2, 25
 def updatePrefillCache(cache: Tensor[bf16, 1, 2, 288, 128], update: Tensor[bf16, 1, 2, 256, 128], index: Tensor[i64, 1]) -> Tensor[bf16, 1, 2, 288, 128]:
     return tensor.dynamicUpdateSliceAxisBf16(cache, update, index, 2)
 
-@tensor()
+@tensor
 def lastLogitsKernel(hidden: Tensor[bf16, 1, 256, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 1, 151936]:
     finalHidden = lastHidden(hidden)
     return lastLogitsProjection(lastRmsNorm(finalHidden, normWeight), transposeEmbedding(embedding))
 
-@tensor()
+@tensor
 def prefillKeyCacheKernel(
     hidden: Tensor[bf16, 1, 256, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -408,7 +408,7 @@ def prefillKeyCacheKernel(
     update = prefillKvToBf16(rotary)
     return updatePrefillCache(cache, update, index)
 
-@tensor()
+@tensor
 def prefillValueCacheKernel(
     hidden: Tensor[bf16, 1, 256, 2048],
     inputNorm: Tensor[bf16, 2048],

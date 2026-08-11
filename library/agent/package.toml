@@ -1,0 +1,16 @@
+[package]
+name = "agent"
+version = "0.1.0"
+edition = "2026"
+description = "Native Severian development-agent contracts and control loop"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+json = { path = "../json", version = "0.1.0" }
+
+[package.metadata.library]
+category = "automation"
+implementation = "source"
+status = "experimental"

@@ -81,7 +81,7 @@ def verificationPassed(result: agent.CommandResult) -> bool:
     return result.exitCode == 0 and not result.timedOut
 
 def verificationFailure(result: agent.CommandResult) -> string:
-    message = "verification failed"
+    message := "verification failed"
 
     if result.timedOut:
         message = message + ": timeout"
@@ -248,7 +248,7 @@ def runDefault(
     )
 
 def summary(result: HarnessResult) -> string:
-    text = "passed: " + string(result.passed)
+    text := "passed: " + string(result.passed)
     text = text + "\niterations: " + string(result.iterations)
     text = text + "\nmessage: " + result.message
 

@@ -45,6 +45,9 @@ struct Instrumenter<'a> {
 
 impl Instrumenter<'_> {
     fn function(&mut self, function: &mut Function) {
+        if function.native_symbol.is_some() && function.instructions.is_empty() {
+            return;
+        }
         self.branch_ordinal = 0;
         let function_region = self
             .sources
@@ -275,5 +278,20 @@ mod tests {
     fn positions_are_one_based_and_utf8_aware() {
         assert_eq!(position("a\nλx", 4).unwrap().line, 2);
         assert_eq!(position("a\nλx", 4).unwrap().column, 2);
+    }
+
+    #[test]
+    fn declaration_only_native_functions_are_not_executable_regions() {
+        let compilation = crate::compile_source(
+            "native(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
+        )
+        .unwrap();
+        let (_, regions) = instrument(&compilation);
+        let functions = regions
+            .regions()
+            .filter(|region| region.kind == CoverageRegionKind::Function)
+            .map(|region| region.function.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(functions, ["main"]);
     }
 }

@@ -271,11 +271,11 @@ def qwenMlp(value: Tensor[bf16, 1, 1, 2048], gateWeight: Tensor[bf16, 11008, 204
     combined = mlpMultiply(activated, up)
     return mlpDown(combined, transposeDownWeight(downWeight))
 
-@tensor()
+@tensor
 def embeddingKernel(embedding: Tensor[bf16, 151936, 2048], inputIds: Tensor[i64, 1, 1]) -> Tensor[bf16, 1, 1, 2048]:
     return tensor.gatherBf16(embedding, inputIds)
 
-@tensor()
+@tensor
 def updateKeyCacheKernel(
     hidden: Tensor[bf16, 1, 1, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -293,7 +293,7 @@ def updateKeyCacheKernel(
     update = kvHeadsToBf16(applyKvRope(heads, cosine, sine))
     return updateCache(cache, update, index)
 
-@tensor()
+@tensor
 def updateValueCacheKernel(
     hidden: Tensor[bf16, 1, 1, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -307,7 +307,7 @@ def updateValueCacheKernel(
     value = addKv(projected, broadcastKvBias(valueBias, projected))
     return updateCache(cache, transposeKv(reshapeKv(value)), index)
 
-@tensor()
+@tensor
 def qwen2LayerKernel(
     hidden: Tensor[bf16, 1, 1, 2048],
     inputNorm: Tensor[bf16, 2048],
@@ -339,7 +339,7 @@ def qwen2LayerKernel(
     feedForward = qwenMlp(rmsNorm(residual, postNorm), gateWeight, upWeight, downWeight)
     return addModel(residual, feedForward)
 
-@tensor()
+@tensor
 def logitsKernel(hidden: Tensor[bf16, 1, 1, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 1, 151936]:
     normalized = rmsNorm(hidden, normWeight)
     return logitsProjection(normalized, transposeEmbedding(embedding))

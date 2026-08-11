@@ -1,4 +1,4 @@
-import models
+import model
 
 def buildInput(count: int) -> list[float]:
     X := []
@@ -12,7 +12,7 @@ def sumValues(values: list[float]) -> float:
         total += value
     return total
 
-@models(Relu, FastTanh, Swish)
+@model(Relu, FastTanh, Swish)
 def forward(X: list[float]) -> list[float]:
     active = Relu(X)
     curved = FastTanh(active)

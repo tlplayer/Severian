@@ -1,6 +1,7 @@
 use severian_hir::{
-    BinaryOp, CallTarget, Decorator, Expression, Function, FunctionId, HirId, Instruction,
-    MatchPattern, Parameter, Program, TaskPlacement, TensorElementType, TensorType, ValueType,
+    AssignmentOp, BinaryOp, CallTarget, Decorator, Expression, Function, FunctionId, HirId,
+    Instruction, MatchPattern, Parameter, Program, SwitchArm, TaskPlacement, TensorElementType,
+    TensorType, TypeDefinitionId, ValueType, VariantId,
 };
 
 #[test]
@@ -33,6 +34,89 @@ fn lowers_primitive_prints_to_native_calls() {
     assert!(text.contains("vararg(!llvm.func<i32 (!llvm.ptr, ...)>)"));
     assert!(text.contains("llvm.select"));
     assert!(text.contains("llvm.call @puts"));
+}
+
+#[test]
+fn carries_reassigned_values_out_of_switch_arms() {
+    let result = Expression::Variant {
+        type_id: Some(TypeDefinitionId::from_name("Result")),
+        variant_id: VariantId::from_name("ok"),
+        name: "ok".into(),
+        fields: vec![Expression::String("value".into())],
+    };
+    let assign = |value: &str| Instruction::Assign {
+        target: Expression::Variable("state".into()),
+        op: AssignmentOp::Assign,
+        value: Expression::String(value.into()),
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![
+                Instruction::Let {
+                    name: "state".into(),
+                    value: Expression::String("initial".into()),
+                },
+                Instruction::Let {
+                    name: "result".into(),
+                    value: result,
+                },
+                Instruction::Switch {
+                    value: Expression::Variable("result".into()),
+                    arms: vec![
+                        SwitchArm {
+                            source: None,
+                            pattern: MatchPattern::Constructor {
+                                name: "ok".into(),
+                                fields: vec![MatchPattern::Bind("value".into())],
+                            },
+                            guard: None,
+                            instructions: vec![assign("updated")],
+                        },
+                        SwitchArm {
+                            source: None,
+                            pattern: MatchPattern::Constructor {
+                                name: "failure".into(),
+                                fields: vec![MatchPattern::Bind("error".into())],
+                            },
+                            guard: None,
+                            instructions: vec![assign("failed")],
+                        },
+                    ],
+                },
+                Instruction::Print(Expression::Variable("state".into())),
+            ],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
+    let text = lowered.as_str();
+    let exit = text
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with("^bb") && line.contains(": !llvm.ptr"))
+        .expect("switch exit must carry pointer variables as block arguments");
+    let print = text
+        .lines()
+        .rev()
+        .find(|line| line.contains("llvm.call @puts"))
+        .expect("state must be printed after the switch");
+    let state = print
+        .split("@puts(")
+        .nth(1)
+        .and_then(|arguments| arguments.split(')').next())
+        .expect("the print call must have a state operand");
+    assert!(exit.contains(state));
 }
 
 #[test]

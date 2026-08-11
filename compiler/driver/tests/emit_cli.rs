@@ -19,7 +19,7 @@ fn top_level_emit_reaches_every_active_compiler_representation() {
     let source = directory.join("tensor_add.sev");
     std::fs::write(
         &source,
-        "import tensor\n\n@tensor()\ndef add(left: Tensor[f64, dynamic], right: Tensor[f64, dynamic]) -> Tensor[f64, dynamic]:\n    return tensor.rankedAdd(left, right)\n",
+        "import tensor\n\n@tensor\ndef add(left: Tensor[f64, dynamic], right: Tensor[f64, dynamic]) -> Tensor[f64, dynamic]:\n    return tensor.rankedAdd(left, right)\n",
     )
     .unwrap();
 

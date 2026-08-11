@@ -6,5 +6,5 @@ edition = "2026"
 [dependencies]
 distributed = { path = "../../library/distributed" }
 tensor = { path = "../../library/tensor" }
-models = { path = "../../library/models" }
+model = { path = "../../library/model" }
 parallel = { path = "../../library/parallel" }

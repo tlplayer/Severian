@@ -1,10 +1,10 @@
 [package]
-name = "operating-system-example"
+name = "operating-system-lab"
 version = "0.1.0"
 edition = "2026"
 
 [[bin]]
-name = "operating-system-example"
+name = "operating-system-lab"
 path = "main.sev"
 
 [dependencies]
