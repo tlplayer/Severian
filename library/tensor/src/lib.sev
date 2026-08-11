@@ -145,6 +145,7 @@ native("__sev_tensor_bf16_sigmoid") def sigmoidBf16(value: Tensor[bf16]) -> Tens
 native("__sev_tensor_f32_broadcast_like") def broadcastLikeF32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
 native("__sev_tensor_bf16_broadcast_like") def broadcastLikeBf16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
 native("__sev_tensor_bf16_broadcast") def broadcastBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
+native("__sev_tensor_f32_broadcast") def broadcastF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
 native("__sev_tensor_bf16_gather") def gatherBf16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
 native("__sev_tensor_bf16_dynamic_slice") def dynamicSliceBf16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
 native("__sev_tensor_bf16_dynamic_update_slice") def dynamicUpdateSliceBf16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]

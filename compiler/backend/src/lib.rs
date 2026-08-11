@@ -153,7 +153,16 @@ pub fn compile_native(
     module: &Module,
     output: &Path,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output)
+    native::compile_native(program, module, output, None)
+}
+
+pub fn compile_native_with_xla_runtime(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    xla_runtime: &Path,
+) -> Result<(), BackendError> {
+    native::compile_native(program, module, output, Some(xla_runtime))
 }
 
 /// Compiles GPU execution regions to an AMD code object, embeds it in the host

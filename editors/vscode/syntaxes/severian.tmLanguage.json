@@ -7,7 +7,10 @@
   ],
   "patterns": [
     { "include": "#comments" },
+    { "include": "#formatted-strings" },
     { "include": "#strings" },
+    { "include": "#decorators" },
+    { "include": "#native-declarations" },
     { "include": "#function-declarations" },
     { "include": "#type-declarations" },
     { "include": "#tests" },
@@ -18,6 +21,7 @@
     { "include": "#numbers" },
     { "include": "#types" },
     { "include": "#builtins" },
+    { "include": "#member-access" },
     { "include": "#function-calls" },
     { "include": "#operators" },
     { "include": "#punctuation" }
@@ -35,19 +39,48 @@
         }
       ]
     },
-    "strings": {
+    "formatted-strings": {
       "patterns": [
         {
-          "name": "string.regexp.severian",
-          "begin": "\\br\"",
+          "name": "string.quoted.double.interpolated.severian",
+          "begin": "(?<![A-Za-z0-9_])f\"",
           "beginCaptures": {
             "0": { "name": "punctuation.definition.string.begin.severian" }
           },
           "end": "\"",
           "endCaptures": {
             "0": { "name": "punctuation.definition.string.end.severian" }
-          }
-        },
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.severian",
+              "match": "\\\\[nrt\"\\\\]"
+            },
+            {
+              "name": "meta.interpolation.severian",
+              "begin": "\\{",
+              "beginCaptures": {
+                "0": { "name": "punctuation.section.interpolation.begin.severian" }
+              },
+              "end": "\\}",
+              "endCaptures": {
+                "0": { "name": "punctuation.section.interpolation.end.severian" }
+              },
+              "patterns": [
+                { "include": "#numbers" },
+                { "include": "#constants" },
+                { "include": "#member-access" },
+                { "include": "#function-calls" },
+                { "include": "#operators" },
+                { "include": "#punctuation" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
         {
           "name": "string.quoted.double.severian",
           "begin": "\"",
@@ -61,51 +94,78 @@
           "patterns": [
             {
               "name": "constant.character.escape.severian",
-              "match": "\\\\(?:[nrt\"\\\\]|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]+\\})"
+              "match": "\\\\[nrt\"\\\\]"
             }
           ]
+        }
+      ]
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "begin": "^\\s*(@)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\s*(\\()",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.annotation.severian" },
+            "2": { "name": "entity.name.function.decorator.severian" },
+            "3": { "name": "punctuation.definition.arguments.begin.severian" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.arguments.end.severian" }
+          },
+          "patterns": [
+            { "include": "#constants" },
+            { "include": "#numbers" },
+            { "include": "#strings" },
+            {
+              "match": "[A-Za-z_][A-Za-z0-9_]*",
+              "name": "constant.other.decorator-symbol.severian"
+            },
+            {
+              "match": "[+\\-*/%^]",
+              "name": "keyword.operator.decorator.severian"
+            },
+            { "include": "#punctuation" }
+          ]
+        }
+      ]
+    },
+    "native-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(native)\\b",
+          "captures": {
+            "1": { "name": "storage.modifier.native.severian" }
+          }
         }
       ]
     },
     "function-declarations": {
       "patterns": [
         {
-          "match": "\\b(def)\\s+([A-Z][A-Za-z0-9]*)",
+          "match": "\\b(def)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.function.severian" },
             "2": { "name": "entity.name.function.constructor.severian" }
           }
         },
         {
-          "begin": "\\b(def)\\s+([a-z][A-Za-z0-9]*)\\s*(\\()",
-          "beginCaptures": {
+          "match": "\\b(def)\\s+([a-z_][A-Za-z0-9_]*)",
+          "captures": {
             "1": { "name": "storage.type.function.severian" },
-            "2": { "name": "entity.name.function.severian" },
-            "3": { "name": "punctuation.definition.parameters.begin.severian" }
-          },
-          "end": "\\)",
-          "endCaptures": {
-            "0": { "name": "punctuation.definition.parameters.end.severian" }
-          },
-          "patterns": [
-            { "include": "#comments" },
-            {
-              "match": "\\b([a-z_][A-Za-z0-9_]*)\\b(?=\\s*:)",
-              "name": "variable.parameter.severian"
-            },
-            { "include": "#types" },
-            { "include": "#constants" },
-            { "include": "#numbers" },
-            { "include": "#strings" },
-            { "include": "#punctuation" }
-          ]
+            "2": { "name": "entity.name.function.severian" }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*:\\s*[A-Za-z_][A-Za-z0-9_.]*(?:\\s*\\[)?)",
+          "name": "variable.parameter.severian"
         }
       ]
     },
     "type-declarations": {
       "patterns": [
         {
-          "match": "\\b(class|trait|enum|type)\\s+([A-Z][A-Za-z0-9]*)",
+          "match": "\\b(class|trait|enum)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.severian" },
             "2": { "name": "entity.name.type.severian" }
@@ -122,13 +182,9 @@
           }
         },
         {
-          "match": "\\b(property|bench|chaos)\\b",
+          "match": "\\b(property|bench|chaos|integration)\\b",
           "name": "storage.modifier.test.severian"
-        },
-        {
-          "match": "\"(?:\\\\.|[^\"])*\"(?=\\s*:)",
-          "name": "string.quoted.double.severian"
-          }
+        }
       ]
     },
     "imports": {
@@ -148,7 +204,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|else|while|for|in|switch|when|return|throw|break|continue|fail|unsafe)\\b",
+          "match": "\\b(if|else|while|for|in|switch|when|return|throw|break|continue|unsafe)\\b",
           "name": "keyword.control.severian"
         },
         {
@@ -162,21 +218,29 @@
         {
           "match": "\\b(and|or|not)\\b",
           "name": "keyword.operator.logical.severian"
+        },
+        {
+          "match": "\\b(assert)\\b",
+          "name": "keyword.other.assert.severian"
         }
       ]
     },
     "ownership": {
       "patterns": [
         {
-          "match": "\\b(view|borrow|clone|move)\\b|&",
+          "match": "\\b(view|borrow|clone|move)\\b",
           "name": "storage.modifier.ownership.severian"
+        },
+        {
+          "match": "&",
+          "name": "keyword.operator.address.severian"
         }
       ]
     },
     "constants": {
       "patterns": [
         {
-          "match": "\\b(true|false|absent|invalid)\\b",
+          "match": "\\b(true|false|absent|invalid|dynamic)\\b",
           "name": "constant.language.severian"
         },
         {
@@ -188,7 +252,7 @@
     "numbers": {
       "patterns": [
         {
-          "match": "(?<![A-Za-z0-9_])(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|(?:\\d+\\.\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?|\\d+(?:[eE][+-]?\\d+)?)(?:[iu](?:8|16|32|64)|f(?:16|32|64))?\\b",
+          "match": "(?<![A-Za-z0-9_])(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?\\b",
           "name": "constant.numeric.severian"
         }
       ]
@@ -200,7 +264,11 @@
           "name": "storage.type.primitive.severian"
         },
         {
-          "match": "\\b[A-Z][A-Za-z0-9]*\\b",
+          "match": "\\b(Tensor|Result|Option|Channel|Buffer|Path)\\b",
+          "name": "support.type.builtin.severian"
+        },
+        {
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b",
           "name": "support.type.severian"
         }
       ]
@@ -208,8 +276,16 @@
     "builtins": {
       "patterns": [
         {
-          "match": "\\b(assert|panic|print|range|size)\\b(?=\\s*\\(?)",
+          "match": "\\b(panic|print|range|size|enumerate|zip|indices|present)\\b(?=\\s*\\()",
           "name": "support.function.builtin.severian"
+        }
+      ]
+    },
+    "member-access": {
+      "patterns": [
+        {
+          "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.member.severian"
         }
       ]
     },
@@ -224,8 +300,12 @@
     "operators": {
       "patterns": [
         {
-          "match": "\\?=|:=|==|!=|<=|>=|->|\\+=|-=|\\*=|/=|%=|[=+\\-*/%<>|]",
+          "match": "\\?=|:=|==|!=|<=|>=|->|\\+=|-=|\\*=|/=|%=|\\*\\*|[=+\\-*/%<>|@^]",
           "name": "keyword.operator.severian"
+        },
+        {
+          "match": "(?<![A-Za-z0-9_])X(?![A-Za-z0-9_])",
+          "name": "keyword.operator.matrix.severian"
         }
       ]
     },

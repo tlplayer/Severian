@@ -142,9 +142,6 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             value => return Err(format!("unknown build option `{value}`\n{}", usage())),
         }
     }
-    if target == BuildTarget::Xla && emit != EmitMode::StableHlo {
-        return Err("the current XLA path supports `--emit stablehlo`; XLA/PJRT execution is not available yet".into());
-    }
     if target == BuildTarget::Native && emit == EmitMode::StableHlo {
         return Err("StableHLO emission requires `--target xla`".into());
     }
@@ -375,7 +372,19 @@ fn run_targets(input: &Path) -> Result<(), String> {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         compile_native(&compilation, &output).map_err(|error| error.to_string())?;
-        let status = Command::new(&output)
+        let mut command = Command::new(&output);
+        let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
+            function
+                .decorators
+                .iter()
+                .any(|decorator| decorator.package == "tensor")
+        });
+        if has_xla_regions && std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN").is_none() {
+            if let Some(plugin) = local_rocm_pjrt_plugin(&target.package_root) {
+                command.env("SEVERIAN_ROCM_PJRT_PLUGIN", plugin);
+            }
+        }
+        let status = command
             .status()
             .map_err(|error| format!("could not run {}: {error}", output.display()))?;
         if !status.success() {
@@ -383,6 +392,24 @@ fn run_targets(input: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn local_rocm_pjrt_plugin(start: &Path) -> Option<PathBuf> {
+    for directory in start.ancestors() {
+        let python_lib = directory.join(".venv/lib");
+        let Ok(versions) = fs::read_dir(python_lib) else {
+            continue;
+        };
+        for version in versions.flatten() {
+            let candidate = version
+                .path()
+                .join("site-packages/jax_plugins/xla_rocm7/xla_rocm_plugin.so");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 fn test_targets(input: &Path) -> Result<(), String> {

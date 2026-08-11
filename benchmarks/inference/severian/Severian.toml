@@ -11,4 +11,6 @@ path = "benchmark.sev"
 file = { path = "../../../library/file", version = "0.1.0" }
 qwen2 = { path = "modules/qwen2", version = "0.1.0" }
 qwen2_config = { path = "modules/qwen2_config", version = "0.1.0" }
+qwen_kernels = { path = "modules/qwen_kernels", version = "0.1.0" }
 safetensor_weights = { path = "modules/safetensor_weights", version = "0.1.0" }
+tensor = { path = "../../../library/tensor", version = "0.1.0" }

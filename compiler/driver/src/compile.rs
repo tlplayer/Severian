@@ -188,8 +188,25 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
-    severian_backend::compile_native(&compilation.optimized_hir, &compilation.mlir, output)
-        .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+    let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
+        function
+            .decorators
+            .iter()
+            .any(|decorator| decorator.package == "tensor")
+    });
+    let result = if has_xla_regions {
+        let directory = output.parent().unwrap_or_else(|| Path::new("."));
+        let runtime = crate::runtime_asset::materialize_xla_runtime(directory)?;
+        severian_backend::compile_native_with_xla_runtime(
+            &compilation.optimized_hir,
+            &compilation.mlir,
+            output,
+            &runtime,
+        )
+    } else {
+        severian_backend::compile_native(&compilation.optimized_hir, &compilation.mlir, output)
+    };
+    result.map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 
 pub fn inspect_toolchain() -> severian_backend::ToolchainReport {

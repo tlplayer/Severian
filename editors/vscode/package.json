@@ -2,9 +2,13 @@
   "name": "severian-language",
   "displayName": "Severian Language",
   "description": "Syntax highlighting and editor behavior for the Severian programming language.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "severian",
-  "license": "MIT",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tlplayer/Severian.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -13,7 +17,9 @@
   ],
   "keywords": [
     "severian",
-    "sev"
+    "sev",
+    "mlir",
+    "programming language"
   ],
   "contributes": {
     "languages": [

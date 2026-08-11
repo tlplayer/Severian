@@ -1,0 +1,30 @@
+import math
+from model import neuralnet as nn
+
+native("sev_print_i64") def nativePrint(value: i64)
+
+@tensor(target, amd, ^)
+class HTTPServer:
+    port: int
+
+    def HTTPServer(port: int):
+        self.port = port
+
+    def runServer(input_tensor: Tensor[f32, dynamic, 768]) -> Result[int, IOError]:
+        values := [1, 2, 3]
+        values_view = view values
+        writable = borrow values
+        copied = clone values
+        owned = move copied
+        worker = async print(f"port={self.port}") with runtime
+        await worker
+        score = 3.0 ** 2.0
+        cross = left ^ right
+        product = left X right
+        return size(values_view) + int(score)
+
+    test with integration "native output":
+        assert(size([1, 2, 3]) == 3)
+
+    test with property and chaos "ownership":
+        assert(true and not false)

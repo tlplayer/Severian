@@ -16,7 +16,7 @@ pub mod reduction;
 pub use ops::{MlirValue, StableHloEmitter};
 pub use reduction::StableHloReduction;
 
-use severian_hir::{Expression, Function, Instruction, Program, ValueType};
+use severian_hir::{CallTarget, Expression, Function, FunctionId, Instruction, Program, ValueType};
 use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_mlir::Module;
 use std::collections::HashMap;
@@ -26,6 +26,7 @@ use crate::tensor::tensor_type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StableHloLoweringError {
+    UnknownFunction(FunctionId),
     UnsupportedOperation(String),
     InvalidArity {
         operation: String,
@@ -47,6 +48,7 @@ pub enum StableHloLoweringError {
 impl fmt::Display for StableHloLoweringError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownFunction(id) => write!(formatter, "unknown StableHLO entry function {id:?}"),
             Self::UnsupportedOperation(operation) => {
                 write!(formatter, "unsupported StableHLO operation `{operation}`")
             }
@@ -91,21 +93,65 @@ pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError
         .filter(|function| {
             function.native_symbol.is_none()
                 && matches!(function.return_type, ValueType::Tensor(_))
+                && function
+                    .decorators
+                    .iter()
+                    .any(|decorator| decorator.package == "tensor")
         })
         .collect::<Vec<_>>();
     if tensor_functions.is_empty() {
         return Err(StableHloLoweringError::NoTensorFunctions);
     }
 
+    let context = LoweringContext::new(program);
     let mut output = String::from("module {\n");
     for function in tensor_functions {
-        lower_function(function, &mut output)?;
+        lower_function(&context, function, &function.name, &mut output)?;
     }
     output.push_str("}\n");
     Ok(Module::new(output))
 }
 
-fn lower_function(function: &Function, output: &mut String) -> Result<(), StableHloLoweringError> {
+/// Lowers one resolved Severian function as a single StableHLO/XLA region.
+/// Calls to other source functions are inlined by `FunctionId`; native tensor
+/// functions remain generic StableHLO intrinsics.
+pub fn lower_entry(
+    program: &Program,
+    entry: FunctionId,
+) -> Result<Module, StableHloLoweringError> {
+    let context = LoweringContext::new(program);
+    let function = context
+        .functions
+        .get(&entry)
+        .copied()
+        .ok_or(StableHloLoweringError::UnknownFunction(entry))?;
+    let mut output = String::from("module {\n");
+    lower_function(&context, function, "main", &mut output)?;
+    output.push_str("}\n");
+    Ok(Module::new(output))
+}
+
+struct LoweringContext<'a> {
+    functions: HashMap<FunctionId, &'a Function>,
+}
+
+impl<'a> LoweringContext<'a> {
+    fn new(program: &'a Program) -> Self {
+        let functions = program
+            .functions
+            .iter()
+            .map(|function| (function.id, function))
+            .collect();
+        Self { functions }
+    }
+}
+
+fn lower_function(
+    context: &LoweringContext<'_>,
+    function: &Function,
+    exported_name: &str,
+    output: &mut String,
+) -> Result<(), StableHloLoweringError> {
     let ValueType::Tensor(result_type) = function.return_type else {
         unreachable!()
     };
@@ -124,7 +170,9 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
     }
     let mut emitter = StableHloEmitter::new();
     let result = lower_straight_line(
+        context,
         &function.name,
+        result_type,
         &function.instructions,
         &mut values,
         &mut emitter,
@@ -142,7 +190,7 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
     writeln!(
         output,
         "  func.func @{}({signature}) -> {} {{",
-        function.name,
+        exported_name,
         tensor_type(result_type),
     )
     .expect("writing to a String cannot fail");
@@ -154,7 +202,9 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
 }
 
 fn lower_straight_line(
+    context: &LoweringContext<'_>,
     function: &str,
+    return_type: TensorType,
     instructions: &[Instruction],
     values: &mut HashMap<String, MlirValue>,
     emitter: &mut StableHloEmitter,
@@ -162,7 +212,7 @@ fn lower_straight_line(
     for instruction in instructions {
         match instruction {
             Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
-                let value = lower_expression(function, value, values, emitter)?;
+                let value = lower_expression(context, function, value, None, values, emitter)?;
                 values.insert(name.clone(), value);
             }
             Instruction::Assign { target, op, value } => {
@@ -178,14 +228,29 @@ fn lower_straight_line(
                         reason: "tensor assignment target must be a local variable".into(),
                     });
                 };
-                let value = lower_expression(function, value, values, emitter)?;
+                let value = lower_expression(context, function, value, None, values, emitter)?;
                 values.insert(name.clone(), value);
             }
             Instruction::Return(Some(value)) => {
-                return lower_expression(function, value, values, emitter).map(Some);
+                return lower_expression(
+                    context,
+                    function,
+                    value,
+                    Some(return_type),
+                    values,
+                    emitter,
+                )
+                .map(Some);
             }
             Instruction::With { instructions, .. } => {
-                if let Some(result) = lower_straight_line(function, instructions, values, emitter)? {
+                if let Some(result) = lower_straight_line(
+                    context,
+                    function,
+                    return_type,
+                    instructions,
+                    values,
+                    emitter,
+                )? {
                     return Ok(Some(result));
                 }
             }
@@ -202,8 +267,10 @@ fn lower_straight_line(
 }
 
 fn lower_expression(
+    context: &LoweringContext<'_>,
     function: &str,
     expression: &Expression,
+    expected_type: Option<TensorType>,
     values: &HashMap<String, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
@@ -215,8 +282,11 @@ fn lower_expression(
             }
         }),
         Expression::Call { target, args } => {
-            let result_type = match expression.ty() {
-                Some(ValueType::Tensor(tensor)) => tensor,
+            let result_type = match expected_type.or_else(|| match expression.ty() {
+                Some(ValueType::Tensor(tensor)) if tensor.rank.is_some() => Some(tensor),
+                _ => None,
+            }) {
+                Some(tensor) => tensor,
                 other => {
                     return Err(StableHloLoweringError::UnsupportedFunction {
                         function: function.into(),
@@ -224,16 +294,331 @@ fn lower_expression(
                     });
                 }
             };
-            let operands = args
-                .iter()
-                .filter(|argument| matches!(argument.ty(), Some(ValueType::Tensor(_))))
-                .map(|argument| lower_expression(function, argument, values, emitter))
-                .collect::<Result<Vec<_>, _>>()?;
-            lower_tensor_call(&target.name, &operands, result_type, emitter)
+            lower_call(
+                context,
+                function,
+                target,
+                args,
+                result_type,
+                values,
+                emitter,
+            )
         }
         other => Err(StableHloLoweringError::UnsupportedFunction {
             function: function.into(),
             reason: format!("unsupported tensor expression {other:?}"),
+        }),
+    }
+}
+
+fn lower_call(
+    context: &LoweringContext<'_>,
+    caller: &str,
+    target: &CallTarget,
+    arguments: &[Expression],
+    result_type: TensorType,
+    values: &HashMap<String, MlirValue>,
+    emitter: &mut StableHloEmitter,
+) -> Result<MlirValue, StableHloLoweringError> {
+    if let Some(function) = context.functions.get(&target.id).copied() {
+        if function.native_symbol.is_none() {
+            return lower_source_call(context, function, arguments, values, emitter);
+        }
+    }
+    lower_intrinsic_call(
+        context,
+        caller,
+        target,
+        arguments,
+        result_type,
+        values,
+        emitter,
+    )
+}
+
+fn lower_source_call(
+    context: &LoweringContext<'_>,
+    function: &Function,
+    arguments: &[Expression],
+    caller_values: &HashMap<String, MlirValue>,
+    emitter: &mut StableHloEmitter,
+) -> Result<MlirValue, StableHloLoweringError> {
+    if function.params.len() != arguments.len() {
+        return Err(StableHloLoweringError::InvalidArity {
+            operation: function.name.clone(),
+            expected: function.params.len(),
+            actual: arguments.len(),
+        });
+    }
+    let ValueType::Tensor(return_type) = function.return_type else {
+        return Err(StableHloLoweringError::UnsupportedFunction {
+            function: function.name.clone(),
+            reason: "an inlined tensor source call must return a tensor".into(),
+        });
+    };
+    let mut callee_values = HashMap::new();
+    for (parameter, argument) in function.params.iter().zip(arguments) {
+        let ValueType::Tensor(parameter_type) = parameter.ty else {
+            return Err(StableHloLoweringError::UnsupportedFunction {
+                function: function.name.clone(),
+                reason: format!("inlined parameter `{}` is not a tensor", parameter.name),
+            });
+        };
+        let value = lower_expression(
+            context,
+            &function.name,
+            argument,
+            Some(parameter_type),
+            caller_values,
+            emitter,
+        )?;
+        callee_values.insert(parameter.name.clone(), value);
+    }
+    lower_straight_line(
+        context,
+        &function.name,
+        return_type,
+        &function.instructions,
+        &mut callee_values,
+        emitter,
+    )?
+    .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+        function: function.name.clone(),
+        reason: "inlined tensor function has no returned value".into(),
+    })
+}
+
+fn lower_intrinsic_call(
+    context: &LoweringContext<'_>,
+    caller: &str,
+    target: &CallTarget,
+    arguments: &[Expression],
+    result_type: TensorType,
+    values: &HashMap<String, MlirValue>,
+    emitter: &mut StableHloEmitter,
+) -> Result<MlirValue, StableHloLoweringError> {
+    let mut operands = Vec::new();
+    for argument in arguments {
+        if matches!(argument.ty(), Some(ValueType::Tensor(_))) {
+            operands.push(lower_expression(
+                context, caller, argument, None, values, emitter,
+            )?);
+        } else if let Expression::List(elements) = argument.kind() {
+            for element in elements {
+                if matches!(element.ty(), Some(ValueType::Tensor(_))) {
+                    operands.push(lower_expression(
+                        context, caller, element, None, values, emitter,
+                    )?);
+                }
+            }
+        }
+    }
+    lower_tensor_intrinsic(target, arguments, &operands, result_type, emitter)
+}
+
+fn lower_tensor_intrinsic(
+    target: &CallTarget,
+    source_args: &[Expression],
+    args: &[MlirValue],
+    result_type: TensorType,
+    emitter: &mut StableHloEmitter,
+) -> Result<MlirValue, StableHloLoweringError> {
+    let op = normalized_tensor_operation(&target.name);
+    match op.as_str() {
+        "gather" => {
+            require_arity(&op, args, 2)?;
+            let table = args[0]
+                .tensor_type()
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            let ids = args[1]
+                .tensor_type()
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            let table_rank = table.rank.ok_or_else(|| {
+                StableHloLoweringError::UnsupportedFunction {
+                    function: target.name.clone(),
+                    reason: "gather requires a ranked embedding table".into(),
+                }
+            })?;
+            let index_rank = ids.rank.ok_or_else(|| {
+                StableHloLoweringError::UnsupportedFunction {
+                    function: target.name.clone(),
+                    reason: "gather requires ranked indices".into(),
+                }
+            })?;
+            if table_rank != 2 {
+                return Err(StableHloLoweringError::InvalidRank {
+                    operation: op,
+                    expected: 2,
+                    actual: Some(table_rank),
+                });
+            }
+            let TensorDimension::Static(vocabulary_size) = table.dimensions[0] else {
+                return Err(StableHloLoweringError::UnsupportedOperation(target.name.clone()));
+            };
+            let TensorDimension::Static(embedding_size) = table.dimensions[1] else {
+                return Err(StableHloLoweringError::UnsupportedOperation(target.name.clone()));
+            };
+            Ok(indexing::embedding_lookup(
+                emitter,
+                &args[0],
+                &args[1],
+                u64::from(index_rank),
+                vocabulary_size,
+                embedding_size,
+                result_type,
+            ))
+        }
+        "transpose" => {
+            require_arity(&op, args, 1)?;
+            let axes = integer_list_argument(source_args.get(1), &target.name)?;
+            Ok(emitter.transpose(&args[0], &axes, result_type))
+        }
+        "reshape" => {
+            require_arity(&op, args, 1)?;
+            let _shape = integer_list_argument(source_args.get(1), &target.name)?;
+            Ok(emitter.reshape(&args[0], result_type))
+        }
+        "broadcast" => {
+            require_arity(&op, args, 1)?;
+            let _shape = integer_list_argument(source_args.get(1), &target.name)?;
+            let input_rank = args[0]
+                .tensor_type()
+                .and_then(|tensor| tensor.rank)
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            result_type
+                .rank
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            Ok(emitter.broadcast_in_dim(
+                &args[0],
+                &(0..u64::from(input_rank)).collect::<Vec<_>>(),
+                result_type,
+            ))
+        }
+        "scale" | "addscalar" => {
+            require_arity(&op, args, 1)?;
+            let literal = float_argument(source_args.get(1), &target.name)?;
+            let scalar = emitter.splat(&literal, result_type);
+            if op == "scale" {
+                Ok(emitter.multiply(&args[0], &scalar, result_type))
+            } else {
+                Ok(emitter.add(&args[0], &scalar, result_type))
+            }
+        }
+        "dynamicupdateslice" => {
+            require_arity(&op, args, 2)?;
+            let starts = integer_list_argument(source_args.get(2), &target.name)?
+                .into_iter()
+                .map(|start| emitter.scalar(&start.to_string(), TensorElementType::I64))
+                .collect::<Vec<_>>();
+            Ok(emitter.dynamic_update_slice(
+                &args[0],
+                &args[1],
+                &starts,
+                result_type,
+            ))
+        }
+        "dynamicslice" => {
+            require_arity(&op, args, 1)?;
+            let starts = integer_list_argument(source_args.get(1), &target.name)?
+                .into_iter()
+                .map(|start| emitter.scalar(&start.to_string(), TensorElementType::I64))
+                .collect::<Vec<_>>();
+            let sizes = integer_list_argument(source_args.get(2), &target.name)?;
+            Ok(emitter.dynamic_slice(&args[0], &starts, &sizes, result_type))
+        }
+        "slice" => {
+            require_arity(&op, args, 1)?;
+            let starts = integer_list_argument(source_args.get(1), &target.name)?;
+            let limits = integer_list_argument(source_args.get(2), &target.name)?;
+            let strides = integer_list_argument(source_args.get(3), &target.name)?;
+            Ok(emitter.slice(&args[0], &starts, &limits, &strides, result_type))
+        }
+        "cosine" => {
+            require_arity(&op, args, 1)?;
+            Ok(emitter.cosine(&args[0], result_type))
+        }
+        "sine" => {
+            require_arity(&op, args, 1)?;
+            Ok(emitter.sine(&args[0], result_type))
+        }
+        "concatenate" => {
+            if args.is_empty() {
+                return Err(StableHloLoweringError::InvalidArity {
+                    operation: op,
+                    expected: 1,
+                    actual: 0,
+                });
+            }
+            let axis = integer_argument(source_args.get(1), &target.name)?;
+            Ok(emitter.concatenate(args, axis, result_type))
+        }
+        _ => lower_tensor_call(&target.name, args, result_type, emitter),
+    }
+}
+
+fn normalized_tensor_operation(function: &str) -> String {
+    let op = function
+        .rsplit_once('.')
+        .map(|(_, leaf)| leaf)
+        .unwrap_or(function)
+        .to_ascii_lowercase();
+    op.strip_suffix("bf16")
+        .or_else(|| op.strip_suffix("f32"))
+        .unwrap_or(&op)
+        .to_string()
+}
+
+fn integer_list_argument(
+    expression: Option<&Expression>,
+    operation: &str,
+) -> Result<Vec<u64>, StableHloLoweringError> {
+    let Some(Expression::List(values)) = expression.map(Expression::kind) else {
+        return Err(StableHloLoweringError::UnsupportedFunction {
+            function: operation.into(),
+            reason: "expected a compile-time integer list".into(),
+        });
+    };
+    values
+        .iter()
+        .map(|value| match value.kind() {
+            Expression::Integer(value) if *value >= 0 => Ok(*value as u64),
+            _ => Err(StableHloLoweringError::UnsupportedFunction {
+                function: operation.into(),
+                reason: "expected non-negative compile-time integer metadata".into(),
+            }),
+        })
+        .collect()
+}
+
+fn float_argument(
+    expression: Option<&Expression>,
+    operation: &str,
+) -> Result<String, StableHloLoweringError> {
+    match expression.map(Expression::kind) {
+        Some(Expression::Float(bits)) => {
+            let mut literal = f64::from_bits(*bits).to_string();
+            if !literal.contains(['.', 'e', 'E']) {
+                literal.push_str(".0");
+            }
+            Ok(literal)
+        }
+        Some(Expression::Integer(value)) => Ok(format!("{value}.0")),
+        _ => Err(StableHloLoweringError::UnsupportedFunction {
+            function: operation.into(),
+            reason: "expected a compile-time scalar".into(),
+        }),
+    }
+}
+
+fn integer_argument(
+    expression: Option<&Expression>,
+    operation: &str,
+) -> Result<u64, StableHloLoweringError> {
+    match expression.map(Expression::kind) {
+        Some(Expression::Integer(value)) if *value >= 0 => Ok(*value as u64),
+        _ => Err(StableHloLoweringError::UnsupportedFunction {
+            function: operation.into(),
+            reason: "expected a non-negative compile-time integer".into(),
         }),
     }
 }
@@ -244,16 +629,7 @@ pub fn lower_tensor_call(
     result_type: TensorType,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
-    let op = function
-        .rsplit_once('.')
-        .map(|(_, leaf)| leaf)
-        .unwrap_or(function)
-        .to_ascii_lowercase();
-    let op = op
-        .strip_suffix("bf16")
-        .or_else(|| op.strip_suffix("f32"))
-        .unwrap_or(&op)
-        .to_string();
+    let op = normalized_tensor_operation(function);
 
     match op.as_str() {
         "add" | "rankedadd" | "tensor_add" => {
@@ -276,7 +652,7 @@ pub fn lower_tensor_call(
             Ok(emitter.divide(&args[0], &args[1], result_type))
         }
 
-        "matmul" | "rankedmatmul" | "tensor_matmul" => {
+        "matmul" | "batchedmatmul" | "rankedmatmul" | "tensor_matmul" => {
             require_arity(&op, args, 2)?;
             match result_type.rank {
                 Some(2) => Ok(linear::matmul_2d(emitter, &args[0], &args[1], result_type)),
@@ -305,12 +681,6 @@ pub fn lower_tensor_call(
             Ok(emitter.reshape(&args[0], result_type))
         }
 
-        "transpose" | "tensor_transpose" => {
-            require_arity(&op, args, 1)?;
-            require_rank(&op, result_type, 2)?;
-            Ok(emitter.transpose(&args[0], &[1, 0], result_type))
-        }
-
         "broadcast" | "broadcastlike" | "broadcast_in_dim" | "tensor_broadcast" => {
             if args.is_empty() || args.len() > 2 {
                 return Err(StableHloLoweringError::InvalidArity {
@@ -333,8 +703,21 @@ pub fn lower_tensor_call(
                     actual: Some(result_rank),
                 });
             }
-            let first = u64::from(result_rank - input_rank);
-            let dimensions = (first..u64::from(result_rank)).collect::<Vec<_>>();
+            let input_type = args[0].tensor_type().unwrap();
+            let width = usize::from(input_rank);
+            let result_width = usize::from(result_rank);
+            let first = (0..=result_width - width)
+                .max_by_key(|&start| {
+                    (0..width)
+                        .filter(|&axis| {
+                            input_type.dimensions[axis] == result_type.dimensions[start + axis]
+                        })
+                        .count()
+                })
+                .unwrap_or(result_width - width);
+            let dimensions = (first..first + width)
+                .map(|axis| axis as u64)
+                .collect::<Vec<_>>();
             Ok(emitter.broadcast_in_dim(&args[0], &dimensions, result_type))
         }
 
@@ -561,22 +944,6 @@ fn require_arity(
             operation: operation.to_string(),
             expected,
             actual: args.len(),
-        })
-    }
-}
-
-fn require_rank(
-    operation: &str,
-    tensor: TensorType,
-    expected: usize,
-) -> Result<(), StableHloLoweringError> {
-    if tensor.rank == Some(expected as u8) {
-        Ok(())
-    } else {
-        Err(StableHloLoweringError::InvalidRank {
-            operation: operation.to_string(),
-            expected,
-            actual: tensor.rank,
         })
     }
 }

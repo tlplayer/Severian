@@ -177,6 +177,14 @@ impl StableHloEmitter {
         self.unary("exponential", input, result_type)
     }
 
+    pub fn cosine(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("cosine", input, result_type)
+    }
+
+    pub fn sine(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("sine", input, result_type)
+    }
+
     pub fn tanh(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
         self.unary("tanh", input, result_type)
     }
@@ -330,11 +338,7 @@ impl StableHloEmitter {
 }
 
 fn dense_i64(values: &[u64]) -> String {
-    format!(
-        "dense<[{}]> : tensor<{}xi64>",
-        list(values),
-        values.len()
-    )
+    format!("[{}]", list(values))
 }
 
 pub(crate) fn list(values: &[u64]) -> String {

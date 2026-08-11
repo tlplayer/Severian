@@ -78,7 +78,9 @@ fn zero_literal(element: TensorElementType) -> &'static str {
 
 fn minimum_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "-inf",
+        TensorElementType::BF16 => "0xFF80",
+        TensorElementType::F32 => "0xFF800000",
+        TensorElementType::F64 => "0xFFF0000000000000",
         TensorElementType::I32 => "-2147483648",
         TensorElementType::I64 => "-9223372036854775808",
     }
@@ -86,7 +88,9 @@ fn minimum_literal(element: TensorElementType) -> &'static str {
 
 fn maximum_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "inf",
+        TensorElementType::BF16 => "0x7F80",
+        TensorElementType::F32 => "0x7F800000",
+        TensorElementType::F64 => "0x7FF0000000000000",
         TensorElementType::I32 => "2147483647",
         TensorElementType::I64 => "9223372036854775807",
     }

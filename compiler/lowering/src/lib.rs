@@ -221,6 +221,22 @@ fn lower_hir(program: &Program) -> Module {
         }
         output.push('\n');
     }
+    for function in program.functions.iter().filter(|function| {
+        function.native_symbol.is_none()
+            && function
+                .decorators
+                .iter()
+                .any(|decorator| decorator.package == "tensor")
+    }) {
+        write!(output, "  llvm.func @{}(", source_function_symbol(&function.name)).unwrap();
+        for (index, parameter) in function.params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(mlir_type(parameter.ty));
+        }
+        write!(output, ") -> {}\n", mlir_type(function.return_type)).unwrap();
+    }
     let locally_declared_symbols = program
         .functions
         .iter()
@@ -410,7 +426,12 @@ fn lower_hir(program: &Program) -> Module {
         }
     }
     for function in &program.functions {
-        if function.native_symbol.is_some() {
+        if function.native_symbol.is_some()
+            || function
+                .decorators
+                .iter()
+                .any(|decorator| decorator.package == "tensor")
+        {
             continue;
         }
         lower_function(function, &environment, &mut output);
@@ -6012,6 +6033,56 @@ int64_t __sev_host_page_size(void) {
     }
     if has_model_graph {
         source.push_str(&severian_platform::model_graph_source(rocm));
+    }
+    let tensor_regions = program
+        .functions
+        .iter()
+        .filter(|function| {
+            function.native_symbol.is_none()
+                && function
+                    .decorators
+                    .iter()
+                    .any(|decorator| decorator.package == "tensor")
+        })
+        .collect::<Vec<_>>();
+    if !tensor_regions.is_empty() {
+        source.push_str(concat!(
+            "extern void *__sev_xla_execute(uint64_t, const uint8_t *, size_t, void **, size_t);\n",
+            "extern void *__sev_xla_i64_token(int64_t);\n",
+            "extern int64_t __sev_xla_argmax_bf16(void *);\n\n",
+        ));
+        for function in tensor_regions {
+            let module = stablehlo::lower_entry(program, function.id)
+                .unwrap_or_else(|error| panic!("failed to lower XLA region `{}`: {error}", function.name));
+            write!(source, "void *{}(", source_function_symbol(&function.name)).unwrap();
+            for index in 0..function.params.len() {
+                if index > 0 {
+                    source.push_str(", ");
+                }
+                write!(source, "void *arg{index}").unwrap();
+            }
+            source.push_str(") {\n  static const uint8_t module[] = {");
+            for (index, byte) in module.as_str().bytes().enumerate() {
+                if index > 0 {
+                    source.push_str(",");
+                }
+                write!(source, "{byte}").unwrap();
+            }
+            source.push_str("};\n  void *args[] = {");
+            for index in 0..function.params.len() {
+                if index > 0 {
+                    source.push_str(", ");
+                }
+                write!(source, "arg{index}").unwrap();
+            }
+            writeln!(
+                source,
+                "}};\n  return __sev_xla_execute({}ULL, module, sizeof(module), args, {});\n}}",
+                function.id.0,
+                function.params.len(),
+            )
+            .unwrap();
+        }
     }
     source
 }
