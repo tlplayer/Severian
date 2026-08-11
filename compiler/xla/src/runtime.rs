@@ -14,6 +14,12 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+unsafe extern "C" {
+    fn __sev_collection_size(collection: *mut c_void) -> i64;
+    fn __sev_collection_get(collection: *mut c_void, index: i64) -> *mut c_void;
+    fn __sev_unbox_i64(value: *mut c_void) -> i64;
+}
+
 #[repr(C)]
 struct MappedBf16Tensor {
     rank: i64,
@@ -30,6 +36,7 @@ struct RuntimeState {
 }
 
 static STATE: OnceLock<Mutex<Option<RuntimeState>>> = OnceLock::new();
+const QWEN_PREFILL_CAPACITY: usize = 32;
 
 fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("Severian XLA runtime error: {message}");
@@ -59,6 +66,16 @@ fn new_handle() -> *mut c_void {
     Box::into_raw(Box::new(0_u8)).cast()
 }
 
+fn upload_host(runtime: &mut RuntimeState, host: HostBuffer) -> *mut c_void {
+    let buffer = runtime
+        .client
+        .upload_to(host, &runtime.device)
+        .unwrap_or_else(|error| fail(error));
+    let handle = new_handle();
+    runtime.buffers.insert(handle as usize, buffer);
+    handle
+}
+
 unsafe fn upload_mapped_bf16(runtime: &mut RuntimeState, pointer: *mut c_void) {
     let tensor = &*pointer.cast::<MappedBf16Tensor>();
     if tensor.rank <= 0 || tensor.elements < 0 || tensor.shape.is_null() || tensor.data.is_null() {
@@ -83,13 +100,109 @@ pub unsafe extern "C" fn __sev_xla_i64_token(value: i64) -> *mut c_void {
     let mut guard = state();
     let runtime = guard.as_mut().unwrap();
     let host = HostBuffer::from_i64([1, 1], &[value]).unwrap_or_else(|error| fail(error));
-    let buffer = runtime
-        .client
-        .upload_to(host, &runtime.device)
+    upload_host(runtime, host)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_i64_tokens(values: *mut c_void) -> *mut c_void {
+    if values.is_null() {
+        fail("null token list");
+    }
+    let count = __sev_collection_size(values);
+    if count <= 0 {
+        fail("cannot upload an empty token list");
+    }
+    if count as usize > QWEN_PREFILL_CAPACITY {
+        fail(format!(
+            "prompt has {count} tokens; prefill capacity is {QWEN_PREFILL_CAPACITY}"
+        ));
+    }
+    let mut tokens = (0..count)
+        .map(|index| __sev_unbox_i64(__sev_collection_get(values, index)))
+        .collect::<Vec<_>>();
+    tokens.resize(QWEN_PREFILL_CAPACITY, 0);
+    let host = HostBuffer::from_i64([1, QWEN_PREFILL_CAPACITY as i64], &tokens)
         .unwrap_or_else(|error| fail(error));
-    let handle = new_handle();
-    runtime.buffers.insert(handle as usize, buffer);
-    handle
+    let mut guard = state();
+    upload_host(guard.as_mut().unwrap(), host)
+}
+
+fn upload_f32(values: &[f32], dimensions: impl Into<Vec<i64>>) -> *mut c_void {
+    let host = HostBuffer::from_f32(dimensions, values).unwrap_or_else(|error| fail(error));
+    let mut guard = state();
+    upload_host(guard.as_mut().unwrap(), host)
+}
+
+unsafe fn token_count(tokens: *mut c_void) -> usize {
+    if tokens.is_null() {
+        fail("null token list");
+    }
+    let count = __sev_collection_size(tokens);
+    if count <= 0 || count as usize > QWEN_PREFILL_CAPACITY {
+        fail(format!(
+            "prompt token count {count} is outside prefill capacity 1..={QWEN_PREFILL_CAPACITY}"
+        ));
+    }
+    count as usize
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_qwen_rope_cos(tokens: *mut c_void) -> *mut c_void {
+    token_count(tokens);
+    let mut values = Vec::with_capacity(QWEN_PREFILL_CAPACITY * 128);
+    for position in 0..QWEN_PREFILL_CAPACITY {
+        let frequencies = (0..64)
+            .map(|index| {
+                let inverse = 1_000_000.0_f32.powf(-(index as f32) / 64.0);
+                (position as f32 * inverse).cos()
+            })
+            .collect::<Vec<_>>();
+        values.extend_from_slice(&frequencies);
+        values.extend_from_slice(&frequencies);
+    }
+    upload_f32(&values, [1, 1, QWEN_PREFILL_CAPACITY as i64, 128])
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_qwen_rope_sin(tokens: *mut c_void) -> *mut c_void {
+    token_count(tokens);
+    let mut values = Vec::with_capacity(QWEN_PREFILL_CAPACITY * 128);
+    for position in 0..QWEN_PREFILL_CAPACITY {
+        let frequencies = (0..64)
+            .map(|index| {
+                let inverse = 1_000_000.0_f32.powf(-(index as f32) / 64.0);
+                (position as f32 * inverse).sin()
+            })
+            .collect::<Vec<_>>();
+        values.extend_from_slice(&frequencies);
+        values.extend_from_slice(&frequencies);
+    }
+    upload_f32(&values, [1, 1, QWEN_PREFILL_CAPACITY as i64, 128])
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_qwen_causal_mask(tokens: *mut c_void) -> *mut c_void {
+    let count = token_count(tokens);
+    let values = (0..QWEN_PREFILL_CAPACITY)
+        .flat_map(|query| {
+            (0..QWEN_PREFILL_CAPACITY).map(move |key| {
+                if query < count && key <= query {
+                    0.0
+                } else {
+                    -1.0e30
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    upload_f32(
+        &values,
+        [
+            1,
+            1,
+            QWEN_PREFILL_CAPACITY as i64,
+            QWEN_PREFILL_CAPACITY as i64,
+        ],
+    )
 }
 
 #[no_mangle]
@@ -152,6 +265,50 @@ pub unsafe extern "C" fn __sev_xla_argmax_bf16(tensor: *mut c_void) -> i64 {
         .unwrap_or_else(|| fail("argmax requires an XLA output tensor"));
     let bytes = buffer.to_host_bytes().unwrap_or_else(|error| fail(error));
     bytes
+        .chunks_exact(2)
+        .enumerate()
+        .map(|(index, bytes)| {
+            let bits = u16::from_ne_bytes([bytes[0], bytes[1]]);
+            (index, f32::from_bits(u32::from(bits) << 16))
+        })
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index as i64)
+        .unwrap_or_else(|| fail("argmax received an empty tensor"))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_argmax_position_bf16(
+    tensor: *mut c_void,
+    tokens: *mut c_void,
+) -> i64 {
+    let guard = state();
+    let runtime = guard.as_ref().unwrap();
+    let buffer = runtime
+        .buffers
+        .get(&(tensor as usize))
+        .unwrap_or_else(|| fail("argmax requires an XLA output tensor"));
+    if buffer.shape().element_type != ElementType::BF16 {
+        fail("argmax requires a BF16 tensor");
+    }
+    let width = buffer
+        .shape()
+        .dimensions
+        .last()
+        .copied()
+        .unwrap_or_else(|| fail("argmax requires a ranked tensor"));
+    if width <= 0 {
+        fail("argmax received an empty final dimension");
+    }
+    let bytes = buffer.to_host_bytes().unwrap_or_else(|error| fail(error));
+    let row_bytes = width as usize * 2;
+    let position = token_count(tokens) - 1;
+    let start = position
+        .checked_mul(row_bytes)
+        .unwrap_or_else(|| fail("argmax row offset overflow"));
+    let row = bytes
+        .get(start..start + row_bytes)
+        .unwrap_or_else(|| fail("argmax position is outside the tensor"));
+    row
         .chunks_exact(2)
         .enumerate()
         .map(|(index, bytes)| {

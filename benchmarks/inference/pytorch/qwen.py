@@ -19,7 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, required=True)
-    parser.add_argument("--length", choices=("128", "512", "2048"), required=True)
+    parser.add_argument("--length", required=True)
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--end-to-end", action="store_true")
     args = parser.parse_args()
@@ -50,6 +50,11 @@ def main() -> None:
         token_ids = record["input_ids"]
     tokenize_end = time.monotonic_ns()
     input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+    warmup_start = time.monotonic_ns()
+    with torch.inference_mode():
+        model(input_ids=input_ids, use_cache=False)
+    synchronize()
+    warmup_end = time.monotonic_ns()
     torch.cuda.reset_peak_memory_stats(device)
     with torch.inference_mode():
         prefill_start = time.monotonic_ns()
@@ -83,9 +88,15 @@ def main() -> None:
         "decode_ns": decode_end - decode_start,
         "load_ns": model_ready - process_start,
         "tokenize_ns": tokenize_end - tokenize_start,
+        "warmup_ns": warmup_end - warmup_start,
+        "process_to_ready_ns": warmup_end - process_start,
         "measurement_mode": "end_to_end" if args.end_to_end else "compute",
         "ttft_ns": first_token - prefill_start,
-        "decode_tokens_per_second": (len(generated) - 1) * 1e9 / (decode_end - decode_start),
+        "decode_tokens_per_second": (
+            (len(generated) - 1) * 1e9 / (decode_end - decode_start)
+            if len(generated) > 1 and decode_end > decode_start
+            else None
+        ),
         "gpu_free_total_before": before,
         "gpu_free_total_after": after,
         "peak_vram_bytes": torch.cuda.max_memory_allocated(device),

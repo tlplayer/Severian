@@ -96,25 +96,49 @@ def _event_token_ids(event: dict, kind: str, tokenizer) -> list[int]:
 
 def _gpu_snapshot() -> dict:
     command = ["rocm-smi", "--showproductname", "--showmeminfo", "vram", "--json"]
-    result = subprocess.run(command, text=True, capture_output=True, timeout=10)
-    if result.returncode != 0:
-        raise RuntimeError(f"rocm-smi failed: {result.stderr}")
-    devices = json.loads(result.stdout)
-    if not devices:
-        raise RuntimeError("rocm-smi reported no AMD GPU")
-    key = sorted(devices)[0]
-    values = devices[key]
-    used = next(
-        int(value)
-        for name, value in values.items()
-        if "VRAM Total Used Memory" in name
-    )
-    model = next(
-        str(value)
-        for name, value in values.items()
-        if "Card Series" in name or "Card Model" in name
-    )
-    return {"gpu_model": model, "gpu_index": 0, "vram_used_bytes": used}
+    try:
+        result = subprocess.run(command, text=True, capture_output=True, timeout=10)
+    except FileNotFoundError:
+        result = None
+    if result is not None and result.returncode == 0:
+        devices = json.loads(result.stdout)
+        if devices:
+            key = sorted(devices)[0]
+            values = devices[key]
+            used = next(
+                int(value)
+                for name, value in values.items()
+                if "VRAM Total Used Memory" in name
+            )
+            model = next(
+                str(value)
+                for name, value in values.items()
+                if "Card Series" in name or "Card Model" in name
+            )
+            return {"gpu_model": model, "gpu_index": 0, "vram_used_bytes": used}
+
+    # Radeon desktop installs do not always ship rocm-smi. The amdgpu sysfs
+    # counters expose the same process-independent VRAM measurement.
+    for memory_path in sorted(Path("/sys/class/drm").glob("card*/device/mem_info_vram_used")):
+        device = memory_path.parent
+        slot = None
+        for line in (device / "uevent").read_text().splitlines():
+            if line.startswith("PCI_SLOT_NAME="):
+                slot = line.split("=", 1)[1]
+                break
+        model = "AMD Radeon GPU"
+        if slot:
+            pci = subprocess.run(
+                ["lspci", "-s", slot], text=True, capture_output=True, timeout=10
+            )
+            if pci.returncode == 0 and ": " in pci.stdout:
+                model = pci.stdout.strip().split(": ", 1)[1]
+        return {
+            "gpu_model": model,
+            "gpu_index": 0,
+            "vram_used_bytes": int(memory_path.read_text().strip()),
+        }
+    raise RuntimeError("no AMD GPU VRAM counter was found")
 
 
 class _VramMonitor:
@@ -178,7 +202,11 @@ def benchmark_server(spec: ServerSpec, tokenizer, output_tokens: int, timeout: f
             "load_ns": model_ready - process_start,
             "ttft_ns": first_token - request_started,
             "decode_ns": decode_ns,
-            "decode_tokens_per_second": (output_tokens - 1) * 1e9 / decode_ns,
+            "decode_tokens_per_second": (
+                (output_tokens - 1) * 1e9 / decode_ns
+                if output_tokens > 1 and decode_ns > 0
+                else None
+            ),
             "gpu_memory_before_bytes": before["vram_used_bytes"],
             "gpu_memory_after_load_bytes": loaded["vram_used_bytes"],
             "peak_vram_bytes": monitor.peak,

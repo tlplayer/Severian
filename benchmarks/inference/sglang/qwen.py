@@ -14,7 +14,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, required=True)
-    parser.add_argument("--length", choices=("128", "512", "2048"), required=True)
+    parser.add_argument("--length", required=True)
     parser.add_argument("--port", type=int, default=31000)
     parser.add_argument("--memory-fraction", type=float, default=0.9)
     parser.add_argument("--timeout", type=float, default=1800)

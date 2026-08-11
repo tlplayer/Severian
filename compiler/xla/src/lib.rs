@@ -15,6 +15,7 @@ pub mod pjrt;
 pub mod safetensors;
 pub mod stablehlo;
 mod runtime;
+mod tokenizer;
 
 pub use client::XlaClient;
 pub use pipeline::{CompileOptions, XlaPipeline};

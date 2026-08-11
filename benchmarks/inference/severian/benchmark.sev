@@ -3,9 +3,38 @@ import json
 import qwen2
 import qwen2_config
 import qwen_kernels
+import qwen_tokenizer
 import safetensor_weights
 
 native("__sev_monotonic_ns") def monotonicNs() -> int
+
+def infer(weights: qwen2.Qwen2Weights, promptTokens: list[int]) -> int:
+    inputIds = qwen_kernels.inputTokens(promptTokens)
+    cosine = qwen_kernels.ropeCosine(promptTokens)
+    sine = qwen_kernels.ropeSine(promptTokens)
+    mask = qwen_kernels.causalMask(promptTokens)
+    hidden := qwen_kernels.embeddingKernel(weights.embedding, inputIds)
+    for layer in weights.layers:
+        hidden = qwen_kernels.qwen2LayerKernel(
+            hidden,
+            layer.inputNorm,
+            layer.attention.query,
+            layer.attention.queryBias,
+            layer.attention.key,
+            layer.attention.keyBias,
+            layer.attention.value,
+            layer.attention.valueBias,
+            layer.attention.output,
+            layer.postAttentionNorm,
+            layer.mlp.gate,
+            layer.mlp.up,
+            layer.mlp.down,
+            cosine,
+            sine,
+            mask,
+        )
+    logits = qwen_kernels.logitsKernel(hidden, weights.finalNorm, weights.embedding)
+    return qwen_kernels.argmaxBf16(logits, promptTokens)
 
 def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     modelPath = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
@@ -36,29 +65,28 @@ def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     print("process_start_ns", processStart)
     print("checkpoint_tensor_count", size(json.objectKeys(store.weightMap)))
     print("loaded_layers", size(weights.layers))
-    inputIds = qwen_kernels.inputToken(42)
-    hidden := qwen_kernels.embeddingKernel(weights.embedding, inputIds)
-    for layer in weights.layers:
-        hidden = qwen_kernels.qwen2LayerKernel(
-            hidden,
-            layer.inputNorm,
-            layer.attention.query,
-            layer.attention.queryBias,
-            layer.attention.key,
-            layer.attention.keyBias,
-            layer.attention.value,
-            layer.attention.valueBias,
-            layer.attention.output,
-            layer.postAttentionNorm,
-            layer.mlp.gate,
-            layer.mlp.up,
-            layer.mlp.down,
-        )
-    logits = qwen_kernels.logitsKernel(hidden, weights.finalNorm, weights.embedding)
-    nextToken = qwen_kernels.argmaxBf16(logits)
-    print("input_token", 42)
+    prompt = "Roses are red,"
+    promptTokens = qwen_tokenizer.encode(modelPath, prompt)
+    assert(promptTokens == [49, 19696, 525, 2518, 11])
+    warmupStart = monotonicNs()
+    warmupToken = infer(weights, promptTokens)
+    modelReady = monotonicNs()
+    assert(warmupToken == 348)
+    inferenceStart = monotonicNs()
+    nextToken = infer(weights, promptTokens)
+    firstToken = monotonicNs()
+    nextText = qwen_tokenizer.decodeToken(modelPath, nextToken)
+    print("prompt", prompt)
+    print("prompt_token_count", size(promptTokens))
     print("next_token", nextToken)
-    assert(nextToken == 25852)
+    print("next_text", nextText)
+    print("model_ready_ns", modelReady)
+    print("load_ns", modelReady - processStart)
+    print("warmup_ns", modelReady - warmupStart)
+    print("prefill_ns", firstToken - inferenceStart)
+    print("ttft_ns", firstToken - inferenceStart)
+    assert(nextToken == 348)
+    assert(nextText == " v")
     return weights
 
 def main():
