@@ -9,6 +9,7 @@ members = [
     "compiler/hir",
     "compiler/lexer",
     "compiler/lowering",
+    "compiler/mir",
     "compiler/mlir",
     "compiler/ownership",
     "compiler/package",

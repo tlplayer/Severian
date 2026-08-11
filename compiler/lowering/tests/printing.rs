@@ -25,7 +25,7 @@ fn lowers_primitive_prints_to_native_calls() {
         }],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     let text = lowered.as_str();
 
     assert!(text.contains("llvm.call @printf"));
@@ -56,7 +56,7 @@ fn lowers_boolean_and_with_short_circuit_control_flow() {
         }],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     let text = lowered.as_str();
     assert!(text.contains("llvm.cond_br"));
     assert!(text.contains("llvm.br"));
@@ -85,7 +85,7 @@ fn lowers_conditional_expressions_to_native_selects() {
         }],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     assert!(lowered.as_str().contains("llvm.select"));
     assert!(lowered.as_str().contains(": i1, f64"));
 }
@@ -116,7 +116,7 @@ fn lowers_integer_range_for_to_control_flow() {
         }],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     let text = lowered.as_str();
     assert!(text.contains("llvm.icmp \"slt\""));
     assert!(text.contains("llvm.cond_br"));
@@ -157,7 +157,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
         ],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     assert!(lowered
         .as_str()
         .contains("llvm.call @__sev_fn_consume() : () -> ()"));
@@ -204,7 +204,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
         ],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     let text = lowered.as_str();
     assert!(text.contains("llvm.call @__sev_task_spawn_work() {severian_distribution = \"local\"}"));
     assert!(!text.contains("llvm.func @main() -> i32 attributes"));
@@ -250,7 +250,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
         ],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     let text = lowered.as_str();
     assert!(text.contains("severian_parallel = \"gpu\""));
     assert!(text.contains("severian_device_fallback = \"cpu\""));
@@ -284,7 +284,7 @@ fn compares_dynamic_collection_values_by_value() {
         }],
     };
 
-    let lowered = severian_lowering::lower(&program);
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
     assert!(lowered.as_str().contains("llvm.call @__sev_value_less"));
     assert!(!lowered.as_str().contains("llvm.icmp \"sgt\" %v"));
 }

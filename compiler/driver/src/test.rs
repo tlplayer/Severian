@@ -65,7 +65,7 @@ pub fn native_test_compilation(
     instructions.push(Instruction::Print(Expression::String(format!(
         "{count} passed"
     ))));
-    let mut hir = compilation.hir.clone();
+    let mut hir = compilation.optimized_hir.clone();
     hir.functions.retain(|function| function.name != "main");
     hir.functions.push(Function {
         id: FunctionId::from_name("main"),
@@ -78,9 +78,11 @@ pub fn native_test_compilation(
         instructions,
         tests: Vec::new(),
     });
+    let mir = severian_mir::lower(&hir);
     let native = Compilation {
-        mlir: severian_lowering::lower(&hir),
+        mlir: severian_lowering::lower(&mir),
         optimized_hir: hir.clone(),
+        mir,
         hir,
     };
     Ok((native, count))

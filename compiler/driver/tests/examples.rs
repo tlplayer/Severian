@@ -146,7 +146,7 @@ fn builds_and_executes_the_native_inference_node_vertically() {
         String::from_utf8_lossy(&build.stderr)
     );
     let build_log = String::from_utf8_lossy(&build.stdout);
-    for package_name in ["tensor", "models", "network", "orchestrator"] {
+    for package_name in ["tensor", "model", "network", "orchestrator"] {
         assert!(
             build_log.contains(&format!("Built {package_name} ->")),
             "missing {package_name} library build in:\n{build_log}"

@@ -18,6 +18,7 @@ severian-diagnostics = { version = "0.1.0", path = "../diagnostics" }
 severian-hir = { version = "0.1.0", path = "../hir" }
 severian-lexer = { version = "0.1.0", path = "../lexer" }
 severian-lowering = { version = "0.1.0", path = "../lowering" }
+severian-mir = { version = "0.1.0", path = "../mir" }
 severian-mlir = { version = "0.1.0", path = "../mlir" }
 severian-ownership = { version = "0.1.0", path = "../ownership" }
 severian-package = { version = "0.1.0", path = "../package" }

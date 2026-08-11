@@ -223,6 +223,7 @@ dependencies = [
  "severian-hir",
  "severian-lexer",
  "severian-lowering",
+ "severian-mir",
  "severian-mlir",
  "severian-ownership",
  "severian-package",
@@ -248,9 +249,17 @@ version = "0.1.0"
 dependencies = [
  "severian-coverage",
  "severian-hir",
+ "severian-mir",
  "severian-mlir",
  "severian-platform",
  "severian-source",
+]
+
+[[package]]
+name = "severian-mir"
+version = "0.1.0"
+dependencies = [
+ "severian-hir",
 ]
 
 [[package]]

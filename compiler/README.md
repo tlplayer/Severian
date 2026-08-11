@@ -13,11 +13,11 @@ Resolve / typecheck (currently one semantic stage)
   ↓
 Typed HIR
   ↓
-MIR (planned; not implemented)
-  ↓
 Ownership analysis
   ↓
-MIR passes
+HIR optimization passes
+  ↓
+MIR control-flow graph
   ↓
 Lowering
   ├── Native MLIR → LLVM → native backend → executable
@@ -31,12 +31,15 @@ The workspace keeps language concerns separated:
   diagnostics and lowering locations.
 - `package` resolves manifests, dependency source, public interfaces, symbol
   packs, and compiler contracts declared by libraries.
-- `semantic` resolves those interfaces into HIR; `ownership` checks HIR.
+- `semantic` resolves those interfaces into typed HIR; `ownership` checks HIR.
 - `passes` currently owns the working dataflow and loop transformations over
-  HIR. It will become the MIR pass layer when MIR exists. Domain packages register
-  compatible operations through manifest metadata rather than hard-coded
-  driver function names.
-- `lowering` converts HIR to MLIR and generates compiler-owned ABI glue.
+  HIR. Domain packages register compatible operations through manifest metadata
+  rather than hard-coded driver function names.
+- `mir` owns the explicit function/basic-block control-flow graph and typed HIR
+  value references. It is a mandatory, independently emittable native-pipeline
+  stage.
+- `lowering` accepts MIR, converts its structured expression payload to MLIR,
+  and generates compiler-owned ABI glue.
 - `xla` owns StableHLO artifacts and the PJRT compilation/runtime boundary.
   Optimization after StableHLO handoff belongs to XLA itself.
 - `platform` contains concrete native providers such as SQLite and ranked
@@ -59,9 +62,10 @@ HIR v2 owns semantic identity and type information: expressions carry `HirId`
 and their resolved `ValueType`; functions, type definitions, and variants carry
 stable IDs; resolved call targets retain their full function signature and
 native ABI symbol where one exists. Lowering must consume that information
-directly instead of rebuilding types or package identity from names. MIR,
-MIR-based passes, and IREE support remain future work rather than empty active
-compiler modules.
+directly instead of rebuilding types or package identity from names. MIR now
+owns explicit control-flow blocks while reusing typed HIR value identities;
+MIR-native optimization passes and IREE support remain future work rather than
+empty active compiler modules.
 
 Direct GPU lowering and ROCm backend implementation remain as inactive
 low-level code because they contain real MLIR/ROCDL lowering work. They are not

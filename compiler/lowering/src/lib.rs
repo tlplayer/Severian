@@ -17,7 +17,11 @@ use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-pub fn lower(program: &Program) -> Module {
+pub fn lower(mir: &severian_mir::Program) -> Module {
+    lower_hir(mir.lowering_hir())
+}
+
+fn lower_hir(program: &Program) -> Module {
     let mut strings = Vec::new();
     for class in &program.classes {
         strings.push(class.name.clone());
@@ -198,13 +202,16 @@ pub fn lower(program: &Program) -> Module {
     for signature in native_call_signatures.values() {
         native_symbols.insert(signature.name.clone(), signature.symbol.clone());
     }
+    let mut declared_native_symbols = HashSet::new();
     for function in program
         .functions
         .iter()
         .filter(|function| function.native_symbol.is_some())
     {
         let symbol = function.native_symbol.as_ref().unwrap();
-        if is_predeclared_native_symbol(symbol) {
+        if is_predeclared_native_symbol(symbol)
+            || !declared_native_symbols.insert(symbol.as_str())
+        {
             continue;
         }
         write!(output, "  llvm.func @{symbol}(").unwrap();
@@ -2666,7 +2673,7 @@ impl LowerContext<'_> {
                     .unwrap();
                     return (result, ValueType::Bool);
                 }
-                if function.ends_with(".zero") && args.is_empty() {
+                if target.native_symbol.is_none() && function.ends_with(".zero") && args.is_empty() {
                     let zero = self.fresh_value();
                     writeln!(
                         self.output,
@@ -2675,7 +2682,7 @@ impl LowerContext<'_> {
                     .unwrap();
                     return (self.box_value((zero, ValueType::Int)), ValueType::Any);
                 }
-                if function.ends_with(".add") && args.len() == 2 {
+                if target.native_symbol.is_none() && function.ends_with(".add") && args.len() == 2 {
                     let left = self.box_value(args[0].clone());
                     let right = self.box_value(args[1].clone());
                     let result = self.fresh_value();
@@ -2901,31 +2908,10 @@ impl LowerContext<'_> {
                 (result, *return_type)
             }
             Expression::Binary { left, op, right } => {
-                let left = self.lower_expression(left);
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
-                    let (left, _) = self.unbox_value(left, ValueType::Bool);
-                    let right_block = self.fresh_block();
-                    let continue_block = self.fresh_block();
-                    let constant = self.fresh_value();
-                    let constant_value = i32::from(*op == BinaryOp::Or);
-                    writeln!(
-                        self.output,
-                        "    {constant} = llvm.mlir.constant({constant_value} : i1) : i1"
-                    )
-                    .unwrap();
-                    if *op == BinaryOp::And {
-                        writeln!(self.output, "    llvm.cond_br {left}, ^bb{right_block}, ^bb{continue_block}({constant} : i1)").unwrap();
-                    } else {
-                        writeln!(self.output, "    llvm.cond_br {left}, ^bb{continue_block}({constant} : i1), ^bb{right_block}").unwrap();
-                    }
-                    writeln!(self.output, "  ^bb{right_block}:").unwrap();
-                    let right = self.lower_expression(right);
-                    let (right, _) = self.unbox_value(right, ValueType::Bool);
-                    writeln!(self.output, "    llvm.br ^bb{continue_block}({right} : i1)").unwrap();
-                    let result = self.fresh_value();
-                    writeln!(self.output, "  ^bb{continue_block}({result}: i1):").unwrap();
-                    return (result, ValueType::Bool);
+                    return self.lower_short_circuit_chain(left, *op, right);
                 }
+                let left = self.lower_expression(left);
                 let right = self.lower_expression(right);
                 if *op == BinaryOp::Power {
                     return self.lower_power_values(left, right);
@@ -2933,6 +2919,47 @@ impl LowerContext<'_> {
                 self.lower_binary_values(left, *op, right)
             }
         }
+    }
+
+    fn lower_short_circuit_chain(
+        &mut self,
+        left: &Expression,
+        op: BinaryOp,
+        right: &Expression,
+    ) -> (String, ValueType) {
+        let mut operands = Vec::new();
+        collect_short_circuit_operands(left, op, &mut operands);
+        collect_short_circuit_operands(right, op, &mut operands);
+        let mut value = self.lower_expression(operands[0]);
+        for operand in &operands[1..] {
+            let (left, _) = self.unbox_value(value, ValueType::Bool);
+            let right_block = self.fresh_block();
+            let continue_block = self.fresh_block();
+            let constant = self.fresh_value();
+            let constant_value = i32::from(op == BinaryOp::Or);
+            writeln!(
+                self.output,
+                "    {constant} = llvm.mlir.constant({constant_value} : i1) : i1"
+            )
+            .unwrap();
+            if op == BinaryOp::And {
+                writeln!(self.output, "    llvm.cond_br {left}, ^bb{right_block}, ^bb{continue_block}({constant} : i1)").unwrap();
+            } else {
+                writeln!(self.output, "    llvm.cond_br {left}, ^bb{continue_block}({constant} : i1), ^bb{right_block}").unwrap();
+            }
+            writeln!(self.output, "  ^bb{right_block}:").unwrap();
+            let right = self.lower_expression(operand);
+            let (right, _) = self.unbox_value(right, ValueType::Bool);
+            writeln!(
+                self.output,
+                "    llvm.br ^bb{continue_block}({right} : i1)"
+            )
+            .unwrap();
+            let result = self.fresh_value();
+            writeln!(self.output, "  ^bb{continue_block}({result}: i1):").unwrap();
+            value = (result, ValueType::Bool);
+        }
+        value
     }
 
     fn lower_collection_literal(
@@ -4620,6 +4647,26 @@ fn collect_pattern_strings(pattern: &MatchPattern, strings: &mut Vec<String>) {
     }
 }
 
+fn collect_short_circuit_operands<'expression>(
+    expression: &'expression Expression,
+    op: BinaryOp,
+    operands: &mut Vec<&'expression Expression>,
+) {
+    if let Expression::Binary {
+        left,
+        op: nested_op,
+        right,
+    } = expression.kind()
+    {
+        if *nested_op == op {
+            collect_short_circuit_operands(left, op, operands);
+            collect_short_circuit_operands(right, op, operands);
+            return;
+        }
+    }
+    operands.push(expression);
+}
+
 fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>) {
     match expression {
         Expression::Typed { expression, .. } => collect_expression_strings(expression, strings),
@@ -5909,7 +5956,13 @@ fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignat
 }
 
 fn is_predeclared_native_symbol(symbol: &str) -> bool {
-    matches!(symbol, "__sev_regex_matches")
+    matches!(
+        symbol,
+        "__sev_regex_matches"
+            | "__sev_matrix_new"
+            | "__sev_matrix_multiply"
+            | "__sev_matrix_scale"
+    )
 }
 
 fn c_type(ty: ValueType) -> &'static str {

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub struct Compilation {
     pub hir: Program,
     pub optimized_hir: Program,
+    pub mir: severian_mir::Program,
     pub mlir: Module,
 }
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
@@ -36,6 +37,7 @@ fn compile_ast(
 ) -> Result<Compilation, CompileError> {
     let hir = check_ast(ast, interfaces)?;
     let mut optimized_hir = hir.clone();
+    link_package_hir(&mut optimized_hir, interfaces)?;
     let fusion_rules = interfaces
         .iter()
         .flat_map(|interface| interface.compiler.fusion_rules.iter().cloned());
@@ -48,13 +50,61 @@ fn compile_ast(
     severian_passes::standard_pipeline_with_graph(fusion_rules, fusion_aliases, graph_rules)
         .run(&mut optimized_hir)
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
-    let mlir = severian_lowering::lower(&optimized_hir);
+    let mir = severian_mir::lower(&optimized_hir);
+    let mlir = severian_lowering::lower(&mir);
 
     Ok(Compilation {
         hir,
         optimized_hir,
+        mir,
         mlir,
     })
+}
+
+fn link_package_hir(
+    program: &mut Program,
+    interfaces: &[PackageInterface],
+) -> Result<(), CompileError> {
+    for interface in interfaces {
+        let dependency = severian_semantic::analyze_with_packages(&interface.module, interfaces)
+            .map_err(|error| CompileError::Frontend {
+                stage: "semantic",
+                span: error.span,
+                message: format!("package `{}`: {}", interface.name, error.message),
+            })?;
+        severian_ownership::check(&dependency).map_err(|error| {
+            CompileError::Ownership(format!("package `{}`: {}", interface.name, error.message))
+        })?;
+
+        for global in dependency.globals {
+            if !program
+                .globals
+                .iter()
+                .any(|existing| existing.name == global.name)
+            {
+                program.globals.push(global);
+            }
+        }
+        for class in dependency.classes {
+            if !program
+                .classes
+                .iter()
+                .any(|existing| existing.id == class.id)
+            {
+                program.classes.push(class);
+            }
+        }
+        for function in dependency.functions {
+            if !program
+                .functions
+                .iter()
+                .any(|existing| existing.id == function.id)
+            {
+                program.functions.push(function);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn check_ast(ast: &AstModule, interfaces: &[PackageInterface]) -> Result<Program, CompileError> {
@@ -109,7 +159,7 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
-    severian_backend::compile_native(&compilation.hir, &compilation.mlir, output)
+    severian_backend::compile_native(&compilation.optimized_hir, &compilation.mlir, output)
         .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 

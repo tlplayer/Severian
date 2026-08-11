@@ -135,9 +135,6 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             value => return Err(format!("unknown build option `{value}`\n{}", usage())),
         }
     }
-    if emit == EmitMode::Mir {
-        return Err("MIR emission is not available because Severian MIR does not exist yet".into());
-    }
     if target == BuildTarget::Xla && emit != EmitMode::StableHlo {
         return Err("the current XLA path supports `--emit stablehlo`; XLA/PJRT execution is not available yet".into());
     }
@@ -180,7 +177,9 @@ fn emit_artifact(
         }
         EmitMode::Hir => fs::write(output, format!("{:#?}", compilation.optimized_hir))
             .map_err(|error| error.to_string()),
-        EmitMode::Mir => unreachable!(),
+        EmitMode::Mir => {
+            fs::write(output, format!("{:#?}", compilation.mir)).map_err(|error| error.to_string())
+        }
         EmitMode::Mlir => {
             fs::write(output, compilation.mlir.as_str()).map_err(|error| error.to_string())
         }
@@ -716,7 +715,7 @@ fn usage() -> String {
         "  tree <path>                    print the Severian package dependency graph",
         "  metadata <path>                print Severian project metadata as JSON",
         "  explain <diagnostic-code>      explain a registered diagnostic",
-        "  emit kinds: hir, mlir, stablehlo, llvm, asm; mir is explicitly unavailable",
+        "  emit kinds: hir, mir, mlir, stablehlo, llvm, asm",
     ]
     .join("\n")
 }
