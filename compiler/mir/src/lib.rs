@@ -27,6 +27,19 @@ impl Program {
     pub fn lowering_hir(&self) -> &severian_hir::Program {
         &self.hir
     }
+
+    /// HIR-v2 metadata is carried through MIR as an inert sidecar. MIR and
+    /// lowering do not interpret it yet, but downstream migrations can query
+    /// canonical source spans and detailed types without recovering AST data.
+    pub fn metadata(&self) -> &severian_hir::ProgramMetadata {
+        &self.hir.metadata
+    }
+
+    pub fn source_span(&self, value: ValueRef) -> Option<severian_hir::SourceSpan> {
+        value
+            .id
+            .and_then(|id| self.hir.metadata.sources.expression_span(id))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

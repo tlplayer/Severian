@@ -218,7 +218,10 @@ dependencies = [
 name = "severian-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "severian-ast",
  "severian-hir",
+ "severian-lexer",
+ "severian-parser",
  "severian-source",
 ]
 
@@ -239,6 +242,7 @@ dependencies = [
  "severian-parser",
  "severian-passes",
  "severian-semantic",
+ "severian-source",
  "severian-xla",
 ]
 

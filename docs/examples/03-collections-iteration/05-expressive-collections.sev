@@ -22,7 +22,7 @@ def dotProduct(left: list[int], right: list[int]) -> int:
 def classify(value: int) -> string:
     if value < 0:
         return "negative"
-    else if value == 0:
+    else value == 0:
         return "zero"
     else:
         return "positive"

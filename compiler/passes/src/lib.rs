@@ -344,6 +344,7 @@ mod tests {
     #[test]
     fn fusion_is_driven_by_package_rules_not_function_names() {
         let mut program = Program {
+            metadata: Default::default(),
             globals: Vec::new(),
             classes: Vec::new(),
             functions: vec![Function {
@@ -398,6 +399,7 @@ mod tests {
     #[test]
     fn rejects_an_alias_to_an_unknown_package_operation() {
         let mut program = Program {
+            metadata: Default::default(),
             globals: Vec::new(),
             classes: Vec::new(),
             functions: Vec::new(),
@@ -437,6 +439,7 @@ mod tests {
             ],
         };
         let mut program = Program {
+            metadata: Default::default(),
             globals: Vec::new(),
             classes: Vec::new(),
             functions: vec![Function {

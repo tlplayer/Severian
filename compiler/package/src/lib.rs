@@ -5,6 +5,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub const MANIFEST_FILE: &str = "package.toml";
+pub const LEGACY_MANIFEST_FILE: &str = "Severian.toml";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionRule {
     pub function: String,
@@ -53,6 +56,8 @@ pub struct PackageInterface {
     pub name: String,
     pub module: Module,
     pub compiler: CompilerMetadata,
+    pub source_path: PathBuf,
+    pub source: String,
 }
 
 #[derive(Debug)]
@@ -95,11 +100,7 @@ impl From<std::io::Error> for PackageError {
 }
 
 pub fn find_manifest(source: &Path) -> Option<PathBuf> {
-    source
-        .parent()?
-        .ancestors()
-        .map(|directory| directory.join("Severian.toml"))
-        .find(|candidate| candidate.is_file())
+    source.parent()?.ancestors().find_map(manifest_in)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,16 +119,17 @@ pub struct LibraryTarget {
 }
 
 pub fn nearest_manifest(directory: &Path) -> Option<PathBuf> {
-    directory
-        .ancestors()
-        .map(|ancestor| ancestor.join("Severian.toml"))
-        .find(|candidate| candidate.is_file())
+    directory.ancestors().find_map(manifest_in)
+}
+
+pub fn is_legacy_manifest(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some(LEGACY_MANIFEST_FILE)
 }
 
 pub fn workspace_manifests(directory: &Path) -> Result<Vec<PathBuf>, PackageError> {
     let manifest_path = nearest_manifest(directory).ok_or_else(|| {
         PackageError::Manifest(format!(
-            "could not find Severian.toml from {}",
+            "could not find package.toml from {}",
             directory.display()
         ))
     })?;
@@ -149,7 +151,8 @@ pub fn workspace_manifests(directory: &Path) -> Result<Vec<PathBuf>, PackageErro
             let member = member.as_str().ok_or_else(|| {
                 PackageError::Manifest("workspace members must be paths encoded as strings".into())
             })?;
-            let path = root.join(member).join("Severian.toml");
+            let directory = root.join(member);
+            let path = manifest_in(&directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
             if !path.is_file() {
                 return Err(PackageError::Manifest(format!(
                     "workspace member manifest {} does not exist",
@@ -210,10 +213,7 @@ fn strip_package_tests(source: &str) -> String {
 /// `[[bin]]` manifest fields.
 pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageError> {
     let direct = directory.join("main.sev");
-    let manifest_path = directory
-        .ancestors()
-        .map(|ancestor| ancestor.join("Severian.toml"))
-        .find(|candidate| candidate.is_file());
+    let manifest_path = nearest_manifest(directory);
     let Some(manifest_path) = manifest_path else {
         if direct.is_file() {
             return Ok(BinaryTarget {
@@ -223,7 +223,7 @@ pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageEr
             });
         }
         return Err(PackageError::Manifest(format!(
-            "could not find `main.sev` or Severian.toml from {}",
+            "could not find `main.sev` or package.toml from {}",
             directory.display()
         )));
     };
@@ -289,16 +289,13 @@ pub fn default_binary_target(directory: &Path) -> Result<BinaryTarget, PackageEr
 /// string-array form.
 pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, PackageError> {
     let direct = directory.join("main.sev");
-    let manifest_path = directory
-        .ancestors()
-        .map(|ancestor| ancestor.join("Severian.toml"))
-        .find(|candidate| candidate.is_file());
+    let manifest_path = nearest_manifest(directory);
     let Some(manifest_path) = manifest_path else {
         if direct.is_file() {
             return Ok(vec![default_binary_target(directory)?]);
         }
         return Err(PackageError::Manifest(format!(
-            "could not find `main.sev` or Severian.toml from {}",
+            "could not find `main.sev` or package.toml from {}",
             directory.display()
         )));
     };
@@ -335,7 +332,8 @@ pub fn workspace_binary_targets(directory: &Path) -> Result<Vec<BinaryTarget>, P
             PackageError::Manifest("workspace members must be paths encoded as strings".into())
         })?;
         let member_root = root.join(member);
-        let member_manifest_path = member_root.join("Severian.toml");
+        let member_manifest_path =
+            manifest_in(&member_root).unwrap_or_else(|| member_root.join(MANIFEST_FILE));
         let member_manifest = parse_manifest(&member_manifest_path)?;
         let has_binary = member_manifest.get("bin").is_some()
             || member_root.join("src/main.sev").is_file()
@@ -397,7 +395,8 @@ fn collect_path_dependency_interfaces(
                 root.join(path).display()
             ))
         })?;
-        let dependency_manifest = directory.join("Severian.toml");
+        let dependency_manifest =
+            manifest_in(&directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
         let canonical_manifest = dependency_manifest.canonicalize()?;
         if !visited.insert(canonical_manifest.clone()) {
             continue;
@@ -434,10 +433,7 @@ pub fn load_official_interfaces(
                 .fold(library_root.to_path_buf(), |path, segment| {
                     path.join(segment)
                 });
-            directory
-                .join("Severian.toml")
-                .is_file()
-                .then_some((name, directory))
+            manifest_in(&directory).map(|_| (name, directory))
         }) else {
             continue;
         };
@@ -484,7 +480,7 @@ fn imported_packages(module: &Module) -> HashSet<String> {
 }
 
 fn load_interface(name: &str, directory: &Path) -> Result<PackageInterface, PackageError> {
-    let manifest_path = directory.join("Severian.toml");
+    let manifest_path = manifest_in(directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
     let manifest = parse_manifest(&manifest_path)?;
     let declared_name = package_name(&manifest, &manifest_path)?;
     if declared_name != name {
@@ -515,6 +511,8 @@ fn load_interface(name: &str, directory: &Path) -> Result<PackageInterface, Pack
         name: name.into(),
         module,
         compiler: compiler_metadata(name, &manifest, &manifest_path)?,
+        source_path,
+        source,
     })
 }
 
@@ -761,7 +759,8 @@ fn load_manifest_dependencies(
             continue;
         };
         let dependency_directory = manifest_directory.join(path);
-        let dependency_manifest = dependency_directory.join("Severian.toml");
+        let dependency_manifest = manifest_in(&dependency_directory)
+            .unwrap_or_else(|| dependency_directory.join(MANIFEST_FILE));
         let canonical_manifest = dependency_manifest.canonicalize().map_err(|error| {
             PackageError::Manifest(format!(
                 "dependency `{dependency_name}` has invalid path `{}`: {error}",
@@ -832,11 +831,10 @@ fn collect_library_targets(
             else {
                 continue;
             };
-            collect_library_targets(
-                &directory.join(path).join("Severian.toml"),
-                visited,
-                targets,
-            )?;
+            let dependency_directory = directory.join(path);
+            let dependency_manifest = manifest_in(&dependency_directory)
+                .unwrap_or_else(|| dependency_directory.join(MANIFEST_FILE));
+            collect_library_targets(&dependency_manifest, visited, targets)?;
         }
     }
     if manifest.get("lib").is_some() {
@@ -895,4 +893,13 @@ fn parse_manifest(path: &Path) -> Result<toml::Value, PackageError> {
     toml::from_str::<toml::Value>(&source).map_err(|error| {
         PackageError::Manifest(format!("invalid manifest {}: {error}", path.display()))
     })
+}
+
+fn manifest_in(directory: &Path) -> Option<PathBuf> {
+    let preferred = directory.join(MANIFEST_FILE);
+    if preferred.is_file() {
+        return Some(preferred);
+    }
+    let legacy = directory.join(LEGACY_MANIFEST_FILE);
+    legacy.is_file().then_some(legacy)
 }

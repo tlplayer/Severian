@@ -14,6 +14,51 @@ pub fn explain(code: &str) -> Option<Explanation> {
 fn explanations() -> BTreeMap<&'static str, Explanation> {
     [
         Explanation {
+            code: "N001",
+            title: "Variable naming",
+            text: "Variables, parameters, fields, and bindings use snake_case. Conventional one-letter coordinates and indices remain valid.",
+        },
+        Explanation {
+            code: "N002",
+            title: "Function naming",
+            text: "Functions and methods use snake_case. The only mixed-case exception is the narrow coordinate accessor set getX/getY/getZ and setX/setY/setZ.",
+        },
+        Explanation {
+            code: "N003",
+            title: "Type naming",
+            text: "Concrete types use PascalCase unless a registered scientific spelling or the leading-acronym disambiguation rule applies.",
+        },
+        Explanation {
+            code: "N004",
+            title: "Constant naming",
+            text: "Top-level typed constants use UPPER_SNAKE_CASE.",
+        },
+        Explanation {
+            code: "N005",
+            title: "Module naming",
+            text: "Packages, modules, and import aliases use snake_case and ordinary words are written in full.",
+        },
+        Explanation {
+            code: "N006",
+            title: "Decorator naming",
+            text: "Decorator names and their package path segments use snake_case.",
+        },
+        Explanation {
+            code: "N007",
+            title: "Deprecated compatibility spelling",
+            text: "The spelling remains accepted for migration but is not canonical Severian style. Apply the diagnostic's replacement when practical.",
+        },
+        Explanation {
+            code: "N010",
+            title: "Canonical technical spelling",
+            text: "A small registry preserves spellings whose capitalization carries established technical meaning, including XLA, MLIR, CUDA, PJRT, BERT, and GPT.",
+        },
+        Explanation {
+            code: "N011",
+            title: "Canonical scientific operator spelling",
+            text: "Named scientific constructs preserve conventional spellings such as ReLU, GELU, SiLU, LSTM, RMSNorm, and Conv2D; functional operations remain snake_case.",
+        },
+        Explanation {
             code: "dead-code::function",
             title: "Unreachable function",
             text: "The function cannot be reached from main, exported functions, tests, native ABI roots, or another reachable function. Remove it or make the intended entry path explicit.",

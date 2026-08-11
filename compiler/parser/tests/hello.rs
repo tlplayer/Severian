@@ -240,6 +240,44 @@ fn parses_integration_tests_with_output_assertions() {
 }
 
 #[test]
+fn parses_else_condition_as_an_ordinary_conditional_branch() {
+    let source = concat!(
+        "def classify(value: int) -> int:\n",
+        "    if value > 0:\n",
+        "        return 1\n",
+        "    else value < 0:\n",
+        "        return -1\n",
+        "    else:\n",
+        "        return 0\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::If(statement) = &function.body.statements[0] else {
+        panic!("expected conditional");
+    };
+    assert!(matches!(
+        statement.else_branch,
+        Some(severian_ast::ElseBranch::If(_))
+    ));
+}
+
+#[test]
+fn keeps_elif_as_a_compatibility_spelling() {
+    let source = concat!(
+        "def classify(value: int) -> int:\n",
+        "    if value > 0:\n",
+        "        return 1\n",
+        "    elif value < 0:\n",
+        "        return -1\n",
+        "    else:\n",
+        "        return 0\n",
+    );
+    parse(&lex(source).unwrap()).unwrap();
+}
+
+#[test]
 fn parses_imported_decorator_symbol_packs() {
     let source = concat!(
         "import math\n",

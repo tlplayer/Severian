@@ -7,7 +7,7 @@ def binarySearch(values: list[int], target: int) -> int:
 
         if values[middle] == target:
             return middle
-        else if values[middle] < target:
+        else values[middle] < target:
             left = middle + 1
         else:
             right = middle - 1

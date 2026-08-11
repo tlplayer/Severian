@@ -158,7 +158,7 @@ contrived example.
 - Grid BFS is readable with parallel row, column, and distance queues, though
   a tuple-valued queue would express the relationship between those values more
   directly.
-- Slices, negative indexing, chained comparisons, `else if`, and
+- Slices, negative indexing, chained comparisons, `else condition:`, and
   `break`/`continue` remove much of the control-flow and indexing scaffolding
   that the first versions of these solutions needed.
 - String indexing, slicing, character iteration, and length all agree on

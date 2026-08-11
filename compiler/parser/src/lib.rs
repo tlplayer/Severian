@@ -997,13 +997,35 @@ impl Parser<'_> {
 
     fn parse_if(&mut self) -> Result<IfStmt, ParseError> {
         let start = self.expect_simple(TokenKind::If, "`if`")?.span.start;
+        self.parse_conditional_branch(start, "if")
+    }
+
+    fn parse_conditional_branch(
+        &mut self,
+        start: usize,
+        spelling: &str,
+    ) -> Result<IfStmt, ParseError> {
         let condition = self.parse_expression()?;
-        self.expect_simple(TokenKind::Colon, "`:` after if condition")?;
-        let then_block = self.parse_suite("if")?;
+        self.expect_simple(TokenKind::Colon, "`:` after conditional condition")?;
+        let then_block = self.parse_suite(spelling)?;
         let mut end = then_block.span.end;
-        let else_branch = if self.take_simple(&TokenKind::Else).is_some() {
+        let else_branch = if let Some(start) = self
+            .take_simple(&TokenKind::Elif)
+            .map(|token| token.span.start)
+        {
+            let branch = self.parse_conditional_branch(start, "elif")?;
+            end = branch.span.end;
+            Some(ElseBranch::If(Box::new(branch)))
+        } else if let Some(start) = self
+            .take_simple(&TokenKind::Else)
+            .map(|token| token.span.start)
+        {
             if self.at(&TokenKind::If) {
                 let branch = self.parse_if()?;
+                end = branch.span.end;
+                Some(ElseBranch::If(Box::new(branch)))
+            } else if !self.at(&TokenKind::Colon) {
+                let branch = self.parse_conditional_branch(start, "else")?;
                 end = branch.span.end;
                 Some(ElseBranch::If(Box::new(branch)))
             } else {

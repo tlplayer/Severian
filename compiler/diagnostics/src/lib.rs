@@ -5,6 +5,7 @@ pub mod dead_code;
 pub mod doctor;
 pub mod explain;
 pub mod lint;
+pub mod naming;
 pub mod render;
 pub mod verify;
 

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::{collections::BTreeMap, path::PathBuf};
+
 macro_rules! stable_id {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,6 +30,267 @@ impl HirId {
     pub const fn synthetic(value: u64) -> Self {
         Self(u64::MAX - value)
     }
+
+    pub fn from_source_span(file: SourceFileId, range: SourceRange) -> Self {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in file
+            .0
+            .to_le_bytes()
+            .into_iter()
+            .chain(range.start.to_le_bytes())
+            .chain(range.end.to_le_bytes())
+        {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        Self(hash)
+    }
+
+    pub const fn legacy_source_range(self) -> Option<SourceRange> {
+        if self.0 > u64::MAX - (1 << 20) {
+            return None;
+        }
+        Some(SourceRange {
+            start: (self.0 >> 32) as usize,
+            end: (self.0 & u32::MAX as u64) as usize,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceFileId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceSpan {
+    pub file: SourceFileId,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceFile {
+    pub id: SourceFileId,
+    pub path: PathBuf,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceMap {
+    files: Vec<SourceFile>,
+    expression_spans: BTreeMap<HirId, SourceSpan>,
+    definition_spans: BTreeMap<DefinitionId, SourceSpan>,
+}
+
+impl SourceMap {
+    pub fn add_file(
+        &mut self,
+        path: impl Into<PathBuf>,
+        source: impl Into<String>,
+    ) -> SourceFileId {
+        let path = path.into();
+        if let Some(file) = self.files.iter().find(|file| file.path == path) {
+            return file.id;
+        }
+        let id = SourceFileId(self.files.len() as u32);
+        self.files.push(SourceFile {
+            id,
+            path,
+            source: source.into(),
+        });
+        id
+    }
+
+    pub fn files(&self) -> &[SourceFile] {
+        &self.files
+    }
+
+    pub fn file(&self, id: SourceFileId) -> Option<&SourceFile> {
+        self.files.get(id.0 as usize)
+    }
+
+    pub fn expression_span(&self, id: HirId) -> Option<SourceSpan> {
+        self.expression_spans.get(&id).copied()
+    }
+
+    pub fn definition_span(&self, id: DefinitionId) -> Option<SourceSpan> {
+        self.definition_spans.get(&id).copied()
+    }
+
+    pub fn record_definition(&mut self, id: DefinitionId, span: SourceSpan) {
+        self.definition_spans.insert(id, span);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DefinitionId {
+    Function(FunctionId),
+    Type(TypeDefinitionId),
+    Variant {
+        owner: TypeDefinitionId,
+        variant: VariantId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TypeId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeKind {
+    Int,
+    Float,
+    Bool,
+    String,
+    Unit,
+    Any,
+    List(TypeId),
+    Tuple(Vec<TypeId>),
+    Map {
+        key: TypeId,
+        value: TypeId,
+    },
+    Set(TypeId),
+    Tensor(TensorType),
+    Channel(TypeId),
+    Function {
+        parameters: Vec<TypeId>,
+        returns: TypeId,
+    },
+    Result {
+        ok: TypeId,
+        error: TypeId,
+    },
+    Option(TypeId),
+    Union(Vec<TypeId>),
+    Future(TypeId),
+    Reference {
+        mutable: bool,
+        inner: TypeId,
+    },
+    Named {
+        definition: TypeDefinitionId,
+        name: String,
+        arguments: Vec<TypeId>,
+    },
+    Unresolved {
+        name: String,
+        arguments: Vec<TypeId>,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TypeTable {
+    types: Vec<TypeKind>,
+}
+
+impl TypeTable {
+    pub fn intern(&mut self, kind: TypeKind) -> TypeId {
+        if let Some(index) = self.types.iter().position(|existing| existing == &kind) {
+            return TypeId(index as u32);
+        }
+        let id = TypeId(self.types.len() as u32);
+        self.types.push(kind);
+        id
+    }
+
+    pub fn get(&self, id: TypeId) -> Option<&TypeKind> {
+        self.types.get(id.0 as usize)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (TypeId, &TypeKind)> {
+        self.types
+            .iter()
+            .enumerate()
+            .map(|(index, kind)| (TypeId(index as u32), kind))
+    }
+
+    pub fn legacy(&mut self, ty: ValueType) -> TypeId {
+        let kind = match ty {
+            ValueType::Int => TypeKind::Int,
+            ValueType::Float => TypeKind::Float,
+            ValueType::Bool => TypeKind::Bool,
+            ValueType::String => TypeKind::String,
+            ValueType::List => TypeKind::List(self.intern(TypeKind::Any)),
+            ValueType::Tuple => TypeKind::Tuple(Vec::new()),
+            ValueType::Map => {
+                let any = self.intern(TypeKind::Any);
+                TypeKind::Map {
+                    key: any,
+                    value: any,
+                }
+            }
+            ValueType::Set => TypeKind::Set(self.intern(TypeKind::Any)),
+            ValueType::Tensor(tensor) => TypeKind::Tensor(tensor),
+            ValueType::Channel => TypeKind::Channel(self.intern(TypeKind::Any)),
+            ValueType::Function => {
+                let any = self.intern(TypeKind::Any);
+                TypeKind::Function {
+                    parameters: Vec::new(),
+                    returns: any,
+                }
+            }
+            ValueType::Result => {
+                let any = self.intern(TypeKind::Any);
+                TypeKind::Result {
+                    ok: any,
+                    error: any,
+                }
+            }
+            ValueType::Option => TypeKind::Option(self.intern(TypeKind::Any)),
+            ValueType::Any => TypeKind::Any,
+            ValueType::Unit => TypeKind::Unit,
+        };
+        self.intern(kind)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetailedFunctionType {
+    pub parameters: Vec<TypeId>,
+    pub returns: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldDefinition {
+    pub name: String,
+    pub ty: TypeId,
+    pub default: Option<HirId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDefinition {
+    pub id: TypeDefinitionId,
+    pub name: String,
+    pub fields: Vec<FieldDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantDefinition {
+    pub id: VariantId,
+    pub name: String,
+    pub fields: Vec<TypeId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDefinition {
+    pub id: TypeDefinitionId,
+    pub name: String,
+    pub variants: Vec<VariantDefinition>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProgramMetadata {
+    pub sources: SourceMap,
+    pub types: TypeTable,
+    pub expression_types: BTreeMap<HirId, TypeId>,
+    pub globals: BTreeMap<String, TypeId>,
+    pub functions: BTreeMap<FunctionId, DetailedFunctionType>,
+    pub classes: BTreeMap<TypeDefinitionId, ClassDefinition>,
+    pub enums: BTreeMap<TypeDefinitionId, EnumDefinition>,
 }
 
 fn stable_name_hash(name: &str) -> u64 {
@@ -41,12 +304,56 @@ fn stable_name_hash(name: &str) -> u64 {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub metadata: ProgramMetadata,
     pub globals: Vec<Global>,
     pub classes: Vec<Class>,
     pub functions: Vec<Function>,
 }
 
 impl Program {
+    pub fn attach_source_file(
+        &mut self,
+        path: impl Into<PathBuf>,
+        source: impl Into<String>,
+    ) -> SourceFileId {
+        let mut metadata = std::mem::take(&mut self.metadata);
+        let file = self.attach_source_file_to(&mut metadata, path, source);
+        self.metadata = metadata;
+        file
+    }
+
+    pub fn attach_source_file_to(
+        &mut self,
+        metadata: &mut ProgramMetadata,
+        path: impl Into<PathBuf>,
+        source: impl Into<String>,
+    ) -> SourceFileId {
+        let file = metadata.sources.add_file(path, source);
+        let mut spans = Vec::new();
+        let mut expression_types = Vec::new();
+        self.visit_expressions_mut(&mut |expression| {
+            let Expression::Typed { id, ty, .. } = expression else {
+                return;
+            };
+            if metadata.sources.expression_span(*id).is_some() {
+                return;
+            }
+            let Some(range) = id.legacy_source_range() else {
+                return;
+            };
+            let remapped = HirId::from_source_span(file, range);
+            *id = remapped;
+            spans.push((remapped, SourceSpan { file, range }));
+            expression_types.push((remapped, *ty));
+        });
+        metadata.sources.expression_spans.extend(spans);
+        for (id, ty) in expression_types {
+            let ty = metadata.types.legacy(ty);
+            metadata.expression_types.insert(id, ty);
+        }
+        file
+    }
+
     pub fn main(&self) -> Option<&Function> {
         self.functions
             .iter()
@@ -403,6 +710,7 @@ pub enum Expression {
         args: Vec<Expression>,
     },
     Variant {
+        type_id: Option<TypeDefinitionId>,
         variant_id: VariantId,
         name: String,
         fields: Vec<Expression>,

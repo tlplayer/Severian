@@ -69,7 +69,7 @@ fn build_uses_the_manifest_name_and_target_debug_directory() {
     let source_directory = root.join("src");
     std::fs::create_dir_all(&source_directory).unwrap();
     std::fs::write(
-        root.join("Severian.toml"),
+        root.join("package.toml"),
         "[package]\nname = \"native-demo\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
     )
     .unwrap();
@@ -107,7 +107,7 @@ fn build_compiles_library_artifacts_before_consuming_them() {
     std::fs::create_dir_all(application.join("src")).unwrap();
     std::fs::create_dir_all(helper.join("src")).unwrap();
     std::fs::write(
-        helper.join("Severian.toml"),
+        helper.join("package.toml"),
         "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[lib]\npath = \"src/lib.sev\"\n",
     )
     .unwrap();
@@ -117,7 +117,7 @@ fn build_compiles_library_artifacts_before_consuming_them() {
     )
     .unwrap();
     std::fs::write(
-        application.join("Severian.toml"),
+        application.join("package.toml"),
         "[package]\nname = \"vertical-app\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[[bin]]\nname = \"vertical-app\"\npath = \"src/main.sev\"\n\n[dependencies]\nhelper = { path = \"../helper\", version = \"0.1.0\" }\n",
     )
     .unwrap();

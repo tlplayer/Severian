@@ -6,6 +6,7 @@ use severian_hir::{
 #[test]
 fn finds_the_main_function() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {

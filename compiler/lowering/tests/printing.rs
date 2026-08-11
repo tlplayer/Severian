@@ -6,6 +6,7 @@ use severian_hir::{
 #[test]
 fn lowers_primitive_prints_to_native_calls() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
@@ -37,6 +38,7 @@ fn lowers_primitive_prints_to_native_calls() {
 #[test]
 fn lowers_boolean_and_with_short_circuit_control_flow() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
@@ -66,6 +68,7 @@ fn lowers_boolean_and_with_short_circuit_control_flow() {
 #[test]
 fn lowers_conditional_expressions_to_native_selects() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
@@ -93,6 +96,7 @@ fn lowers_conditional_expressions_to_native_selects() {
 #[test]
 fn lowers_integer_range_for_to_control_flow() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {
@@ -126,6 +130,7 @@ fn lowers_integer_range_for_to_control_flow() {
 #[test]
 fn lowers_unit_function_calls_without_an_invalid_result() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -167,6 +172,7 @@ fn lowers_unit_function_calls_without_an_invalid_result() {
 #[test]
 fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -213,6 +219,7 @@ fn attaches_local_distribution_to_the_task_spawn_not_the_function() {
 #[test]
 fn preserves_parallel_placement_on_spawn_calls() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -259,6 +266,7 @@ fn preserves_parallel_placement_on_spawn_calls() {
 #[test]
 fn compares_dynamic_collection_values_by_value() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {

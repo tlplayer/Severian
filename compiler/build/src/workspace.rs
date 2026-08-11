@@ -1,7 +1,7 @@
 use crate::{
     manifest::{Manifest, ManifestError},
     package::Package,
-    DEFAULT_TARGET_DIRECTORY, MANIFEST_FILE,
+    DEFAULT_TARGET_DIRECTORY, LEGACY_MANIFEST_FILE, MANIFEST_FILE,
 };
 use std::{
     collections::BTreeSet,
@@ -52,7 +52,7 @@ pub struct Workspace {
 impl Workspace {
     pub fn discover(start: impl AsRef<Path>) -> Result<Self, WorkspaceError> {
         let root = find_workspace_root(start.as_ref())?;
-        let manifest_path = root.join(MANIFEST_FILE);
+        let manifest_path = manifest_in(&root).expect("workspace root contains a manifest");
         let root_manifest = Manifest::load(&manifest_path)?;
 
         let target_directory = root_manifest
@@ -90,7 +90,9 @@ impl Workspace {
             let manifest = if canonical == canonical_root {
                 root_manifest.clone()
             } else {
-                Manifest::load(canonical.join(MANIFEST_FILE))?
+                Manifest::load(
+                    manifest_in(&canonical).unwrap_or_else(|| canonical.join(MANIFEST_FILE)),
+                )?
             };
             if manifest.package.is_some() {
                 packages.push(manifest.to_package(canonical)?);
@@ -120,8 +122,7 @@ fn find_workspace_root(start: &Path) -> Result<PathBuf, std::io::Error> {
     };
 
     loop {
-        let manifest = current.join(MANIFEST_FILE);
-        if manifest.is_file() {
+        if manifest_in(&current).is_some() {
             return Ok(current);
         }
         if !current.pop() {
@@ -131,4 +132,13 @@ fn find_workspace_root(start: &Path) -> Result<PathBuf, std::io::Error> {
             ));
         }
     }
+}
+
+fn manifest_in(directory: &Path) -> Option<PathBuf> {
+    let preferred = directory.join(MANIFEST_FILE);
+    if preferred.is_file() {
+        return Some(preferred);
+    }
+    let legacy = directory.join(LEGACY_MANIFEST_FILE);
+    legacy.is_file().then_some(legacy)
 }

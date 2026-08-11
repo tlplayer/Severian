@@ -1,9 +1,10 @@
 use severian_hir::{
-    Expression, Instruction, TaskPlacement, TensorDimension, TensorElementType, ValueType,
+    DefinitionId, Expression, FunctionId, Instruction, TaskPlacement, TensorDimension,
+    TensorElementType, TypeDefinitionId, TypeKind, ValueType, VariantId,
 };
 use severian_lexer::lex;
 use severian_parser::parse;
-use severian_semantic::{analyze, analyze_with_interfaces};
+use severian_semantic::{analyze, analyze_with_interfaces, attach_module_metadata};
 
 #[test]
 fn resolves_print_and_lowers_hello_to_hir() {
@@ -320,4 +321,82 @@ fn retains_first_class_function_return_types() {
         panic!("expected an indirect function call")
     };
     assert_eq!(*return_type, ValueType::Int);
+}
+
+#[test]
+fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
+    let source = concat!(
+        "enum Outcome:\n",
+        "    Found(value: int)\n",
+        "    Missing\n",
+        "\n",
+        "class Box:\n",
+        "    values: list[int]\n",
+        "\n",
+        "native(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
+        "\n",
+        "def choose() -> Outcome:\n",
+        "    return Found(1)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let mut hir = analyze(&ast).unwrap();
+    attach_module_metadata(&ast, &mut hir, "/workspace/model.sev", source, None);
+
+    let files = hir.metadata.sources.files();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path.to_string_lossy(), "/workspace/model.sev");
+    assert_eq!(files[0].source, source);
+
+    let load = hir.metadata.functions[&FunctionId::from_name("loadValues")].clone();
+    let TypeKind::List(element) = hir.metadata.types.get(load.parameters[0]).unwrap() else {
+        panic!("expected a detailed list parameter")
+    };
+    assert_eq!(hir.metadata.types.get(*element), Some(&TypeKind::Int));
+    let TypeKind::Result { ok, error } = hir.metadata.types.get(load.returns).unwrap() else {
+        panic!("expected a detailed result return")
+    };
+    assert!(matches!(
+        hir.metadata.types.get(*ok),
+        Some(TypeKind::List(_))
+    ));
+    assert_eq!(hir.metadata.types.get(*error), Some(&TypeKind::String));
+
+    let box_id = TypeDefinitionId::from_name("Box");
+    let box_definition = &hir.metadata.classes[&box_id];
+    assert_eq!(box_definition.fields[0].name, "values");
+    assert!(matches!(
+        hir.metadata.types.get(box_definition.fields[0].ty),
+        Some(TypeKind::List(_))
+    ));
+
+    let outcome_id = TypeDefinitionId::from_name("Outcome");
+    let found_id = VariantId::from_name("Found");
+    assert_eq!(hir.metadata.enums[&outcome_id].variants[0].id, found_id);
+    assert!(hir
+        .metadata
+        .sources
+        .definition_span(DefinitionId::Variant {
+            owner: outcome_id,
+            variant: found_id,
+        })
+        .is_some());
+
+    let Instruction::Return(Some(value)) = &hir
+        .functions
+        .iter()
+        .find(|function| function.name == "choose")
+        .unwrap()
+        .instructions[0]
+    else {
+        panic!("expected a return value")
+    };
+    assert!(hir
+        .metadata
+        .sources
+        .expression_span(value.hir_id().unwrap())
+        .is_some());
+    let Expression::Variant { type_id, .. } = value.kind() else {
+        panic!("expected an enum variant")
+    };
+    assert_eq!(*type_id, Some(outcome_id));
 }

@@ -18,8 +18,11 @@ failed=0
 
 while IFS= read -r source; do
     package_root="${source%/src/lib.sev}"
-    package="$(sed -n 's/^name = "\([^"]*\)"/\1/p' "$package_root/Severian.toml" | head -n 1)"
-    status="$(sed -n 's/^status = "\([^"]*\)"/\1/p' "$package_root/Severian.toml")"
+    if [[ ! -f "$package_root/package.toml" ]]; then
+        continue
+    fi
+    package="$(sed -n 's/^name = "\([^"]*\)"/\1/p' "$package_root/package.toml" | head -n 1)"
+    status="$(sed -n 's/^status = "\([^"]*\)"/\1/p' "$package_root/package.toml")"
 
     if [[ "$status" != "experimental" && "$status" != "stable" ]]; then
         printf 'SKIP  %-16s %s\n' "$package" "$status"

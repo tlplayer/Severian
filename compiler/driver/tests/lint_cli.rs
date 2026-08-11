@@ -1,0 +1,48 @@
+use std::{
+    path::PathBuf,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+fn temporary_directory() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time must follow the Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("severian-lint-cli-{}-{nonce}", std::process::id()))
+}
+
+#[test]
+fn lint_reports_and_safely_fixes_role_based_names() {
+    let directory = temporary_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("main.sev");
+    std::fs::write(
+        &source,
+        "def LoadModel(modelPath: string):\n    hiddenState = modelPath\n    return hiddenState\n",
+    )
+    .unwrap();
+
+    let report = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(report.status.success());
+    let standard_error = String::from_utf8_lossy(&report.stderr);
+    assert!(standard_error.contains("warning[N002]"));
+    assert!(standard_error.contains("warning[N001]"));
+
+    let fix = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint", "--fix"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(fix.status.success());
+    assert_eq!(
+        std::fs::read_to_string(&source).unwrap(),
+        "def load_model(model_path: string):\n    hidden_state = model_path\n    return hidden_state\n"
+    );
+
+    let _ = std::fs::remove_dir_all(directory);
+}

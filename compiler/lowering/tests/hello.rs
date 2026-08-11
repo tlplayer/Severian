@@ -3,6 +3,7 @@ use severian_hir::{Expression, Function, FunctionId, Instruction, Program, Value
 #[test]
 fn lowers_hello_to_mlir_text() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![Function {

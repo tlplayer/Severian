@@ -19,7 +19,7 @@ The organization borrows three useful ideas without copying any one ecosystem:
 - Python's broad, task-oriented coverage and searchable category index.
 - Rust's small foundation, explicit prelude, and separation between portable
   abstractions and platform services.
-- Go's short, focused, flat package names.
+- Go's focused, flat package organization, while keeping ordinary words complete.
 
 ## Ownership boundary
 
@@ -43,7 +43,7 @@ Each package is independently testable and documented:
 
 ```text
 library/math/
-├── Severian.toml
+├── package.toml
 ├── README.md
 ├── src/
 │   └── lib.sev
@@ -71,12 +71,12 @@ groups packages by subject.
 
 ## Numerical stack
 
-The experimental numerical stack separates author-facing model code from
-lowering policy. `model` exposes conventional tensor operations, and
-`from model import neuralnet as nn` exposes familiar layers such as `Linear`,
-`LayerNorm`, `MultiheadAttention`, and `TransformerEncoderLayer`. The lower-level
-`tensor`, `models`, and `neuralnet` packages own kernels, symbolic graphs,
-autodiff experiments, and compiler fixtures. `parallel` owns operation-local
+The experimental numerical stack separates author-facing machine-learning code
+from lowering policy. `tensor` is the one canonical numerical container, while
+`model` and `model.neuralnet` provide model and layer APIs such as `Linear`,
+`LayerNorm`, `MultiheadAttention`, and `TransformerEncoderLayer`. Historical
+top-level `models`, `matrix`, and `neuralnet` package names are not part of the
+public hierarchy. `parallel` owns operation-local
 `simd`, `simt`, and `gpu` contracts used inside libraries. Compatible activation
 chains are fused automatically; model callers do not request fusion or select a
 backend.

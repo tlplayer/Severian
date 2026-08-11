@@ -18,6 +18,7 @@ pub enum TokenKind {
     Enum,
     Test,
     If,
+    Elif,
     Else,
     Return,
     Throw,
@@ -132,8 +133,12 @@ impl<'source> Lexer<'source> {
 
     fn lex(mut self) -> Result<Vec<Token>, LexError> {
         let mut offset = 0;
-
-        for segment in self.source.split_inclusive('\n') {
+        while offset < self.source.len() {
+            let remaining = &self.source[offset..];
+            let segment_length = remaining
+                .find('\n')
+                .map_or(remaining.len(), |index| index + 1);
+            let segment = &remaining[..segment_length];
             let line = segment.strip_suffix('\n').unwrap_or(segment);
             let content = line.trim_start_matches(' ');
             let indentation = line.len() - content.len();
@@ -149,17 +154,31 @@ impl<'source> Lexer<'source> {
                 if self.delimiter_depth == 0 {
                     self.emit_indentation(indentation, offset)?;
                 }
-                self.lex_line(content, offset + indentation)?;
+                let consumed = self.lex_line(content, offset + indentation)?;
+                let (line_end, next_offset) = if let Some(end) = consumed {
+                    let after = &self.source[end..];
+                    let trailing_length = after.find('\n').unwrap_or(after.len());
+                    let trailing = &after[..trailing_length];
+                    if !trailing.trim().is_empty() {
+                        self.lex_line(trailing, end)?;
+                    }
+                    let line_end = end + trailing_length;
+                    let next_offset = line_end
+                        + usize::from(after.as_bytes().get(trailing_length) == Some(&b'\n'));
+                    (line_end, next_offset)
+                } else {
+                    (offset + line.len(), offset + segment.len())
+                };
                 if self.delimiter_depth == 0 {
-                    let end = offset + line.len();
                     self.tokens.push(Token {
                         kind: TokenKind::Newline,
-                        span: Span::new(end, end + usize::from(segment.ends_with('\n'))),
+                        span: Span::new(line_end, next_offset),
                     });
                 }
+                offset = next_offset;
+            } else {
+                offset += segment.len();
             }
-
-            offset += segment.len();
         }
 
         while self.indents.len() > 1 {
@@ -208,7 +227,7 @@ impl<'source> Lexer<'source> {
         Ok(())
     }
 
-    fn lex_line(&mut self, line: &str, base: usize) -> Result<(), LexError> {
+    fn lex_line(&mut self, line: &str, base: usize) -> Result<Option<usize>, LexError> {
         let bytes = line.as_bytes();
         let mut index = 0;
 
@@ -308,6 +327,17 @@ impl<'source> Lexer<'source> {
                     self.push_double(TokenKind::GreaterEqual, base, &mut index)
                 }
                 b'>' => self.push_simple(TokenKind::Greater, base, &mut index),
+                b'"' if bytes.get(index + 1) == Some(&b'"')
+                    && bytes.get(index + 2) == Some(&b'"') =>
+                {
+                    let absolute_start = base + index;
+                    let absolute_end = self.lex_triple_string(absolute_start)?;
+                    if absolute_end <= base + line.len() {
+                        index = absolute_end - base;
+                    } else {
+                        return Ok(Some(absolute_end));
+                    }
+                }
                 b'"' => index = self.lex_string(line, base, index)?,
                 b'f' if bytes.get(index + 1) == Some(&b'"') => {
                     index = self.lex_formatted_string(line, base, index)?
@@ -353,6 +383,7 @@ impl<'source> Lexer<'source> {
                         "enum" => TokenKind::Enum,
                         "test" => TokenKind::Test,
                         "if" => TokenKind::If,
+                        "elif" => TokenKind::Elif,
                         "else" => TokenKind::Else,
                         "return" => TokenKind::Return,
                         "throw" => TokenKind::Throw,
@@ -400,7 +431,24 @@ impl<'source> Lexer<'source> {
             }
         }
 
-        Ok(())
+        Ok(None)
+    }
+
+    fn lex_triple_string(&mut self, start: usize) -> Result<usize, LexError> {
+        let content_start = start + 3;
+        let Some(relative_end) = self.source[content_start..].find("\"\"\"") else {
+            return Err(LexError {
+                span: Span::new(start, self.source.len()),
+                message: "unterminated triple-quoted string literal".into(),
+            });
+        };
+        let content_end = content_start + relative_end;
+        let end = content_end + 3;
+        self.tokens.push(Token {
+            kind: TokenKind::String(self.source[content_start..content_end].into()),
+            span: Span::new(start, end),
+        });
+        Ok(end)
     }
 
     fn push_simple(&mut self, kind: TokenKind, base: usize, index: &mut usize) {

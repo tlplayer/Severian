@@ -74,3 +74,26 @@ fn lexes_power_and_leading_decimal_literals() {
         ]
     );
 }
+
+#[test]
+fn lexes_triple_quoted_strings_with_preserved_newlines() {
+    let source = "value = \"\"\"first\n  \"quoted\" second\n\"\"\"\n";
+    let tokens = lex(source).unwrap();
+    assert!(matches!(
+        &tokens[2].kind,
+        TokenKind::String(value) if value == "first\n  \"quoted\" second\n"
+    ));
+    assert_eq!(tokens[3].kind, TokenKind::Newline);
+}
+
+#[test]
+fn lexes_an_empty_triple_quoted_string() {
+    let tokens = lex("value = \"\"\"\"\"\"\n").unwrap();
+    assert!(matches!(&tokens[2].kind, TokenKind::String(value) if value.is_empty()));
+}
+
+#[test]
+fn rejects_an_unterminated_triple_quoted_string() {
+    let error = lex("value = \"\"\"never closed\n").unwrap_err();
+    assert!(error.message.contains("unterminated triple-quoted"));
+}

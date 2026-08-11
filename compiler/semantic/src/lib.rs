@@ -6,16 +6,19 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, CallTarget, ChaosAction as HirChaosAction, Class,
-    ComprehensionClause as HirComprehensionClause, Decorator as HirDecorator, Expression, Function,
+    AssignmentOp, BinaryOp, CallTarget, ChaosAction as HirChaosAction, Class, ClassDefinition,
+    ComprehensionClause as HirComprehensionClause, Decorator as HirDecorator, DefinitionId,
+    DetailedFunctionType, EnumDefinition, Expression, FieldDefinition, Function,
     FunctionContract as HirFunctionContract, FunctionId, Global, HirId, Instruction, MatchPattern,
-    OwnershipOp, Parameter, Program, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension,
-    TensorElementType, TensorType, Test, TestMode as HirTestMode, TypeDefinitionId, UnaryOp,
-    ValueType, VariantId,
+    OwnershipOp, Parameter, Program, ProgramMetadata, SourceRange, SourceSpan,
+    SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension, TensorElementType, TensorType, Test,
+    TestMode as HirTestMode, TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType,
+    VariantDefinition, VariantId,
 };
 use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticError {
@@ -75,6 +78,8 @@ pub fn analyze_with_interfaces(
             name: name.clone(),
             module: module.clone(),
             compiler: Default::default(),
+            source_path: PathBuf::from(format!("<interface:{name}>")),
+            source: String::new(),
         })
         .collect::<Vec<_>>();
     analyze_with_packages(module, &interfaces)
@@ -441,10 +446,447 @@ pub fn analyze_with_packages(
         });
     }
     Ok(Program {
+        metadata: Default::default(),
         globals,
         classes,
         functions,
     })
+}
+
+/// Attaches the HIR-v2 metadata wire without changing semantic execution.
+/// Existing lowering continues to consume the compact `ValueType`; detailed
+/// types and source provenance live in this sidecar until consumers migrate.
+pub fn attach_module_metadata(
+    module: &Module,
+    program: &mut Program,
+    path: impl Into<PathBuf>,
+    source: impl Into<String>,
+    namespace: Option<&str>,
+) {
+    let mut metadata = std::mem::take(&mut program.metadata);
+    attach_module_metadata_to(module, program, &mut metadata, path, source, namespace);
+    program.metadata = metadata;
+}
+
+pub fn attach_module_metadata_to(
+    module: &Module,
+    program: &mut Program,
+    metadata: &mut ProgramMetadata,
+    path: impl Into<PathBuf>,
+    source: impl Into<String>,
+    namespace: Option<&str>,
+) {
+    let file = program.attach_source_file_to(metadata, path, source);
+    let known_types = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Class(class) => Some((
+                class.name.name.clone(),
+                metadata_type_id(namespace, &class.name.name),
+            )),
+            Item::Trait(trait_) => Some((
+                trait_.name.name.clone(),
+                metadata_type_id(namespace, &trait_.name.name),
+            )),
+            Item::Enum(enumeration) => Some((
+                enumeration.name.name.clone(),
+                metadata_type_id(namespace, &enumeration.name.name),
+            )),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut variant_owners = HashMap::new();
+
+    for item in &module.items {
+        match item {
+            Item::Function(function) => {
+                register_function_metadata(function, None, namespace, file, &known_types, metadata);
+            }
+            Item::Class(class) => {
+                let id = metadata_type_id(namespace, &class.name.name);
+                metadata
+                    .sources
+                    .record_definition(DefinitionId::Type(id), source_span(file, class.name.span));
+                let fields = class
+                    .fields
+                    .iter()
+                    .map(|field| FieldDefinition {
+                        name: field.name.name.clone(),
+                        ty: intern_optional_type(
+                            field.ty.as_ref(),
+                            &known_types,
+                            &mut metadata.types,
+                        ),
+                        default: field.default.as_ref().map(|default| {
+                            HirId::from_source_span(
+                                file,
+                                SourceRange {
+                                    start: default.span().start,
+                                    end: default.span().end,
+                                },
+                            )
+                        }),
+                    })
+                    .collect();
+                metadata.classes.insert(
+                    id,
+                    ClassDefinition {
+                        id,
+                        name: class.name.name.clone(),
+                        fields,
+                    },
+                );
+                for constructor in &class.constructors {
+                    register_constructor_metadata(
+                        constructor,
+                        &class.name.name,
+                        namespace,
+                        file,
+                        &known_types,
+                        metadata,
+                    );
+                }
+                for method in &class.methods {
+                    register_function_metadata(
+                        method,
+                        Some(&class.name.name),
+                        namespace,
+                        file,
+                        &known_types,
+                        metadata,
+                    );
+                }
+            }
+            Item::Enum(enumeration) => {
+                let id = metadata_type_id(namespace, &enumeration.name.name);
+                metadata.sources.record_definition(
+                    DefinitionId::Type(id),
+                    source_span(file, enumeration.name.span),
+                );
+                let variants = enumeration
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let variant_id = VariantId::from_name(&variant.name.name);
+                        variant_owners.insert(variant.name.name.clone(), id);
+                        metadata.sources.record_definition(
+                            DefinitionId::Variant {
+                                owner: id,
+                                variant: variant_id,
+                            },
+                            source_span(file, variant.name.span),
+                        );
+                        VariantDefinition {
+                            id: variant_id,
+                            name: variant.name.name.clone(),
+                            fields: variant
+                                .fields
+                                .iter()
+                                .map(|field| {
+                                    intern_optional_type(
+                                        field.ty.as_ref(),
+                                        &known_types,
+                                        &mut metadata.types,
+                                    )
+                                })
+                                .collect(),
+                        }
+                    })
+                    .collect();
+                metadata.enums.insert(
+                    id,
+                    EnumDefinition {
+                        id,
+                        name: enumeration.name.name.clone(),
+                        variants,
+                    },
+                );
+            }
+            Item::Statement(Stmt::Let(binding)) => {
+                let ty =
+                    intern_optional_type(binding.ty.as_ref(), &known_types, &mut metadata.types);
+                metadata.globals.insert(binding.name.name.clone(), ty);
+            }
+            Item::Trait(_) | Item::Import(_) | Item::Statement(_) => {}
+        }
+    }
+
+    program.visit_expressions_mut(&mut |expression| {
+        if let Expression::Variant { type_id, name, .. } = expression.kind() {
+            if type_id.is_none() {
+                if let Some(owner) = variant_owners.get(name) {
+                    let Expression::Typed { expression, .. } = expression else {
+                        return;
+                    };
+                    if let Expression::Variant { type_id, .. } = expression.as_mut() {
+                        *type_id = Some(*owner);
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn register_constructor_metadata(
+    constructor: &severian_ast::ConstructorDecl,
+    class: &str,
+    namespace: Option<&str>,
+    file: severian_hir::SourceFileId,
+    known_types: &HashMap<String, TypeDefinitionId>,
+    metadata: &mut ProgramMetadata,
+) {
+    let class = qualified_name(namespace, class);
+    let id = FunctionId::from_name(&format!("{class}.{}", constructor.name.name));
+    metadata.sources.record_definition(
+        DefinitionId::Function(id),
+        source_span(file, constructor.name.span),
+    );
+    let parameters = constructor
+        .params
+        .iter()
+        .map(|parameter| {
+            intern_optional_type(parameter.ty.as_ref(), known_types, &mut metadata.types)
+        })
+        .collect();
+    let returns = metadata.types.intern(TypeKind::Unit);
+    metadata.functions.insert(
+        id,
+        DetailedFunctionType {
+            parameters,
+            returns,
+        },
+    );
+}
+
+fn register_function_metadata(
+    function: &severian_ast::FunctionDecl,
+    class: Option<&str>,
+    namespace: Option<&str>,
+    file: severian_hir::SourceFileId,
+    known_types: &HashMap<String, TypeDefinitionId>,
+    metadata: &mut ProgramMetadata,
+) {
+    let name = if let Some(class) = class {
+        format!(
+            "{}.{}",
+            qualified_name(namespace, class),
+            function.name.name
+        )
+    } else if let Some(namespace) = namespace {
+        format!("{namespace}.{}", function.name.name)
+    } else {
+        function.name.name.clone()
+    };
+    let id = FunctionId::from_name(&name);
+    metadata.sources.record_definition(
+        DefinitionId::Function(id),
+        source_span(file, function.name.span),
+    );
+    let parameters = function
+        .params
+        .iter()
+        .map(|parameter| {
+            intern_optional_type(parameter.ty.as_ref(), known_types, &mut metadata.types)
+        })
+        .collect();
+    let returns = match &function.return_type {
+        Some(ty) => intern_type(ty, known_types, &mut metadata.types),
+        None => metadata.types.intern(TypeKind::Unit),
+    };
+    metadata.functions.insert(
+        id,
+        DetailedFunctionType {
+            parameters,
+            returns,
+        },
+    );
+}
+
+fn intern_optional_type(
+    ty: Option<&Type>,
+    known_types: &HashMap<String, TypeDefinitionId>,
+    types: &mut TypeTable,
+) -> TypeId {
+    match ty {
+        Some(ty) => intern_type(ty, known_types, types),
+        None => types.intern(TypeKind::Any),
+    }
+}
+
+fn intern_type(
+    ty: &Type,
+    known_types: &HashMap<String, TypeDefinitionId>,
+    types: &mut TypeTable,
+) -> TypeId {
+    match ty {
+        Type::Named(path) => {
+            let name = path
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            let arguments = path
+                .args
+                .iter()
+                .filter_map(TypeArg::as_type)
+                .map(|argument| intern_type(argument, known_types, types))
+                .collect::<Vec<_>>();
+            match name.as_str() {
+                "int" | "u8" | "u16" | "u32" | "u64" | "usize" | "i32" | "i64" => {
+                    types.intern(TypeKind::Int)
+                }
+                "float" | "f32" | "f64" => types.intern(TypeKind::Float),
+                "bool" => types.intern(TypeKind::Bool),
+                "string" => types.intern(TypeKind::String),
+                "unit" => types.intern(TypeKind::Unit),
+                "list" => {
+                    let element = arguments
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| types.intern(TypeKind::Any));
+                    types.intern(TypeKind::List(element))
+                }
+                "map" => {
+                    let any = types.intern(TypeKind::Any);
+                    let key = arguments.first().copied().unwrap_or(any);
+                    let value = arguments.get(1).copied().unwrap_or(any);
+                    types.intern(TypeKind::Map { key, value })
+                }
+                "set" => {
+                    let element = arguments
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| types.intern(TypeKind::Any));
+                    types.intern(TypeKind::Set(element))
+                }
+                "Tensor" => types
+                    .intern(TypeKind::Tensor(lower_tensor_type(path).unwrap_or_else(
+                        |_| TensorType::dynamic(TensorElementType::F64),
+                    ))),
+                "Channel" => {
+                    let element = arguments
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| types.intern(TypeKind::Any));
+                    types.intern(TypeKind::Channel(element))
+                }
+                "Result" => {
+                    let any = types.intern(TypeKind::Any);
+                    let ok = arguments.first().copied().unwrap_or(any);
+                    let error = arguments.get(1).copied().unwrap_or(any);
+                    types.intern(TypeKind::Result { ok, error })
+                }
+                "Option" => {
+                    let some = arguments
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| types.intern(TypeKind::Any));
+                    types.intern(TypeKind::Option(some))
+                }
+                "fn" => {
+                    let any = types.intern(TypeKind::Any);
+                    let (parameters, returns) = arguments
+                        .split_last()
+                        .map_or((Vec::new(), any), |(returns, parameters)| {
+                            (parameters.to_vec(), *returns)
+                        });
+                    types.intern(TypeKind::Function {
+                        parameters,
+                        returns,
+                    })
+                }
+                _ if known_types.contains_key(&name) => types.intern(TypeKind::Named {
+                    definition: known_types[&name],
+                    name,
+                    arguments,
+                }),
+                _ => types.intern(TypeKind::Unresolved { name, arguments }),
+            }
+        }
+        Type::List { element, .. } => {
+            let element = intern_type(element, known_types, types);
+            types.intern(TypeKind::List(element))
+        }
+        Type::Tuple { elements, .. } => {
+            let elements = elements
+                .iter()
+                .map(|element| intern_type(element, known_types, types))
+                .collect();
+            types.intern(TypeKind::Tuple(elements))
+        }
+        Type::Union { alternatives, .. } => {
+            let alternatives = alternatives
+                .iter()
+                .map(|alternative| intern_type(alternative, known_types, types))
+                .collect();
+            types.intern(TypeKind::Union(alternatives))
+        }
+        Type::Map { key, value, .. } => {
+            let key = intern_type(key, known_types, types);
+            let value = intern_type(value, known_types, types);
+            types.intern(TypeKind::Map { key, value })
+        }
+        Type::Set { element, .. } => {
+            let element = intern_type(element, known_types, types);
+            types.intern(TypeKind::Set(element))
+        }
+        Type::Result { ok, err, .. } => {
+            let ok = intern_type(ok, known_types, types);
+            let error = intern_type(err, known_types, types);
+            types.intern(TypeKind::Result { ok, error })
+        }
+        Type::Option { some, .. } => {
+            let some = intern_type(some, known_types, types);
+            types.intern(TypeKind::Option(some))
+        }
+        Type::Function {
+            params, returns, ..
+        } => {
+            let parameters = params
+                .iter()
+                .map(|parameter| intern_type(parameter, known_types, types))
+                .collect();
+            let returns = intern_type(returns, known_types, types);
+            types.intern(TypeKind::Function {
+                parameters,
+                returns,
+            })
+        }
+        Type::Future { output, .. } => {
+            let output = intern_type(output, known_types, types);
+            types.intern(TypeKind::Future(output))
+        }
+        Type::Reference { mutable, inner, .. } => {
+            let inner = intern_type(inner, known_types, types);
+            types.intern(TypeKind::Reference {
+                mutable: *mutable,
+                inner,
+            })
+        }
+    }
+}
+
+fn metadata_type_id(namespace: Option<&str>, name: &str) -> TypeDefinitionId {
+    TypeDefinitionId::from_name(&qualified_name(namespace, name))
+}
+
+fn qualified_name(namespace: Option<&str>, name: &str) -> String {
+    namespace.map_or_else(
+        || name.to_owned(),
+        |namespace| format!("{namespace}.{name}"),
+    )
+}
+
+fn source_span(file: severian_hir::SourceFileId, span: Span) -> SourceSpan {
+    SourceSpan {
+        file,
+        range: SourceRange {
+            start: span.start,
+            end: span.end,
+        },
+    }
 }
 
 fn class_type_name(ty: &Type) -> Option<String> {
@@ -974,6 +1416,7 @@ fn lower_block(
                 let value = match (return_type, actual, value) {
                     (ValueType::Result, ValueType::Result, value) => value,
                     (ValueType::Result, _, Some(value)) => Some(Expression::Variant {
+                        type_id: Some(TypeDefinitionId::from_name("Result")),
                         variant_id: VariantId::from_name("ok"),
                         name: "ok".into(),
                         fields: vec![value],
@@ -1308,6 +1751,7 @@ fn lower_expression_kind(
             } else if identifier.name == "invalid" {
                 Ok((
                     Expression::Variant {
+                        type_id: None,
                         variant_id: VariantId::from_name("invalid"),
                         name: "invalid".into(),
                         fields: Vec::new(),
@@ -1317,6 +1761,7 @@ fn lower_expression_kind(
             } else if identifier.name == "absent" {
                 Ok((
                     Expression::Variant {
+                        type_id: Some(TypeDefinitionId::from_name("Option")),
                         variant_id: VariantId::from_name("absent"),
                         name: "absent".into(),
                         fields: Vec::new(),
@@ -1326,6 +1771,7 @@ fn lower_expression_kind(
             } else if identifier.name == "None" {
                 Ok((
                     Expression::Variant {
+                        type_id: Some(TypeDefinitionId::from_name("Option")),
                         variant_id: VariantId::from_name("None"),
                         name: "None".into(),
                         fields: Vec::new(),
@@ -1340,6 +1786,7 @@ fn lower_expression_kind(
             {
                 Ok((
                     Expression::Variant {
+                        type_id: None,
                         variant_id: VariantId::from_name(&identifier.name),
                         name: identifier.name.clone(),
                         fields: Vec::new(),
@@ -2035,6 +2482,7 @@ fn lower_call(
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok((
                 Expression::Variant {
+                    type_id: Some(TypeDefinitionId::from_name("Option")),
                     variant_id: VariantId::from_name("present"),
                     name: "present".into(),
                     fields,
@@ -2052,6 +2500,7 @@ fn lower_call(
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok((
                 Expression::Variant {
+                    type_id: Some(TypeDefinitionId::from_name("Result")),
                     variant_id: VariantId::from_name("failure"),
                     name: "failure".into(),
                     fields,
@@ -2164,6 +2613,7 @@ fn lower_call(
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((
             Expression::Variant {
+                type_id: None,
                 variant_id: VariantId::from_name(&callee.name),
                 name: callee.name.clone(),
                 fields,

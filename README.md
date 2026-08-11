@@ -66,7 +66,7 @@ If a source has tests but no `main`, the generated native entry point executes
 those tests and prints the real pass count.
 
 `sev build` reads Cargo-compatible `[package]`, `[[bin]]`, `[dependencies]`, and
-`[workspace] members` fields from `Severian.toml`. Package and workspace binaries
+`[workspace] members` fields from `package.toml`. Package and workspace binaries
 are emitted under `target/debug`. Path libraries are checked in dependency order
 and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
 those artifacts. Library-local tests are not linked into downstream application
@@ -79,6 +79,18 @@ cargo install --path compiler/driver
 sev doctor
 sev --help
 ```
+
+### Naming lint
+
+`sev lint [path]` enforces naming by semantic role: variables, functions,
+modules, packages, and decorators use `snake_case`; types use `PascalCase`;
+and constants use `UPPER_SNAKE_CASE`. `sev lint --fix [path]` applies only
+collision-free file-wide renames and direct compatibility spelling fixes.
+External member names are diagnosed but are not automatically rewritten.
+
+Ordinary words stay complete (`system`, `implement`). A small explicit registry
+preserves established technical and scientific spellings such as `XLA`,
+`StableHLO`, `ReLU`, and `GELU`. See [docs/NAMING.md](docs/NAMING.md).
 
 Internal compiler dependencies carry both local `path` entries and registry
 versions, so the compiler crates can be published in dependency order and the
@@ -284,7 +296,9 @@ for index in range(size(values) - 1, -1, -1):
     print(values[index])
 ```
 
-Conditions support `else if`, chained comparisons, `in`, and `not in`.
+Conditions use `else condition:` branches and also support chained comparisons,
+`in`, and `not in`. The Python-compatible `elif` and legacy `else if` spellings
+remain accepted with lint warnings during migration.
 
 ## Collections And Expressive Iteration
 
@@ -402,11 +416,11 @@ from io import print as write
 ```
 
 Imports select names; they do not install packages. Package identity, versions,
-sources, and dependency resolution belong to `Severian.toml`. A package uses the
+sources, and dependency resolution belong to `package.toml`. A package uses the
 standard Cargo-style layout:
 
 ```text
-Severian.toml
+package.toml
 Severian.lock
 src/lib.sev
 src/main.sev

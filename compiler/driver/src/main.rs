@@ -38,6 +38,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         }
         "doctor" if args.len() == 1 => doctor(),
         "check" if args.len() == 2 => check_targets(Path::new(&args[1])),
+        "lint" => lint_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
         "run" if args.len() == 2 => run_targets(Path::new(&args[1])),
         "test" if args.len() == 2 => test_targets(Path::new(&args[1])),
@@ -255,7 +256,9 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
         if input.extension().and_then(|value| value.to_str()) != Some("sev") {
             return Err(format!("{} is not a Severian source file", input.display()));
         }
-        let package_root = severian_package::find_manifest(input)
+        let manifest = severian_package::find_manifest(input);
+        warn_legacy_manifest(manifest.as_deref());
+        let package_root = manifest
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .or_else(|| input.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."));
@@ -273,7 +276,9 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
     if !input.is_dir() {
         return Err(format!("{} does not exist", input.display()));
     }
-    if severian_package::nearest_manifest(input).is_some() || input.join("main.sev").is_file() {
+    let manifest = severian_package::nearest_manifest(input);
+    warn_legacy_manifest(manifest.as_deref());
+    if manifest.is_some() || input.join("main.sev").is_file() {
         return severian_package::workspace_binary_targets(input)
             .map_err(|error| error.to_string());
     }
@@ -295,6 +300,14 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
             }
         })
         .collect())
+}
+
+fn warn_legacy_manifest(manifest: Option<&Path>) {
+    if manifest.is_some_and(severian_package::is_legacy_manifest) {
+        eprintln!(
+            "warning[N007]: `Severian.toml` is a compatibility filename; prefer `package.toml`"
+        );
+    }
 }
 
 fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -351,6 +364,87 @@ fn check_targets(input: &Path) -> Result<(), String> {
         println!("Checked {}", target.source.display());
     }
     println!("{checked} checked");
+    Ok(())
+}
+
+fn lint_command(args: &[String]) -> Result<(), String> {
+    let mut input = PathBuf::from(".");
+    let mut fix = false;
+    let mut has_input = false;
+    for argument in args {
+        match argument.as_str() {
+            "--fix" => fix = true,
+            value if !value.starts_with('-') && !has_input => {
+                input = PathBuf::from(value);
+                has_input = true;
+            }
+            value => return Err(format!("unknown lint option `{value}`\n{}", usage())),
+        }
+    }
+
+    let mut sources = if input.is_file() {
+        if input.extension().and_then(|value| value.to_str()) != Some("sev") {
+            return Err(format!("{} is not a Severian source file", input.display()));
+        }
+        vec![input]
+    } else if input.is_dir() {
+        let mut sources = Vec::new();
+        collect_sources(&input, &mut sources).map_err(|error| error.to_string())?;
+        sources.sort();
+        sources
+    } else {
+        return Err(format!("{} does not exist", input.display()));
+    };
+    sources.dedup();
+
+    let mut warning_count = 0;
+    let mut fixed_count = 0;
+    for path in sources {
+        let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let tokens = severian_lexer::lex(&original)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let module = severian_parser::parse(&tokens)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let report = severian_diagnostics::naming::check(&module, &tokens, &original, &path);
+
+        let (source, report) = if fix {
+            let fixed = severian_diagnostics::naming::apply_safe_fixes(&original, &tokens, &report);
+            if fixed != original {
+                fs::write(&path, &fixed).map_err(|error| error.to_string())?;
+                fixed_count += 1;
+            }
+            let fixed_tokens = severian_lexer::lex(&fixed)
+                .map_err(|error| format!("{} after fixes: {error}", path.display()))?;
+            let fixed_module = severian_parser::parse(&fixed_tokens)
+                .map_err(|error| format!("{} after fixes: {error}", path.display()))?;
+            let fixed_report =
+                severian_diagnostics::naming::check(&fixed_module, &fixed_tokens, &fixed, &path);
+            (fixed, fixed_report)
+        } else {
+            (original, report)
+        };
+
+        if !report.diagnostics.diagnostics().is_empty() {
+            let mut source_map = severian_source::SourceMap::new();
+            source_map.add(path.clone(), source);
+            let rendered = severian_diagnostics::render::render_bag(
+                &report.diagnostics,
+                Some(&source_map),
+                &severian_diagnostics::render::RenderOptions {
+                    color: false,
+                    ..Default::default()
+                },
+            );
+            eprintln!("{rendered}");
+        }
+        warning_count += report.diagnostics.warning_count();
+    }
+
+    if fix {
+        println!("Fixed {fixed_count} file(s); {warning_count} warning(s) remain");
+    } else {
+        println!("{warning_count} warning(s)");
+    }
     Ok(())
 }
 
@@ -741,6 +835,7 @@ fn usage() -> String {
         "usage: sev <command> [project-or-source] [options]",
         "  doctor                         diagnose native and optional toolchains",
         "  check <path>                   parse, resolve, typecheck, and check ownership",
+        "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  build [path] [--emit KIND] [--target native|xla]",
         "  run <path>                     build and run native code",
         "  test <path>                    build and run native Severian tests",

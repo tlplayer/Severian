@@ -26,6 +26,7 @@ fn function(name: &str, params: &[&str], instructions: Vec<Instruction>) -> Func
 
 fn program(instructions: Vec<Instruction>) -> Program {
     Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![function("main", &[], instructions)],
@@ -158,6 +159,7 @@ fn rejects_use_after_move_on_only_one_branch() {
 #[test]
 fn infers_that_a_function_consumes_its_parameter() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -194,6 +196,7 @@ fn infers_that_a_function_consumes_its_parameter() {
 #[test]
 fn inferred_mutable_call_conflicts_with_a_live_view() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -235,6 +238,7 @@ fn inferred_mutable_call_conflicts_with_a_live_view() {
 #[test]
 fn call_argument_loans_overlap_for_the_whole_call() {
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![
@@ -278,6 +282,7 @@ fn borrowed_alias_cannot_escape_through_return() {
     );
     escaping.return_type = ValueType::Any;
     let program = Program {
+        metadata: Default::default(),
         globals: vec![],
         classes: vec![],
         functions: vec![escaping],

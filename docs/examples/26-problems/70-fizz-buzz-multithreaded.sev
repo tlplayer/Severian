@@ -46,10 +46,10 @@ def concurrentFizzBuzz(n: int) -> list[string]:
         if value % 15 == 0:
             signal = async send 1 with bothGate
             await signal
-        else if value % 3 == 0:
+        else value % 3 == 0:
             signal = async send 1 with fizzGate
             await signal
-        else if value % 5 == 0:
+        else value % 5 == 0:
             signal = async send 1 with buzzGate
             await signal
         else:
