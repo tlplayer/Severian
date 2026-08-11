@@ -94,7 +94,7 @@ native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
 
 native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
 
-native("__sev_host_page_size") def hostPageSize() -> int
+native("__sev_host_page_size") def host_page_size() -> int
 
 native("__sev_database_open") def databaseOpen(path: string) -> Result[Database, DatabaseError]
 

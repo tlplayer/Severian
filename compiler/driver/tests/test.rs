@@ -306,6 +306,39 @@ fn assurance_commands_produce_coverage_mutation_and_memory_results() {
 }
 
 #[test]
+fn repository_coverage_ignores_generated_work_and_expected_negative_fixtures() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!(
+        "severian-coverage-discovery-test-{}",
+        std::process::id()
+    ));
+    let negative = root.join("docs/examples/bugs/ownership/sample");
+    let generated = root.join("bench/.work/generated");
+    std::fs::create_dir_all(&negative).unwrap();
+    std::fs::create_dir_all(&generated).unwrap();
+    std::fs::write(
+        root.join("covered.sev"),
+        "def covered() -> int:\n    return 1\n\ntest:\n    assert(covered() == 1)\n",
+    )
+    .unwrap();
+    std::fs::write(negative.join("invalid.sev"), "this cannot parse").unwrap();
+    std::fs::write(generated.join("broken.sev"), "this cannot parse").unwrap();
+
+    let coverage = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("coverage")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        coverage.status.success(),
+        "{}",
+        String::from_utf8_lossy(&coverage.stderr)
+    );
+    assert!(String::from_utf8_lossy(&coverage.stdout).contains("1 test(s) across 1 target(s)"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn native_tests_lower_a_typed_sorted_reverse_flag_as_a_boolean() {
     let _lock = native_cli_lock();
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

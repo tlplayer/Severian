@@ -12,29 +12,29 @@ def boot_laboratory() -> kernel.KernelReport:
     disk = kernel.Process(3, "disk", "blocked", 50, ["fs.read", "fs.write"])
     processes = [init, shell, disk]
 
-    owners = kernel.initialPageOwners(10, 2)
-    init_allocation = kernel.allocatePages(owners, 2, init.id)
+    owners = kernel.initial_page_owners(10, 2)
+    init_allocation = kernel.allocate_pages(owners, 2, init.id)
     assert(init_allocation.ok)
-    shell_allocation = kernel.allocatePages(init_allocation.owners, 1, shell.id)
+    shell_allocation = kernel.allocate_pages(init_allocation.owners, 1, shell.id)
     assert(shell_allocation.ok)
 
     page_size = kernel.page_size()
-    first_map = kernel.mapPage([], shell_allocation.owners, init, page_size, init_allocation.frames[0], true, false)
+    first_map = kernel.map_page([], shell_allocation.owners, init, page_size, init_allocation.frames[0], true, false)
     assert(first_map.ok)
-    second_map = kernel.mapPage(first_map.mappings, shell_allocation.owners, shell, page_size, shell_allocation.frames[0], false, true)
+    second_map = kernel.map_page(first_map.mappings, shell_allocation.owners, shell, page_size, shell_allocation.frames[0], false, true)
     assert(second_map.ok)
 
     nodes = [kernel.FileNode("/etc/motd", "welcome to severian", 1, true, false), kernel.FileNode("/tmp/session", "", 1, true, true)]
     requests = [kernel.SyscallRequest(3, shell, "yield", ""), kernel.SyscallRequest(1, init, "fs.read", "/etc/motd"), kernel.SyscallRequest(4, disk, "console.write", "blocked"), kernel.SyscallRequest(2, shell, "console.write", "shell ready")]
-    replies = kernel.runSyscalls(requests, nodes, 4)
-    schedule = kernel.roundRobinSchedule(processes, 8)
-    interrupts = [kernel.classifyInterrupt(32), kernel.classifyInterrupt(14), kernel.classifyInterrupt(33)]
-    audit = kernel.auditKernel(shell_allocation.owners, second_map.mappings, processes)
+    replies = kernel.run_syscalls(requests, nodes, 4)
+    schedule = kernel.round_robin_schedule(processes, 8)
+    interrupts = [kernel.classify_interrupt(32), kernel.classify_interrupt(14), kernel.classify_interrupt(33)]
+    audit = kernel.audit_kernel(shell_allocation.owners, second_map.mappings, processes)
     return kernel.KernelReport(shell_allocation.owners, second_map.mappings, schedule, replies, interrupts, audit)
 
 test "boot composes memory mappings scheduling syscalls and interrupts":
     report = boot_laboratory()
-    assert(report.pageOwners == [-1, -1, 1, 1, 2, 0, 0, 0, 0, 0])
+    assert(report.page_owners == [-1, -1, 1, 1, 2, 0, 0, 0, 0, 0])
     assert(size(report.mappings) == 2)
     assert(report.schedule == [1, 2, 1, 2, 1, 2, 1, 2])
     assert(report.interrupts == ["timer", "page-fault", "keyboard"])
@@ -52,7 +52,7 @@ test "concurrent syscall completion is sorted for deterministic replay":
 
 test "process teardown releases only its physical frames":
     report = boot_laboratory()
-    released = kernel.releaseProcessPages(report.pageOwners, 1)
+    released = kernel.release_process_pages(report.page_owners, 1)
     assert(released == [-1, -1, 0, 0, 2, 0, 0, 0, 0, 0])
 
 test "unsafe boot image inspection remains bounds guarded":
@@ -62,11 +62,11 @@ test "unsafe boot image inspection remains bounds guarded":
 def main():
     report = boot_laboratory()
     print("kernel laboratory")
-    print("pages", report.pageOwners)
+    print("pages", report.page_owners)
     print("mappings", size(report.mappings))
     print("schedule", report.schedule)
     for reply in report.replies:
-        print("syscall", reply.id, reply.processId, reply.ok, reply.value)
+        print("syscall", reply.id, reply.process_id, reply.ok, reply.value)
     print("interrupts", report.interrupts)
     print("audit", "clean" if size(report.audit) == 0 else "failed")
     print("boot byte", boot_image_byte([83, 69, 86, 0], 0))

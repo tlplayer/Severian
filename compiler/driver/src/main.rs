@@ -357,7 +357,8 @@ fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> std::io::Resu
     for entry in fs::read_dir(directory)? {
         let path = entry?.path();
         if path.is_dir() {
-            if path.file_name().and_then(|value| value.to_str()) != Some("target") {
+            let name = path.file_name().and_then(|value| value.to_str());
+            if name != Some("target") && !name.is_some_and(|name| name.starts_with('.')) {
                 collect_sources(&path, output)?;
             }
         } else if path.extension().and_then(|value| value.to_str()) == Some("sev") {
@@ -761,7 +762,10 @@ fn run_with_timeout(binary: &Path, seconds: u64) -> Result<MutantStatus, String>
 }
 
 fn coverage(input: &Path) -> Result<(), String> {
-    let targets = resolve_targets(input)?;
+    let targets = resolve_targets(input)?
+        .into_iter()
+        .filter(|target| !is_expected_negative_coverage_fixture(&target.source))
+        .collect::<Vec<_>>();
     if targets.is_empty() {
         return Err(format!(
             "no Severian targets found under {}",
@@ -860,6 +864,13 @@ fn coverage(input: &Path) -> Result<(), String> {
             failures.len()
         ))
     }
+}
+
+fn is_expected_negative_coverage_fixture(source: &Path) -> bool {
+    source.file_name().and_then(|name| name.to_str()) == Some("invalid.sev")
+        && source
+            .components()
+            .any(|component| component.as_os_str() == "bugs")
 }
 
 fn memory_command(args: &[String]) -> Result<(), String> {

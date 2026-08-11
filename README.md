@@ -668,7 +668,7 @@ does not change the meaning of commas in calls, tuples, collection literals, or
 any other Severian construct.
 
 ```sev
-def runJob(job_id: int, connection: network.TCPConnection) with {
+def run_job(job_id: int, connection: network.TCPConnection) with {
     0 <= job_id <= 1000,
     connection != invalid,
     with connection,
@@ -678,7 +678,7 @@ def runJob(job_id: int, connection: network.TCPConnection) with {
 
 This contract is equivalent to requiring the first two expressions with
 `and`, plus the `connection` capability. A caller must supply that capability
-explicitly with `runJob(job_id, connection) with connection`. A missing or
+explicitly with `run_job(job_id, connection) with connection`. A missing or
 incorrect capability is a compile-time error. A value requirement that can be
 proved false is also a compile-time error; a requirement depending on runtime
 data is checked once at function entry.
@@ -742,10 +742,10 @@ site:
 import distributed
 
 with self and local:
-    first = async processShard(firstValues)
-    second = async processShard(secondValues)
-    firstResult = await first
-    secondResult = await second
+    first = async process_shard(first_values)
+    second = async process_shard(second_values)
+    first_result = await first
+    second_result = await second
 ```
 
 The owner and placement are inherited by every bare `async` expression in the

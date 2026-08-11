@@ -27,7 +27,7 @@ def canCreateMachine() -> bool:
 
 def memoryErrors(region: MemoryRegion) -> list[string]:
     failures := []
-    pageSize = platform.hostPageSize()
+    pageSize = platform.host_page_size()
     if region.guestAddress < 0:
         failures.append("guest address is negative")
     if region.bytes < pageSize:
@@ -61,12 +61,12 @@ test "KVM discovery reports reality rather than inventing availability":
     assert(detected == "unavailable" or platform.hostKvmApiVersion() >= 0)
 
 test "guest memory mappings require host page alignment":
-    pageSize = platform.hostPageSize()
+    pageSize = platform.host_page_size()
     assert(memoryErrors(MemoryRegion(1, pageSize - 1, true)) == ["memory region is smaller than one page", "guest address is not page aligned", "memory size is not page aligned"])
     assert(memoryErrors(MemoryRegion(0, pageSize, true)) == [])
 
 test "hypervisor plans include CPUs memory interrupts and devices":
-    pageSize = platform.hostPageSize()
+    pageSize = platform.host_page_size()
     plan = hypervisorLaunchPlan([VirtualCpu(0, 4096)], [MemoryRegion(0, pageSize, true)], [Interrupt(32, 0)], [Device("virtio-block", "root")])
     assert(plan[1] == "vcpu 0 entry=4096")
     assert(plan[2] == "memory 0:" + string(pageSize))

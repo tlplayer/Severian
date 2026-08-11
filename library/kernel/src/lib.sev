@@ -58,7 +58,7 @@ class KernelReport:
     audit: list[string]
 
 def page_size() -> int:
-    return platform.hostPageSize()
+    return platform.host_page_size()
 
 def has_capability(process: Process, expected: string) -> bool:
     for capability in process.capabilities:
@@ -245,7 +245,7 @@ test "allocation is transactional under exhaustion":
 test "page mappings enforce ownership alignment and W^X":
     process = Process(7, "init", "ready", 10, ["memory.map"])
     allocation = allocate_pages(initial_page_owners(8, 2), 2, process.id)
-    page_size = platform.hostPageSize()
+    page_size = platform.host_page_size()
     mapped = map_page([], allocation.owners, process, page_size, allocation.frames[0], true, false)
     assert(mapped.ok)
     assert(not map_page(mapped.mappings, allocation.owners, process, page_size, allocation.frames[1], false, true).ok)
@@ -277,5 +277,5 @@ test "bounded syscall workers preserve reply identity and permissions":
 test "kernel audit recognizes clean state":
     process = Process(1, "init", "ready", 10, ["memory.map"])
     allocation = allocate_pages(initial_page_owners(8, 2), 1, process.id)
-    mapped = map_page([], allocation.owners, process, platform.hostPageSize(), allocation.frames[0], true, false)
+    mapped = map_page([], allocation.owners, process, platform.host_page_size(), allocation.frames[0], true, false)
     assert(audit_kernel(allocation.owners, mapped.mappings, [process]) == [])

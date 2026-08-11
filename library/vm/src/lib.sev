@@ -29,7 +29,7 @@ def vmValid(spec: MachineSpec) -> bool:
 
 def vmLaunchPlan(spec: MachineSpec) -> list[string]:
     assert(vmValid(spec))
-    plan := ["vm " + spec.name, "image " + spec.image, "vcpus " + string(spec.cpus), "memory-mib " + string(spec.memoryMiB), "page-size " + string(platform.hostPageSize()), "init " + spec.init]
+    plan := ["vm " + spec.name, "image " + spec.image, "vcpus " + string(spec.cpus), "memory-mib " + string(spec.memoryMiB), "page-size " + string(platform.host_page_size()), "init " + spec.init]
     for filesystem in spec.filesystems:
         plan.append("filesystem " + string(filesystem))
     for network in spec.networks:
@@ -51,4 +51,4 @@ test "VM plans include filesystems networking storage and processes":
     assert(plan[9] == "disk data:20GiB")
 
 test "VM page size comes from the native platform boundary":
-    assert(platform.hostPageSize() > 0)
+    assert(platform.host_page_size() > 0)
