@@ -11,7 +11,7 @@ with self and simd:
     result = async internalKernel(values)
 ```
 
-Ordinary model callers should not need these controls. `matrix`, `tensor`, and
+Ordinary model callers should not need these controls. `tensor` and
 `models` expose algebraic operations; the compiler selects legal backend
 candidates after fusion and shape analysis.
 

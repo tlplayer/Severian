@@ -1,8 +1,7 @@
-import math
+import tensor
 
-@math(X)
 def main():
-    x = matrix.rand(1024, 1024)
-    y = x X x
+    x = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    y = tensor.rankedMatmul(x, x)
 
-    print(y.shape)
+    print(tensor.rankedShape(y))

@@ -1,14 +1,13 @@
-import math
+import tensor
 import probability
 
-@math(X)
 @probability(P)
-def expectedProjection(weights: Matrix[f32], samples: Matrix[f32]) -> f32:
-    projected = weights X samples
-    return P(projected > 0.5)
+def expectedProjection(weights: Tensor[f64], samples: Tensor[f64]) -> f32:
+    projected = tensor.rankedMatmul(weights, samples)
+    return P(tensor.rankedValues(projected)[0] > 0.5)
 
 def main():
-    weights = matrix.rand(4, 4)
-    samples = matrix.rand(4, 4)
+    weights = tensor.ranked([1.0], [1, 1])
+    samples = tensor.ranked([1.0], [1, 1])
 
     print(expectedProjection(weights, samples))

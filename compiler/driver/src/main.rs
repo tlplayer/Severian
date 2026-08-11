@@ -29,6 +29,13 @@ fn execute(args: Vec<String>) -> Result<(), String> {
     }
 
     match command {
+        "--emit" if args.len() == 3 => {
+            let mut build_args = vec![args[2].clone(), "--emit".into(), args[1].clone()];
+            if args[1] == "stablehlo" {
+                build_args.extend(["--target".into(), "xla".into()]);
+            }
+            build_command(&build_args).map(|_| ())
+        }
         "doctor" if args.len() == 1 => doctor(),
         "check" if args.len() == 2 => check_targets(Path::new(&args[1])),
         "build" => build_command(&args[1..]).map(|_| ()),
@@ -711,6 +718,7 @@ fn usage() -> String {
         "  run <path>                     build and run native code",
         "  test <path>                    build and run native Severian tests",
         "  coverage <path>                report coverage support or source-map blocker",
+        "  --emit <stage> <path>          emit hir, mir, mlir, stablehlo, llvm, or asm",
         "  clean [path]                   remove only the Severian project target directory",
         "  tree <path>                    print the Severian package dependency graph",
         "  metadata <path>                print Severian project metadata as JSON",

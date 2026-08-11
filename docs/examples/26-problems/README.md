@@ -71,7 +71,7 @@ without duplicating its source file.
 | `39-determine-close-strings.sev` | LeetCode 75: Determine if Two Strings Are Close | Frequency maps, sorted views, and collection equality. |
 | `40-removing-stars.sev` | LeetCode 75: Removing Stars From a String | Logical stack truncation and string reconstruction. |
 | `41-dota2-senate.sev` | LeetCode 75: Dota2 Senate | Competing logical queues and cyclic scheduling. |
-| `42-nearest-exit.sev` | LeetCode 75: Nearest Exit from Entrance in Maze | Matrix mutation and breadth-first search. |
+| `42-nearest-exit.sev` | LeetCode 75: Nearest Exit from Entrance in Maze | Grid mutation and breadth-first search. |
 | `43-rotting-oranges.sev` | LeetCode 75: Rotting Oranges | Multi-source breadth-first search. |
 | `44-number-of-provinces.sev` | LeetCode 75: Number of Provinces | Recursive DFS and union-find. |
 | `45-course-schedule.sev` | Top Interview 150: Course Schedule | Topological sorting with an indegree queue. |
@@ -155,7 +155,7 @@ contrived example.
 - Queue and heap algorithms use `appendleft()`, `popleft()`, `heapPush()`, and
   `heapPop()` directly; the examples therefore validate the same concise APIs
   expected in ordinary algorithm solutions.
-- Matrix BFS is readable with parallel row, column, and distance queues, though
+- Grid BFS is readable with parallel row, column, and distance queues, though
   a tuple-valued queue would express the relationship between those values more
   directly.
 - Slices, negative indexing, chained comparisons, `else if`, and

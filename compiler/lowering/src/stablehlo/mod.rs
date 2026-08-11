@@ -79,7 +79,10 @@ pub fn lower_program(program: &Program) -> Result<Module, StableHloLoweringError
     let tensor_functions = program
         .functions
         .iter()
-        .filter(|function| matches!(function.return_type, ValueType::Tensor(_)))
+        .filter(|function| {
+            function.native_symbol.is_none()
+                && matches!(function.return_type, ValueType::Tensor(_))
+        })
         .collect::<Vec<_>>();
     if tensor_functions.is_empty() {
         return Err(StableHloLoweringError::NoTensorFunctions);
@@ -111,7 +114,7 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
         ));
     }
 
-    let [Instruction::Return(Some(returned))] = function.instructions.as_slice() else {
+    let Some(returned) = direct_tensor_return(&function.instructions) else {
         return Err(StableHloLoweringError::UnsupportedFunction {
             function: function.name.clone(),
             reason: "expected a direct return of a tensor call".into(),
@@ -166,6 +169,14 @@ fn lower_function(function: &Function, output: &mut String) -> Result<(), Stable
     Ok(())
 }
 
+fn direct_tensor_return(instructions: &[Instruction]) -> Option<&Expression> {
+    match instructions {
+        [Instruction::Return(Some(value))] => Some(value),
+        [Instruction::With { instructions, .. }] => direct_tensor_return(instructions),
+        _ => None,
+    }
+}
+
 pub fn lower_tensor_call(
     function: &str,
     args: &[MlirValue],
@@ -179,7 +190,7 @@ pub fn lower_tensor_call(
         .to_ascii_lowercase();
 
     match op.as_str() {
-        "add" | "tensor_add" => {
+        "add" | "rankedadd" | "tensor_add" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.add(&args[0], &args[1], result_type))
         }
@@ -199,13 +210,13 @@ pub fn lower_tensor_call(
             Ok(emitter.divide(&args[0], &args[1], result_type))
         }
 
-        "matmul" | "matrix_multiply" | "tensor_matmul" => {
+        "matmul" | "rankedmatmul" | "tensor_matmul" => {
             require_arity(&op, args, 2)?;
             require_rank(&op, result_type, 2)?;
             Ok(emitter.dot_general(&args[0], &args[1], &[], &[], &[1], &[0], result_type))
         }
 
-        "relu" | "tensor_relu" => {
+        "relu" | "rankedrelu" | "tensor_relu" => {
             require_arity(&op, args, 1)?;
             let zero = scalar_zero(result_type, emitter);
             Ok(emitter.maximum(&args[0], &zero, result_type))

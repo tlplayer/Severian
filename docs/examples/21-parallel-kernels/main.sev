@@ -1,19 +1,15 @@
-import matrix
-from tensor import tensor
+import tensor
 import model
 
-@matrix(X, ^, I, J)
 def algebra():
-    A = I(2)
-    B = I(2)
-    product = A X B
-    normal = [1.0, 0.0, 0.0] ^ [0.0, 1.0, 0.0]
-    jacobian = J([1.0, 0.0])
-    zero = matrix.matrix(1, 1)
-    print(product)
-    print(normal)
+    A = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    B = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    product = tensor.rankedMatmul(A, B)
+    jacobian = model.jacobianList([1.0, 0.0])
+    zero = tensor.ranked([0.0], [1, 1])
+    print(tensor.rankedValues(product))
     print(jacobian)
-    print(zero)
+    print(tensor.rankedValues(zero))
 
 @model(Relu, FastTanh, Swish)
 def forward(X: list[float]) -> list[float]:
@@ -21,4 +17,4 @@ def forward(X: list[float]) -> list[float]:
 
 def main():
     algebra()
-    print(forward(tensor([0.0])))
+    print(forward([0.0]))

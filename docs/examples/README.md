@@ -38,7 +38,7 @@ paths while staying Severian-first:
 | `18-tensor-neuralnet` | Imported tensor kernels, neural-network activations, task parallelism, and Jacobians. |
 | `19-distributed-learning` | Large sharded forward/backward passes with deterministic native task reduction. |
 | `20-onnx-iris` | Generated model algebra checked against an exported Iris ONNX graph. |
-| `21-parallel-kernels` | Matrix notation and compiler-driven fusion of stacked model activations. |
+| `21-parallel-kernels` | Ranked tensor kernels and compiler-driven fusion of stacked model activations. |
 | `22-ranked-tensors` | Contiguous ranked tensors executing MLIR linalg kernels through the tensor package. |
 | `23-data-infrastructure` | PQL-backed controller state, scheduling, and desired-state reconciliation. |
 | `24-database-server` | Real SQLite-backed TCP server, SQL execution, and iterable result rows. |

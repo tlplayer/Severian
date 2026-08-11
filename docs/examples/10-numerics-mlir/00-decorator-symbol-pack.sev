@@ -1,8 +1,10 @@
-import math
+import tensor
 
-@math(X, ^)
-def identity(value: int) -> int:
-    return value
+@tensor(X)
+def contract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    return left X right
 
 test:
-    assert(identity(42) == 42)
+    left = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    right = tensor.ranked([2.0, 3.0, 4.0, 5.0], [2, 2])
+    assert(tensor.rankedValues(contract(left, right)) == [2.0, 3.0, 4.0, 5.0])

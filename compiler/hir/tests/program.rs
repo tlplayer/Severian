@@ -26,15 +26,15 @@ fn finds_the_main_function() {
 
 #[test]
 fn verifies_ranked_tensor_compatibility_and_broadcasting() {
-    let matrix = TensorType::ranked(
+    let rank_two = TensorType::ranked(
         TensorElementType::F64,
         &[TensorDimension::Static(2), TensorDimension::Static(3)],
     )
     .unwrap();
     let row = TensorType::ranked(TensorElementType::F64, &[TensorDimension::Static(3)]).unwrap();
-    assert_eq!(matrix.broadcast_with(row).unwrap(), matrix);
+    assert_eq!(rank_two.broadcast_with(row).unwrap(), rank_two);
 
     let incompatible =
         TensorType::ranked(TensorElementType::F64, &[TensorDimension::Static(4)]).unwrap();
-    assert!(matrix.broadcast_with(incompatible).is_err());
+    assert!(rank_two.broadcast_with(incompatible).is_err());
 }

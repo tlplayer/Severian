@@ -33,17 +33,15 @@ claim that hardware-specific lowering exists already.
 
 ## The library boundary
 
-`matrix` owns symbolic linear algebra (`X`, `^`, `I`, and `J`). `tensor` builds
-storage and elementwise operations above it, and `models` supplies domain names
+`tensor` owns ranked storage, contraction, and elementwise operations, while
+`model` supplies domain names
 such as `Relu` and `Swish`. Model code composes those operations; package
 metadata registers their resolved identities with generic compiler passes,
 which choose fusion and backend lowering. Hardware decisions do not leak into
 ordinary model source, and new aliases do not require driver edits.
 
-The current `Matrix` runtime records only shape and uniform fill. It establishes
-the namespace and lowering boundary, but it is not yet a ranked JAX-style array.
-That storage representation is the most important prerequisite for general
-matrix/tensor fusion.
+Ranked tensors use contiguous storage with explicit shapes and strides. This is
+the sole numerical representation used by compiler kernels and model fusion.
 
 ## Why warm PyTorch is still faster
 
@@ -67,7 +65,7 @@ tensor-granularity graphs and optimized forward/backward kernels.
 
 ## Backend sequence
 
-1. Replace uniform-fill `Matrix` with ranked contiguous storage, explicit shape,
+1. Use ranked contiguous tensor storage with explicit shape,
    strides, and unboxed element access.
 2. Make tensor operations produce typed graph nodes and lower matrix algebra to
    MLIR `tensor`/`linalg` operations.

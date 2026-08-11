@@ -1,8 +1,7 @@
-import math
+import tensor
 
-@math(X)
 def main():
 #replace with tensor
-    a = matrix.eye(4)
-    b = matrix.eye(4)
-    print(a X b)
+    a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    b = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    print(tensor.rankedValues(tensor.rankedMatmul(a, b)))

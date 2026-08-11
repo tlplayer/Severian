@@ -1,19 +1,18 @@
-import math
+import tensor
 
-@math(X, *)
-def transform(a: Matrix[f32], b: Matrix[f32], scale: f32) -> Matrix[f32]:
-    product = a X b
-    return product * scale
+def transform(a: Tensor[f64], b: Tensor[f64], scale: f64) -> Tensor[f64]:
+    product = tensor.rankedMatmul(a, b)
+    return tensor.rankedScale(product, scale)
 
 test:
-    a = matrix.eye(4)
-    b = matrix.eye(4)
+    a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    b = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
 
-    assert(transform(a, b, 0.5) == matrix.scale(matrix.eye(4), 0.5))
+    assert(tensor.rankedValues(transform(a, b, 0.5)) == [0.5, 0.0, 0.0, 0.5])
 
 def main():
-    a = matrix.eye(4)
-    b = matrix.rand(4, 4)
+    a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    b = tensor.ranked([1.0, 1.0, 1.0, 1.0], [2, 2])
 
     result = transform(a, b, 0.5)
-    print(result)
+    print(tensor.rankedValues(result))

@@ -127,7 +127,6 @@ pub fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
@@ -148,7 +147,6 @@ pub fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function

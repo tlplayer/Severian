@@ -1,9 +1,8 @@
-import math
+import tensor
 
 def worker(id: int) -> int:
     return id * 2
 
-@math(X)
 def main():
     first = async worker(10) with self
     second = async worker(20) with self
@@ -11,8 +10,8 @@ def main():
     a = await first
     b = await second
 
-    x = matrix.rand(1024, 1024)
-    y = x X x
+    x = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    y = tensor.rankedMatmul(x, x)
 
     print(a + b)
-    print(y.shape)
+    print(tensor.rankedShape(y))

@@ -87,8 +87,22 @@ registry.
 
 `compile` verifies the emitted MLIR, translates its LLVM dialect to LLVM IR, and
 links a native executable named `a.out` by default. Use `-o executable` to choose
-another path. `emit-mlir` prints the intermediate MLIR for inspection, while
-`run` executes the validated HIR for a fast development loop.
+another path. `run` always builds and executes that native artifact; it never
+executes HIR directly.
+
+Every active compiler representation can be inspected through the same command
+surface:
+
+```sh
+sev --emit hir source.sev
+sev --emit mir source.sev
+sev --emit mlir source.sev
+sev --emit llvm source.sev
+sev --emit asm source.sev
+sev --emit stablehlo xla_tensor_source.sev
+```
+
+StableHLO is emitted only for tensor functions supported by the XLA path.
 
 ## Example Fixtures
 
@@ -790,28 +804,27 @@ Most functions use ordinary expression syntax. A function can opt into reserved
 domain symbols with decorators.
 
 ```sev
-import math
+import tensor
 
-@math(X)
-def transform(a: Matrix[f32], b: Matrix[f32]) -> Matrix[f32]:
+@tensor(X)
+def transform(a: Tensor[f64], b: Tensor[f64]) -> Tensor[f64]:
     return a X b
 ```
 
 Decorator arguments name the symbols being imported into that function's syntax.
-For example, `@math(X)` imports only the math meaning of `X`, while
-`@math(X, *)` imports both `X` and math-specific `*` behavior.
+For example, `@tensor(X)` imports the tensor contraction meaning of `X`.
 
 Multiple decorators can compose isolated symbol packs.
 
 ```sev
-import math
+import tensor
 import probability
 
-@math(X)
+@tensor(X)
 @probability(P)
-def expected(weights: Matrix[f32], samples: Matrix[f32]) -> f32:
+def expected(weights: Tensor[f64], samples: Tensor[f64]) -> f32:
     projected = weights X samples
-    return P(projected > 0.5)
+    return P(tensor.rankedValues(projected)[0] > 0.5)
 ```
 
 Outside decorated functions, those spellings are not silently reinterpreted. Each

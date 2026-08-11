@@ -1,14 +1,14 @@
-# Matrix notation and automatic model fusion
+# Tensor kernels and automatic model fusion
 
-This example has no user-directed optimization syntax. `matrix` imports the
-linear-algebra symbols `X`, `^`, `I`, and `J`; `models` imports activation
-names. The model is written as ordinary composition:
+This example has no user-directed optimization syntax. `tensor` owns ranked
+storage and numerical kernels; `model` imports activation names. The model is
+written as ordinary composition:
 
 ```sev
 return Swish(FastTanh(Relu(X)))
 ```
 
-The `models` package declares these functions as compatible members of the
+The `model` package declares these functions as compatible members of the
 tensor elementwise pipeline in its package metadata. The generic compiler pass
 therefore replaces three list traversals with one opaque `FusedPipeline` HIR
 operation. Native lowering emits one runtime traversal with automatic `simd`,
@@ -16,8 +16,8 @@ operation. Native lowering emits one runtime traversal with automatic `simd`,
 select a backend or request fusion, while the compiler contains no table of
 model function names.
 
-The example also uses the explicit constructors requested by the packages:
-`from matrix import matrix` and `from tensor import tensor`.
+The example uses `tensor.ranked` for storage and `tensor.rankedMatmul` for
+contraction, so the compiler has one numerical representation to lower.
 
 The directory name is retained to avoid renumbering the example inventory; its
 content now demonstrates the corrected library-driven parallel architecture.

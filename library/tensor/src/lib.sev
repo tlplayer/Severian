@@ -1,5 +1,3 @@
-import matrix
-
 native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
 
 native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
@@ -74,12 +72,12 @@ test "ranked sum lowers as a reduction":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     assert(rankedValues(rankedSum(value)) == [10.0])
 
-test "ranked matrix multiplication executes the native linalg kernel":
+test "rank-two contraction executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     right = ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
     assert(rankedValues(rankedMatmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
 
-test "ranked transpose swaps matrix axes":
+test "ranked transpose swaps tensor axes":
     value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
     assert(rankedValues(rankedTranspose(value)) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
 
@@ -119,10 +117,6 @@ test "reverse mode accumulates gradients and SGD updates a leaf":
 
 def tensor(values: list[float]) -> list[float]:
     return values
-
-@matrix(X)
-def matrixProduct(left: Matrix[f32], right: Matrix[f32]) -> Matrix[f32]:
-    return left X right
 
 def relu(values: list[float]) -> list[float]:
     output := []
@@ -177,7 +171,7 @@ def matVec(
         output.append(total)
     return output
 
-test "matrix vector product":
+test "rank-two tensor-vector product":
     result = matVec([1.0, 2.0, 3.0, 4.0], 2, 2, [5.0, 6.0])
     assert(result == [17.0, 39.0])
 
@@ -198,7 +192,7 @@ def reluJacobian(values: list[float]) -> list[float]:
                 jacobian.append(0.0)
     return jacobian
 
-test "relu jacobian is a flattened diagonal matrix":
+test "relu jacobian is a flattened diagonal tensor":
     assert(reluJacobian([2.0, -1.0]) == [1.0, 0.0, 0.0, 0.0])
 
 def absValue(value: float) -> float:

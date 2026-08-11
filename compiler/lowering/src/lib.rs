@@ -155,12 +155,6 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
-        "  llvm.func @__sev_matrix_new(i64, i64, f64) -> !llvm.ptr\n",
-        "  llvm.func @__sev_matrix_shape(!llvm.ptr) -> !llvm.ptr\n",
-        "  llvm.func @__sev_matrix_multiply(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
-        "  llvm.func @__sev_matrix_scale(!llvm.ptr, f64) -> !llvm.ptr\n",
-        "  llvm.func @__sev_matrix_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
-        "  llvm.func @__sev_matrix_print(!llvm.ptr)\n",
         "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",
         "  llvm.func @__sev_variant_new(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_variant_is(!llvm.ptr, !llvm.ptr) -> i1\n",
@@ -746,23 +740,8 @@ impl LowerContext<'_> {
                             )
                             .unwrap();
                         }
-                        ValueType::Matrix => {
-                            writeln!(self.output, "    llvm.call @__sev_matrix_print({value}) : (!llvm.ptr) -> ()").unwrap();
-                        }
                         ValueType::Any => {
-                            if self
-                                .object_classes
-                                .get(&value)
-                                .is_some_and(|class| class == "Matrix")
-                            {
-                                writeln!(self.output, "    llvm.call @__sev_matrix_print({value}) : (!llvm.ptr) -> ()").unwrap();
-                            } else {
-                                writeln!(
-                                    self.output,
-                                    "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()"
-                                )
-                                .unwrap();
-                            }
+                            writeln!(self.output, "    llvm.call @__sev_print_value({value}) : (!llvm.ptr) -> ()").unwrap();
                         }
                         ValueType::List | ValueType::Tuple | ValueType::Set => {
                             writeln!(self.output, "    llvm.call @__sev_print_collection({value}) : (!llvm.ptr) -> ()").unwrap();
@@ -1343,16 +1322,6 @@ impl LowerContext<'_> {
             }
             Expression::Member { object, member } => {
                 let (object, _) = self.lower_expression(object);
-                if member == "shape"
-                    && self
-                        .object_classes
-                        .get(&object)
-                        .is_some_and(|class| class == "Matrix")
-                {
-                    let result = self.fresh_value();
-                    writeln!(self.output, "    {result} = llvm.call @__sev_matrix_shape({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
-                    return (result, ValueType::List);
-                }
                 let field = self.string_address(member);
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
@@ -1981,7 +1950,7 @@ impl LowerContext<'_> {
                     }
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
-                    return (result, ValueType::Matrix);
+                    return (result, ValueType::Any);
                 };
                 let symbol = class_function_symbol(&class, method);
                 let method_definition = self
@@ -2693,59 +2662,6 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_add({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 }
-                if matches!(
-                    function.as_str(),
-                    "math.rand"
-                        | "math.eye"
-                        | "math.matrixMultiply"
-                        | "math.scale"
-                        | "matrix.matrix"
-                        | "matrix.random"
-                        | "matrix.identity"
-                        | "matrix.multiply"
-                        | "matrix.scale"
-                ) {
-                    let result = self.fresh_value();
-                    match function.as_str() {
-                        "math.rand" => {
-                            let fill = self.fresh_value();
-                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[1].0).unwrap();
-                        }
-                        "math.eye" => {
-                            let fill = self.fresh_value();
-                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[0].0).unwrap();
-                        }
-                        "math.matrixMultiply" => writeln!(self.output, "    {result} = llvm.call @__sev_matrix_multiply({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", args[0].0, args[1].0).unwrap(),
-                        "math.scale" => {
-                            let factor = self.unbox_value(args[1].clone(), ValueType::Float).0;
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({}, {factor}) : (!llvm.ptr, f64) -> !llvm.ptr", args[0].0).unwrap();
-                        }
-                        "matrix.matrix" => {
-                            let fill = self.unbox_value(args[2].clone(), ValueType::Float).0;
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[1].0).unwrap();
-                        }
-                        "matrix.random" => {
-                            let fill = self.fresh_value();
-                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[1].0).unwrap();
-                        }
-                        "matrix.identity" => {
-                            let fill = self.fresh_value();
-                            writeln!(self.output, "    {fill} = llvm.mlir.constant(1.0 : f64) : f64").unwrap();
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_new({}, {}, {fill}) : (i64, i64, f64) -> !llvm.ptr", args[0].0, args[0].0).unwrap();
-                        }
-                        "matrix.multiply" => writeln!(self.output, "    {result} = llvm.call @__sev_matrix_multiply({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", args[0].0, args[1].0).unwrap(),
-                        "matrix.scale" => {
-                            let factor = self.unbox_value(args[1].clone(), ValueType::Float).0;
-                            writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({}, {factor}) : (!llvm.ptr, f64) -> !llvm.ptr", args[0].0).unwrap();
-                        }
-                        _ => unreachable!(),
-                    }
-                    self.object_classes.insert(result.clone(), "Matrix".into());
-                    return (result, ValueType::Matrix);
-                }
                 if function == "probability.probability" {
                     let result = self.fresh_value();
                     writeln!(
@@ -2839,15 +2755,6 @@ impl LowerContext<'_> {
                     mlir_type(return_type)
                 )
                 .unwrap();
-                if return_type == ValueType::Any
-                    && args.iter().any(|(value, _)| {
-                        self.object_classes
-                            .get(value)
-                            .is_some_and(|class| class == "Matrix")
-                    })
-                {
-                    self.object_classes.insert(result.clone(), "Matrix".into());
-                }
                 (result, return_type)
             }
             Expression::CallValue {
@@ -3558,49 +3465,6 @@ impl LowerContext<'_> {
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
             return (result, ValueType::Bool);
-        }
-        if operand_type == ValueType::Matrix
-            || self
-                .object_classes
-                .get(&left)
-                .is_some_and(|class| class == "Matrix")
-        {
-            if op == BinaryOp::Mul && right_type == ValueType::Float {
-                let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @__sev_matrix_scale({left}, {right}) : (!llvm.ptr, f64) -> !llvm.ptr").unwrap();
-                self.object_classes.insert(result.clone(), "Matrix".into());
-                return (result, ValueType::Matrix);
-            }
-            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
-                && (right_type == ValueType::Matrix
-                    || self
-                        .object_classes
-                        .get(&right)
-                        .is_some_and(|class| class == "Matrix"))
-            {
-                let equal = self.fresh_value();
-                writeln!(self.output, "    {equal} = llvm.call @__sev_matrix_equal({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
-                if op == BinaryOp::Equal {
-                    return (equal, ValueType::Bool);
-                }
-                let one = self.fresh_value();
-                writeln!(self.output, "    {one} = llvm.mlir.constant(1 : i1) : i1").unwrap();
-                let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.xor {equal}, {one} : i1").unwrap();
-                return (result, ValueType::Bool);
-            }
-            if matches!(
-                op,
-                BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual
-            ) {
-                let result = self.fresh_value();
-                writeln!(
-                    self.output,
-                    "    {result} = llvm.mlir.constant(1 : i1) : i1"
-                )
-                .unwrap();
-                return (result, ValueType::Bool);
-            }
         }
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
             && matches!(
@@ -5142,7 +5006,6 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
         "typedef struct { int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
         "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
-        "typedef struct { int64_t rows; int64_t columns; double fill; } sev_matrix;\n\n",
         "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
@@ -5259,12 +5122,6 @@ fn native_bridge_source_for_target(program: &Program, rocm: bool) -> String {
         "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
         "void *__sev_object_get(void *raw, void *name) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); }\n\n",
         "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && strcmp(value->class_name, class_name) == 0; }\n\n",
-        "void *__sev_matrix_new(int64_t rows, int64_t columns, double fill) { sev_matrix *value = sev_allocate(sizeof(*value)); value->rows = rows; value->columns = columns; value->fill = fill; return value; }\n",
-        "void *__sev_matrix_shape(void *raw) { sev_matrix *value = raw; if (!value) abort(); sev_collection *shape = __sev_collection_new(0); __sev_collection_push(shape, __sev_box_i64(value->rows)); __sev_collection_push(shape, __sev_box_i64(value->columns)); return shape; }\n",
-        "void *__sev_matrix_multiply(void *left_raw, void *right_raw) { sev_matrix *left = left_raw; sev_matrix *right = right_raw; if (!left || !right || left->columns != right->rows) abort(); return __sev_matrix_new(left->rows, right->columns, left->fill * right->fill); }\n",
-        "void *__sev_matrix_scale(void *raw, double factor) { sev_matrix *value = raw; if (!value) abort(); return __sev_matrix_new(value->rows, value->columns, value->fill * factor); }\n",
-        "bool __sev_matrix_equal(void *left_raw, void *right_raw) { sev_matrix *left = left_raw; sev_matrix *right = right_raw; return left && right && left->rows == right->rows && left->columns == right->columns && left->fill == right->fill; }\n",
-        "void __sev_matrix_print(void *raw) { sev_matrix *value = raw; if (!value) abort(); printf(\"matrix(%ldx%ld, %.15g)\\n\", value->rows, value->columns, value->fill); }\n\n",
         "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->tag = tag; value->field = field; return value; }\n",
         "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && strcmp(value->tag, tag) == 0; }\n",
         "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value) abort(); return value->field; }\n",
@@ -5909,7 +5766,6 @@ fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
@@ -5988,9 +5844,6 @@ fn is_predeclared_native_symbol(symbol: &str) -> bool {
     matches!(
         symbol,
         "__sev_regex_matches"
-            | "__sev_matrix_new"
-            | "__sev_matrix_multiply"
-            | "__sev_matrix_scale"
     )
 }
 
@@ -6005,7 +5858,6 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function
@@ -6026,7 +5878,6 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Tuple
         | ValueType::Map
         | ValueType::Set
-        | ValueType::Matrix
         | ValueType::Tensor(_)
         | ValueType::Channel
         | ValueType::Function

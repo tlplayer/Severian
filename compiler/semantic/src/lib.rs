@@ -650,9 +650,6 @@ fn collect_imports(module: &Module) -> HashMap<String, String> {
                     .name
                     .clone();
                 aliases.insert(exposed, canonical);
-                if path.first().is_some_and(|part| part.name == "math") {
-                    aliases.insert("matrix".into(), "math".into());
-                }
             }
             ImportKind::From { module, names } => {
                 let module = module
@@ -1401,42 +1398,22 @@ fn lower_expression_kind(
                 }
                 AstBinaryOp::MatMul => {
                     let package = aliases.get("__symbol.X").map(String::as_str);
-                    if !matches!(package, Some("math" | "matrix")) {
+                    if package != Some("tensor") {
                         return Err(error(
                             binary.span,
-                            "operator `X` requires `@matrix(X)` on this function",
+                            "operator `X` requires `@tensor(X)` on this function",
                         ));
                     }
                     return Ok((
                         Expression::Call {
-                            target: CallTarget::source(if package == Some("matrix") {
-                                "matrix.multiply"
-                            } else {
-                                "math.matrixMultiply"
-                            }),
+                            target: CallTarget::source("tensor.rankedMatmul"),
                             args: vec![left, right],
                         },
-                        ValueType::Any,
+                        left_type,
                     ));
                 }
                 AstBinaryOp::Cross => {
-                    if aliases.get("__symbol.^").map(String::as_str) != Some("matrix") {
-                        return Err(error(
-                            binary.span,
-                            "operator `^` requires `@matrix(^)` on this function",
-                        ));
-                    }
-                    return Ok((
-                        Expression::Call {
-                            target: CallTarget::source(if signatures.contains_key("cross") {
-                                "cross"
-                            } else {
-                                "matrix.cross"
-                            }),
-                            args: vec![left, right],
-                        },
-                        ValueType::List,
-                    ));
+                    return Err(error(binary.span, "operator `^` is not supported"));
                 }
                 AstBinaryOp::Equal => (BinaryOp::Equal, ValueType::Bool),
                 AstBinaryOp::NotEqual => (BinaryOp::NotEqual, ValueType::Bool),
@@ -2640,7 +2617,6 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
-                "Matrix" => Ok(ValueType::Matrix),
                 "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
                 "Channel" => Ok(ValueType::Channel),
                 "fn" => Ok(ValueType::Function),

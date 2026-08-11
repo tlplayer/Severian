@@ -1,7 +1,2 @@
-native("__sev_matrix_random") def rand(rows: int, columns: int) -> Matrix[f32]
-
-native("__sev_matrix_identity") def eye(size: int) -> Matrix[f32]
-
-native("__sev_matrix_multiply") def matrixMultiply(left: Matrix[f32], right: Matrix[f32]) -> Matrix[f32]
-
-native("__sev_matrix_scale") def scale(value: Matrix[f32], factor: f32) -> Matrix[f32]
+# Scalar arithmetic uses language operators. Ranked numerical storage and
+# kernels are owned exclusively by the tensor package.

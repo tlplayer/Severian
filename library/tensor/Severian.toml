@@ -7,13 +7,13 @@ description = "Shape-aware tensor kernels and parallel execution policies"
 [lib]
 path = "src/lib.sev"
 
-[dependencies]
-matrix = { path = "../matrix", version = "0.1.0" }
-
 [package.metadata.library]
 category = "numerics"
 implementation = "source-and-compiler-contracts"
 status = "experimental"
+
+[package.metadata.compiler]
+symbols = { X = "rankedMatmul" }
 
 [package.metadata.compiler.fusion]
 runtime-symbol = "__sev_fused_activations"

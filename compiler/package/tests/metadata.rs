@@ -41,9 +41,9 @@ fn loads_package_owned_symbols_and_fusion_contracts() {
 
 #[test]
 fn loads_only_reachable_official_interfaces() {
-    let module = parse("import matrix\nimport application_package\n");
+    let module = parse("import tensor\nimport application_package\n");
     let interfaces = load_official_interfaces(&module, &library_root()).unwrap();
 
     assert_eq!(interfaces.len(), 1);
-    assert_eq!(interfaces[0].name, "matrix");
+    assert_eq!(interfaces[0].name, "tensor");
 }
