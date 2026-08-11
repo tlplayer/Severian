@@ -20,6 +20,31 @@ impl PjrtPlugin {
 
     pub fn path(&self) -> &Path { self.raw.path() }
 
+    /// Loads the ROCm PJRT plugin selected for Severian.
+    ///
+    /// Packaged XLA distributions do not use one universal install prefix, so
+    /// `SEVERIAN_ROCM_PJRT_PLUGIN` is the authoritative override. The two
+    /// conventional ROCm system locations are tried when it is not set.
+    pub fn load_rocm() -> Result<Self> {
+        if let Some(path) = std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN") {
+            return Self::load(path);
+        }
+
+        for path in [
+            "/opt/rocm/lib/libpjrt_rocm.so",
+            "/opt/rocm/lib/libpjrt_plugin_rocm.so",
+        ] {
+            if Path::new(path).is_file() {
+                return Self::load(path);
+            }
+        }
+
+        Err(crate::XlaError::PluginLoad(
+            "ROCm PJRT plugin not found; set SEVERIAN_ROCM_PJRT_PLUGIN to the library exporting GetPjrtApi"
+                .into(),
+        ))
+    }
+
     pub fn raw_api(&self) -> *const c_void {
         (self.raw.api() as *const super::api::PJRT_Api).cast()
     }
@@ -47,6 +72,22 @@ impl PjrtClient {
             .collect()
     }
 
+    pub fn addressable_devices(&self) -> Result<Vec<Device>> {
+        self.raw.addressable_devices()?
+            .into_iter()
+            .map(|device| Device::from_raw(device, Arc::clone(&self.raw)))
+            .collect()
+    }
+
+    pub fn amd_gpu_device(&self) -> Result<Device> {
+        self.addressable_devices()?
+            .into_iter()
+            .find(|device| device.kind == super::device::DeviceKind::AmdGpu)
+            .ok_or_else(|| crate::XlaError::Pjrt(
+                "PJRT client has no addressable AMD GPU".into(),
+            ))
+    }
+
     pub fn default_device(&self) -> Result<Device> {
         Device::from_raw(self.raw.default_device()?, Arc::clone(&self.raw))
     }
@@ -56,7 +97,9 @@ impl PjrtClient {
         module: &StableHloModule,
         options: &CompileOptions,
     ) -> Result<LoadedExecutable> {
-        self.raw.compile(module, options).map(LoadedExecutable::from_raw)
+        self.raw
+            .compile(module, options)
+            .map(|executable| LoadedExecutable::from_raw(executable, Arc::clone(&self.raw)))
     }
 
     pub fn buffer_from_host(
@@ -70,6 +113,6 @@ impl PjrtClient {
         };
         self.raw
             .upload_host_buffer(&host, selected.raw())
-            .map(Buffer::from_raw)
+            .map(|buffer| Buffer::from_raw(buffer, Arc::clone(&self.raw)))
     }
 }

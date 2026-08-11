@@ -157,6 +157,8 @@ impl RawLoadedExecutable {
         self.executable.as_ptr()
     }
 
+    pub(crate) fn plugin(&self) -> &RawPjrtPlugin { &self.plugin }
+
 }
 
 impl Drop for RawLoadedExecutable {
@@ -187,8 +189,8 @@ fn serialized_compile_options(options: &CompileOptions) -> Result<Vec<u8>> {
     {
         Ok(Vec::new())
     } else {
-        Err(XlaError::Unsupported(
-            "non-default XLA compile options require generated CompileOptionsProto bindings"
+        Err(XlaError::Compilation(
+            "this PJRT plugin bridge currently accepts the canonical default CompileOptionsProto; requested non-default fields cannot be serialized losslessly"
                 .into(),
         ))
     }

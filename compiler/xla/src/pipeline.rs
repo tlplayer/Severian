@@ -30,7 +30,7 @@ impl Default for CompileOptions {
     fn default() -> Self {
         Self {
             optimization: OptimizationLevel::O2,
-            portable_artifact: true,
+            portable_artifact: false,
             stablehlo_target_version: None,
             device_ordinal: None,
             num_replicas: 1,
@@ -52,7 +52,7 @@ impl Default for XlaPipeline {
     fn default() -> Self {
         Self {
             verify_stablehlo: true,
-            serialize_portable_artifact: true,
+            serialize_portable_artifact: false,
         }
     }
 }

@@ -1,5 +1,7 @@
 use super::host_buffer::RawBuffer;
+use super::compile::RawClient;
 use crate::{Result, XlaError};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ElementType {
@@ -103,10 +105,34 @@ impl HostBuffer {
 
 pub struct Buffer {
     raw: RawBuffer,
+    _client: Arc<RawClient>,
 }
 
 impl Buffer {
-    pub(crate) fn from_raw(raw: RawBuffer) -> Self { Self { raw } }
+    pub(crate) fn from_raw(raw: RawBuffer, client: Arc<RawClient>) -> Self {
+        Self { raw, _client: client }
+    }
 
     pub fn shape(&self) -> &Shape { self.raw.shape() }
+
+    pub fn is_on_cpu(&self) -> Result<bool> { self.raw.is_on_cpu() }
+
+    pub fn is_on_device(&self, device: &super::device::Device) -> Result<bool> {
+        Ok(self.raw.device()? == device.raw().raw())
+    }
+
+    pub fn to_host_bytes(&self) -> Result<Vec<u8>> { self.raw.to_host() }
+
+    pub fn to_f32(&self) -> Result<Vec<f32>> {
+        if self.shape().element_type != ElementType::F32 {
+            return Err(XlaError::Pjrt("buffer element type is not f32".into()));
+        }
+        Ok(self
+            .to_host_bytes()?
+            .chunks_exact(4)
+            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+            .collect())
+    }
+
+    pub(crate) fn raw(&self) -> &RawBuffer { &self.raw }
 }

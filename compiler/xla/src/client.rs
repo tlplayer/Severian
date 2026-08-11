@@ -40,6 +40,10 @@ impl XlaClient {
         self.pjrt.devices()
     }
 
+    pub fn amd_gpu_device(&self) -> Result<Device> {
+        self.pjrt.amd_gpu_device()
+    }
+
     pub fn default_device(&self) -> Result<Device> {
         self.pjrt.default_device()
     }
@@ -58,5 +62,34 @@ impl XlaClient {
 
     pub fn upload_to(&self, host: HostBuffer, device: &Device) -> Result<Buffer> {
         self.pjrt.buffer_from_host(host, Some(device))
+    }
+
+    pub fn execute(
+        &self,
+        executable: &LoadedExecutable,
+        arguments: &[&Buffer],
+        device: &Device,
+    ) -> Result<Vec<Buffer>> {
+        executable.execute(arguments, device)
+    }
+
+    /// Compiles one StableHLO module, uploads all arguments to the selected
+    /// AMD GPU, executes it there, and returns owned GPU-resident outputs.
+    /// This is the single production path shared by direct backend tests and
+    /// StableHLO emitted from Severian lowering.
+    pub fn compile_and_execute_amd(
+        &self,
+        module: &StableHloModule,
+        arguments: impl IntoIterator<Item = HostBuffer>,
+        options: &CompileOptions,
+    ) -> Result<Vec<Buffer>> {
+        let device = self.amd_gpu_device()?;
+        let executable = self.compile(module, options)?;
+        let buffers = arguments
+            .into_iter()
+            .map(|argument| self.upload_to(argument, &device))
+            .collect::<Result<Vec<_>>>()?;
+        let borrowed = buffers.iter().collect::<Vec<_>>();
+        executable.execute(&borrowed, &device)
     }
 }

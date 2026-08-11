@@ -16,6 +16,7 @@ pub(crate) mod api;
 pub(crate) mod compile;
 pub(crate) mod devices;
 pub(crate) mod error;
+pub(crate) mod execute;
 pub(crate) mod host_buffer;
 pub(crate) mod plugin;
 

@@ -1,11 +1,13 @@
-use severian_hir::TensorType;
+use severian_hir::{TensorElementType, TensorType};
 
 use crate::tensor::tensor_type;
+use super::scalar_tensor;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MlirValue {
     pub name: String,
     pub ty: String,
+    pub tensor: Option<TensorType>,
 }
 
 impl MlirValue {
@@ -13,7 +15,20 @@ impl MlirValue {
         Self {
             name: name.into(),
             ty: ty.into(),
+            tensor: None,
         }
+    }
+
+    pub fn from_tensor(name: impl Into<String>, tensor: TensorType) -> Self {
+        Self {
+            name: name.into(),
+            ty: tensor_type(tensor),
+            tensor: Some(tensor),
+        }
+    }
+
+    pub fn tensor_type(&self) -> Option<TensorType> {
+        self.tensor
     }
 }
 
@@ -36,13 +51,13 @@ impl StableHloEmitter {
         &self.text
     }
 
-    fn fresh(&mut self) -> String {
+    pub(crate) fn fresh(&mut self) -> String {
         let value = format!("%hlo{}", self.next_value);
         self.next_value += 1;
         value
     }
 
-    fn line(&mut self, line: impl AsRef<str>) {
+    pub(crate) fn line(&mut self, line: impl AsRef<str>) {
         self.text.push_str("    ");
         self.text.push_str(line.as_ref());
         self.text.push('\n');
@@ -58,7 +73,20 @@ impl StableHloEmitter {
         self.line(format!(
             "{result} = stablehlo.constant dense<{literal}> : {ty}"
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
+    }
+
+    pub fn scalar(&mut self, value: &str, element: TensorElementType) -> MlirValue {
+        self.constant_scalar(value, scalar_tensor(element))
+    }
+
+    pub fn splat(&mut self, value: &str, result_type: TensorType) -> MlirValue {
+        let scalar = self.scalar(value, result_type.element);
+        if result_type.rank == Some(0) {
+            scalar
+        } else {
+            self.broadcast_in_dim(&scalar, &[], result_type)
+        }
     }
 
     pub fn add(
@@ -128,7 +156,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.{op} {}, {} : {ty}",
             lhs.name, rhs.name
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn negate(
@@ -142,7 +170,37 @@ impl StableHloEmitter {
             "{result} = stablehlo.negate {} : {ty}",
             input.name
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
+    }
+
+    pub fn exponential(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("exponential", input, result_type)
+    }
+
+    pub fn tanh(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("tanh", input, result_type)
+    }
+
+    pub fn rsqrt(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("rsqrt", input, result_type)
+    }
+
+    pub fn logistic(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("logistic", input, result_type)
+    }
+
+    pub fn sqrt(&mut self, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        self.unary("sqrt", input, result_type)
+    }
+
+    fn unary(&mut self, operation: &str, input: &MlirValue, result_type: TensorType) -> MlirValue {
+        let result = self.fresh();
+        let ty = tensor_type(result_type);
+        self.line(format!(
+            "{result} = \"stablehlo.{operation}\"({}) : ({}) -> {ty}",
+            input.name, input.ty,
+        ));
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn reshape(
@@ -156,7 +214,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.reshape {} : ({}) -> {ty}",
             input.name, input.ty
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn transpose(
@@ -172,7 +230,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.transpose {} , dims = {permutation} : ({}) -> {ty}",
             input.name, input.ty
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn broadcast_in_dim(
@@ -188,7 +246,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.broadcast_in_dim {} , dims = {dimensions} : ({}) -> {ty}",
             input.name, input.ty
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn dot_general(
@@ -206,10 +264,14 @@ impl StableHloEmitter {
 
         self.line(format!(
             concat!(
-                "{result} = stablehlo.dot_general {}, {}, ",
-                "batching_dims = [lhs = {}, rhs = {}], ",
-                "contracting_dims = [lhs = {}, rhs = {}] : ",
-                "({}, {}) -> {ty}"
+                "{result} = \"stablehlo.dot_general\"({}, {}) {{",
+                "dot_dimension_numbers = #stablehlo.dot<",
+                "lhs_batching_dimensions = [{}], ",
+                "rhs_batching_dimensions = [{}], ",
+                "lhs_contracting_dimensions = [{}], ",
+                "rhs_contracting_dimensions = [{}]>, ",
+                "precision_config = [#stablehlo<precision DEFAULT>, ",
+                "#stablehlo<precision DEFAULT>]}} : ({}, {}) -> {ty}"
             ),
             lhs.name,
             rhs.name,
@@ -219,11 +281,9 @@ impl StableHloEmitter {
             list(rhs_contracting),
             lhs.ty,
             rhs.ty,
-            result = result,
-            ty = ty,
         ));
 
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn convert(
@@ -237,7 +297,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.convert {} : ({}) -> {ty}",
             input.name, input.ty
         ));
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 
     pub fn custom_call(
@@ -263,7 +323,7 @@ impl StableHloEmitter {
             "{result} = stablehlo.custom_call @\"{target}\"({operands}) {{api_version = 0 : i32}} : ({input_types}) -> {ty}"
         ));
 
-        MlirValue::new(result, ty)
+        MlirValue::from_tensor(result, result_type)
     }
 }
 
@@ -275,7 +335,7 @@ fn dense_i64(values: &[u64]) -> String {
     )
 }
 
-fn list(values: &[u64]) -> String {
+pub(crate) fn list(values: &[u64]) -> String {
     values
         .iter()
         .map(u64::to_string)

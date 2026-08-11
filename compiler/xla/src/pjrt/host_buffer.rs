@@ -54,30 +54,130 @@ impl RawClient {
         let result = unsafe { (api.PJRT_Client_BufferFromHostBuffer)(&mut args) };
         unsafe { error::check(api, result)? };
 
+        let buffer =
+            NonNull::new(args.buffer).ok_or_else(|| error::invalid_raw_pointer("PJRT_Buffer"))?;
+        let buffer = RawBuffer {
+            plugin: self.plugin().clone(),
+            buffer,
+            shape: host.shape.clone(),
+        };
+
         // We promised to keep the host bytes alive until the transfer finishes.
         // Await the returned event before returning from this borrowed upload.
         if !args.done_with_host_buffer.is_null() {
             await_and_destroy_event(api, args.done_with_host_buffer)?;
         }
-
-        let buffer =
-            NonNull::new(args.buffer).ok_or_else(|| error::invalid_raw_pointer("PJRT_Buffer"))?;
-
-        Ok(RawBuffer {
-            plugin: self.plugin().clone(),
-            buffer,
-            shape: host.shape.clone(),
-        })
+        Ok(buffer)
     }
 }
 
 impl RawBuffer {
+    pub(crate) fn from_raw(
+        plugin: super::plugin::RawPjrtPlugin,
+        buffer: *mut api::PJRT_Buffer,
+    ) -> Result<Self> {
+        let buffer = NonNull::new(buffer)
+            .ok_or_else(|| error::invalid_raw_pointer("PJRT_Buffer"))?;
+        let api = plugin.api();
+
+        let mut type_args = api::PJRT_Buffer_ElementType_Args {
+            struct_size: api::struct_size::<api::PJRT_Buffer_ElementType_Args>(),
+            extension_start: api::null_extension(),
+            buffer: buffer.as_ptr(),
+            type_: api::PJRT_BUFFER_TYPE_INVALID,
+        };
+        let result = unsafe { (api.PJRT_Buffer_ElementType)(&mut type_args) };
+        unsafe { error::check(api, result)? };
+
+        let mut dimensions_args = api::PJRT_Buffer_Dimensions_Args {
+            struct_size: api::struct_size::<api::PJRT_Buffer_Dimensions_Args>(),
+            extension_start: api::null_extension(),
+            buffer: buffer.as_ptr(),
+            dims: std::ptr::null(),
+            num_dims: 0,
+        };
+        let result = unsafe { (api.PJRT_Buffer_Dimensions)(&mut dimensions_args) };
+        unsafe { error::check(api, result)? };
+        if dimensions_args.num_dims != 0 && dimensions_args.dims.is_null() {
+            return Err(error::invalid_raw_pointer("PJRT buffer dimensions"));
+        }
+        let dimensions = if dimensions_args.num_dims == 0 {
+            Vec::new()
+        } else {
+            unsafe {
+                std::slice::from_raw_parts(
+                    dimensions_args.dims,
+                    dimensions_args.num_dims,
+                )
+            }
+            .to_vec()
+        };
+
+        Ok(Self {
+            plugin,
+            buffer,
+            shape: Shape::new(element_type_from_raw(type_args.type_)?, dimensions),
+        })
+    }
+
     pub fn raw(&self) -> *mut api::PJRT_Buffer {
         self.buffer.as_ptr()
     }
 
     pub fn shape(&self) -> &Shape {
         &self.shape
+    }
+
+    pub fn is_on_cpu(&self) -> Result<bool> {
+        let api = self.plugin.api();
+        let mut args = api::PJRT_Buffer_IsOnCpu_Args {
+            struct_size: api::struct_size::<api::PJRT_Buffer_IsOnCpu_Args>(),
+            extension_start: api::null_extension(),
+            buffer: self.raw(),
+            is_on_cpu: true,
+        };
+        let result = unsafe { (api.PJRT_Buffer_IsOnCpu)(&mut args) };
+        unsafe { error::check(api, result)? };
+        Ok(args.is_on_cpu)
+    }
+
+    pub fn device(&self) -> Result<*mut api::PJRT_Device> {
+        let api = self.plugin.api();
+        let mut args = api::PJRT_Buffer_Device_Args {
+            struct_size: api::struct_size::<api::PJRT_Buffer_Device_Args>(),
+            extension_start: api::null_extension(),
+            buffer: self.raw(),
+            device: std::ptr::null_mut(),
+        };
+        let result = unsafe { (api.PJRT_Buffer_Device)(&mut args) };
+        unsafe { error::check(api, result)? };
+        if args.device.is_null() {
+            Err(error::invalid_raw_pointer("PJRT buffer device"))
+        } else {
+            Ok(args.device)
+        }
+    }
+
+    pub fn to_host(&self) -> Result<Vec<u8>> {
+        let mut bytes = vec![0; self.shape.byte_len()?];
+        let api = self.plugin.api();
+        let mut args = api::PJRT_Buffer_ToHostBuffer_Args {
+            struct_size: api::struct_size::<api::PJRT_Buffer_ToHostBuffer_Args>(),
+            extension_start: api::null_extension(),
+            src: self.raw(),
+            host_layout: std::ptr::null_mut(),
+            dst: bytes.as_mut_ptr().cast(),
+            dst_size: bytes.len(),
+            event: std::ptr::null_mut(),
+        };
+        let result = unsafe { (api.PJRT_Buffer_ToHostBuffer)(&mut args) };
+        unsafe { error::check(api, result)? };
+        await_and_destroy_event(api, args.event)?;
+        Ok(bytes)
+    }
+
+    pub(crate) fn plugin(&self) -> &super::plugin::RawPjrtPlugin {
+        &self.plugin
     }
 
 }
@@ -111,6 +211,27 @@ pub fn element_type_to_raw(element: ElementType) -> api::PJRT_Buffer_Type {
         ElementType::BF16 => api::PJRT_BUFFER_TYPE_BF16,
         ElementType::F32 => api::PJRT_BUFFER_TYPE_F32,
         ElementType::F64 => api::PJRT_BUFFER_TYPE_F64,
+    }
+}
+
+fn element_type_from_raw(element: api::PJRT_Buffer_Type) -> Result<ElementType> {
+    match element {
+        api::PJRT_BUFFER_TYPE_PRED => Ok(ElementType::Pred),
+        api::PJRT_BUFFER_TYPE_S8 => Ok(ElementType::S8),
+        api::PJRT_BUFFER_TYPE_S16 => Ok(ElementType::S16),
+        api::PJRT_BUFFER_TYPE_S32 => Ok(ElementType::S32),
+        api::PJRT_BUFFER_TYPE_S64 => Ok(ElementType::S64),
+        api::PJRT_BUFFER_TYPE_U8 => Ok(ElementType::U8),
+        api::PJRT_BUFFER_TYPE_U16 => Ok(ElementType::U16),
+        api::PJRT_BUFFER_TYPE_U32 => Ok(ElementType::U32),
+        api::PJRT_BUFFER_TYPE_U64 => Ok(ElementType::U64),
+        api::PJRT_BUFFER_TYPE_F16 => Ok(ElementType::F16),
+        api::PJRT_BUFFER_TYPE_F32 => Ok(ElementType::F32),
+        api::PJRT_BUFFER_TYPE_F64 => Ok(ElementType::F64),
+        api::PJRT_BUFFER_TYPE_BF16 => Ok(ElementType::BF16),
+        other => Err(crate::XlaError::Pjrt(format!(
+            "PJRT returned unknown buffer element type {other}"
+        ))),
     }
 }
 

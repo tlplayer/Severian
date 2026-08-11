@@ -388,6 +388,14 @@ pub struct PJRT_Buffer_Device_Args {
 }
 
 #[repr(C)]
+pub struct PJRT_Buffer_IsOnCpu_Args {
+    pub struct_size: usize,
+    pub extension_start: *mut PJRT_Extension_Base,
+    pub buffer: *mut PJRT_Buffer,
+    pub is_on_cpu: bool,
+}
+
+#[repr(C)]
 pub struct PJRT_Buffer_ToHostBuffer_Args {
     pub struct_size: usize,
     pub extension_start: *mut PJRT_Extension_Base,
@@ -454,6 +462,8 @@ pub type BufferDevice =
     unsafe extern "C" fn(*mut PJRT_Buffer_Device_Args) -> *mut PJRT_Error;
 pub type BufferToHostBuffer =
     unsafe extern "C" fn(*mut PJRT_Buffer_ToHostBuffer_Args) -> *mut PJRT_Error;
+pub type BufferIsOnCpu =
+    unsafe extern "C" fn(*mut PJRT_Buffer_IsOnCpu_Args) -> *mut PJRT_Error;
 
 /// Prefix of PJRT_Api through PJRT_Buffer_ToHostBuffer.
 ///
@@ -543,6 +553,7 @@ pub struct PJRT_Api {
     pub _buffer_is_deleted: *const c_void,
     pub _buffer_copy_to_device: *const c_void,
     pub PJRT_Buffer_ToHostBuffer: BufferToHostBuffer,
+    pub PJRT_Buffer_IsOnCpu: BufferIsOnCpu,
 }
 
 pub type GetPjrtApi = unsafe extern "C" fn() -> *const PJRT_Api;
