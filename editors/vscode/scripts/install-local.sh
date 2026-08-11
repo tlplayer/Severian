@@ -4,22 +4,36 @@ set -euo pipefail
 extension_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$extension_dir"
 
-if command -v code >/dev/null 2>&1; then
-  editor=code
-elif command -v codium >/dev/null 2>&1; then
+if command -v codium >/dev/null 2>&1; then
   editor=codium
+  default_extensions_dir="${HOME:?}/.vscode-oss/extensions"
+elif command -v code >/dev/null 2>&1; then
+  editor=code
+  default_extensions_dir="${HOME:?}/.vscode/extensions"
 else
   echo "Neither 'code' nor 'codium' is on PATH." >&2
   exit 1
 fi
+user_extensions_dir="${SEVERIAN_EXTENSIONS_DIR:-$default_extensions_dir}"
 
-if ! command -v npx >/dev/null 2>&1; then
-  echo "npx is required to package the extension." >&2
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to read the extension manifest." >&2
   exit 1
 fi
 
-rm -f severian-language.vsix
-npx --yes @vscode/vsce@3.6.2 package --out severian-language.vsix
-"$editor" --install-extension severian-language.vsix --force
+read -r publisher extension_name version < <(
+  python3 -c 'import json, pathlib; package = json.loads(pathlib.Path("package.json").read_text()); print(package["publisher"], package["name"], package["version"])'
+)
+install_path="$user_extensions_dir/$publisher.$extension_name-$version"
 
-echo "Installed Severian Language. Reload the editor window, then open a .sev file."
+mkdir -p "$user_extensions_dir"
+if [[ -L "$install_path" ]]; then
+  unlink "$install_path"
+elif [[ -e "$install_path" ]]; then
+  echo "Refusing to replace non-link extension path: $install_path" >&2
+  exit 1
+fi
+ln -s "$extension_dir" "$install_path"
+
+echo "Linked Severian Language for $editor: $install_path -> $extension_dir"
+echo "Reload the editor window, then open a .sev file."

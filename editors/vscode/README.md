@@ -25,14 +25,19 @@ npm run package
 
 ## Install locally
 
-From the Severian repository root:
+No Marketplace account, publishing token, Node.js, or npm is needed for local
+highlighting. From the Severian repository root, run:
 
 ```bash
-cd editors/vscode
-./scripts/install-local.sh
+./editors/vscode/scripts/install-local.sh
 ```
 
-Then run **Developer: Reload Window** and open a `.sev` file. The language selector in the lower-right corner should show **Severian**.
+The command detects VSCodium or VS Code and links this checkout directly into
+its local extensions directory. Repository grammar changes are therefore
+available after reloading the editor; no VSIX rebuild is required.
+
+Then run **Developer: Reload Window** and open a `.sev` file. The language
+selector in the lower-right corner should show **Severian**.
 
 For extension development without packaging:
 
