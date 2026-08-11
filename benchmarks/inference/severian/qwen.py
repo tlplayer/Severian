@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -15,9 +16,15 @@ from server_common import _VramMonitor, _gpu_snapshot
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--expected-token", type=int, default=348)
+    parser.add_argument(
+        "--inputs", type=Path, default=Path("benchmarks/inference/example_inputs.json")
+    )
+    parser.add_argument("--length", default="32")
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args()
+    record = json.loads(args.inputs.read_text())[args.length]
+    if len(record["input_ids"]) != 32 or record["logits_position"] != 31:
+        raise RuntimeError("Severian requires the canonical 32-token fixture")
     process_start = time.monotonic_ns()
     before = _gpu_snapshot()
     with _VramMonitor(before["vram_used_bytes"]) as monitor:
@@ -40,8 +47,9 @@ def main() -> None:
     if missing:
         raise RuntimeError(f"Severian output is missing {missing}:\n{process.stdout}")
     token = int(fields["next_token"])
-    if token != args.expected_token:
-        raise RuntimeError(f"Severian returned token {token}, expected {args.expected_token}")
+    expected = record.get("expected_output_ids", [])
+    if expected and [token] != expected:
+        raise RuntimeError(f"Severian returned token {token}, expected {expected[0]}")
     gpu = "unknown"
     match = re.search(r"StreamExecutor \[0\]: ([^,]+)", process.stderr)
     if match:
@@ -54,10 +62,15 @@ def main() -> None:
         "gpu_model": gpu,
         "gpu_index": 0,
         "input_tokens": int(fields["prompt_token_count"]),
+        "input_token_ids_sha256": hashlib.sha256(
+            json.dumps(record["input_ids"], separators=(",", ":")).encode()
+        ).hexdigest(),
+        "logits_position": int(fields["logits_position"]),
+        "warmup_token": int(fields["warmup_token"]),
         "output_tokens": 1,
         "process_start_ns": int(fields["process_start_ns"]),
         "model_ready_ns": int(fields["model_ready_ns"]),
-        "first_token_ns": int(fields["model_ready_ns"]) + int(fields["prefill_ns"]),
+        "first_token_ns": int(fields["first_token_ns"]),
         "load_ns": process_to_ready_ns - warmup_ns,
         "warmup_ns": warmup_ns,
         "process_to_ready_ns": process_to_ready_ns,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import resource
 import time
@@ -28,7 +29,20 @@ def main() -> None:
         raise RuntimeError("PyTorch ROCm GPU is unavailable")
     device = torch.device("cuda:0")
     before = torch.cuda.mem_get_info(device)
-    tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
+    record = json.loads(args.inputs.read_text())[args.length]
+    token_ids = record["input_ids"]
+    attention_mask_values = record["attention_mask"]
+    position_id_values = record["position_ids"]
+    logits_position = record["logits_position"]
+    if len(token_ids) != 32 or len(attention_mask_values) != 32 or len(position_id_values) != 32:
+        raise RuntimeError("the full-pass fixture must contain exactly 32 tokens")
+    if attention_mask_values != [1] * 32 or position_id_values != list(range(32)):
+        raise RuntimeError("the full-pass fixture mask or position IDs are invalid")
+    if logits_position != 31:
+        raise RuntimeError("the full-pass fixture must select logits position 31")
+    tokenizer = None
+    if args.end_to_end:
+        tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         local_files_only=True,
@@ -40,9 +54,9 @@ def main() -> None:
     synchronize()
     model_ready = time.monotonic_ns()
     after = torch.cuda.mem_get_info(device)
-    record = json.loads(args.inputs.read_text())[args.length]
     tokenize_start = time.monotonic_ns()
     if args.end_to_end:
+        assert tokenizer is not None
         token_ids = tokenizer.encode(record["prompt_text"], add_special_tokens=False)
         if token_ids != record["input_ids"]:
             raise RuntimeError("end-to-end tokenizer IDs differ from the fixed compute input")
@@ -50,29 +64,44 @@ def main() -> None:
         token_ids = record["input_ids"]
     tokenize_end = time.monotonic_ns()
     input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+    attention_mask = torch.tensor(
+        [attention_mask_values], dtype=torch.long, device=device
+    )
+    position_ids = torch.tensor([position_id_values], dtype=torch.long, device=device)
     warmup_start = time.monotonic_ns()
     with torch.inference_mode():
-        model(input_ids=input_ids, use_cache=False)
+        warmup_output = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            use_cache=False,
+        )
     synchronize()
+    warmup_token = int(warmup_output.logits[:, logits_position].argmax(dim=-1).item())
     warmup_end = time.monotonic_ns()
     torch.cuda.reset_peak_memory_stats(device)
     with torch.inference_mode():
+        synchronize()
         prefill_start = time.monotonic_ns()
-        output = model(input_ids=input_ids, use_cache=True)
+        output = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            use_cache=False,
+        )
         synchronize()
         prefill_end = time.monotonic_ns()
-        next_token = output.logits[:, -1].argmax(dim=-1, keepdim=True)
-        past = output.past_key_values
+        next_token = output.logits[:, logits_position].argmax(dim=-1, keepdim=True)
         generated = [int(next_token.item())]
-        first_token = prefill_end
+        first_token = time.monotonic_ns()
         decode_start = time.monotonic_ns()
-        for _ in range(record["output_tokens"] - 1):
-            output = model(input_ids=next_token, past_key_values=past, use_cache=True)
-            past = output.past_key_values
-            next_token = output.logits[:, -1].argmax(dim=-1, keepdim=True)
-            generated.append(int(next_token.item()))
         synchronize()
         decode_end = time.monotonic_ns()
+    if generated[0] != warmup_token:
+        raise RuntimeError("warmup and measured next-token argmax differ")
+    expected = record.get("expected_output_ids", [])
+    if expected and generated != expected:
+        raise RuntimeError(f"generated {generated}, expected {expected}")
     properties = torch.cuda.get_device_properties(device)
     result = {
         "framework": "pytorch_compile" if args.compile else "pytorch_eager",
@@ -80,6 +109,11 @@ def main() -> None:
         "gpu_model": properties.name,
         "gpu_index": 0,
         "input_tokens": len(record["input_ids"]),
+        "input_token_ids_sha256": hashlib.sha256(
+            json.dumps(record["input_ids"], separators=(",", ":")).encode()
+        ).hexdigest(),
+        "logits_position": logits_position,
+        "warmup_token": warmup_token,
         "output_tokens": len(generated),
         "process_start_ns": process_start,
         "model_ready_ns": model_ready,
