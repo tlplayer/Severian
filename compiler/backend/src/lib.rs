@@ -7,6 +7,8 @@ pub mod llvm;
 pub mod native;
 pub mod toolchain;
 
+pub use native::{NativeCompileOptions, NativeSanitizer};
+
 use severian_hir::Program;
 use severian_mlir::Module;
 use std::fmt;
@@ -153,7 +155,7 @@ pub fn compile_native(
     module: &Module,
     output: &Path,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output, None)
+    native::compile_native(program, module, output, None, &NativeCompileOptions::default())
 }
 
 pub fn compile_native_with_xla_runtime(
@@ -162,7 +164,22 @@ pub fn compile_native_with_xla_runtime(
     output: &Path,
     xla_runtime: &Path,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output, Some(xla_runtime))
+    native::compile_native(
+        program,
+        module,
+        output,
+        Some(xla_runtime),
+        &NativeCompileOptions::default(),
+    )
+}
+
+pub fn compile_native_with_options(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    options: &NativeCompileOptions,
+) -> Result<(), BackendError> {
+    native::compile_native(program, module, output, None, options)
 }
 
 /// Compiles GPU execution regions to an AMD code object, embeds it in the host

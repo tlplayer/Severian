@@ -218,12 +218,6 @@ pub fn analyze_with_packages(
             ),
             _ => continue,
         };
-        if !is_lower_camel_case(&name.name) {
-            return Err(error(
-                name.span,
-                format!("function `{}` must use lowerCamelCase", name.name),
-            ));
-        }
         let signature = lower_signature(&name.name, native_symbol, params, return_type)?;
         if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
@@ -3193,11 +3187,6 @@ fn always_returns(instructions: &[Instruction]) -> bool {
         }
         _ => false,
     })
-}
-
-fn is_lower_camel_case(name: &str) -> bool {
-    name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-        && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 fn is_upper_camel_case(name: &str) -> bool {

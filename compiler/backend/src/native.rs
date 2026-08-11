@@ -8,6 +8,19 @@ use severian_hir::Program;
 use severian_mlir::Module;
 use std::{ffi::OsString, path::Path};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSanitizer {
+    Address,
+    Thread,
+    Memory,
+    Undefined,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NativeCompileOptions {
+    pub sanitizers: Vec<NativeSanitizer>,
+}
+
 /// Host-native compilation.
 ///
 /// This is the modular equivalent of the existing monolithic
@@ -17,6 +30,7 @@ pub fn compile_native(
     module: &Module,
     output: &Path,
     xla_runtime: Option<&Path>,
+    options: &NativeCompileOptions,
 ) -> Result<(), BackendError> {
     let temporary = TemporaryFiles::new("severian-native");
     let source_mlir = temporary.path("source.mlir");
@@ -64,6 +78,32 @@ pub fn compile_native(
         libraries.push(library.to_path_buf());
     }
 
+    let sanitizer_names = options
+        .sanitizers
+        .iter()
+        .map(|sanitizer| match sanitizer {
+            NativeSanitizer::Address => "address",
+            NativeSanitizer::Thread => "thread",
+            NativeSanitizer::Memory => "memory",
+            NativeSanitizer::Undefined => "undefined",
+        })
+        .collect::<Vec<_>>();
+    let mut additional_arguments = vec![
+        OsString::from("-ffunction-sections"),
+        OsString::from("-fdata-sections"),
+        OsString::from("-Wl,--gc-sections"),
+        OsString::from("-ldl"),
+        OsString::from("-lrt"),
+        OsString::from("-lutil"),
+    ];
+    if !sanitizer_names.is_empty() {
+        additional_arguments.extend([
+            format!("-fsanitize={}", sanitizer_names.join(",")).into(),
+            OsString::from("-fno-omit-frame-pointer"),
+            OsString::from("-g"),
+        ]);
+    }
+
     link_native_executable(
         &llvm_ir,
         bridge_path,
@@ -73,15 +113,8 @@ pub fn compile_native(
             libraries,
             pthread: bridge_path.is_some(),
             math: true,
-            optimization: 3,
-            additional_arguments: vec![
-                OsString::from("-ffunction-sections"),
-                OsString::from("-fdata-sections"),
-                OsString::from("-Wl,--gc-sections"),
-                OsString::from("-ldl"),
-                OsString::from("-lrt"),
-                OsString::from("-lutil"),
-            ],
+            optimization: if sanitizer_names.is_empty() { 3 } else { 1 },
+            additional_arguments,
             ..NativeLinkOptions::default()
         },
     )

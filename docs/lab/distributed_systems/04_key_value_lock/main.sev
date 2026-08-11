@@ -1,0 +1,143 @@
+# Versioned single-server key/value behavior and the lock built on top of it.
+
+class GetReply:
+    found: bool
+    value: string
+    version: int
+
+    def GetReply(found_value: bool, item_value: string, version_value: int):
+        found = found_value
+        value = item_value
+        version = version_value
+
+class PutReply:
+    error: string
+    version: int
+
+    def PutReply(error_value: string, version_value: int):
+        error = error_value
+        version = version_value
+
+class VersionedStore:
+    keys: list[string]
+    values: list[string]
+    versions: list[int]
+
+    def VersionedStore():
+        keys = []
+        values = []
+        versions = []
+
+    def key_index(key: string) -> int:
+        for index in range(size(keys)):
+            if keys[index] == key:
+                return index
+        return -1
+
+    def get(key: string) -> GetReply:
+        index := -1
+        for candidate_index in range(size(keys)):
+            if keys[candidate_index] == key:
+                index = candidate_index
+        if index < 0:
+            return GetReply(false, "", 0)
+        return GetReply(true, values[index], versions[index])
+
+    def put(key: string, value: string, expected_version: int) -> PutReply:
+        index := -1
+        for candidate_index in range(size(keys)):
+            if keys[candidate_index] == key:
+                index = candidate_index
+        if index < 0:
+            if expected_version != 0:
+                return PutReply("ErrNoKey", 0)
+            keys.append(key)
+            values.append(value)
+            versions.append(1)
+            return PutReply("OK", 1)
+        if versions[index] != expected_version:
+            return PutReply("ErrVersion", versions[index])
+        values[index] = value
+        versions[index] += 1
+        return PutReply("OK", versions[index])
+
+    def retry_put(key: string, value: string, attempted_version: int) -> PutReply:
+        index := -1
+        for candidate_index in range(size(keys)):
+            if keys[candidate_index] == key:
+                index = candidate_index
+        if index >= 0 and values[index] == value and versions[index] == attempted_version + 1:
+            return PutReply("ErrMaybe", versions[index])
+        if index < 0:
+            if attempted_version != 0:
+                return PutReply("ErrNoKey", 0)
+            keys.append(key)
+            values.append(value)
+            versions.append(1)
+            return PutReply("OK", 1)
+        if versions[index] != attempted_version:
+            return PutReply("ErrVersion", versions[index])
+        values[index] = value
+        versions[index] += 1
+        return PutReply("OK", versions[index])
+
+class DistributedLock:
+    store: VersionedStore
+    key: string
+    owner: string
+    held_version: int
+
+    def DistributedLock(store_value: VersionedStore, key_value: string, owner_value: string):
+        store = store_value
+        key = key_value
+        owner = owner_value
+        held_version = 0
+
+    def acquire() -> bool:
+        current = store.get(key)
+        if not current.found:
+            reply = store.put(key, owner, 0)
+            if reply.error == "OK":
+                held_version = reply.version
+                return true
+            return false
+        if current.value != "":
+            return current.value == owner
+        reply = store.put(key, owner, current.version)
+        if reply.error == "OK":
+            held_version = reply.version
+            return true
+        return false
+
+    def release() -> bool:
+        current = store.get(key)
+        if not current.found or current.value != owner:
+            return false
+        reply = store.put(key, "", current.version)
+        if reply.error == "OK":
+            held_version = 0
+            return true
+        return false
+
+test "version checks and ambiguous retry":
+    store := VersionedStore()
+    assert(not store.get("x").found)
+    assert(store.put("x", "one", 0).error == "OK")
+    assert(store.put("x", "stale", 0).error == "ErrVersion")
+    assert(store.put("missing", "value", 2).error == "ErrNoKey")
+    assert(store.retry_put("x", "one", 0).error == "ErrMaybe")
+    assert(store.put("x", "two", 1).version == 2)
+
+test "optimistic lock excludes another owner":
+    store := VersionedStore()
+    first := DistributedLock(store, "lock", "client-a")
+    second := DistributedLock(store, "lock", "client-b")
+    assert(first.acquire())
+    assert(not second.acquire())
+    assert(first.release())
+    assert(second.acquire())
+
+def main():
+    store := VersionedStore()
+    lock := DistributedLock(store, "report", "worker-1")
+    print("key-value-lock", lock.acquire(), lock.release())

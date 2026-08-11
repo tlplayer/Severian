@@ -1,10 +1,13 @@
 use serde::Deserialize;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
     process::Command,
 };
+
+use crate::{CoverageRegionId, CoverageRegionKind, CoverageSourceMap};
 
 #[derive(Debug, Clone)]
 pub struct CoverageToolchain {
@@ -35,6 +38,130 @@ pub struct CoverageReport {
     pub branches: CoverageMetric,
     pub functions: CoverageMetric,
     pub raw_json: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileCoverageReport {
+    pub file: PathBuf,
+    pub report: CoverageReport,
+}
+
+/// Reads the append-only hit format produced by Severian's native coverage
+/// runtime. Repeated ids are deliberately collapsed: coverage measures reach,
+/// not execution frequency.
+pub fn read_language_hits(path: &Path) -> io::Result<BTreeSet<CoverageRegionId>> {
+    if !path.exists() {
+        return Ok(BTreeSet::new());
+    }
+    let contents = fs::read_to_string(path)?;
+    contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.trim()
+                .parse::<u64>()
+                .map(CoverageRegionId)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        })
+        .collect()
+}
+
+/// Builds aggregate and per-file source coverage from Severian regions.
+pub fn language_report(
+    source_map: &CoverageSourceMap,
+    hits: &BTreeSet<CoverageRegionId>,
+) -> (CoverageReport, Vec<FileCoverageReport>) {
+    let aggregate = report_for_regions(source_map.regions(), hits);
+    let mut files = BTreeMap::<PathBuf, Vec<_>>::new();
+    for region in source_map.regions() {
+        files
+            .entry(region.span.file.clone())
+            .or_default()
+            .push(region);
+    }
+    let files = files
+        .into_iter()
+        .map(|(file, regions)| FileCoverageReport {
+            file,
+            report: report_for_regions(regions.into_iter(), hits),
+        })
+        .collect();
+    (aggregate, files)
+}
+
+fn report_for_regions<'a>(
+    regions: impl Iterator<Item = &'a crate::CoverageRegion>,
+    hits: &BTreeSet<CoverageRegionId>,
+) -> CoverageReport {
+    let regions = regions.collect::<Vec<_>>();
+    let statements = regions
+        .iter()
+        .filter(|region| region.kind == CoverageRegionKind::Statement)
+        .copied()
+        .collect::<Vec<_>>();
+    let lines = statements
+        .iter()
+        .map(|region| (region.span.file.clone(), region.span.start.line))
+        .collect::<BTreeSet<_>>();
+    let covered_lines = statements
+        .iter()
+        .filter(|region| hits.contains(&region.id))
+        .map(|region| (region.span.file.clone(), region.span.start.line))
+        .collect::<BTreeSet<_>>();
+    CoverageReport {
+        lines: ratio(lines.len() as u64, covered_lines.len() as u64),
+        regions: ratio(
+            statements.len() as u64,
+            statements
+                .iter()
+                .filter(|region| hits.contains(&region.id))
+                .count() as u64,
+        ),
+        branches: kind_metric(&regions, hits, CoverageRegionKind::Branch),
+        functions: kind_metric(&regions, hits, CoverageRegionKind::Function),
+        raw_json: None,
+    }
+}
+
+fn kind_metric(
+    regions: &[&crate::CoverageRegion],
+    hits: &BTreeSet<CoverageRegionId>,
+    kind: CoverageRegionKind,
+) -> CoverageMetric {
+    let matching = regions.iter().filter(|region| region.kind == kind);
+    let count = matching.clone().count() as u64;
+    let covered = matching.filter(|region| hits.contains(&region.id)).count() as u64;
+    ratio(count, covered)
+}
+
+fn ratio(count: u64, covered: u64) -> CoverageMetric {
+    CoverageMetric {
+        count,
+        covered,
+        percent: if count == 0 {
+            100.0
+        } else {
+            covered as f64 * 100.0 / count as f64
+        },
+    }
+}
+
+pub fn render_files(files: &[FileCoverageReport]) -> String {
+    let mut output = String::new();
+    for file in files {
+        use std::fmt::Write as _;
+        let _ = writeln!(
+            output,
+            "{:<48} {:6.2}% lines ({}/{})  {:6.2}% branches  {:6.2}% functions",
+            file.file.display(),
+            file.report.lines.percent,
+            file.report.lines.covered,
+            file.report.lines.count,
+            file.report.branches.percent,
+            file.report.functions.percent,
+        );
+    }
+    output
 }
 
 pub fn merge_profiles(

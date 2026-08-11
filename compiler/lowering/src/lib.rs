@@ -167,6 +167,7 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
         "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
+        "  llvm.func @__sev_coverage_hit(i64)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
 
@@ -593,6 +594,10 @@ fn lower_class_function(
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
     };
+    for global in environment.globals {
+        let value = context.lower_expression(&global.value);
+        context.variables.insert(global.name.clone(), value);
+    }
     context.lower_instructions(&function.instructions);
     if !context.terminated && function.return_type == ValueType::Unit {
         context.output.push_str("    llvm.return\n");
@@ -1163,9 +1168,12 @@ impl LowerContext<'_> {
                         .field_types
                         .get(name)
                         .copied()
-                        .filter(|ty| matches!(ty, ValueType::Tensor(_)))
                         .unwrap_or(ValueType::Any);
-                    (result, ty)
+                    if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
+                        (result, ty)
+                    } else {
+                        self.unbox_value((result, ValueType::Any), ty)
+                    }
                 } else {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
@@ -1335,6 +1343,20 @@ impl LowerContext<'_> {
                         .find(|constructor| constructor.params.len() == args.len())
                 });
                 if let Some(constructor) = constructor {
+                    let lowered_args = lowered_args
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, argument)| {
+                            let expected = constructor.params[index].ty;
+                            if argument.1 == ValueType::Any && expected != ValueType::Any {
+                                self.unbox_value(argument, expected)
+                            } else if expected == ValueType::Any && argument.1 != ValueType::Any {
+                                (self.box_value(argument), ValueType::Any)
+                            } else {
+                                argument
+                            }
+                        })
+                        .collect::<Vec<_>>();
                     let values = lowered_args
                         .iter()
                         .map(|(value, _)| value.as_str())
@@ -1399,11 +1421,12 @@ impl LowerContext<'_> {
                 if let Some((_, Some(class))) = &metadata {
                     self.object_classes.insert(result.clone(), class.clone());
                 }
-                let ty = metadata
-                    .map(|(ty, _)| ty)
-                    .filter(|ty| matches!(ty, ValueType::Tensor(_)))
-                    .unwrap_or(ValueType::Any);
-                (result, ty)
+                let ty = metadata.map(|(ty, _)| ty).unwrap_or(ValueType::Any);
+                if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
+                    (result, ty)
+                } else {
+                    self.unbox_value((result, ValueType::Any), ty)
+                }
             }
             Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();
@@ -1610,7 +1633,10 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if method == "join" && args.len() == 1 => {
+            } if method == "join"
+                && args.len() == 1
+                && !self.has_known_class_method(object, method) =>
+            {
                 let (mut object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
                     object = self.unbox_value((object, object_type), ValueType::List).0;
@@ -1839,7 +1865,10 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "get" | "setDefault") && args.len() == 2 => {
+            } if matches!(method.as_str(), "get" | "setDefault")
+                && args.len() == 2
+                && !self.has_known_class_method(object, method) =>
+            {
                 let (object, _) = self.lower_expression(object);
                 let key = self.lower_expression(&args[0]);
                 let key = self.box_value(key);
@@ -2030,16 +2059,20 @@ impl LowerContext<'_> {
                             .methods
                             .iter()
                             .find(|candidate| candidate.name == *method)
-                    });
+                    })
+                    .cloned();
                 let lowered_args = lowered_args
                     .into_iter()
                     .enumerate()
                     .map(|(index, argument)| {
-                        if method_definition
+                        let expected = method_definition
+                            .as_ref()
                             .and_then(|definition| definition.params.get(index))
-                            .is_some_and(|parameter| parameter.ty == ValueType::Any)
-                            && argument.1 != ValueType::Any
-                        {
+                            .map(|parameter| parameter.ty)
+                            .unwrap_or(argument.1);
+                        if argument.1 == ValueType::Any && expected != ValueType::Any {
+                            self.unbox_value(argument, expected)
+                        } else if expected == ValueType::Any && argument.1 != ValueType::Any {
                             (self.box_value(argument), ValueType::Any)
                         } else {
                             argument
@@ -2067,6 +2100,7 @@ impl LowerContext<'_> {
                     format!(", {types}")
                 };
                 let return_type = method_definition
+                    .as_ref()
                     .map(|definition| definition.return_type)
                     .unwrap_or(ValueType::Any);
                 if return_type == ValueType::Unit {
@@ -2995,6 +3029,27 @@ impl LowerContext<'_> {
         result
     }
 
+    fn has_known_class_method(&self, object: &Expression, method: &str) -> bool {
+        let Expression::Variable(name) = object.kind() else {
+            return false;
+        };
+        let Some((value, _)) = self.variables.get(name) else {
+            return false;
+        };
+        let Some(class_name) = self.object_classes.get(value) else {
+            return false;
+        };
+        self.classes
+            .iter()
+            .find(|class| class.name == *class_name)
+            .is_some_and(|class| {
+                class
+                    .methods
+                    .iter()
+                    .any(|candidate| candidate.name == method)
+            })
+    }
+
     fn box_value(&mut self, (value, ty): (String, ValueType)) -> String {
         let function = match ty {
             ValueType::Int => "__sev_box_i64",
@@ -3535,6 +3590,9 @@ impl LowerContext<'_> {
         op: BinaryOp,
         (mut right, mut right_type): (String, ValueType),
     ) -> (String, ValueType) {
+        if op == BinaryOp::In && right_type == ValueType::Any {
+            (right, right_type) = self.unbox_value((right, right_type), ValueType::List);
+        }
         if op == BinaryOp::In && matches!(right_type, ValueType::List | ValueType::Set) {
             let left = self.box_value((left, operand_type));
             let result = self.fresh_value();
@@ -5094,6 +5152,7 @@ fn native_bridge_source_for_target(
         "typedef struct { const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { const char *tag; sev_value *field; } sev_variant;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
+        "void __sev_coverage_hit(int64_t id) { const char *path = getenv(\"SEVERIAN_COVERAGE_FILE\"); if (!path || !*path) return; int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666); if (fd < 0) abort(); char line[32]; int size = snprintf(line, sizeof(line), \"%lu\\n\", (uint64_t)id); if (size <= 0 || write(fd, line, (size_t)size) != size) { close(fd); abort(); } close(fd); }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
         "void *__sev_box_i64(int64_t raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_INT; value->as.i64 = raw; return value; }\n",
         "void *__sev_box_f64(double raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_FLOAT; value->as.f64 = raw; return value; }\n",

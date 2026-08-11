@@ -68,7 +68,9 @@ pub fn native_test_compilation(
     let mut hir = compilation.optimized_hir.clone();
     hir.functions.retain(|function| function.name != "main");
     hir.functions.push(Function {
-        id: FunctionId::from_name("main"),
+        // The executable symbol must still be `main`, but its identity must not
+        // alias a user-defined main function in source maps or coverage data.
+        id: FunctionId::from_name("__severian_test_main"),
         name: "main".into(),
         native_symbol: None,
         decorators: Vec::new(),

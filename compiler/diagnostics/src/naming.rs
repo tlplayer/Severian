@@ -651,6 +651,13 @@ fn to_snake_case(name: &str) -> String {
 fn words(name: &str) -> Vec<String> {
     let mut output = Vec::new();
     for chunk in name.split('_').filter(|chunk| !chunk.is_empty()) {
+        if chunk
+            .bytes()
+            .all(|byte| !byte.is_ascii_alphabetic() || byte.is_ascii_uppercase())
+        {
+            output.push(chunk.to_owned());
+            continue;
+        }
         let mut index = 0;
         while index < chunk.len() {
             if let Some(acronym) = known_acronyms()
@@ -830,6 +837,13 @@ mod tests {
         assert_eq!(expected_type_name("HTTPRPCServer"), "http_rpc_server");
         assert_eq!(expected_type_name("XLAGPUExecutable"), "xla_gpu_executable");
         assert_eq!(expected_type_name("TransformerBlock"), "TransformerBlock");
+    }
+
+    #[test]
+    fn preserves_upper_snake_case_constants() {
+        assert_eq!(expected_name("SHARD_COUNT", Role::Constant), "SHARD_COUNT");
+        let (report, _) = lint("int SHARD_COUNT = 12\n");
+        assert_eq!(report.diagnostics.warning_count(), 0);
     }
 
     #[test]

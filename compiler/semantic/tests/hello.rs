@@ -193,10 +193,9 @@ fn rejects_parallel_placement_without_the_parallel_import() {
 }
 
 #[test]
-fn rejects_snake_case_function_names() {
+fn accepts_snake_case_function_names_for_lint_managed_style() {
     let ast = parse(&lex("def bad_name():\n    print(\"hello\")\n").unwrap()).unwrap();
-    let error = analyze(&ast).unwrap_err();
-    assert_eq!(error.message, "function `bad_name` must use lowerCamelCase");
+    analyze(&ast).unwrap();
 }
 
 #[test]

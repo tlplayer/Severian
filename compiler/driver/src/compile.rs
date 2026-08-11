@@ -233,6 +233,20 @@ pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), Co
     result.map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
 
+pub fn compile_native_with_options(
+    compilation: &Compilation,
+    output: &Path,
+    options: &severian_backend::NativeCompileOptions,
+) -> Result<(), CompileError> {
+    severian_backend::compile_native_with_options(
+        &compilation.optimized_hir,
+        &compilation.mlir,
+        output,
+        options,
+    )
+    .map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
+}
+
 pub fn inspect_toolchain() -> severian_backend::ToolchainReport {
     severian_backend::inspect_toolchain()
 }

@@ -56,6 +56,10 @@ impl CoverageSourceMap {
         self.regions.values()
     }
 
+    pub fn extend(&mut self, other: Self) {
+        self.regions.extend(other.regions);
+    }
+
     pub fn regions_for_file<'a>(
         &'a self,
         file: &'a Path,

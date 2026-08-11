@@ -1,5 +1,6 @@
 use severian_driver::{
-    check_path, compile_native, compile_native_tests, compile_path, inspect_toolchain, Compilation,
+    check_path, compile_native, compile_native_tests, compile_native_with_options, compile_path,
+    inspect_toolchain, native_test_compilation, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -41,8 +42,9 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "lint" => lint_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
         "run" if args.len() == 2 => run_targets(Path::new(&args[1])),
-        "test" if args.len() == 2 => test_targets(Path::new(&args[1])),
+        "test" => test_command(&args[1..]),
         "coverage" if args.len() == 2 => coverage(Path::new(&args[1])),
+        "memory" => memory_command(&args[1..]),
         "clean" if args.len() <= 2 => clean(args.get(1).map(Path::new)),
         "tree" if args.len() == 2 => tree(Path::new(&args[1])),
         "metadata" if args.len() == 2 => metadata(Path::new(&args[1])),
@@ -545,15 +547,346 @@ fn test_targets(input: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn test_command(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut mutate = false;
+    let mut limit = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--mutate" => {
+                mutate = true;
+                index += 1;
+            }
+            "--limit" if index + 1 < args.len() => {
+                limit = Some(
+                    args[index + 1]
+                        .parse::<usize>()
+                        .map_err(|_| "--limit must be a positive integer".to_string())?,
+                );
+                index += 2;
+            }
+            value if !value.starts_with('-') && input.is_none() => {
+                input = Some(PathBuf::from(value));
+                index += 1;
+            }
+            value => return Err(format!("unknown test option `{value}`\n{}", usage())),
+        }
+    }
+    let input_supplied = input.is_some();
+    let input = input.unwrap_or_else(|| PathBuf::from("."));
+    if mutate {
+        mutation_test_targets(&input, limit)
+    } else if !input_supplied {
+        Err(usage())
+    } else {
+        test_targets(&input)
+    }
+}
+
+fn mutation_test_targets(input: &Path, limit: Option<usize>) -> Result<(), String> {
+    let targets = resolve_targets(input)?;
+    let mut generated = 0;
+    let mut killed = 0;
+    let mut survived = 0;
+    let mut invalid = 0;
+
+    for target in targets {
+        let compilation = compile_path(&target.source)
+            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        if compilation.hir.test_count() == 0 {
+            continue;
+        }
+
+        let (baseline, _) = native_test_compilation(&compilation)
+            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        let directory = target.package_root.join("target").join("mutants");
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let baseline_binary = directory.join(format!("{}-baseline", target.name));
+        compile_native(&baseline, &baseline_binary).map_err(|error| error.to_string())?;
+        if run_with_timeout(&baseline_binary, 10)?.is_failure() {
+            return Err(format!(
+                "baseline tests for {} do not pass; mutation testing requires a green baseline",
+                target.source.display()
+            ));
+        }
+
+        let available = severian_driver::mutation::count(&compilation);
+        let selected = limit.map_or(available, |limit| limit.min(available));
+        for mutation_index in 0..selected {
+            let Some((mutated, mutation)) =
+                severian_driver::mutation::apply(&compilation, mutation_index)
+            else {
+                continue;
+            };
+            generated += 1;
+            let (runnable, _) = native_test_compilation(&mutated)
+                .map_err(|error| format!("{}: {error}", target.source.display()))?;
+            let binary = directory.join(format!("{}-{mutation_index}", target.name));
+            if let Err(error) = compile_native(&runnable, &binary) {
+                invalid += 1;
+                println!("INVALID  {}: {} ({error})", mutation_location(&mutation), mutation.description);
+                continue;
+            }
+            match run_with_timeout(&binary, 10)? {
+                MutantStatus::Passed => {
+                    survived += 1;
+                    println!("SURVIVED {}: {}", mutation_location(&mutation), mutation.description);
+                }
+                MutantStatus::Failed => {
+                    killed += 1;
+                    println!("KILLED   {}: {}", mutation_location(&mutation), mutation.description);
+                }
+                MutantStatus::TimedOut => {
+                    killed += 1;
+                    println!("KILLED   {}: {} (timed out)", mutation_location(&mutation), mutation.description);
+                }
+            }
+        }
+    }
+
+    let viable = killed + survived;
+    let score = if viable == 0 {
+        100.0
+    } else {
+        killed as f64 * 100.0 / viable as f64
+    };
+    println!(
+        "Mutants generated: {generated}\nKilled:            {killed}\nSurvived:          {survived}\nInvalid:           {invalid}\nMutation score:    {score:.1}%"
+    );
+    Ok(())
+}
+
+fn mutation_location(mutation: &severian_driver::mutation::Mutation) -> String {
+    match (&mutation.file, mutation.line) {
+        (Some(file), Some(line)) => format!("{}:{line}", file.display()),
+        (Some(file), None) => file.display().to_string(),
+        _ => format!("mutant {}", mutation.index),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MutantStatus {
+    Passed,
+    Failed,
+    TimedOut,
+}
+
+impl MutantStatus {
+    fn is_failure(self) -> bool {
+        self != Self::Passed
+    }
+}
+
+fn run_with_timeout(binary: &Path, seconds: u64) -> Result<MutantStatus, String> {
+    let mut child = Command::new(binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("could not run {}: {error}", binary.display()))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Ok(if status.success() {
+                MutantStatus::Passed
+            } else {
+                MutantStatus::Failed
+            });
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().map_err(|error| error.to_string())?;
+            let _ = child.wait();
+            return Ok(MutantStatus::TimedOut);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn coverage(input: &Path) -> Result<(), String> {
     let targets = resolve_targets(input)?;
-    for target in &targets {
-        compile_path(&target.source).map_err(|error| error.to_string())?;
+    if targets.is_empty() {
+        return Err(format!("no Severian targets found under {}", input.display()));
     }
-    Err(format!(
-        "coverage is not yet available: {} target(s) checked, but HIR does not retain the stable Severian source spans required for truthful LLVM coverage mapping",
-        targets.len()
-    ))
+    let report_root = targets[0].package_root.join("target").join("coverage");
+    fs::create_dir_all(&report_root).map_err(|error| error.to_string())?;
+    let mut all_regions = severian_coverage::CoverageSourceMap::default();
+    let mut all_hits = std::collections::BTreeSet::new();
+    let mut executed = 0;
+    let mut tests = 0;
+    let mut failures = Vec::new();
+
+    for (index, target) in targets.iter().enumerate() {
+        let compilation = match compile_path(&target.source) {
+            Ok(compilation) => compilation,
+            Err(error) => {
+                failures.push(format!("{}: {error}", target.source.display()));
+                continue;
+            }
+        };
+        let declared_count = compilation.hir.test_count();
+        let (_, source_regions) = severian_driver::coverage::instrument(&compilation);
+        all_regions.extend(source_regions);
+        let (runnable, count) = if declared_count > 0 {
+            match native_test_compilation(&compilation) {
+                Ok(runnable) => runnable,
+                Err(error) => {
+                    failures.push(format!("{}: {error}", target.source.display()));
+                    continue;
+                }
+            }
+        } else {
+            (compilation, 0)
+        };
+        let (instrumented, _) = severian_driver::coverage::instrument(&runnable);
+        if count == 0 {
+            continue;
+        }
+
+        let stem = format!("{}-{index}", target.name);
+        let binary = report_root.join(format!("{stem}-tests"));
+        let hits = report_root.join(format!("{stem}.hits"));
+        if hits.exists() {
+            fs::remove_file(&hits).map_err(|error| error.to_string())?;
+        }
+        if let Err(error) = compile_native(&instrumented, &binary) {
+            failures.push(format!("{}: {error}", target.source.display()));
+            continue;
+        }
+        let output = Command::new(&binary)
+            .env("SEVERIAN_COVERAGE_FILE", &hits)
+            .output()
+            .map_err(|error| format!("could not run {}: {error}", binary.display()))?;
+        if !output.status.success() {
+            failures.push(format!(
+                "{}: tests failed with {}: {}",
+                target.source.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+            continue;
+        }
+        all_hits.extend(
+            severian_coverage::read_language_hits(&hits).map_err(|error| error.to_string())?,
+        );
+        tests += count;
+        executed += 1;
+    }
+
+    let map_path = report_root.join("coverage-map.json");
+    all_regions
+        .save_json(&map_path)
+        .map_err(|error| error.to_string())?;
+    let (report, files) = severian_coverage::language_report(&all_regions, &all_hits);
+    print!("{}", severian_coverage::render_files(&files));
+    print!("{}", severian_coverage::report::render_text(&report));
+    println!(
+        "Executed {tests} test(s) across {executed} target(s); {} failure(s); map: {}",
+        failures.len(),
+        map_path.display()
+    );
+    for failure in &failures {
+        eprintln!("UNCOVERED {failure}");
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "coverage could not compile or execute {} target(s)",
+            failures.len()
+        ))
+    }
+}
+
+fn memory_command(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut sanitizers = Vec::new();
+    let mut leaks = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--leaks" => {
+                leaks = true;
+                index += 1;
+            }
+            "--sanitizer" if index + 1 < args.len() => {
+                let sanitizer = match args[index + 1].as_str() {
+                    "address" => severian_backend::NativeSanitizer::Address,
+                    "thread" => severian_backend::NativeSanitizer::Thread,
+                    "memory" => severian_backend::NativeSanitizer::Memory,
+                    "undefined" => severian_backend::NativeSanitizer::Undefined,
+                    value => return Err(format!("unknown sanitizer `{value}`")),
+                };
+                if !sanitizers.contains(&sanitizer) {
+                    sanitizers.push(sanitizer);
+                }
+                index += 2;
+            }
+            value if !value.starts_with('-') && input.is_none() => {
+                input = Some(PathBuf::from(value));
+                index += 1;
+            }
+            value => return Err(format!("unknown memory option `{value}`\n{}", usage())),
+        }
+    }
+    let input = input.ok_or_else(usage)?;
+    if sanitizers.is_empty() {
+        sanitizers.extend([
+            severian_backend::NativeSanitizer::Address,
+            severian_backend::NativeSanitizer::Undefined,
+        ]);
+    }
+    let has_thread = sanitizers.contains(&severian_backend::NativeSanitizer::Thread);
+    let has_memory = sanitizers.contains(&severian_backend::NativeSanitizer::Memory);
+    if (has_thread || has_memory) && sanitizers.len() > 1 {
+        return Err("thread and memory sanitizers must run alone; address may be combined with undefined".into());
+    }
+
+    let options = severian_backend::NativeCompileOptions { sanitizers };
+    let targets = resolve_targets(&input)?;
+    let mut executed = 0;
+    let mut findings = 0;
+    for target in targets {
+        let compilation = compile_path(&target.source)
+            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        if compilation.hir.test_count() == 0 {
+            continue;
+        }
+        let (runnable, count) = native_test_compilation(&compilation)
+            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        let directory = target.package_root.join("target").join("memory");
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let binary = directory.join(format!("{}-tests", target.name));
+        compile_native_with_options(&runnable, &binary, &options)
+            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        println!("Memory checking {} ({count} test(s))", target.source.display());
+        let status = Command::new(&binary)
+            .env(
+                "ASAN_OPTIONS",
+                format!(
+                    "detect_leaks={}:halt_on_error=1:abort_on_error=1",
+                    usize::from(leaks)
+                ),
+            )
+            .env("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
+            .env("MSAN_OPTIONS", "halt_on_error=1")
+            .env("TSAN_OPTIONS", "halt_on_error=1")
+            .status()
+            .map_err(|error| format!("could not run {}: {error}", binary.display()))?;
+        executed += 1;
+        if status.success() {
+            println!("PASS {}", target.source.display());
+        } else {
+            findings += 1;
+            println!("FINDING {} exited with {status}", target.source.display());
+        }
+    }
+    println!("Memory summary: {executed} target(s), {findings} target(s) with findings");
+    if findings == 0 {
+        Ok(())
+    } else {
+        Err(format!("memory checking found failures in {findings} target(s)"))
+    }
 }
 
 fn clean(input: Option<&Path>) -> Result<(), String> {
@@ -845,7 +1178,9 @@ fn usage() -> String {
         "  build [path] [--emit KIND] [--target native|xla]",
         "  run <path>                     build and run native code",
         "  test <path>                    build and run native Severian tests",
-        "  coverage <path>                report coverage support or source-map blocker",
+        "  test [path] --mutate [--limit N] run deterministic mutation testing",
+        "  coverage <path>                run tests and report Severian source coverage",
+        "  memory <path> [--sanitizer KIND] [--leaks] run native memory diagnostics",
         "  --emit <stage> <path>          emit hir, mir, mlir, stablehlo, llvm, or asm",
         "  clean [path]                   remove only the Severian project target directory",
         "  tree <path>                    print the Severian package dependency graph",

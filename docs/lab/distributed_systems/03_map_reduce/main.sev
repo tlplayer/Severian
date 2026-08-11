@@ -1,0 +1,147 @@
+# In-memory behavioral port of the implemented mr coordinator/worker and the
+# word-count/indexer applications. File transport is deliberately factored out.
+
+class KeyValue:
+    key: string
+    value: string
+
+    def KeyValue(key_value: string, item_value: string):
+        key = key_value
+        value = item_value
+
+class Task:
+    kind: string
+    identifier: int
+    state: string
+    lease_tick: int
+
+    def Task(kind_value: string, identifier_value: int):
+        kind = kind_value
+        identifier = identifier_value
+        state = "idle"
+        lease_tick = 0
+
+    def start(tick: int):
+        state = "running"
+        lease_tick = tick
+
+    def finish():
+        state = "finished"
+
+    def reset():
+        state = "idle"
+
+class Coordinator:
+    tasks: list[Task]
+    phase: string
+    timeout_ticks: int
+
+    def Coordinator(map_count: int, reduce_count: int):
+        tasks = []
+        for identifier in range(map_count):
+            tasks.append(Task("map", identifier))
+        for identifier in range(reduce_count):
+            tasks.append(Task("reduce", identifier))
+        phase = "map"
+        timeout_ticks = 3
+
+    def refresh(tick: int):
+        for index in range(size(tasks)):
+            if tasks[index].state == "running" and tick - tasks[index].lease_tick >= timeout_ticks:
+                tasks[index].reset()
+
+    def all_finished(kind: string) -> bool:
+        for task in tasks:
+            if task.kind == kind and task.state != "finished":
+                return false
+        return true
+
+    def request(tick: int) -> int:
+        for index in range(size(tasks)):
+            if tasks[index].state == "running" and tick - tasks[index].lease_tick >= timeout_ticks:
+                tasks[index].reset()
+        for index in range(size(tasks)):
+            if tasks[index].kind == phase and tasks[index].state == "idle":
+                tasks[index].start(tick)
+                return tasks[index].identifier
+        finished := true
+        for task in tasks:
+            if task.kind == phase and task.state != "finished":
+                finished = false
+        if finished:
+            if phase == "map":
+                phase = "reduce"
+                for index in range(size(tasks)):
+                    if tasks[index].kind == phase and tasks[index].state == "idle":
+                        tasks[index].start(tick)
+                        return tasks[index].identifier
+            phase = "done"
+        return -1
+
+    def complete(kind: string, identifier: int):
+        for index in range(size(tasks)):
+            if tasks[index].kind == kind and tasks[index].identifier == identifier:
+                tasks[index].finish()
+
+def map_words(document: string) -> list[KeyValue]:
+    output := []
+    for word in document.words():
+        output.append(KeyValue(word.lower(), "1"))
+    return output
+
+def reduce_word_counts(values: list[KeyValue]) -> list[string]:
+    counts := {}
+    for item in values:
+        counts[item.key] = counts.get(item.key, 0) + 1
+    output := []
+    for key in counts.keys().sorted():
+        output.append(key + " " + string(counts[key]))
+    return output
+
+def inverted_index(documents: list[string], names: list[string]) -> list[string]:
+    words := []
+    document_names := []
+    for index, document in enumerate(documents):
+        for word in document.words():
+            normalized = word.lower()
+            found := false
+            for position, known in enumerate(words):
+                if known == normalized:
+                    if names[index] not in document_names[position]:
+                        document_names[position].append(names[index])
+                    found = true
+            if not found:
+                words.append(normalized)
+                document_names.append([names[index]])
+    output := []
+    for word in words.sorted():
+        for position, known in enumerate(words):
+            if known == word:
+                output.append(word + " " + document_names[position].sorted().join(","))
+    return output
+
+test "coordinator phases and lease retry":
+    coordinator := Coordinator(2, 1)
+    assert(coordinator.request(0) == 0)
+    assert(coordinator.request(0) == 1)
+    assert(coordinator.request(1) == -1)
+    assert(coordinator.request(3) == 0)
+    coordinator.complete("map", 0)
+    coordinator.complete("map", 1)
+    assert(coordinator.request(4) == 0)
+    coordinator.complete("reduce", 0)
+    assert(coordinator.request(5) == -1)
+    assert(coordinator.phase == "done")
+
+test "word count application":
+    mapped := map_words("Raft raft shards")
+    mapped.extend(map_words("shards RPC"))
+    assert(reduce_word_counts(mapped) == ["raft 2", "rpc 1", "shards 2"])
+
+test "inverted index application":
+    result = inverted_index(["raft shard", "raft rpc"], ["a.txt", "b.txt"])
+    assert(result == ["raft a.txt,b.txt", "rpc b.txt", "shard a.txt"])
+
+def main():
+    output = reduce_word_counts(map_words("map reduce map"))
+    print("map-reduce", output.join(" | "))

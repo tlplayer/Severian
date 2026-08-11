@@ -1,0 +1,160 @@
+# Port of shardcfg's deterministic twelve-shard configuration operations.
+
+int SHARD_COUNT = 12
+
+class ShardConfiguration:
+    number: int
+    shards: list[int]
+    groups: list[int]
+
+    def ShardConfiguration():
+        number = 0
+        shards = []
+        for shard in range(SHARD_COUNT):
+            shards.append(0)
+        groups = []
+
+    def rebalance():
+        if size(groups) == 0:
+            for shard in range(SHARD_COUNT):
+                shards[shard] = 0
+            return
+        sorted_groups = groups.sorted()
+        for shard in range(SHARD_COUNT):
+            if shards[shard] not in groups:
+                shards[shard] = sorted_groups[0]
+        while true:
+            most_group := sorted_groups[0]
+            least_group := sorted_groups[0]
+            most_count := -1
+            least_count := SHARD_COUNT + 1
+            for group in sorted_groups:
+                count := 0
+                for assigned in shards:
+                    if assigned == group:
+                        count += 1
+                if count > most_count:
+                    most_count = count
+                    most_group = group
+                if count < least_count:
+                    least_count = count
+                    least_group = group
+            if most_count < least_count + 2:
+                return
+            for shard in range(SHARD_COUNT):
+                if shards[shard] == most_group:
+                    shards[shard] = least_group
+                    break
+
+    def join(group: int) -> bool:
+        if group in groups:
+            return false
+        groups.append(group)
+        number += 1
+        sorted_groups = groups.sorted()
+        for shard in range(SHARD_COUNT):
+            if shards[shard] not in groups:
+                shards[shard] = sorted_groups[0]
+        while true:
+            counts := []
+            for candidate in sorted_groups:
+                count := 0
+                for assigned in shards:
+                    if assigned == candidate:
+                        count += 1
+                counts.append(count)
+            most_position := 0
+            least_position := 0
+            for position in range(size(counts)):
+                if counts[position] > counts[most_position]:
+                    most_position = position
+                if counts[position] < counts[least_position]:
+                    least_position = position
+            if counts[most_position] < counts[least_position] + 2:
+                return true
+            for shard in range(SHARD_COUNT):
+                if shards[shard] == sorted_groups[most_position]:
+                    shards[shard] = sorted_groups[least_position]
+                    break
+        return true
+
+    def leave(group: int) -> bool:
+        if group not in groups:
+            return false
+        groups.remove(group)
+        number += 1
+        if size(groups) == 0:
+            for shard in range(SHARD_COUNT):
+                shards[shard] = 0
+            return true
+        sorted_groups = groups.sorted()
+        for shard in range(SHARD_COUNT):
+            if shards[shard] == group:
+                least_group := sorted_groups[0]
+                least_count := SHARD_COUNT + 1
+                for candidate in sorted_groups:
+                    count := 0
+                    for assigned in shards:
+                        if assigned == candidate:
+                            count += 1
+                    if count < least_count:
+                        least_count = count
+                        least_group = candidate
+                shards[shard] = least_group
+        return true
+
+    def move_shard(shard: int, group: int) -> bool:
+        if group not in groups or shard < 0 or shard >= SHARD_COUNT:
+            return false
+        shards[shard] = group
+        number += 1
+        return true
+
+def key_to_shard(key: string) -> int:
+    # Deterministic ASCII polynomial used by the executable port. The Go source
+    # retaining the exact FNV-1a routine remains alongside this lab.
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+    hash_value := 2166136261
+    for character in key.characters():
+        code := alphabet.find(character) + 1
+        hash_value = (hash_value * 16777619 + code) % 4294967296
+    return hash_value % SHARD_COUNT
+
+def group_count(configuration: ShardConfiguration, group: int) -> int:
+    count := 0
+    for assigned in configuration.shards:
+        if assigned == group:
+            count += 1
+    return count
+
+test "join is balanced and deterministic":
+    configuration := ShardConfiguration()
+    first_join = configuration.join(20)
+    assert(first_join)
+    assert(configuration.join(10))
+    assert(configuration.join(30))
+    assert(group_count(configuration, 10) == 4)
+    assert(group_count(configuration, 20) == 4)
+    assert(group_count(configuration, 30) == 4)
+    assert(configuration.number == 3)
+
+test "leave and move preserve valid ownership":
+    configuration := ShardConfiguration()
+    configuration.join(1)
+    configuration.join(2)
+    configuration.join(3)
+    assert(configuration.leave(2))
+    assert(2 not in configuration.shards)
+    assert(abs(group_count(configuration, 1) - group_count(configuration, 3)) <= 1)
+    assert(configuration.move_shard(0, 3))
+    assert(configuration.shards[0] == 3)
+
+test "key mapping is stable":
+    assert(key_to_shard("alpha") == key_to_shard("alpha"))
+    assert(key_to_shard("alpha") >= 0 and key_to_shard("alpha") < SHARD_COUNT)
+
+def main():
+    configuration := ShardConfiguration()
+    configuration.join(1)
+    configuration.join(2)
+    print("shard-configuration", configuration.number, group_count(configuration, 1), group_count(configuration, 2))

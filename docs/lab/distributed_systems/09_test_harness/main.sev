@@ -1,0 +1,111 @@
+# Ports tester1's detached persister and models1's sequential KV model.
+
+class Persister:
+    raft_state: list[int]
+    snapshot: list[int]
+
+    def Persister():
+        raft_state = []
+        snapshot = []
+
+    def save(state: list[int], snapshot_value: list[int]):
+        raft_state = clone state
+        snapshot = clone snapshot_value
+
+    def read_raft_state() -> list[int]:
+        return clone raft_state
+
+    def read_snapshot() -> list[int]:
+        return clone snapshot
+
+    def copy() -> Persister:
+        copied := Persister()
+        copied.save(raft_state, snapshot)
+        return copied
+
+class ModelOperation:
+    kind: string
+    key: string
+    input_value: string
+    expected_version: int
+    output_value: string
+    output_version: int
+    error: string
+
+    def ModelOperation(kind_value: string, key_value: string, input_item: string, expected: int, output_item: string, output: int, error_value: string):
+        kind = kind_value
+        key = key_value
+        input_value = input_item
+        expected_version = expected
+        output_value = output_item
+        output_version = output
+        error = error_value
+
+def history_is_valid(history: list[ModelOperation]) -> bool:
+    keys := []
+    values := []
+    versions := []
+    for operation in history:
+        index := -1
+        for candidate_index in range(size(keys)):
+            if keys[candidate_index] == operation.key:
+                index = candidate_index
+        current_value := ""
+        current_version := 0
+        if index >= 0:
+            current_value = values[index]
+            current_version = versions[index]
+        if operation.kind == "get":
+            if operation.output_value != current_value:
+                return false
+        else operation.kind == "put":
+            if operation.expected_version == current_version:
+                if operation.error != "OK" and operation.error != "ErrMaybe":
+                    return false
+                if index < 0:
+                    keys.append(operation.key)
+                    values.append(operation.input_value)
+                    versions.append(current_version + 1)
+                else:
+                    values[index] = operation.input_value
+                    versions[index] = current_version + 1
+            else:
+                if operation.error != "ErrVersion" and operation.error != "ErrMaybe":
+                    return false
+        else:
+            return false
+    return true
+
+test "persister reads and copies are detached":
+    state := [1, 2, 3]
+    snapshot := [9, 8]
+    persister := Persister()
+    persister.save(state, snapshot)
+    state.append(4)
+    read := persister.read_raft_state()
+    read.append(5)
+    assert(persister.read_raft_state() == [1, 2, 3])
+    copied = persister.copy()
+    copied.save([7], [6])
+    assert(persister.read_snapshot() == [9, 8])
+
+test "valid model history":
+    history = [
+        ModelOperation("get", "x", "", 0, "", 0, "OK"),
+        ModelOperation("put", "x", "one", 0, "", 1, "OK"),
+        ModelOperation("get", "x", "", 0, "one", 1, "OK"),
+        ModelOperation("put", "x", "stale", 0, "", 1, "ErrVersion"),
+    ]
+    assert(history_is_valid(history))
+
+test "invalid model history is rejected":
+    history = [
+        ModelOperation("put", "x", "one", 0, "", 1, "OK"),
+        ModelOperation("get", "x", "", 0, "wrong", 1, "OK"),
+    ]
+    assert(not history_is_valid(history))
+
+def main():
+    persister := Persister()
+    persister.save([1, 2, 3], [4, 5])
+    print("test-harness", size(persister.read_raft_state()), size(persister.read_snapshot()))
