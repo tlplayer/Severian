@@ -25,6 +25,6 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-license = "MIT"
+license-file = "LICENSE.md"
 repository = "https://github.com/tlplayer/Severian"
 version = "0.1.0"
