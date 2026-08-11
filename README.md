@@ -92,6 +92,41 @@ Ordinary words stay complete (`system`, `implement`). A small explicit registry
 preserves established technical and scientific spellings such as `XLA`,
 `StableHLO`, `ReLU`, and `GELU`. See [docs/NAMING.md](docs/NAMING.md).
 
+### Test assurance
+
+Severian can measure whether native tests reach production source, whether those
+tests detect small semantic changes, and whether the exercised native runtime
+triggers compiler sanitizers:
+
+```sh
+sev coverage path
+sev test path --mutate
+sev test path --mutate --limit 20
+sev memory path
+sev memory path --sanitizer thread
+sev memory path --leaks
+```
+
+`sev coverage` reports line, statement-region, executable-branch, and function
+coverage for every valid `.sev` source discovered below `path`. It executes
+ordinary native tests, excludes integration-test bodies from the numerator, and
+leaves main-only programs visibly uncovered. Machine-readable
+`coverage-report.json` and `coverage-map.json` files are written under
+`target/coverage`. A directory run keeps collecting after a broken target and
+lists every source it could not compile or execute.
+
+Mutation testing changes typed HIR after semantic and ownership checking, then
+rebuilds and runs the original tests. Its initial deterministic operators cover
+arithmetic, comparison, Boolean, and logical changes. Compile-invalid mutants
+are reported separately rather than counted as killed; surviving mutants still
+need human review because some changes are semantically equivalent.
+
+`sev memory` defaults to AddressSanitizer plus UndefinedBehaviorSanitizer.
+ThreadSanitizer and MemorySanitizer run alone because their runtimes are not
+compatible with the default pair. Leak checking is opt-in because the current
+native value runtime intentionally retains process-lifetime allocations and
+some restricted environments cannot run LeakSanitizer.
+
 Internal compiler dependencies carry both local `path` entries and registry
 versions, so the compiler crates can be published in dependency order and the
 final `severian-driver` package can provide the `sev` executable through a Cargo

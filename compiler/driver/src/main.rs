@@ -1,6 +1,6 @@
 use severian_driver::{
     check_path, compile_native, compile_native_tests, compile_native_with_options, compile_path,
-    inspect_toolchain, native_test_compilation, Compilation,
+    inspect_toolchain, native_test_compilation, native_test_count, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -466,7 +466,7 @@ fn run_targets(input: &Path) -> Result<(), String> {
         }
         if compilation.hir.main().is_some() {
             compile_native(&compilation, &output).map_err(|error| error.to_string())?;
-        } else if compilation.hir.test_count() > 0 {
+        } else if native_test_count(&compilation.hir) > 0 {
             compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
         } else {
             return Err(format!(
@@ -519,7 +519,7 @@ fn test_targets(input: &Path) -> Result<(), String> {
     let mut total = 0;
     for target in targets {
         let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
-        let count = compilation.hir.test_count();
+        let count = native_test_count(&compilation.hir);
         if count == 0 {
             continue;
         }
@@ -594,7 +594,7 @@ fn mutation_test_targets(input: &Path, limit: Option<usize>) -> Result<(), Strin
     for target in targets {
         let compilation = compile_path(&target.source)
             .map_err(|error| format!("{}: {error}", target.source.display()))?;
-        if compilation.hir.test_count() == 0 {
+        if native_test_count(&compilation.hir) == 0 {
             continue;
         }
 
@@ -625,21 +625,37 @@ fn mutation_test_targets(input: &Path, limit: Option<usize>) -> Result<(), Strin
             let binary = directory.join(format!("{}-{mutation_index}", target.name));
             if let Err(error) = compile_native(&runnable, &binary) {
                 invalid += 1;
-                println!("INVALID  {}: {} ({error})", mutation_location(&mutation), mutation.description);
+                println!(
+                    "INVALID  {}: {} ({error})",
+                    mutation_location(&mutation),
+                    mutation.description
+                );
                 continue;
             }
             match run_with_timeout(&binary, 10)? {
                 MutantStatus::Passed => {
                     survived += 1;
-                    println!("SURVIVED {}: {}", mutation_location(&mutation), mutation.description);
+                    println!(
+                        "SURVIVED {}: {}",
+                        mutation_location(&mutation),
+                        mutation.description
+                    );
                 }
                 MutantStatus::Failed => {
                     killed += 1;
-                    println!("KILLED   {}: {}", mutation_location(&mutation), mutation.description);
+                    println!(
+                        "KILLED   {}: {}",
+                        mutation_location(&mutation),
+                        mutation.description
+                    );
                 }
                 MutantStatus::TimedOut => {
                     killed += 1;
-                    println!("KILLED   {}: {} (timed out)", mutation_location(&mutation), mutation.description);
+                    println!(
+                        "KILLED   {}: {} (timed out)",
+                        mutation_location(&mutation),
+                        mutation.description
+                    );
                 }
             }
         }
@@ -706,7 +722,10 @@ fn run_with_timeout(binary: &Path, seconds: u64) -> Result<MutantStatus, String>
 fn coverage(input: &Path) -> Result<(), String> {
     let targets = resolve_targets(input)?;
     if targets.is_empty() {
-        return Err(format!("no Severian targets found under {}", input.display()));
+        return Err(format!(
+            "no Severian targets found under {}",
+            input.display()
+        ));
     }
     let report_root = targets[0].package_root.join("target").join("coverage");
     fs::create_dir_all(&report_root).map_err(|error| error.to_string())?;
@@ -724,7 +743,7 @@ fn coverage(input: &Path) -> Result<(), String> {
                 continue;
             }
         };
-        let declared_count = compilation.hir.test_count();
+        let declared_count = native_test_count(&compilation.hir);
         let (_, source_regions) = severian_driver::coverage::instrument(&compilation);
         all_regions.extend(source_regions);
         let (runnable, count) = if declared_count > 0 {
@@ -778,11 +797,15 @@ fn coverage(input: &Path) -> Result<(), String> {
         .save_json(&map_path)
         .map_err(|error| error.to_string())?;
     let (report, files) = severian_coverage::language_report(&all_regions, &all_hits);
+    let report_path = report_root.join("coverage-report.json");
+    severian_coverage::save_language_report(&report_path, &report, &files)
+        .map_err(|error| error.to_string())?;
     print!("{}", severian_coverage::render_files(&files));
     print!("{}", severian_coverage::report::render_text(&report));
     println!(
-        "Executed {tests} test(s) across {executed} target(s); {} failure(s); map: {}",
+        "Executed {tests} test(s) across {executed} target(s); {} failure(s); report: {}; map: {}",
         failures.len(),
+        report_path.display(),
         map_path.display()
     );
     for failure in &failures {
@@ -839,17 +862,21 @@ fn memory_command(args: &[String]) -> Result<(), String> {
     let has_thread = sanitizers.contains(&severian_backend::NativeSanitizer::Thread);
     let has_memory = sanitizers.contains(&severian_backend::NativeSanitizer::Memory);
     if (has_thread || has_memory) && sanitizers.len() > 1 {
-        return Err("thread and memory sanitizers must run alone; address may be combined with undefined".into());
+        return Err(
+            "thread and memory sanitizers must run alone; address may be combined with undefined"
+                .into(),
+        );
     }
 
     let options = severian_backend::NativeCompileOptions { sanitizers };
     let targets = resolve_targets(&input)?;
     let mut executed = 0;
     let mut findings = 0;
+    let mut tool_failures = 0;
     for target in targets {
         let compilation = compile_path(&target.source)
             .map_err(|error| format!("{}: {error}", target.source.display()))?;
-        if compilation.hir.test_count() == 0 {
+        if native_test_count(&compilation.hir) == 0 {
             continue;
         }
         let (runnable, count) = native_test_compilation(&compilation)
@@ -859,8 +886,11 @@ fn memory_command(args: &[String]) -> Result<(), String> {
         let binary = directory.join(format!("{}-tests", target.name));
         compile_native_with_options(&runnable, &binary, &options)
             .map_err(|error| format!("{}: {error}", target.source.display()))?;
-        println!("Memory checking {} ({count} test(s))", target.source.display());
-        let status = Command::new(&binary)
+        println!(
+            "Memory checking {} ({count} test(s))",
+            target.source.display()
+        );
+        let output = Command::new(&binary)
             .env(
                 "ASAN_OPTIONS",
                 format!(
@@ -871,21 +901,37 @@ fn memory_command(args: &[String]) -> Result<(), String> {
             .env("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
             .env("MSAN_OPTIONS", "halt_on_error=1")
             .env("TSAN_OPTIONS", "halt_on_error=1")
-            .status()
+            .output()
             .map_err(|error| format!("could not run {}: {error}", binary.display()))?;
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
         executed += 1;
-        if status.success() {
+        if output.status.success() {
             println!("PASS {}", target.source.display());
+        } else if String::from_utf8_lossy(&output.stderr)
+            .contains("LeakSanitizer has encountered a fatal error")
+        {
+            tool_failures += 1;
+            println!(
+                "UNAVAILABLE {}: LeakSanitizer could not inspect this process",
+                target.source.display()
+            );
         } else {
             findings += 1;
-            println!("FINDING {} exited with {status}", target.source.display());
+            println!(
+                "FINDING {} exited with {}",
+                target.source.display(),
+                output.status
+            );
         }
     }
-    println!("Memory summary: {executed} target(s), {findings} target(s) with findings");
-    if findings == 0 {
+    println!("Memory summary: {executed} target(s), {findings} target(s) with findings, {tool_failures} tool failure(s)");
+    if findings == 0 && tool_failures == 0 {
         Ok(())
     } else {
-        Err(format!("memory checking found failures in {findings} target(s)"))
+        Err(format!(
+            "memory checking found failures in {findings} target(s) and could not inspect {tool_failures} target(s)"
+        ))
     }
 }
 

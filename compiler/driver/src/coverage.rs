@@ -4,7 +4,7 @@ use severian_coverage::{
     CoverageSourceMap, SourcePosition, SourceSpan,
 };
 use severian_hir::{
-    CallTarget, DefinitionId, Expression, Function, Instruction, SourceFile, ValueType,
+    CallTarget, DefinitionId, Expression, Function, HirId, Instruction, SourceFile, ValueType,
 };
 
 pub fn instrument(compilation: &Compilation) -> (Compilation, CoverageSourceMap) {
@@ -63,12 +63,7 @@ impl Instrumenter<'_> {
         for mut instruction in std::mem::take(instructions) {
             self.nested(function, &mut instruction);
             if let Some(span) = instruction_span(&instruction, self.sources) {
-                if let Some(id) = self.region(
-                    function,
-                    span,
-                    CoverageRegionKind::Statement,
-                    None,
-                ) {
+                if let Some(id) = self.region(function, span, CoverageRegionKind::Statement, None) {
                     output.push(hit(id));
                 }
             }
@@ -88,14 +83,24 @@ impl Instrumenter<'_> {
                 self.branch(function, then_instructions, span);
                 self.branch(function, else_instructions, span);
             }
-            Instruction::While { instructions, condition, setup, .. } => {
+            Instruction::While {
+                instructions,
+                condition,
+                setup,
+                ..
+            } => {
                 if let Some(setup) = setup {
                     self.nested(function, setup);
                 }
                 let span = expression_span(condition, self.sources);
                 self.branch(function, instructions, span);
             }
-            Instruction::For { instructions, iterable, setup, .. } => {
+            Instruction::For {
+                instructions,
+                iterable,
+                setup,
+                ..
+            } => {
                 if let Some(setup) = setup {
                     self.nested(function, setup);
                 }
@@ -108,7 +113,11 @@ impl Instrumenter<'_> {
                     self.branch(function, &mut arm.instructions, span);
                 }
             }
-            Instruction::ChannelSwitch { arms, repeat_condition, .. } => {
+            Instruction::ChannelSwitch {
+                arms,
+                repeat_condition,
+                ..
+            } => {
                 let span = repeat_condition
                     .as_ref()
                     .and_then(|value| expression_span(value, self.sources));
@@ -149,7 +158,10 @@ impl Instrumenter<'_> {
     ) -> Option<CoverageRegionId> {
         let file = self.sources.file(span.file)?;
         let span = convert_span(file, span.range)?;
-        let identity = salt.map_or_else(|| function.to_owned(), |salt| format!("{function}#{salt}"));
+        // The canonical file/span is the source identity. A dependency may be
+        // linked both qualified and unqualified across separate test targets;
+        // including its linkage name would count the same source twice.
+        let identity = salt.map_or_else(String::new, |salt| format!("branch#{salt}"));
         let id = stable_region_id(&identity, &span, kind);
         self.map.insert(CoverageRegion {
             id,
@@ -162,10 +174,18 @@ impl Instrumenter<'_> {
 }
 
 fn hit(id: CoverageRegionId) -> Instruction {
-    Instruction::Evaluate(Expression::Call {
-        target: CallTarget::native("coverage.hit", "__sev_coverage_hit")
-            .with_signature([ValueType::Int], ValueType::Unit),
-        args: vec![Expression::Integer(id.0 as i64)],
+    Instruction::Evaluate(Expression::Typed {
+        id: HirId::synthetic(id.0 & ((1 << 20) - 1)),
+        ty: ValueType::Unit,
+        expression: Box::new(Expression::Call {
+            target: CallTarget::native("coverage.hit", "__sev_coverage_hit")
+                .with_signature([ValueType::Int], ValueType::Unit),
+            args: vec![Expression::Typed {
+                id: HirId::synthetic((id.0 & ((1 << 20) - 1)) ^ 1),
+                ty: ValueType::Int,
+                expression: Box::new(Expression::Integer(id.0 as i64)),
+            }],
+        }),
     })
 }
 
@@ -184,17 +204,33 @@ fn instruction_span(
         Instruction::If { condition, .. } | Instruction::While { condition, .. } => condition,
         Instruction::For { iterable, .. } => iterable,
         Instruction::Switch { value, .. } => value,
-        Instruction::ChannelSwitch { channels, repeat_condition, .. } => {
+        Instruction::ChannelSwitch {
+            channels,
+            repeat_condition,
+            ..
+        } => {
             return repeat_condition
                 .as_ref()
                 .and_then(|value| expression_span(value, sources))
-                .or_else(|| channels.first().and_then(|value| expression_span(value, sources)));
+                .or_else(|| {
+                    channels
+                        .first()
+                        .and_then(|value| expression_span(value, sources))
+                });
         }
-        Instruction::With { resources, instructions, .. } => {
+        Instruction::With {
+            resources,
+            instructions,
+            ..
+        } => {
             return resources
                 .first()
                 .and_then(|value| expression_span(value, sources))
-                .or_else(|| instructions.iter().find_map(|value| instruction_span(value, sources)));
+                .or_else(|| {
+                    instructions
+                        .iter()
+                        .find_map(|value| instruction_span(value, sources))
+                });
         }
         Instruction::Return(None) | Instruction::Break | Instruction::Continue => return None,
     };
@@ -205,12 +241,14 @@ fn expression_span(
     expression: &Expression,
     sources: &severian_hir::SourceMap,
 ) -> Option<severian_hir::SourceSpan> {
-    expression.hir_id().and_then(|id| sources.expression_span(id))
+    expression
+        .hir_id()
+        .and_then(|id| sources.expression_span(id))
 }
 
 fn convert_span(file: &SourceFile, range: severian_hir::SourceRange) -> Option<SourceSpan> {
     Some(SourceSpan {
-        file: file.path.clone(),
+        file: std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone()),
         start: position(&file.source, range.start)?,
         end: position(&file.source, range.end)?,
     })

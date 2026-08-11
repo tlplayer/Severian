@@ -175,3 +175,71 @@ fn build_compiles_library_artifacts_before_consuming_them() {
     assert_eq!(String::from_utf8(tests.stdout).unwrap(), "1 passed\n");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn assurance_commands_produce_coverage_mutation_and_memory_results() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!("severian-assurance-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("boundary.sev");
+    std::fs::write(
+        &source,
+        "def boundary(value: int) -> bool:\n    return value > 10\n\ntest:\n    assert(boundary(11))\n    assert(not boundary(10))\n",
+    )
+    .unwrap();
+
+    let coverage = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("coverage")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        coverage.status.success(),
+        "{}",
+        String::from_utf8_lossy(&coverage.stderr)
+    );
+    let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
+    assert!(coverage_stdout.contains("Lines      100.00%"));
+    assert!(root.join("target/coverage/coverage-report.json").is_file());
+
+    let mutation = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["test", "--mutate", "--limit", "1"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(mutation.status.success());
+    let mutation_stdout = String::from_utf8_lossy(&mutation.stdout);
+    assert!(mutation_stdout.contains("Killed:            1"));
+    assert!(mutation_stdout.contains("Mutation score:    100.0%"));
+
+    let memory = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("memory")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        memory.status.success(),
+        "{}",
+        String::from_utf8_lossy(&memory.stderr)
+    );
+    assert!(String::from_utf8_lossy(&memory.stdout).contains("0 target(s) with findings"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_tests_lower_a_typed_sorted_reverse_flag_as_a_boolean() {
+    let _lock = native_cli_lock();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/examples/03-collections-iteration/05-expressive-collections.sev");
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("test")
+        .arg(fixture)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("4 passed"));
+}

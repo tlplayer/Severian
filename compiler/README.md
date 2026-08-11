@@ -81,6 +81,9 @@ and `sev test` continue through lowering and the native backend; `run` and
 cargo run -p severian-driver --bin sev -- check docs/examples/01-values-control/03-basic-functions.sev
 cargo run -p severian-driver --bin sev -- run docs/examples/01-values-control/03-basic-functions.sev
 cargo run -p severian-driver --bin sev -- test docs/examples/01-values-control/03-basic-functions.sev
+cargo run -p severian-driver --bin sev -- coverage docs/examples/26-problems
+cargo run -p severian-driver --bin sev -- test docs/examples/26-problems/06-min-cost-climbing-stairs.sev --mutate
+cargo run -p severian-driver --bin sev -- memory docs/examples/08-concurrency/10-locked-shared-mutation.sev --sanitizer thread
 cargo run -p severian-driver --bin sev -- compile docs/examples/01-values-control/03-basic-functions.sev -o /tmp/severian-basic
 ```
 

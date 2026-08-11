@@ -155,7 +155,13 @@ pub fn compile_native(
     module: &Module,
     output: &Path,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output, None, &NativeCompileOptions::default())
+    native::compile_native(
+        program,
+        module,
+        output,
+        None,
+        &NativeCompileOptions::default(),
+    )
 }
 
 pub fn compile_native_with_xla_runtime(

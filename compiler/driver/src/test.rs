@@ -16,6 +16,22 @@ pub fn compile_native_tests(
     Ok(count)
 }
 
+pub fn native_test_count(program: &Program) -> usize {
+    program
+        .functions
+        .iter()
+        .flat_map(|function| &function.tests)
+        .chain(
+            program
+                .classes
+                .iter()
+                .flat_map(|class| class.methods.iter().chain(&class.constructors))
+                .flat_map(|function| &function.tests),
+        )
+        .filter(|test| !test.modes.contains(&TestMode::Integration))
+        .count()
+}
+
 pub fn native_test_compilation(
     compilation: &Compilation,
 ) -> Result<(Compilation, usize), CompileError> {

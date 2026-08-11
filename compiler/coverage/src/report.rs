@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
@@ -24,14 +24,14 @@ impl CoverageToolchain {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct CoverageMetric {
     pub count: u64,
     pub covered: u64,
     pub percent: f64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct CoverageReport {
     pub lines: CoverageMetric,
     pub regions: CoverageMetric,
@@ -40,10 +40,26 @@ pub struct CoverageReport {
     pub raw_json: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FileCoverageReport {
     pub file: PathBuf,
     pub report: CoverageReport,
+}
+
+#[derive(Serialize)]
+struct LanguageCoverageExport<'a> {
+    aggregate: &'a CoverageReport,
+    files: &'a [FileCoverageReport],
+}
+
+pub fn save_language_report(
+    path: &Path,
+    aggregate: &CoverageReport,
+    files: &[FileCoverageReport],
+) -> io::Result<()> {
+    let bytes = serde_json::to_vec_pretty(&LanguageCoverageExport { aggregate, files })
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    fs::write(path, bytes)
 }
 
 /// Reads the append-only hit format produced by Severian's native coverage

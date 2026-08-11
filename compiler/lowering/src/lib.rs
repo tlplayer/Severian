@@ -167,7 +167,6 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
         "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
-        "  llvm.func @__sev_coverage_hit(i64)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
 
@@ -1544,7 +1543,9 @@ impl LowerContext<'_> {
                 args,
             } if method == "sorted"
                 && !args.is_empty()
-                && !matches!(args.first(), Some(Expression::Boolean(_))) =>
+                && !args
+                    .first()
+                    .is_some_and(|argument| matches!(argument.kind(), Expression::Boolean(_))) =>
             {
                 let (mut object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {

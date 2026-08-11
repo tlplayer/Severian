@@ -70,7 +70,12 @@ fn production_program(compilation: &Compilation) -> severian_hir::Program {
 }
 
 fn mutation(expression: &Expression) -> Option<(HirId, Expression, String)> {
-    let Expression::Typed { id, ty, expression: inner } = expression else {
+    let Expression::Typed {
+        id,
+        ty,
+        expression: inner,
+    } = expression
+    else {
         return None;
     };
     let (replacement, description) = match inner.as_ref() {
@@ -140,10 +145,7 @@ fn op_name(op: BinaryOp) -> &'static str {
     }
 }
 
-fn location(
-    sources: &severian_hir::SourceMap,
-    id: HirId,
-) -> (Option<PathBuf>, Option<u32>) {
+fn location(sources: &severian_hir::SourceMap, id: HirId) -> (Option<PathBuf>, Option<u32>) {
     let Some(SourceSpan { file, range }) = sources.expression_span(id) else {
         return (None, None);
     };
@@ -169,7 +171,10 @@ mod tests {
 
     #[test]
     fn comparison_mutations_cross_the_boundary() {
-        assert_eq!(replacement_op(BinaryOp::Greater), Some(BinaryOp::GreaterEqual));
+        assert_eq!(
+            replacement_op(BinaryOp::Greater),
+            Some(BinaryOp::GreaterEqual)
+        );
         assert_eq!(replacement_op(BinaryOp::LessEqual), Some(BinaryOp::Less));
     }
 }
