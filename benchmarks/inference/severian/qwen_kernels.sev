@@ -1,12 +1,5 @@
 import tensor
 
-unsafe:
-    native("__sev_xla_i64_tokens") def inputTokens(values: list[int]) -> Tensor[i64, 1, 32]
-    native("__sev_xla_qwen_rope_cos") def ropeCosine(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 128]
-    native("__sev_xla_qwen_rope_sin") def ropeSine(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 128]
-    native("__sev_xla_qwen_causal_mask") def causalMask(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 32]
-    native("__sev_xla_argmax_position_bf16") def argmaxBf16(value: Tensor[bf16], tokens: list[int]) -> int
-
 # Qwen2.5-3B prefill uses a static XLA capacity of 32 while the tokenizer list
 # controls the active sequence length, padding mask, and selected logits row.
 

@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2026"
 description = "Native Severian development-agent contracts and control loop"
 
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]
+
 [lib]
 path = "src/lib.sev"
 

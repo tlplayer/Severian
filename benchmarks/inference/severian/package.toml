@@ -13,6 +13,7 @@ path = "serving_benchmark.sev"
 
 [dependencies]
 file = { path = "../../../library/file", version = "0.1.0" }
+platform = { path = "../../../library/platform", version = "0.1.0" }
 qwen2 = { path = "modules/qwen2", version = "0.1.0" }
 qwen2_config = { path = "modules/qwen2_config", version = "0.1.0" }
 qwen_kernels = { path = "modules/qwen_kernels", version = "0.1.0" }

@@ -609,7 +609,7 @@ fn build_libraries(source: &Path, built: &mut HashSet<PathBuf>) -> Result<(), St
         if !built.insert(library.artifact.clone()) {
             continue;
         }
-        compile_dependency_path(&library.source)
+        compile_dependency_path(&library.source, &library.manifest)
             .map_err(|error| format!("could not build library `{}`: {error}", library.name))?;
         severian_package::write_library_artifact(&library).map_err(|error| error.to_string())?;
         println!("Built {} -> {}", library.name, library.artifact.display());

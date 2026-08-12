@@ -1,3 +1,7 @@
-unsafe:
-    native("__sev_qwen_tokenize") def encode(modelPath: string, text: string) -> list[int]
-    native("__sev_qwen_decode_token") def decodeToken(modelPath: string, token: int) -> string
+import platform
+
+def encode(modelPath: string, text: string) -> list[int]:
+    return platform.qwen_tokenize(modelPath, text)
+
+def decodeToken(modelPath: string, token: int) -> string:
+    return platform.qwen_decode_token(modelPath, token)

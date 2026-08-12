@@ -81,7 +81,5 @@ fn loads_transitive_packages_from_compiler_embedded_sources() {
             .collect::<Vec<_>>(),
         ["alpha", "beta"]
     );
-    assert!(interfaces[0]
-        .source_path
-        .ends_with("alpha/src/lib.sev"));
+    assert!(interfaces[0].source_path.ends_with("alpha/src/lib.sev"));
 }

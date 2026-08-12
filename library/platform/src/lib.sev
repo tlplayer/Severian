@@ -1,4 +1,10 @@
 unsafe:
+    native("__sev_monotonic_ns") def monotonicNs() -> int
+
+    native("__sev_qwen_tokenize") def qwen_tokenize(model_path: string, text: string) -> list[int]
+
+    native("__sev_qwen_decode_token") def qwen_decode_token(model_path: string, token: int) -> string
+
     native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 
     native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]

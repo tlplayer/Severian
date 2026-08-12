@@ -225,6 +225,7 @@ impl TypeTable {
             }
             ValueType::Set => TypeKind::Set(self.intern(TypeKind::Any)),
             ValueType::Tensor(tensor) => TypeKind::Tensor(tensor),
+            ValueType::TensorAny => TypeKind::Any,
             ValueType::Channel => TypeKind::Channel(self.intern(TypeKind::Any)),
             ValueType::Function => {
                 let any = self.intern(TypeKind::Any);
@@ -472,6 +473,9 @@ pub enum ValueType {
     Map,
     Set,
     Tensor(TensorType),
+    /// A tensor of any element type and rank. Unlike `Any`, this remains a
+    /// tensor-only type guard for dtype-polymorphic APIs such as `release`.
+    TensorAny,
     Channel,
     Function,
     Result,

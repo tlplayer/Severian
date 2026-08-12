@@ -2,9 +2,7 @@ import kernel
 
 def boot_image_byte(image: list[u8], index: int) -> u8:
     assert(index >= 0 and index < size(image))
-    unsafe:
-        pointer = &image
-        return pointer[index]
+    return image[index]
 
 def boot_laboratory() -> kernel.KernelReport:
     init = kernel.Process(1, "init", "ready", 10, ["memory.map", "console.write", "fs.read", "fs.write"])
@@ -55,7 +53,7 @@ test "process teardown releases only its physical frames":
     released = kernel.release_process_pages(report.page_owners, 1)
     assert(released == [-1, -1, 0, 0, 2, 0, 0, 0, 0, 0])
 
-test "unsafe boot image inspection remains bounds guarded":
+test "boot image inspection remains bounds guarded":
     assert(boot_image_byte([83, 69, 86, 0], 0) == 83)
     assert(boot_image_byte([83, 69, 86, 0], 2) == 86)
 

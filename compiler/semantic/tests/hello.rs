@@ -69,6 +69,36 @@ fn rejects_incompatible_static_tensor_shapes_at_call_boundaries() {
 }
 
 #[test]
+fn tensor_wildcard_parameters_infer_each_callers_dtype() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"release_tensor\") def release[type](value: Tensor[type])\n",
+        "\n",
+        "def release_all(bfloat: Tensor[bf16], float: Tensor[f32], integer: Tensor[i64]):\n",
+        "    release(bfloat)\n",
+        "    release(float)\n",
+        "    release(integer)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    assert_eq!(hir.functions[0].params[0].ty, ValueType::TensorAny);
+}
+
+#[test]
+fn tensor_wildcard_parameters_reject_non_tensor_values() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"release_tensor\") def release[type](value: Tensor[type])\n",
+        "\n",
+        "def wrong():\n",
+        "    release(\"not a tensor\")\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("expected TensorAny"));
+}
+
+#[test]
 fn retains_local_task_placement_after_validating_its_import() {
     let source = concat!(
         "import distributed\n",

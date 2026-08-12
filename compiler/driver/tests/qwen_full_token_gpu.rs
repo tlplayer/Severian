@@ -1,4 +1,4 @@
-use severian_driver::compile_path;
+use severian_driver::compile_dependency_path;
 use severian_lowering::stablehlo::lower_entry;
 use severian_xla::{
     Buffer, CompileOptions, HostBuffer, PjrtClient, PjrtPlugin, SafeTensorStore, StableHloModule,
@@ -64,8 +64,10 @@ fn full_qwen_next_token_is_compiled_from_severian_and_executes_on_amd_gpu(
         Err(error) => return Err(error.into()),
     };
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let compilation =
-        compile_path(&workspace.join("benchmarks/inference/severian/qwen_kernels.sev"))?;
+    let compilation = compile_dependency_path(
+        &workspace.join("benchmarks/inference/severian/qwen_kernels.sev"),
+        &workspace.join("benchmarks/inference/severian/modules/qwen_kernels/package.toml"),
+    )?;
     let entry = |name: &str| {
         compilation
             .optimized_hir

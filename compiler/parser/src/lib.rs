@@ -396,7 +396,9 @@ impl Parser<'_> {
         let mut functions = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             if !self.at(&TokenKind::Native) {
-                return Err(self.error("module-level `unsafe:` blocks may only declare native functions"));
+                return Err(
+                    self.error("module-level `unsafe:` blocks may only declare native functions")
+                );
             }
             let start = self.peek().span.start;
             functions.push(self.parse_native_function(start)?);
@@ -894,6 +896,9 @@ impl Parser<'_> {
             }));
         }
         if self.at(&TokenKind::Unsafe) {
+            if self.test_depth > 0 {
+                return Err(self.error("tests may not contain `unsafe` blocks"));
+            }
             let start = self.advance().span.start;
             self.expect_simple(TokenKind::Colon, "`:` after unsafe")?;
             self.unsafe_depth += 1;

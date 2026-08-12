@@ -5,3 +5,6 @@ edition = "2026"
 
 [lib]
 path = "../../qwen_tokenizer.sev"
+
+[dependencies]
+platform = { path = "../../../../../library/platform", version = "0.1.0" }

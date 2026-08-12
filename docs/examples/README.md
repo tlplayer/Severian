@@ -25,8 +25,8 @@ paths while staying Severian-first:
 | `05-ownership-borrowing` | Inferred ownership plus explicit view/borrow/clone/move keywords. |
 | `06-results-patterns` | `Result`, `Option`, `?=`, `present`, `absent`, and exhaustive switching. |
 | `07-generics-constraints` | Type parameters and trait-bounded abstractions. |
-| `08-concurrency` | `async`, `await`, bounded channels, channel switches, tasks, and safe shared state shapes. |
-| `09-systems-unsafe` | Pointers, unsafe blocks, and isolated low-level code. |
+| `08-concurrency` | `async`, `await`, bounded channels, channel switches, tasks, safe shared state shapes, and narrowly exempted runtime-owned task examples. |
+| `09-systems-unsafe` | A source-scoped pointer exception plus a safe host-boundary API shape; direct native ABI declarations remain library-only. |
 | `10-numerics-mlir` | Tensor-style code that should lower cleanly to MLIR. |
 | `11-testing` | Function-attached and constructor-attached tests. |
 | `12-enums-aliases` | Placeholder enum and type alias syntax. |

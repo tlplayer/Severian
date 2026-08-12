@@ -1,8 +1,6 @@
 import model
 from model import neuralnet as nn
-
-unsafe:
-    native("__sev_monotonic_ns") def monotonicNs() -> int
+from platform import monotonicNs
 
 def main():
     tokens = model.tensor([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])

@@ -2,7 +2,7 @@ def rawDriverCall() -> int:
     return 42
 
 def main():
-    # Runtime ownership is explicit even when the task is awaited here.
+    # This example explicitly demonstrates crossing into runtime ownership.
     unsafe:
         task = async rawDriverCall() with runtime
 

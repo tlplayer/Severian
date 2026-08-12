@@ -504,15 +504,42 @@ sources are embedded in `sev`, so named imports remain available after the
 compiler binary is installed or relocated. `SEVERIAN_LIBRARY_PATH` deliberately
 overrides those embedded packages for library development.
 
-Native ABI declarations must acknowledge their unsafe boundary explicitly:
+Native ABI declarations must acknowledge their unsafe boundary explicitly, and
+only a declared library target may opt in:
+
+```toml
+[package]
+name = "native-file-backend"
+version = "0.1.0"
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]
+
+[lib]
+path = "src/lib.sev"
+```
 
 ```sev
 unsafe:
     native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 ```
 
-Application code should normally import the safe public package (`file` in this
-case) instead of declaring platform symbols itself.
+Unsafe code is denied unless both its capability and exact source file appear in
+`[package.unsafe]`. `native-abi` applies only to library targets; a binary cannot
+use it even if listed. This prevents examples and applications from skipping an
+API implementation with direct `native(...)` declarations. Genuine low-level
+examples can instead request a narrow capability such as `pointers` or
+`runtime-owned-tasks` for one named source file. `test` bodies reject `unsafe:`
+unconditionally. Application code imports the safe public package (`file` in
+this case) instead of declaring platform symbols itself.
+
+Public tensor APIs use `snake_case` names and rely on tensor types instead of
+dtype-suffixed overload names where the operation is identical. For example,
+`release[type](value: Tensor[type])` accepts `Tensor[bf16]`, `Tensor[f32]`, or
+`Tensor[i64]` and infers `type` from each call; passing a non-tensor is a type
+error. Backend-specific fixed-shape constructors keep their capacity in the
+name when that capacity is part of the native ABI contract.
 
 Registry packages use the same import syntax and never expose cache paths to
 source code:
@@ -607,8 +634,9 @@ for index in indices(values):
 ```
 
 Operations such as `pop`, `remove`, `clear`, and resizing are rejected inside
-that loop. An `unsafe` region may override the shape restriction, but indexing
-remains bounds-checked. Removing a bounds check is a separate unsafe operation.
+that loop. An opted-in low-level library may override the shape restriction in
+an `unsafe` region, but indexing remains bounds-checked. Applications and tests
+cannot make that override.
 
 Frozen collections preserve both their contents and shape. Fixed arrays preserve
 their shape while allowing element mutation. Resizable collections retain runtime
@@ -774,8 +802,8 @@ switch messages and commands while received < 2 with received := 0:
 ```
 
 Every task names its lifetime owner. A task declared `with self` cannot outlive
-the current execution. A task declared `with runtime` is runtime-owned and must
-be created inside an explicit `unsafe:` block.
+the current execution. Runtime-owned task creation is confined to an opted-in
+library; applications use its safe API rather than opening an unsafe region.
 
 An imported execution package may add placement to the same clause. Local
 distributed work keeps its structured owner and selects placement at the launch
@@ -889,10 +917,10 @@ await left
 await right
 ```
 
-```sev
-unsafe:
-    worker = async raw_driver_call() with runtime
+Tests and application binaries always use scope-owned work directly:
 
+```sev
+worker = async driver_call() with self
 result = await worker
 ```
 

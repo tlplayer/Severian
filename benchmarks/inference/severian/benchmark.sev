@@ -1,5 +1,6 @@
 import file
 import json
+from platform import monotonicNs
 import qwen2
 import qwen2_config
 import qwen_kernels
@@ -7,14 +8,11 @@ import qwen_tokenizer
 import safetensor_weights
 import tensor
 
-unsafe:
-    native("__sev_monotonic_ns") def monotonicNs() -> int
-
 def forward(weights: qwen2.Qwen2Weights, promptTokens: list[int]) -> Tensor[bf16, 1, 32, 151936]:
-    inputIds = qwen_kernels.inputTokens(promptTokens)
-    cosine = qwen_kernels.ropeCosine(promptTokens)
-    sine = qwen_kernels.ropeSine(promptTokens)
-    mask = qwen_kernels.causalMask(promptTokens)
+    inputIds = tensor.from_i64_tokens_32(promptTokens)
+    cosine = tensor.rope_cosine_32(promptTokens)
+    sine = tensor.rope_sine_32(promptTokens)
+    mask = tensor.causal_mask_32(promptTokens)
     hidden := qwen_kernels.embeddingKernel(weights.embedding, inputIds)
     for layer in weights.layers:
         hidden = qwen_kernels.qwen2LayerKernel(
@@ -87,13 +85,13 @@ def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     assert(qwen_tokenizer.encode(modelPath, prompt) == promptTokens)
     warmupStart = monotonicNs()
     warmupLogits = forward(weights, promptTokens)
-    warmupToken = qwen_kernels.argmaxBf16(warmupLogits, promptTokens)
+    warmupToken = tensor.argmax_at_active_position(warmupLogits, promptTokens)
     assert(warmupToken == expectedTokens[0])
     modelReady = monotonicNs()
     inferenceStart = monotonicNs()
     logits = forward(weights, promptTokens)
     forwardEnd = monotonicNs()
-    nextToken = qwen_kernels.argmaxBf16(logits, promptTokens)
+    nextToken = tensor.argmax_at_active_position(logits, promptTokens)
     firstToken = monotonicNs()
     nextText = qwen_tokenizer.decodeToken(modelPath, nextToken)
     print("prompt", prompt)

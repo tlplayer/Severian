@@ -175,27 +175,35 @@ fn check_ast(
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, true)?;
+    let (ast, interfaces, source) = frontend_path(path, true, None)?;
     compile_ast(&ast, &interfaces, path, &source)
 }
 
-pub fn compile_dependency_path(path: &Path) -> Result<Compilation, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, false)?;
+pub fn compile_dependency_path(
+    path: &Path,
+    manifest_path: &Path,
+) -> Result<Compilation, CompileError> {
+    let (ast, interfaces, source) = frontend_path(path, false, Some(manifest_path))?;
     compile_ast(&ast, &interfaces, path, &source)
 }
 
 pub fn check_path(path: &Path) -> Result<Program, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, true)?;
+    let (ast, interfaces, source) = frontend_path(path, true, None)?;
     check_ast(&ast, &interfaces, path, &source)
 }
 
 fn frontend_path(
     path: &Path,
     write_lock: bool,
+    manifest_override: Option<&Path>,
 ) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
     let source = std::fs::read_to_string(path)?;
+    let manifest_path = manifest_override
+        .map(Path::to_path_buf)
+        .or_else(|| severian_package::find_manifest(path));
+    severian_package::enforce_unsafe_policy(manifest_path.as_deref(), path, &source)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
     let ast = parse_source(&source)?;
-    let manifest_path = severian_package::find_manifest(path);
     let project_root = manifest_path
         .as_deref()
         .and_then(Path::parent)

@@ -76,6 +76,28 @@ def openSafetensors(modelDirectory: string) -> Result[SafeTensorStore, IOError]:
     return SafeTensorStore(modelDirectory, weightMap, [], [], [], [])
 
 unsafe:
+    # Backend handle construction and lifetime live at the tensor boundary.
+    # Consumers use these typed APIs and never redeclare XLA symbols.
+    native("__sev_xla_i64_token") def from_i64_token(value: int) -> Tensor[i64, 1, 1]
+    native("__sev_xla_i64_position") def from_i64_position(value: int) -> Tensor[i64, 1]
+    native("__sev_xla_i64_tokens") def from_i64_tokens_32(values: list[int]) -> Tensor[i64, 1, 32]
+    native("__sev_xla_qwen_serving_prefill_tokens") def from_i64_tokens_256(values: list[int]) -> Tensor[i64, 1, 256]
+
+    native("__sev_xla_qwen_rope_cos") def rope_cosine_32(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 128]
+    native("__sev_xla_qwen_rope_sin") def rope_sine_32(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 128]
+    native("__sev_xla_qwen_causal_mask") def causal_mask_32(tokens: list[int]) -> Tensor[f32, 1, 1, 32, 32]
+    native("__sev_xla_qwen_serving_prefill_rope_cos") def rope_cosine_256() -> Tensor[f32, 1, 1, 256, 128]
+    native("__sev_xla_qwen_serving_prefill_rope_sin") def rope_sine_256() -> Tensor[f32, 1, 1, 256, 128]
+    native("__sev_xla_qwen_serving_prefill_causal_mask") def causal_mask_256() -> Tensor[f32, 1, 1, 256, 256]
+    native("__sev_xla_qwen_serving_decode_rope_cos") def rope_cosine_at(position: int) -> Tensor[f32, 1, 1, 1, 128]
+    native("__sev_xla_qwen_serving_decode_rope_sin") def rope_sine_at(position: int) -> Tensor[f32, 1, 1, 1, 128]
+    native("__sev_xla_qwen_serving_decode_mask") def causal_mask_at(position: int) -> Tensor[f32, 1, 1, 1, 288]
+
+    native("__sev_xla_qwen_serving_empty_cache") def empty_kv_cache() -> Tensor[bf16, 1, 2, 288, 128]
+    native("__sev_xla_argmax_bf16") def argmax(value: Tensor[bf16]) -> int
+    native("__sev_xla_argmax_position_bf16") def argmax_at_active_position(value: Tensor[bf16], tokens: list[int]) -> int
+    native("__sev_xla_release") def release[type](value: Tensor[type])
+
     native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
 
     native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]

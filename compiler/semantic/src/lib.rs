@@ -3079,6 +3079,15 @@ fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
+                "Tensor"
+                    if matches!(
+                        path.args.first().and_then(TypeArg::as_type),
+                        Some(Type::Named(element))
+                            if element.segments.first().is_some_and(|part| part.name == "type")
+                    ) =>
+                {
+                    Ok(ValueType::TensorAny)
+                }
                 "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
                 "Channel" => Ok(ValueType::Channel),
                 "fn" => Ok(ValueType::Function),
@@ -3174,6 +3183,10 @@ fn compatible(span: Span, actual: ValueType, expected: ValueType) -> Result<(), 
     if actual == expected
         || actual == ValueType::Any
         || expected == ValueType::Any
+        || matches!(
+            (actual, expected),
+            (ValueType::Tensor(_), ValueType::TensorAny)
+        )
         || matches!((actual, expected), (ValueType::Tensor(actual), ValueType::Tensor(expected)) if actual.is_compatible_with(expected))
         || (expected == ValueType::Result && actual != ValueType::Unit)
     {

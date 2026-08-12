@@ -441,3 +441,17 @@ fn restricts_address_of_to_unsafe_blocks() {
     let error = parse(&lex(invalid).unwrap()).unwrap_err();
     assert_eq!(error.message, "address-of is only valid inside `unsafe`");
 }
+
+#[test]
+fn rejects_unsafe_blocks_inside_tests() {
+    let source = concat!(
+        "def probe():\n",
+        "    return\n",
+        "\n",
+        "test \"unsafe is never a test capability\":\n",
+        "    unsafe:\n",
+        "        value = 1\n",
+    );
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert_eq!(error.message, "tests may not contain `unsafe` blocks");
+}

@@ -16,7 +16,7 @@ artifacts, and links a native executable that composes:
 - priority-ordered round-robin scheduling;
 - timer, page-fault, and keyboard interrupt classification;
 - a cross-subsystem kernel audit; and
-- a bounds-guarded unsafe boot-image inspection boundary.
+- bounds-guarded boot-image inspection through safe indexing.
 
 Build and execute it:
 

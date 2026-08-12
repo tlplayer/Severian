@@ -10,3 +10,4 @@ path = "benchmark.sev"
 [dependencies]
 model = { path = "../../library/model", version = "0.1.0" }
 "model.neuralnet" = { path = "../../library/model/neuralnet", version = "0.1.0" }
+platform = { path = "../../library/platform", version = "0.1.0" }

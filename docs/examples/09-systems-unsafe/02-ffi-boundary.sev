@@ -2,8 +2,7 @@ def cStrlen(text: string) -> usize:
     return text.length()
 
 def strlen(text: string) -> usize:
-    unsafe:
-        return cStrlen(text)
+    return cStrlen(text)
 
 def main():
     print(strlen("severian"))

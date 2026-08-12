@@ -1,0 +1,16 @@
+[package]
+name = "systems-unsafe-examples"
+version = "0.1.0"
+edition = "2026"
+
+[package.unsafe]
+capabilities = ["pointers"]
+sources = ["01-isolated-pointer.sev"]
+
+[[bin]]
+name = "isolated-pointer"
+path = "01-isolated-pointer.sev"
+
+[[bin]]
+name = "ffi-boundary"
+path = "02-ffi-boundary.sev"

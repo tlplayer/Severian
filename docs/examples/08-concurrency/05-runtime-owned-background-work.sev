@@ -2,7 +2,6 @@ def refreshCache():
     print("cache refreshed")
 
 def main():
-    # This task is intentionally owned by the runtime. Main does not wait for it,
-    # so its work must own its inputs, return unit, and handle its own failures.
+    # This example deliberately demonstrates detached runtime ownership.
     unsafe:
         async refreshCache() with runtime
