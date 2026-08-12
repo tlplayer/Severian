@@ -161,6 +161,7 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_print_space()\n",
         "  llvm.func @__sev_print_newline()\n",
         "  llvm.func @__sev_object_new(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
@@ -757,6 +758,28 @@ impl LowerContext<'_> {
                             };
                             writeln!(self.output, "    llvm.call @__sev_collection_set({object}, {index}, {boxed}) : (!llvm.ptr, i64, !llvm.ptr) -> ()").unwrap();
                         }
+                    } else if let Expression::Member { object, member } = target.kind() {
+                        let (object, _) = self.lower_expression(object);
+                        let field = self.string_address(member);
+                        let right = self.lower_expression(value);
+                        let expected = self
+                            .object_field_metadata(&object, member)
+                            .map(|(ty, _)| ty)
+                            .unwrap_or(right.1);
+                        let value = if *op == AssignmentOp::Assign {
+                            if right.1 == ValueType::Any && expected != ValueType::Any {
+                                self.unbox_value(right, expected)
+                            } else {
+                                right
+                            }
+                        } else {
+                            let current = self.fresh_value();
+                            writeln!(self.output, "    {current} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                            let current = self.unbox_value((current, ValueType::Any), expected);
+                            self.lower_binary_values(current, assignment_binary(*op), right)
+                        };
+                        let boxed = self.box_value(value);
+                        writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
                     }
                 }
                 Instruction::Print(value) => {
@@ -1108,14 +1131,19 @@ impl LowerContext<'_> {
         match expression {
             Expression::Typed { ty, expression, .. } => {
                 let (value, lowered_type) = self.lower_expression(expression);
-                (
-                    value,
-                    if lowered_type == ValueType::Any {
-                        *ty
-                    } else {
-                        lowered_type
-                    },
-                )
+                if lowered_type == ValueType::Any && *ty != ValueType::Any {
+                    let (value, coerced_type) = self.unbox_value((value, lowered_type), *ty);
+                    (
+                        value,
+                        if coerced_type == ValueType::Any {
+                            *ty
+                        } else {
+                            coerced_type
+                        },
+                    )
+                } else {
+                    (value, lowered_type)
+                }
             }
             Expression::Integer(value) => {
                 let result = self.fresh_value();
@@ -1343,6 +1371,12 @@ impl LowerContext<'_> {
                     .iter()
                     .find(|candidate| candidate.name == *class)
                     .cloned();
+                if let Some(definition) = &definition {
+                    for field in &definition.fields {
+                        let field = self.string_address(field);
+                        writeln!(self.output, "    llvm.call @__sev_object_declare({result}, {field}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                    }
+                }
                 let constructor = definition.as_ref().and_then(|definition| {
                     definition
                         .constructors
@@ -1408,23 +1442,7 @@ impl LowerContext<'_> {
                 let field = self.string_address(member);
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                let metadata = self
-                    .object_classes
-                    .get(&object)
-                    .and_then(|class| {
-                        self.classes
-                            .iter()
-                            .find(|candidate| candidate.name == *class)
-                    })
-                    .and_then(|class| {
-                        class
-                            .fields
-                            .iter()
-                            .position(|field| field == member)
-                            .map(|index| {
-                                (class.field_types[index], class.field_classes[index].clone())
-                            })
-                    });
+                let metadata = self.object_field_metadata(&object, member);
                 if let Some((_, Some(class))) = &metadata {
                     self.object_classes.insert(result.clone(), class.clone());
                 }
@@ -1434,6 +1452,47 @@ impl LowerContext<'_> {
                 } else {
                     self.unbox_value((result, ValueType::Any), ty)
                 }
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "get"
+                && args.len() == 1
+                && !self.has_known_class_method(object, method) =>
+            {
+                let (object, _) = self.lower_expression(object);
+                let (field, _) = self.lower_expression(&args[0]);
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                let metadata = match args[0].kind() {
+                    Expression::String(name) => self.object_field_metadata(&object, name),
+                    _ => None,
+                };
+                if let Some((_, Some(class))) = &metadata {
+                    self.object_classes.insert(result.clone(), class.clone());
+                }
+                let ty = metadata.map(|(ty, _)| ty).unwrap_or(ValueType::Any);
+                if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
+                    (result, ty)
+                } else {
+                    self.unbox_value((result, ValueType::Any), ty)
+                }
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "set"
+                && args.len() == 2
+                && !self.has_known_class_method(object, method) =>
+            {
+                let (object, _) = self.lower_expression(object);
+                let (field, _) = self.lower_expression(&args[0]);
+                let value = self.lower_expression(&args[1]);
+                let value = self.box_value(value);
+                writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                (String::new(), ValueType::Unit)
             }
             Expression::ChaosRule { .. } => {
                 let result = self.fresh_value();
@@ -1539,7 +1598,7 @@ impl LowerContext<'_> {
                 args,
             } if matches!(
                 method.as_str(),
-                "appendleft" | "extend" | "remove" | "heapPush"
+                "append_left" | "appendleft" | "extend" | "remove" | "heap_push" | "heapPush"
             ) && args.len() == 1 =>
             {
                 let (mut object, object_type) = self.lower_expression(object);
@@ -1548,10 +1607,10 @@ impl LowerContext<'_> {
                 }
                 let argument = self.lower_expression(&args[0]);
                 let function = match method.as_str() {
-                    "appendleft" => "__sev_collection_appendleft",
+                    "append_left" | "appendleft" => "__sev_collection_appendleft",
                     "extend" => "__sev_collection_extend",
                     "remove" => "__sev_collection_remove",
-                    "heapPush" => "__sev_collection_heap_push",
+                    "heap_push" | "heapPush" => "__sev_collection_heap_push",
                     _ => unreachable!(),
                 };
                 let argument = if method == "extend" {
@@ -1675,7 +1734,16 @@ impl LowerContext<'_> {
                 args,
             } if matches!(
                 method.as_str(),
-                "pop" | "popleft" | "heapPop" | "last" | "sorted" | "sum" | "minimum" | "maximum"
+                "pop"
+                    | "pop_left"
+                    | "popleft"
+                    | "heap_pop"
+                    | "heapPop"
+                    | "last"
+                    | "sorted"
+                    | "sum"
+                    | "minimum"
+                    | "maximum"
             ) && args.is_empty() =>
             {
                 let (mut object, object_type) = self.lower_expression(object);
@@ -1685,8 +1753,8 @@ impl LowerContext<'_> {
                 let result = self.fresh_value();
                 let function = match method.as_str() {
                     "pop" => "__sev_collection_pop",
-                    "popleft" => "__sev_collection_pop_at",
-                    "heapPop" => "__sev_collection_heap_pop",
+                    "pop_left" | "popleft" => "__sev_collection_pop_at",
+                    "heap_pop" | "heapPop" => "__sev_collection_heap_pop",
                     "last" => "__sev_collection_last",
                     "sorted" => "__sev_collection_sorted",
                     "sum" => "__sev_collection_sum",
@@ -1694,7 +1762,7 @@ impl LowerContext<'_> {
                     "maximum" => "__sev_collection_maximum",
                     _ => unreachable!(),
                 };
-                if method == "popleft" {
+                if matches!(method.as_str(), "pop_left" | "popleft") {
                     let zero = self.fresh_value();
                     writeln!(
                         self.output,
@@ -1737,13 +1805,15 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "toSet" | "toList") && args.is_empty() => {
+            } if matches!(method.as_str(), "to_set" | "toSet" | "to_list" | "toList")
+                && args.is_empty() =>
+            {
                 let (mut object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
                     object = self.unbox_value((object, object_type), ValueType::List).0;
                 }
                 let result = self.fresh_value();
-                let function = if method == "toSet" {
+                let function = if matches!(method.as_str(), "to_set" | "toSet") {
                     "__sev_collection_to_set"
                 } else {
                     "__sev_set_to_list"
@@ -1753,7 +1823,7 @@ impl LowerContext<'_> {
                     "    {result} = llvm.call @{function}({object}) : (!llvm.ptr) -> !llvm.ptr"
                 )
                 .unwrap();
-                if method == "toSet" {
+                if matches!(method.as_str(), "to_set" | "toSet") {
                     (result, ValueType::Set)
                 } else {
                     (result, ValueType::List)
@@ -1784,7 +1854,7 @@ impl LowerContext<'_> {
                 args,
             } if matches!(
                 method.as_str(),
-                "union" | "intersection" | "symmetricDifference"
+                "union" | "intersection" | "symmetric_difference" | "symmetricDifference"
             ) && args.len() == 1 =>
             {
                 let (mut object, object_type) = self.lower_expression(object);
@@ -1891,7 +1961,7 @@ impl LowerContext<'_> {
                 args,
             } if matches!(
                 method.as_str(),
-                "startsWith" | "endsWith" | "find" | "count"
+                "starts_with" | "startsWith" | "ends_with" | "endsWith" | "find" | "count"
             ) && args.len() == 1 =>
             {
                 let (object, object_type) = self.lower_expression(object);
@@ -1899,13 +1969,16 @@ impl LowerContext<'_> {
                 let needle = self.lower_expression(&args[0]);
                 let needle = self.unbox_value(needle, ValueType::String).0;
                 let function = match method.as_str() {
-                    "startsWith" => "__sev_string_starts_with",
-                    "endsWith" => "__sev_string_ends_with",
+                    "starts_with" | "startsWith" => "__sev_string_starts_with",
+                    "ends_with" | "endsWith" => "__sev_string_ends_with",
                     "find" => "__sev_string_find",
                     _ => "__sev_string_count",
                 };
                 let result = self.fresh_value();
-                let ty = if matches!(method.as_str(), "startsWith" | "endsWith") {
+                let ty = if matches!(
+                    method.as_str(),
+                    "starts_with" | "startsWith" | "ends_with" | "endsWith"
+                ) {
                     ValueType::Bool
                 } else {
                     ValueType::Int
@@ -1951,7 +2024,7 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "get" | "setDefault")
+            } if matches!(method.as_str(), "get" | "set_default" | "setDefault")
                 && args.len() == 2
                 && !self.has_known_class_method(object, method) =>
             {
@@ -3253,10 +3326,12 @@ impl LowerContext<'_> {
         let Expression::Variable(name) = object.kind() else {
             return false;
         };
-        let Some((value, _)) = self.variables.get(name) else {
-            return false;
-        };
-        let Some(class_name) = self.object_classes.get(value) else {
+        let class_name = self
+            .variables
+            .get(name)
+            .and_then(|(value, _)| self.object_classes.get(value))
+            .or_else(|| self.field_classes.get(name));
+        let Some(class_name) = class_name else {
             return false;
         };
         self.classes
@@ -3267,6 +3342,27 @@ impl LowerContext<'_> {
                     .methods
                     .iter()
                     .any(|candidate| candidate.name == method)
+            })
+    }
+
+    fn object_field_metadata(
+        &self,
+        object: &str,
+        field: &str,
+    ) -> Option<(ValueType, Option<String>)> {
+        self.object_classes
+            .get(object)
+            .and_then(|class| {
+                self.classes
+                    .iter()
+                    .find(|candidate| candidate.name == *class)
+            })
+            .and_then(|class| {
+                class
+                    .fields
+                    .iter()
+                    .position(|candidate| candidate == field)
+                    .map(|index| (class.field_types[index], class.field_classes[index].clone()))
             })
     }
 
@@ -5609,7 +5705,9 @@ fn native_bridge_source_for_target(
         "static void sev_print_collection_inline(void *raw) { sev_collection *value = raw; char open = value->kind == 1 ? '(' : value->kind == 2 ? '{' : '['; char close = value->kind == 1 ? ')' : value->kind == 2 ? '}' : ']'; fputc(open, stdout); for (int64_t i = 0; i < value->size; ++i) { if (i) fputs(\", \", stdout); __sev_print_value_inline(value->items[i]); } fputc(close, stdout); }\n",
         "void __sev_print_collection(void *raw) { sev_print_collection_inline(raw); fputc('\\n', stdout); }\n",
         "void *__sev_object_new(void *class_name) { sev_object *value = sev_allocate(sizeof(*value)); value->magic = SEV_OBJECT_MAGIC; value->class_name = class_name; pthread_mutex_init(&value->mutex, NULL); return value; }\n",
-        "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC) abort(); for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = item; }\n",
+        "void __sev_object_declare(void *raw, void *name) { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC || !name) abort(); for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return; if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->names = realloc(value->names, (size_t)value->capacity * sizeof(*value->names)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->names || !value->values) abort(); } value->names[value->size] = name; value->values[value->size++] = NULL; }\n",
+        "static int64_t sev_dynamic_kind(void *raw) { if (!raw) abort(); uint64_t magic = *(uint64_t *)raw; if (magic == SEV_OBJECT_MAGIC) return 100; if (magic == SEV_VARIANT_MAGIC) return 101; if (magic == SEV_TENSOR_MAGIC) return 102; sev_value *value = raw; if (value->kind < SEV_INT || value->kind > SEV_COLLECTION) abort(); return value->kind; }\n",
+        "void __sev_object_set(void *raw, void *name, void *item) { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC || !name || !item) abort(); for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) { if (value->values[i]) { int64_t old_kind = sev_dynamic_kind(value->values[i]); int64_t new_kind = sev_dynamic_kind(item); if (old_kind != new_kind) abort(); if (old_kind == 100 && strcmp(((sev_object *)value->values[i])->class_name, ((sev_object *)item)->class_name) != 0) abort(); } value->values[i] = item; return; } abort(); }\n",
         "void *__sev_object_get(void *raw, void *name) { if (!raw || !name) abort(); uint64_t magic = *(uint64_t *)raw; if (magic == SEV_OBJECT_MAGIC) { sev_object *value = raw; for (int64_t i = 0; i < value->size; ++i) if (strcmp(value->names[i], name) == 0) return value->values[i]; abort(); } if (magic == SEV_VARIANT_MAGIC) { sev_variant *value = raw; if (strcmp(name, \"message\") == 0 && value->field) return value->field; } abort(); }\n\n",
         "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && value->magic == SEV_OBJECT_MAGIC && strcmp(value->class_name, class_name) == 0; }\n\n",
         "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->magic = SEV_VARIANT_MAGIC; value->tag = tag; value->field = field; return value; }\n",

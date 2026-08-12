@@ -1,0 +1,13 @@
+class Point:
+    x: int
+    y: int
+
+def main():
+    point := Point(3, 4)
+    axis = "x"
+
+    print(point.get(axis))
+    point.set(axis, 10)
+    print(point.x)
+    point.y = 20
+    print(point.y)

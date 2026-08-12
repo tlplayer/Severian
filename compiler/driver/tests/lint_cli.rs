@@ -77,3 +77,44 @@ fn lint_rejects_adjacent_module_unsafe_blocks() {
 
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[test]
+fn camel_case_compatibility_remains_callable_but_is_linted() {
+    let directory = temporary_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("main.sev");
+    std::fs::write(
+        &source,
+        concat!(
+            "class Point:\n",
+            "    x: int\n",
+            "\n",
+            "    def getX() -> int:\n",
+            "        return x\n",
+            "\n",
+            "def main():\n",
+            "    point = Point(7)\n",
+            "    print(point.getX())\n",
+        ),
+    )
+    .unwrap();
+
+    let lint = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(lint.status.success());
+    let standard_error = String::from_utf8_lossy(&lint.stderr);
+    assert!(standard_error.contains("warning[N002]"));
+    assert!(standard_error.contains("`getX` should be `get_x`"));
+
+    let run = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(run.status.success());
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "7\n");
+
+    let _ = std::fs::remove_dir_all(directory);
+}

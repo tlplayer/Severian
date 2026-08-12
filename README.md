@@ -104,6 +104,11 @@ and constants use `SCREAMING_SNAKE_CASE`. `sev lint --fix [path]` applies only
 collision-free file-wide renames and direct compatibility spelling fixes.
 External member names are diagnosed but are not automatically rewritten.
 
+Prefer one clear word where it is unambiguous; otherwise use `snake_case`.
+CamelCase APIs remain callable only for compatibility and are linted in
+Severian source. Dynamic field selection uses `object.get(field)` and
+`object.set(field, value)`; fixed fields continue to use `object.field`.
+
 Ordinary words stay complete (`system`, `implement`). A small explicit registry
 preserves established technical and scientific spellings such as `XLA`,
 `StableHLO`, `ReLU`, and `GELU`. See [docs/NAMING.md](docs/NAMING.md).
@@ -313,8 +318,8 @@ dedicated unboxed runtime ABI and kernels.
 
 ### Naming
 
-Severian uses casing to communicate semantic role instead of forcing one casing
-onto every name.
+Severian uses snake case for values and callables, reserving PascalCase for
+named types and screaming snake case for constants.
 
 | Role | Convention | Examples |
 | --- | --- | --- |
@@ -335,9 +340,9 @@ Standard domain names such as XLA, GPU, HTTP, MLIR, HIR, and IR are acceptable;
 ordinary words stay complete: `statement`, `expression`, `platform`, and
 `configuration`, not arbitrary compressed forms.
 
-The deliberate mixed-case exception is coordinate/property access where the
-letter is mathematical notation: `getX()`, `getY()`, and `getZ()`. It does not
-extend to ordinary APIs.
+There is no mixed-case coordinate exception. Use `point.x` for a fixed field,
+or `point.get(axis)` and `point.set(axis, value)` when the field name is a
+variable. Compatibility camelCase remains callable but receives a lint warning.
 
 Primitive types remain lowercase: `int`, `float`, and `string`.
 

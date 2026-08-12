@@ -53,9 +53,10 @@ struct SignatureParameter {
     default: Option<Expr>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Binding {
     ty: ValueType,
+    class: Option<String>,
     function_return: Option<ValueType>,
     collection_len: Option<usize>,
     mutable: bool,
@@ -154,6 +155,16 @@ pub fn analyze_with_packages(
                     .collect::<Vec<_>>()
                     .join(","),
             );
+            aliases.insert(
+                format!("__class_methods.{}", class.name.name),
+                class
+                    .methods
+                    .iter()
+                    .map(|method| method.name.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
         }
     }
     let mut signatures = HashMap::new();
@@ -176,6 +187,17 @@ pub fn analyze_with_packages(
                             .collect::<Vec<_>>()
                             .join(",")
                     });
+                aliases
+                    .entry(format!("__class_methods.{}", class.name.name))
+                    .or_insert_with(|| {
+                        class
+                            .methods
+                            .iter()
+                            .map(|method| method.name.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    });
+                register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
                 if imports_entire_module(module, module_name) {
                     aliases
                         .entry(class.name.name.clone())
@@ -242,6 +264,7 @@ pub fn analyze_with_packages(
                 binding.name.name.clone(),
                 Binding {
                     ty,
+                    class: expression_class(source, &global_scope, &aliases),
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -267,7 +290,7 @@ pub fn analyze_with_packages(
         let signature = signatures.get(&function.name.name).unwrap();
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
-        for parameter in &signature.params {
+        for (index, parameter) in signature.params.iter().enumerate() {
             let default = parameter
                 .default
                 .as_ref()
@@ -282,6 +305,11 @@ pub fn analyze_with_packages(
                 parameter.name.clone(),
                 Binding {
                     ty: parameter.ty,
+                    class: function
+                        .params
+                        .get(index)
+                        .and_then(|parameter| parameter.ty.as_ref())
+                        .and_then(class_type_name),
                     function_return: parameter.function_return,
                     collection_len: None,
                     mutable: false,
@@ -912,6 +940,111 @@ fn class_type_name(ty: &Type) -> Option<String> {
     }
 }
 
+fn register_class_field_aliases(
+    aliases: &mut HashMap<String, String>,
+    class: &str,
+    fields: &[severian_ast::Field],
+) -> Result<(), SemanticError> {
+    for field in fields {
+        if let Some(ty) = &field.ty {
+            aliases.insert(
+                format!("__class_field_type.{class}.{}", field.name.name),
+                encode_field_type(lower_type(ty)?).to_owned(),
+            );
+            if let Some(field_class) = class_type_name(ty) {
+                aliases.insert(
+                    format!("__class_field_class.{class}.{}", field.name.name),
+                    field_class,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn encode_field_type(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Int => "int",
+        ValueType::Float => "float",
+        ValueType::Bool => "bool",
+        ValueType::String => "string",
+        ValueType::List => "list",
+        ValueType::Tuple => "tuple",
+        ValueType::Map => "map",
+        ValueType::Set => "set",
+        ValueType::Tensor(_) | ValueType::TensorAny => "tensor",
+        ValueType::Channel => "channel",
+        ValueType::Function => "function",
+        ValueType::Result => "result",
+        ValueType::Option => "option",
+        ValueType::Any => "any",
+        ValueType::Unit => "unit",
+    }
+}
+
+fn decode_field_type(value: &str) -> Option<ValueType> {
+    Some(match value {
+        "int" => ValueType::Int,
+        "float" => ValueType::Float,
+        "bool" => ValueType::Bool,
+        "string" => ValueType::String,
+        "list" => ValueType::List,
+        "tuple" => ValueType::Tuple,
+        "map" => ValueType::Map,
+        "set" => ValueType::Set,
+        "tensor" => ValueType::TensorAny,
+        "channel" => ValueType::Channel,
+        "function" => ValueType::Function,
+        "result" => ValueType::Result,
+        "option" => ValueType::Option,
+        "any" => ValueType::Any,
+        "unit" => ValueType::Unit,
+        _ => return None,
+    })
+}
+
+fn expression_class(
+    expression: &Expr,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    match expression {
+        Expr::Identifier(identifier) => scope
+            .get(&identifier.name)
+            .and_then(|binding| binding.class.clone())
+            .or_else(|| {
+                aliases
+                    .get(&identifier.name)
+                    .and_then(|value| value.strip_prefix("__class."))
+                    .map(str::to_owned)
+            }),
+        Expr::Call(call) => match call.callee.as_ref() {
+            Expr::Identifier(identifier) => aliases
+                .get(&identifier.name)
+                .and_then(|value| value.strip_prefix("__class."))
+                .map(str::to_owned),
+            Expr::Member(member) => {
+                let Expr::Identifier(module) = member.object.as_ref() else {
+                    return None;
+                };
+                let exported = format!("{}.{}", module.name, member.member.name);
+                aliases.get(&format!("__module_class.{exported}")).cloned()
+            }
+            _ => None,
+        },
+        Expr::Member(member) => {
+            let class = expression_class(&member.object, scope, aliases)?;
+            aliases
+                .get(&format!(
+                    "__class_field_class.{class}.{}",
+                    member.member.name
+                ))
+                .cloned()
+        }
+        _ => None,
+    }
+}
+
 fn imports_entire_module(module: &Module, module_name: &str) -> bool {
     module.items.iter().any(|item| {
         let Item::Import(import) = item else {
@@ -954,6 +1087,9 @@ fn lower_class_function(
             field.clone(),
             Binding {
                 ty: ValueType::Any,
+                class: aliases
+                    .get(&format!("__class_field_class.{class_name}.{field}"))
+                    .cloned(),
                 function_return: None,
                 collection_len: None,
                 mutable: true,
@@ -982,6 +1118,7 @@ fn lower_class_function(
             param.name.name.clone(),
             Binding {
                 ty,
+                class: param.ty.as_ref().and_then(class_type_name),
                 function_return: function_return_type(param.ty.as_ref()),
                 collection_len: None,
                 mutable: false,
@@ -1276,6 +1413,7 @@ fn lower_block(
                     .filter(|ty| named_type_is(ty, "u8"))
                     .map(|_| u8::MAX as i64);
                 let known_integer = constant_integer(source);
+                let class = expression_class(source, scope, aliases);
                 if scope
                     .get(&binding.name.name)
                     .is_some_and(|existing| existing.field || existing.mutable)
@@ -1292,6 +1430,7 @@ fn lower_block(
                         binding.name.name.clone(),
                         Binding {
                             ty,
+                            class,
                             function_return: None,
                             collection_len: binding.value.as_ref().and_then(collection_length),
                             mutable: binding.kind == LetKind::Changeable,
@@ -1324,6 +1463,7 @@ fn lower_block(
                         name.name.clone(),
                         Binding {
                             ty: ValueType::Any,
+                            class: None,
                             function_return: None,
                             collection_len: None,
                             mutable: false,
@@ -1350,6 +1490,21 @@ fn lower_block(
                             name.span,
                             format!("binding `{}` is not changeable", name.name),
                         ));
+                    }
+                } else if let Expr::Member(member) = &assignment.target {
+                    if let Expr::Identifier(object) = member.object.as_ref() {
+                        if !scope
+                            .get(&object.name)
+                            .is_some_and(|binding| binding.mutable || binding.field)
+                        {
+                            return Err(error(
+                                object.span,
+                                format!(
+                                    "object `{}` is not changeable; bind it with `:=` before assigning a field",
+                                    object.name
+                                ),
+                            ));
+                        }
                     }
                 } else if !matches!(assignment.target, Expr::Index(_)) {
                     return Err(error(
@@ -1381,6 +1536,7 @@ fn lower_block(
                     binding.name.name.clone(),
                     Binding {
                         ty: ValueType::Any,
+                        class: None,
                         function_return: None,
                         collection_len: None,
                         mutable: false,
@@ -2003,13 +2159,35 @@ fn lower_expression_kind(
             ))
         }
         Expr::Member(member) => {
+            let object_class = expression_class(&member.object, scope, aliases);
             let object = lower_expression(&member.object, scope, signatures, aliases)?.0;
+            let field_type = if let Some(class) = object_class {
+                let fields = aliases
+                    .get(&format!("__class_fields.{class}"))
+                    .map(|fields| fields.split(',').collect::<Vec<_>>())
+                    .unwrap_or_default();
+                if !fields.contains(&member.member.name.as_str()) {
+                    return Err(error(
+                        member.member.span,
+                        format!("class `{class}` has no field `{}`", member.member.name),
+                    ));
+                }
+                aliases
+                    .get(&format!(
+                        "__class_field_type.{class}.{}",
+                        member.member.name
+                    ))
+                    .and_then(|value| decode_field_type(value))
+                    .unwrap_or(ValueType::Any)
+            } else {
+                ValueType::Any
+            };
             Ok((
                 Expression::Member {
                     object: Box::new(object),
                     member: member.member.name.clone(),
                 },
-                ValueType::Any,
+                field_type,
             ))
         }
         Expr::ListComprehension(comprehension) => {
@@ -2213,6 +2391,7 @@ fn lower_expression_kind(
                     parameter.name.name.clone(),
                     Binding {
                         ty: ValueType::Any,
+                        class: None,
                         function_return: None,
                         collection_len: None,
                         mutable: false,
@@ -2272,6 +2451,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
         "chaos".into(),
         Binding {
             ty: ValueType::List,
+            class: None,
             function_return: None,
             collection_len: None,
             mutable: false,
@@ -2286,6 +2466,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
                 name.into(),
                 Binding {
                     ty: ValueType::String,
+                    class: None,
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -2405,20 +2586,87 @@ fn lower_call(
                 ));
             }
         }
+        let object_class = expression_class(&member.object, scope, aliases);
+        let known_class_method = object_class.as_ref().is_some_and(|class| {
+            aliases
+                .get(&format!("__class_methods.{class}"))
+                .is_some_and(|methods| {
+                    methods
+                        .split(',')
+                        .any(|method| method == member.member.name)
+                })
+        });
+        let dynamic_object_access =
+            matches!(member.member.name.as_str(), "get" | "set") && !known_class_method;
         let (object, object_type) = lower_expression(&member.object, scope, signatures, aliases)?;
         let lowered_args = call
             .args
             .iter()
             .map(|arg| lower_expression(&arg.value, scope, signatures, aliases))
             .collect::<Result<Vec<_>, _>>()?;
-        validate_builtin_method(
-            call.span,
-            object_type,
-            &member.member.name,
-            &lowered_args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>(),
-        )?;
+        if object_type == ValueType::Any && member.member.name == "set" && dynamic_object_access {
+            if let Expr::Identifier(identifier) = member.object.as_ref() {
+                if !scope
+                    .get(&identifier.name)
+                    .is_some_and(|binding| binding.mutable || binding.field)
+                {
+                    return Err(error(
+                        member.object.span(),
+                        format!(
+                            "object `{}` is not changeable; bind it with `:=` before calling `set`",
+                            identifier.name
+                        ),
+                    ));
+                }
+            }
+        }
+        if !known_class_method {
+            validate_builtin_method(
+                call.span,
+                object_type,
+                &member.member.name,
+                &lowered_args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>(),
+            )?;
+        }
+        let known_field = dynamic_object_access
+            .then_some(())
+            .and_then(|()| object_class.as_ref())
+            .and_then(|class| {
+                let Expr::Literal(Literal::String { value, .. }) =
+                    call.args.first().map(|argument| &argument.value)?
+                else {
+                    return None;
+                };
+                Some((class, value))
+            });
+        let field_type = if let Some((class, field)) = known_field {
+            let fields = aliases
+                .get(&format!("__class_fields.{class}"))
+                .map(|fields| fields.split(',').collect::<Vec<_>>())
+                .unwrap_or_default();
+            if !fields.contains(&field.as_str()) {
+                return Err(error(
+                    call.args[0].value.span(),
+                    format!("class `{class}` has no field `{field}`"),
+                ));
+            }
+            aliases
+                .get(&format!("__class_field_type.{class}.{field}"))
+                .and_then(|value| decode_field_type(value))
+        } else {
+            None
+        };
+        if member.member.name == "set" && dynamic_object_access {
+            if let (Some(expected), Some((_, actual))) = (field_type, lowered_args.get(1)) {
+                compatible(call.args[1].value.span(), *actual, expected)?;
+            }
+        }
         let args = lowered_args.into_iter().map(|(arg, _)| arg).collect();
-        let return_type = method_return_type(object_type, &member.member.name);
+        let return_type = if member.member.name == "get" && dynamic_object_access {
+            field_type.unwrap_or(ValueType::Any)
+        } else {
+            method_return_type(object_type, &member.member.name)
+        };
         return Ok((
             Expression::MethodCall {
                 object: Box::new(object),
@@ -2680,9 +2928,9 @@ fn method_return_type(object: ValueType, method: &str) -> ValueType {
         (ValueType::String, "characters" | "words" | "split")
         | (ValueType::List, "reversed" | "sorted" | "map" | "filter")
         | (ValueType::Map, "keys" | "values")
-        | (ValueType::Set, "toList") => ValueType::List,
+        | (ValueType::Set, "to_list" | "toList") => ValueType::List,
         (ValueType::String | ValueType::List, "frequencies") => ValueType::Map,
-        (ValueType::List, "toSet") | (ValueType::Set, "difference") => ValueType::Set,
+        (ValueType::List, "to_set" | "toSet") | (ValueType::Set, "difference") => ValueType::Set,
         (ValueType::List, "join") => ValueType::String,
         (ValueType::List, "reduce") => ValueType::Any,
         (ValueType::String, "length" | "find" | "count") => ValueType::Int,
@@ -2696,13 +2944,20 @@ fn method_return_type(object: ValueType, method: &str) -> ValueType {
             | ValueType::TensorAny,
             "len" | "size" | "bytes" | "bits" | "capacity",
         ) => ValueType::Int,
-        (ValueType::String, "startsWith" | "endsWith") => ValueType::Bool,
+        (ValueType::String, "starts_with" | "startsWith" | "ends_with" | "endsWith") => {
+            ValueType::Bool
+        }
         (ValueType::String, "strip" | "lower" | "upper" | "replace") => ValueType::String,
         (
             ValueType::List,
-            "append" | "appendleft" | "extend" | "insert" | "remove" | "heapPush",
+            "append" | "append_left" | "appendleft" | "extend" | "insert" | "remove" | "heap_push"
+            | "heapPush",
         ) => ValueType::Unit,
-        (ValueType::Set, "union" | "intersection" | "symmetricDifference") => ValueType::Set,
+        (
+            ValueType::Set,
+            "union" | "intersection" | "symmetric_difference" | "symmetricDifference",
+        ) => ValueType::Set,
+        (ValueType::Any, "set") => ValueType::Unit,
         _ => ValueType::Any,
     }
 }
@@ -2711,13 +2966,17 @@ fn collection_shape_mutating_method(method: &str) -> bool {
     matches!(
         method,
         "append"
+            | "append_left"
             | "appendleft"
             | "extend"
             | "insert"
             | "remove"
             | "pop"
+            | "pop_left"
             | "popleft"
+            | "heap_push"
             | "heapPush"
+            | "heap_pop"
             | "heapPop"
             | "clear"
     )
@@ -2735,25 +2994,34 @@ fn validate_builtin_method(
         (ValueType::List, "reduce") => Some(1..=2),
         (
             ValueType::List,
-            "append" | "appendleft" | "extend" | "remove" | "heapPush" | "join" | "map" | "filter",
+            "append" | "append_left" | "appendleft" | "extend" | "remove" | "heap_push"
+            | "heapPush" | "join" | "map" | "filter",
         ) => Some(1..=1),
         (ValueType::List, "insert") => Some(2..=2),
         (
             ValueType::List,
-            "popleft" | "heapPop" | "last" | "reversed" | "sum" | "minimum" | "maximum"
-            | "frequencies" | "toSet",
+            "pop_left" | "popleft" | "heap_pop" | "heapPop" | "last" | "reversed" | "sum"
+            | "minimum" | "maximum" | "frequencies" | "to_set" | "toSet",
         ) => Some(0..=0),
-        (ValueType::Set, "union" | "intersection" | "difference" | "symmetricDifference") => {
-            Some(1..=1)
-        }
-        (ValueType::Set, "toList") => Some(0..=0),
-        (ValueType::Map, "get" | "setDefault") => Some(2..=2),
+        (
+            ValueType::Set,
+            "union"
+            | "intersection"
+            | "difference"
+            | "symmetric_difference"
+            | "symmetricDifference",
+        ) => Some(1..=1),
+        (ValueType::Set, "to_list" | "toList") => Some(0..=0),
+        (ValueType::Map, "get" | "set_default" | "setDefault") => Some(2..=2),
         (ValueType::Map, "keys" | "values") => Some(0..=0),
         (
             ValueType::String,
             "characters" | "words" | "frequencies" | "strip" | "lower" | "upper" | "length",
         ) => Some(0..=0),
-        (ValueType::String, "split" | "startsWith" | "endsWith" | "find" | "count") => Some(1..=1),
+        (
+            ValueType::String,
+            "split" | "starts_with" | "startsWith" | "ends_with" | "endsWith" | "find" | "count",
+        ) => Some(1..=1),
         (ValueType::String, "replace") => Some(2..=2),
         (
             ValueType::String
@@ -2765,6 +3033,8 @@ fn validate_builtin_method(
             | ValueType::TensorAny,
             "len" | "size" | "bytes" | "bits" | "capacity",
         ) => Some(0..=0),
+        (ValueType::Any, "get") => Some(1..=1),
+        (ValueType::Any, "set") => Some(2..=2),
         _ => None,
     };
     if let Some(arity) = arity {
@@ -2794,6 +3064,14 @@ fn validate_builtin_method(
             return Err(error(
                 span,
                 "method `sorted` expects a boolean reverse flag",
+            ));
+        }
+    }
+    if object == ValueType::Any && matches!(method, "get" | "set") {
+        if !matches!(args.first(), Some(ValueType::String | ValueType::Any)) {
+            return Err(error(
+                span,
+                format!("object.{method} expects a string field name"),
             ));
         }
     }
@@ -3302,6 +3580,7 @@ fn lower_pattern(
                 name.name.clone(),
                 Binding {
                     ty: ValueType::Any,
+                    class: None,
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -3336,6 +3615,7 @@ fn lower_pattern(
                                     field.into(),
                                     Binding {
                                         ty: ValueType::Any,
+                                        class: None,
                                         function_return: None,
                                         collection_len: None,
                                         mutable: false,
@@ -3359,6 +3639,7 @@ fn lower_pattern(
                     name.clone(),
                     Binding {
                         ty: ValueType::Any,
+                        class: None,
                         function_return: None,
                         collection_len: None,
                         mutable: false,

@@ -13,12 +13,28 @@ where its spelling is already widely recognized.
 | packages, modules, import aliases | `snake_case` | `safe_tensor`, `model_runtime` | `N005` |
 | decorators | `snake_case` | `@tensor`, `@parallel` | `N006` |
 
-Short conventional names remain valid for coordinates, indices, and generic
-types: `x`, `y`, `z`, `i`, `j`, `k`, `T`, `K`, and `V`.
+Prefer one clear word when it conveys the meaning. Use `snake_case` when a word
+boundary removes ambiguity. Short conventional names remain valid for
+coordinates, indices, and generic types: `x`, `y`, `z`, `i`, `j`, `k`, `T`,
+`K`, and `V`.
 
-Coordinate accessors have one intentionally narrow exception: `getX`, `getY`,
-`getZ`, `setX`, `setY`, and `setZ`. The exception does not extend to names such
-as `getHiddenState`, which becomes `get_hidden_state`.
+There are no coordinate-accessor exceptions. Fixed fields use ordinary member
+access, while a variable selects a field through the dynamic object API:
+
+```sev
+point.x
+point.x = 10
+
+axis = "x"
+value = point.get(axis)
+point.set(axis, 10)
+```
+
+`getX`, `setX`, and other camelCase spellings may remain callable for external
+compatibility, but `sev lint` reports them in Severian source. `get` and `set`
+are not reflection escape hatches: field names must be strings, `set` requires
+a changeable receiver, and compile-time-known fields retain their declared
+types.
 
 Named scientific constructs use their canonical spellings: `ReLU`, `GELU`,
 `SiLU`, `LSTM`, `GRU`, `RMSNorm`, `LayerNorm`, `Softmax`, and `Conv2D`.
@@ -40,6 +56,5 @@ XLAGPUClient  -> xla_gpu_client
 Ordinary words are not clipped: use `statement`, `expression`, `platform`, and
 `configuration` instead of arbitrary abbreviations. The package is `system`,
 not `sys`; any future implementation-block syntax is reserved as `implement`,
-never `impl`. `elif`
-and legacy `else if` are compatibility spellings covered by `N007` during
+never `impl`. `elif` and legacy `else if` are compatibility spellings covered by `N007` during
 their migration windows. The sole package manifest name is `package.toml`.

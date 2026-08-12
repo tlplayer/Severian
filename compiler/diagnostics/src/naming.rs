@@ -203,10 +203,8 @@ impl Checker<'_> {
         }
     }
 
-    fn function(&mut self, function: &FunctionDecl, method: bool) {
-        if !(method && is_coordinate_accessor(&function.name.name)) {
-            self.name(&function.name, Role::Function);
-        }
+    fn function(&mut self, function: &FunctionDecl, _method: bool) {
+        self.name(&function.name, Role::Function);
         for decorator in &function.decorators {
             for segment in &decorator.name.segments {
                 self.name(segment, Role::Decorator);
@@ -364,20 +362,18 @@ impl Checker<'_> {
         match expression {
             Expr::Call(call) => {
                 if let Expr::Member(member) = call.callee.as_ref() {
-                    if !is_coordinate_accessor(&member.member.name) {
-                        let role = if member
-                            .member
-                            .name
-                            .chars()
-                            .next()
-                            .is_some_and(char::is_uppercase)
-                        {
-                            Role::Type
-                        } else {
-                            Role::Function
-                        };
-                        self.name_without_fix(&member.member, role);
-                    }
+                    let role = if member
+                        .member
+                        .name
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_uppercase)
+                    {
+                        Role::Type
+                    } else {
+                        Role::Function
+                    };
+                    self.name_without_fix(&member.member, role);
                     self.expression(&member.object);
                 } else {
                     self.expression(&call.callee);
@@ -831,10 +827,6 @@ fn role_matches_canonical_acronym(role: Role, original: &str, expected: &str) ->
         && canonical_technical(original).is_some_and(|canonical| canonical == expected)
 }
 
-fn is_coordinate_accessor(name: &str) -> bool {
-    matches!(name, "getX" | "getY" | "getZ" | "setX" | "setY" | "setZ")
-}
-
 fn is_short_generic(name: &str) -> bool {
     matches!(name, "T" | "K" | "V")
 }
@@ -886,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_scientific_and_coordinate_spellings() {
+    fn preserves_scientific_types_but_rejects_coordinate_camel_case() {
         let source = concat!(
             "class ReLU:\n",
             "    value: int\n",
@@ -894,7 +886,11 @@ mod tests {
             "        return value\n",
         );
         let (report, _) = lint(source);
-        assert_eq!(report.diagnostics.warning_count(), 0);
+        assert_eq!(report.diagnostics.warning_count(), 1);
+        assert_eq!(
+            report.diagnostics.diagnostics()[0].code.0,
+            "N002".to_owned()
+        );
     }
 
     #[test]

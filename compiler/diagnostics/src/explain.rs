@@ -21,7 +21,7 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
         Explanation {
             code: "N002",
             title: "Function naming",
-            text: "Functions and methods use snake_case. The only mixed-case exception is the narrow coordinate accessor set getX/getY/getZ and setX/setY/setZ.",
+            text: "Functions and methods use a clear single word when possible and snake_case when a boundary is useful. CamelCase spellings may remain callable at compatibility boundaries, but native Severian code receives this warning.",
         },
         Explanation {
             code: "N003",
@@ -46,7 +46,7 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
         Explanation {
             code: "N007",
             title: "Deprecated compatibility spelling",
-            text: "The spelling remains accepted for migration but is not canonical Severian style. Apply the diagnostic's replacement when practical.",
+            text: "The spelling remains accepted for migration or external compatibility but is not canonical Severian style. Native Severian declarations and calls prefer one clear word, otherwise snake_case. Apply the diagnostic's replacement when practical.",
         },
         Explanation {
             code: "N010",

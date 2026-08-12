@@ -1048,10 +1048,12 @@ fn mutating_method(method: &str) -> bool {
     matches!(
         method,
         "append"
+            | "append_left"
             | "appendleft"
             | "extend"
             | "push"
             | "pop"
+            | "pop_left"
             | "popleft"
             | "remove"
             | "clear"
@@ -1060,7 +1062,11 @@ fn mutating_method(method: &str) -> bool {
             | "reverse"
             | "heapPush"
             | "heapPop"
+            | "heap_push"
+            | "heap_pop"
             | "setDefault"
+            | "set_default"
+            | "set"
     )
 }
 
