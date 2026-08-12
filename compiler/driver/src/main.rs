@@ -7,6 +7,7 @@ use severian_package::BinaryTarget;
 use std::{
     collections::HashSet,
     fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
@@ -51,6 +52,10 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             publish_command(args.get(1).map_or(Path::new("."), Path::new))
         }
         "install" => install_command(&args[1..]),
+        "trust" => trust_command(&args[1..]),
+        "verify" if args.len() <= 2 => {
+            verify_command(args.get(1).map_or(Path::new("."), Path::new))
+        }
         "check" if args.len() <= 2 => check_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "lint" => lint_command(&args[1..]),
         "fmt" => fmt_command(&args[1..]),
@@ -313,6 +318,76 @@ fn publish_command(input: &Path) -> Result<(), String> {
 }
 
 fn install_command(args: &[String]) -> Result<(), String> {
+    if args.first().is_none_or(|value| value.starts_with('-')) {
+        return install_project_command(args);
+    }
+    install_binary_command(args)
+}
+
+fn install_project_command(args: &[String]) -> Result<(), String> {
+    let mut dry_run = false;
+    let mut locked = false;
+    for option in args {
+        match option.as_str() {
+            "--dry-run" => dry_run = true,
+            "--locked" => locked = true,
+            _ => return Err(format!("unknown project install option `{option}`")),
+        }
+    }
+    let manifest = project_manifest(Path::new("."))?;
+    let plan = severian_package::plan_installation(&manifest, locked)
+        .map_err(|error| error.to_string())?;
+    if plan.items.is_empty() {
+        println!(
+            "Package {} has no external installation requirements.",
+            plan.package_name
+        );
+        if !dry_run {
+            severian_package::perform_installation(&plan).map_err(|error| error.to_string())?;
+            println!("Updated {}", plan.lockfile.display());
+        }
+        return Ok(());
+    }
+    println!("Package {} requires:\n", plan.package_name);
+    for item in &plan.items {
+        println!("  {} {}", item.locked.name, item.locked.version);
+        println!("  Publisher: {}", item.locked.publisher);
+        let domain = item
+            .locked
+            .source
+            .strip_prefix("https://")
+            .and_then(|source| source.split('/').next())
+            .unwrap_or(&item.locked.source);
+        println!("  Source: {domain}");
+        println!("  Trust valid through: {}", item.locked.trusted_until);
+        println!(
+            "  System installation: {}\n",
+            if item.system_install { "yes" } else { "no" }
+        );
+    }
+    if dry_run {
+        println!("Dry run: no artifacts installed and sev.lock was not changed by the installer.");
+        return Ok(());
+    }
+    print!("Install? [y/N] ");
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| error.to_string())?;
+    if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "Yes") {
+        println!("Installation cancelled; no external artifacts were changed.");
+        return Ok(());
+    }
+    severian_package::perform_installation(&plan).map_err(|error| error.to_string())?;
+    println!(
+        "Installed verified external requirements and updated {}",
+        plan.lockfile.display()
+    );
+    Ok(())
+}
+
+fn install_binary_command(args: &[String]) -> Result<(), String> {
     let Some(name) = args.first().filter(|name| !name.starts_with('-')) else {
         return Err("usage: sev install <package> [--version REQUIREMENT]".into());
     };
@@ -376,6 +451,62 @@ fn install_command(args: &[String]) -> Result<(), String> {
     })();
     let _ = fs::remove_dir_all(&temporary);
     result
+}
+
+fn trust_command(args: &[String]) -> Result<(), String> {
+    let registry =
+        severian_package::TrustRegistry::load_default().map_err(|error| error.to_string())?;
+    match args {
+        [command] if command == "list" => {
+            if registry.publishers.is_empty() {
+                println!("No trusted publishers are configured.");
+                return Ok(());
+            }
+            for publisher in registry.publishers {
+                println!(
+                    "{}  {}..{}  system-install={}",
+                    publisher.name,
+                    publisher.trusted_from.as_str(),
+                    publisher.trusted_until.as_str(),
+                    publisher.allow_system_install
+                );
+            }
+            Ok(())
+        }
+        [command, name] if command == "show" => {
+            let publisher = registry
+                .publisher(name)
+                .map_err(|error| error.to_string())?;
+            println!("Publisher: {}", publisher.name);
+            println!("Allowed domains: {}", publisher.allowed_domains.join(", "));
+            println!(
+                "Package namespaces: {}",
+                publisher.package_namespaces.join(", ")
+            );
+            println!("Signing keys: {}", publisher.signing_keys.len());
+            println!("Trusted from: {}", publisher.trusted_from.as_str());
+            println!("Trusted until: {}", publisher.trusted_until.as_str());
+            println!("System installation: {}", publisher.allow_system_install);
+            Ok(())
+        }
+        _ => Err("usage:\n  sev trust list\n  sev trust show <publisher>".into()),
+    }
+}
+
+fn verify_command(input: &Path) -> Result<(), String> {
+    let manifest = project_manifest(input)?;
+    let plan =
+        severian_package::verify_installation(&manifest).map_err(|error| error.to_string())?;
+    println!(
+        "Verified {} package dependencies and {} external artifacts against {}",
+        severian_package::resolve_dependencies_transient(&manifest)
+            .map_err(|error| error.to_string())?
+            .dependencies
+            .len(),
+        plan.items.len(),
+        plan.lockfile.display()
+    );
+    Ok(())
 }
 
 fn project_manifest(input: &Path) -> Result<PathBuf, String> {
@@ -2178,7 +2309,10 @@ fn usage() -> String {
         "  remove <package>                remove a dependency and refresh sev.lock",
         "  update [path]                   resolve, verify, cache, and lock dependencies",
         "  publish [path]                  publish an immutable version to the configured registry",
+        "  install [--dry-run] [--locked] resolve, approve, and install declared external requirements",
         "  install <package> [--version V] install a registry package binary",
+        "  trust list|show <publisher>    inspect the compiler-owned publisher trust registry",
+        "  verify [path]                  verify locked packages, trust, signatures, and installed artifacts",
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",

@@ -5,12 +5,27 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+mod install;
+mod lockfile;
+mod manifest;
 mod resolution;
+mod resolver;
+mod sandbox;
+mod signature;
+mod system;
+mod transport;
+mod trust;
 
+pub use install::{perform_installation, plan_installation, verify_installation, InstallationPlan};
+pub use lockfile::{LockedExternal, LockedPackage, Lockfile};
+pub use manifest::{InstallRequirement, InstallationManifest, SystemRequirement};
 pub use resolution::{
     publish_package, resolve_dependencies, resolve_dependencies_transient, update_dependencies,
     Resolution, ResolvedDependency,
 };
+pub use resolver::{signature_payload, InstallPlanItem, VendorCatalog, VendorPackage};
+pub use sandbox::BuildSandbox;
+pub use trust::{Date, TrustRegistry, TrustedPublisher};
 
 pub const MANIFEST_FILE: &str = "package.toml";
 
@@ -1471,9 +1486,11 @@ fn library_path(manifest: &toml::Value) -> &str {
 
 fn parse_manifest(path: &Path) -> Result<toml::Value, PackageError> {
     let source = std::fs::read_to_string(path)?;
-    toml::from_str::<toml::Value>(&source).map_err(|error| {
+    let value = toml::from_str::<toml::Value>(&source).map_err(|error| {
         PackageError::Manifest(format!("invalid manifest {}: {error}", path.display()))
-    })
+    })?;
+    manifest::validate_non_executable_manifest(&value, path)?;
+    Ok(value)
 }
 
 fn manifest_in(directory: &Path) -> Option<PathBuf> {

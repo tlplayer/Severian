@@ -637,6 +637,17 @@ immutable. `sev install <package>` builds a published binary into
 `SEVERIAN_HOME/bin`. The repository's canonical manifest remains
 `package.toml`; this is the Severian equivalent of Cargo's `Cargo.toml`.
 
+Native/toolchain requirements are declarative as well. `[system]` contains
+version requirements and `[install.<name>]` may select only a trusted vendor,
+package identity, and `source = "vendor"`. Bare `sev install` shows and, after
+confirmation, applies that plan; `--dry-run` only shows it and `--locked`
+requires an exact existing lock. Publisher trust, domains, namespaces, dates,
+and Ed25519 keys live under `SEVERIAN_HOME/trust`, outside package control.
+`sev trust list`, `sev trust show <publisher>`, and `sev verify` expose the same
+policy. Package installer scripts and executable hooks are rejected, and build
+steps do not inherit install-time network or process authority. See the
+[package guide](docs/examples/14-packages/README.md#external-requirements).
+
 ## Classes And Traits
 
 Classes are value types by default. Traits describe capabilities, not inheritance

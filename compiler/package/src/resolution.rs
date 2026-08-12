@@ -1,4 +1,10 @@
-use crate::{manifest_in, package_name, parse_manifest, PackageError, MANIFEST_FILE};
+use crate::{
+    install::preserve_external_lock,
+    lockfile::{self, LockedPackage},
+    manifest_in, package_name, parse_manifest,
+    sandbox::validate_package_payload,
+    PackageError, MANIFEST_FILE,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -38,6 +44,7 @@ pub fn publish_package(
         .parent()
         .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
     let manifest = parse_manifest(&manifest_path)?;
+    validate_package_payload(root)?;
     let name = package_name(&manifest, &manifest_path)?.to_owned();
     validate_package_name(&name)?;
     let version = package_version(&manifest, &manifest_path)?;
@@ -107,12 +114,7 @@ pub fn publish_package(
     })
 }
 
-#[derive(Debug, Clone)]
-struct Locked {
-    version: String,
-    source: String,
-    checksum: Option<String>,
-}
+type Locked = LockedPackage;
 
 /// Resolves every dependency reachable from `manifest_path`, materializes
 /// registry packages in the Severian cache, verifies their SHA-256 digest, and
@@ -167,7 +169,7 @@ fn resolve_dependencies_with_lock(
         .filter_map(|name| state.resolved.remove(&name))
         .collect::<Vec<_>>();
     if write_lock {
-        write_lockfile(&lockfile, &dependencies)?;
+        preserve_external_lock(&lockfile, lockfile::packages_from_resolution(&dependencies))?;
     }
     Ok(Resolution {
         dependencies,
@@ -200,6 +202,7 @@ impl Resolver {
         let root = canonical
             .parent()
             .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
+        validate_package_payload(root)?;
         if let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) {
             for (import_name, specification) in dependencies {
                 let dependency = self.resolve_one(import_name, specification, root)?;
@@ -604,99 +607,11 @@ fn generated_package_path(relative: &Path) -> bool {
 }
 
 fn read_lockfile(path: &Path) -> Result<BTreeMap<(String, String), Locked>, PackageError> {
-    let source = match fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(error.into()),
-    };
-    let value = toml::from_str::<toml::Value>(&source).map_err(|error| {
-        PackageError::Manifest(format!("invalid lockfile {}: {error}", path.display()))
-    })?;
-    if value
-        .get("version")
-        .and_then(toml::Value::as_integer)
-        .unwrap_or(1)
-        != 1
-    {
-        return Err(PackageError::Manifest(format!(
-            "unsupported lockfile version in {}",
-            path.display()
-        )));
-    }
-    let mut result = BTreeMap::new();
-    if let Some(packages) = value.get("packages") {
-        let packages = packages.as_array().ok_or_else(|| {
-            PackageError::Manifest(format!("`packages` in {} must be an array", path.display()))
-        })?;
-        for package in packages {
-            let package = package.as_table().ok_or_else(|| {
-                PackageError::Manifest(format!(
-                    "package entry in {} must be a table",
-                    path.display()
-                ))
-            })?;
-            let field = |name| {
-                package
-                    .get(name)
-                    .and_then(toml::Value::as_str)
-                    .ok_or_else(|| {
-                        PackageError::Manifest(format!(
-                            "package entry in {} has no string `{name}`",
-                            path.display()
-                        ))
-                    })
-            };
-            let name = field("name")?;
-            let version = field("version")?;
-            let source = field("source")?;
-            result.insert(
-                (name.into(), source.into()),
-                Locked {
-                    version: version.into(),
-                    source: source.into(),
-                    checksum: package
-                        .get("checksum")
-                        .and_then(toml::Value::as_str)
-                        .map(str::to_owned),
-                },
-            );
-        }
-    }
-    Ok(result)
-}
-
-fn write_lockfile(path: &Path, dependencies: &[ResolvedDependency]) -> Result<(), PackageError> {
-    let mut packages = dependencies.to_vec();
-    packages.sort_by(|left, right| {
-        (&left.package_name, &left.version, &left.source).cmp(&(
-            &right.package_name,
-            &right.version,
-            &right.source,
-        ))
-    });
-    packages.dedup_by(|left, right| {
-        left.package_name == right.package_name
-            && left.version == right.version
-            && left.source == right.source
-    });
-    let mut output = String::from("version = 1\n");
-    for package in packages {
-        output.push_str("\n[[packages]]\n");
-        output.push_str(&format!("name = {}\n", toml_string(&package.package_name)));
-        output.push_str(&format!("version = {}\n", toml_string(&package.version)));
-        output.push_str(&format!("source = {}\n", toml_string(&package.source)));
-        if let Some(checksum) = package.checksum {
-            output.push_str(&format!("checksum = {}\n", toml_string(&checksum)));
-        }
-    }
-    let temporary = path.with_extension("lock.tmp");
-    fs::write(&temporary, output)?;
-    fs::rename(temporary, path)?;
-    Ok(())
-}
-
-fn toml_string(value: &str) -> String {
-    format!("{value:?}")
+    Ok(lockfile::read(path)?
+        .packages
+        .into_iter()
+        .map(|package| ((package.name.clone(), package.source.clone()), package))
+        .collect())
 }
 
 fn package_version(manifest: &toml::Value, path: &Path) -> Result<String, PackageError> {

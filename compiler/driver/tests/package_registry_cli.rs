@@ -162,6 +162,69 @@ fn install_builds_a_published_binary_into_severian_home() {
 }
 
 #[test]
+fn project_install_trust_and_verify_commands_share_the_declarative_policy() {
+    let root = temporary_directory();
+    let severian_home = root.join("sev-home");
+    let application = root.join("application");
+    std::fs::create_dir_all(application.join("src")).unwrap();
+    std::fs::create_dir_all(severian_home.join("trust")).unwrap();
+    std::fs::write(
+        application.join("package.toml"),
+        "[package]\nname = \"declarative-app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        application.join("src/main.sev"),
+        "def main():\n    print(1)\n",
+    )
+    .unwrap();
+    // RFC 8032 test-vector public key. Trust inspection validates keys even
+    // when this project has no external requirement.
+    std::fs::write(
+        severian_home.join("trust/publishers.toml"),
+        "[[publisher]]\nname = \"amd\"\nallowed_domains = [\"repo.radeon.com\"]\nsigning_keys = [\"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a\"]\npackage_namespaces = [\"rocm\"]\ntrusted_from = \"2000-01-01\"\ntrusted_until = \"9999-12-31\"\nallow_system_install = true\n",
+    )
+    .unwrap();
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["install", "--dry-run"])
+        .current_dir(&application)
+        .env("SEVERIAN_HOME", &severian_home)
+        .output()
+        .unwrap();
+    assert!(dry_run.status.success());
+    assert!(!application.join("sev.lock").exists());
+
+    let install = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("install")
+        .current_dir(&application)
+        .env("SEVERIAN_HOME", &severian_home)
+        .output()
+        .unwrap();
+    assert!(install.status.success());
+    assert!(application.join("sev.lock").is_file());
+
+    for arguments in [
+        vec!["trust", "list"],
+        vec!["trust", "show", "amd"],
+        vec!["verify"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+            .args(arguments)
+            .current_dir(&application)
+            .env("SEVERIAN_HOME", &severian_home)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn publish_writes_an_immutable_verified_registry_entry() {
     let root = temporary_directory();
     let registry = root.join("registry");
