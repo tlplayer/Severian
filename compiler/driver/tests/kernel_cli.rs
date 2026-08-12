@@ -32,6 +32,7 @@ fn inspect_explains_automatic_backend_selection() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("operation: reduction.sum"));
+    assert!(stdout.contains("requested backend: triton"));
     assert!(stdout.contains("selected backend: triton"));
     assert!(stdout.contains("fallback: xla"));
     assert!(!stdout.contains("popcorn"));
@@ -98,4 +99,25 @@ fn xla_fallback_emits_stablehlo_from_kernel_ir() {
     assert!(source.contains("tensor<?xf32>"));
     assert!(source.contains("-> tensor<f32>"));
     let _ = std::fs::remove_file(artifact);
+}
+
+#[test]
+fn direct_kernel_invocation_compiles_the_selected_artifact() {
+    let target = fixture()
+        .parent()
+        .unwrap()
+        .join("target/debug/reduction_sum.triton.py");
+    let _ = std::fs::remove_file(&target);
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg(fixture())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(target.is_file());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Compiled 1 function(s)"));
+    let _ = std::fs::remove_file(target);
 }

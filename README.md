@@ -90,6 +90,12 @@ StableHLO/XLA path or a specialized Triton GPU path. `sev kernel emit` writes
 the selected standalone artifact; it does not generate benchmark adapters or
 encode a harness protocol. See [docs/KERNEL_BACKENDS.md](docs/KERNEL_BACKENDS.md).
 
+`sev build` collects independent diagnostics across package sources before it
+emits artifacts. Use `--max-errors N` to bound the batch and
+`--message-format json` for editor, CI, or automated-repair integrations. A
+direct function-only `.sev` file compiles as a linkable module rather than
+requiring an artificial `main` function.
+
 ### Naming lint
 
 `sev lint [path]` enforces naming by semantic role: variables, functions,

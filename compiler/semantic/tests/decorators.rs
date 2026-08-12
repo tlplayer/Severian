@@ -41,3 +41,32 @@ fn rejects_a_decorator_whose_package_was_not_imported() {
         .message
         .contains("decorator package `math` must be imported"));
 }
+
+#[test]
+fn compile_policy_is_a_builtin_decorator() {
+    let source = concat!(
+        "@compile(triton)\n",
+        "def transform(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let tokens = severian_lexer::lex(source).unwrap();
+    let module = severian_parser::parse(&tokens).unwrap();
+    let program = severian_semantic::analyze(&module).unwrap();
+
+    assert_eq!(program.functions[0].decorators[0].package, "compile");
+    assert_eq!(program.functions[0].decorators[0].symbols, ["triton"]);
+}
+
+#[test]
+fn rejects_unknown_compile_policies() {
+    let source = concat!(
+        "@compile(cuda)\n",
+        "def transform(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let tokens = severian_lexer::lex(source).unwrap();
+    let module = severian_parser::parse(&tokens).unwrap();
+    let error = severian_semantic::analyze(&module).unwrap_err();
+
+    assert!(error.message.contains("`auto`, `xla`, or `triton`"));
+}

@@ -1,0 +1,10 @@
+# E0103: invalid package source syntax
+# A dependency must parse with the compiler resolving the package graph.
+# The diagnostic points to the dependency file, line, column, and source text;
+# raw byte offsets are retained only when no source file is available.
+# Fix an editable dependency, or use compatible package and compiler versions.
+
+def valid_declaration() -> int:
+    return 1
+
+valid_declaration()

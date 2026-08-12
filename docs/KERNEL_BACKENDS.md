@@ -26,6 +26,18 @@ Backend selection is inspectable:
 sev kernel inspect source.sev --entry reductionSum --target gpu
 ```
 
+Source may request a policy without importing a compiler package:
+
+```sev
+@compile(triton)
+def reduction_sum(value: Tensor[f32, dynamic]) -> Tensor[f32]:
+    return tensor.sumLastF32(value)
+```
+
+`@compile(auto)`, `@compile(xla)`, and `@compile(triton)` are built-in compiler
+policy decorators. A command-line `--backend` option overrides the source
+policy for comparison and diagnosis.
+
 An automatic GPU selection reports the recognized kernel operation, selected
 backend, fallback, and reason. Explicit `--backend xla`, `--backend triton`, and
 `--backend llvm` options are policy overrides for diagnosis and benchmarking;

@@ -1,6 +1,7 @@
-use crate::{Diagnostic, DiagnosticBag, Severity};
+use crate::{Diagnostic, DiagnosticBag, Severity, SourceRange};
 use severian_hir::{Expression, Function, Instruction, OwnershipOp, Program};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintLevel {
@@ -37,6 +38,58 @@ pub fn run(program: &Program, config: &LintConfig) -> DiagnosticBag {
     }
 
     bag
+}
+
+pub fn run_with_source(
+    program: &Program,
+    config: &LintConfig,
+    path: &Path,
+    source: &str,
+) -> DiagnosticBag {
+    let mut bag = run(program, config);
+    for diagnostic in bag.diagnostics_mut() {
+        let needle = match diagnostic.code.0.as_str() {
+            "W001" => diagnostic.message.split('`').nth(1).map(str::to_owned),
+            "W002" => Some("async".to_owned()),
+            _ => None,
+        };
+        let Some(needle) = needle else {
+            continue;
+        };
+        let start = if diagnostic.code.0 == "W001" {
+            source.find(&needle)
+        } else {
+            source.find("async")
+        };
+        let Some(start) = start else {
+            continue;
+        };
+        let (start_line, start_column) = line_column(source, start);
+        let (end_line, end_column) = line_column(source, start + needle.len());
+        diagnostic.source = Some(SourceRange {
+            file: path.to_path_buf(),
+            start_byte: start,
+            end_byte: start + needle.len(),
+            start_line: Some(start_line),
+            start_column: Some(start_column),
+            end_line: Some(end_line),
+            end_column: Some(end_column),
+        });
+    }
+    bag
+}
+
+fn line_column(source: &str, byte: usize) -> (u32, u32) {
+    let byte = byte.min(source.len());
+    let prefix = source.get(..byte).unwrap_or("");
+    let line = prefix
+        .bytes()
+        .filter(|character| *character == b'\n')
+        .count() as u32
+        + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let column = source.get(line_start..byte).unwrap_or("").chars().count() as u32 + 1;
+    (line, column)
 }
 
 fn lint_function(function: &Function, config: &LintConfig, bag: &mut DiagnosticBag) {
@@ -399,7 +452,22 @@ fn emit(
         return;
     }
 
-    let mut diagnostic = Diagnostic::warning(format!("lint::{lint}").as_str(), message);
+    let code = match lint {
+        "unused-binding" => "W001",
+        "discarded-task" => "W002",
+        other => return emit_named(bag, level, format!("lint::{other}"), message, help),
+    };
+    emit_named(bag, level, code.to_owned(), message, help);
+}
+
+fn emit_named(
+    bag: &mut DiagnosticBag,
+    level: LintLevel,
+    code: String,
+    message: impl Into<String>,
+    help: Option<&str>,
+) {
+    let mut diagnostic = Diagnostic::warning(code.as_str(), message);
     diagnostic.severity = match level {
         LintLevel::Allow => Severity::Allow,
         LintLevel::Warn => Severity::Warning,

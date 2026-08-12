@@ -96,7 +96,7 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or_else(kernel_usage)?;
     let mut entry = None;
-    let mut backend = KernelBackend::Auto;
+    let mut backend = None;
     let mut target = KernelTarget::Gpu;
     let mut output = None;
     let mut index = 2;
@@ -108,13 +108,13 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
         match option {
             "--entry" => entry = Some(value.clone()),
             "--backend" => {
-                backend = match value.as_str() {
+                backend = Some(match value.as_str() {
                     "auto" => KernelBackend::Auto,
                     "xla" => KernelBackend::Xla,
                     "triton" => KernelBackend::Triton,
                     "llvm" => KernelBackend::Llvm,
                     _ => return Err(format!("unknown kernel backend `{value}`")),
-                }
+                })
             }
             "--target" => {
                 target = match value.as_str() {
@@ -138,7 +138,8 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
     let compilation = compile_path(&source).map_err(|error| error.to_string())?;
     let kernel =
         find(&compilation.optimized_hir, entry.as_deref()).map_err(|error| error.to_string())?;
-    let selection = select_backend(&kernel, backend, target).map_err(|error| error.to_string())?;
+    let selection = select_backend(&kernel, backend.unwrap_or(kernel.policy), target)
+        .map_err(|error| error.to_string())?;
     if action == "inspect" {
         println!("kernel: {}", kernel.name);
         println!("operation: {}", kernel.operation.name());
@@ -498,12 +499,28 @@ enum BuildTarget {
     Xla,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageFormat {
+    Text,
+    Json,
+}
+
+#[derive(Debug)]
+struct BuildFinding {
+    severity: &'static str,
+    code: String,
+    path: PathBuf,
+    rendered: String,
+}
+
 const REQUIRED_LINE_COVERAGE: f64 = 75.0;
 
 fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut input = PathBuf::from(".");
     let mut emit = EmitMode::Executable;
     let mut target = BuildTarget::Native;
+    let mut max_errors = 50usize;
+    let mut message_format = MessageFormat::Text;
     let mut index = 0;
     if args.first().is_some_and(|value| !value.starts_with('-')) {
         input = PathBuf::from(&args[0]);
@@ -527,11 +544,44 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 };
                 index += 2;
             }
+            "--max-errors" if index + 1 < args.len() => {
+                max_errors = args[index + 1]
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| "--max-errors must be a positive integer".to_string())?;
+                index += 2;
+            }
+            "--message-format" if index + 1 < args.len() => {
+                message_format = match args[index + 1].as_str() {
+                    "text" => MessageFormat::Text,
+                    "json" => MessageFormat::Json,
+                    value => {
+                        return Err(format!(
+                            "unknown message format `{value}`; use text or json"
+                        ))
+                    }
+                };
+                index += 2;
+            }
             value => return Err(format!("unknown build option `{value}`\n{}", usage())),
         }
     }
     if target == BuildTarget::Native && emit == EmitMode::StableHlo {
         return Err("StableHLO emission requires `--target xla`".into());
+    }
+
+    let targets = resolve_targets(&input)?;
+    let findings = collect_build_findings(&input, max_errors)?;
+    render_build_findings(&findings, message_format);
+    let error_count = findings
+        .iter()
+        .filter(|finding| finding.severity == "error")
+        .count();
+    if error_count > 0 {
+        return Err(format!(
+            "build stopped after {error_count} independent error(s); no artifacts were emitted"
+        ));
     }
 
     coverage(&input).map_err(|error| {
@@ -540,14 +590,6 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             REQUIRED_LINE_COVERAGE
         )
     })?;
-
-    let targets = resolve_targets(&input)?;
-    if targets.is_empty() {
-        return Err(format!(
-            "no runnable Severian targets found under {}",
-            input.display()
-        ));
-    }
     let mut libraries = HashSet::new();
     let mut artifacts = Vec::new();
     for target_spec in targets {
@@ -557,11 +599,150 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        emit_artifact(&compilation, emit, target, &output)?;
-        println!("Built {} -> {}", target_spec.name, output.display());
-        artifacts.push(output);
+        if emit == EmitMode::Executable && compilation.hir.main().is_none() {
+            for output in emit_non_executable_module(&compilation, &target_spec)? {
+                println!("Built {} -> {}", target_spec.name, output.display());
+                artifacts.push(output);
+            }
+        } else {
+            emit_artifact(&compilation, emit, target, &output)?;
+            println!("Built {} -> {}", target_spec.name, output.display());
+            artifacts.push(output);
+        }
     }
     Ok(artifacts)
+}
+
+fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFinding>, String> {
+    let mut sources = if input.is_file() {
+        vec![input.to_path_buf()]
+    } else {
+        let mut sources = Vec::new();
+        collect_sources(input, &mut sources).map_err(|error| error.to_string())?;
+        sources.sort();
+        sources
+    };
+    sources.dedup();
+
+    let mut findings = Vec::new();
+    let mut errors = 0usize;
+    let mut seen = std::collections::BTreeSet::new();
+    for source_path in sources {
+        if errors >= max_errors {
+            break;
+        }
+        match compile_path(&source_path) {
+            Ok(compilation) => {
+                let source = fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+                let diagnostics = severian_diagnostics::lint::run_with_source(
+                    &compilation.hir,
+                    &Default::default(),
+                    &source_path,
+                    &source,
+                );
+                if !diagnostics.diagnostics().is_empty() {
+                    let mut source_map = severian_source::SourceMap::new();
+                    source_map.add(source_path.clone(), source);
+                    for diagnostic in diagnostics.diagnostics() {
+                        let rendered = severian_diagnostics::render::render(
+                            diagnostic,
+                            Some(&source_map),
+                            &severian_diagnostics::render::RenderOptions {
+                                color: false,
+                                ..Default::default()
+                            },
+                        );
+                        let key = format!("{}:{rendered}", source_path.display());
+                        if seen.insert(key) {
+                            findings.push(BuildFinding {
+                                severity: if diagnostic.severity
+                                    >= severian_diagnostics::Severity::Error
+                                {
+                                    "error"
+                                } else {
+                                    "warning"
+                                },
+                                code: diagnostic.code.0.clone(),
+                                path: source_path.clone(),
+                                rendered,
+                            });
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                let rendered = error.to_string();
+                let key = format!("{}:{rendered}", source_path.display());
+                if seen.insert(key) {
+                    findings.push(BuildFinding {
+                        severity: "error",
+                        code: diagnostic_code(&rendered).unwrap_or("compiler").to_owned(),
+                        path: source_path,
+                        rendered,
+                    });
+                    errors += 1;
+                }
+            }
+        }
+    }
+    Ok(findings)
+}
+
+fn render_build_findings(findings: &[BuildFinding], format: MessageFormat) {
+    match format {
+        MessageFormat::Text => {
+            for finding in findings {
+                eprintln!("{}", finding.rendered);
+            }
+        }
+        MessageFormat::Json => {
+            let entries = findings
+                .iter()
+                .map(|finding| {
+                    format!(
+                        "{{\"severity\":\"{}\",\"code\":\"{}\",\"path\":\"{}\",\"message\":\"{}\"}}",
+                        finding.severity,
+                        json_escape(&finding.code),
+                        json_escape(&finding.path.display().to_string()),
+                        json_escape(&finding.rendered),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            println!("[{}]", entries);
+        }
+    }
+}
+
+fn diagnostic_code(message: &str) -> Option<&str> {
+    message
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+        .find(|part| {
+            matches!(
+                (part.as_bytes().first(), part.len()),
+                (Some(b'E'), 5) | (Some(b'W'), 4)
+            ) && part.as_bytes()[1..].iter().all(u8::is_ascii_digit)
+        })
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write;
+                write!(escaped, "\\u{:04x}", character as u32)
+                    .expect("writing to a String cannot fail");
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn emit_artifact(
@@ -671,8 +852,11 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
     }
     let manifest = severian_package::nearest_manifest(input);
     if manifest.is_some() || input.join("main.sev").is_file() {
-        return severian_package::workspace_binary_targets(input)
-            .map_err(|error| error.to_string());
+        let targets =
+            severian_package::workspace_binary_targets(input).map_err(|error| error.to_string())?;
+        if !targets.is_empty() {
+            return Ok(targets);
+        }
     }
     let mut sources = Vec::new();
     collect_sources(input, &mut sources).map_err(|error| error.to_string())?;
@@ -812,7 +996,7 @@ fn lint_command(args: &[String]) -> Result<(), String> {
 
         if !report.diagnostics.diagnostics().is_empty() {
             let mut source_map = severian_source::SourceMap::new();
-            source_map.add(path.clone(), source);
+            source_map.add(path.clone(), source.clone());
             let rendered = severian_diagnostics::render::render_bag(
                 &report.diagnostics,
                 Some(&source_map),
@@ -825,6 +1009,38 @@ fn lint_command(args: &[String]) -> Result<(), String> {
         }
         warning_count += report.diagnostics.warning_count();
         error_count += report.diagnostics.error_count();
+
+        match check_path(&path) {
+            Ok(program) => {
+                let semantic = severian_diagnostics::lint::run_with_source(
+                    &program,
+                    &Default::default(),
+                    &path,
+                    &source,
+                );
+                if !semantic.diagnostics().is_empty() {
+                    let mut source_map = severian_source::SourceMap::new();
+                    source_map.add(path.clone(), source.clone());
+                    eprintln!(
+                        "{}",
+                        severian_diagnostics::render::render_bag(
+                            &semantic,
+                            Some(&source_map),
+                            &severian_diagnostics::render::RenderOptions {
+                                color: false,
+                                ..Default::default()
+                            },
+                        )
+                    );
+                }
+                warning_count += semantic.warning_count();
+                error_count += semantic.error_count();
+            }
+            // `sev lint` owns lint diagnostics. Syntax and type errors belong to
+            // `sev check`/`sev build`, and should not make an otherwise valid
+            // naming-lint invocation fail before its safe fixes can be applied.
+            Err(_) => {}
+        }
     }
 
     if fix {
@@ -859,10 +1075,14 @@ fn run_targets(input: &Path) -> Result<(), String> {
         } else if native_test_count(&compilation.hir) > 0 {
             compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
         } else {
-            return Err(format!(
-                "{} has neither a main function nor native tests",
-                target.source.display()
-            ));
+            for module in emit_non_executable_module(&compilation, &target)? {
+                println!(
+                    "Compiled {} function(s) -> {}",
+                    compilation.hir.functions.len(),
+                    module.display()
+                );
+            }
+            continue;
         }
         let mut command = Command::new(&output);
         let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
@@ -884,6 +1104,54 @@ fn run_targets(input: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn emit_non_executable_module(
+    compilation: &Compilation,
+    target: &BinaryTarget,
+) -> Result<Vec<PathBuf>, String> {
+    let kernels = severian_lowering::kernel::collect(&compilation.optimized_hir);
+    if !kernels.is_empty() {
+        use severian_lowering::kernel::{
+            emit_stablehlo, emit_triton_python, select_backend, KernelBackend, KernelTarget,
+        };
+        let mut outputs = Vec::new();
+        for kernel in kernels {
+            let selection = select_backend(&kernel, kernel.policy, KernelTarget::Gpu)
+                .map_err(|error| error.to_string())?;
+            let (artifact, extension) = match selection.selected {
+                KernelBackend::Triton => (
+                    emit_triton_python(&kernel).map_err(|error| error.to_string())?,
+                    "triton.py",
+                ),
+                KernelBackend::Xla => (
+                    emit_stablehlo(&kernel)
+                        .map_err(|error| error.to_string())?
+                        .as_str()
+                        .to_owned(),
+                    "stablehlo.mlir",
+                ),
+                KernelBackend::Auto => unreachable!("backend selection resolves auto"),
+                KernelBackend::Llvm => unreachable!("GPU selection does not choose LLVM"),
+            };
+            let output = target
+                .package_root
+                .join("target/debug")
+                .join(format!("{}.{extension}", kernel.name));
+            if let Some(parent) = output.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            fs::write(&output, artifact).map_err(|error| error.to_string())?;
+            outputs.push(output);
+        }
+        return Ok(outputs);
+    }
+    let output = artifact_path(target, EmitMode::Llvm);
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    emit_backend_artifact(compilation, EmitMode::Llvm, &output)?;
+    Ok(vec![output])
 }
 
 fn local_rocm_pjrt_plugin(start: &Path) -> Option<PathBuf> {
@@ -1466,13 +1734,6 @@ fn metadata(input: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-}
-
 fn explain(code: &str) -> Result<(), String> {
     let explanation = severian_diagnostics::explain::explain(code)
         .ok_or_else(|| format!("no explanation is registered for diagnostic `{code}`"))?;
@@ -1660,7 +1921,7 @@ fn usage() -> String {
         "  install <package> [--version V] install a registry package binary",
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
-        "  build [path] [--emit KIND] [--target native|xla] (requires 75% line coverage)",
+        "  build [path] [--emit KIND] [--target native|xla] [--max-errors N] [--message-format text|json]",
         "  run [path]                     build and run native code",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --mutate [--limit N] run deterministic mutation testing",

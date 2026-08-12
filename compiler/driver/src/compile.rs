@@ -36,20 +36,24 @@ impl Drop for Compilation {
     }
 }
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
-    let ast = parse_source(source)?;
+    let ast = parse_source(source, Path::new("<memory>"))?;
     compile_ast(&ast, &[], Path::new("<memory>"), source)
 }
 
-fn parse_source(source: &str) -> Result<AstModule, CompileError> {
+fn parse_source(source: &str, source_path: &Path) -> Result<AstModule, CompileError> {
     let tokens = severian_lexer::lex(source).map_err(|error| CompileError::Frontend {
         stage: "lexer",
         span: error.span,
         message: error.message,
+        source_path: source_path.to_path_buf(),
+        source: source.to_owned(),
     })?;
     let ast = severian_parser::parse(&tokens).map_err(|error| CompileError::Frontend {
         stage: "parser",
         span: error.span,
         message: error.message,
+        source_path: source_path.to_path_buf(),
+        source: source.to_owned(),
     })?;
     Ok(ast)
 }
@@ -97,10 +101,16 @@ fn link_package_hir(
                     stage: "semantic",
                     span: error.span,
                     message: format!("package `{}`: {}", interface.name, error.message),
+                    source_path: interface.source_path.clone(),
+                    source: interface.source.clone(),
                 },
             )?;
         severian_ownership::check(&dependency).map_err(|error| {
-            CompileError::Ownership(format!("package `{}`: {}", interface.name, error.message))
+            ownership_compile_error(
+                format!("package `{}`: {}", interface.name, error.message),
+                &interface.source_path,
+                &interface.source,
+            )
         })?;
         qualify_package_functions(&mut dependency, &interface.name);
         let mut metadata = std::mem::take(&mut program.metadata);
@@ -181,6 +191,8 @@ fn check_ast(
             stage: "semantic",
             span: error.span,
             message: error.message,
+            source_path: source_path.to_path_buf(),
+            source: source.to_owned(),
         }
     })?;
     severian_semantic::attach_module_metadata(
@@ -190,8 +202,41 @@ fn check_ast(
         source.to_owned(),
         None,
     );
-    severian_ownership::check(&hir).map_err(|error| CompileError::Ownership(error.message))?;
+    severian_ownership::check(&hir)
+        .map_err(|error| ownership_compile_error(error.message, source_path, source))?;
     Ok(hir)
+}
+
+fn ownership_compile_error(message: String, source_path: &Path, source: &str) -> CompileError {
+    let name = message.split('`').nth(1);
+    let start = name
+        .and_then(|name| {
+            if message.contains("cannot be mutated") {
+                source.rfind(&format!("{name}."))
+            } else {
+                identifier_occurrences(source, name).last()
+            }
+        })
+        .unwrap_or(0);
+    let end = start + name.map_or(1, str::len);
+    CompileError::Frontend {
+        stage: "ownership",
+        span: severian_ast::Span::new(start, end),
+        message,
+        source_path: source_path.to_path_buf(),
+        source: source.to_owned(),
+    }
+}
+
+fn identifier_occurrences<'a>(source: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
+    source.match_indices(name).filter_map(move |(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !(character == '_' || character.is_alphanumeric()))
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
@@ -227,13 +272,13 @@ fn frontend_path(
     manifest_override: Option<&Path>,
 ) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
     let source = std::fs::read_to_string(path)?;
+    let ast = parse_source(&source, path)?;
     let manifest_path = manifest_override
         .map(Path::to_path_buf)
         .or_else(|| severian_package::find_manifest(path));
     severian_package::enforce_unsafe_policy(manifest_path.as_deref(), path, &source)
         .map_err(|error| CompileError::Package(error.to_string()))?;
-    let ast = parse_source(&source)?;
-    severian_package::enforce_type_safe_policy(manifest_path.as_deref(), &ast, &source)
+    severian_package::enforce_type_safe_policy(manifest_path.as_deref(), path, &ast, &source)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     let project_root = manifest_path
         .as_deref()
@@ -260,6 +305,7 @@ fn frontend_path(
     for interface in &local_interfaces {
         severian_package::enforce_type_safe_policy(
             manifest_path.as_deref(),
+            &interface.source_path,
             &interface.module,
             &interface.source,
         )

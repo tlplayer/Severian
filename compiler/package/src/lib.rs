@@ -82,6 +82,8 @@ pub enum PackageError {
         stage: &'static str,
         span: Span,
         message: String,
+        source_path: Option<PathBuf>,
+        source: Option<String>,
     },
 }
 
@@ -95,11 +97,46 @@ impl fmt::Display for PackageError {
                 stage,
                 span,
                 message,
-            } => write!(
-                formatter,
-                "invalid {stage} in package `{package}` at bytes {}..{}: {message}",
-                span.start, span.end
-            ),
+                source_path,
+                source,
+            } => {
+                let prefix = if matches!(*stage, "lexer" | "parser") && !message.starts_with('E') {
+                    "E0103: "
+                } else {
+                    ""
+                };
+                write!(
+                    formatter,
+                    "{prefix}invalid {stage} in package `{package}`: {message}"
+                )?;
+                if let (Some(path), Some(source)) = (source_path, source) {
+                    let (line, column, text, marker) = source_location(source, *span);
+                    let help = match *stage {
+                        "lexer" | "parser" => {
+                            "fix this dependency source or use a package version compatible with this compiler"
+                        }
+                        "unsafe policy" => {
+                            "move host access behind a permitted library API; applications and tests remain safe"
+                        }
+                        "type safety" => {
+                            "add a concrete type, or write `Any` explicitly at an intentional dynamic boundary"
+                        }
+                        _ => "run `sev explain <code>` for the normal repair",
+                    };
+                    write!(
+                        formatter,
+                        "\n --> {}:{line}:{column}\n{line:>4} | {text}\n     | {marker}\n help: {help}",
+                        path.display()
+                    )?;
+                } else {
+                    write!(
+                        formatter,
+                        " at bytes {}..{}\n help: rebuild or update the package with a compatible Severian compiler",
+                        span.start, span.end
+                    )?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -109,6 +146,49 @@ impl std::error::Error for PackageError {}
 impl From<std::io::Error> for PackageError {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+fn source_location(source: &str, span: Span) -> (usize, usize, &str, String) {
+    let start = span.start.min(source.len());
+    let end = span.end.min(source.len()).max(start);
+    let prefix = source.get(..start).unwrap_or("");
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let line_end = source[start..]
+        .find('\n')
+        .map_or(source.len(), |length| start + length);
+    let text = source.get(line_start..line_end).unwrap_or("");
+    let column = source.get(line_start..start).unwrap_or("").chars().count() + 1;
+    let marker_width = source
+        .get(start..end.min(line_end))
+        .unwrap_or("")
+        .chars()
+        .count()
+        .max(1);
+    let marker = format!("{}{}", " ".repeat(column - 1), "^".repeat(marker_width));
+    (line, column, text, marker)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn package_frontend_errors_render_source_context() {
+        let error = PackageError::Frontend {
+            package: "tensor".into(),
+            stage: "parser",
+            span: Span::new(17, 23),
+            message: "expected a declaration or import".into(),
+            source_path: Some(PathBuf::from("library/tensor/src/lib.sev")),
+            source: Some("def valid():\n    broken\n".into()),
+        };
+        let rendered = error.to_string();
+        assert!(rendered.contains("E0103"));
+        assert!(rendered.contains("library/tensor/src/lib.sev:2:5"));
+        assert!(rendered.contains("2 |     broken"));
+        assert!(!rendered.contains("bytes 17..23"));
     }
 }
 
@@ -405,6 +485,8 @@ pub fn enforce_unsafe_policy(
         stage: "lexer",
         span: error.span,
         message: error.message,
+        source_path: Some(source_path.to_path_buf()),
+        source: Some(source.to_owned()),
     })?;
     let Some(token) = tokens
         .iter()
@@ -413,10 +495,10 @@ pub fn enforce_unsafe_policy(
         return Ok(());
     };
     let Some(manifest_path) = manifest_path else {
-        return Err(unsafe_policy_error(
-            "source without package.toml",
-            token.span,
-            "source-file",
+        return Err(with_frontend_source(
+            unsafe_policy_error("source without package.toml", token.span, "source-file"),
+            source_path,
+            source,
         ));
     };
     let manifest = parse_manifest(manifest_path)?;
@@ -428,6 +510,7 @@ pub fn enforce_unsafe_policy(
         token.span,
         false,
     )
+    .map_err(|error| with_frontend_source(error, source_path, source))
 }
 
 /// Rejects declaration sites that would silently fall back to `Any` when the
@@ -438,6 +521,7 @@ pub fn enforce_unsafe_policy(
 /// while stable libraries progressively add concrete boundary types.
 pub fn enforce_type_safe_policy(
     manifest_path: Option<&Path>,
+    source_path: &Path,
     module: &Module,
     source: &str,
 ) -> Result<(), PackageError> {
@@ -474,6 +558,8 @@ pub fn enforce_type_safe_policy(
                  source: {snippet}\n\
                  add an explicit type, such as `{declaration}: ConcreteType`; write `{declaration}: Any` only when dynamic typing is intentional"
             ),
+            source_path: Some(source_path.to_path_buf()),
+            source: Some(source.to_owned()),
         });
     }
     Ok(())
@@ -676,6 +762,28 @@ fn unsafe_policy_error(reason: &str, span: Span, capability: &str) -> PackageErr
         message: format!(
             "E0701: unsafe capability `{capability}` is not allowed; add it and this source path to `[package.unsafe]`, while native ABI remains library-only and tests remain safe-only"
         ),
+        source_path: None,
+        source: None,
+    }
+}
+
+fn with_frontend_source(error: PackageError, path: &Path, source: &str) -> PackageError {
+    match error {
+        PackageError::Frontend {
+            package,
+            stage,
+            span,
+            message,
+            ..
+        } => PackageError::Frontend {
+            package,
+            stage,
+            span,
+            message,
+            source_path: Some(path.to_path_buf()),
+            source: Some(source.to_owned()),
+        },
+        error => error,
     }
 }
 
@@ -797,12 +905,16 @@ fn collect_local_interfaces(
             stage: "lexer",
             span: error.span,
             message: error.message,
+            source_path: Some(source_path.clone()),
+            source: Some(source.clone()),
         })?;
         let imported = severian_parser::parse(&tokens).map_err(|error| PackageError::Frontend {
             package: module_name.clone(),
             stage: "parser",
             span: error.span,
             message: error.message,
+            source_path: Some(source_path.clone()),
+            source: Some(source.clone()),
         })?;
         collect_local_interfaces(&imported, project_root, visited, names, interfaces)?;
         interfaces.push(PackageInterface {
@@ -1030,6 +1142,8 @@ fn load_interface_source(
         stage: "lexer",
         span: error.span,
         message: error.message,
+        source_path: Some(source_path.clone()),
+        source: Some(source.clone()),
     })?;
     if let Some(token) = tokens
         .iter()
@@ -1042,13 +1156,16 @@ fn load_interface_source(
             &tokens,
             token.span,
             true,
-        )?;
+        )
+        .map_err(|error| with_frontend_source(error, &source_path, &source))?;
     }
     let module = severian_parser::parse(&tokens).map_err(|error| PackageError::Frontend {
         package: name.into(),
         stage: "parser",
         span: error.span,
         message: error.message,
+        source_path: Some(source_path.clone()),
+        source: Some(source.clone()),
     })?;
     Ok(PackageInterface {
         name: name.into(),

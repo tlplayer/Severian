@@ -107,6 +107,10 @@ impl DiagnosticBag {
         &self.diagnostics
     }
 
+    pub fn diagnostics_mut(&mut self) -> &mut [Diagnostic] {
+        &mut self.diagnostics
+    }
+
     pub fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()

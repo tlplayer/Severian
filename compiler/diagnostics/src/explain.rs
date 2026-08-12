@@ -74,6 +74,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "Indentation must match an enclosing block and must use spaces rather than tabs.",
         },
         Explanation {
+            code: "E0103",
+            title: "Invalid package source syntax",
+            text: "A dependency source file cannot be parsed by this Severian compiler. The diagnostic identifies the package file, line, column, and rejected source. Fix an editable dependency or select a package/compiler version with compatible syntax.",
+        },
+        Explanation {
             code: "E0202",
             title: "Incompatible types",
             text: "A value does not satisfy the concrete type required at this assignment, return, or call boundary. Convert the value or correct the declaration.",
@@ -119,12 +124,12 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "The function cannot be reached from main, exported functions, tests, native ABI roots, or another reachable function. Remove it or make the intended entry path explicit.",
         },
         Explanation {
-            code: "lint::unused-binding",
+            code: "W001",
             title: "Unused binding",
             text: "A binding is created but never read. Remove the binding, use the value, or prefix the name with `_` when the unused value is intentional.",
         },
         Explanation {
-            code: "lint::discarded-task",
+            code: "W002",
             title: "Discarded task",
             text: "A task handle is created and immediately discarded. This can hide cancellation, failure, ordering, and lifetime bugs. Bind and await it unless detached execution is intentional.",
         },

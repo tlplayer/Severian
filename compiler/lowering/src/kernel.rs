@@ -72,6 +72,7 @@ pub struct KernelIr {
     pub parameters: Vec<TensorType>,
     pub result: TensorType,
     pub operation: KernelOperation,
+    pub policy: KernelBackend,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,7 +364,24 @@ fn lower_function(function: &Function) -> Option<KernelIr> {
         parameters,
         result,
         operation,
+        policy: compile_policy(function),
     })
+}
+
+fn compile_policy(function: &Function) -> KernelBackend {
+    let Some(policy) = function
+        .decorators
+        .iter()
+        .find(|decorator| decorator.package == "compile")
+        .and_then(|decorator| decorator.symbols.first())
+    else {
+        return KernelBackend::Auto;
+    };
+    match policy.as_str() {
+        "xla" => KernelBackend::Xla,
+        "triton" => KernelBackend::Triton,
+        _ => KernelBackend::Auto,
+    }
 }
 
 fn lower_body(instructions: &[Instruction], function: &Function) -> Option<KernelOperation> {

@@ -1172,9 +1172,30 @@ fn lower_decorators(
     decorators: &[severian_ast::Decorator],
     imported_modules: &HashSet<String>,
 ) -> Result<Vec<HirDecorator>, SemanticError> {
+    let mut compile_policy_seen = false;
     for decorator in decorators {
         let root = &decorator.name.segments.first().unwrap().name;
-        if !imported_modules.contains(root) {
+        if root == "compile" {
+            if compile_policy_seen {
+                return Err(error(
+                    decorator.span,
+                    "a function may declare only one `@compile` backend policy",
+                ));
+            }
+            compile_policy_seen = true;
+            if decorator.name.segments.len() != 1
+                || decorator.symbols.len() != 1
+                || !matches!(
+                    decorator.symbols[0].spelling.as_str(),
+                    "auto" | "xla" | "triton"
+                )
+            {
+                return Err(error(
+                    decorator.span,
+                    "`@compile` expects exactly one backend policy: `auto`, `xla`, or `triton`",
+                ));
+            }
+        } else if !imported_modules.contains(root) {
             return Err(error(
                 decorator.name.span,
                 format!("decorator package `{root}` must be imported"),
