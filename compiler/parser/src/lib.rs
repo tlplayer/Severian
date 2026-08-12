@@ -3,13 +3,14 @@
 use severian_ast::{
     AssertStmt, AssignOp, AssignStmt, AsyncExpr, AwaitExpr, BinaryExpr, BinaryOp, Block, CallArg,
     CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ComprehensionClause,
-    ConstructorDecl, Decorator, DecoratorSymbol, DestructureLetStmt, ElseBranch, EnumDecl,
-    EnumVariant, Expr, Field, ForStmt, FunctionContract, FunctionDecl, Ident, IfExpr, IfStmt,
-    ImportDecl, ImportKind, ImportName, IndexExpr, Item, LambdaBody, LetKind, LetStmt,
-    ListComprehensionExpr, Literal, MapComprehensionExpr, MapEntry, MapExpr, MemberExpr, Module,
-    OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt, SetComprehensionExpr, SliceExpr,
-    Span, Stmt, SwitchArm, SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl,
-    TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    ConstructorDecl, ContractClause, ContractFailure, Decorator, DecoratorSymbol,
+    DestructureLetStmt, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionContract,
+    FunctionDecl, Ident, IfExpr, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item,
+    LambdaBody, LetKind, LetStmt, ListComprehensionExpr, Literal, MapComprehensionExpr, MapEntry,
+    MapExpr, MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt,
+    SetComprehensionExpr, SliceExpr, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner, TaskPlacement,
+    TestBlock, TestMode, TraitDecl, TraitMethod, Type, TypeArg, TypePath, UnaryExpr, UnaryOp,
+    UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;
@@ -511,11 +512,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        let contract = if self.take_simple(&TokenKind::With).is_some() {
-            Some(self.parse_function_contract()?)
-        } else {
-            None
-        };
+        let contract = self.parse_optional_contract()?;
         self.expect_simple(TokenKind::Colon, "`:`")?;
         self.expect_simple(TokenKind::Newline, "newline after function header")?;
         self.expect_simple(TokenKind::Indent, "indented function body")?;
@@ -543,21 +540,51 @@ impl Parser<'_> {
         })
     }
 
+    fn parse_optional_contract(&mut self) -> Result<Option<FunctionContract>, ParseError> {
+        if self.take_simple(&TokenKind::With).is_some() {
+            self.take_simple(&TokenKind::Newline);
+            return self.parse_function_contract().map(Some);
+        }
+        if self.at(&TokenKind::Newline) && self.peek_kind(1, &TokenKind::LeftBrace) {
+            return Err(self.error("API contracts require `with` before `{`"));
+        }
+        if self.at(&TokenKind::LeftBrace) {
+            return Err(self.error("API contracts require `with` before `{`"));
+        }
+        Ok(None)
+    }
+
     fn parse_function_contract(&mut self) -> Result<FunctionContract, ParseError> {
         let start = self
-            .expect_simple(TokenKind::LeftBrace, "`{` after function `with`")?
+            .expect_simple(TokenKind::LeftBrace, "`{` at the start of the contract")?
             .span
             .start;
         self.skip_parenthesized_layout();
-        let mut requirements = Vec::new();
+        let mut clauses = Vec::new();
         let mut capabilities = Vec::new();
         while !self.at(&TokenKind::RightBrace) {
             if self.take_simple(&TokenKind::With).is_some() {
                 capabilities.push(self.expect_identifier("function capability")?);
             } else {
-                requirements.push(self.parse_expression()?);
+                let clause_start = self.peek().span.start;
+                let deferred = self.take_simple(&TokenKind::Defer).is_some();
+                let condition = self.parse_expression()?;
+                let failure = if self.take_simple(&TokenKind::Arrow).is_some() {
+                    Some(self.parse_contract_failure()?)
+                } else {
+                    None
+                };
+                let clause_end = failure
+                    .as_ref()
+                    .map_or(condition.span().end, |failure| failure.span.end);
+                clauses.push(ContractClause {
+                    span: Span::new(clause_start, clause_end),
+                    deferred,
+                    condition,
+                    failure,
+                });
             }
-            self.take_simple(&TokenKind::Comma);
+            self.expect_simple(TokenKind::Comma, "`,` after every contract clause")?;
             self.skip_parenthesized_layout();
         }
         let end = self
@@ -566,8 +593,60 @@ impl Parser<'_> {
             .end;
         Ok(FunctionContract {
             span: Span::new(start, end),
-            requirements,
+            clauses,
             capabilities,
+        })
+    }
+
+    fn parse_contract_failure(&mut self) -> Result<ContractFailure, ParseError> {
+        let exception = self.expect_identifier("`exception` after `->`")?;
+        if exception.name != "exception" {
+            return Err(ParseError {
+                span: exception.span,
+                message: "a contract failure action must be `exception(...)`".into(),
+            });
+        }
+        self.expect_simple(TokenKind::LeftParen, "`(` after `exception`")?;
+        let message_token = self.advance().clone();
+        let message = match message_token.kind {
+            TokenKind::String(message) => message,
+            _ => {
+                return Err(ParseError {
+                    span: message_token.span,
+                    message: "a contract exception requires a string message".into(),
+                })
+            }
+        };
+        let mut location = false;
+        let mut vars = false;
+        while self.take_simple(&TokenKind::Comma).is_some() {
+            let option = self.expect_identifier("`location` or `vars`")?;
+            match option.name.as_str() {
+                "location" if !location => location = true,
+                "vars" if !vars => vars = true,
+                "location" | "vars" => {
+                    return Err(ParseError {
+                        span: option.span,
+                        message: format!("duplicate `{}` contract exception option", option.name),
+                    })
+                }
+                _ => {
+                    return Err(ParseError {
+                        span: option.span,
+                        message: "contract exception options are `location` and `vars`".into(),
+                    })
+                }
+            }
+        }
+        let end = self
+            .expect_simple(TokenKind::RightParen, "`)` after contract exception")?
+            .span
+            .end;
+        Ok(ContractFailure {
+            span: Span::new(exception.span.start, end),
+            message,
+            location,
+            vars,
         })
     }
 
@@ -684,7 +763,8 @@ impl Parser<'_> {
     fn parse_test(&mut self) -> Result<TestBlock, ParseError> {
         let start = self.expect_simple(TokenKind::Test, "`test`")?.span.start;
         let mut modes = Vec::new();
-        if self.take_simple(&TokenKind::With).is_some() {
+        if self.at(&TokenKind::With) && self.starts_test_modes() {
+            self.advance();
             loop {
                 let mode = self.expect_identifier("test mode")?;
                 modes.push(match mode.name.as_str() {
@@ -692,6 +772,7 @@ impl Parser<'_> {
                     "bench" => TestMode::Bench,
                     "chaos" => TestMode::Chaos,
                     "integration" => TestMode::Integration,
+                    "profile" => TestMode::Profile,
                     _ => {
                         return Err(ParseError {
                             span: mode.span,
@@ -713,6 +794,12 @@ impl Parser<'_> {
         } else {
             None
         };
+        let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        let contract = self.parse_optional_contract()?;
         self.expect_simple(TokenKind::Colon, "`:` after test")?;
         self.expect_simple(TokenKind::Newline, "newline after test header")?;
         self.expect_simple(TokenKind::Indent, "indented test body")?;
@@ -728,8 +815,21 @@ impl Parser<'_> {
             span: Span::new(start, end),
             modes,
             name,
+            return_type,
+            contract,
             body,
         })
+    }
+
+    fn starts_test_modes(&self) -> bool {
+        matches!(
+            &self.peek_token(1).kind,
+            TokenKind::Identifier(name)
+                if matches!(
+                    name.as_str(),
+                    "property" | "bench" | "chaos" | "integration" | "profile"
+                )
+        )
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
@@ -1353,6 +1453,10 @@ impl Parser<'_> {
                 span: token.span,
                 value,
             })),
+            TokenKind::Quantity(_, _) => Err(ParseError {
+                span: token.span,
+                message: "profile quantities cannot be used as match patterns".into(),
+            }),
             TokenKind::Float(bits) => Ok(Pattern::Literal(Literal::Float {
                 span: token.span,
                 value: f64::from_bits(bits),
@@ -1843,6 +1947,10 @@ impl Parser<'_> {
                 span: token.span,
                 value,
             })),
+            TokenKind::Quantity(value, unit) => Ok(Expr::Literal(Literal::Integer {
+                span: token.span,
+                value: normalize_quantity(value, &unit, token.span)?,
+            })),
             TokenKind::Float(bits) => Ok(Expr::Literal(Literal::Float {
                 span: token.span,
                 value: f64::from_bits(bits),
@@ -2172,6 +2280,31 @@ fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
         left: Box::new(left),
         op,
         right: Box::new(right),
+    })
+}
+
+fn normalize_quantity(value: i64, unit: &str, span: Span) -> Result<i64, ParseError> {
+    let multiplier = match unit {
+        "ns" => 1,
+        "us" => 1_000,
+        "ms" => 1_000_000,
+        "s" => 1_000_000_000,
+        "b" => 1,
+        "kb" => 1024,
+        "mb" => 1024 * 1024,
+        "gb" => 1024 * 1024 * 1024,
+        _ => {
+            return Err(ParseError {
+                span,
+                message: format!(
+                    "unknown contract quantity unit `{unit}`; use ns, us, ms, s, b, kb, mb, or gb"
+                ),
+            })
+        }
+    };
+    value.checked_mul(multiplier).ok_or_else(|| ParseError {
+        span,
+        message: format!("contract quantity `{value}{unit}` is too large"),
     })
 }
 

@@ -188,6 +188,16 @@ pub fn compile_native_with_options(
     native::compile_native(program, module, output, None, options)
 }
 
+pub fn compile_native_with_xla_runtime_and_options(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    xla_runtime: &Path,
+    options: &NativeCompileOptions,
+) -> Result<(), BackendError> {
+    native::compile_native(program, module, output, Some(xla_runtime), options)
+}
+
 /// Compiles GPU execution regions to an AMD code object, embeds it in the host
 /// executable, and links the MLIR GPU runtime ABI to HIP.
 pub fn compile_rocm(

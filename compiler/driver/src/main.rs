@@ -1,7 +1,7 @@
 use severian_driver::{
-    check_path, compile_dependency_path, compile_native, compile_native_tests,
-    compile_native_with_options, compile_path, inspect_toolchain, native_test_compilation,
-    native_test_count, Compilation,
+    check_path, compile_dependency_path, compile_native, compile_native_profile_tests,
+    compile_native_tests, compile_native_with_options, compile_path, inspect_toolchain,
+    native_profile_test_count, native_test_compilation, native_test_count, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -53,9 +53,11 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "install" => install_command(&args[1..]),
         "check" if args.len() <= 2 => check_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "lint" => lint_command(&args[1..]),
+        "fmt" => fmt_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
         "run" if args.len() <= 2 => run_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "test" => test_command(&args[1..]),
+        "debug" if args.len() <= 2 => debug_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "coverage" if args.len() == 2 => coverage(Path::new(&args[1])),
         "memory" => memory_command(&args[1..]),
         "kernel" => kernel_command(&args[1..]),
@@ -893,6 +895,184 @@ fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> std::io::Resu
     Ok(())
 }
 
+fn fmt_command(args: &[String]) -> Result<(), String> {
+    let mut check = false;
+    let mut input = PathBuf::from(".");
+    for argument in args {
+        if argument == "--check" {
+            check = true;
+        } else if input == Path::new(".") {
+            input = PathBuf::from(argument);
+        } else {
+            return Err("usage: sev fmt [path] [--check]".into());
+        }
+    }
+    let mut sources = if input.is_file() {
+        vec![input]
+    } else {
+        let mut sources = Vec::new();
+        collect_sources(&input, &mut sources).map_err(|error| error.to_string())?;
+        sources.sort();
+        sources
+    };
+    sources.dedup();
+    let mut changed = Vec::new();
+    for path in sources {
+        let source = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let tokens = severian_lexer::lex(&source).map_err(|error| error.to_string())?;
+        let module = severian_parser::parse(&tokens).map_err(|error| error.to_string())?;
+        let formatted = format_contracts(&source, &module);
+        if formatted != source {
+            changed.push(path.clone());
+            if !check {
+                fs::write(&path, formatted).map_err(|error| error.to_string())?;
+                println!("Formatted {}", path.display());
+            }
+        }
+    }
+    if check && !changed.is_empty() {
+        return Err(format!(
+            "{} file(s) require formatting:\n{}",
+            changed.len(),
+            changed
+                .iter()
+                .map(|path| format!("  {}", path.display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    Ok(())
+}
+
+fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
+    fn function_contracts<'a>(
+        function: &'a severian_ast::FunctionDecl,
+        output: &mut Vec<&'a severian_ast::FunctionContract>,
+    ) {
+        if let Some(contract) = &function.contract {
+            output.push(contract);
+        }
+        for test in &function.tests {
+            if let Some(contract) = &test.contract {
+                output.push(contract);
+            }
+        }
+    }
+
+    let mut contracts = Vec::new();
+    for item in &module.items {
+        match item {
+            severian_ast::Item::Function(function) => function_contracts(function, &mut contracts),
+            severian_ast::Item::Class(class) => {
+                for constructor in &class.constructors {
+                    if let Some(contract) = &constructor.contract {
+                        contracts.push(contract);
+                    }
+                    for test in &constructor.tests {
+                        if let Some(contract) = &test.contract {
+                            contracts.push(contract);
+                        }
+                    }
+                }
+                for method in &class.methods {
+                    function_contracts(method, &mut contracts);
+                }
+            }
+            _ => {}
+        }
+    }
+    contracts.sort_by_key(|contract| contract.span.start);
+    let mut formatted = source.to_owned();
+    for contract in contracts.into_iter().rev() {
+        let mut replace_start = contract.span.start;
+        while replace_start > 0 && source.as_bytes()[replace_start - 1].is_ascii_whitespace() {
+            replace_start -= 1;
+        }
+        if source[..replace_start].ends_with("with") {
+            replace_start -= "with".len();
+            while replace_start > 0 && matches!(source.as_bytes()[replace_start - 1], b' ' | b'\t')
+            {
+                replace_start -= 1;
+            }
+        }
+        let header_line = source[..replace_start]
+            .rsplit_once('\n')
+            .map_or(&source[..replace_start], |(_, line)| line);
+        let indent = header_line
+            .chars()
+            .take_while(|character| character.is_whitespace())
+            .collect::<String>();
+        let mut replacement = format!(" with\n{indent}{{\n");
+        for clause in &contract.clauses {
+            let text = normalize_contract_clause(&source[clause.span.start..clause.span.end]);
+            replacement.push_str(&format!("{indent}    {text},\n"));
+        }
+        for capability in &contract.capabilities {
+            replacement.push_str(&format!("{indent}    with {},\n", capability.name));
+        }
+        replacement.push_str(&format!("{indent}}}"));
+        let mut replace_end = contract.span.end;
+        while matches!(source.as_bytes().get(replace_end), Some(b' ' | b'\t')) {
+            replace_end += 1;
+        }
+        if source.as_bytes().get(replace_end) == Some(&b':') {
+            replace_end += 1;
+            replacement.push(':');
+            while matches!(source.as_bytes().get(replace_end), Some(b' ' | b'\t')) {
+                replace_end += 1;
+            }
+        }
+        formatted.replace_range(replace_start..replace_end, &replacement);
+    }
+    formatted
+}
+
+fn normalize_contract_clause(source: &str) -> String {
+    let characters = source.chars().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut index = 0;
+    let mut quote_width = 0;
+    let mut escaped = false;
+    while index < characters.len() {
+        if quote_width == 0 {
+            if characters[index].is_whitespace() {
+                if !output.is_empty() && !output.ends_with(' ') {
+                    output.push(' ');
+                }
+                index += 1;
+                continue;
+            }
+            if characters[index] == '"' {
+                quote_width = if characters.get(index + 1) == Some(&'"')
+                    && characters.get(index + 2) == Some(&'"')
+                {
+                    3
+                } else {
+                    1
+                };
+            }
+        } else if escaped {
+            escaped = false;
+        } else if characters[index] == '\\' && quote_width == 1 {
+            escaped = true;
+        } else if quote_width == 1 && characters[index] == '"' {
+            quote_width = 0;
+        } else if quote_width == 3
+            && characters[index] == '"'
+            && characters.get(index + 1) == Some(&'"')
+            && characters.get(index + 2) == Some(&'"')
+        {
+            output.extend(['"', '"', '"']);
+            index += 3;
+            quote_width = 0;
+            continue;
+        }
+        output.push(characters[index]);
+        index += 1;
+    }
+    output.trim().to_owned()
+}
+
 fn build_libraries(source: &Path, built: &mut HashSet<PathBuf>) -> Result<(), String> {
     let Some(manifest) = severian_package::find_manifest(source) else {
         return Ok(());
@@ -1106,6 +1286,63 @@ fn run_targets(input: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn debug_targets(input: &Path) -> Result<(), String> {
+    let targets = resolve_targets(input)?;
+    if targets.is_empty() {
+        return Err(format!(
+            "no debuggable Severian targets found under {}",
+            input.display()
+        ));
+    }
+    let configured = std::env::var_os("SEVERIAN_DEBUGGER").map(PathBuf::from);
+    let debugger = configured
+        .or_else(|| find_command(&["lldb", "gdb"]))
+        .ok_or_else(|| {
+            "no debugger found; install `lldb` or `gdb`, or set SEVERIAN_DEBUGGER".to_string()
+        })?;
+    let debugger_name = debugger
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("debugger");
+
+    for target in targets {
+        let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
+        if compilation.hir.main().is_none() {
+            return Err(format!(
+                "{} has no `main()` function to debug",
+                target.source.display()
+            ));
+        }
+        let output = artifact_path(&target, EmitMode::Executable);
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let options = severian_backend::NativeCompileOptions {
+            debug: true,
+            ..severian_backend::NativeCompileOptions::default()
+        };
+        compile_native_with_options(&compilation, &output, &options)
+            .map_err(|error| error.to_string())?;
+        println!("Debug build {} -> {}", target.name, output.display());
+
+        let mut command = Command::new(&debugger);
+        if debugger_name.contains("lldb") {
+            command.arg("--").arg(&output);
+        } else if debugger_name.contains("gdb") {
+            command.arg("--args").arg(&output);
+        } else {
+            command.arg(&output);
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("could not launch {}: {error}", debugger.display()))?;
+        if !status.success() {
+            return Err(format!("{} exited with {status}", debugger.display()));
+        }
+    }
+    Ok(())
+}
+
 fn emit_non_executable_module(
     compilation: &Compilation,
     target: &BinaryTarget,
@@ -1172,12 +1409,16 @@ fn local_rocm_pjrt_plugin(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn test_targets(input: &Path) -> Result<(), String> {
+fn test_targets(input: &Path, profile_only: bool) -> Result<(), String> {
     let targets = resolve_targets(input)?;
     let mut total = 0;
     for target in targets {
         let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
-        let count = native_test_count(&compilation.hir);
+        let count = if profile_only {
+            native_profile_test_count(&compilation.hir)
+        } else {
+            native_test_count(&compilation.hir)
+        };
         if count == 0 {
             continue;
         }
@@ -1189,7 +1430,12 @@ fn test_targets(input: &Path) -> Result<(), String> {
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
+        if profile_only {
+            compile_native_profile_tests(&compilation, &output)
+        } else {
+            compile_native_tests(&compilation, &output)
+        }
+        .map_err(|error| error.to_string())?;
         let status = Command::new(&output)
             .status()
             .map_err(|error| format!("could not run {}: {error}", output.display()))?;
@@ -1201,19 +1447,28 @@ fn test_targets(input: &Path) -> Result<(), String> {
         }
         total += count;
     }
-    println!("{total} passed");
+    if profile_only {
+        println!("{total} profile test(s) passed");
+    } else {
+        println!("{total} passed");
+    }
     Ok(())
 }
 
 fn test_command(args: &[String]) -> Result<(), String> {
     let mut input = None;
     let mut mutate = false;
+    let mut profile = false;
     let mut limit = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--mutate" => {
                 mutate = true;
+                index += 1;
+            }
+            "--profile" => {
+                profile = true;
                 index += 1;
             }
             "--limit" if index + 1 < args.len() => {
@@ -1232,10 +1487,12 @@ fn test_command(args: &[String]) -> Result<(), String> {
         }
     }
     let input = input.unwrap_or_else(|| PathBuf::from("."));
-    if mutate {
+    if mutate && profile {
+        Err("`--profile` cannot be combined with `--mutate`".into())
+    } else if mutate {
         mutation_test_targets(&input, limit)
     } else {
-        test_targets(&input)
+        test_targets(&input, profile)
     }
 }
 
@@ -1568,7 +1825,10 @@ fn memory_command(args: &[String]) -> Result<(), String> {
         );
     }
 
-    let options = severian_backend::NativeCompileOptions { sanitizers };
+    let options = severian_backend::NativeCompileOptions {
+        sanitizers,
+        ..severian_backend::NativeCompileOptions::default()
+    };
     let targets = resolve_targets(&input)?;
     let mut executed = 0;
     let mut findings = 0;
@@ -1921,9 +2181,12 @@ fn usage() -> String {
         "  install <package> [--version V] install a registry package binary",
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
+        "  fmt [path] [--check]           format contracts and verify canonical layout",
         "  build [path] [--emit KIND] [--target native|xla] [--max-errors N] [--message-format text|json]",
         "  run [path]                     build and run native code",
         "  test [path]                    build and run native Severian tests",
+        "  test [path] --profile          run only profile tests and enforce profile contracts",
+        "  debug [path]                   build with debug symbols and launch lldb or gdb",
         "  test [path] --mutate [--limit N] run deterministic mutation testing",
         "  coverage <path>                run tests and report Severian source coverage",
         "  memory <path> [--sanitizer KIND] [--leaks] run native memory diagnostics",

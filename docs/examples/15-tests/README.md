@@ -9,6 +9,13 @@ test "ordinary named test":
 test with property "generated values and shrinking":
 test with bench "warmup and measurement":
 test with chaos "fault injection":
+test with profile "runtime and allocation bounds" -> TestResult with
+{
+    defer 1ms < time < 2ms -> exception("runtime outside range", location, vars),
+    defer memory < 32mb -> exception("memory limit exceeded", location, vars),
+    defer allocations < 1000 -> exception("allocation limit exceeded", location, vars),
+}:
+    measured_operation()
 test with property and chaos "generated inputs under injected failures":
 ```
 
@@ -19,10 +26,17 @@ test with property and chaos "generated inputs under injected failures":
 - Chaos tests inject failures at every reachable chaos point. Their failure
   surface is transitive through the call graph. A caller inherits the scenarios
   of its dependencies and adds scenarios belonging to its own layer.
+- Profile tests expose `time` in nanoseconds, `memory` in allocated bytes, and
+  `allocations` as a count. Unit literals such as `1ms` and `32mb` are normalized
+  by the compiler. Bounds are checked after the measured body, including lower
+  bounds, so stubbed work cannot satisfy `1ms < time`.
 - Compatible modes compose with `and`. The API-contract comma rule does not
   apply to test modes.
 
 The files in this directory demonstrate each form and representative use cases.
+
+Run every test with `sev test`. Run only profile tests and enforce their runtime
+contracts with `sev test --profile`.
 
 `when function return/throw value` is test-only syntax. It is valid in both an
 ordinary `test:` and a `test with chaos` block, and is a compile-time error

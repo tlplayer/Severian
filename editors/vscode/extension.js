@@ -15,6 +15,8 @@ const decoder = new TextDecoder('utf-8');
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('Severian Coverage');
+  const toolingOutput = vscode.window.createOutputChannel('Severian');
+  const contractDiagnostics = vscode.languages.createDiagnosticCollection('severian-contracts');
   const coveredDecoration = vscode.window.createTextEditorDecorationType({
     gutterIconPath: context.asAbsolutePath('images/coverage-covered.svg'),
     gutterIconSize: 'contain',
@@ -205,6 +207,50 @@ function activate(context) {
     render();
   }
 
+  async function runTool(action, options = []) {
+    const run = resolveToolRun();
+    if (!run) {
+      void vscode.window.showErrorMessage('Open a .sev file inside a workspace first.');
+      return;
+    }
+    const executable = vscode.workspace
+      .getConfiguration('severian', run.scope)
+      .get('executable', 'sev')
+      .trim() || 'sev';
+    contractDiagnostics.clear();
+    toolingOutput.clear();
+    const arguments = [action, ...options, run.target];
+    toolingOutput.appendLine(`$ ${executable} ${arguments.join(' ')}`);
+    toolingOutput.show(true);
+    const result = await spawnTool(executable, arguments, run.cwd, toolingOutput);
+    const failures = publishContractDiagnostics(result.stderr, contractDiagnostics);
+    if (result.code === 0) {
+      void vscode.window.showInformationMessage(`Severian ${action} completed.`);
+    } else {
+      void vscode.window.showErrorMessage(`Severian ${action} failed. See the Severian output.`);
+      if (failures.length > 0) {
+        const first = failures[0];
+        const document = await vscode.workspace.openTextDocument(first.uri);
+        await vscode.window.showTextDocument(document, { selection: first.range });
+      }
+    }
+  }
+
+  function debugTool() {
+    const run = resolveToolRun();
+    if (!run) {
+      void vscode.window.showErrorMessage('Open a .sev file inside a workspace first.');
+      return;
+    }
+    const executable = vscode.workspace
+      .getConfiguration('severian', run.scope)
+      .get('executable', 'sev')
+      .trim() || 'sev';
+    const terminal = vscode.window.createTerminal({ name: 'Severian Debug', cwd: run.cwd });
+    terminal.show();
+    terminal.sendText(`${shellQuote(executable)} debug ${shellQuote(run.target)}`);
+  }
+
   function scheduleRefresh() {
     if (!vscode.workspace.getConfiguration('severian.coverage').get('autoLoad', true)) {
       return;
@@ -220,6 +266,8 @@ function activate(context) {
 
   context.subscriptions.push(
     output,
+    toolingOutput,
+    contractDiagnostics,
     coveredDecoration,
     uncoveredDecoration,
     status,
@@ -227,6 +275,11 @@ function activate(context) {
     vscode.commands.registerCommand('severian.coverage.run', runCoverage),
     vscode.commands.registerCommand('severian.coverage.load', () => loadCoverage(true)),
     vscode.commands.registerCommand('severian.coverage.clear', clearCoverage),
+    vscode.commands.registerCommand('severian.run', () => runTool('run')),
+    vscode.commands.registerCommand('severian.test', () => runTool('test')),
+    vscode.commands.registerCommand('severian.profile', () => runTool('test', ['--profile'])),
+    vscode.commands.registerCommand('severian.debug', debugTool),
+    vscode.commands.registerCommand('severian.build', () => runTool('build')),
     vscode.window.onDidChangeVisibleTextEditors(render),
     vscode.window.onDidChangeActiveTextEditor(render),
     vscode.workspace.onDidChangeConfiguration((event) => {
@@ -293,6 +346,35 @@ function resolveCoverageRun() {
   return { scope, cwd: workspaceFolder.uri.fsPath, target };
 }
 
+function resolveToolRun() {
+  const editor = vscode.window.activeTextEditor;
+  const scope = editor && editor.document.uri;
+  const folder = scope ? vscode.workspace.getWorkspaceFolder(scope) : undefined;
+  const workspaceFolder = folder || (vscode.workspace.workspaceFolders || [])[0];
+  if (!workspaceFolder || workspaceFolder.uri.scheme !== 'file') {
+    return undefined;
+  }
+  const configuredTarget = vscode.workspace
+    .getConfiguration('severian', scope)
+    .get('target', '')
+    .trim();
+  if (configuredTarget) {
+    return {
+      scope,
+      cwd: workspaceFolder.uri.fsPath,
+      target: path.isAbsolute(configuredTarget)
+        ? configuredTarget
+        : path.join(workspaceFolder.uri.fsPath, configuredTarget),
+    };
+  }
+  let target = workspaceFolder.uri.fsPath;
+  if (editor && editor.document.languageId === 'severian' && editor.document.uri.scheme === 'file') {
+    target = nearestPackageRoot(editor.document.uri.fsPath, workspaceFolder.uri.fsPath)
+      || editor.document.uri.fsPath;
+  }
+  return { scope, cwd: workspaceFolder.uri.fsPath, target };
+}
+
 function nearestPackageRoot(source, workspaceRoot) {
   const boundary = path.resolve(workspaceRoot);
   let current = path.dirname(path.resolve(source));
@@ -335,6 +417,68 @@ function spawnCoverage(executable, target, cwd, token, output) {
       }
     });
   });
+}
+
+function spawnTool(executable, args, cwd, output) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    const child = childProcess.spawn(executable, args, { cwd, env: process.env, shell: false });
+    child.stdout.on('data', (data) => {
+      const text = data.toString();
+      stdout += text;
+      output.append(text);
+    });
+    child.stderr.on('data', (data) => {
+      const text = data.toString();
+      stderr += text;
+      output.append(text);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+function publishContractDiagnostics(stderr, collection) {
+  const lines = stderr.split(/\r?\n/);
+  const byFile = new Map();
+  const failures = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].startsWith('contract error:')) {
+      continue;
+    }
+    const message = lines[index].slice('contract error:'.length).trim();
+    const location = lines[index + 1] && lines[index + 1].match(/^location: (.*):(\d+):(\d+)$/);
+    if (!location) {
+      continue;
+    }
+    const vars = lines[index + 2] && lines[index + 2].startsWith('vars:')
+      ? lines[index + 2].slice('vars:'.length).trim()
+      : '';
+    const uri = vscode.Uri.file(location[1]);
+    const line = Math.max(0, Number(location[2]) - 1);
+    const column = Math.max(0, Number(location[3]) - 1);
+    const range = new vscode.Range(line, column, line, column + 1);
+    const diagnostic = new vscode.Diagnostic(
+      range,
+      vars ? `${message}\nvars: ${vars}` : message,
+      vscode.DiagnosticSeverity.Error,
+    );
+    diagnostic.source = 'Severian contract';
+    const key = normalizeFilePath(uri.fsPath);
+    const entry = byFile.get(key) || { uri, diagnostics: [] };
+    entry.diagnostics.push(diagnostic);
+    byFile.set(key, entry);
+    failures.push({ uri, range });
+  }
+  for (const entry of byFile.values()) {
+    collection.set(entry.uri, entry.diagnostics);
+  }
+  return failures;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 function deactivate() {}

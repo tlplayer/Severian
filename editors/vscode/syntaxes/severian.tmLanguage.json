@@ -182,7 +182,7 @@
           }
         },
         {
-          "match": "\\b(property|bench|chaos|integration)\\b",
+          "match": "\\b(property|bench|chaos|integration|profile)\\b",
           "name": "storage.modifier.test.severian"
         }
       ]
@@ -204,7 +204,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|elif|else|while|for|in|switch|when|return|throw|break|continue|unsafe)\\b",
+          "match": "\\b(if|elif|else|while|for|in|switch|when|return|throw|break|continue|unsafe|defer)\\b",
           "name": "keyword.control.severian"
         },
         {
@@ -252,7 +252,7 @@
     "numbers": {
       "patterns": [
         {
-          "match": "(?<![A-Za-z0-9_])(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?\\b",
+          "match": "(?<![A-Za-z0-9_])(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][+-]?\\d+)?(?:ns|us|ms|s|b|kb|mb|gb)?\\b",
           "name": "constant.numeric.severian"
         }
       ]
@@ -264,7 +264,7 @@
           "name": "storage.type.primitive.severian"
         },
         {
-          "match": "\\b(Tensor|Result|Option|Channel|Buffer|Path)\\b",
+          "match": "\\b(Tensor|Result|TestResult|Option|Channel|Buffer|Path)\\b",
           "name": "support.type.builtin.severian"
         },
         {
@@ -276,7 +276,7 @@
     "builtins": {
       "patterns": [
         {
-          "match": "\\b(panic|print|range|size|enumerate|zip|indices|present)\\b(?=\\s*\\()",
+          "match": "\\b(panic|exception|print|range|size|enumerate|zip|indices|present)\\b(?=\\s*\\()",
           "name": "support.function.builtin.severian"
         }
       ]

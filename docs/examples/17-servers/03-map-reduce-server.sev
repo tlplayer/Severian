@@ -66,7 +66,8 @@ def runJob(
     job_id: int,
     connection: network.TCPConnection,
     jobs: Channel[Job],
-) -> Result[unit, IOError | JsonError] with {
+) -> Result[unit, IOError | JsonError] with
+{
     0 <= job_id <= 1000,
     connection != invalid,
     64 <= size(jobs.buffer),

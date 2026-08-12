@@ -441,8 +441,19 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionContract {
-    pub requirements: Vec<Expression>,
+    pub clauses: Vec<ContractClause>,
     pub capabilities: Vec<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractClause {
+    pub condition: Expression,
+    pub deferred: bool,
+    pub message: Option<String>,
+    pub location: bool,
+    pub vars: bool,
+    pub dependencies: Vec<String>,
+    pub dependency_types: Vec<ValueType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -462,6 +473,8 @@ pub struct Parameter {
 pub struct Test {
     pub name: Option<String>,
     pub modes: Vec<TestMode>,
+    pub return_type: ValueType,
+    pub contract: Option<FunctionContract>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -471,6 +484,7 @@ pub enum TestMode {
     Bench,
     Chaos,
     Integration,
+    Profile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -884,8 +898,24 @@ fn visit_function_expressions_mut(
     function: &mut Function,
     visitor: &mut impl FnMut(&mut Expression),
 ) {
+    if let Some(contract) = &mut function.contract {
+        for clause in &mut contract.clauses {
+            visit_expression_mut(&mut clause.condition, visitor);
+        }
+        for capability in &mut contract.capabilities {
+            visit_expression_mut(capability, visitor);
+        }
+    }
     visit_instructions_mut(&mut function.instructions, visitor);
     for test in &mut function.tests {
+        if let Some(contract) = &mut test.contract {
+            for clause in &mut contract.clauses {
+                visit_expression_mut(&mut clause.condition, visitor);
+            }
+            for capability in &mut contract.capabilities {
+                visit_expression_mut(capability, visitor);
+            }
+        }
         visit_instructions_mut(&mut test.instructions, visitor);
     }
 }

@@ -1,5 +1,8 @@
 use crate::{compile_native, Compilation, CompileError};
-use severian_hir::{Expression, Function, FunctionId, Instruction, Program, TestMode};
+use severian_hir::{
+    BinaryOp, CallTarget, ContractClause, Expression, Function, FunctionId, FunctionType, HirId,
+    Instruction, Program, Test, TestMode, ValueType,
+};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -11,12 +14,27 @@ pub fn compile_native_tests(
     compilation: &Compilation,
     output: &Path,
 ) -> Result<usize, CompileError> {
+    compile_selected_native_tests(compilation, output, false)
+}
+
+pub fn compile_native_profile_tests(
+    compilation: &Compilation,
+    output: &Path,
+) -> Result<usize, CompileError> {
+    compile_selected_native_tests(compilation, output, true)
+}
+
+fn compile_selected_native_tests(
+    compilation: &Compilation,
+    output: &Path,
+    profile_only: bool,
+) -> Result<usize, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("severian-test-compiler".into())
             .stack_size(16 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let (native, count) = native_test_compilation(compilation)?;
+                let (native, count) = native_test_compilation_selected(compilation, profile_only)?;
                 compile_native(&native, output)?;
                 Ok(count)
             })
@@ -29,6 +47,14 @@ pub fn compile_native_tests(
 }
 
 pub fn native_test_count(program: &Program) -> usize {
+    selected_native_test_count(program, false)
+}
+
+pub fn native_profile_test_count(program: &Program) -> usize {
+    selected_native_test_count(program, true)
+}
+
+fn selected_native_test_count(program: &Program, profile_only: bool) -> usize {
     program
         .functions
         .iter()
@@ -40,18 +66,31 @@ pub fn native_test_count(program: &Program) -> usize {
                 .flat_map(|class| class.methods.iter().chain(&class.constructors))
                 .flat_map(|function| &function.tests),
         )
-        .filter(|test| !test.modes.contains(&TestMode::Integration))
+        .filter(|test| selected_test(test, profile_only))
         .count()
 }
 
 pub fn native_test_compilation(
     compilation: &Compilation,
 ) -> Result<(Compilation, usize), CompileError> {
+    native_test_compilation_selected(compilation, false)
+}
+
+pub fn native_profile_test_compilation(
+    compilation: &Compilation,
+) -> Result<(Compilation, usize), CompileError> {
+    native_test_compilation_selected(compilation, true)
+}
+
+fn native_test_compilation_selected(
+    compilation: &Compilation,
+    profile_only: bool,
+) -> Result<(Compilation, usize), CompileError> {
     let mut instructions = Vec::new();
     let mut count = 0;
     for function in &compilation.hir.functions {
         for test in &function.tests {
-            if !test.modes.contains(&TestMode::Integration) {
+            if selected_test(test, profile_only) {
                 if test.modes.contains(&TestMode::Chaos) {
                     let inherited = reachable_dependencies(&compilation.hir, function)
                         .into_iter()
@@ -69,7 +108,7 @@ pub fn native_test_compilation(
                         ),
                     });
                 }
-                instructions.extend(test.instructions.clone());
+                instructions.extend(test_instructions(test));
                 count += 1;
             }
         }
@@ -77,8 +116,8 @@ pub fn native_test_compilation(
     for class in &compilation.hir.classes {
         for function in class.methods.iter().chain(&class.constructors) {
             for test in &function.tests {
-                if !test.modes.contains(&TestMode::Integration) {
-                    instructions.extend(test.instructions.clone());
+                if selected_test(test, profile_only) {
+                    instructions.extend(test_instructions(test));
                     count += 1;
                 }
             }
@@ -132,6 +171,152 @@ pub fn native_test_compilation(
         hir,
     };
     Ok((native, count))
+}
+
+fn selected_test(test: &Test, profile_only: bool) -> bool {
+    !test.modes.contains(&TestMode::Integration)
+        && (!profile_only || test.modes.contains(&TestMode::Profile))
+}
+
+fn test_instructions(test: &Test) -> Vec<Instruction> {
+    let Some(contract) = &test.contract else {
+        return test.instructions.clone();
+    };
+    if test.modes.contains(&TestMode::Profile) {
+        let mut instructions = Vec::new();
+        for (name, symbol) in [
+            ("__contract_start_time", "__sev_monotonic_ns"),
+            ("__contract_start_memory", "__sev_allocation_bytes"),
+            ("__contract_start_allocations", "__sev_allocation_count"),
+        ] {
+            instructions.push(Instruction::Let {
+                name: name.into(),
+                value: native_metric(symbol),
+            });
+        }
+        instructions.extend(test.instructions.clone());
+        for (name, start, symbol) in [
+            ("time", "__contract_start_time", "__sev_monotonic_ns"),
+            (
+                "memory",
+                "__contract_start_memory",
+                "__sev_allocation_bytes",
+            ),
+            (
+                "allocations",
+                "__contract_start_allocations",
+                "__sev_allocation_count",
+            ),
+        ] {
+            instructions.push(Instruction::Let {
+                name: name.into(),
+                value: typed(
+                    ValueType::Int,
+                    Expression::Binary {
+                        left: Box::new(native_metric(symbol)),
+                        op: BinaryOp::Sub,
+                        right: Box::new(typed(ValueType::Int, Expression::Variable(start.into()))),
+                    },
+                ),
+            });
+        }
+        instructions.extend(contract.clauses.iter().map(contract_check));
+        return instructions;
+    }
+
+    test.instructions.clone()
+}
+
+fn native_metric(symbol: &str) -> Expression {
+    typed(
+        ValueType::Int,
+        Expression::Call {
+            target: CallTarget {
+                id: FunctionId::from_name(symbol),
+                name: symbol.into(),
+                native_symbol: Some(symbol.into()),
+                signature: Some(FunctionType {
+                    parameters: Vec::new(),
+                    returns: ValueType::Int,
+                }),
+            },
+            args: Vec::new(),
+        },
+    )
+}
+
+fn contract_check(clause: &ContractClause) -> Instruction {
+    let range = clause
+        .condition
+        .hir_id()
+        .and_then(HirId::legacy_source_range);
+    let values = [
+        clause
+            .message
+            .clone()
+            .unwrap_or_else(|| "contract condition was not satisfied".into()),
+        if clause.location {
+            range.map_or_else(
+                || "contract source".into(),
+                |range| format!("contract source bytes {}..{}", range.start, range.end),
+            )
+        } else {
+            String::new()
+        },
+        String::new(),
+    ];
+    let mut arguments = values
+        .into_iter()
+        .map(|value| typed(ValueType::String, Expression::String(value)))
+        .collect::<Vec<_>>();
+    if clause.vars && !clause.dependencies.is_empty() {
+        arguments[2] = typed(
+            ValueType::String,
+            Expression::Format {
+                template: clause
+                    .dependencies
+                    .iter()
+                    .map(|name| format!("{name}={{}}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                args: clause
+                    .dependencies
+                    .iter()
+                    .zip(&clause.dependency_types)
+                    .map(|(name, ty)| typed(*ty, Expression::Variable(name.clone())))
+                    .collect(),
+                arg_types: clause.dependency_types.clone(),
+            },
+        );
+    }
+    let failure = typed(
+        ValueType::Unit,
+        Expression::Call {
+            target: CallTarget {
+                id: FunctionId::from_name("__sev_contract_fail"),
+                name: "__sev_contract_fail".into(),
+                native_symbol: Some("__sev_contract_fail".into()),
+                signature: Some(FunctionType {
+                    parameters: vec![ValueType::String; 3],
+                    returns: ValueType::Unit,
+                }),
+            },
+            args: arguments,
+        },
+    );
+    Instruction::If {
+        condition: clause.condition.clone(),
+        then_instructions: Vec::new(),
+        else_instructions: vec![Instruction::Evaluate(failure)],
+    }
+}
+
+fn typed(ty: ValueType, expression: Expression) -> Expression {
+    Expression::Typed {
+        id: HirId::synthetic(500),
+        ty,
+        expression: Box::new(expression),
+    }
 }
 
 fn reachable_dependencies<'program>(

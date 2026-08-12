@@ -5,7 +5,18 @@ This extension provides editor support for `.sev` files:
 - the `severian` language ID;
 - TextMate highlighting for declarations, decorators, native declarations, types, ownership operations, control flow, concurrency, tests, literals, calls, members, comments, and operators;
 - comment toggling, bracket pairing, indentation, and folding;
+- one-click Run, Build, Test, Profile, and Debug actions backed directly by
+  `sev run`, `sev build`, `sev test`, `sev test --profile`, and `sev debug`;
+- contract failure diagnostics with source jumping and captured `vars`;
 - native green/red coverage gutters backed by `sev coverage`.
+
+## CLI-backed actions
+
+The editor title exposes **Run**, **Build**, **Test**, **Profile**, and **Debug**.
+These actions are deliberately thin wrappers around the standard CLI; they do
+not maintain a separate editor execution model. Debug runs in a terminal so
+LLDB or GDB remains interactive. Set `severian.executable` when `sev` is not on
+`PATH`, or `severian.target` to override the active file or nearest project.
 
 ## Coverage gutters
 

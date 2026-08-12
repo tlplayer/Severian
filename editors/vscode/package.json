@@ -20,6 +20,11 @@
   "main": "./extension.js",
   "activationEvents": [
     "onLanguage:severian",
+    "onCommand:severian.run",
+    "onCommand:severian.test",
+    "onCommand:severian.profile",
+    "onCommand:severian.debug",
+    "onCommand:severian.build",
     "onCommand:severian.coverage.run",
     "onCommand:severian.coverage.load",
     "onCommand:severian.coverage.clear"
@@ -64,6 +69,36 @@
     ],
     "commands": [
       {
+        "command": "severian.run",
+        "title": "Run",
+        "category": "Severian",
+        "icon": "$(run)"
+      },
+      {
+        "command": "severian.test",
+        "title": "Test",
+        "category": "Severian",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "severian.profile",
+        "title": "Profile",
+        "category": "Severian",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "severian.debug",
+        "title": "Debug",
+        "category": "Severian",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "severian.build",
+        "title": "Build",
+        "category": "Severian",
+        "icon": "$(tools)"
+      },
+      {
         "command": "severian.coverage.run",
         "title": "Run Coverage",
         "category": "Severian",
@@ -83,6 +118,31 @@
     "menus": {
       "editor/title": [
         {
+          "command": "severian.run",
+          "when": "editorLangId == severian",
+          "group": "navigation@1"
+        },
+        {
+          "command": "severian.test",
+          "when": "editorLangId == severian",
+          "group": "navigation@2"
+        },
+        {
+          "command": "severian.profile",
+          "when": "editorLangId == severian",
+          "group": "navigation@3"
+        },
+        {
+          "command": "severian.debug",
+          "when": "editorLangId == severian",
+          "group": "navigation@4"
+        },
+        {
+          "command": "severian.build",
+          "when": "editorLangId == severian",
+          "group": "navigation@5"
+        },
+        {
           "command": "severian.coverage.run",
           "when": "editorLangId == severian",
           "group": "navigation@10"
@@ -90,8 +150,18 @@
       ]
     },
     "configuration": {
-      "title": "Severian Coverage",
+      "title": "Severian",
       "properties": {
+        "severian.executable": {
+          "type": "string",
+          "default": "sev",
+          "description": "Path to the Severian compiler executable used by Run, Build, Test, Profile, and Debug."
+        },
+        "severian.target": {
+          "type": "string",
+          "default": "",
+          "description": "Optional source or project target for CLI-backed editor actions, relative to the workspace."
+        },
         "severian.coverage.executable": {
           "type": "string",
           "default": "sev",

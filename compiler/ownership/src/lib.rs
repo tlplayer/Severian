@@ -52,7 +52,12 @@ fn check_function(
         checker.define(parameter.name.clone(), None);
     }
     if let Some(contract) = &function.contract {
-        for expression in contract.requirements.iter().chain(&contract.capabilities) {
+        for expression in contract
+            .clauses
+            .iter()
+            .map(|clause| &clause.condition)
+            .chain(&contract.capabilities)
+        {
             checker.check_expression(expression, Access::Read)?;
         }
     }
@@ -63,6 +68,16 @@ fn check_function(
         test_checker.remaining = count_instruction_uses(&test.instructions);
         for field in fields {
             test_checker.define(field.clone(), None);
+        }
+        if let Some(contract) = &test.contract {
+            for expression in contract
+                .clauses
+                .iter()
+                .map(|clause| &clause.condition)
+                .chain(&contract.capabilities)
+            {
+                test_checker.check_expression(expression, Access::Read)?;
+            }
         }
         test_checker.check_instructions(&test.instructions)?;
     }

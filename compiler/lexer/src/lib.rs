@@ -42,6 +42,7 @@ pub enum TokenKind {
     Continue,
     In,
     With,
+    Defer,
     And,
     Or,
     Not,
@@ -49,6 +50,7 @@ pub enum TokenKind {
     False,
     Identifier(String),
     Integer(i64),
+    Quantity(i64, String),
     Float(u64),
     String(String),
     FormattedString(String),
@@ -356,9 +358,27 @@ impl<'source> Lexer<'source> {
                             index += 1;
                         }
                     }
-                    let text = &line[start..index];
+                    let number_end = index;
+                    while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+                        index += 1;
+                    }
+                    let text = &line[start..number_end];
+                    let unit = &line[number_end..index];
                     self.tokens.push(Token {
-                        kind: if is_float {
+                        kind: if !unit.is_empty() {
+                            if is_float {
+                                return Err(LexError {
+                                    span: Span::new(base + start, base + index),
+                                    message:
+                                        "profile quantities currently require an integer value"
+                                            .into(),
+                                });
+                            }
+                            TokenKind::Quantity(
+                                text.parse().expect("digits form an integer"),
+                                unit.into(),
+                            )
+                        } else if is_float {
                             TokenKind::Float(
                                 text.parse::<f64>().expect("digits form a float").to_bits(),
                             )
@@ -407,6 +427,7 @@ impl<'source> Lexer<'source> {
                         "continue" => TokenKind::Continue,
                         "in" => TokenKind::In,
                         "with" => TokenKind::With,
+                        "defer" => TokenKind::Defer,
                         "and" => TokenKind::And,
                         "or" => TokenKind::Or,
                         "not" => TokenKind::Not,

@@ -83,6 +83,40 @@ sev doctor
 sev --help
 ```
 
+### Step 3: standard CLI and editor surface
+
+The standard single-file commands are:
+
+```sh
+sev run main.sev
+sev build
+sev test
+sev test --profile
+sev debug main.sev
+sev clean
+```
+
+Inside a project, the manifest supplies the target:
+
+```sh
+sev run
+sev build
+sev test
+sev test --profile
+sev debug
+```
+
+`run` builds and executes, `build` reports the project's compiler diagnostics,
+and `test` runs all native tests and their contracts. `test --profile` selects
+only profile tests and enforces their time, memory, allocation, and runtime
+contracts. `debug` creates an unoptimized native build with debug symbols and
+launches LLDB or GDB; `SEVERIAN_DEBUGGER` selects another debugger. `clean`
+removes only the resolved project's generated `target` directory.
+
+The VS Code Run, Build, Test, Profile, and Debug actions invoke those same CLI
+commands. The extension does not implement a separate editor-only execution or
+profiling path.
+
 ### Accelerator kernel backends
 
 `sev kernel inspect` explains whether a tensor kernel uses the portable
@@ -768,15 +802,14 @@ for domain syntax, such as regex helpers imported by a decorator.
 
 ## Function Contracts
 
-A function may declare entry requirements in a `with { ... }` suffix. Within
-those contract braces only, every comma-separated requirement must hold, so a
-comma is equivalent to `and`. `and` may be written explicitly. There is no
-contract shorthand for `or`; alternatives must use the `or` keyword. This rule
-does not change the meaning of commas in calls, tuples, collection literals, or
-any other Severian construct.
+A declaration introduces an API contract with `with`. This rule is identical
+for functions and tests. The opening `{` and closing `}:` have their own lines,
+each clause has its own line, and every clause ends in a comma. `sev fmt` writes
+this canonical layout and `sev fmt --check` verifies it without changing files.
 
 ```sev
-def run_job(job_id: int, connection: network.TCPConnection) with {
+def run_job(job_id: int, connection: network.TCPConnection) with
+{
     0 <= job_id <= 1000,
     connection != invalid,
     with connection,
@@ -784,12 +817,26 @@ def run_job(job_id: int, connection: network.TCPConnection) with {
     process(job_id, connection)
 ```
 
-This contract is equivalent to requiring the first two expressions with
-`and`, plus the `connection` capability. A caller must supply that capability
-explicitly with `run_job(job_id, connection) with connection`. A missing or
-incorrect capability is a compile-time error. A value requirement that can be
-proved false is also a compile-time error; a requirement depending on runtime
-data is checked once at function entry.
+The ordinary conditions are checked when the function is entered. A `defer`
+condition is checked at entry and again only after an operation that can change
+one of its dependencies:
+
+```sev
+def add(value: int, values: list[int]) with
+{
+    value >= 0,
+    defer len(values) < 100 -> exception("list limit exceeded", location, vars),
+}:
+    values.append(value)
+```
+
+`exception` supplies the failure message. `location` adds a source location and
+`vars` adds dependent names and values to the failure report.
+
+A capability clause such as `with connection,` is compile-time metadata. A
+caller must supply that capability explicitly with
+`run_job(job_id, connection) with connection`; a missing or incorrect
+capability is a compile-time error.
 
 The capability belongs in the function contract and call suffix. Wrapping the
 function's entire body in `with connection:` when the contract already requires

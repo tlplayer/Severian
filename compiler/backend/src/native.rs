@@ -19,6 +19,7 @@ pub enum NativeSanitizer {
 #[derive(Debug, Clone, Default)]
 pub struct NativeCompileOptions {
     pub sanitizers: Vec<NativeSanitizer>,
+    pub debug: bool,
 }
 
 /// Host-native compilation.
@@ -103,6 +104,12 @@ pub fn compile_native(
             OsString::from("-g"),
         ]);
     }
+    if options.debug && sanitizer_names.is_empty() {
+        additional_arguments.extend([
+            OsString::from("-g"),
+            OsString::from("-fno-omit-frame-pointer"),
+        ]);
+    }
 
     link_native_executable(
         &llvm_ir,
@@ -113,7 +120,13 @@ pub fn compile_native(
             libraries,
             pthread: bridge_path.is_some(),
             math: true,
-            optimization: if sanitizer_names.is_empty() { 3 } else { 1 },
+            optimization: if options.debug {
+                0
+            } else if sanitizer_names.is_empty() {
+                3
+            } else {
+                1
+            },
             additional_arguments,
             ..NativeLinkOptions::default()
         },

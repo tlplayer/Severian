@@ -108,8 +108,24 @@ pub struct FunctionDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionContract {
     pub span: Span,
-    pub requirements: Vec<Expr>,
+    pub clauses: Vec<ContractClause>,
     pub capabilities: Vec<Ident>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContractClause {
+    pub span: Span,
+    pub deferred: bool,
+    pub condition: Expr,
+    pub failure: Option<ContractFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContractFailure {
+    pub span: Span,
+    pub message: String,
+    pub location: bool,
+    pub vars: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -189,6 +205,8 @@ pub struct TestBlock {
     pub span: Span,
     pub modes: Vec<TestMode>,
     pub name: Option<Ident>,
+    pub return_type: Option<Type>,
+    pub contract: Option<FunctionContract>,
     pub body: Block,
 }
 
@@ -198,6 +216,7 @@ pub enum TestMode {
     Bench,
     Chaos,
     Integration,
+    Profile,
 }
 
 #[derive(Debug, Clone, PartialEq)]

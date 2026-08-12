@@ -24,6 +24,10 @@ pub fn lower(mir: &severian_mir::Program) -> Module {
 }
 
 fn lower_hir(program: &Program) -> Module {
+    let metadata = program.metadata.clone();
+    let mut resolved_program = program.clone();
+    resolve_contract_locations(&mut resolved_program, &metadata);
+    let program = &resolved_program;
     let mut strings = Vec::new();
     for class in &program.classes {
         strings.push(class.name.clone());
@@ -454,6 +458,74 @@ fn lower_hir(program: &Program) -> Module {
     }
     output.push_str("}\n");
     Module::new(output)
+}
+
+fn resolve_contract_locations(program: &mut Program, metadata: &severian_hir::ProgramMetadata) {
+    fn visit(instructions: &mut [Instruction], metadata: &severian_hir::ProgramMetadata) {
+        for instruction in instructions {
+            match instruction {
+                Instruction::If {
+                    condition,
+                    then_instructions,
+                    else_instructions,
+                } => {
+                    if let Some(location) = contract_source_location(condition, metadata) {
+                        if let Some(Expression::Typed { expression, .. }) = else_instructions
+                            .first_mut()
+                            .and_then(|instruction| match instruction {
+                                Instruction::Evaluate(expression) => Some(expression),
+                                _ => None,
+                            })
+                        {
+                            if let Expression::Call { target, args } = expression.as_mut() {
+                                if target.name == "__sev_contract_fail" {
+                                    if let Some(Expression::Typed { expression, .. }) =
+                                        args.get_mut(1)
+                                    {
+                                        **expression = Expression::String(location);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    visit(then_instructions, metadata);
+                    visit(else_instructions, metadata);
+                }
+                Instruction::While { instructions, .. }
+                | Instruction::For { instructions, .. }
+                | Instruction::With { instructions, .. } => visit(instructions, metadata),
+                Instruction::Switch { arms, .. } | Instruction::ChannelSwitch { arms, .. } => {
+                    for arm in arms {
+                        visit(&mut arm.instructions, metadata);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for function in &mut program.functions {
+        visit(&mut function.instructions, metadata);
+    }
+    for class in &mut program.classes {
+        for function in class.methods.iter_mut().chain(&mut class.constructors) {
+            visit(&mut function.instructions, metadata);
+        }
+    }
+}
+
+fn contract_source_location(
+    condition: &Expression,
+    metadata: &severian_hir::ProgramMetadata,
+) -> Option<String> {
+    let span = metadata.sources.expression_span(condition.hir_id()?)?;
+    let file = metadata.sources.file(span.file)?;
+    let before = file.source.get(..span.range.start)?;
+    let line = before.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = before
+        .rsplit_once('\n')
+        .map_or(before.len(), |(_, tail)| tail.len())
+        + 1;
+    Some(format!("{}:{line}:{column}", file.path.display()))
 }
 
 struct LoweringEnvironment<'a> {
@@ -5535,9 +5607,14 @@ fn native_bridge_source_for_target(
         "typedef struct { uint64_t magic; const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { uint64_t magic; const char *tag; sev_value *field; } sev_variant;\n\n",
         "typedef struct { uint64_t magic; int64_t rank; int64_t *shape; int64_t *strides; int64_t size; } sev_tensor_header;\n\n",
-        "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
+        "static uint64_t sev_allocated_bytes = 0;\n",
+        "static uint64_t sev_allocation_count = 0;\n",
+        "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); __atomic_fetch_add(&sev_allocated_bytes, size, __ATOMIC_RELAXED); __atomic_fetch_add(&sev_allocation_count, 1, __ATOMIC_RELAXED); return value; }\n",
         "void __sev_coverage_hit(int64_t id) { const char *path = getenv(\"SEVERIAN_COVERAGE_FILE\"); if (!path || !*path) return; int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666); if (fd < 0) abort(); char line[32]; int size = snprintf(line, sizeof(line), \"%lu\\n\", (uint64_t)id); if (size <= 0 || write(fd, line, (size_t)size) != size) { close(fd); abort(); } close(fd); }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
+        "int64_t __sev_allocation_bytes(void) { return (int64_t)__atomic_load_n(&sev_allocated_bytes, __ATOMIC_RELAXED); }\n",
+        "int64_t __sev_allocation_count(void) { return (int64_t)__atomic_load_n(&sev_allocation_count, __ATOMIC_RELAXED); }\n",
+        "void __sev_contract_fail(void *message_raw, void *location_raw, void *vars_raw) { const char *message = message_raw; const char *location = location_raw; const char *vars = vars_raw; fprintf(stderr, \"contract error: %s\\n\", message && *message ? message : \"contract condition was not satisfied\"); if (location && *location) fprintf(stderr, \"location: %s\\n\", location); if (vars && *vars) fprintf(stderr, \"vars: %s\\n\", vars); exit(70); }\n",
         "void *__sev_box_i64(int64_t raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_INT; value->as.i64 = raw; return value; }\n",
         "void *__sev_box_f64(double raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_FLOAT; value->as.f64 = raw; return value; }\n",
         "void *__sev_box_bool(bool raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_BOOL; value->as.boolean = raw; return value; }\n",
