@@ -1,13 +1,16 @@
+import "src/file_interface.sev" as file_interface
+import "src/file_text.sev" as file_text
+import "src/file_csv.sev" as file_csv
+import "src/file_wav.sev" as file_wav
+import "src/file_mp3.sev" as file_mp3
+import "src/file_binary.sev" as file_binary
 import platform
 
-def read(path: string) -> Result[string, IOError]:
-    return platform.fileRead(path)
+def read_text(path: string) -> Result[string, IOError]:
+    return platform.file_read(path)
 
 def write(path: string, contents: string) -> Result[unit, IOError]:
-    return platform.fileWrite(path, contents)
-
-def read_text(path: string) -> Result[string, IOError]:
-    return read(path)
+    return platform.file_write(path, contents)
 
 def write_text(path: string, contents: string) -> Result[unit, IOError]:
     return write(path, contents)
@@ -27,82 +30,121 @@ def copy(source: string, destination: string) -> Result[unit, IOError]:
 def open(path: string, mode: string = "rb") -> Result[Any, IOError]:
     if mode != "rb":
         return failure(IOError("binary file mode must be rb"))
-    return platform.fileOpenBinary(path)
+    return platform.file_open_binary(path)
 
-def readBytes(handle: Any, count: int) -> Result[list[int], IOError]:
-    return platform.fileReadBytes(handle, count)
+def read_bytes_from(handle: Any, count: int) -> Result[list[int], IOError]:
+    return platform.file_read_bytes(handle, count)
 
-def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
-    return platform.fileReadExact(handle, count)
+def read_exact(handle: Any, count: int) -> Result[list[int], IOError]:
+    return platform.file_read_exact(handle, count)
 
-def utf8(bytes: list[int]) -> Result[string, IOError]:
-    return platform.bytesUtf8(bytes)
+def utf8(data: list[int]) -> Result[string, IOError]:
+    return platform.decode_utf8(data)
 
 def seek(handle: Any, offset: int) -> Result[unit, IOError]:
-    return platform.fileSeek(handle, offset)
+    return platform.file_seek(handle, offset)
+
+def byte_length(handle: Any) -> Result[int, IOError]:
+    return platform.file_size(handle)
 
 def bytes(handle: Any) -> Result[int, IOError]:
-    return platform.fileSize(handle)
+    return byte_length(handle)
 
 def close(handle: Any) -> Result[unit, IOError]:
-    return platform.fileClose(handle)
+    return platform.file_close(handle)
 
 def map(path: string) -> Result[Any, IOError]:
-    return platform.fileMap(path)
+    return platform.file_map(path)
 
-def mappedBytes(mapping: Any) -> int:
-    return platform.fileMappedSize(mapping)
+def mapped_bytes(mapping: Any) -> int:
+    return platform.file_mapped_size(mapping)
 
 def unmap(mapping: Any) -> Result[unit, IOError]:
-    return platform.fileUnmap(mapping)
+    return platform.file_unmap(mapping)
 
-def littleEndianU64(bytes: list[int]) -> int:
-    assert(size(bytes) == 8, "u64 requires exactly eight bytes")
+def little_endian_u64(data: list[int]) -> int:
+    assert(size(data) == 8, "u64 requires exactly eight bytes")
     value := 0
     multiplier := 1
-    for byte in bytes:
+    for byte in data:
         value += byte * multiplier
         multiplier *= 256
     return value
 
+def default_reader(extension: string) -> file_interface.Reader:
+    if extension == ".csv":
+        return file_csv.CsvReader()
+    if extension == ".wav":
+        return file_wav.WavReader()
+    if extension == ".mp3":
+        return file_mp3.Mp3Reader()
+    if extension in [".txt", ".text", ".md", ".sev", ".toml", ".json", ".xml", ".html", ".log"]:
+        return file_text.TextReader()
+    return file_binary.BinaryReader()
+
+def register(extension: string, reader: file_interface.Reader):
+    normalized := extension.lower()
+    if not normalized.starts_with("."):
+        normalized = "." + normalized
+    platform.file_format_register(normalized, reader)
+
+def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+    extension = platform.path_extension(path).lower()
+    fallback = default_reader(extension)
+    reader: file_interface.Reader = platform.file_format_reader(extension, fallback)
+    document ?= reader.read(path)
+    return document
+
+# Compatibility aliases remain temporarily for older packages. New Severian
+# code uses complete snake_case names and receives no abbreviation burden.
+def readBytes(handle: Any, count: int) -> Result[list[int], IOError]:
+    return read_bytes_from(handle, count)
+
+def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
+    return read_exact(handle, count)
+
+def mappedBytes(mapping: Any) -> int:
+    return mapped_bytes(mapping)
+
+def littleEndianU64(data: list[int]) -> int:
+    return little_endian_u64(data)
+
 test "native file round trip":
     path = "/tmp/severian-library-file-roundtrip.txt"
-    switch write(path, "severian file runtime"):
-        ok:
-            switch read(path):
-                ok contents:
-                    assert(contents == "severian file runtime")
-                failure error:
-                    assert(false, error)
-        failure error:
-            assert(false, error)
+    _written ?= write(path, "severian file runtime")
+    contents ?= read_text(path)
+    assert(contents == "severian file runtime")
+
+test "read dispatches text and csv formats":
+    text_path = "/tmp/severian-library-format.txt"
+    table_path = "/tmp/severian-library-format.csv"
+    _text_written ?= write_text(text_path, "hello")
+    _table_written ?= write_text(table_path, "name,note\nAda,\"compiler, author\"\n")
+    text_file ?= read(text_path)
+    table_file ?= read(table_path)
+    assert(text_file.kind() == "text")
+    assert(text_file.get("content") == "hello")
+    assert(table_file.kind() == "csv")
+    assert(table_file.get("rows") == [["name", "note"], ["Ada", "compiler, author"]])
+
+test "binary extensions use typed audio and fallback objects":
+    mp3_path = "/tmp/severian-library-format.mp3"
+    bin_path = "/tmp/severian-library-format.bin"
+    _mp3_written ?= write(mp3_path, "ID3payload")
+    _bin_written ?= write(bin_path, "raw")
+    mp3_file ?= read(mp3_path)
+    binary_file ?= read(bin_path)
+    assert(mp3_file.kind() == "mp3")
+    assert(mp3_file.get("has_id3"))
+    assert(binary_file.kind() == "binary")
 
 test "binary file supports exact reads seeking and sizing":
     path = "/tmp/severian-library-file-binary.bin"
-    switch write(path, "ABCDEFGH"):
-        ok:
-            switch open(path):
-                ok handle:
-                    switch platform.fileSize(handle):
-                        ok length:
-                            assert(length == 8)
-                        failure error:
-                            assert(false, error)
-                    switch seek(handle, 2):
-                        ok:
-                            switch readExact(handle, 3):
-                                ok bytes:
-                                    assert(bytes == [67, 68, 69])
-                                failure error:
-                                    assert(false, error)
-                        failure error:
-                            assert(false, error)
-                    switch close(handle):
-                        ok:
-                            assert(true)
-                        failure error:
-                            assert(false, error)
-                failure error:
-                    assert(false, error)
-        failure error:
-            assert(false, error)
+    _written ?= write(path, "ABCDEFGH")
+    handle ?= open(path)
+    length ?= byte_length(handle)
+    assert(length == 8)
+    _positioned ?= seek(handle, 2)
+    data ?= read_exact(handle, 3)
+    assert(data == [67, 68, 69])
+    _closed ?= close(handle)

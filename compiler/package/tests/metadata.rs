@@ -52,7 +52,18 @@ fn loads_only_reachable_official_interfaces() {
             .iter()
             .map(|interface| interface.name.as_str())
             .collect::<Vec<_>>(),
-        ["file", "json", "platform", "tensor"]
+        [
+            "file",
+            "json",
+            "platform",
+            "src.file_binary",
+            "src.file_csv",
+            "src.file_interface",
+            "src.file_mp3",
+            "src.file_text",
+            "src.file_wav",
+            "tensor",
+        ]
     );
 }
 
@@ -63,12 +74,17 @@ fn loads_transitive_packages_from_compiler_embedded_sources() {
         EmbeddedOfficialPackage {
             name: "alpha",
             manifest: "[package]\nname = \"alpha\"\nversion = \"1.0.0\"\n",
-            source: "import beta\n\ndef alphaValue() -> int:\n    return beta.betaValue()\n",
+            source: "import \"src/alpha_widget.sev\" as alpha_widget\nimport beta\n\ndef alphaValue() -> int:\n    return beta.betaValue()\n",
+            modules: &[severian_package::EmbeddedOfficialModule {
+                path: "src/alpha_widget.sev",
+                source: "class Widget:\n    value: int\n",
+            }],
         },
         EmbeddedOfficialPackage {
             name: "beta",
             manifest: "[package]\nname = \"beta\"\nversion = \"1.0.0\"\n",
             source: "def betaValue() -> int:\n    return 42\n",
+            modules: &[],
         },
     ];
 
@@ -79,7 +95,8 @@ fn loads_transitive_packages_from_compiler_embedded_sources() {
             .iter()
             .map(|interface| interface.name.as_str())
             .collect::<Vec<_>>(),
-        ["alpha", "beta"]
+        ["alpha", "beta", "src.alpha_widget"]
     );
     assert!(interfaces[0].source_path.ends_with("alpha/src/lib.sev"));
+    assert_eq!(interfaces[2].export_package.as_deref(), Some("alpha"));
 }

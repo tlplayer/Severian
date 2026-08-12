@@ -353,6 +353,98 @@ fn retains_first_class_function_return_types() {
 }
 
 #[test]
+fn requires_classes_to_implement_their_declared_traits() {
+    let missing = concat!(
+        "trait Format:\n",
+        "    kind() -> string\n",
+        "\n",
+        "class Broken: Format\n",
+        "    path: string\n",
+    );
+    let ast = parse(&lex(missing).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("class `Broken` does not implement `kind` required by trait `Format`"));
+
+    let incompatible = concat!(
+        "trait Format:\n",
+        "    kind() -> string\n",
+        "\n",
+        "class Broken: Format\n",
+        "    def kind() -> int:\n",
+        "        return 1\n",
+    );
+    let ast = parse(&lex(incompatible).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("does not match trait `Format`"));
+    assert!(error.message.contains("expected `kind() -> string`"));
+}
+
+#[test]
+fn validates_traits_imported_from_packages() {
+    let interface_source = "trait File:\n    kind() -> string\n";
+    let interface = parse(&lex(interface_source).unwrap()).unwrap();
+    let source = concat!(
+        "import file\n",
+        "\n",
+        "class Playlist: file.File\n",
+        "    def kind() -> string:\n",
+        "        return \"playlist\"\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze_with_interfaces(&ast, &[("file".into(), interface)]).unwrap();
+}
+
+#[test]
+fn refines_literal_file_reads_to_the_extension_class() {
+    let interface_source = concat!(
+        "trait File:\n",
+        "    kind() -> string\n",
+        "\n",
+        "class WAV: File\n",
+        "    sample_rate: int\n",
+        "\n",
+        "    def kind() -> string:\n",
+        "        return \"wav\"\n",
+        "\n",
+        "def read(path: string) -> Result[File, string]:\n",
+        "    return failure(\"unavailable\")\n",
+    );
+    let interface = parse(&lex(interface_source).unwrap()).unwrap();
+
+    let literal_source = concat!(
+        "import file\n",
+        "\n",
+        "def sample_rate() -> int:\n",
+        "    audio ?= file.read(\"sound.WAV\")\n",
+        "    return audio.sample_rate\n",
+        "\n",
+        "def switched_sample_rate() -> int:\n",
+        "    switch file.read(\"sound.wav\"):\n",
+        "        ok audio:\n",
+        "            return audio.sample_rate\n",
+        "        failure error:\n",
+        "            return 0\n",
+    );
+    let literal = parse(&lex(literal_source).unwrap()).unwrap();
+    analyze_with_interfaces(&literal, &[("file".into(), interface.clone())]).unwrap();
+
+    let dynamic_source = concat!(
+        "import file\n",
+        "\n",
+        "def sample_rate(path: string) -> int:\n",
+        "    audio ?= file.read(path)\n",
+        "    return audio.sample_rate\n",
+    );
+    let dynamic = parse(&lex(dynamic_source).unwrap()).unwrap();
+    let error = analyze_with_interfaces(&dynamic, &[("file".into(), interface)]).unwrap_err();
+    assert!(error
+        .message
+        .contains("class `File` has no field `sample_rate`"));
+}
+
+#[test]
 fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
     let source = concat!(
         "enum Outcome:\n",

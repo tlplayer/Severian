@@ -64,8 +64,33 @@ fn embed_official_libraries(manifest: &std::path::Path, out: &std::path::Path) {
             .unwrap_or_else(|error| panic!("reading {} failed: {error}", manifest_path.display()));
         let source = fs::read_to_string(&source_path)
             .unwrap_or_else(|error| panic!("reading {} failed: {error}", source_path.display()));
+        let mut module_paths = fs::read_dir(directory.join("src"))
+            .unwrap_or_else(|error| panic!("reading package sources failed: {error}"))
+            .map(|entry| entry.expect("package source entry is readable").path())
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("sev")
+                    && path.file_name().and_then(|name| name.to_str()) != Some("lib.sev")
+            })
+            .collect::<Vec<_>>();
+        module_paths.sort();
+        let modules = module_paths
+            .iter()
+            .map(|path| {
+                let module_source = fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("reading {} failed: {error}", path.display()));
+                let relative = path
+                    .strip_prefix(&directory)
+                    .expect("module source is inside its package")
+                    .to_string_lossy();
+                println!("cargo:rerun-if-changed={}", path.display());
+                format!(
+                    "severian_package::EmbeddedOfficialModule {{ path: {relative:?}, source: {module_source:?} }}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         generated.push_str(&format!(
-            "    severian_package::EmbeddedOfficialPackage {{ name: {name:?}, manifest: {manifest_source:?}, source: {source:?} }},\n"
+            "    severian_package::EmbeddedOfficialPackage {{ name: {name:?}, manifest: {manifest_source:?}, source: {source:?}, modules: &[{modules}] }},\n"
         ));
         println!("cargo:rerun-if-changed={}", manifest_path.display());
         println!("cargo:rerun-if-changed={}", source_path.display());

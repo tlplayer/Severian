@@ -143,7 +143,7 @@ impl ModelGraphOptimization {
 
         for instruction in instructions {
             match instruction {
-                Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+                Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                     if let Some(signature) = self.signature(value, &definitions) {
                         if let Some(existing) = common_nodes.get(&signature) {
                             *value = Expression::Variable(existing.clone());

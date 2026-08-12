@@ -1,0 +1,12 @@
+trait File:
+    path() -> string
+    extension() -> string
+    kind() -> string
+    media_type() -> string
+    bytes() -> int
+
+class FormatError:
+    message: string
+
+trait Reader:
+    read(path: string) -> Result[File, IOError | FormatError]

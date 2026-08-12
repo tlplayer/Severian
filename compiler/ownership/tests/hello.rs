@@ -16,6 +16,7 @@ fn function(name: &str, params: &[&str], instructions: Vec<Instruction>) -> Func
                 name: (*name).into(),
                 ty: ValueType::Any,
                 default: None,
+                receiver: None,
             })
             .collect(),
         return_type: ValueType::Unit,

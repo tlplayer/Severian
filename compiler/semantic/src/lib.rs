@@ -11,12 +11,13 @@ use severian_hir::{
     Decorator as HirDecorator, DefinitionId, DetailedFunctionType, EnumDefinition, Expression,
     FieldDefinition, Function, FunctionContract as HirFunctionContract, FunctionId, FunctionType,
     Global, HirId, Instruction, MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata,
-    SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension,
-    TensorElementType, TensorType, Test, TestMode as HirTestMode, TypeDefinitionId, TypeId,
-    TypeKind, TypeTable, UnaryOp, ValueType, VariantDefinition, VariantId,
+    ReceiverType, SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement,
+    TensorDimension, TensorElementType, TensorType, Test, TestMode as HirTestMode,
+    TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType, VariantDefinition,
+    VariantId,
 };
 use severian_package::{local_import_exposed_name, local_import_module_name, PackageInterface};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -77,6 +78,7 @@ pub fn analyze_with_interfaces(
         .iter()
         .map(|(name, module)| PackageInterface {
             name: name.clone(),
+            export_package: None,
             module: module.clone(),
             compiler: Default::default(),
             source_path: PathBuf::from(format!("<interface:{name}>")),
@@ -115,7 +117,11 @@ pub fn analyze_with_packages(
             );
         }
     }
+    validate_trait_implementations(module, interfaces, &aliases)?;
     for item in &module.items {
+        if let Item::Trait(declaration) = item {
+            register_trait_aliases(&mut aliases, declaration);
+        }
         if let Item::Enum(enumeration) = item {
             if !is_upper_camel_case(&enumeration.name.name) {
                 return Err(error(
@@ -171,12 +177,22 @@ pub fn analyze_with_packages(
     for interface in interfaces {
         let module_name = &interface.name;
         for item in &interface.module.items {
+            if let Item::Trait(declaration) = item {
+                register_trait_aliases(&mut aliases, declaration);
+                continue;
+            }
             if let Item::Class(class) = item {
                 let exported = format!("{module_name}.{}", class.name.name);
                 aliases.insert(
                     format!("__module_class.{exported}"),
                     class.name.name.clone(),
                 );
+                if let Some(package) = &interface.export_package {
+                    aliases.insert(
+                        format!("__module_class.{package}.{}", class.name.name),
+                        class.name.name.clone(),
+                    );
+                }
                 aliases
                     .entry(format!("__class_fields.{}", class.name.name))
                     .or_insert_with(|| {
@@ -198,7 +214,12 @@ pub fn analyze_with_packages(
                             .join(",")
                     });
                 register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
-                if imports_entire_module(module, module_name) {
+                if imports_entire_module(module, module_name)
+                    || interface
+                        .export_package
+                        .as_deref()
+                        .is_some_and(|package| imports_entire_module(module, package))
+                {
                     aliases
                         .entry(class.name.name.clone())
                         .or_insert_with(|| format!("__class.{}", class.name.name));
@@ -322,6 +343,11 @@ pub fn analyze_with_packages(
                 name: parameter.name.clone(),
                 ty: parameter.ty,
                 default,
+                receiver: function
+                    .params
+                    .get(index)
+                    .and_then(|parameter| parameter.ty.as_ref())
+                    .and_then(|ty| declared_receiver_type(ty, &function_aliases)),
             });
         }
         let mut instructions = lower_block(
@@ -484,6 +510,214 @@ pub fn analyze_with_packages(
         classes,
         functions,
     })
+}
+
+fn validate_trait_implementations(
+    module: &Module,
+    interfaces: &[PackageInterface],
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    let mut traits = HashMap::<String, &severian_ast::TraitDecl>::new();
+    for item in &module.items {
+        if let Item::Trait(declaration) = item {
+            traits.insert(declaration.name.name.clone(), declaration);
+        }
+    }
+    for interface in interfaces {
+        for item in &interface.module.items {
+            if let Item::Trait(declaration) = item {
+                traits.insert(
+                    format!("{}.{}", interface.name, declaration.name.name),
+                    declaration,
+                );
+                if let Some(package) = &interface.export_package {
+                    traits.insert(format!("{package}.{}", declaration.name.name), declaration);
+                }
+            }
+        }
+    }
+
+    for item in &module.items {
+        let Item::Class(class) = item else { continue };
+        for implemented in &class.traits {
+            let raw = declaration_type_name(implemented).ok_or_else(|| {
+                error(
+                    implemented.span(),
+                    "trait implementation requires a named trait",
+                )
+            })?;
+            let canonical = canonical_declared_type_name(&raw, aliases);
+            let declaration = traits
+                .get(&canonical)
+                .or_else(|| traits.get(&raw))
+                .ok_or_else(|| {
+                    error(
+                        implemented.span(),
+                        format!("unknown trait `{raw}` implemented by `{}`", class.name.name),
+                    )
+                })?;
+            for required in &declaration.methods {
+                let Some(method) = class
+                    .methods
+                    .iter()
+                    .find(|method| method.name.name == required.name.name)
+                else {
+                    return Err(error(
+                        implemented.span(),
+                        format!(
+                            "class `{}` does not implement `{}` required by trait `{raw}`",
+                            class.name.name, required.name.name
+                        ),
+                    ));
+                };
+                let parameters_match = method.params.len() == required.params.len()
+                    && method
+                        .params
+                        .iter()
+                        .zip(&required.params)
+                        .all(|(actual, expected)| {
+                            optional_declaration_types_match(
+                                actual.ty.as_ref(),
+                                expected.ty.as_ref(),
+                            )
+                        });
+                let return_matches = optional_declaration_types_match(
+                    method.return_type.as_ref(),
+                    required.return_type.as_ref(),
+                );
+                if !parameters_match || !return_matches {
+                    return Err(error(
+                        method.name.span,
+                        format!(
+                            "method `{}.{}` does not match trait `{raw}`; expected `{}`",
+                            class.name.name,
+                            method.name.name,
+                            trait_method_signature(required)
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn declaration_type_name(ty: &Type) -> Option<String> {
+    let Type::Named(path) = ty else { return None };
+    Some(
+        path.segments
+            .iter()
+            .map(|segment| segment.name.as_str())
+            .collect::<Vec<_>>()
+            .join("."),
+    )
+}
+
+fn canonical_declared_type_name(name: &str, aliases: &HashMap<String, String>) -> String {
+    let (head, tail) = name.split_once('.').unwrap_or((name, ""));
+    let Some(canonical) = aliases.get(head) else {
+        return name.to_owned();
+    };
+    if tail.is_empty() || canonical.ends_with(&format!(".{tail}")) {
+        canonical.clone()
+    } else {
+        format!("{canonical}.{tail}")
+    }
+}
+
+fn optional_declaration_types_match(left: Option<&Type>, right: Option<&Type>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => declaration_type_key(left) == declaration_type_key(right),
+        (None, Some(right)) | (Some(right), None) => declaration_type_key(right) == "unit",
+    }
+}
+
+fn declaration_type_key(ty: &Type) -> String {
+    match ty {
+        Type::Named(path) => {
+            let mut result = path
+                .segments
+                .last()
+                .map(|segment| segment.name.clone())
+                .unwrap_or_default();
+            if !path.args.is_empty() {
+                let arguments = path
+                    .args
+                    .iter()
+                    .map(|argument| match argument {
+                        TypeArg::Type { ty, .. } => declaration_type_key(ty),
+                        TypeArg::Dimension { size, .. } => size.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                result.push('[');
+                result.push_str(&arguments);
+                result.push(']');
+            }
+            result
+        }
+        Type::List { element, .. } => format!("list[{}]", declaration_type_key(element)),
+        Type::Tuple { elements, .. } => format!(
+            "tuple[{}]",
+            elements
+                .iter()
+                .map(declaration_type_key)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Union { alternatives, .. } => alternatives
+            .iter()
+            .map(declaration_type_key)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        Type::Map { key, value, .. } => format!(
+            "map[{}, {}]",
+            declaration_type_key(key),
+            declaration_type_key(value)
+        ),
+        Type::Set { element, .. } => format!("set[{}]", declaration_type_key(element)),
+        Type::Result { ok, err, .. } => format!(
+            "Result[{}, {}]",
+            declaration_type_key(ok),
+            declaration_type_key(err)
+        ),
+        Type::Option { some, .. } => format!("Option[{}]", declaration_type_key(some)),
+        Type::Function {
+            params, returns, ..
+        } => {
+            let mut parts = params.iter().map(declaration_type_key).collect::<Vec<_>>();
+            parts.push(declaration_type_key(returns));
+            format!("fn[{}]", parts.join(", "))
+        }
+        Type::Future { output, .. } => format!("Future[{}]", declaration_type_key(output)),
+        Type::Reference { mutable, inner, .. } => format!(
+            "{}{}",
+            if *mutable { "mut &" } else { "&" },
+            declaration_type_key(inner)
+        ),
+    }
+}
+
+fn trait_method_signature(method: &severian_ast::TraitMethod) -> String {
+    let params = method
+        .params
+        .iter()
+        .map(|parameter| {
+            parameter
+                .ty
+                .as_ref()
+                .map(declaration_type_key)
+                .unwrap_or_else(|| "Any".into())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let returns = method
+        .return_type
+        .as_ref()
+        .map(declaration_type_key)
+        .unwrap_or_else(|| "unit".into());
+    format!("{}({params}) -> {returns}", method.name.name)
 }
 
 /// Attaches the HIR-v2 metadata wire without changing semantic execution.
@@ -924,7 +1158,7 @@ fn source_span(file: severian_hir::SourceFileId, span: Span) -> SourceSpan {
 
 fn class_type_name(ty: &Type) -> Option<String> {
     let Type::Named(path) = ty else { return None };
-    let name = path.segments.first()?.name.as_str();
+    let name = path.segments.last()?.name.as_str();
     if matches!(
         name,
         "int"
@@ -954,6 +1188,21 @@ fn class_type_name(ty: &Type) -> Option<String> {
     }
 }
 
+fn declared_receiver_type(ty: &Type, aliases: &HashMap<String, String>) -> Option<ReceiverType> {
+    let name = class_type_name(ty)?;
+    let methods = aliases
+        .get(&format!("__class_methods.{name}"))?
+        .split(',')
+        .filter(|method| !method.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Some(ReceiverType {
+        concrete: !aliases.contains_key(&format!("__trait.{name}")),
+        name,
+        methods,
+    })
+}
+
 fn register_class_field_aliases(
     aliases: &mut HashMap<String, String>,
     class: &str,
@@ -974,6 +1223,26 @@ fn register_class_field_aliases(
         }
     }
     Ok(())
+}
+
+fn register_trait_aliases(
+    aliases: &mut HashMap<String, String>,
+    declaration: &severian_ast::TraitDecl,
+) {
+    aliases.insert(format!("__trait.{}", declaration.name.name), String::new());
+    aliases
+        .entry(format!("__class_fields.{}", declaration.name.name))
+        .or_default();
+    aliases
+        .entry(format!("__class_methods.{}", declaration.name.name))
+        .or_insert_with(|| {
+            declaration
+                .methods
+                .iter()
+                .map(|method| method.name.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
 }
 
 fn encode_field_type(ty: ValueType) -> &'static str {
@@ -1057,6 +1326,123 @@ fn expression_class(
         }
         _ => None,
     }
+}
+
+fn file_read_result_class(expression: &Expr, aliases: &HashMap<String, String>) -> Option<String> {
+    let Expr::Call(call) = expression else {
+        return None;
+    };
+    if called_function_name(call.callee.as_ref(), aliases).as_deref() != Some("file.read") {
+        return None;
+    }
+    let literal_class = call.args.first().and_then(|argument| {
+        let Expr::Literal(Literal::String { value, .. }) = &argument.value else {
+            return None;
+        };
+        file_class_for_literal_path(value)
+    });
+    Some(literal_class.unwrap_or("File").to_owned())
+}
+
+fn file_read_receiver_type(
+    expression: &Expr,
+    aliases: &HashMap<String, String>,
+) -> Option<ReceiverType> {
+    let name = file_read_result_class(expression, aliases)?;
+    let concrete = !aliases.contains_key(&format!("__trait.{name}"));
+    let methods = aliases
+        .get(&format!("__class_methods.{name}"))
+        .filter(|methods| !methods.is_empty())
+        .map(|methods| methods.split(',').map(str::to_owned).collect())
+        .unwrap_or_default();
+    Some(ReceiverType {
+        name,
+        concrete,
+        methods,
+    })
+}
+
+fn called_function_name(callee: &Expr, aliases: &HashMap<String, String>) -> Option<String> {
+    match callee {
+        Expr::Identifier(identifier) => Some(
+            aliases
+                .get(&identifier.name)
+                .cloned()
+                .unwrap_or_else(|| identifier.name.clone()),
+        ),
+        Expr::Member(member) => {
+            let Expr::Identifier(module) = member.object.as_ref() else {
+                return None;
+            };
+            let module = aliases
+                .get(&module.name)
+                .map(String::as_str)
+                .unwrap_or(&module.name);
+            Some(format!("{module}.{}", member.member.name))
+        }
+        _ => None,
+    }
+}
+
+fn file_class_for_literal_path(path: &str) -> Option<&'static str> {
+    let extension = path.rsplit_once('.').map(|(_, extension)| extension)?;
+    if extension.eq_ignore_ascii_case("wav") {
+        Some("WAV")
+    } else if extension.eq_ignore_ascii_case("csv") {
+        Some("CSV")
+    } else if extension.eq_ignore_ascii_case("mp3") {
+        Some("MP3")
+    } else if [
+        "txt", "text", "md", "sev", "toml", "json", "xml", "html", "log",
+    ]
+    .iter()
+    .any(|known| extension.eq_ignore_ascii_case(known))
+    {
+        Some("Text")
+    } else {
+        None
+    }
+}
+
+fn refine_success_pattern_bindings(
+    pattern: &MatchPattern,
+    class: &str,
+    scope: &mut HashMap<String, Binding>,
+) {
+    let MatchPattern::Constructor { name, fields } = pattern else {
+        return;
+    };
+    if name != "ok" {
+        return;
+    }
+    for field in fields {
+        if let MatchPattern::Bind(name) = field {
+            if let Some(binding) = scope.get_mut(name) {
+                binding.class = Some(class.to_owned());
+            }
+        }
+    }
+}
+
+fn success_pattern_receivers(
+    pattern: &MatchPattern,
+    receiver: &ReceiverType,
+) -> BTreeMap<String, ReceiverType> {
+    let MatchPattern::Constructor { name, fields } = pattern else {
+        return BTreeMap::new();
+    };
+    if name != "ok" {
+        return BTreeMap::new();
+    }
+    fields
+        .iter()
+        .filter_map(|field| {
+            let MatchPattern::Bind(name) = field else {
+                return None;
+            };
+            Some((name.clone(), receiver.clone()))
+        })
+        .collect()
 }
 
 fn imports_entire_module(module: &Module, module_name: &str) -> bool {
@@ -1145,6 +1531,10 @@ fn lower_class_function(
             name: param.name.name.clone(),
             ty,
             default,
+            receiver: param
+                .ty
+                .as_ref()
+                .and_then(|ty| declared_receiver_type(ty, aliases)),
         });
     }
     let mut instructions = lower_block(body, &mut scope, return_type, signatures, aliases)?;
@@ -1578,11 +1968,13 @@ fn lower_block(
             }
             Stmt::TryBind(binding) => {
                 let (value, _) = lower_expression(&binding.value, scope, signatures, aliases)?;
+                let receiver = file_read_receiver_type(&binding.value, aliases);
+                let class = receiver.as_ref().map(|receiver| receiver.name.clone());
                 scope.insert(
                     binding.name.name.clone(),
                     Binding {
                         ty: ValueType::Any,
-                        class: None,
+                        class,
                         function_return: None,
                         collection_len: None,
                         mutable: false,
@@ -1594,6 +1986,7 @@ fn lower_block(
                 instructions.push(Instruction::TryLet {
                     name: binding.name.name.clone(),
                     value,
+                    receiver,
                 });
             }
             Stmt::Expr(expression) => {
@@ -1791,6 +2184,9 @@ fn lower_block(
                 });
             }
             Stmt::Switch(statement) => {
+                let file_receiver = (statement.values.len() == 1)
+                    .then(|| file_read_receiver_type(&statement.values[0], aliases))
+                    .flatten();
                 let setup = statement
                     .setup
                     .as_ref()
@@ -1822,6 +2218,13 @@ fn lower_block(
                 for arm in &statement.arms {
                     let mut arm_scope = scope.clone();
                     let pattern = lower_pattern(&arm.pattern, &mut arm_scope, aliases)?;
+                    if let Some(receiver) = &file_receiver {
+                        refine_success_pattern_bindings(&pattern, &receiver.name, &mut arm_scope);
+                    }
+                    let receivers = file_receiver
+                        .as_ref()
+                        .map(|receiver| success_pattern_receivers(&pattern, receiver))
+                        .unwrap_or_default();
                     let source = arm
                         .source
                         .as_ref()
@@ -1845,6 +2248,7 @@ fn lower_block(
                         pattern,
                         guard,
                         instructions: arm_instructions,
+                        receivers,
                     });
                 }
                 if statement.values.len() == 1
@@ -2694,6 +3098,7 @@ fn lower_call(
         let known_field = dynamic_object_access
             .then_some(())
             .and_then(|()| object_class.as_ref())
+            .filter(|class| !aliases.contains_key(&format!("__trait.{class}")))
             .and_then(|class| {
                 let Expr::Literal(Literal::String { value, .. }) =
                     call.args.first().map(|argument| &argument.value)?

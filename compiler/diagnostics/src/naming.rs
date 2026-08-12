@@ -794,6 +794,9 @@ fn canonical_technical(value: &str) -> Option<&'static str> {
         "XLA",
         "StableHLO",
         "PJRT",
+        "WAV",
+        "CSV",
+        "MP3",
     ]
     .into_iter()
     .find(|canonical| canonical.eq_ignore_ascii_case(value))

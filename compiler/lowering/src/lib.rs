@@ -182,6 +182,17 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));
+    for dispatch in dynamic_method_dispatches(program) {
+        write!(output, "  llvm.func @{}(!llvm.ptr", dispatch.symbol).unwrap();
+        for parameter in &dispatch.params {
+            write!(output, ", {}", mlir_type(*parameter)).unwrap();
+        }
+        output.push(')');
+        if dispatch.returns != ValueType::Unit {
+            write!(output, " -> {}", mlir_type(dispatch.returns)).unwrap();
+        }
+        output.push('\n');
+    }
 
     let mut fusion_runtime_symbols = HashSet::new();
     let mut scanned_program = program.clone();
@@ -571,6 +582,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         field_types: HashMap::new(),
         field_classes: HashMap::new(),
         object_classes: HashMap::new(),
+        receiver_types: HashMap::new(),
         declared_return: function.return_type,
         task_results: HashMap::new(),
         channel_types: HashMap::new(),
@@ -588,6 +600,15 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         is_main,
         placement: TaskPlacement::Default,
     };
+    for (index, parameter) in function.params.iter().enumerate() {
+        if let Some(receiver) = &parameter.receiver {
+            let value = format!("%arg_{index}");
+            context
+                .object_classes
+                .insert(value.clone(), receiver.name.clone());
+            context.receiver_types.insert(value, receiver.clone());
+        }
+    }
     for global in environment.globals {
         let value = context.lower_expression(&global.value);
         context.variables.insert(global.name.clone(), value);
@@ -657,6 +678,7 @@ fn lower_class_function(
             .filter_map(|(field, class)| class.map(|class| (field, class)))
             .collect(),
         object_classes: HashMap::from([("%self".into(), class.name.clone())]),
+        receiver_types: HashMap::new(),
         task_results: HashMap::new(),
         channel_types: HashMap::new(),
         variables: function
@@ -674,6 +696,15 @@ fn lower_class_function(
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
     };
+    for (index, parameter) in function.params.iter().enumerate() {
+        if let Some(receiver) = &parameter.receiver {
+            let value = format!("%arg_{index}");
+            context
+                .object_classes
+                .insert(value.clone(), receiver.name.clone());
+            context.receiver_types.insert(value, receiver.clone());
+        }
+    }
     for global in environment.globals {
         let value = context.lower_expression(&global.value);
         context.variables.insert(global.name.clone(), value);
@@ -705,6 +736,7 @@ struct LowerContext<'a> {
     field_types: HashMap<String, ValueType>,
     field_classes: HashMap<String, String>,
     object_classes: HashMap<String, String>,
+    receiver_types: HashMap<String, severian_hir::ReceiverType>,
     task_results: HashMap<String, ValueType>,
     channel_types: HashMap<String, ValueType>,
     variables: HashMap<String, (String, ValueType)>,
@@ -729,7 +761,11 @@ impl LowerContext<'_> {
                     let lowered = self.lower_expression(value);
                     self.variables.insert(name.clone(), lowered);
                 }
-                Instruction::TryLet { name, value } => {
+                Instruction::TryLet {
+                    name,
+                    value,
+                    receiver,
+                } => {
                     let (result, _) = self.lower_expression(value);
                     let ok_tag = self.string_address("ok");
                     let succeeded = self.fresh_value();
@@ -751,6 +787,12 @@ impl LowerContext<'_> {
                     writeln!(self.output, "  ^bb{success_block}:").unwrap();
                     let payload = self.fresh_value();
                     writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    if let Some(receiver) = receiver {
+                        self.object_classes
+                            .insert(payload.clone(), receiver.name.clone());
+                        self.receiver_types
+                            .insert(payload.clone(), receiver.clone());
+                    }
                     self.variables
                         .insert(name.clone(), (payload, ValueType::Any));
                     self.terminated = false;
@@ -1578,7 +1620,9 @@ impl LowerContext<'_> {
             } if matches!(
                 method.as_str(),
                 "len" | "size" | "bytes" | "bits" | "capacity"
-            ) && args.is_empty() =>
+            ) && args.is_empty()
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
             {
                 let (value, ty) = self.lower_expression(object);
                 if let ValueType::Tensor(tensor) = ty {
@@ -2253,20 +2297,143 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|arg| self.lower_expression(arg))
                     .collect::<Vec<_>>();
-                let inferred_classes = self
+                let inferred_methods = self
                     .classes
                     .iter()
-                    .filter(|candidate| {
-                        candidate.methods.iter().any(|definition| {
-                            definition.name == *method && definition.params.len() == args.len()
-                        })
+                    .filter_map(|class| {
+                        class
+                            .methods
+                            .iter()
+                            .find(|definition| {
+                                definition.name == *method && definition.params.len() == args.len()
+                            })
+                            .map(|definition| (class, definition))
                     })
-                    .map(|candidate| candidate.name.clone())
                     .collect::<Vec<_>>();
-                let class =
-                    self.object_classes.get(&object).cloned().or_else(|| {
-                        (inferred_classes.len() == 1).then(|| inferred_classes[0].clone())
+                let class = self.object_classes.get(&object).cloned().or_else(|| {
+                    (inferred_methods.len() == 1).then(|| inferred_methods[0].0.name.clone())
+                });
+                if let Some(receiver) = self.receiver_types.get(&object) {
+                    if !receiver.concrete && receiver.methods.iter().any(|name| name == method) {
+                        let first = inferred_methods[0].1;
+                        let params = first
+                            .params
+                            .iter()
+                            .map(|parameter| parameter.ty)
+                            .collect::<Vec<_>>();
+                        let lowered = lowered_args
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .map(|(index, argument)| {
+                                let expected = params[index];
+                                if argument.1 == ValueType::Any && expected != ValueType::Any {
+                                    self.unbox_value(argument, expected)
+                                } else if expected == ValueType::Any && argument.1 != ValueType::Any
+                                {
+                                    (self.box_value(argument), ValueType::Any)
+                                } else {
+                                    argument
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let values = lowered
+                            .iter()
+                            .map(|(value, _)| value.as_str())
+                            .collect::<Vec<_>>();
+                        let mut operands = object.clone();
+                        if !values.is_empty() {
+                            operands.push_str(", ");
+                            operands.push_str(&values.join(", "));
+                        }
+                        let mut types = String::from("!llvm.ptr");
+                        for parameter in &params {
+                            write!(types, ", {}", mlir_type(*parameter)).unwrap();
+                        }
+                        let symbol =
+                            dynamic_method_dispatch_symbol(method, &params, first.return_type);
+                        if first.return_type == ValueType::Unit {
+                            writeln!(
+                                self.output,
+                                "    llvm.call @{symbol}({operands}) : ({types}) -> ()"
+                            )
+                            .unwrap();
+                            return (String::new(), ValueType::Unit);
+                        }
+                        let result = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @{symbol}({operands}) : ({types}) -> {}",
+                            mlir_type(first.return_type)
+                        )
+                        .unwrap();
+                        return (result, first.return_type);
+                    }
+                }
+                if class.is_none() && inferred_methods.len() > 1 {
+                    let first = inferred_methods[0].1;
+                    let params = first
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect::<Vec<_>>();
+                    let uniform = inferred_methods.iter().all(|(_, definition)| {
+                        definition.return_type == first.return_type
+                            && definition
+                                .params
+                                .iter()
+                                .map(|parameter| parameter.ty)
+                                .eq(params.iter().copied())
                     });
+                    if uniform {
+                        let lowered_args = lowered_args
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, argument)| {
+                                let expected = params[index];
+                                if argument.1 == ValueType::Any && expected != ValueType::Any {
+                                    self.unbox_value(argument, expected)
+                                } else if expected == ValueType::Any && argument.1 != ValueType::Any
+                                {
+                                    (self.box_value(argument), ValueType::Any)
+                                } else {
+                                    argument
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let values = lowered_args
+                            .iter()
+                            .map(|(value, _)| value.as_str())
+                            .collect::<Vec<_>>();
+                        let mut operands = object.clone();
+                        if !values.is_empty() {
+                            operands.push_str(", ");
+                            operands.push_str(&values.join(", "));
+                        }
+                        let mut types = String::from("!llvm.ptr");
+                        for parameter in &params {
+                            write!(types, ", {}", mlir_type(*parameter)).unwrap();
+                        }
+                        let symbol =
+                            dynamic_method_dispatch_symbol(method, &params, first.return_type);
+                        if first.return_type == ValueType::Unit {
+                            writeln!(
+                                self.output,
+                                "    llvm.call @{symbol}({operands}) : ({types}) -> ()"
+                            )
+                            .unwrap();
+                            return (String::new(), ValueType::Unit);
+                        }
+                        let result = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @{symbol}({operands}) : ({types}) -> {}",
+                            mlir_type(first.return_type)
+                        )
+                        .unwrap();
+                        return (result, first.return_type);
+                    }
+                }
                 let Some(class) = class else {
                     if method == "draw" {
                         writeln!(
@@ -3417,6 +3584,20 @@ impl LowerContext<'_> {
             })
     }
 
+    fn has_abstract_class_method(&self, object: &Expression, method: &str) -> bool {
+        let Expression::Variable(name) = object.kind() else {
+            return false;
+        };
+        let Some(receiver) = self
+            .variables
+            .get(name)
+            .and_then(|(value, _)| self.receiver_types.get(value))
+        else {
+            return false;
+        };
+        !receiver.concrete && receiver.methods.iter().any(|name| name == method)
+    }
+
     fn object_field_metadata(
         &self,
         object: &str,
@@ -4368,6 +4549,7 @@ impl LowerContext<'_> {
                     .unwrap();
                 } else {
                     writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                    let successful_result = name == "ok";
                     if !fields.is_empty() {
                         let payload = self.fresh_value();
                         writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
@@ -4388,6 +4570,13 @@ impl LowerContext<'_> {
                                 writeln!(self.output, "    {field} = llvm.call @__sev_collection_get({payload}, {index_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
                                 field
                             };
+                            if successful_result {
+                                if let Some(receiver) = arm.receivers.get(name) {
+                                    self.object_classes
+                                        .insert(field.clone(), receiver.name.clone());
+                                    self.receiver_types.insert(field.clone(), receiver.clone());
+                                }
+                            }
                             bound.push((
                                 name.clone(),
                                 self.variables.insert(name.clone(), (field, ValueType::Any)),
@@ -5754,6 +5943,12 @@ fn native_bridge_source_for_target(
         "void *__sev_path_basename(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); return strdup(slash ? slash + 1 : path); }\n",
         "void *__sev_path_dirname(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); if (!slash) return strdup(\".\"); if (slash == path) return strdup(\"/\"); return sev_string_range(path, 0, (int64_t)(slash - path)); }\n",
         "void *__sev_path_extension(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); const char *dot = strrchr(path, '.'); if (!dot || (slash && dot < slash) || dot == (slash ? slash + 1 : path)) return strdup(\"\"); return strdup(dot); }\n",
+        "typedef struct { char *extension; void *reader; } sev_file_format_reader_entry;\n",
+        "static sev_file_format_reader_entry *sev_file_format_readers = NULL;\n",
+        "static int64_t sev_file_format_reader_count = 0;\n",
+        "static int64_t sev_file_format_reader_capacity = 0;\n",
+        "void __sev_file_format_register(void *extension_raw, void *reader) { const char *extension = extension_raw; for (int64_t index = 0; index < sev_file_format_reader_count; ++index) if (strcmp(sev_file_format_readers[index].extension, extension) == 0) { sev_file_format_readers[index].reader = reader; return; } if (sev_file_format_reader_count == sev_file_format_reader_capacity) { sev_file_format_reader_capacity = sev_file_format_reader_capacity ? sev_file_format_reader_capacity * 2 : 8; sev_file_format_readers = realloc(sev_file_format_readers, (size_t)sev_file_format_reader_capacity * sizeof(*sev_file_format_readers)); if (!sev_file_format_readers) abort(); } sev_file_format_readers[sev_file_format_reader_count].extension = strdup(extension); sev_file_format_readers[sev_file_format_reader_count].reader = reader; sev_file_format_reader_count += 1; }\n",
+        "void *__sev_file_format_reader(void *extension_raw, void *fallback) { const char *extension = extension_raw; for (int64_t index = sev_file_format_reader_count - 1; index >= 0; --index) if (strcmp(sev_file_format_readers[index].extension, extension) == 0) return sev_file_format_readers[index].reader; return fallback; }\n",
         "void *__sev_path_absolute(void *raw) { const char *path = raw; if (path[0] == '/') return strdup(path); char current[PATH_MAX]; if (!getcwd(current, sizeof(current))) abort(); return __sev_path_join(current, raw); }\n",
         "double __sev_time_seconds(void) { struct timespec value; if (clock_gettime(CLOCK_REALTIME, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
         "double __sev_time_monotonic(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
@@ -6507,6 +6702,55 @@ int64_t __sev_host_page_size(void) {
         .unwrap();
     }
     source.push_str("  abort();\n}\n\n");
+    for dispatch in dynamic_method_dispatches(program) {
+        for class in &dispatch.classes {
+            write!(
+                source,
+                "extern {} {}(void *",
+                c_type(dispatch.returns),
+                class_function_symbol(class, &dispatch.method)
+            )
+            .unwrap();
+            for parameter in &dispatch.params {
+                write!(source, ", {}", c_type(*parameter)).unwrap();
+            }
+            source.push_str(");\n");
+        }
+        write!(
+            source,
+            "{} {}(void *raw",
+            c_type(dispatch.returns),
+            dispatch.symbol
+        )
+        .unwrap();
+        for (index, parameter) in dispatch.params.iter().enumerate() {
+            write!(source, ", {} arg_{index}", c_type(*parameter)).unwrap();
+        }
+        source.push_str(") { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC) abort();\n");
+        let arguments = (0..dispatch.params.len())
+            .map(|index| format!(", arg_{index}"))
+            .collect::<String>();
+        for class in &dispatch.classes {
+            let call = format!(
+                "{}(raw{arguments})",
+                class_function_symbol(class, &dispatch.method)
+            );
+            if dispatch.returns == ValueType::Unit {
+                writeln!(
+                    source,
+                    "  if (strcmp(value->class_name, {class:?}) == 0) {{ {call}; return; }}"
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    source,
+                    "  if (strcmp(value->class_name, {class:?}) == 0) return {call};"
+                )
+                .unwrap();
+            }
+        }
+        source.push_str("  abort();\n}\n\n");
+    }
     let mut return_types = specs
         .iter()
         .map(|spec| spec.return_type)
@@ -6883,6 +7127,68 @@ fn mangle_symbol_component(name: &str) -> String {
 
 fn class_function_symbol(class: &str, method: &str) -> String {
     format!("__sev_method_{class}_{method}")
+}
+
+#[derive(Debug, Clone)]
+struct DynamicMethodDispatch {
+    symbol: String,
+    method: String,
+    params: Vec<ValueType>,
+    returns: ValueType,
+    classes: Vec<String>,
+}
+
+fn dynamic_method_dispatches(program: &Program) -> Vec<DynamicMethodDispatch> {
+    let mut groups = HashMap::<(String, Vec<ValueType>, ValueType), Vec<String>>::new();
+    for class in &program.classes {
+        for method in &class.methods {
+            let params = method
+                .params
+                .iter()
+                .map(|parameter| parameter.ty)
+                .collect::<Vec<_>>();
+            groups
+                .entry((method.name.clone(), params, method.return_type))
+                .or_default()
+                .push(class.name.clone());
+        }
+    }
+    let mut dispatches = groups
+        .into_iter()
+        .map(|((method, params, returns), mut classes)| {
+            classes.sort();
+            DynamicMethodDispatch {
+                symbol: dynamic_method_dispatch_symbol(&method, &params, returns),
+                method,
+                params,
+                returns,
+                classes,
+            }
+        })
+        .collect::<Vec<_>>();
+    dispatches.sort_by(|left, right| left.symbol.cmp(&right.symbol));
+    dispatches
+}
+
+fn dynamic_method_dispatch_symbol(
+    method: &str,
+    params: &[ValueType],
+    returns: ValueType,
+) -> String {
+    let mut signature = params
+        .iter()
+        .map(|ty| task_type_suffix(*ty))
+        .collect::<Vec<_>>()
+        .join("_");
+    if signature.is_empty() {
+        signature.push_str("none");
+    }
+    format!(
+        "__sev_dispatch_{}_{}_{}",
+        mangle_symbol_component(method),
+        signature,
+        task_type_suffix(returns)
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

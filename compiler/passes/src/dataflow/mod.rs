@@ -74,7 +74,7 @@ pub fn optimize_function(function: &mut Function) {
 fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
     for instruction in instructions {
         match instruction {
-            Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+            Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 substitute_expression(value, facts, &mut HashSet::new());
                 facts.bind(name.clone(), value);
             }

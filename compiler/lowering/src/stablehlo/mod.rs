@@ -210,7 +210,7 @@ fn lower_straight_line(
 ) -> Result<Option<MlirValue>, StableHloLoweringError> {
     for instruction in instructions {
         match instruction {
-            Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+            Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 let value = lower_expression(context, function, value, None, values, emitter)?;
                 values.insert(name.clone(), value);
             }

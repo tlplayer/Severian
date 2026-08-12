@@ -138,6 +138,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_print_space()\n",
             "  llvm.func @__sev_print_newline()\n",
             "  llvm.func @__sev_object_new(!llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
             "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
             "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",

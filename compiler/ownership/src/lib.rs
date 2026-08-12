@@ -138,7 +138,7 @@ impl Checker {
 
     fn check_instruction(&mut self, instruction: &Instruction) -> Result<(), OwnershipError> {
         match instruction {
-            Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+            Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 let loan = self.check_initializer(name, value)?;
                 self.define(name.clone(), loan);
             }

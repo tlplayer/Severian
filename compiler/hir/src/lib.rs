@@ -467,6 +467,7 @@ pub struct Parameter {
     pub name: String,
     pub ty: ValueType,
     pub default: Option<Expression>,
+    pub receiver: Option<ReceiverType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -615,6 +616,7 @@ pub enum Instruction {
     TryLet {
         name: String,
         value: Expression,
+        receiver: Option<ReceiverType>,
     },
     Assign {
         target: Expression,
@@ -667,6 +669,14 @@ pub struct SwitchArm {
     pub pattern: MatchPattern,
     pub guard: Option<Expression>,
     pub instructions: Vec<Instruction>,
+    pub receivers: BTreeMap<String, ReceiverType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiverType {
+    pub name: String,
+    pub concrete: bool,
+    pub methods: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -458,6 +458,7 @@ mod tests {
                     name: "value".into(),
                     ty: ValueType::Tensor(tensor),
                     default: None,
+                    receiver: None,
                 }],
                 return_type: ValueType::Tensor(tensor),
                 instructions: vec![Instruction::Return(Some(Expression::Call {

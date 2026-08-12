@@ -2,7 +2,7 @@
 name = "file"
 version = "0.1.0"
 edition = "2026"
-description = "File operations and owned file handles"
+description = "Trait-backed file format dispatch and file operations"
 
 [lib]
 path = "src/lib.sev"

@@ -1,0 +1,26 @@
+import "src/file_interface.sev" as file_interface
+import platform
+
+class Text: file_interface.File
+    source_path: string
+    content: string
+
+    def path() -> string:
+        return source_path
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "text"
+
+    def media_type() -> string:
+        return "text/plain"
+
+    def bytes() -> int:
+        return size(platform.string_encode(content))
+
+class TextReader: file_interface.Reader
+    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+        content ?= platform.file_read(path)
+        return Text(path, content)

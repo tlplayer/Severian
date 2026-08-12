@@ -60,6 +60,9 @@ pub struct CompilerMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackageInterface {
     pub name: String,
+    /// Package namespace that publicly exposes this package-local module's
+    /// classes and traits. Local implementation functions retain `name`.
+    pub export_package: Option<String>,
     pub module: Module,
     pub compiler: CompilerMetadata,
     pub source_path: PathBuf,
@@ -70,6 +73,13 @@ pub struct PackageInterface {
 pub struct EmbeddedOfficialPackage<'a> {
     pub name: &'a str,
     pub manifest: &'a str,
+    pub source: &'a str,
+    pub modules: &'a [EmbeddedOfficialModule<'a>],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EmbeddedOfficialModule<'a> {
+    pub path: &'a str,
     pub source: &'a str,
 }
 
@@ -802,17 +812,14 @@ pub fn load_transient_dependency_interfaces(
 fn load_dependency_interfaces(
     resolution: Resolution,
 ) -> Result<Vec<PackageInterface>, PackageError> {
-    let mut interfaces = resolution
-        .dependencies
-        .into_iter()
-        .map(|dependency| {
-            load_interface_as(
-                &dependency.import_name,
-                &dependency.package_name,
-                &dependency.root,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut interfaces = Vec::new();
+    for dependency in resolution.dependencies {
+        interfaces.extend(load_interface_tree_as(
+            &dependency.import_name,
+            &dependency.package_name,
+            &dependency.root,
+        )?);
+    }
     interfaces.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(interfaces)
 }
@@ -919,6 +926,7 @@ fn collect_local_interfaces(
         collect_local_interfaces(&imported, project_root, visited, names, interfaces)?;
         interfaces.push(PackageInterface {
             name: module_name,
+            export_package: None,
             module: imported,
             compiler: CompilerMetadata::default(),
             source_path,
@@ -1007,9 +1015,10 @@ pub fn load_official_interfaces(
         }) else {
             continue;
         };
-        let interface = load_interface(&name, &directory)?;
-        pending.extend(imported_packages(&interface.module));
-        interfaces.push(interface);
+        for interface in load_interface_tree_as(&name, &name, &directory)? {
+            pending.extend(imported_packages(&interface.module));
+            interfaces.push(interface);
+        }
     }
     interfaces.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(interfaces)
@@ -1063,6 +1072,27 @@ pub fn load_embedded_official_interfaces(
         )?;
         pending.extend(imported_packages(&interface.module));
         interfaces.push(interface);
+        for embedded in package.modules {
+            let module_name = local_import_module_name(embedded.path).ok_or_else(|| {
+                PackageError::Manifest(format!(
+                    "embedded module path `{}` in package `{}` is invalid",
+                    embedded.path, package.name
+                ))
+            })?;
+            let module_path = PathBuf::from("<severian-stdlib>")
+                .join(package.name)
+                .join(embedded.path);
+            let mut interface = load_interface_source(
+                &module_name,
+                &manifest,
+                &manifest_path,
+                module_path,
+                embedded.source.to_owned(),
+            )?;
+            interface.export_package = Some(name.clone());
+            pending.extend(imported_packages(&interface.module));
+            interfaces.push(interface);
+        }
     }
     interfaces.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(interfaces)
@@ -1103,8 +1133,20 @@ fn imported_packages(module: &Module) -> HashSet<String> {
         .collect()
 }
 
-fn load_interface(name: &str, directory: &Path) -> Result<PackageInterface, PackageError> {
-    load_interface_as(name, name, directory)
+fn load_interface_tree_as(
+    import_name: &str,
+    expected_package: &str,
+    directory: &Path,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let root = load_interface_as(import_name, expected_package, directory)?;
+    let mut local = load_local_interfaces(&root.module, directory)?;
+    for interface in &mut local {
+        interface.export_package = Some(import_name.to_owned());
+    }
+    let mut interfaces = Vec::with_capacity(local.len() + 1);
+    interfaces.push(root);
+    interfaces.extend(local);
+    Ok(interfaces)
 }
 
 fn load_interface_as(
@@ -1169,6 +1211,7 @@ fn load_interface_source(
     })?;
     Ok(PackageInterface {
         name: name.into(),
+        export_package: None,
         module,
         compiler: compiler_metadata(name, manifest, manifest_path)?,
         source_path,

@@ -5,7 +5,7 @@ def main():
     path = "/tmp/severian-getting-started-imports.txt"
     switch file.write(path, string(distance)):
         ok:
-            switch file.read(path):
+            switch file.read_text(path):
                 ok file_distance:
                     print(file_distance)
                 failure error:

@@ -1,0 +1,64 @@
+import "src/file_interface.sev" as file_interface
+import platform
+
+class CSV: file_interface.File
+    source_path: string
+    content: string
+    rows: list[list[string]]
+
+    def path() -> string:
+        return source_path
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "csv"
+
+    def media_type() -> string:
+        return "text/csv"
+
+    def bytes() -> int:
+        return size(platform.string_encode(content))
+
+class CsvReader: file_interface.Reader
+    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+        content ?= platform.file_read(path)
+        rows := []
+        row := []
+        field := ""
+        quoted := false
+        characters = content.characters()
+        index := 0
+        while index < size(characters):
+            character = characters[index]
+            if quoted:
+                if character == "\"":
+                    if index + 1 < size(characters) and characters[index + 1] == "\"":
+                        field += "\""
+                        index += 1
+                    else:
+                        quoted = false
+                else:
+                    field += character
+            else:
+                if character == "\"":
+                    quoted = true
+                else:
+                    if character == ",":
+                        row.append(field)
+                        field = ""
+                    else:
+                        if character == "\n":
+                            row.append(field)
+                            rows.append(row)
+                            row = []
+                            field = ""
+                        else:
+                            if character != "\r":
+                                field += character
+            index += 1
+        if field != "" or size(row) > 0:
+            row.append(field)
+            rows.append(row)
+        return CSV(path, content, rows)

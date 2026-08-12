@@ -1,0 +1,32 @@
+import "src/file_interface.sev" as file_interface
+import platform
+
+class MP3: file_interface.File
+    source_path: string
+    data: list[int]
+    has_id3: bool
+
+    def path() -> string:
+        return source_path
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "mp3"
+
+    def media_type() -> string:
+        return "audio/mpeg"
+
+    def bytes() -> int:
+        return size(data)
+
+class Mp3Reader: file_interface.Reader
+    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+        handle ?= platform.file_open_binary(path)
+        length ?= platform.file_size(handle)
+        loaded ?= platform.file_read_exact(handle, length)
+        data: list[int] = loaded
+        _closed ?= platform.file_close(handle)
+        has_id3 = size(data) >= 3 and data[0:3] == [73, 68, 51]
+        return MP3(path, data, has_id3)

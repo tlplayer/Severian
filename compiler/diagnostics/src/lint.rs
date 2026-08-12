@@ -124,7 +124,7 @@ fn collect_bindings_and_uses(
 ) {
     for instruction in instructions {
         match instruction {
-            Instruction::Let { name, value } | Instruction::TryLet { name, value } => {
+            Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 defined.insert(name.clone());
                 inspect_expression(value, used, config, bag, false);
             }

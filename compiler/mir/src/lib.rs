@@ -188,7 +188,7 @@ impl FunctionBuilder {
                 Instruction::Let { name, value } => {
                     self.operation(block, OperationKind::Bind(name.clone()), [value_ref(value)])
                 }
-                Instruction::TryLet { name, value } => self.operation(
+                Instruction::TryLet { name, value, .. } => self.operation(
                     block,
                     OperationKind::TryBind(name.clone()),
                     [value_ref(value)],

@@ -92,6 +92,127 @@ def main():
 }
 
 #[test]
+fn file_read_dispatches_formats_and_accepts_trait_decoders() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "severian-file-formats-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let text = root.join("note.txt");
+    let csv = root.join("people.csv");
+    let mp3 = root.join("sound.mp3");
+    let wav = root.join("sound.wav");
+    let playlist = root.join("music.m3u");
+    std::fs::write(&text, "hello").unwrap();
+    std::fs::write(&csv, "name,note\nAda,\"compiler, author\"\n").unwrap();
+    std::fs::write(&mp3, b"ID3payload").unwrap();
+    let mut wav_header = vec![0_u8; 44];
+    wav_header[0..4].copy_from_slice(b"RIFF");
+    wav_header[8..12].copy_from_slice(b"WAVE");
+    wav_header[22..24].copy_from_slice(&2_u16.to_le_bytes());
+    wav_header[24..28].copy_from_slice(&48_000_u32.to_le_bytes());
+    wav_header[34..36].copy_from_slice(&16_u16.to_le_bytes());
+    std::fs::write(&wav, wav_header).unwrap();
+    std::fs::write(&playlist, "one.mp3\ntwo.mp3").unwrap();
+
+    let source = root.join("main.sev");
+    std::fs::write(
+        &source,
+        format!(
+            r#"import file
+
+class Playlist: file.File
+    source_path: string
+    tracks: list[string]
+
+    def path() -> string:
+        return source_path
+
+    def extension() -> string:
+        return ".m3u"
+
+    def kind() -> string:
+        return "playlist"
+
+    def media_type() -> string:
+        return "audio/x-playlist"
+
+    def bytes() -> int:
+        return size(tracks.join("\n"))
+
+class PlaylistReader: file.Reader
+    def read(path: string) -> Result[file.File, IOError | file.FormatError]:
+        content ?= file.read_text(path)
+        return Playlist(path, content.split("\n"))
+
+def main():
+    file.register("m3u", PlaylistReader())
+    switch file.read("{}"):
+        ok document:
+            assert(document.kind() == "text")
+            assert(document.extension() == ".txt")
+            assert(document.bytes() == 5)
+            assert(document.content == "hello")
+        failure error:
+            assert(false, error)
+    switch file.read("{}"):
+        ok document:
+            assert(document.kind() == "csv")
+            assert(document.rows == [["name", "note"], ["Ada", "compiler, author"]])
+        failure error:
+            assert(false, error)
+    switch file.read("{}"):
+        ok document:
+            assert(document.kind() == "mp3")
+            assert(document.extension() == ".mp3")
+            assert(document.has_id3)
+        failure error:
+            assert(false, error)
+    switch file.read("{}"):
+        ok document:
+            assert(document.kind() == "wav")
+            assert(document.bytes() == 44)
+            assert(document.channels == 2)
+            assert(document.sample_rate == 48000)
+            assert(document.bits_per_sample == 16)
+        failure error:
+            assert(false, error)
+    switch file.read("{}"):
+        ok document:
+            assert(document.kind() == "playlist")
+            assert(document.bytes() == 15)
+            assert(document.get("tracks") == ["one.mp3", "two.mp3"])
+        failure error:
+            assert(false, error)
+"#,
+            text.display(),
+            csv.display(),
+            mp3.display(),
+            wav.display(),
+            playlist.display(),
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn all_requested_packages_are_workspace_members() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library/package.toml");
     let manifest = std::fs::read_to_string(workspace).unwrap();
