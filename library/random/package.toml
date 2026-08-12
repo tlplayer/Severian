@@ -1,0 +1,11 @@
+[package]
+name = "random"
+version = "0.1.0"
+edition = "2026"
+description = "Deterministic pseudo-random generation"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }

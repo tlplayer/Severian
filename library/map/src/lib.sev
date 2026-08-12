@@ -1,0 +1,25 @@
+import platform
+
+def get[key, value](values: map[key, value], name: key, fallback: value) -> value:
+    return values.get(name, fallback)
+
+def keys[key, value](values: map[key, value]) -> list[key]:
+    return values.keys()
+
+def values[key, value](items: map[key, value]) -> list[value]:
+    return items.values()
+
+def items[key, value](values: map[key, value]) -> list[tuple[key, value]]:
+    return platform.map_items(values)
+
+def update[key, value](values: map[key, value], additions: map[key, value]):
+    platform.map_update(values, additions)
+
+def pop[key, value](values: map[key, value], name: key, fallback: value) -> value:
+    return platform.map_pop(values, name, fallback)
+
+def clear[key, value](values: map[key, value]):
+    platform.map_clear(values)
+
+def setdefault[key, value](values: map[key, value], name: key, fallback: value) -> value:
+    return values.setDefault(name, fallback)

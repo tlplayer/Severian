@@ -49,6 +49,7 @@ typedef enum {
   SEV_TENSOR_LAYER_NORM
 } sev_tensor_operation;
 typedef struct sev_tensor {
+  uint64_t magic;
   int64_t rank;
   int64_t *shape;
   int64_t *strides;
@@ -68,6 +69,7 @@ typedef struct { double *allocated; double *aligned; int64_t offset; int64_t siz
 static sev_tensor *sev_tensor_allocate(int64_t rank, const int64_t *shape) {
   if (rank <= 0) abort();
   sev_tensor *tensor = sev_allocate(sizeof(*tensor));
+  tensor->magic = SEV_TENSOR_MAGIC;
   tensor->rank = rank;
   tensor->shape = sev_allocate((size_t)rank * sizeof(*tensor->shape));
   tensor->strides = sev_allocate((size_t)rank * sizeof(*tensor->strides));
@@ -127,12 +129,86 @@ void *__sev_tensor_from_list(void *values_raw, void *shape_raw) {
   return tensor;
 }
 
+static sev_tensor *sev_tensor_from_shape_values(void *shape_raw, double fill) {
+  sev_collection *shape_values = shape_raw;
+  int64_t *shape = sev_allocate((size_t)shape_values->size * sizeof(*shape));
+  for (int64_t axis = 0; axis < shape_values->size; ++axis) shape[axis] = __sev_unbox_i64(shape_values->items[axis]);
+  sev_tensor *tensor = sev_tensor_allocate(shape_values->size, shape);
+  free(shape);
+  for (int64_t index = 0; index < tensor->size; ++index) tensor->data[index] = fill;
+  return tensor;
+}
+
+void *__sev_tensor_zeros(void *shape_raw) { return sev_tensor_from_shape_values(shape_raw, 0.0); }
+void *__sev_tensor_ones(void *shape_raw) { return sev_tensor_from_shape_values(shape_raw, 1.0); }
+void *__sev_tensor_empty(void *shape_raw) { return sev_tensor_from_shape_values(shape_raw, 0.0); }
+
+void *__sev_tensor_arange(int64_t stop) {
+  if (stop < 0) abort();
+  int64_t shape[] = {stop};
+  sev_tensor *tensor = sev_tensor_allocate(1, shape);
+  for (int64_t index = 0; index < stop; ++index) tensor->data[index] = (double)index;
+  return tensor;
+}
+
+void *__sev_tensor_reshape(void *tensor_raw, void *shape_raw) {
+  sev_tensor *input = tensor_raw;
+  sev_collection *shape_values = shape_raw;
+  int64_t *shape = sev_allocate((size_t)shape_values->size * sizeof(*shape));
+  for (int64_t axis = 0; axis < shape_values->size; ++axis) shape[axis] = __sev_unbox_i64(shape_values->items[axis]);
+  sev_tensor *result = sev_tensor_allocate(shape_values->size, shape);
+  free(shape);
+  if (result->size != input->size) abort();
+  for (int64_t index = 0; index < input->size; ++index) result->data[index] = input->data[sev_tensor_offset(input, index)];
+  return result;
+}
+
+double __sev_tensor_mean(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  if (!tensor || tensor->size == 0) abort();
+  double total = 0.0;
+  for (int64_t index = 0; index < tensor->size; ++index) total += tensor->data[sev_tensor_offset(tensor, index)];
+  return total / (double)tensor->size;
+}
+
+double __sev_tensor_max(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  if (!tensor || tensor->size == 0) abort();
+  double result = tensor->data[sev_tensor_offset(tensor, 0)];
+  for (int64_t index = 1; index < tensor->size; ++index) { double value = tensor->data[sev_tensor_offset(tensor, index)]; if (value > result) result = value; }
+  return result;
+}
+
+double __sev_tensor_min(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  if (!tensor || tensor->size == 0) abort();
+  double result = tensor->data[sev_tensor_offset(tensor, 0)];
+  for (int64_t index = 1; index < tensor->size; ++index) { double value = tensor->data[sev_tensor_offset(tensor, index)]; if (value < result) result = value; }
+  return result;
+}
+
 void *__sev_tensor_to_list(void *tensor_raw) {
   sev_tensor *tensor = tensor_raw;
   sev_collection *values = __sev_collection_new(0);
   for (int64_t index = 0; index < tensor->size; ++index)
     __sev_collection_push(values, __sev_box_f64(tensor->data[sev_tensor_offset(tensor, index)]));
   return values;
+}
+
+int64_t __sev_tensor_size(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  if (!tensor) abort();
+  return tensor->size;
+}
+
+int64_t __sev_tensor_bytes(void *tensor_raw) {
+  sev_tensor *tensor = tensor_raw;
+  if (!tensor) abort();
+  return tensor->size * (int64_t)sizeof(*tensor->data);
+}
+
+int64_t __sev_tensor_capacity(void *tensor_raw) {
+  return __sev_tensor_size(tensor_raw);
 }
 
 void *__sev_tensor_shape(void *tensor_raw) {

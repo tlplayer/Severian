@@ -3,6 +3,24 @@ import platform
 def matches(text: string, pattern: string) -> bool:
     return platform.regexMatches(text, pattern)
 
+def compile(pattern: string) -> string:
+    return pattern
+
+def match(pattern: string, text: string) -> bool:
+    return platform.regexMatches(text, "^" + pattern)
+
+def search(pattern: string, text: string) -> bool:
+    return platform.regexMatches(text, pattern)
+
+def findall(pattern: string, text: string) -> list[string]:
+    return platform.regex_findall(text, pattern)
+
+def split(pattern: string, text: string) -> list[string]:
+    return platform.regex_split(text, pattern)
+
+def sub(pattern: string, replacement: string, text: string) -> string:
+    return platform.regex_sub(text, pattern, replacement)
+
 test "POSIX extended matching":
     assert(matches("release-42", "^[a-z]+-[0-9]+$"))
     assert(not matches("release", "^[a-z]+-[0-9]+$"))

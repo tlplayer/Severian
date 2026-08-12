@@ -7,8 +7,10 @@ description = "Portable mathematics and compiler-backed numeric intrinsics"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
 [package.metadata.library]
 category = "numerics"
 implementation = "source-and-intrinsics"
 status = "experimental"
-

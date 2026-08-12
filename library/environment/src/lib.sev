@@ -1,0 +1,10 @@
+import platform
+
+def get(name: string, fallback: string = "") -> string:
+    return platform.environment_get(name, fallback)
+
+def set(name: string, value: string) -> bool:
+    return platform.environment_set(name, value)
+
+def remove(name: string) -> bool:
+    return platform.environment_remove(name)

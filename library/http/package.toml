@@ -1,0 +1,11 @@
+[package]
+name = "http"
+version = "0.1.0"
+edition = "2026"
+description = "HTTP clients and typed server messages"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }

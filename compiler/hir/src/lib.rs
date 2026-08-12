@@ -311,6 +311,17 @@ pub struct Program {
     pub functions: Vec<Function>,
 }
 
+impl Default for Program {
+    fn default() -> Self {
+        Self {
+            metadata: ProgramMetadata::default(),
+            globals: Vec::new(),
+            classes: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
+}
+
 impl Program {
     pub fn attach_source_file(
         &mut self,

@@ -11,6 +11,15 @@ pub struct Program {
     pub functions: Vec<Function>,
 }
 
+impl Default for Program {
+    fn default() -> Self {
+        Self {
+            hir: severian_hir::Program::default(),
+            functions: Vec::new(),
+        }
+    }
+}
+
 impl std::fmt::Debug for Program {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

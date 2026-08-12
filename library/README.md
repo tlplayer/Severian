@@ -14,6 +14,20 @@ dot([1.0, 2.0], [3.0, 4.0])
 Package functions are ordinary `def` declarations with real bodies. There is
 no separate export header or `extern def` form.
 
+The initial general-purpose surface is available through flat imports such as
+`core`, `list`, `map`, `set`, `string`, `math`, `random`, `file`, `path`,
+`json`, `regex`, `time`, `process`, `environment`, `http`, `network`,
+`logging`, and `tensor`. Collection APIs are typed and mutating operations act
+on the supplied collection; OS-backed behavior is implemented behind the
+trusted `platform` boundary.
+
+Length and storage use distinct compiler-level vocabulary: `len(value)` and
+`size(value)` are exact aliases for the number of elements, while
+`bytes(value)` and `bits(value)` report storage size. `capacity(value)` reports
+allocated element slots for resizable containers. The same operations are
+available as methods. For a statically shaped `Tensor[f32, 32, 128]`, both
+`len()` and `size()` are 4096, `bytes()` is 16384, and `bits()` is 131072.
+
 The organization borrows three useful ideas without copying any one ecosystem:
 
 - Python's broad, task-oriented coverage and searchable category index.

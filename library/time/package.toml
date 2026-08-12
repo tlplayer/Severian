@@ -1,0 +1,11 @@
+[package]
+name = "time"
+version = "0.1.0"
+edition = "2026"
+description = "Wall and monotonic clocks"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }

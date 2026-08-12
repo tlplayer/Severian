@@ -1,4 +1,21 @@
 import platform
+import file
+
+def loads[type](text: string) -> Result[type, JsonError]:
+    return decode[type](text)
+
+def dumps[type](value: type) -> string:
+    return encode(value)
+
+def load[type](path: string) -> Result[type, Error]:
+    switch file.read_text(path):
+        ok text:
+            return loads[type](text)
+        failure error:
+            return failure(error)
+
+def dump[type](value: type, path: string) -> Result[unit, IOError]:
+    return file.write_text(path, dumps(value))
 
 def decode[type](text: string) -> Result[type, JsonError]:
     return platform.jsonDecode(text)

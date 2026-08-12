@@ -1,0 +1,25 @@
+import platform
+
+def join(left: string, right: string) -> string:
+    return platform.path_join(left, right)
+
+def exists(value: string) -> bool:
+    return platform.file_exists(value)
+
+def is_file(value: string) -> bool:
+    return platform.path_is_file(value)
+
+def is_dir(value: string) -> bool:
+    return platform.path_is_dir(value)
+
+def basename(value: string) -> string:
+    return platform.path_basename(value)
+
+def dirname(value: string) -> string:
+    return platform.path_dirname(value)
+
+def extension(value: string) -> string:
+    return platform.path_extension(value)
+
+def absolute(value: string) -> string:
+    return platform.path_absolute(value)

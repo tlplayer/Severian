@@ -6,6 +6,24 @@ def read(path: string) -> Result[string, IOError]:
 def write(path: string, contents: string) -> Result[unit, IOError]:
     return platform.fileWrite(path, contents)
 
+def read_text(path: string) -> Result[string, IOError]:
+    return read(path)
+
+def write_text(path: string, contents: string) -> Result[unit, IOError]:
+    return write(path, contents)
+
+def exists(path: string) -> bool:
+    return platform.file_exists(path)
+
+def remove(path: string) -> Result[unit, IOError]:
+    return platform.file_remove(path)
+
+def rename(source: string, destination: string) -> Result[unit, IOError]:
+    return platform.file_rename(source, destination)
+
+def copy(source: string, destination: string) -> Result[unit, IOError]:
+    return platform.file_copy(source, destination)
+
 def open(path: string, mode: string = "rb") -> Result[Any, IOError]:
     if mode != "rb":
         return failure(IOError("binary file mode must be rb"))

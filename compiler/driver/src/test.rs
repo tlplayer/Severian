@@ -11,9 +11,21 @@ pub fn compile_native_tests(
     compilation: &Compilation,
     output: &Path,
 ) -> Result<usize, CompileError> {
-    let (native, count) = native_test_compilation(compilation)?;
-    compile_native(&native, output)?;
-    Ok(count)
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("severian-test-compiler".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                let (native, count) = native_test_compilation(compilation)?;
+                compile_native(&native, output)?;
+                Ok(count)
+            })
+            .map_err(|error| {
+                CompileError::Execution(format!("could not start the test compiler: {error}"))
+            })?
+            .join()
+            .map_err(|_| CompileError::Execution("the test compiler panicked".into()))?
+    })
 }
 
 pub fn native_test_count(program: &Program) -> usize {

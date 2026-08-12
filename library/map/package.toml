@@ -1,0 +1,11 @@
+[package]
+name = "map"
+version = "0.1.0"
+edition = "2026"
+description = "Mutable map operations"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }

@@ -87,6 +87,11 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_value_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_less(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_value_size(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_value_bytes(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_value_capacity(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_tensor_size(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_tensor_bytes(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_tensor_capacity(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_value_index(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_clone(!llvm.ptr) -> !llvm.ptr\n",
@@ -132,6 +137,8 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_map_insert(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_map_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_map_size(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_map_bytes(!llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_map_capacity(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_map_key_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_map_value_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_map_keys(!llvm.ptr) -> !llvm.ptr\n",
@@ -1436,6 +1443,83 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
+            } if matches!(
+                method.as_str(),
+                "len" | "size" | "bytes" | "bits" | "capacity"
+            ) && args.is_empty() =>
+            {
+                let (value, ty) = self.lower_expression(object);
+                if let ValueType::Tensor(tensor) = ty {
+                    if let Some(elements) = static_tensor_elements(tensor) {
+                        let amount = match method.as_str() {
+                            "bytes" => elements * tensor_element_bytes(tensor.element),
+                            "bits" => elements * tensor_element_bytes(tensor.element) * 8,
+                            _ => elements,
+                        };
+                        let result = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.mlir.constant({amount} : i64) : i64"
+                        )
+                        .unwrap();
+                        return (result, ValueType::Int);
+                    }
+                }
+                let runtime = match (method.as_str(), ty) {
+                    ("len" | "size", ValueType::String) => "__sev_string_length",
+                    ("len" | "size", ValueType::Map) => "__sev_map_size",
+                    ("len" | "size", ValueType::Tensor(_) | ValueType::TensorAny) => {
+                        "__sev_tensor_size"
+                    }
+                    ("len" | "size", _) => "__sev_collection_size",
+                    ("capacity", ValueType::Map) => "__sev_map_capacity",
+                    ("capacity", ValueType::Tensor(_) | ValueType::TensorAny) => {
+                        "__sev_tensor_capacity"
+                    }
+                    ("capacity", _) => "__sev_value_capacity",
+                    ("bytes" | "bits", ValueType::Map) => "__sev_map_bytes",
+                    ("bytes" | "bits", ValueType::Tensor(_) | ValueType::TensorAny) => {
+                        "__sev_tensor_bytes"
+                    }
+                    ("bytes" | "bits", _) => "__sev_value_bytes",
+                    _ => unreachable!(),
+                };
+                let requires_box = matches!(
+                    (method.as_str(), ty),
+                    (
+                        "bytes" | "bits" | "capacity",
+                        ValueType::String | ValueType::List | ValueType::Tuple | ValueType::Set
+                    )
+                );
+                let value = if requires_box {
+                    self.box_value((value, ty))
+                } else {
+                    value
+                };
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @{runtime}({value}) : (!llvm.ptr) -> i64"
+                )
+                .unwrap();
+                if method == "bits" {
+                    let eight = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {eight} = llvm.mlir.constant(8 : i64) : i64"
+                    )
+                    .unwrap();
+                    let bits = self.fresh_value();
+                    writeln!(self.output, "    {bits} = llvm.mul {result}, {eight} : i64").unwrap();
+                    (bits, ValueType::Int)
+                } else {
+                    (result, ValueType::Int)
+                }
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
             } if method == "append" => {
                 let (mut object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
@@ -2597,7 +2681,30 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_resolved_call_arguments(target, linked_function, args);
+                let compiler_intrinsic = matches!(
+                    function.as_str(),
+                    "float"
+                        | "string"
+                        | "len"
+                        | "size"
+                        | "bytes"
+                        | "bits"
+                        | "capacity"
+                        | "range"
+                        | "abs"
+                        | "min"
+                        | "max"
+                        | "divmod"
+                        | "enumerate"
+                        | "zip"
+                        | "any"
+                        | "all"
+                );
+                let args = if compiler_intrinsic {
+                    args
+                } else {
+                    self.coerce_resolved_call_arguments(target, linked_function, args)
+                };
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
@@ -2645,8 +2752,24 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_string({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::String);
                 }
-                if function == "size" {
+                if function == "len" || function == "size" {
                     let (value, ty) = args.first().cloned().unwrap();
+                    if let ValueType::Tensor(tensor) = ty {
+                        if let Some(elements) = static_tensor_elements(tensor) {
+                            let result = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {result} = llvm.mlir.constant({elements} : i64) : i64"
+                            )
+                            .unwrap();
+                            return (result, ValueType::Int);
+                        }
+                    }
+                    if matches!(ty, ValueType::Tensor(_) | ValueType::TensorAny) {
+                        let result = self.fresh_value();
+                        writeln!(self.output, "    {result} = llvm.call @__sev_tensor_size({value}) : (!llvm.ptr) -> i64").unwrap();
+                        return (result, ValueType::Int);
+                    }
                     if ty == ValueType::String {
                         let result = self.fresh_value();
                         writeln!(
@@ -2668,6 +2791,88 @@ impl LowerContext<'_> {
                     }
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
+                    return (result, ValueType::Int);
+                }
+                if matches!(function.as_str(), "bytes" | "bits" | "capacity") {
+                    let (value, ty) = args.first().cloned().unwrap();
+                    let result = self.fresh_value();
+                    if let ValueType::Tensor(tensor) = ty {
+                        if let Some(elements) = static_tensor_elements(tensor) {
+                            let amount = if function == "capacity" {
+                                elements
+                            } else {
+                                let bytes = elements * tensor_element_bytes(tensor.element);
+                                if function == "bits" {
+                                    bytes * 8
+                                } else {
+                                    bytes
+                                }
+                            };
+                            writeln!(
+                                self.output,
+                                "    {result} = llvm.mlir.constant({amount} : i64) : i64"
+                            )
+                            .unwrap();
+                            return (result, ValueType::Int);
+                        }
+                    }
+                    if function == "capacity" {
+                        let runtime = match ty {
+                            ValueType::Map => "__sev_map_capacity",
+                            ValueType::Tensor(_) | ValueType::TensorAny => "__sev_tensor_capacity",
+                            _ => "__sev_value_capacity",
+                        };
+                        let value = if matches!(
+                            ty,
+                            ValueType::Any
+                                | ValueType::Map
+                                | ValueType::Tensor(_)
+                                | ValueType::TensorAny
+                        ) {
+                            value
+                        } else {
+                            self.box_value((value, ty))
+                        };
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @{runtime}({value}) : (!llvm.ptr) -> i64"
+                        )
+                        .unwrap();
+                    } else {
+                        let runtime = match ty {
+                            ValueType::Map => "__sev_map_bytes",
+                            ValueType::Tensor(_) | ValueType::TensorAny => "__sev_tensor_bytes",
+                            _ => "__sev_value_bytes",
+                        };
+                        let value = if matches!(
+                            ty,
+                            ValueType::Any
+                                | ValueType::Map
+                                | ValueType::Tensor(_)
+                                | ValueType::TensorAny
+                        ) {
+                            value
+                        } else {
+                            self.box_value((value, ty))
+                        };
+                        writeln!(
+                            self.output,
+                            "    {result} = llvm.call @{runtime}({value}) : (!llvm.ptr) -> i64"
+                        )
+                        .unwrap();
+                        if function == "bits" {
+                            let eight = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {eight} = llvm.mlir.constant(8 : i64) : i64"
+                            )
+                            .unwrap();
+                            let bits = self.fresh_value();
+                            writeln!(self.output, "    {bits} = llvm.mul {result}, {eight} : i64")
+                                .unwrap();
+                            return (bits, ValueType::Int);
+                        }
+                    }
                     return (result, ValueType::Int);
                 }
                 if function == "range" {
@@ -2769,7 +2974,11 @@ impl LowerContext<'_> {
                     .unwrap();
                     return (self.box_value((zero, ValueType::Int)), ValueType::Any);
                 }
-                if target.native_symbol.is_none() && function.ends_with(".add") && args.len() == 2 {
+                if target.native_symbol.is_none()
+                    && function.ends_with(".add")
+                    && args.len() == 2
+                    && args[0].1 != ValueType::Set
+                {
                     let left = self.box_value(args[0].clone());
                     let right = self.box_value(args[1].clone());
                     let result = self.fresh_value();
@@ -2830,7 +3039,7 @@ impl LowerContext<'_> {
                     .join(", ");
                 let return_type = match function.as_str() {
                     "sqrt" | "float" => ValueType::Float,
-                    "size" => ValueType::Int,
+                    "len" | "size" | "bytes" | "bits" | "capacity" => ValueType::Int,
                     _ => target
                         .signature
                         .as_ref()
@@ -5200,8 +5409,11 @@ fn native_bridge_source_for_target(
         "#include <arpa/inet.h>\n",
         "#include <fcntl.h>\n",
         "#include <ctype.h>\n",
+        "#include <errno.h>\n",
+        "#include <math.h>\n",
         "#include <stdbool.h>\n",
         "#include <stdint.h>\n",
+        "#include <limits.h>\n",
         "#include <stdio.h>\n",
         "#include <stdlib.h>\n",
         "#include <string.h>\n",
@@ -5209,9 +5421,11 @@ fn native_bridge_source_for_target(
         "#include <sys/socket.h>\n",
         "#include <sys/ioctl.h>\n",
         "#include <sys/mman.h>\n",
+        "#include <sys/wait.h>\n",
         "#include <sys/stat.h>\n",
         "#include <sys/syscall.h>\n",
         "#include <unistd.h>\n",
+        "#include <signal.h>\n",
         "#include <regex.h>\n",
         "#ifdef __linux__\n#include <linux/kvm.h>\n#endif\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
@@ -5220,8 +5434,10 @@ fn native_bridge_source_for_target(
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
         "#define SEV_OBJECT_MAGIC UINT64_C(0x5345564f424a4543)\n",
         "#define SEV_VARIANT_MAGIC UINT64_C(0x5345565641524941)\n",
+        "#define SEV_TENSOR_MAGIC UINT64_C(0x53455654454e534f)\n",
         "typedef struct { uint64_t magic; const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { uint64_t magic; const char *tag; sev_value *field; } sev_variant;\n\n",
+        "typedef struct { uint64_t magic; int64_t rank; int64_t *shape; int64_t *strides; int64_t size; } sev_tensor_header;\n\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); return value; }\n",
         "void __sev_coverage_hit(int64_t id) { const char *path = getenv(\"SEVERIAN_COVERAGE_FILE\"); if (!path || !*path) return; int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666); if (fd < 0) abort(); char line[32]; int size = snprintf(line, sizeof(line), \"%lu\\n\", (uint64_t)id); if (size <= 0 || write(fd, line, (size_t)size) != size) { close(fd); abort(); } close(fd); }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
@@ -5272,7 +5488,9 @@ fn native_bridge_source_for_target(
         "void *__sev_collection_heap_pop(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); sev_value *result = value->items[0]; value->size -= 1; if (value->size == 0) return result; value->items[0] = value->items[value->size]; int64_t parent = 0; while (parent * 2 + 1 < value->size) { int64_t left = parent * 2 + 1; int64_t right = left + 1; int64_t child = right < value->size && __sev_value_less(value->items[right], value->items[left]) ? right : left; if (!__sev_value_less(value->items[child], value->items[parent])) break; sev_value *temporary = value->items[parent]; value->items[parent] = value->items[child]; value->items[child] = temporary; parent = child; } return result; }\n",
         "void __sev_collection_set(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value) abort(); if (index < 0) index += value->size; if (index < 0 || index >= value->size) abort(); value->items[index] = item; }\n",
         "int64_t __sev_collection_size(void *raw) { sev_collection *value = raw; if (!value) abort(); return value->size; }\n",
-        "int64_t __sev_value_size(void *raw) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_STRING) return __sev_string_length((void *)value->as.string); if (value->kind == SEV_COLLECTION) return __sev_collection_size(value->as.pointer); abort(); }\n",
+        "int64_t __sev_value_size(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size; if (value->kind == SEV_STRING) return __sev_string_length((void *)value->as.string); if (value->kind == SEV_COLLECTION) return __sev_collection_size(value->as.pointer); abort(); }\n",
+        "int64_t __sev_value_bytes(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size * 8; switch (value->kind) { case SEV_INT: case SEV_FLOAT: return 8; case SEV_BOOL: return 1; case SEV_STRING: return __sev_strlen((void *)value->as.string); case SEV_COLLECTION: { sev_collection *collection = value->as.pointer; return (int64_t)sizeof(*collection) + collection->capacity * (int64_t)sizeof(*collection->items); } } abort(); }\n",
+        "int64_t __sev_value_capacity(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size; if (value->kind == SEV_STRING) return __sev_strlen((void *)value->as.string); if (value->kind == SEV_COLLECTION) return ((sev_collection *)value->as.pointer)->capacity; return 1; }\n",
         "void *__sev_value_index(void *raw, int64_t index) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_collection_get(value->as.pointer, index); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_char_at((void *)value->as.string, index)); abort(); }\n",
         "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
         "void *__sev_collection_reversed(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t i = value->size; i > 0; --i) __sev_collection_push(result, value->items[i - 1]); return result; }\n",
@@ -5285,6 +5503,8 @@ fn native_bridge_source_for_target(
         "void __sev_map_insert(void *raw, void *key, void *item) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) { value->values[i] = item; return; } if (value->size == value->capacity) { value->capacity = value->capacity ? value->capacity * 2 : 4; value->keys = realloc(value->keys, (size_t)value->capacity * sizeof(*value->keys)); value->values = realloc(value->values, (size_t)value->capacity * sizeof(*value->values)); if (!value->keys || !value->values) abort(); } value->keys[value->size] = key; value->values[value->size++] = item; }\n",
         "void *__sev_map_get(void *raw, void *key) { sev_map *value = raw; for (int64_t i = 0; i < value->size; ++i) if (sev_value_equal(value->keys[i], key)) return value->values[i]; abort(); }\n",
         "int64_t __sev_map_size(void *raw) { sev_map *value = raw; if (!value) abort(); return value->size; }\n",
+        "int64_t __sev_map_bytes(void *raw) { sev_map *value = raw; if (!value) abort(); return (int64_t)sizeof(*value) + value->capacity * (int64_t)(sizeof(*value->keys) + sizeof(*value->values)); }\n",
+        "int64_t __sev_map_capacity(void *raw) { sev_map *value = raw; if (!value) abort(); return value->capacity; }\n",
         "void *__sev_map_key_at(void *raw, int64_t index) { sev_map *value = raw; if (!value || index < 0 || index >= value->size) abort(); return value->keys[index]; }\n",
         "void *__sev_map_value_at(void *raw, int64_t index) { sev_map *value = raw; if (!value || index < 0 || index >= value->size) abort(); return value->values[index]; }\n",
         "static char *sev_string_range(const char *text, int64_t start, int64_t size) { char *result = sev_allocate((size_t)size + 1); memcpy(result, text + start, (size_t)size); result[size] = '\\0'; return result; }\n",
@@ -5319,7 +5539,60 @@ fn native_bridge_source_for_target(
         "void *__sev_map_values(void *raw) { sev_map *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < value->size; ++index) __sev_collection_push(result, value->values[index]); return result; }\n",
         "void *__sev_map_get_default(void *raw, void *key, void *fallback) { sev_map *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->keys[index], key)) return value->values[index]; return fallback; }\n",
         "void *__sev_map_set_default(void *raw, void *key, void *fallback) { sev_map *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->keys[index], key)) return value->values[index]; __sev_map_insert(value, key, fallback); return fallback; }\n",
+        "void *__sev_map_items(void *raw) { sev_map *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < value->size; ++index) { sev_collection *pair = __sev_collection_new(1); __sev_collection_push(pair, value->keys[index]); __sev_collection_push(pair, value->values[index]); __sev_collection_push(result, __sev_box_collection(pair)); } return result; }\n",
+        "void __sev_map_update(void *raw, void *additions_raw) { sev_map *value = raw; sev_map *additions = additions_raw; if (!value || !additions) abort(); for (int64_t index = 0; index < additions->size; ++index) __sev_map_insert(value, additions->keys[index], additions->values[index]); }\n",
+        "void *__sev_map_pop(void *raw, void *key, void *fallback) { sev_map *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->keys[index], key)) { sev_value *result = value->values[index]; memmove(value->keys + index, value->keys + index + 1, (size_t)(value->size - index - 1) * sizeof(*value->keys)); memmove(value->values + index, value->values + index + 1, (size_t)(value->size - index - 1) * sizeof(*value->values)); value->size -= 1; return result; } return fallback; }\n",
+        "void __sev_map_clear(void *raw) { sev_map *value = raw; if (!value) abort(); value->size = 0; }\n",
+        "void __sev_platform_set_add(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); if (!__sev_set_contains(value, item)) __sev_collection_push(value, item); }\n",
+        "bool __sev_platform_set_remove(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->items[index], item)) { (void)__sev_collection_pop_at(value, index); return true; } return false; }\n",
+        "bool __sev_set_remove(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->items[index], item)) { (void)__sev_collection_pop_at(value, index); return true; } return false; }\n",
         "void *__sev_string_strip(void *raw) { const char *text = raw; int64_t start = 0; int64_t end = __sev_strlen(raw); while (start < end && isspace((unsigned char)text[start])) start += 1; while (end > start && isspace((unsigned char)text[end - 1])) end -= 1; return sev_string_range(text, start, end - start); }\n",
+        "void *__sev_string_lstrip(void *raw) { const char *text = raw; int64_t start = 0; int64_t end = __sev_strlen(raw); while (start < end && isspace((unsigned char)text[start])) start += 1; return sev_string_range(text, start, end - start); }\n",
+        "void *__sev_string_rstrip(void *raw) { const char *text = raw; int64_t end = __sev_strlen(raw); while (end > 0 && isspace((unsigned char)text[end - 1])) end -= 1; return sev_string_range(text, 0, end); }\n",
+        "void *__sev_string_encode(void *raw) { const unsigned char *text = raw; int64_t size = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < size; ++index) __sev_collection_push(result, __sev_box_i64(text[index])); return result; }\n",
+        "void *__sev_string_casefold(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)tolower((unsigned char)text[index]); return result; }\n",
+        "double __sev_math_sqrt(double value) { return sqrt(value); }\n",
+        "double __sev_math_pow(double value, double exponent) { return pow(value, exponent); }\n",
+        "double __sev_math_exp(double value) { return exp(value); }\n",
+        "double __sev_math_log(double value) { return log(value); }\n",
+        "double __sev_math_log2(double value) { return log2(value); }\n",
+        "double __sev_math_log10(double value) { return log10(value); }\n",
+        "double __sev_math_sin(double value) { return sin(value); }\n",
+        "double __sev_math_cos(double value) { return cos(value); }\n",
+        "double __sev_math_tan(double value) { return tan(value); }\n",
+        "int64_t __sev_math_floor(double value) { return (int64_t)floor(value); }\n",
+        "int64_t __sev_math_ceil(double value) { return (int64_t)ceil(value); }\n",
+        "bool __sev_math_isfinite(double value) { return isfinite(value); }\n",
+        "bool __sev_math_isnan(double value) { return isnan(value); }\n",
+        "double __sev_math_round(double value, int64_t digits) { double factor = pow(10.0, (double)digits); return round(value * factor) / factor; }\n",
+        "static uint64_t sev_random_state = UINT64_C(0x9e3779b97f4a7c15);\n",
+        "static uint64_t sev_random_next(void) { uint64_t value = sev_random_state; value ^= value >> 12; value ^= value << 25; value ^= value >> 27; sev_random_state = value; return value * UINT64_C(2685821657736338717); }\n",
+        "void __sev_random_seed(int64_t value) { sev_random_state = value ? (uint64_t)value : UINT64_C(0x9e3779b97f4a7c15); }\n",
+        "double __sev_random_float(void) { return (double)(sev_random_next() >> 11) * (1.0 / 9007199254740992.0); }\n",
+        "int64_t __sev_random_int(int64_t start, int64_t stop) { if (stop < start) abort(); uint64_t width = (uint64_t)(stop - start) + 1; return start + (int64_t)(sev_random_next() % width); }\n",
+        "void *__sev_random_choice(void *raw) { sev_collection *values = raw; if (!values || values->size == 0) abort(); return values->items[sev_random_next() % (uint64_t)values->size]; }\n",
+        "void __sev_random_shuffle(void *raw) { sev_collection *values = raw; if (!values) abort(); for (int64_t index = values->size - 1; index > 0; --index) { int64_t other = (int64_t)(sev_random_next() % (uint64_t)(index + 1)); sev_value *temporary = values->items[index]; values->items[index] = values->items[other]; values->items[other] = temporary; } }\n",
+        "void *__sev_random_sample(void *raw, int64_t count) { sev_collection *copy = __sev_collection_clone(raw); if (count < 0 || count > copy->size) abort(); __sev_random_shuffle(copy); copy->size = count; return copy; }\n",
+        "bool __sev_file_exists(void *path) { return access(path, F_OK) == 0; }\n",
+        "bool __sev_path_is_file(void *path) { struct stat status; return stat(path, &status) == 0 && S_ISREG(status.st_mode); }\n",
+        "bool __sev_path_is_dir(void *path) { struct stat status; return stat(path, &status) == 0 && S_ISDIR(status.st_mode); }\n",
+        "void *__sev_path_join(void *left_raw, void *right_raw) { const char *left = left_raw; const char *right = right_raw; if (!*left) return strdup(right); if (!*right) return strdup(left); size_t left_size = strlen(left); size_t right_size = strlen(right); bool slash = left[left_size - 1] != '/'; char *result = sev_allocate(left_size + right_size + (slash ? 2 : 1)); memcpy(result, left, left_size); if (slash) result[left_size++] = '/'; memcpy(result + left_size, right, right_size + 1); return result; }\n",
+        "void *__sev_path_basename(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); return strdup(slash ? slash + 1 : path); }\n",
+        "void *__sev_path_dirname(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); if (!slash) return strdup(\".\"); if (slash == path) return strdup(\"/\"); return sev_string_range(path, 0, (int64_t)(slash - path)); }\n",
+        "void *__sev_path_extension(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); const char *dot = strrchr(path, '.'); if (!dot || (slash && dot < slash) || dot == (slash ? slash + 1 : path)) return strdup(\"\"); return strdup(dot); }\n",
+        "void *__sev_path_absolute(void *raw) { const char *path = raw; if (path[0] == '/') return strdup(path); char current[PATH_MAX]; if (!getcwd(current, sizeof(current))) abort(); return __sev_path_join(current, raw); }\n",
+        "double __sev_time_seconds(void) { struct timespec value; if (clock_gettime(CLOCK_REALTIME, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
+        "double __sev_time_monotonic(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
+        "void __sev_time_sleep(double seconds) { if (seconds < 0.0) abort(); struct timespec delay = {(time_t)seconds, (long)((seconds - floor(seconds)) * 1000000000.0)}; while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {} }\n",
+        "void *__sev_environment_get(void *name, void *fallback) { const char *value = getenv(name); return strdup(value ? value : fallback); }\n",
+        "bool __sev_environment_set(void *name, void *value) { return setenv(name, value, 1) == 0; }\n",
+        "bool __sev_environment_remove(void *name) { return unsetenv(name) == 0; }\n",
+        "void *__sev_platform_range(int64_t start, int64_t stop, int64_t step) { return __sev_range(start, stop, step); }\n",
+        "void *__sev_platform_enumerate(void *values) { return __sev_collection_enumerate(values); }\n",
+        "void *__sev_platform_zip(void *left, void *right) { return __sev_collection_zip(left, right); }\n",
+        "bool __sev_platform_all(void *values) { return __sev_collection_all(values); }\n",
+        "bool __sev_platform_any(void *values) { return __sev_collection_any(values); }\n",
+        "void *__sev_platform_abs(void *value) { return __sev_abs(value); }\n",
         "void *__sev_string_lower(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)tolower((unsigned char)text[index]); return result; }\n",
         "void *__sev_string_upper(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)toupper((unsigned char)text[index]); return result; }\n",
         "bool __sev_string_starts_with(void *raw, void *needle_raw) { const char *text = raw; const char *needle = needle_raw; size_t size = strlen(needle); return strncmp(text, needle, size) == 0; }\n",
@@ -5500,6 +5773,28 @@ void *__sev_file_read(void *path_raw) {
   bool success = fread(contents, 1, (size_t)size, file) == (size_t)size && fclose(file) == 0;
   if (!success) return sev_failure("could not read file");
   return __sev_variant_new("ok", __sev_box_string(contents));
+}
+
+void *__sev_file_remove(void *path_raw) {
+  return unlink(path_raw) == 0 ? __sev_variant_new("ok", NULL) : sev_failure("could not remove file");
+}
+
+void *__sev_file_rename(void *source_raw, void *destination_raw) {
+  return rename(source_raw, destination_raw) == 0 ? __sev_variant_new("ok", NULL) : sev_failure("could not rename file");
+}
+
+void *__sev_file_copy(void *source_raw, void *destination_raw) {
+  FILE *source = fopen(source_raw, "rb");
+  if (!source) return sev_failure("could not open source file");
+  FILE *destination = fopen(destination_raw, "wb");
+  if (!destination) { fclose(source); return sev_failure("could not open destination file"); }
+  char buffer[16384];
+  bool success = true;
+  size_t count;
+  while ((count = fread(buffer, 1, sizeof(buffer), source)) > 0) if (fwrite(buffer, 1, count, destination) != count) { success = false; break; }
+  if (ferror(source)) success = false;
+  if (fclose(source) != 0 || fclose(destination) != 0) success = false;
+  return success ? __sev_variant_new("ok", NULL) : sev_failure("could not copy file");
 }
 
 typedef struct { char *data; size_t size; size_t capacity; } sev_json_buffer;
@@ -5839,12 +6134,130 @@ void *__sev_network_loopback_echo(void *message_raw) {
   return __sev_variant_new("ok", __sev_box_string(buffer));
 }
 
+static bool sev_parse_endpoint(const char *address, struct sockaddr_in *endpoint) {
+  const char *colon = strrchr(address, ':');
+  if (!colon) return false;
+  char host[64]; size_t host_size = (size_t)(colon - address);
+  if (host_size == 0 || host_size >= sizeof(host)) return false;
+  memcpy(host, address, host_size); host[host_size] = '\0';
+  char *end = NULL; long port = strtol(colon + 1, &end, 10);
+  if (*end || port < 0 || port > 65535) return false;
+  memset(endpoint, 0, sizeof(*endpoint)); endpoint->sin_family = AF_INET; endpoint->sin_port = htons((uint16_t)port);
+  return inet_pton(AF_INET, host, &endpoint->sin_addr) == 1;
+}
+
+void *__sev_network_connect(void *address_raw) {
+  struct sockaddr_in endpoint; if (!sev_parse_endpoint(address_raw, &endpoint)) return sev_failure("invalid network address");
+  int descriptor = socket(AF_INET, SOCK_STREAM, 0);
+  if (descriptor < 0 || connect(descriptor, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0) { if (descriptor >= 0) close(descriptor); return sev_failure("could not connect"); }
+  int *handle = sev_allocate(sizeof(*handle)); *handle = descriptor; return __sev_variant_new("ok", handle);
+}
+
+void *__sev_network_accept(void *listener_raw) {
+  sev_tcp_listener *listener = listener_raw; if (!listener) return sev_failure("invalid listener");
+  int descriptor = accept(listener->socket, NULL, NULL); if (descriptor < 0) return sev_failure("could not accept connection");
+  int *handle = sev_allocate(sizeof(*handle)); *handle = descriptor; return __sev_variant_new("ok", handle);
+}
+
+void *__sev_network_send(void *socket_raw, void *message_raw) {
+  int *descriptor = socket_raw; if (!descriptor) return sev_failure("invalid socket");
+  size_t size = strlen(message_raw); if (!sev_socket_write_all(*descriptor, message_raw, size)) return sev_failure("could not send");
+  return __sev_variant_new("ok", __sev_box_i64((int64_t)size));
+}
+
+void *__sev_network_receive(void *socket_raw, int64_t count) {
+  int *descriptor = socket_raw; if (!descriptor || count < 0) return sev_failure("invalid receive");
+  char *buffer = sev_allocate((size_t)count + 1); ssize_t received = recv(*descriptor, buffer, (size_t)count, 0);
+  if (received < 0) return sev_failure("could not receive"); buffer[received] = '\0'; return __sev_variant_new("ok", __sev_box_string(buffer));
+}
+
+void *__sev_network_close(void *socket_raw) {
+  int *descriptor = socket_raw; if (!descriptor || close(*descriptor) != 0) return sev_failure("could not close socket"); return __sev_variant_new("ok", NULL);
+}
+
+int64_t __sev_process_run(void *command_raw) { int status = system(command_raw); return status < 0 ? -1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
+int64_t __sev_process_spawn(void *command_raw) { pid_t child = fork(); if (child == 0) { execl("/bin/sh", "sh", "-c", (char *)command_raw, NULL); _exit(127); } return (int64_t)child; }
+int64_t __sev_process_wait(int64_t process) { int status = 0; if (waitpid((pid_t)process, &status, 0) < 0) return -1; return WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
+bool __sev_process_kill(int64_t process) { return kill((pid_t)process, SIGTERM) == 0; }
+void __sev_process_exit(int64_t status) { exit((int)status); }
+
+void *__sev_http_request(void *method_raw, void *url_raw, void *body_raw) {
+  (void)body_raw;
+  const char *url = url_raw; const char *prefix = "http://";
+  if (strncmp(url, prefix, strlen(prefix)) != 0) return sev_failure("only http:// URLs are supported");
+  const char *authority = url + strlen(prefix); const char *slash = strchr(authority, '/');
+  const char *path = slash ? slash : "/"; size_t authority_size = slash ? (size_t)(slash - authority) : strlen(authority);
+  char endpoint[320]; if (authority_size + 4 >= sizeof(endpoint)) return sev_failure("HTTP authority is too long");
+  memcpy(endpoint, authority, authority_size); endpoint[authority_size] = '\0'; if (!strchr(endpoint, ':')) strcat(endpoint, ":80");
+  void *connected = __sev_network_connect(endpoint); sev_variant *variant = connected; if (!variant || strcmp(variant->tag, "ok") != 0) return connected;
+  int *socket_handle = (int *)(void *)variant->field; char request[4096]; int request_size = snprintf(request, sizeof(request), "%s %s HTTP/1.0\r\nHost: %.*s\r\nConnection: close\r\n\r\n", (char *)method_raw, path, (int)authority_size, authority);
+  if (request_size <= 0 || !sev_socket_write_all(*socket_handle, request, (size_t)request_size)) { close(*socket_handle); return sev_failure("HTTP send failed"); }
+  size_t capacity = 8192, used = 0; char *response = sev_allocate(capacity); ssize_t received;
+  while ((received = recv(*socket_handle, response + used, capacity - used - 1, 0)) > 0) { used += (size_t)received; if (capacity - used < 2) { capacity *= 2; response = realloc(response, capacity); if (!response) abort(); } }
+  close(*socket_handle); if (received < 0) return sev_failure("HTTP receive failed"); response[used] = '\0'; char *body = strstr(response, "\r\n\r\n"); return __sev_variant_new("ok", __sev_box_string(body ? body + 4 : response));
+}
+
 bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
   regex_t expression;
   if (regcomp(&expression, (const char *)pattern_raw, REG_EXTENDED | REG_NOSUB) != 0) return false;
   bool matches = regexec(&expression, (const char *)text_raw, 0, NULL, 0) == 0;
   regfree(&expression);
   return matches;
+}
+
+void *__sev_regex_findall(void *text_raw, void *pattern_raw) {
+  const char *text = text_raw;
+  regex_t expression;
+  sev_collection *result = __sev_collection_new(0);
+  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) return result;
+  regmatch_t match;
+  const char *cursor = text;
+  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
+    __sev_collection_push(result, __sev_box_string(sev_string_range(cursor, match.rm_so, match.rm_eo - match.rm_so)));
+    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
+  }
+  regfree(&expression);
+  return result;
+}
+
+void *__sev_regex_split(void *text_raw, void *pattern_raw) {
+  const char *text = text_raw;
+  regex_t expression;
+  sev_collection *result = __sev_collection_new(0);
+  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) { __sev_collection_push(result, __sev_box_string(strdup(text))); return result; }
+  regmatch_t match;
+  const char *cursor = text;
+  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
+    __sev_collection_push(result, __sev_box_string(sev_string_range(cursor, 0, match.rm_so)));
+    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
+  }
+  __sev_collection_push(result, __sev_box_string(strdup(cursor)));
+  regfree(&expression);
+  return result;
+}
+
+void *__sev_regex_sub(void *text_raw, void *pattern_raw, void *replacement_raw) {
+  const char *text = text_raw;
+  const char *replacement = replacement_raw;
+  regex_t expression;
+  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) return strdup(text);
+  size_t capacity = strlen(text) + 1;
+  char *result = sev_allocate(capacity);
+  size_t used = 0;
+  regmatch_t match;
+  const char *cursor = text;
+  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
+    size_t prefix = (size_t)match.rm_so;
+    size_t replacement_size = strlen(replacement);
+    size_t required = used + prefix + replacement_size + strlen(cursor + match.rm_eo) + 1;
+    if (required > capacity) { capacity = required; result = realloc(result, capacity); if (!result) abort(); }
+    memcpy(result + used, cursor, prefix); used += prefix;
+    memcpy(result + used, replacement, replacement_size); used += replacement_size;
+    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
+  }
+  strcpy(result + used, cursor);
+  regfree(&expression);
+  return result;
 }
 
 void *__sev_host_container_backend(void) {
@@ -6359,6 +6772,26 @@ fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Result
         | ValueType::Option
         | ValueType::Any => "void *",
+    }
+}
+
+fn static_tensor_elements(tensor: severian_hir::TensorType) -> Option<i64> {
+    let rank = usize::from(tensor.rank?);
+    tensor.dimensions[..rank]
+        .iter()
+        .try_fold(1_i64, |total, dimension| {
+            let severian_hir::TensorDimension::Static(value) = dimension else {
+                return None;
+            };
+            total.checked_mul(i64::try_from(*value).ok()?)
+        })
+}
+
+fn tensor_element_bytes(element: severian_hir::TensorElementType) -> i64 {
+    match element {
+        severian_hir::TensorElementType::BF16 => 2,
+        severian_hir::TensorElementType::F32 | severian_hir::TensorElementType::I32 => 4,
+        severian_hir::TensorElementType::F64 | severian_hir::TensorElementType::I64 => 8,
     }
 }
 

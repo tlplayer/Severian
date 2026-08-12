@@ -1,0 +1,28 @@
+import platform
+
+class Request:
+    method: string
+    path: string
+    body: string
+
+class Response:
+    status: int = 200
+    body: string = ""
+
+class Server:
+    address: string
+
+def request(method: string, url: string, body: string = "") -> Result[string, IOError]:
+    return platform.http_request(method, url, body)
+
+def get(url: string) -> Result[string, IOError]:
+    return request("GET", url)
+
+def post(url: string, body: string = "") -> Result[string, IOError]:
+    return request("POST", url, body)
+
+def put(url: string, body: string = "") -> Result[string, IOError]:
+    return request("PUT", url, body)
+
+def delete(url: string) -> Result[string, IOError]:
+    return request("DELETE", url)

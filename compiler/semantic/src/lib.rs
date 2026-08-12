@@ -2483,7 +2483,7 @@ fn lower_call(
         "abs" | "min" | "max" => Some((canonical, ValueType::Any)),
         "divmod" => Some(("divmod", ValueType::Tuple)),
         "read" if !signatures.contains_key(&callee.name) => Some(("read", ValueType::Result)),
-        "size" => Some(("size", ValueType::Int)),
+        "len" | "size" | "bytes" | "bits" | "capacity" => Some((canonical, ValueType::Int)),
         "present" => {
             let fields = call
                 .args
@@ -2665,6 +2665,16 @@ fn method_return_type(object: ValueType, method: &str) -> ValueType {
         (ValueType::List, "join") => ValueType::String,
         (ValueType::List, "reduce") => ValueType::Any,
         (ValueType::String, "length" | "find" | "count") => ValueType::Int,
+        (
+            ValueType::String
+            | ValueType::List
+            | ValueType::Tuple
+            | ValueType::Map
+            | ValueType::Set
+            | ValueType::Tensor(_)
+            | ValueType::TensorAny,
+            "len" | "size" | "bytes" | "bits" | "capacity",
+        ) => ValueType::Int,
         (ValueType::String, "startsWith" | "endsWith") => ValueType::Bool,
         (ValueType::String, "strip" | "lower" | "upper" | "replace") => ValueType::String,
         (
@@ -2724,6 +2734,16 @@ fn validate_builtin_method(
         ) => Some(0..=0),
         (ValueType::String, "split" | "startsWith" | "endsWith" | "find" | "count") => Some(1..=1),
         (ValueType::String, "replace") => Some(2..=2),
+        (
+            ValueType::String
+            | ValueType::List
+            | ValueType::Tuple
+            | ValueType::Map
+            | ValueType::Set
+            | ValueType::Tensor(_)
+            | ValueType::TensorAny,
+            "len" | "size" | "bytes" | "bits" | "capacity",
+        ) => Some(0..=0),
         _ => None,
     };
     if let Some(arity) = arity {

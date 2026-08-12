@@ -1,0 +1,22 @@
+import platform
+
+def random() -> float:
+    return platform.random_float()
+
+def randint(start: int, stop: int) -> int:
+    return platform.random_int(start, stop)
+
+def uniform(start: float, stop: float) -> float:
+    return start + (stop - start) * random()
+
+def choice[type](values: list[type]) -> type:
+    return platform.random_choice(values)
+
+def shuffle[type](values: list[type]):
+    platform.random_shuffle(values)
+
+def sample[type](values: list[type], count: int) -> list[type]:
+    return platform.random_sample(values, count)
+
+def seed(value: int):
+    platform.random_seed(value)

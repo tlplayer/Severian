@@ -1,0 +1,43 @@
+def len[type](value: type) -> int:
+    return size(value)
+
+def range(start: int, stop: int = -9223372036854775807, step: int = 1) -> list[int]:
+    if stop == -9223372036854775807:
+        return platform.core_range(0, start, 1)
+    return platform.core_range(start, stop, step)
+
+def enumerate[type](values: list[type]) -> list[tuple[int, type]]:
+    return platform.core_enumerate(values)
+
+def zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]:
+    return platform.core_zip(left_values, right_values)
+
+def min[type](values: list[type]) -> type:
+    return values.minimum()
+
+def max[type](values: list[type]) -> type:
+    return values.maximum()
+
+def sum[type](values: list[type]) -> type:
+    return values.sum()
+
+def abs[type](value: type) -> type:
+    return platform.core_abs(value)
+
+def round(value: float, digits: int = 0) -> float:
+    return platform.math_round(value, digits)
+
+def sorted[type](values: list[type], reverse: bool = false) -> list[type]:
+    if reverse:
+        return values.sorted(true)
+    return values.sorted()
+
+def reversed[type](values: list[type]) -> list[type]:
+    return values.reversed()
+
+def all(values: list[bool]) -> bool:
+    return platform.core_all(values)
+
+def any(values: list[bool]) -> bool:
+    return platform.core_any(values)
+import platform

@@ -5,6 +5,74 @@ unsafe:
 
     native("__sev_qwen_decode_token") def qwen_decode_token(model_path: string, token: int) -> string
 
+    native("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
+    native("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
+    native("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value
+    native("__sev_map_clear") def map_clear[key, value](values: map[key, value])
+    native("__sev_platform_set_add") def set_add[type](values: set[type], value: type)
+    native("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
+    native("__sev_string_lstrip") def string_lstrip(value: string) -> string
+    native("__sev_string_rstrip") def string_rstrip(value: string) -> string
+    native("__sev_string_casefold") def string_casefold(value: string) -> string
+    native("__sev_string_encode") def string_encode(value: string) -> list[int]
+    native("__sev_math_sqrt") def math_sqrt(value: float) -> float
+    native("__sev_math_pow") def math_pow(value: float, exponent: float) -> float
+    native("__sev_math_exp") def math_exp(value: float) -> float
+    native("__sev_math_log") def math_log(value: float) -> float
+    native("__sev_math_log2") def math_log2(value: float) -> float
+    native("__sev_math_log10") def math_log10(value: float) -> float
+    native("__sev_math_sin") def math_sin(value: float) -> float
+    native("__sev_math_cos") def math_cos(value: float) -> float
+    native("__sev_math_tan") def math_tan(value: float) -> float
+    native("__sev_math_floor") def math_floor(value: float) -> int
+    native("__sev_math_ceil") def math_ceil(value: float) -> int
+    native("__sev_math_isfinite") def math_isfinite(value: float) -> bool
+    native("__sev_math_isnan") def math_isnan(value: float) -> bool
+    native("__sev_math_round") def math_round(value: float, digits: int) -> float
+    native("__sev_random_float") def random_float() -> float
+    native("__sev_random_int") def random_int(start: int, stop: int) -> int
+    native("__sev_random_seed") def random_seed(value: int)
+    native("__sev_random_choice") def random_choice[type](values: list[type]) -> type
+    native("__sev_random_shuffle") def random_shuffle[type](values: list[type])
+    native("__sev_random_sample") def random_sample[type](values: list[type], count: int) -> list[type]
+    native("__sev_file_exists") def file_exists(path: string) -> bool
+    native("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
+    native("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
+    native("__sev_file_copy") def file_copy(source: string, destination: string) -> Result[unit, IOError]
+    native("__sev_path_join") def path_join(left: string, right: string) -> string
+    native("__sev_path_is_file") def path_is_file(path: string) -> bool
+    native("__sev_path_is_dir") def path_is_dir(path: string) -> bool
+    native("__sev_path_basename") def path_basename(path: string) -> string
+    native("__sev_path_dirname") def path_dirname(path: string) -> string
+    native("__sev_path_extension") def path_extension(path: string) -> string
+    native("__sev_path_absolute") def path_absolute(path: string) -> string
+    native("__sev_time_seconds") def time_seconds() -> float
+    native("__sev_time_sleep") def time_sleep(seconds: float)
+    native("__sev_time_monotonic") def time_monotonic() -> float
+    native("__sev_environment_get") def environment_get(name: string, fallback: string) -> string
+    native("__sev_environment_set") def environment_set(name: string, value: string) -> bool
+    native("__sev_environment_remove") def environment_remove(name: string) -> bool
+    native("__sev_regex_findall") def regex_findall(text: string, pattern: string) -> list[string]
+    native("__sev_regex_split") def regex_split(text: string, pattern: string) -> list[string]
+    native("__sev_regex_sub") def regex_sub(text: string, pattern: string, replacement: string) -> string
+    native("__sev_process_run") def process_run(command: string) -> int
+    native("__sev_process_spawn") def process_spawn(command: string) -> int
+    native("__sev_process_wait") def process_wait(process: int) -> int
+    native("__sev_process_kill") def process_kill(process: int) -> bool
+    native("__sev_process_exit") def process_exit(status: int)
+    native("__sev_network_connect") def network_connect(address: string) -> Result[Any, IOError]
+    native("__sev_network_accept") def network_accept(listener: TCPListener) -> Result[Any, IOError]
+    native("__sev_network_send") def network_send(socket: Any, message: string) -> Result[int, IOError]
+    native("__sev_network_receive") def network_receive(socket: Any, count: int) -> Result[string, IOError]
+    native("__sev_network_close") def network_close(socket: Any) -> Result[unit, IOError]
+    native("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
+    native("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
+    native("__sev_platform_enumerate") def core_enumerate[type](values: list[type]) -> list[tuple[int, type]]
+    native("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]
+    native("__sev_platform_all") def core_all(values: list[bool]) -> bool
+    native("__sev_platform_any") def core_any(values: list[bool]) -> bool
+    native("__sev_platform_abs") def core_abs[type](value: type) -> type
+
     native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 
     native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]

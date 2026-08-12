@@ -2081,6 +2081,13 @@ impl Parser<'_> {
                 span: token.span,
                 name,
             }),
+            // `send` is a statement keyword only in expression-leading
+            // position. It remains available as a library/member API name,
+            // such as `network.send(...)`.
+            TokenKind::Send => Ok(Ident {
+                span: token.span,
+                name: "send".into(),
+            }),
             _ => Err(ParseError {
                 span: token.span,
                 message: format!("expected {expected}"),

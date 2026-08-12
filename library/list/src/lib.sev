@@ -1,0 +1,49 @@
+def append[type](values: list[type], value: type):
+    values.append(value)
+
+def extend[type](values: list[type], additions: list[type]):
+    values.extend(additions)
+
+def insert[type](values: list[type], index: int, value: type):
+    values.insert(index, value)
+
+def pop[type](values: list[type], index: int = -1) -> type:
+    return values.pop(index)
+
+def remove[type](values: list[type], value: type):
+    values.remove(value)
+
+def clear[type](values: list[type]):
+    while size(values) > 0:
+        values.pop()
+
+def index[type](values: list[type], expected: type) -> int:
+    for position, value in enumerate(values):
+        if value == expected:
+            return position
+    return -1
+
+def count[type](values: list[type], expected: type) -> int:
+    total := 0
+    for value in values:
+        if value == expected:
+            total += 1
+    return total
+
+def sort[type](values: list[type], descending: bool = false):
+    if descending:
+        ordered = values.sorted(true)
+        clear(values)
+        values.extend(ordered)
+        return
+    ordered = values.sorted()
+    clear(values)
+    values.extend(ordered)
+
+def reverse[type](values: list[type]):
+    ordered = values.reversed()
+    clear(values)
+    values.extend(ordered)
+
+def copy[type](values: list[type]) -> list[type]:
+    return values[0:size(values)]

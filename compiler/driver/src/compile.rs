@@ -15,6 +15,26 @@ pub struct Compilation {
     pub mir: severian_mir::Program,
     pub mlir: Module,
 }
+
+impl Drop for Compilation {
+    fn drop(&mut self) {
+        // Linked standard-library HIR contains deeply nested expression trees.
+        // Rust test workers and embedding hosts commonly use a 2 MiB stack,
+        // which is too small for their recursive derived drop glue. Move the
+        // recursive payloads to the same bounded compiler stack used to build
+        // them, while leaving the flat emitted module to drop normally.
+        let hir = std::mem::take(&mut self.hir);
+        let optimized_hir = std::mem::take(&mut self.optimized_hir);
+        let mir = std::mem::take(&mut self.mir);
+        std::thread::Builder::new()
+            .name("severian-compiler-drop".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || drop((hir, optimized_hir, mir)))
+            .expect("creating the compiler cleanup thread must succeed")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    }
+}
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
     let ast = parse_source(source)?;
     compile_ast(&ast, &[], Path::new("<memory>"), source)
@@ -175,8 +195,17 @@ fn check_ast(
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, true, None)?;
-    compile_ast(&ast, &interfaces, path, &source)
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .name("severian-compiler".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            let (ast, interfaces, source) = frontend_path(&path, true, None)?;
+            compile_ast(&ast, &interfaces, &path, &source)
+        })
+        .map_err(CompileError::Io)?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 pub fn compile_dependency_path(

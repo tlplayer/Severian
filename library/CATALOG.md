@@ -4,18 +4,18 @@ The catalog is grouped for discovery, while package imports stay flat.
 
 | Area | Packages | Initial status |
 | --- | --- | --- |
-| Language foundation | `prelude`, `option`, `result`, `iteration` | language design |
-| Core data | `boolean`, `collections`, `text`, `bytes` | `boolean` started |
-| Numerics | `math`,  `probability`, `statistics`, `random` | `math`, `tensor`, `probability` experimental |
+| Language foundation | `core`, `prelude`, `option`, `result`, `iteration` | `core` experimental |
+| Core data | `list`, `map`, `set`, `string`, `boolean`, `bytes` | collection and string APIs experimental |
+| Numerics | `math`, `tensor`, `probability`, `statistics`, `random` | `math`, `tensor`, `probability`, and `random` experimental |
 | Machine learning | `model`, `model.neuralnet`, `autodiff`, `optimization` | `tensor` is the canonical container; `model` owns the public machine-learning hierarchy |
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
 | Data formats | `json`, `csv`, `base64`, `binary` | `json` scalar/list baseline implemented |
-| Files and I/O | `io`, `file`, `path` | `io`, `file` native baseline implemented |
-| Time and environment | `time`, `environment`, `process`, `system` | `system` name reserved; interfaces planned |
+| Files and I/O | `io`, `file`, `path` | file and path APIs experimental |
+| Time and environment | `time`, `environment`, `process`, `system` | clock, environment, and process APIs experimental; `system` reserved |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
-| Networking | `network`, `http`, `url` | `network` bind/loopback baseline implemented |
-| Observability | `log`, `trace`, `metrics` | `log` native sinks implemented |
+| Networking | `network`, `http`, `url` | network and HTTP/1 client APIs experimental |
+| Observability | `log`, `logging`, `trace`, `metrics` | logging sinks experimental |
 | Security | `hash`, `crypto`, `tls` | provider policy required |
 | Data and storage | `pql`, `storage`, `database`, `compression`, `archive` | PQL validation, extensible storage plans, and executable database server experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |

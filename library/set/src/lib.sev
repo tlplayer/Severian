@@ -1,0 +1,22 @@
+import platform
+
+def add[type](values: set[type], value: type):
+    platform.set_add(values, value)
+
+def remove[type](values: set[type], value: type):
+    assert(platform.set_remove(values, value), "set element does not exist")
+
+def discard[type](values: set[type], value: type):
+    platform.set_remove(values, value)
+
+def union[type](left: set[type], right: set[type]) -> set[type]:
+    return left.union(right)
+
+def intersection[type](left: set[type], right: set[type]) -> set[type]:
+    return left.intersection(right)
+
+def difference[type](left: set[type], right: set[type]) -> set[type]:
+    return left.difference(right)
+
+def symmetric_difference[type](left: set[type], right: set[type]) -> set[type]:
+    return left.symmetricDifference(right)

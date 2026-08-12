@@ -9,6 +9,7 @@ path = "src/lib.sev"
 
 [dependencies]
 platform = { path = "../platform", version = "0.1.0" }
+file = { path = "../file", version = "0.1.0" }
 
 [package.metadata.library]
 category = "data-formats"

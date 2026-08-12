@@ -1,0 +1,40 @@
+import platform
+
+def split(value: string, separator: string) -> list[string]:
+    return value.split(separator)
+
+def join(separator: string, values: list[string]) -> string:
+    return values.join(separator)
+
+def strip(value: string) -> string:
+    return value.strip()
+
+def lstrip(value: string) -> string:
+    return platform.string_lstrip(value)
+
+def rstrip(value: string) -> string:
+    return platform.string_rstrip(value)
+
+def replace(value: string, old: string, replacement: string) -> string:
+    return value.replace(old, replacement)
+
+def find(value: string, needle: string) -> int:
+    return value.find(needle)
+
+def startswith(value: string, prefix: string) -> bool:
+    return value.startsWith(prefix)
+
+def endswith(value: string, suffix: string) -> bool:
+    return value.endsWith(suffix)
+
+def lower(value: string) -> string:
+    return value.lower()
+
+def upper(value: string) -> string:
+    return value.upper()
+
+def casefold(value: string) -> string:
+    return platform.string_casefold(value)
+
+def encode(value: string) -> list[int]:
+    return platform.string_encode(value)

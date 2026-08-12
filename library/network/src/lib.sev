@@ -3,6 +3,21 @@ import platform
 def listen(address: string) -> Result[TCPListener, IOError]:
     return platform.networkListen(address)
 
+def connect(address: string) -> Result[Any, IOError]:
+    return platform.network_connect(address)
+
+def accept(listener: TCPListener) -> Result[Any, IOError]:
+    return platform.network_accept(listener)
+
+def send(socket: Any, message: string) -> Result[int, IOError]:
+    return platform.network_send(socket, message)
+
+def receive(socket: Any, count: int = 4096) -> Result[string, IOError]:
+    return platform.network_receive(socket, count)
+
+def close(socket: Any) -> Result[unit, IOError]:
+    return platform.network_close(socket)
+
 def loopbackEcho(message: string) -> Result[string, IOError]:
     return platform.networkLoopbackEcho(message)
 

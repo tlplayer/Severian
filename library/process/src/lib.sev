@@ -1,0 +1,16 @@
+import platform
+
+def run(command: string) -> int:
+    return platform.process_run(command)
+
+def spawn(command: string) -> int:
+    return platform.process_spawn(command)
+
+def wait(process: int) -> int:
+    return platform.process_wait(process)
+
+def kill(process: int) -> bool:
+    return platform.process_kill(process)
+
+def exit(status: int = 0):
+    platform.process_exit(status)

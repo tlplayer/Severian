@@ -179,6 +179,19 @@ unsafe:
     native("__sev_tensor_f32_slice") def sliceF32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
     native("__sev_tensor_f32_concatenate") def concatenateF32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
     native("__sev_tensor_f32_add_scalar") def addScalarF32(value: Tensor[f32], scalar: float) -> Tensor[f32]
+    native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
+    native("__sev_tensor_zeros") def zeros(shape: list[int]) -> Tensor[f64]
+    native("__sev_tensor_ones") def ones(shape: list[int]) -> Tensor[f64]
+    native("__sev_tensor_empty") def empty(shape: list[int]) -> Tensor[f64]
+    native("__sev_tensor_arange") def arange(stop: int) -> Tensor[f64]
+    native("__sev_tensor_reshape") def reshape(value: Tensor[f64], shape: list[int]) -> Tensor[f64]
+    native("__sev_tensor_transpose") def transpose(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_matmul") def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_sum") def sum(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_mean") def mean(value: Tensor[f64]) -> float
+    native("__sev_tensor_max") def max(value: Tensor[f64]) -> float
+    native("__sev_tensor_min") def min(value: Tensor[f64]) -> float
+    native("__sev_tensor_softmax_rows") def softmax(value: Tensor[f64]) -> Tensor[f64]
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
@@ -257,7 +270,7 @@ test "reverse mode accumulates gradients and SGD updates a leaf":
     assert(rankedValues(rankedGradient(input)) == [0.0, 2.0])
     assert(rankedValues(rankedSgd(input, 0.1)) == [-1.0, 1.8])
 
-def tensor(values: list[float]) -> list[float]:
+def vector(values: list[float]) -> list[float]:
     return values
 
 def relu(values: list[float]) -> list[float]:
