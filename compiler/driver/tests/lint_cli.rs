@@ -46,3 +46,34 @@ fn lint_reports_and_safely_fixes_role_based_names() {
 
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[test]
+fn lint_rejects_adjacent_module_unsafe_blocks() {
+    let directory = temporary_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("main.sev");
+    std::fs::write(
+        &source,
+        concat!(
+            "unsafe:\n",
+            "    native(\"first\") def first() -> int\n",
+            "\n",
+            "unsafe:\n",
+            "    native(\"second\") def second() -> int\n",
+        ),
+    )
+    .unwrap();
+
+    let report = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(!report.status.success());
+    let standard_error = String::from_utf8_lossy(&report.stderr);
+    assert!(standard_error.contains("error[N012]"));
+    assert!(standard_error.contains("one cohesive `unsafe:` block"));
+
+    let _ = std::fs::remove_dir_all(directory);
+}

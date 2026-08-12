@@ -1,26 +1,27 @@
-native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
+unsafe:
+    native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 
-native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]
+    native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]
 
-native("__sev_file_open_binary") def fileOpenBinary(path: string) -> Result[Any, IOError]
+    native("__sev_file_open_binary") def fileOpenBinary(path: string) -> Result[Any, IOError]
 
-native("__sev_file_read_bytes") def fileReadBytes(handle: Any, count: int) -> Result[list[int], IOError]
+    native("__sev_file_read_bytes") def fileReadBytes(handle: Any, count: int) -> Result[list[int], IOError]
 
-native("__sev_file_read_exact") def fileReadExact(handle: Any, count: int) -> Result[list[int], IOError]
+    native("__sev_file_read_exact") def fileReadExact(handle: Any, count: int) -> Result[list[int], IOError]
 
-native("__sev_bytes_utf8") def bytesUtf8(bytes: list[int]) -> Result[string, IOError]
+    native("__sev_bytes_utf8") def bytesUtf8(bytes: list[int]) -> Result[string, IOError]
 
-native("__sev_file_seek") def fileSeek(handle: Any, offset: int) -> Result[unit, IOError]
+    native("__sev_file_seek") def fileSeek(handle: Any, offset: int) -> Result[unit, IOError]
 
-native("__sev_file_size") def fileSize(handle: Any) -> Result[int, IOError]
+    native("__sev_file_size") def fileSize(handle: Any) -> Result[int, IOError]
 
-native("__sev_file_close") def fileClose(handle: Any) -> Result[unit, IOError]
+    native("__sev_file_close") def fileClose(handle: Any) -> Result[unit, IOError]
 
-native("__sev_file_map") def fileMap(path: string) -> Result[Any, IOError]
+    native("__sev_file_map") def fileMap(path: string) -> Result[Any, IOError]
 
-native("__sev_file_mapped_size") def fileMappedSize(mapping: Any) -> int
+    native("__sev_file_mapped_size") def fileMappedSize(mapping: Any) -> int
 
-native("__sev_file_unmap") def fileUnmap(mapping: Any) -> Result[unit, IOError]
+    native("__sev_file_unmap") def fileUnmap(mapping: Any) -> Result[unit, IOError]
 
 test "native file ABI":
     path = "/tmp/severian-platform-roundtrip.txt"
@@ -34,7 +35,8 @@ test "native file ABI":
         failure error:
             assert(false, error)
 
-native("__sev_json_decode") def jsonDecode(text: string) -> Result[Any, JsonError]
+unsafe:
+    native("__sev_json_decode") def jsonDecode(text: string) -> Result[Any, JsonError]
 
 test "native JSON decode ABI":
     switch jsonDecode("42"):
@@ -43,37 +45,40 @@ test "native JSON decode ABI":
         failure error:
             assert(false, error)
 
-native("__sev_json_encode") def jsonEncode(value: Any) -> string
+unsafe:
+    native("__sev_json_encode") def jsonEncode(value: Any) -> string
 
-native("__sev_json_object_get") def jsonObjectGet(value: Any, key: string) -> Any
+    native("__sev_json_object_get") def jsonObjectGet(value: Any, key: string) -> Any
 
-native("__sev_json_object_keys") def jsonObjectKeys(value: Any) -> list[string]
+    native("__sev_json_object_keys") def jsonObjectKeys(value: Any) -> list[string]
 
-native("__sev_json_as_string") def jsonAsString(value: Any) -> string
+    native("__sev_json_as_string") def jsonAsString(value: Any) -> string
 
-native("__sev_json_as_int") def jsonAsInt(value: Any) -> int
+    native("__sev_json_as_int") def jsonAsInt(value: Any) -> int
 
-native("__sev_json_as_float") def jsonAsFloat(value: Any) -> float
+    native("__sev_json_as_float") def jsonAsFloat(value: Any) -> float
 
-native("__sev_json_as_bool") def jsonAsBool(value: Any) -> bool
+    native("__sev_json_as_bool") def jsonAsBool(value: Any) -> bool
 
-native("__sev_json_as_int_list") def jsonAsIntList(value: Any) -> list[int]
+    native("__sev_json_as_int_list") def jsonAsIntList(value: Any) -> list[int]
 
-native("__sev_json_as_string_list") def jsonAsStringList(value: Any) -> list[string]
+    native("__sev_json_as_string_list") def jsonAsStringList(value: Any) -> list[string]
 
 test "native JSON encode ABI":
     assert(jsonEncode([1, 2, 3]) == "[1,2,3]")
 
-native("__sev_log_info") def logInfo(message: string)
+unsafe:
+    native("__sev_log_info") def logInfo(message: string)
 
 test "native log ABI":
     logInfo("platform ready")
 
-native("__sev_log_error") def logError(message: string, cause: Any)
+unsafe:
+    native("__sev_log_error") def logError(message: string, cause: Any)
 
-native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
+    native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
 
-native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
+    native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
 
 test with integration "native network ABI":
     switch networkLoopbackEcho("platform loopback"):
@@ -83,37 +88,39 @@ test with integration "native network ABI":
             logError("native network ABI failed", error)
             assert(false, error)
 
-native("__sev_regex_matches") def regexMatches(text: string, pattern: string) -> bool
+unsafe:
+    native("__sev_regex_matches") def regexMatches(text: string, pattern: string) -> bool
 
 test "native regex ABI":
     assert(regexMatches("release-42", "^[a-z]+-[0-9]+$"))
 
-native("__sev_host_container_backend") def hostContainerBackend() -> string
+unsafe:
+    native("__sev_host_container_backend") def hostContainerBackend() -> string
 
-native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
+    native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
 
-native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
+    native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
 
-native("__sev_host_page_size") def host_page_size() -> int
+    native("__sev_host_page_size") def host_page_size() -> int
 
-native("__sev_database_open") def databaseOpen(path: string) -> Result[Database, DatabaseError]
+    native("__sev_database_open") def databaseOpen(path: string) -> Result[Database, DatabaseError]
 
-native("__sev_database_execute") def databaseExecute(database: Database, sql: string) -> Result[int, DatabaseError]
+    native("__sev_database_execute") def databaseExecute(database: Database, sql: string) -> Result[int, DatabaseError]
 
-native("__sev_database_query") def databaseQuery(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+    native("__sev_database_query") def databaseQuery(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
 
-native("__sev_database_close") def databaseClose(database: Database) -> Result[unit, DatabaseError]
+    native("__sev_database_close") def databaseClose(database: Database) -> Result[unit, DatabaseError]
 
-native("__sev_database_server_start") def databaseServerStart(path: string) -> Result[DatabaseServer, DatabaseError]
+    native("__sev_database_server_start") def databaseServerStart(path: string) -> Result[DatabaseServer, DatabaseError]
 
-native("__sev_database_server_address") def databaseServerAddress(server: DatabaseServer) -> string
+    native("__sev_database_server_address") def databaseServerAddress(server: DatabaseServer) -> string
 
-native("__sev_database_server_connect") def databaseServerConnect(address: string) -> Result[DatabaseConnection, DatabaseError]
+    native("__sev_database_server_connect") def databaseServerConnect(address: string) -> Result[DatabaseConnection, DatabaseError]
 
-native("__sev_database_server_execute") def databaseServerExecute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
+    native("__sev_database_server_execute") def databaseServerExecute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
 
-native("__sev_database_server_query") def databaseServerQuery(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
+    native("__sev_database_server_query") def databaseServerQuery(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
 
-native("__sev_database_server_close") def databaseServerClose(connection: DatabaseConnection) -> Result[unit, DatabaseError]
+    native("__sev_database_server_close") def databaseServerClose(connection: DatabaseConnection) -> Result[unit, DatabaseError]
 
-native("__sev_database_server_stop") def databaseServerStop(server: DatabaseServer) -> Result[unit, DatabaseError]
+    native("__sev_database_server_stop") def databaseServerStop(server: DatabaseServer) -> Result[unit, DatabaseError]

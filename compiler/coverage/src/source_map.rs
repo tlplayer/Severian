@@ -60,6 +60,18 @@ impl CoverageSourceMap {
         self.regions.extend(other.regions);
     }
 
+    pub fn within_root(&self, root: &Path) -> Self {
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        Self {
+            regions: self
+                .regions
+                .iter()
+                .filter(|(_, region)| region.span.file.starts_with(&root))
+                .map(|(id, region)| (*id, region.clone()))
+                .collect(),
+        }
+    }
+
     pub fn regions_for_file<'a>(
         &'a self,
         file: &'a Path,

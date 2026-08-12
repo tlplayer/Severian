@@ -75,87 +75,88 @@ def openSafetensors(modelDirectory: string) -> Result[SafeTensorStore, IOError]:
     weightMap = json.objectGet(index, "weight_map")
     return SafeTensorStore(modelDirectory, weightMap, [], [], [], [])
 
-native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
+unsafe:
+    native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
 
-native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
+    native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
 
-native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
 
-native("__sev_tensor_strides") def rankedStrides(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_strides") def rankedStrides(value: Tensor[f64]) -> list[int]
 
-native("__sev_tensor_slice") def rankedSlice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
+    native("__sev_tensor_slice") def rankedSlice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
 
-native("__sev_tensor_materialize") def rankedMaterialize(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_materialize") def rankedMaterialize(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_sum") def rankedSum(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_sum") def rankedSum(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_relu") def rankedRelu(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu") def rankedRelu(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_matmul") def rankedMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_matmul") def rankedMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_transpose") def rankedTranspose(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_transpose") def rankedTranspose(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_scale") def rankedScale(value: Tensor[f64], scale: float) -> Tensor[f64]
+    native("__sev_tensor_scale") def rankedScale(value: Tensor[f64], scale: float) -> Tensor[f64]
 
-native("__sev_tensor_softmax_rows") def rankedSoftmaxRows(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_rows") def rankedSoftmaxRows(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_layer_norm") def rankedLayerNorm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_layer_norm") def rankedLayerNorm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
-native("__sev_tensor_relu_backward") def rankedReluBackward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu_backward") def rankedReluBackward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_softmax_backward") def rankedSoftmaxBackward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_backward") def rankedSoftmaxBackward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_layer_norm_backward") def rankedLayerNormBackward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_layer_norm_backward") def rankedLayerNormBackward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
-native("__sev_tensor_backward_mse") def rankedBackwardMse(output: Tensor[f64])
+    native("__sev_tensor_backward_mse") def rankedBackwardMse(output: Tensor[f64])
 
-native("__sev_tensor_gradient") def rankedGradient(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_gradient") def rankedGradient(value: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_sgd") def rankedSgd(value: Tensor[f64], learningRate: float) -> Tensor[f64]
+    native("__sev_tensor_sgd") def rankedSgd(value: Tensor[f64], learningRate: float) -> Tensor[f64]
 
-native("__sev_safetensor_bf16_view") def mappedBf16(mapping: Any, byteOffset: int, shape: list[int]) -> Tensor[bf16]
+    native("__sev_safetensor_bf16_view") def mappedBf16(mapping: Any, byteOffset: int, shape: list[int]) -> Tensor[bf16]
 
-native("__sev_safetensor_bf16_shape") def mappedBf16Shape(value: Tensor[bf16]) -> list[int]
-native("__sev_tensor_bf16_shape") def shapeBf16(value: Tensor[bf16]) -> list[int]
+    native("__sev_safetensor_bf16_shape") def mappedBf16Shape(value: Tensor[bf16]) -> list[int]
+    native("__sev_tensor_bf16_shape") def shapeBf16(value: Tensor[bf16]) -> list[int]
 
 # These are compiler-recognized tensor primitives. On the XLA target they are
 # decomposed into StableHLO; they are not opaque model/runtime operations.
-native("__sev_tensor_bf16_add") def addBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-native("__sev_tensor_f32_add") def addF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_bf16_multiply") def multiplyBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-native("__sev_tensor_f32_multiply") def multiplyF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_subtract") def subtractF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_divide") def divideF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_bf16_matmul") def matmulBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-native("__sev_tensor_f32_batched_matmul") def batchedMatmulF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_bf16_reshape") def reshapeBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-native("__sev_tensor_f32_reshape") def reshapeF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
-native("__sev_tensor_bf16_transpose") def transposeBf16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
-native("__sev_tensor_f32_transpose") def transposeF32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
-native("__sev_tensor_bf16_to_f32") def bf16ToF32(value: Tensor[bf16]) -> Tensor[f32]
-native("__sev_tensor_f32_to_bf16") def f32ToBf16(value: Tensor[f32]) -> Tensor[bf16]
-native("__sev_tensor_f32_mean_last") def meanLastF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_max_last") def maxLastF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_sum_last") def sumLastF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_rsqrt") def rsqrtF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_exp") def expF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_bf16_sigmoid") def sigmoidBf16(value: Tensor[bf16]) -> Tensor[bf16]
-native("__sev_tensor_f32_broadcast_like") def broadcastLikeF32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_bf16_broadcast_like") def broadcastLikeBf16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
-native("__sev_tensor_bf16_broadcast") def broadcastBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-native("__sev_tensor_f32_broadcast") def broadcastF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
-native("__sev_tensor_bf16_gather") def gatherBf16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
-native("__sev_tensor_bf16_dynamic_slice") def dynamicSliceBf16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
-native("__sev_tensor_bf16_dynamic_update_slice") def dynamicUpdateSliceBf16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
-native("__sev_tensor_bf16_dynamic_update_slice_axis") def dynamicUpdateSliceAxisBf16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
-native("__sev_tensor_f32_scale") def scaleF32(value: Tensor[f32], scale: float) -> Tensor[f32]
-native("__sev_tensor_f32_cosine") def cosineF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_sine") def sineF32(value: Tensor[f32]) -> Tensor[f32]
-native("__sev_tensor_f32_slice") def sliceF32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
-native("__sev_tensor_f32_concatenate") def concatenateF32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
-native("__sev_tensor_f32_add_scalar") def addScalarF32(value: Tensor[f32], scalar: float) -> Tensor[f32]
+    native("__sev_tensor_bf16_add") def addBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_add") def addF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_multiply") def multiplyBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_multiply") def multiplyF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_subtract") def subtractF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_divide") def divideF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_matmul") def matmulBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_batched_matmul") def batchedMatmulF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_reshape") def reshapeBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_reshape") def reshapeF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_transpose") def transposeBf16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_transpose") def transposeF32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_to_f32") def bf16ToF32(value: Tensor[bf16]) -> Tensor[f32]
+    native("__sev_tensor_f32_to_bf16") def f32ToBf16(value: Tensor[f32]) -> Tensor[bf16]
+    native("__sev_tensor_f32_mean_last") def meanLastF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_max_last") def maxLastF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_sum_last") def sumLastF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_rsqrt") def rsqrtF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_exp") def expF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_sigmoid") def sigmoidBf16(value: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_broadcast_like") def broadcastLikeF32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_broadcast_like") def broadcastLikeBf16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_broadcast") def broadcastBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_broadcast") def broadcastF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_gather") def gatherBf16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_slice") def dynamicSliceBf16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_update_slice") def dynamicUpdateSliceBf16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_update_slice_axis") def dynamicUpdateSliceAxisBf16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
+    native("__sev_tensor_f32_scale") def scaleF32(value: Tensor[f32], scale: float) -> Tensor[f32]
+    native("__sev_tensor_f32_cosine") def cosineF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_sine") def sineF32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_slice") def sliceF32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
+    native("__sev_tensor_f32_concatenate") def concatenateF32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
+    native("__sev_tensor_f32_add_scalar") def addScalarF32(value: Tensor[f32], scalar: float) -> Tensor[f32]
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

@@ -2854,6 +2854,15 @@ impl LowerContext<'_> {
                             }
                         })
                 };
+                if linked_function == "main" && return_type == ValueType::Unit {
+                    let ignored = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {ignored} = llvm.call @{symbol}({values}) : ({types}) -> i32"
+                    )
+                    .unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
                 if return_type == ValueType::Unit {
                     writeln!(
                         self.output,

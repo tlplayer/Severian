@@ -66,6 +66,7 @@ pub fn check(module: &Module, tokens: &[Token], source: &str, path: &Path) -> Na
     };
     checker.module(module);
     checker.compatibility_spellings(tokens);
+    checker.cohesive_unsafe_blocks(tokens);
     checker.report
 }
 
@@ -566,6 +567,55 @@ impl Checker<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn cohesive_unsafe_blocks(&mut self, tokens: &[Token]) {
+        let mut index = 0;
+        let mut depth = 0usize;
+        let mut previous_top_level_item_was_unsafe = false;
+        while index < tokens.len() {
+            if depth == 0 && tokens[index].kind == TokenKind::Unsafe {
+                if previous_top_level_item_was_unsafe {
+                    self.report.diagnostics.push(
+                        Diagnostic::error(
+                            "N012",
+                            "adjacent native declarations must share one cohesive `unsafe:` block",
+                        )
+                        .with_help("move this declaration into the preceding `unsafe:` block")
+                        .at(self.range(tokens[index].span)),
+                    );
+                }
+                previous_top_level_item_was_unsafe = true;
+
+                index += 1;
+                while index < tokens.len() && tokens[index].kind != TokenKind::Indent {
+                    index += 1;
+                }
+                if index == tokens.len() {
+                    break;
+                }
+                let mut block_depth = 1usize;
+                index += 1;
+                while index < tokens.len() && block_depth > 0 {
+                    match tokens[index].kind {
+                        TokenKind::Indent => block_depth += 1,
+                        TokenKind::Dedent => block_depth -= 1,
+                        _ => {}
+                    }
+                    index += 1;
+                }
+                continue;
+            }
+
+            match tokens[index].kind {
+                TokenKind::Indent => depth += 1,
+                TokenKind::Dedent => depth = depth.saturating_sub(1),
+                TokenKind::Newline | TokenKind::Eof => {}
+                _ if depth == 0 => previous_top_level_item_was_unsafe = false,
+                _ => {}
+            }
+            index += 1;
         }
     }
 

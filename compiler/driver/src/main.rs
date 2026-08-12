@@ -1,6 +1,7 @@
 use severian_driver::{
-    check_path, compile_native, compile_native_tests, compile_native_with_options, compile_path,
-    inspect_toolchain, native_test_compilation, native_test_count, Compilation,
+    check_path, compile_dependency_path, compile_native, compile_native_tests,
+    compile_native_with_options, compile_path, inspect_toolchain, native_test_compilation,
+    native_test_count, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -8,6 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 fn main() {
@@ -40,10 +42,19 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "doctor" if args.len() == 1 => doctor(),
         "new" if args.len() == 2 => new_project(Path::new(&args[1])),
         "init" if args.len() <= 2 => init_project(args.get(1).map_or(Path::new("."), Path::new)),
-        "check" if args.len() == 2 => check_targets(Path::new(&args[1])),
+        "add" => add_command(&args[1..]),
+        "remove" if args.len() == 2 => remove_command(&args[1]),
+        "update" if args.len() <= 2 => {
+            update_command(args.get(1).map_or(Path::new("."), Path::new))
+        }
+        "publish" if args.len() <= 2 => {
+            publish_command(args.get(1).map_or(Path::new("."), Path::new))
+        }
+        "install" => install_command(&args[1..]),
+        "check" if args.len() <= 2 => check_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "lint" => lint_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
-        "run" if args.len() == 2 => run_targets(Path::new(&args[1])),
+        "run" if args.len() <= 2 => run_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "test" => test_command(&args[1..]),
         "coverage" if args.len() == 2 => coverage(Path::new(&args[1])),
         "memory" => memory_command(&args[1..]),
@@ -67,6 +78,214 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         }
         _ => Err(usage()),
     }
+}
+
+fn add_command(args: &[String]) -> Result<(), String> {
+    let Some(name) = args.first().filter(|value| !value.starts_with('-')) else {
+        return Err("usage: sev add <package> [--version REQUIREMENT] [--path PATH]".into());
+    };
+    let mut version = None;
+    let mut path = None;
+    let mut published_name = None;
+    let mut index = 1;
+    while index < args.len() {
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("option `{}` requires a value", args[index]))?;
+        match args[index].as_str() {
+            "--version" => version = Some(value.clone()),
+            "--path" => path = Some(value.clone()),
+            "--package" => published_name = Some(value.clone()),
+            option => return Err(format!("unknown add option `{option}`")),
+        }
+        index += 2;
+    }
+    let manifest_path = project_manifest(Path::new("."))?;
+    let original = fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
+    let mut manifest = read_manifest_value(&manifest_path)?;
+    let table = manifest
+        .as_table_mut()
+        .ok_or_else(|| format!("{} is not a TOML table", manifest_path.display()))?;
+    let dependencies = table
+        .entry("dependencies")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or("[dependencies] must be a table")?;
+    if dependencies.contains_key(name) {
+        return Err(format!("dependency `{name}` already exists"));
+    }
+    let specification = if let Some(path) = path {
+        let mut detail = toml::Table::new();
+        detail.insert("path".into(), toml::Value::String(path));
+        if let Some(version) = version {
+            detail.insert("version".into(), toml::Value::String(version));
+        }
+        if let Some(package) = published_name {
+            detail.insert("package".into(), toml::Value::String(package));
+        }
+        toml::Value::Table(detail)
+    } else if published_name.is_some() {
+        let mut detail = toml::Table::new();
+        detail.insert(
+            "version".into(),
+            toml::Value::String(version.unwrap_or_else(|| "*".into())),
+        );
+        detail.insert(
+            "package".into(),
+            toml::Value::String(published_name.expect("published name is present")),
+        );
+        toml::Value::Table(detail)
+    } else {
+        toml::Value::String(version.unwrap_or_else(|| "*".into()))
+    };
+    dependencies.insert(name.clone(), specification);
+    write_manifest_value(&manifest_path, &manifest)?;
+    if let Err(error) = severian_package::resolve_dependencies(&manifest_path) {
+        fs::write(&manifest_path, original).map_err(|rollback| {
+            format!(
+                "dependency resolution failed ({error}) and restoring {} also failed: {rollback}",
+                manifest_path.display()
+            )
+        })?;
+        return Err(error.to_string());
+    }
+    println!("Added {name}");
+    Ok(())
+}
+
+fn remove_command(name: &str) -> Result<(), String> {
+    let manifest_path = project_manifest(Path::new("."))?;
+    let mut manifest = read_manifest_value(&manifest_path)?;
+    let removed = manifest
+        .get_mut("dependencies")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|dependencies| dependencies.remove(name));
+    if removed.is_none() {
+        return Err(format!("dependency `{name}` is not declared"));
+    }
+    write_manifest_value(&manifest_path, &manifest)?;
+    // Regenerate the lockfile immediately so removed packages do not remain
+    // authoritative merely because the next command is not a build.
+    severian_package::resolve_dependencies(&manifest_path).map_err(|error| error.to_string())?;
+    println!("Removed {name}");
+    Ok(())
+}
+
+fn update_command(input: &Path) -> Result<(), String> {
+    let manifest = project_manifest(input)?;
+    let resolution =
+        severian_package::update_dependencies(&manifest).map_err(|error| error.to_string())?;
+    for dependency in &resolution.dependencies {
+        println!(
+            "Resolved {} -> {} {}",
+            dependency.import_name, dependency.package_name, dependency.version
+        );
+    }
+    println!("Updated {}", resolution.lockfile.display());
+    Ok(())
+}
+
+fn publish_command(input: &Path) -> Result<(), String> {
+    let manifest = project_manifest(input)?;
+    severian_package::resolve_dependencies(&manifest).map_err(|error| error.to_string())?;
+    let package =
+        severian_package::publish_package(&manifest, None).map_err(|error| error.to_string())?;
+    println!(
+        "Published {} {} ({})",
+        package.package_name,
+        package.version,
+        package.checksum.as_deref().unwrap_or("unverified")
+    );
+    Ok(())
+}
+
+fn install_command(args: &[String]) -> Result<(), String> {
+    let Some(name) = args.first().filter(|name| !name.starts_with('-')) else {
+        return Err("usage: sev install <package> [--version REQUIREMENT]".into());
+    };
+    let mut version = "*".to_owned();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--version" if index + 1 < args.len() => {
+                version = args[index + 1].clone();
+                index += 2;
+            }
+            option => return Err(format!("unknown install option `{option}`")),
+        }
+    }
+    let temporary = std::env::temp_dir().join(format!(
+        "severian-install-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+    let result = (|| {
+        let manifest = temporary.join(severian_package::MANIFEST_FILE);
+        fs::write(
+            &manifest,
+            format!(
+                "[package]\nname = \"severian-install\"\nversion = \"0.0.0\"\n\n[dependencies]\ninstalled_package = {{ package = {:?}, version = {:?} }}\n",
+                name, version
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+        let resolution =
+            severian_package::resolve_dependencies(&manifest).map_err(|error| error.to_string())?;
+        let package = resolution
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.import_name == "installed_package")
+            .ok_or_else(|| format!("package `{name}` did not resolve"))?;
+        let target = severian_package::default_binary_target(&package.root)
+            .map_err(|error| error.to_string())?;
+        let mut libraries = HashSet::new();
+        build_libraries(&target.source, &mut libraries)?;
+        let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
+        let home = std::env::var_os("SEVERIAN_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".sev")))
+            .unwrap_or_else(|| PathBuf::from(".sev"));
+        let binary_directory = home.join("bin");
+        fs::create_dir_all(&binary_directory).map_err(|error| error.to_string())?;
+        let output = binary_directory.join(&target.name);
+        compile_native(&compilation, &output).map_err(|error| error.to_string())?;
+        println!(
+            "Installed {} {} -> {}",
+            name,
+            package.version,
+            output.display()
+        );
+        Ok(())
+    })();
+    let _ = fs::remove_dir_all(&temporary);
+    result
+}
+
+fn project_manifest(input: &Path) -> Result<PathBuf, String> {
+    if input.is_file() {
+        if input.file_name().and_then(|name| name.to_str()) == Some(severian_package::MANIFEST_FILE)
+        {
+            return Ok(input.to_path_buf());
+        }
+        return severian_package::find_manifest(input)
+            .ok_or_else(|| format!("could not find package.toml from {}", input.display()));
+    }
+    severian_package::nearest_manifest(input)
+        .ok_or_else(|| format!("could not find package.toml from {}", input.display()))
+}
+
+fn read_manifest_value(path: &Path) -> Result<toml::Value, String> {
+    let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    toml::from_str(&source).map_err(|error| format!("invalid manifest {}: {error}", path.display()))
+}
+
+fn write_manifest_value(path: &Path, manifest: &toml::Value) -> Result<(), String> {
+    let source = toml::to_string_pretty(manifest).map_err(|error| error.to_string())?;
+    fs::write(path, source).map_err(|error| error.to_string())
 }
 
 fn new_project(path: &Path) -> Result<(), String> {
@@ -111,8 +330,11 @@ fn init_project(path: &Path) -> Result<(), String> {
     fs::create_dir_all(&source_directory).map_err(|error| error.to_string())?;
     let main = source_directory.join("main.sev");
     if !main.exists() {
-        fs::write(&main, "def main():\n    print(\"hello, severian\")\n")
-            .map_err(|error| error.to_string())?;
+        fs::write(
+            &main,
+            "def main():\n    print(\"hello, severian\")\n\ntest \"entrypoint\":\n    main()\n",
+        )
+        .map_err(|error| error.to_string())?;
     }
     println!("Initialized {}", path.display());
     Ok(())
@@ -166,6 +388,8 @@ enum BuildTarget {
     Xla,
 }
 
+const REQUIRED_LINE_COVERAGE: f64 = 75.0;
+
 fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut input = PathBuf::from(".");
     let mut emit = EmitMode::Executable;
@@ -199,6 +423,13 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     if target == BuildTarget::Native && emit == EmitMode::StableHlo {
         return Err("StableHLO emission requires `--target xla`".into());
     }
+
+    coverage(&input).map_err(|error| {
+        format!(
+            "build blocked by the {:.0}% line coverage requirement: {error}",
+            REQUIRED_LINE_COVERAGE
+        )
+    })?;
 
     let targets = resolve_targets(&input)?;
     if targets.is_empty() {
@@ -378,7 +609,7 @@ fn build_libraries(source: &Path, built: &mut HashSet<PathBuf>) -> Result<(), St
         if !built.insert(library.artifact.clone()) {
             continue;
         }
-        compile_path(&library.source)
+        compile_dependency_path(&library.source)
             .map_err(|error| format!("could not build library `{}`: {error}", library.name))?;
         severian_package::write_library_artifact(&library).map_err(|error| error.to_string())?;
         println!("Built {} -> {}", library.name, library.artifact.display());
@@ -442,6 +673,7 @@ fn lint_command(args: &[String]) -> Result<(), String> {
     sources.dedup();
 
     let mut warning_count = 0;
+    let mut error_count = 0;
     let mut fixed_count = 0;
     for path in sources {
         let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -482,12 +714,18 @@ fn lint_command(args: &[String]) -> Result<(), String> {
             eprintln!("{rendered}");
         }
         warning_count += report.diagnostics.warning_count();
+        error_count += report.diagnostics.error_count();
     }
 
     if fix {
-        println!("Fixed {fixed_count} file(s); {warning_count} warning(s) remain");
+        println!(
+            "Fixed {fixed_count} file(s); {error_count} error(s) and {warning_count} warning(s) remain"
+        );
     } else {
-        println!("{warning_count} warning(s)");
+        println!("{error_count} error(s); {warning_count} warning(s)");
+    }
+    if error_count > 0 {
+        return Err(format!("lint failed with {error_count} error(s)"));
     }
     Ok(())
 }
@@ -615,12 +853,9 @@ fn test_command(args: &[String]) -> Result<(), String> {
             value => return Err(format!("unknown test option `{value}`\n{}", usage())),
         }
     }
-    let input_supplied = input.is_some();
     let input = input.unwrap_or_else(|| PathBuf::from("."));
     if mutate {
         mutation_test_targets(&input, limit)
-    } else if !input_supplied {
-        Err(usage())
     } else {
         test_targets(&input)
     }
@@ -844,7 +1079,8 @@ fn coverage(input: &Path) -> Result<(), String> {
     let hits_path = report_root.join("coverage.hits");
     severian_coverage::save_language_hits(&hits_path, &all_hits)
         .map_err(|error| error.to_string())?;
-    let (report, files) = severian_coverage::language_report(&all_regions, &all_hits);
+    let project_regions = all_regions.within_root(&targets[0].package_root);
+    let (report, files) = severian_coverage::language_report(&project_regions, &all_hits);
     let report_path = report_root.join("coverage-report.json");
     severian_coverage::save_language_report(&report_path, &report, &files)
         .map_err(|error| error.to_string())?;
@@ -859,14 +1095,45 @@ fn coverage(input: &Path) -> Result<(), String> {
     for failure in &failures {
         eprintln!("UNCOVERED {failure}");
     }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
+    if !failures.is_empty() {
+        return Err(format!(
             "coverage could not compile or execute {} target(s)",
             failures.len()
-        ))
+        ));
     }
+
+    let diagnostics = severian_diagnostics::coverage::check_thresholds(
+        severian_diagnostics::coverage::CoveragePercentages {
+            lines: report.lines.percent,
+            regions: report.regions.percent,
+            branches: report.branches.percent,
+            functions: report.functions.percent,
+        },
+        severian_diagnostics::coverage::CoverageThresholds {
+            lines: Some(REQUIRED_LINE_COVERAGE),
+            regions: None,
+            branches: None,
+            functions: None,
+        },
+    );
+    if diagnostics.has_errors() {
+        eprintln!(
+            "{}",
+            severian_diagnostics::render::render_bag(
+                &diagnostics,
+                None,
+                &severian_diagnostics::render::RenderOptions {
+                    color: false,
+                    ..Default::default()
+                },
+            )
+        );
+        return Err(format!(
+            "line coverage is {:.2}%; at least {:.2}% is required",
+            report.lines.percent, REQUIRED_LINE_COVERAGE
+        ));
+    }
+    Ok(())
 }
 
 fn is_expected_negative_coverage_fixture(source: &Path) -> bool {
@@ -1276,11 +1543,16 @@ fn usage() -> String {
         "  doctor                         diagnose native and optional toolchains",
         "  new <path>                     create a project with package.toml and sev.lock",
         "  init [path]                    initialize a project in an existing directory",
-        "  check <path>                   parse, resolve, typecheck, and check ownership",
+        "  add <package> [--version V] [--path P] add a dependency to package.toml",
+        "  remove <package>                remove a dependency and refresh sev.lock",
+        "  update [path]                   resolve, verify, cache, and lock dependencies",
+        "  publish [path]                  publish an immutable version to the configured registry",
+        "  install <package> [--version V] install a registry package binary",
+        "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
-        "  build [path] [--emit KIND] [--target native|xla]",
-        "  run <path>                     build and run native code",
-        "  test <path>                    build and run native Severian tests",
+        "  build [path] [--emit KIND] [--target native|xla] (requires 75% line coverage)",
+        "  run [path]                     build and run native code",
+        "  test [path]                    build and run native Severian tests",
         "  test [path] --mutate [--limit N] run deterministic mutation testing",
         "  coverage <path>                run tests and report Severian source coverage",
         "  memory <path> [--sanitizer KIND] [--leaks] run native memory diagnostics",

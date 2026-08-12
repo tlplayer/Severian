@@ -5,6 +5,13 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+mod resolution;
+
+pub use resolution::{
+    publish_package, resolve_dependencies, resolve_dependencies_transient, update_dependencies,
+    Resolution, ResolvedDependency,
+};
+
 pub const MANIFEST_FILE: &str = "package.toml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +64,13 @@ pub struct PackageInterface {
     pub compiler: CompilerMetadata,
     pub source_path: PathBuf,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EmbeddedOfficialPackage<'a> {
+    pub name: &'a str,
+    pub manifest: &'a str,
+    pub source: &'a str,
 }
 
 #[derive(Debug)]
@@ -160,9 +174,20 @@ pub fn workspace_manifests(directory: &Path) -> Result<Vec<PathBuf>, PackageErro
 }
 
 pub fn library_build_plan(manifest_path: &Path) -> Result<Vec<LibraryTarget>, PackageError> {
-    let mut visited = HashSet::new();
+    let resolution = resolve_dependencies(manifest_path)?;
     let mut targets = Vec::new();
-    collect_library_targets(manifest_path, &mut visited, &mut targets)?;
+    for dependency in resolution.dependencies {
+        let manifest = parse_manifest(&dependency.manifest)?;
+        let source = dependency.root.join(library_path(&manifest));
+        if manifest.get("lib").is_some() || source.is_file() {
+            targets.push(LibraryTarget {
+                name: dependency.import_name,
+                source,
+                artifact: library_artifact_path(&dependency.root, &dependency.package_name),
+                manifest: dependency.manifest,
+            });
+        }
+    }
     Ok(targets)
 }
 
@@ -348,18 +373,49 @@ pub fn default_binary_source(directory: &Path) -> Result<PathBuf, PackageError> 
 }
 
 pub fn load_path_dependency_sources(manifest_path: &Path) -> Result<Vec<String>, PackageError> {
-    let mut visited = HashSet::new();
-    let mut sources = Vec::new();
-    load_manifest_dependencies(manifest_path, &mut visited, &mut sources)?;
-    Ok(sources)
+    resolve_dependencies(manifest_path)?
+        .dependencies
+        .into_iter()
+        .map(|dependency| {
+            let manifest = parse_manifest(&dependency.manifest)?;
+            let source = dependency.root.join(library_path(&manifest));
+            std::fs::read_to_string(&source).map_err(|error| {
+                PackageError::Manifest(format!(
+                    "could not read library for `{}` at {}: {error}",
+                    dependency.import_name,
+                    source.display()
+                ))
+            })
+        })
+        .collect()
 }
 
 pub fn load_path_dependency_interfaces(
     manifest_path: &Path,
 ) -> Result<Vec<PackageInterface>, PackageError> {
-    let mut visited = HashSet::new();
-    let mut interfaces = Vec::new();
-    collect_path_dependency_interfaces(manifest_path, &mut visited, &mut interfaces)?;
+    load_dependency_interfaces(resolve_dependencies(manifest_path)?)
+}
+
+pub fn load_transient_dependency_interfaces(
+    manifest_path: &Path,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    load_dependency_interfaces(resolve_dependencies_transient(manifest_path)?)
+}
+
+fn load_dependency_interfaces(
+    resolution: Resolution,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let mut interfaces = resolution
+        .dependencies
+        .into_iter()
+        .map(|dependency| {
+            load_interface_as(
+                &dependency.import_name,
+                &dependency.package_name,
+                &dependency.root,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     interfaces.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(interfaces)
 }
@@ -527,51 +583,6 @@ pub fn local_import_exposed_name(path: &str) -> Option<String> {
     valid.then(|| name.to_owned())
 }
 
-fn collect_path_dependency_interfaces(
-    manifest_path: &Path,
-    visited: &mut HashSet<PathBuf>,
-    interfaces: &mut Vec<PackageInterface>,
-) -> Result<(), PackageError> {
-    let manifest = parse_manifest(manifest_path)?;
-    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
-        return Ok(());
-    };
-    let root = manifest_path
-        .parent()
-        .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
-    for (dependency_name, dependency) in dependencies {
-        let Some(path) = dependency
-            .as_table()
-            .and_then(|table| table.get("path"))
-            .and_then(toml::Value::as_str)
-        else {
-            continue;
-        };
-        let directory = root.join(path).canonicalize().map_err(|error| {
-            PackageError::Manifest(format!(
-                "dependency `{dependency_name}` has invalid path `{}`: {error}",
-                root.join(path).display()
-            ))
-        })?;
-        let dependency_manifest =
-            manifest_in(&directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
-        let canonical_manifest = dependency_manifest.canonicalize()?;
-        if !visited.insert(canonical_manifest.clone()) {
-            continue;
-        }
-        let dependency = parse_manifest(&canonical_manifest)?;
-        let declared_name = package_name(&dependency, &canonical_manifest)?;
-        if declared_name != dependency_name {
-            return Err(PackageError::Manifest(format!(
-                "dependency `{dependency_name}` resolves to package `{declared_name}`"
-            )));
-        }
-        collect_path_dependency_interfaces(&canonical_manifest, visited, interfaces)?;
-        interfaces.push(load_interface(dependency_name, &directory)?);
-    }
-    Ok(())
-}
-
 pub fn load_official_interfaces(
     module: &Module,
     library_root: &Path,
@@ -596,6 +607,59 @@ pub fn load_official_interfaces(
             continue;
         };
         let interface = load_interface(&name, &directory)?;
+        pending.extend(imported_packages(&interface.module));
+        interfaces.push(interface);
+    }
+    interfaces.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(interfaces)
+}
+
+/// Loads standard packages embedded in the compiler binary. This keeps named
+/// imports available when `sev` is installed or relocated without its source
+/// checkout. An explicit `SEVERIAN_LIBRARY_PATH` can still select editable
+/// on-disk packages during compiler and standard-library development.
+pub fn load_embedded_official_interfaces(
+    module: &Module,
+    packages: &[EmbeddedOfficialPackage<'_>],
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let mut pending = imported_packages(module)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let mut loaded = HashSet::new();
+    let mut interfaces = Vec::new();
+    while let Some(name) = pending.pop_first() {
+        if !loaded.insert(name.clone()) {
+            continue;
+        }
+        let Some(package) = packages.iter().find(|package| package.name == name) else {
+            continue;
+        };
+        let manifest_path = PathBuf::from("<severian-stdlib>")
+            .join(package.name)
+            .join(MANIFEST_FILE);
+        let source_path = PathBuf::from("<severian-stdlib>")
+            .join(package.name)
+            .join("src/lib.sev");
+        let manifest = toml::from_str::<toml::Value>(package.manifest).map_err(|error| {
+            PackageError::Manifest(format!(
+                "invalid embedded manifest for package `{}`: {error}",
+                package.name
+            ))
+        })?;
+        let declared_name = package_name(&manifest, &manifest_path)?;
+        if declared_name != package.name {
+            return Err(PackageError::Manifest(format!(
+                "embedded package `{}` declares package `{declared_name}`",
+                package.name
+            )));
+        }
+        let interface = load_interface_source(
+            &name,
+            &manifest,
+            &manifest_path,
+            source_path,
+            package.source.to_owned(),
+        )?;
         pending.extend(imported_packages(&interface.module));
         interfaces.push(interface);
     }
@@ -639,21 +703,39 @@ fn imported_packages(module: &Module) -> HashSet<String> {
 }
 
 fn load_interface(name: &str, directory: &Path) -> Result<PackageInterface, PackageError> {
+    load_interface_as(name, name, directory)
+}
+
+fn load_interface_as(
+    import_name: &str,
+    expected_package: &str,
+    directory: &Path,
+) -> Result<PackageInterface, PackageError> {
     let manifest_path = manifest_in(directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
     let manifest = parse_manifest(&manifest_path)?;
-    let declared_name = package_name(&manifest, &manifest_path)?;
-    if declared_name != name {
-        return Err(PackageError::Manifest(format!(
-            "official package `{name}` declares package `{declared_name}`"
-        )));
-    }
     let source_path = directory.join(library_path(&manifest));
     let source = std::fs::read_to_string(&source_path).map_err(|error| {
         PackageError::Manifest(format!(
-            "could not read official package `{name}` at {}: {error}",
+            "could not read package `{expected_package}` at {}: {error}",
             source_path.display()
         ))
     })?;
+    let declared_name = package_name(&manifest, &manifest_path)?;
+    if declared_name != expected_package {
+        return Err(PackageError::Manifest(format!(
+            "dependency `{import_name}` expects package `{expected_package}` but resolves to `{declared_name}`"
+        )));
+    }
+    load_interface_source(import_name, &manifest, &manifest_path, source_path, source)
+}
+
+fn load_interface_source(
+    name: &str,
+    manifest: &toml::Value,
+    manifest_path: &Path,
+    source_path: PathBuf,
+    source: String,
+) -> Result<PackageInterface, PackageError> {
     let tokens = severian_lexer::lex(&source).map_err(|error| PackageError::Frontend {
         package: name.into(),
         stage: "lexer",
@@ -669,7 +751,7 @@ fn load_interface(name: &str, directory: &Path) -> Result<PackageInterface, Pack
     Ok(PackageInterface {
         name: name.into(),
         module,
-        compiler: compiler_metadata(name, &manifest, &manifest_path)?,
+        compiler: compiler_metadata(name, manifest, manifest_path)?,
         source_path,
         source,
     })
@@ -897,134 +979,12 @@ fn metadata_error(path: &Path, message: impl Into<String>) -> PackageError {
     ))
 }
 
-fn load_manifest_dependencies(
-    manifest_path: &Path,
-    visited: &mut HashSet<PathBuf>,
-    sources: &mut Vec<String>,
-) -> Result<(), PackageError> {
-    let manifest = parse_manifest(manifest_path)?;
-    let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
-        return Ok(());
-    };
-    let manifest_directory = manifest_path
-        .parent()
-        .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
-    for (dependency_name, dependency) in dependencies {
-        let Some(path) = dependency
-            .as_table()
-            .and_then(|table| table.get("path"))
-            .and_then(toml::Value::as_str)
-        else {
-            continue;
-        };
-        let dependency_directory = manifest_directory.join(path);
-        let dependency_manifest = manifest_in(&dependency_directory)
-            .unwrap_or_else(|| dependency_directory.join(MANIFEST_FILE));
-        let canonical_manifest = dependency_manifest.canonicalize().map_err(|error| {
-            PackageError::Manifest(format!(
-                "dependency `{dependency_name}` has invalid path `{}`: {error}",
-                dependency_directory.display()
-            ))
-        })?;
-        if !visited.insert(canonical_manifest.clone()) {
-            continue;
-        }
-        let dependency_package = parse_manifest(&canonical_manifest)?;
-        let declared_name = package_name(&dependency_package, &canonical_manifest)?;
-        if declared_name != dependency_name {
-            return Err(PackageError::Manifest(format!(
-                "dependency `{dependency_name}` resolves to package `{declared_name}`"
-            )));
-        }
-        load_manifest_dependencies(&canonical_manifest, visited, sources)?;
-        let source_path = canonical_manifest
-            .parent()
-            .ok_or_else(|| PackageError::Manifest("dependency manifest has no parent".into()))?
-            .join(library_path(&dependency_package));
-        let artifact_path = library_artifact_path(
-            canonical_manifest
-                .parent()
-                .expect("a manifest path has a parent"),
-            declared_name,
-        );
-        let selected_path = if artifact_is_fresh(&artifact_path, &source_path, &canonical_manifest)
-        {
-            &artifact_path
-        } else {
-            &source_path
-        };
-        sources.push(std::fs::read_to_string(selected_path).map_err(|error| {
-            PackageError::Manifest(format!(
-                "could not read library for `{dependency_name}` at {}: {error}",
-                selected_path.display()
-            ))
-        })?);
-    }
-    Ok(())
-}
-
-fn collect_library_targets(
-    manifest_path: &Path,
-    visited: &mut HashSet<PathBuf>,
-    targets: &mut Vec<LibraryTarget>,
-) -> Result<(), PackageError> {
-    let canonical_manifest = manifest_path.canonicalize().map_err(|error| {
-        PackageError::Manifest(format!(
-            "package manifest {} is invalid: {error}",
-            manifest_path.display()
-        ))
-    })?;
-    if !visited.insert(canonical_manifest.clone()) {
-        return Ok(());
-    }
-    let manifest = parse_manifest(&canonical_manifest)?;
-    let directory = canonical_manifest
-        .parent()
-        .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
-    if let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) {
-        for dependency in dependencies.values() {
-            let Some(path) = dependency
-                .as_table()
-                .and_then(|table| table.get("path"))
-                .and_then(toml::Value::as_str)
-            else {
-                continue;
-            };
-            let dependency_directory = directory.join(path);
-            let dependency_manifest = manifest_in(&dependency_directory)
-                .unwrap_or_else(|| dependency_directory.join(MANIFEST_FILE));
-            collect_library_targets(&dependency_manifest, visited, targets)?;
-        }
-    }
-    if manifest.get("lib").is_some() {
-        let name = package_name(&manifest, &canonical_manifest)?.to_owned();
-        targets.push(LibraryTarget {
-            source: directory.join(library_path(&manifest)),
-            artifact: library_artifact_path(directory, &name),
-            name,
-            manifest: canonical_manifest,
-        });
-    }
-    Ok(())
-}
-
 fn library_artifact_path(directory: &Path, package: &str) -> PathBuf {
     directory
         .join("target")
         .join("debug")
         .join("deps")
         .join(format!("lib{package}.sevi"))
-}
-
-fn artifact_is_fresh(artifact: &Path, source: &Path, manifest: &Path) -> bool {
-    let Ok(artifact_modified) = artifact.metadata().and_then(|metadata| metadata.modified()) else {
-        return false;
-    };
-    [source, manifest].iter().all(|path| {
-        path.metadata()
-            .and_then(|metadata| metadata.modified())
-            .is_ok_and(|modified| modified <= artifact_modified)
-    })
 }
 
 fn package_name<'a>(manifest: &'a toml::Value, path: &Path) -> Result<&'a str, PackageError> {

@@ -71,6 +71,9 @@ are emitted under `target/debug`. Path libraries are checked in dependency order
 and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
 those artifacts. Library-local tests are not linked into downstream application
 test binaries. `sev build source.sev` uses the source stem as the binary name.
+Before emitting artifacts, every build runs the project-owned test coverage gate
+and stops if line coverage is below 75%; standard and path dependencies are not
+charged to the consuming package's percentage.
 
 The CLI is also a conventional Cargo binary crate:
 
@@ -496,7 +499,47 @@ geometry = { version = "0.1.0", path = "../geometry" }
 
 `from geometry import Point` resolves `geometry` from the current package, the
 standard library, or a dependency selected by the manifest and lockfile. Source
-files do not contain a separate `package` declaration.
+files do not contain a separate `package` declaration. Standard-library package
+sources are embedded in `sev`, so named imports remain available after the
+compiler binary is installed or relocated. `SEVERIAN_LIBRARY_PATH` deliberately
+overrides those embedded packages for library development.
+
+Native ABI declarations must acknowledge their unsafe boundary explicitly:
+
+```sev
+unsafe:
+    native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
+```
+
+Application code should normally import the safe public package (`file` in this
+case) instead of declaring platform symbols itself.
+
+Registry packages use the same import syntax and never expose cache paths to
+source code:
+
+```toml
+[dependencies]
+tensor = "0.8"
+http = "2.1"
+local_geometry = { package = "geometry", path = "../geometry", version = "0.1" }
+```
+
+`SEVERIAN_REGISTRY` selects an on-disk registry (a path or `file://` URL), and
+`SEVERIAN_HOME` selects Severian's local state directory (default `~/.sev`). A
+registry stores immutable sources under `packages/<name>/<version>/` and trusted
+SHA-256 digests under `checksums/<name>/<version>.sha256`. Resolution copies
+verified sources to `~/.sev/packages/<name>/<version>/`, writes the exact
+version, source, and checksum to `sev.lock`, and gives the compiler an
+import-name-to-package map. Every later resolution verifies both registry and
+cached source content; a modified cache is replaced before compilation.
+
+`sev build`, `sev run`, `sev test`, and `sev check` resolve automatically.
+`sev update` deliberately selects newer compatible releases; ordinary commands
+honor existing lock selections. `sev add`, `sev remove`, and `sev publish`
+manage the manifest, lockfile, and configured registry. Published versions are
+immutable. `sev install <package>` builds a published binary into
+`SEVERIAN_HOME/bin`. The repository's canonical manifest remains
+`package.toml`; this is the Severian equivalent of Cargo's `Cargo.toml`.
 
 ## Classes And Traits
 

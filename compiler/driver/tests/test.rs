@@ -129,7 +129,7 @@ fn build_uses_the_manifest_name_and_target_debug_directory() {
     .unwrap();
     std::fs::write(
         source_directory.join("main.sev"),
-        "def main():\n    print(42)\n",
+        "def main():\n    print(42)\n\ntest \"entrypoint\":\n    main()\n",
     )
     .unwrap();
 
@@ -147,6 +147,37 @@ fn build_uses_the_manifest_name_and_target_debug_directory() {
     let output = Command::new(&executable).output().unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn build_is_blocked_below_seventy_five_percent_line_coverage() {
+    let root = std::env::temp_dir().join(format!(
+        "severian-build-coverage-gate-test-{}",
+        std::process::id()
+    ));
+    let source_directory = root.join("src");
+    std::fs::create_dir_all(&source_directory).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"uncovered-demo\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source_directory.join("main.sev"),
+        "def main():\n    print(42)\n",
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    assert!(!build.status.success());
+    assert!(String::from_utf8_lossy(&build.stderr).contains("75% line coverage requirement"));
+    assert!(!root.join("target/debug/uncovered-demo").exists());
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -214,7 +245,7 @@ fn build_compiles_library_artifacts_before_consuming_them() {
     .unwrap();
     std::fs::write(
         application.join("src/main.sev"),
-        "import helper\nfrom helper import double\n\ndef main():\n    print(helper.double(21))\n\ntest \"application-only\":\n    assert(double(4) == 8)\n",
+        "import helper\nfrom helper import double\n\ndef main():\n    print(helper.double(21))\n\ntest \"application-only\":\n    assert(double(4) == 8)\n    main()\n",
     )
     .unwrap();
 
@@ -251,7 +282,7 @@ fn build_compiles_library_artifacts_before_consuming_them() {
     assert!(String::from_utf8_lossy(&compiled_tests.stdout).contains("(1 native tests)"));
     let tests = Command::new(test_binary).output().unwrap();
     assert!(tests.status.success());
-    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "1 passed\n");
+    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "42\n1 passed\n");
     std::fs::remove_dir_all(root).unwrap();
 }
 

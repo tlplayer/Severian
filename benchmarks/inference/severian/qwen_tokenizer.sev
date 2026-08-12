@@ -1,2 +1,3 @@
-native("__sev_qwen_tokenize") def encode(modelPath: string, text: string) -> list[int]
-native("__sev_qwen_decode_token") def decodeToken(modelPath: string, token: int) -> string
+unsafe:
+    native("__sev_qwen_tokenize") def encode(modelPath: string, text: string) -> list[int]
+    native("__sev_qwen_decode_token") def decodeToken(modelPath: string, token: int) -> string

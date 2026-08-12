@@ -65,6 +65,10 @@ impl Parser<'_> {
         let start = self.peek().span.start;
         let mut items = Vec::new();
         while !self.at(&TokenKind::Eof) {
+            if self.at(&TokenKind::Unsafe) {
+                items.extend(self.parse_unsafe_native_block()?);
+                continue;
+            }
             let item = if self.at(&TokenKind::At) {
                 let decorators = self.parse_decorators()?;
                 if self.at(&TokenKind::Def) {
@@ -75,7 +79,9 @@ impl Parser<'_> {
                     return Err(self.error("decorators require a function or class"));
                 }
             } else if self.at(&TokenKind::Native) {
-                Item::Function(self.parse_native_function()?)
+                return Err(self.error(
+                    "native declarations cross the host ABI and require an `unsafe:` block",
+                ));
             } else if self.at(&TokenKind::Def) {
                 Item::Function(self.parse_function()?)
             } else if self.at(&TokenKind::Class) {
@@ -381,11 +387,38 @@ impl Parser<'_> {
         self.parse_function_with_decorators(Vec::new())
     }
 
-    fn parse_native_function(&mut self) -> Result<FunctionDecl, ParseError> {
-        let start = self
-            .expect_simple(TokenKind::Native, "`native`")?
-            .span
-            .start;
+    fn parse_unsafe_native_block(&mut self) -> Result<Vec<Item>, ParseError> {
+        self.expect_simple(TokenKind::Unsafe, "`unsafe`")?;
+        self.expect_simple(TokenKind::Colon, "`:` after unsafe")?;
+        self.expect_simple(TokenKind::Newline, "newline after unsafe header")?;
+        self.expect_simple(TokenKind::Indent, "indented unsafe body")?;
+
+        let mut functions = Vec::new();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            if !self.at(&TokenKind::Native) {
+                return Err(self.error("module-level `unsafe:` blocks may only declare native functions"));
+            }
+            let start = self.peek().span.start;
+            functions.push(self.parse_native_function(start)?);
+        }
+        self.expect_simple(TokenKind::Dedent, "end of unsafe body")?;
+
+        if functions.is_empty() {
+            return Err(self.error("module-level `unsafe:` blocks require a native declaration"));
+        }
+        while self.at(&TokenKind::Test) {
+            functions
+                .last_mut()
+                .expect("an unsafe native block has at least one declaration")
+                .tests
+                .push(self.parse_test()?);
+        }
+
+        Ok(functions.into_iter().map(Item::Function).collect())
+    }
+
+    fn parse_native_function(&mut self, start: usize) -> Result<FunctionDecl, ParseError> {
+        self.expect_simple(TokenKind::Native, "`native` inside `unsafe:`")?;
         self.expect_simple(TokenKind::LeftParen, "`(` after `native`")?;
         let symbol = match self.advance().clone() {
             Token {

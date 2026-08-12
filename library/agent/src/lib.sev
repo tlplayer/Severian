@@ -46,31 +46,32 @@ class AgentResult:
     message: string
     state: AgentState
 
-native("__sev_agent_model_request") def modelRequest(
-    endpoint: string,
-    model: string,
-    systemPrompt: string,
-    prompt: string,
-    contextTokens: int,
-    outputTokens: int,
-    temperature: float,
-    timeoutMillis: int,
-) -> Result[ModelReply, string]
+unsafe:
+    native("__sev_agent_model_request") def modelRequest(
+        endpoint: string,
+        model: string,
+        systemPrompt: string,
+        prompt: string,
+        contextTokens: int,
+        outputTokens: int,
+        temperature: float,
+        timeoutMillis: int,
+    ) -> Result[ModelReply, string]
 
-native("__sev_agent_execute") def executeCommand(
-    workspace: string,
-    command: string,
-    timeoutMillis: int,
-    maxOutputBytes: int,
-) -> Result[CommandResult, string]
+    native("__sev_agent_execute") def executeCommand(
+        workspace: string,
+        command: string,
+        timeoutMillis: int,
+        maxOutputBytes: int,
+    ) -> Result[CommandResult, string]
 
-native("__sev_agent_read_file") def readFile(path: string) -> Result[string, string]
+    native("__sev_agent_read_file") def readFile(path: string) -> Result[string, string]
 
-native("__sev_agent_write_file") def writeFile(path: string, content: string) -> Result[int, string]
+    native("__sev_agent_write_file") def writeFile(path: string, content: string) -> Result[int, string]
 
-native("__sev_agent_git_status") def gitStatus(workspace: string) -> Result[list[string], string]
+    native("__sev_agent_git_status") def gitStatus(workspace: string) -> Result[list[string], string]
 
-native("__sev_agent_reset_workspace") def resetWorkspace(workspace: string) -> Result[int, string]
+    native("__sev_agent_reset_workspace") def resetWorkspace(workspace: string) -> Result[int, string]
 
 def defaultModelConfig() -> ModelConfig:
     return ModelConfig(

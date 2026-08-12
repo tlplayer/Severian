@@ -1,15 +1,16 @@
 import tensor
 
-native("__sev_xla_qwen_serving_prefill_tokens") def inputTokens(values: list[int]) -> Tensor[i64, 1, 256]
-native("__sev_xla_qwen_serving_prefill_rope_cos") def ropeCosine() -> Tensor[f32, 1, 1, 256, 128]
-native("__sev_xla_qwen_serving_prefill_rope_sin") def ropeSine() -> Tensor[f32, 1, 1, 256, 128]
-native("__sev_xla_qwen_serving_prefill_causal_mask") def causalMask() -> Tensor[f32, 1, 1, 256, 256]
-native("__sev_xla_i64_position") def cacheIndex(value: int) -> Tensor[i64, 1]
-native("__sev_xla_qwen_serving_empty_cache") def emptyCache() -> Tensor[bf16, 1, 2, 288, 128]
-native("__sev_xla_argmax_bf16") def argmaxBf16(value: Tensor[bf16]) -> int
-native("__sev_xla_release") def releaseBf16(value: Tensor[bf16])
-native("__sev_xla_release") def releaseF32(value: Tensor[f32])
-native("__sev_xla_release") def releaseI64(value: Tensor[i64])
+unsafe:
+    native("__sev_xla_qwen_serving_prefill_tokens") def inputTokens(values: list[int]) -> Tensor[i64, 1, 256]
+    native("__sev_xla_qwen_serving_prefill_rope_cos") def ropeCosine() -> Tensor[f32, 1, 1, 256, 128]
+    native("__sev_xla_qwen_serving_prefill_rope_sin") def ropeSine() -> Tensor[f32, 1, 1, 256, 128]
+    native("__sev_xla_qwen_serving_prefill_causal_mask") def causalMask() -> Tensor[f32, 1, 1, 256, 256]
+    native("__sev_xla_i64_position") def cacheIndex(value: int) -> Tensor[i64, 1]
+    native("__sev_xla_qwen_serving_empty_cache") def emptyCache() -> Tensor[bf16, 1, 2, 288, 128]
+    native("__sev_xla_argmax_bf16") def argmaxBf16(value: Tensor[bf16]) -> int
+    native("__sev_xla_release") def releaseBf16(value: Tensor[bf16])
+    native("__sev_xla_release") def releaseF32(value: Tensor[f32])
+    native("__sev_xla_release") def releaseI64(value: Tensor[i64])
 
 # Qwen2.5-3B serving prefill consumes one exact 256-token request. The model
 # graph is compiler-lowered StableHLO; the resulting K/V tensors remain on GPU.

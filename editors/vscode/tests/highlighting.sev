@@ -2,7 +2,8 @@ import math
 import tensor
 from model import neuralnet as nn
 
-native("sev_print_i64") def native_print(value: i64)
+unsafe:
+    native("sev_print_i64") def native_print(value: i64)
 
 @tensor(target, amd, ^)
 class HttpServer:

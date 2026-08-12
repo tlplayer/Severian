@@ -70,9 +70,10 @@ fn parses_a_for_loop_setup_binding() {
 #[test]
 fn parses_an_explicit_native_abi_declaration() {
     let source = concat!(
-        "native(\"__sev_file_read\") def fileRead(\n",
-        "    path: string,\n",
-        ") -> Result[string, IOError]\n",
+        "unsafe:\n",
+        "    native(\"__sev_file_read\") def fileRead(\n",
+        "        path: string,\n",
+        "    ) -> Result[string, IOError]\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
     let Item::Function(function) = &module.items[0] else {
@@ -82,6 +83,23 @@ fn parses_an_explicit_native_abi_declaration() {
     assert_eq!(function.name.name, "fileRead");
     assert_eq!(function.native_symbol.as_deref(), Some("__sev_file_read"));
     assert!(function.body.statements.is_empty());
+}
+
+#[test]
+fn rejects_a_native_abi_declaration_without_unsafe() {
+    let error = parse(&lex("native(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
+
+    assert_eq!(
+        error.message,
+        "native declarations cross the host ABI and require an `unsafe:` block"
+    );
+}
+
+#[test]
+fn rejects_an_inline_unsafe_native_declaration() {
+    let error = parse(&lex("unsafe native(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
+
+    assert_eq!(error.message, "expected `:` after unsafe");
 }
 
 #[test]

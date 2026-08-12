@@ -27,10 +27,11 @@ fn checks_all_concurrency_examples_through_the_frontend() {
 #[test]
 fn native_calls_require_an_explicit_declaration_and_lower_to_its_abi_symbol() {
     let compilation = compile_source(concat!(
-        "native(\"__sev_regex_matches\") def matches(\n",
-        "    value: string,\n",
-        "    pattern: string,\n",
-        ") -> bool\n",
+        "unsafe:\n",
+        "    native(\"__sev_regex_matches\") def matches(\n",
+        "        value: string,\n",
+        "        pattern: string,\n",
+        "    ) -> bool\n",
         "\n",
         "def main():\n",
         "    print(matches(\"severian\", \"sev.*\"))\n",
@@ -222,7 +223,7 @@ fn builds_model_submodules_and_runs_the_transformer_container_example() {
     ));
     assert_eq!(
         compile_native_tests(&compilation, &test_executable).unwrap(),
-        3
+        4
     );
     let tests = Command::new(&test_executable).output().unwrap();
     let _ = std::fs::remove_file(test_executable);
@@ -231,7 +232,13 @@ fn builds_model_submodules_and_runs_the_transformer_container_example() {
         "{}",
         String::from_utf8_lossy(&tests.stderr)
     );
-    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "3 passed\n");
+    assert_eq!(
+        String::from_utf8(tests.stdout).unwrap(),
+        format!(
+            "{}4 passed\n",
+            std::fs::read_to_string(package.join("main.stdout")).unwrap()
+        )
+    );
 }
 
 #[test]
@@ -273,7 +280,7 @@ fn builds_and_runs_the_operating_system_laboratory_vertically() {
     ));
     assert_eq!(
         compile_native_tests(&compilation, &test_executable).unwrap(),
-        4
+        5
     );
     let tests = Command::new(&test_executable).output().unwrap();
     let _ = std::fs::remove_file(test_executable);
@@ -282,5 +289,11 @@ fn builds_and_runs_the_operating_system_laboratory_vertically() {
         "{}",
         String::from_utf8_lossy(&tests.stderr)
     );
-    assert_eq!(String::from_utf8(tests.stdout).unwrap(), "4 passed\n");
+    assert_eq!(
+        String::from_utf8(tests.stdout).unwrap(),
+        format!(
+            "{}5 passed\n",
+            std::fs::read_to_string(package.join("main.stdout")).unwrap()
+        )
+    );
 }

@@ -1,4 +1,7 @@
-use severian_package::{load_official_interfaces, GraphOperation};
+use severian_package::{
+    load_embedded_official_interfaces, load_official_interfaces, EmbeddedOfficialPackage,
+    GraphOperation,
+};
 use std::path::PathBuf;
 
 fn parse(source: &str) -> severian_ast::Module {
@@ -51,4 +54,34 @@ fn loads_only_reachable_official_interfaces() {
             .collect::<Vec<_>>(),
         ["file", "json", "platform", "tensor"]
     );
+}
+
+#[test]
+fn loads_transitive_packages_from_compiler_embedded_sources() {
+    let module = parse("import alpha\n");
+    let packages = [
+        EmbeddedOfficialPackage {
+            name: "alpha",
+            manifest: "[package]\nname = \"alpha\"\nversion = \"1.0.0\"\n",
+            source: "import beta\n\ndef alphaValue() -> int:\n    return beta.betaValue()\n",
+        },
+        EmbeddedOfficialPackage {
+            name: "beta",
+            manifest: "[package]\nname = \"beta\"\nversion = \"1.0.0\"\n",
+            source: "def betaValue() -> int:\n    return 42\n",
+        },
+    ];
+
+    let interfaces = load_embedded_official_interfaces(&module, &packages).unwrap();
+
+    assert_eq!(
+        interfaces
+            .iter()
+            .map(|interface| interface.name.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "beta"]
+    );
+    assert!(interfaces[0]
+        .source_path
+        .ends_with("alpha/src/lib.sev"));
 }

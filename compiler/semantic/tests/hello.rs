@@ -42,7 +42,7 @@ fn retains_typed_conditional_expressions_in_hir() {
 #[test]
 fn retains_ranked_tensor_element_and_dimension_types_in_hir() {
     let source = concat!(
-        "native(\"tensor_identity\") def identity(value: Tensor[f32, 2, dynamic]) -> Tensor[f32, 2, dynamic]\n",
+        "unsafe:\n    native(\"tensor_identity\") def identity(value: Tensor[f32, 2, dynamic]) -> Tensor[f32, 2, dynamic]\n",
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
@@ -59,7 +59,7 @@ fn retains_ranked_tensor_element_and_dimension_types_in_hir() {
 #[test]
 fn rejects_incompatible_static_tensor_shapes_at_call_boundaries() {
     let source = concat!(
-        "native(\"consume\") def consume(value: Tensor[f64, 2, 3])\n",
+        "unsafe:\n    native(\"consume\") def consume(value: Tensor[f64, 2, 3])\n",
         "def wrong(value: Tensor[f64, 2, 4]):\n",
         "    consume(value)\n",
     );
@@ -332,7 +332,7 @@ fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
         "class Box:\n",
         "    values: list[int]\n",
         "\n",
-        "native(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
+        "unsafe:\n    native(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
         "\n",
         "def choose() -> Outcome:\n",
         "    return Found(1)\n",

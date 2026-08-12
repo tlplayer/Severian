@@ -41,7 +41,7 @@ Package names use complete words. In particular, Severian uses `system`, not
 the clipped Python spelling `sys`. Acronyms remain acceptable when they are the
 established name of a domain rather than a shortened ordinary word.
 
-Native capabilities use typed `native(\"symbol\") def ...` declarations in the
-`platform` package. Standard-library source imports that package instead of
+Native capabilities use typed `native(\"symbol\") def ...` declarations inside explicit `unsafe:` blocks
+in the `platform` package. Standard-library source imports that package instead of
 relying on a compiler-invented namespace. Package acceptance requires native
 compilation, execution, and exact output validation.

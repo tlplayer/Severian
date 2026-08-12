@@ -6,6 +6,8 @@ use severian_package::PackageInterface;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+include!(concat!(env!("OUT_DIR"), "/official_libraries.rs"));
+
 #[derive(Debug, Clone)]
 pub struct Compilation {
     pub hir: Program,
@@ -173,16 +175,24 @@ fn check_ast(
 }
 
 pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path)?;
+    let (ast, interfaces, source) = frontend_path(path, true)?;
+    compile_ast(&ast, &interfaces, path, &source)
+}
+
+pub fn compile_dependency_path(path: &Path) -> Result<Compilation, CompileError> {
+    let (ast, interfaces, source) = frontend_path(path, false)?;
     compile_ast(&ast, &interfaces, path, &source)
 }
 
 pub fn check_path(path: &Path) -> Result<Program, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path)?;
+    let (ast, interfaces, source) = frontend_path(path, true)?;
     check_ast(&ast, &interfaces, path, &source)
 }
 
-fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
+fn frontend_path(
+    path: &Path,
+    write_lock: bool,
+) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
     let source = std::fs::read_to_string(path)?;
     let ast = parse_source(&source)?;
     let manifest_path = severian_package::find_manifest(path);
@@ -197,8 +207,12 @@ fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>, Strin
         project_root
     };
     let mut interfaces = if let Some(manifest_path) = &manifest_path {
-        severian_package::load_path_dependency_interfaces(manifest_path)
-            .map_err(|error| CompileError::Package(error.to_string()))?
+        let loaded = if write_lock {
+            severian_package::load_path_dependency_interfaces(manifest_path)
+        } else {
+            severian_package::load_transient_dependency_interfaces(manifest_path)
+        };
+        loaded.map_err(|error| CompileError::Package(error.to_string()))?
     } else {
         Vec::new()
     };
@@ -206,16 +220,31 @@ fn frontend_path(path: &Path) -> Result<(AstModule, Vec<PackageInterface>, Strin
         .map_err(|error| CompileError::Package(error.to_string()))?;
     for interface in &local_interfaces {
         for official in load_official_interfaces(&interface.module)? {
-            insert_interface(&mut interfaces, official)?;
+            insert_official_interface(&mut interfaces, official)?;
         }
     }
     for interface in local_interfaces {
         insert_interface(&mut interfaces, interface)?;
     }
     for interface in load_official_interfaces(&ast)? {
-        insert_interface(&mut interfaces, interface)?;
+        insert_official_interface(&mut interfaces, interface)?;
     }
     Ok((ast, interfaces, source))
+}
+
+fn insert_official_interface(
+    interfaces: &mut Vec<PackageInterface>,
+    interface: PackageInterface,
+) -> Result<(), CompileError> {
+    // A manifest dependency owns its import name. Embedded standard packages
+    // are the fallback for undeclared names, never a second competing source.
+    if interfaces
+        .iter()
+        .any(|existing| existing.name == interface.name)
+    {
+        return Ok(());
+    }
+    insert_interface(interfaces, interface)
 }
 
 fn insert_interface(
@@ -249,11 +278,19 @@ fn insert_interface(
 }
 
 fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>, CompileError> {
-    let library_root = std::env::var_os("SEVERIAN_LIBRARY_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library"));
-    severian_package::load_official_interfaces(module, &library_root)
-        .map_err(|error| CompileError::Package(error.to_string()))
+    if let Some(library_root) = std::env::var_os("SEVERIAN_LIBRARY_PATH").map(PathBuf::from) {
+        return severian_package::load_official_interfaces(module, &library_root)
+            .map_err(|error| CompileError::Package(error.to_string()));
+    }
+
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library");
+    if checkout.is_dir() {
+        severian_package::load_official_interfaces(module, &checkout)
+            .map_err(|error| CompileError::Package(error.to_string()))
+    } else {
+        severian_package::load_embedded_official_interfaces(module, EMBEDDED_OFFICIAL_PACKAGES)
+            .map_err(|error| CompileError::Package(error.to_string()))
+    }
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {

@@ -82,7 +82,15 @@ pub fn native_test_compilation(
         "{count} passed"
     ))));
     let mut hir = compilation.optimized_hir.clone();
-    hir.functions.retain(|function| function.name != "main");
+    const SOURCE_MAIN: &str = "__severian_source_main";
+    if let Some(main) = hir
+        .functions
+        .iter_mut()
+        .find(|function| function.name == "main")
+    {
+        main.name = SOURCE_MAIN.into();
+        main.id = FunctionId::from_name(SOURCE_MAIN);
+    }
     hir.functions.push(Function {
         // The executable symbol must still be `main`, but its identity must not
         // alias a user-defined main function in source maps or coverage data.
@@ -95,6 +103,14 @@ pub fn native_test_compilation(
         return_type: severian_hir::ValueType::Unit,
         instructions,
         tests: Vec::new(),
+    });
+    hir.visit_expressions_mut(&mut |expression| {
+        if let Expression::Call { target, .. } = expression {
+            if target.name == "main" {
+                target.name = SOURCE_MAIN.into();
+                target.id = FunctionId::from_name(SOURCE_MAIN);
+            }
+        }
     });
     let mir = severian_mir::lower(&hir);
     let native = Compilation {

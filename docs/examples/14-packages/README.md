@@ -29,8 +29,15 @@ select dependency versions.
 
 ```sh
 sev init
+sev add geometry --path ../geometry --version 0.1
 sev build
 sev test
 sev doc
 sev publish
 ```
+
+Version-only dependencies resolve from `SEVERIAN_REGISTRY`, are verified against
+the registry SHA-256 record, cached below `SEVERIAN_HOME/packages`, and pinned in
+`sev.lock`. Source imports only the dependency-table name; registry and cache
+paths never appear in `.sev` files. `sev update` is the explicit operation that
+moves a lock entry to a newer compatible version.

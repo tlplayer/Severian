@@ -6,7 +6,8 @@ import qwen_decode_kernels
 import qwen_prefill_kernels
 import safetensor_weights
 
-native("__sev_monotonic_ns") def monotonicNs() -> int
+unsafe:
+    native("__sev_monotonic_ns") def monotonicNs() -> int
 
 class RequestState:
     id: int

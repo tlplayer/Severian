@@ -70,3 +70,6 @@ def main():
     print("interrupts", report.interrupts)
     print("audit", "clean" if size(report.audit) == 0 else "failed")
     print("boot byte", boot_image_byte([83, 69, 86, 0], 0))
+
+test "entrypoint remains covered":
+    main()

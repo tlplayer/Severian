@@ -32,7 +32,8 @@ Every public operation has one implementation owner:
 | platform | typed native ABI used underneath library APIs | sockets, files, clocks, entropy |
 
 The compiler must not silently invent a package API. Native-backed packages use
-typed Severian `native(\"symbol\")` declarations in the `platform` package.
+typed Severian `native(\"symbol\")` declarations inside explicit `unsafe:` blocks in the `platform`
+package; the explicit marker acknowledges the host ABI boundary.
 There is no implicit source-level native namespace. A package is considered
 implemented only when its native test executable links, runs, and matches its
 expected stdout and stderr.

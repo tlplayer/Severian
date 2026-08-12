@@ -1,24 +1,25 @@
 import tensor
 
-native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
+unsafe:
+    native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
 
-native("__sev_tensor_to_list") def values(input: Tensor[f64]) -> list[float]
+    native("__sev_tensor_to_list") def values(input: Tensor[f64]) -> list[float]
 
-native("__sev_tensor_shape") def shape(input: Tensor[f64]) -> list[int]
+    native("__sev_tensor_shape") def shape(input: Tensor[f64]) -> list[int]
 
-native("__sev_tensor_matmul") def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_matmul") def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_add") def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_add") def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_relu") def relu(input: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu") def relu(input: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_transpose") def transpose(input: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_transpose") def transpose(input: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_scale") def scale(input: Tensor[f64], factor: float) -> Tensor[f64]
+    native("__sev_tensor_scale") def scale(input: Tensor[f64], factor: float) -> Tensor[f64]
 
-native("__sev_tensor_softmax_rows") def softmaxRows(input: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_rows") def softmaxRows(input: Tensor[f64]) -> Tensor[f64]
 
-native("__sev_tensor_layer_norm") def layerNorm(input: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_layer_norm") def layerNorm(input: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
 def reluList(input: list[float]) -> list[float]:
     output := []

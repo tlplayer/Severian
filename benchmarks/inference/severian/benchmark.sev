@@ -7,7 +7,8 @@ import qwen_tokenizer
 import safetensor_weights
 import tensor
 
-native("__sev_monotonic_ns") def monotonicNs() -> int
+unsafe:
+    native("__sev_monotonic_ns") def monotonicNs() -> int
 
 def forward(weights: qwen2.Qwen2Weights, promptTokens: list[int]) -> Tensor[bf16, 1, 32, 151936]:
     inputIds = qwen_kernels.inputTokens(promptTokens)

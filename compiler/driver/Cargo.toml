@@ -28,3 +28,4 @@ severian-passes = { version = "0.1.0", path = "../passes" }
 severian-semantic = { version = "0.1.0", path = "../semantic" }
 severian-source = { version = "0.1.0", path = "../source" }
 severian-xla = { version = "0.1.0", path = "../xla" }
+toml = "1.1.3"
