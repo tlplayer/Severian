@@ -782,7 +782,7 @@ pub fn lower_tensor_call(
             Ok(emitter.logistic(&args[0], result_type))
         }
 
-        "sum" | "sumlast" | "reduce_sum" | "tensor_sum" => {
+        "sum" | "rankedsum" | "sumlast" | "reduce_sum" | "tensor_sum" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_sum(emitter, &args[0], &axes, result_type))

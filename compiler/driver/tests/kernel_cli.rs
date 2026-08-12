@@ -1,0 +1,101 @@
+use std::{
+    path::PathBuf,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+fn fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../benchmarks/popcorn/vectorsum_v2/kernel.sev")
+}
+
+fn temporary_file(name: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("severian-{name}-{}-{nonce}", std::process::id()))
+}
+
+#[test]
+fn inspect_explains_automatic_backend_selection() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["kernel", "inspect"])
+        .arg(fixture())
+        .args(["--entry", "reduction_sum", "--target", "gpu"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("operation: reduction.sum"));
+    assert!(stdout.contains("selected backend: triton"));
+    assert!(stdout.contains("fallback: xla"));
+    assert!(!stdout.contains("popcorn"));
+}
+
+#[test]
+fn emit_writes_a_standalone_triton_module() {
+    let artifact = temporary_file("reduction.triton.py");
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["kernel", "emit"])
+        .arg(fixture())
+        .args([
+            "--entry",
+            "reduction_sum",
+            "--backend",
+            "triton",
+            "--output",
+        ])
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source = std::fs::read_to_string(&artifact).unwrap();
+    assert!(source.contains("def launch("));
+    assert!(source.contains("SEVERIAN_KERNEL_OPERATION = \"reduction.sum\""));
+    assert!(source.contains("SEVERIAN_ELEMENT_TYPE = \"f32\""));
+    assert!(!source.contains("custom_kernel"));
+    assert!(!source.contains("leaderboard"));
+
+    let syntax = Command::new("python3")
+        .args(["-m", "py_compile"])
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        syntax.status.success(),
+        "{}",
+        String::from_utf8_lossy(&syntax.stderr)
+    );
+    let _ = std::fs::remove_file(artifact);
+}
+
+#[test]
+fn xla_fallback_emits_stablehlo_from_kernel_ir() {
+    let artifact = temporary_file("reduction.stablehlo.mlir");
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["kernel", "emit"])
+        .arg(fixture())
+        .args(["--entry", "reduction_sum", "--backend", "xla", "--output"])
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source = std::fs::read_to_string(&artifact).unwrap();
+    assert!(source.contains("stablehlo.reduce"));
+    assert!(source.contains("tensor<?xf32>"));
+    assert!(source.contains("-> tensor<f32>"));
+    let _ = std::fs::remove_file(artifact);
+}

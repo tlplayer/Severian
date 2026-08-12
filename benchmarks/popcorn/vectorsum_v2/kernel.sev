@@ -1,0 +1,4 @@
+import tensor
+@compile(triton)
+def reduction_sum(value: Tensor[f32, dynamic]) -> Tensor[f32]:
+    return tensor.sumLastF32(value)

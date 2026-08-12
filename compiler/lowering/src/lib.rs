@@ -3,6 +3,7 @@
 pub mod coverage;
 pub mod debug;
 pub mod gpu;
+pub mod kernel;
 pub mod llvm;
 pub mod location;
 pub mod runtime;

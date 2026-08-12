@@ -1,7 +1,7 @@
 use severian_driver::{
     check_path, compile_dependency_path, compile_native, compile_native_tests,
-    compile_native_with_options, compile_path, export_popcorn, inspect_toolchain,
-    native_test_compilation, native_test_count, Compilation, PopcornExportOptions,
+    compile_native_with_options, compile_path, inspect_toolchain, native_test_compilation,
+    native_test_count, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -82,52 +82,112 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 }
 
 fn kernel_command(args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) != Some("export")
-        || args.get(1).map(String::as_str) != Some("popcorn")
-    {
-        return Err(format!(
-            "usage: sev kernel export popcorn <source.sev> [--entry NAME] [--leaderboard NAME] [--gpu NAME] [--block-size N] [--output submission.py]\n{}",
-            usage()
-        ));
+    use severian_lowering::kernel::{
+        emit_stablehlo, emit_triton_python, find, select_backend, KernelBackend, KernelTarget,
+    };
+
+    let action = args.first().map(String::as_str).ok_or_else(kernel_usage)?;
+    if action != "inspect" && action != "emit" {
+        return Err(kernel_usage());
     }
     let source = args
-        .get(2)
+        .get(1)
         .filter(|value| !value.starts_with('-'))
         .map(PathBuf::from)
-        .ok_or("sev kernel export popcorn requires a Severian source path")?;
-    let mut options = PopcornExportOptions::default();
-    let mut output = PathBuf::from("submission.py");
-    let mut index = 3;
+        .ok_or_else(kernel_usage)?;
+    let mut entry = None;
+    let mut backend = KernelBackend::Auto;
+    let mut target = KernelTarget::Gpu;
+    let mut output = None;
+    let mut index = 2;
     while index < args.len() {
+        let option = args[index].as_str();
         let value = args
             .get(index + 1)
-            .ok_or_else(|| format!("option `{}` requires a value", args[index]))?;
-        match args[index].as_str() {
-            "--entry" => options.entry = Some(value.clone()),
-            "--leaderboard" => options.leaderboard = value.clone(),
-            "--gpu" => options.gpu = Some(value.clone()),
-            "--block-size" => {
-                options.block_size = value
-                    .parse::<usize>()
-                    .map_err(|_| "--block-size must be a positive integer".to_string())?;
+            .ok_or_else(|| format!("option `{option}` requires a value"))?;
+        match option {
+            "--entry" => entry = Some(value.clone()),
+            "--backend" => {
+                backend = match value.as_str() {
+                    "auto" => KernelBackend::Auto,
+                    "xla" => KernelBackend::Xla,
+                    "triton" => KernelBackend::Triton,
+                    "llvm" => KernelBackend::Llvm,
+                    _ => return Err(format!("unknown kernel backend `{value}`")),
+                }
             }
-            "--output" => output = PathBuf::from(value),
-            option => return Err(format!("unknown kernel export option `{option}`")),
+            "--target" => {
+                target = match value.as_str() {
+                    "cpu" => KernelTarget::Cpu,
+                    "gpu" => KernelTarget::Gpu,
+                    "tpu" => KernelTarget::Tpu,
+                    _ => return Err(format!("unknown kernel target `{value}`")),
+                }
+            }
+            "--output" if action == "emit" => output = Some(PathBuf::from(value)),
+            _ => {
+                return Err(format!(
+                    "unknown kernel option `{option}`\n{}",
+                    kernel_usage()
+                ))
+            }
         }
         index += 2;
     }
 
     let compilation = compile_path(&source).map_err(|error| error.to_string())?;
-    let submission = export_popcorn(&compilation, &options).map_err(|error| error.to_string())?;
-    if let Some(parent) = output
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let kernel =
+        find(&compilation.optimized_hir, entry.as_deref()).map_err(|error| error.to_string())?;
+    let selection = select_backend(&kernel, backend, target).map_err(|error| error.to_string())?;
+    if action == "inspect" {
+        println!("kernel: {}", kernel.name);
+        println!("operation: {}", kernel.operation.name());
+        println!("target: {}", selection.target.name());
+        println!("requested backend: {}", selection.requested.name());
+        println!("selected backend: {}", selection.selected.name());
+        println!(
+            "fallback: {}",
+            selection.fallback.map_or("none", KernelBackend::name)
+        );
+        println!("reason: {}", selection.reason);
+        println!("parameters: {:?}", kernel.parameters);
+        println!("result: {:?}", kernel.result);
+        return Ok(());
     }
-    fs::write(&output, submission).map_err(|error| error.to_string())?;
-    println!("Exported {} -> {}", source.display(), output.display());
+
+    let artifact = match selection.selected {
+        KernelBackend::Triton => emit_triton_python(&kernel).map_err(|error| error.to_string())?,
+        KernelBackend::Xla => emit_stablehlo(&kernel)
+            .map_err(|error| error.to_string())?
+            .as_str()
+            .to_string(),
+        KernelBackend::Llvm => {
+            return Err(
+                "per-kernel LLVM emission is not available yet; use `sev build --emit llvm --target native` for the whole native module"
+                    .into(),
+            )
+        }
+        KernelBackend::Auto => unreachable!("backend selection must resolve auto"),
+    };
+    if let Some(output) = output {
+        if let Some(parent) = output.parent().filter(|path| !path.as_os_str().is_empty()) {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&output, artifact).map_err(|error| error.to_string())?;
+        println!(
+            "Emitted {} kernel {} -> {}",
+            selection.selected.name(),
+            kernel.name,
+            output.display()
+        );
+    } else {
+        print!("{artifact}");
+    }
     Ok(())
+}
+
+fn kernel_usage() -> String {
+    "usage:\n  sev kernel inspect <source.sev> [--entry NAME] [--backend auto|xla|triton|llvm] [--target cpu|gpu|tpu]\n  sev kernel emit <source.sev> [--entry NAME] [--backend auto|xla|triton] [--target gpu|tpu] [--output PATH]".into()
 }
 
 fn add_command(args: &[String]) -> Result<(), String> {
@@ -1606,7 +1666,7 @@ fn usage() -> String {
         "  test [path] --mutate [--limit N] run deterministic mutation testing",
         "  coverage <path>                run tests and report Severian source coverage",
         "  memory <path> [--sanitizer KIND] [--leaks] run native memory diagnostics",
-        "  kernel export popcorn <source> export a single-file Popcorn submission",
+        "  kernel inspect|emit <source>   explain backend choice or emit a standalone kernel",
         "  --emit <stage> <path>          emit hir, mir, mlir, stablehlo, llvm, or asm",
         "  clean [path]                   remove only the Severian project target directory",
         "  tree <path>                    print the Severian package dependency graph",

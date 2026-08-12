@@ -83,20 +83,12 @@ sev doctor
 sev --help
 ```
 
-GPU Mode's Popcorn CLI accepts a single Python submission rather than a raw
-executable. `sev kernel export popcorn` compiles a recognized Severian tensor
-operation into that compatibility format. The first supported contract is
-leaderboard 544 (`vectorsum_v2`):
+### Accelerator kernel backends
 
-```sh
-sev kernel export popcorn kernel.sev --entry reductionSum --output submission.py
-popcorn submit submission.py --leaderboard vectorsum_v2 --gpu A100 --mode benchmark
-```
-
-The generated computation is a Triton device kernel operating on Torch's
-existing allocations and stream; it does not spawn a Severian process during
-measurement. See [docs/POPCORN.md](docs/POPCORN.md) for supported options and
-the current ABI boundary.
+`sev kernel inspect` explains whether a tensor kernel uses the portable
+StableHLO/XLA path or a specialized Triton GPU path. `sev kernel emit` writes
+the selected standalone artifact; it does not generate benchmark adapters or
+encode a harness protocol. See [docs/KERNEL_BACKENDS.md](docs/KERNEL_BACKENDS.md).
 
 ### Naming lint
 
