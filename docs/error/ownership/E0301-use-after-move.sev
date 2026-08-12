@@ -1,0 +1,9 @@
+# E0301: use after move
+# `move` transfers ownership and invalidates the original binding.
+# Use `outbound`, or clone before moving when two owners are required.
+
+def main():
+    packet = [1, 2, 3]
+    outbound = move packet
+    print(outbound)
+    print(packet)

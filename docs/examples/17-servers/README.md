@@ -16,7 +16,7 @@ long-running concurrency APIs.
   untouched.
 - `Type from channel:` receives and destructures an owned class or enum value;
   `name from channel:` binds an entire received value under that lowercase name.
-- Parameter declarations contain only names and types. An async call lists each
+- Parameter declarations contain names and optional types. An async call lists each
   scoped captured binding after its owner, as in
   `async serve(connection) with self and connection`.
 

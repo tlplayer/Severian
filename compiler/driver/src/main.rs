@@ -1,7 +1,7 @@
 use severian_driver::{
     check_path, compile_dependency_path, compile_native, compile_native_tests,
-    compile_native_with_options, compile_path, inspect_toolchain, native_test_compilation,
-    native_test_count, Compilation,
+    compile_native_with_options, compile_path, export_popcorn, inspect_toolchain,
+    native_test_compilation, native_test_count, Compilation, PopcornExportOptions,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -58,6 +58,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "test" => test_command(&args[1..]),
         "coverage" if args.len() == 2 => coverage(Path::new(&args[1])),
         "memory" => memory_command(&args[1..]),
+        "kernel" => kernel_command(&args[1..]),
         "clean" if args.len() <= 2 => clean(args.get(1).map(Path::new)),
         "tree" if args.len() == 2 => tree(Path::new(&args[1])),
         "metadata" if args.len() == 2 => metadata(Path::new(&args[1])),
@@ -78,6 +79,55 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         }
         _ => Err(usage()),
     }
+}
+
+fn kernel_command(args: &[String]) -> Result<(), String> {
+    if args.first().map(String::as_str) != Some("export")
+        || args.get(1).map(String::as_str) != Some("popcorn")
+    {
+        return Err(format!(
+            "usage: sev kernel export popcorn <source.sev> [--entry NAME] [--leaderboard NAME] [--gpu NAME] [--block-size N] [--output submission.py]\n{}",
+            usage()
+        ));
+    }
+    let source = args
+        .get(2)
+        .filter(|value| !value.starts_with('-'))
+        .map(PathBuf::from)
+        .ok_or("sev kernel export popcorn requires a Severian source path")?;
+    let mut options = PopcornExportOptions::default();
+    let mut output = PathBuf::from("submission.py");
+    let mut index = 3;
+    while index < args.len() {
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("option `{}` requires a value", args[index]))?;
+        match args[index].as_str() {
+            "--entry" => options.entry = Some(value.clone()),
+            "--leaderboard" => options.leaderboard = value.clone(),
+            "--gpu" => options.gpu = Some(value.clone()),
+            "--block-size" => {
+                options.block_size = value
+                    .parse::<usize>()
+                    .map_err(|_| "--block-size must be a positive integer".to_string())?;
+            }
+            "--output" => output = PathBuf::from(value),
+            option => return Err(format!("unknown kernel export option `{option}`")),
+        }
+        index += 2;
+    }
+
+    let compilation = compile_path(&source).map_err(|error| error.to_string())?;
+    let submission = export_popcorn(&compilation, &options).map_err(|error| error.to_string())?;
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&output, submission).map_err(|error| error.to_string())?;
+    println!("Exported {} -> {}", source.display(), output.display());
+    Ok(())
 }
 
 fn add_command(args: &[String]) -> Result<(), String> {
@@ -1556,6 +1606,7 @@ fn usage() -> String {
         "  test [path] --mutate [--limit N] run deterministic mutation testing",
         "  coverage <path>                run tests and report Severian source coverage",
         "  memory <path> [--sanitizer KIND] [--leaks] run native memory diagnostics",
+        "  kernel export popcorn <source> export a single-file Popcorn submission",
         "  --emit <stage> <path>          emit hir, mir, mlir, stablehlo, llvm, or asm",
         "  clean [path]                   remove only the Severian project target directory",
         "  tree <path>                    print the Severian package dependency graph",

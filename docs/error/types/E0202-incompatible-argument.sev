@@ -1,0 +1,9 @@
+# E0202: incompatible argument type
+# Calls must satisfy the declared parameter type.
+# Convert the value or correct the function signature.
+
+def double(value: int) -> int:
+    return value * 2
+
+def main():
+    print(double("two"))

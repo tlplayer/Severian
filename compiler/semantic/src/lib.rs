@@ -3045,8 +3045,9 @@ fn lower_signature(
                 ty: param
                     .ty
                     .as_ref()
-                    .ok_or_else(|| error(param.span, "parameters require a type"))
-                    .and_then(lower_type)?,
+                    .map(lower_type)
+                    .transpose()?
+                    .unwrap_or(ValueType::Any),
                 function_return: function_return_type(param.ty.as_ref()),
                 default: param.default.clone(),
             })
@@ -3214,7 +3215,7 @@ fn compatible(span: Span, actual: ValueType, expected: ValueType) -> Result<(), 
     } else {
         Err(error(
             span,
-            format!("expected {expected:?}, found {actual:?}"),
+            format!("E0202: expected {expected:?}, found {actual:?}"),
         ))
     }
 }

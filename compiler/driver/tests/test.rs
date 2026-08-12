@@ -387,3 +387,97 @@ fn native_tests_lower_a_typed_sorted_reverse_flag_as_a_boolean() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("4 passed"));
 }
+
+#[test]
+fn triple_quoted_block_strings_compile_and_preserve_newlines() {
+    let _lock = native_cli_lock();
+    let root =
+        std::env::temp_dir().join(format!("severian-block-string-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("main.sev");
+    std::fs::write(
+        &source,
+        "def main():\n    message = \"\"\"first line\nsecond line\n\"\"\"\n    print(message)\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "first line\nsecond line\n\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
+    let root = std::env::temp_dir().join(format!("severian-type-safe-test-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"strict-example\"\nversion = \"0.1.0\"\ntype-safe = true\n\n[[bin]]\nname = \"strict-example\"\npath = \"src/main.sev\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.sev"),
+        "def identity(value) -> Any:\n    return value\n",
+    )
+    .unwrap();
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("check")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let error = String::from_utf8_lossy(&rejected.stderr);
+    assert!(error.contains("E0201: parameter `value` defaults to `Any`"));
+    assert!(error.contains("source: def identity(value) -> Any:"));
+    assert!(error.contains("value: ConcreteType"));
+
+    std::fs::write(
+        root.join("src/main.sev"),
+        "def identity(value: Any) -> Any:\n    return value\n",
+    )
+    .unwrap();
+    let explicit = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("check")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        explicit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+
+    std::fs::write(
+        root.join("src/main.sev"),
+        "import \"helpers.sev\" as helpers\n\ndef main():\n    print(helpers.identity(1))\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("helpers.sev"),
+        "def identity(value) -> Any:\n    return value\n",
+    )
+    .unwrap();
+    let local_module = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("check")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!local_module.status.success());
+    let error = String::from_utf8_lossy(&local_module.stderr);
+    assert!(error.contains("helpers.sev"));
+    assert!(error.contains("E0201: parameter `value` defaults to `Any`"));
+    std::fs::remove_dir_all(root).unwrap();
+}

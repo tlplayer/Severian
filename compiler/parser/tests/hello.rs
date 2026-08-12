@@ -86,6 +86,36 @@ fn parses_an_explicit_native_abi_declaration() {
 }
 
 #[test]
+fn permits_dynamic_parameters_in_ordinary_functions() {
+    let module = parse(&lex("def identity(value):\n    return value\n").unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    assert!(function.params[0].ty.is_none());
+}
+
+#[test]
+fn permits_dynamic_fields_when_they_have_defaults() {
+    let source = "class Box:\n    value = 1\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Class(class) = &module.items[0] else {
+        panic!("expected class");
+    };
+    assert!(class.fields[0].ty.is_none());
+    assert!(class.fields[0].default.is_some());
+}
+
+#[test]
+fn native_abi_parameters_must_remain_explicitly_typed() {
+    let source = "unsafe:\n    native(\"host_value\") def hostValue(value) -> int\n";
+    let error = parse(&lex(source).unwrap()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "native ABI parameters require explicit types"
+    );
+}
+
+#[test]
 fn rejects_a_native_abi_declaration_without_unsafe() {
     let error = parse(&lex("native(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
 

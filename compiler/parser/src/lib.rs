@@ -252,13 +252,22 @@ impl Parser<'_> {
             } else {
                 let field_start = self.peek().span.start;
                 let field_name = self.expect_identifier("field name")?;
-                self.expect_simple(TokenKind::Colon, "`:` after field name")?;
-                let ty = self.parse_type()?;
+                let ty = if self.take_simple(&TokenKind::Colon).is_some() {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 let default = if self.take_simple(&TokenKind::Equal).is_some() {
                     Some(self.parse_expression()?)
                 } else {
                     None
                 };
+                if ty.is_none() && default.is_none() {
+                    return Err(ParseError {
+                        span: field_name.span,
+                        message: "an untyped field requires a default value".into(),
+                    });
+                }
                 let end = self
                     .expect_simple(TokenKind::Newline, "newline after field")?
                     .span
@@ -266,7 +275,7 @@ impl Parser<'_> {
                 fields.push(Field {
                     span: Span::new(field_start, end),
                     name: field_name,
-                    ty: Some(ty),
+                    ty,
                     default,
                 });
             }
@@ -434,6 +443,12 @@ impl Parser<'_> {
         let name = self.expect_identifier("native function name")?;
         self.parse_generic_parameters()?;
         let params = self.parse_parameters()?;
+        if let Some(parameter) = params.iter().find(|parameter| parameter.ty.is_none()) {
+            return Err(ParseError {
+                span: parameter.name.span,
+                message: "native ABI parameters require explicit types".into(),
+            });
+        }
         let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
             Some(self.parse_type()?)
         } else {
@@ -623,20 +638,24 @@ impl Parser<'_> {
             loop {
                 let param_start = self.peek().span.start;
                 let param_name = self.expect_identifier("parameter name")?;
-                self.expect_simple(TokenKind::Colon, "`:` after parameter name")?;
-                let ty = self.parse_type()?;
+                let ty = if self.take_simple(&TokenKind::Colon).is_some() {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 let default = if self.take_simple(&TokenKind::Equal).is_some() {
                     Some(self.parse_expression()?)
                 } else {
                     None
                 };
-                let end = default
-                    .as_ref()
-                    .map_or(ty.span().end, |value| value.span().end);
+                let end = default.as_ref().map_or_else(
+                    || ty.as_ref().map_or(param_name.span.end, |ty| ty.span().end),
+                    |value| value.span().end,
+                );
                 params.push(Parameter {
                     span: Span::new(param_start, end),
                     name: param_name,
-                    ty: Some(ty),
+                    ty,
                     default,
                 });
                 if self.take_simple(&TokenKind::Comma).is_none() {

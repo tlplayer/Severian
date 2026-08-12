@@ -249,7 +249,7 @@ fn type_checks_injected_return_values() {
 
     let error = analyze(&ast).unwrap_err();
 
-    assert_eq!(error.message, "expected Int, found String");
+    assert_eq!(error.message, "E0202: expected Int, found String");
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn type_checks_calls_against_imported_package_interfaces() {
 
     let error = analyze_with_interfaces(&module, &[("math".into(), interface)]).unwrap_err();
 
-    assert_eq!(error.message, "expected Float, found String");
+    assert_eq!(error.message, "E0202: expected Float, found String");
 }
 
 #[test]
@@ -428,4 +428,12 @@ fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
         panic!("expected an enum variant")
     };
     assert_eq!(*type_id, Some(outcome_id));
+}
+
+#[test]
+fn ordinary_unannotated_parameters_default_to_any() {
+    let ast = parse(&lex("def identity(value) -> Any:\n    return value\n").unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    assert_eq!(hir.functions[0].params[0].ty, ValueType::Any);
+    assert_eq!(hir.functions[0].return_type, ValueType::Any);
 }

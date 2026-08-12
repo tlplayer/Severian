@@ -1,0 +1,7 @@
+# E0701: native ABI outside an approved library boundary
+# Applications and tests must exercise safe package APIs instead of bypassing
+# them. A library may narrowly permit `native-abi` for this exact source in its
+# `[package.unsafe]` configuration.
+
+unsafe:
+    native("host_secret") def host_secret() -> int

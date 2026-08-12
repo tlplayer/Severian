@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use severian_ast::{ImportKind, Item, Module, Span};
+use severian_ast::{FunctionDecl, ImportKind, Item, Module, Parameter, Span};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -430,6 +430,122 @@ pub fn enforce_unsafe_policy(
     )
 }
 
+/// Rejects declaration sites that would silently fall back to `Any` when the
+/// package opts into `[package] type-safe = true`.
+///
+/// Explicit `Any` remains available as an intentional escape hatch. The check
+/// is deliberately package-scoped so exploratory packages can stay dynamic
+/// while stable libraries progressively add concrete boundary types.
+pub fn enforce_type_safe_policy(
+    manifest_path: Option<&Path>,
+    module: &Module,
+    source: &str,
+) -> Result<(), PackageError> {
+    let Some(manifest_path) = manifest_path else {
+        return Ok(());
+    };
+    let manifest = parse_manifest(manifest_path)?;
+    let Some(enabled) = manifest
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|package| package.get("type-safe"))
+    else {
+        return Ok(());
+    };
+    let enabled = enabled.as_bool().ok_or_else(|| {
+        PackageError::Manifest(format!(
+            "{}.package.type-safe must be a boolean",
+            manifest_path.display()
+        ))
+    })?;
+    if !enabled {
+        return Ok(());
+    }
+
+    let package = package_name(&manifest, manifest_path)?.to_owned();
+    if let Some((span, declaration, kind)) = first_inferred_any(module) {
+        let snippet = source_snippet(source, span);
+        return Err(PackageError::Frontend {
+            package,
+            stage: "type safety",
+            span,
+            message: format!(
+                "E0201: {kind} `{declaration}` defaults to `Any`\n\
+                 source: {snippet}\n\
+                 add an explicit type, such as `{declaration}: ConcreteType`; write `{declaration}: Any` only when dynamic typing is intentional"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn first_inferred_any(module: &Module) -> Option<(Span, &str, &'static str)> {
+    for item in &module.items {
+        match item {
+            Item::Function(function) => {
+                if let Some(problem) = untyped_function_parameter(function) {
+                    return Some(problem);
+                }
+            }
+            Item::Class(class) => {
+                if let Some(field) = class.fields.iter().find(|field| field.ty.is_none()) {
+                    return Some((field.name.span, &field.name.name, "field"));
+                }
+                for constructor in &class.constructors {
+                    if let Some(parameter) = untyped_parameter(&constructor.params) {
+                        return Some((parameter.name.span, &parameter.name.name, "parameter"));
+                    }
+                }
+                for method in &class.methods {
+                    if let Some(problem) = untyped_function_parameter(method) {
+                        return Some(problem);
+                    }
+                }
+            }
+            Item::Trait(trait_declaration) => {
+                for method in &trait_declaration.methods {
+                    if let Some(parameter) = untyped_parameter(&method.params) {
+                        return Some((parameter.name.span, &parameter.name.name, "parameter"));
+                    }
+                }
+            }
+            Item::Enum(enumeration) => {
+                for variant in &enumeration.variants {
+                    if let Some(parameter) = untyped_parameter(&variant.fields) {
+                        return Some((parameter.name.span, &parameter.name.name, "variant field"));
+                    }
+                }
+            }
+            Item::Import(_) | Item::Statement(_) => {}
+        }
+    }
+    None
+}
+
+fn untyped_function_parameter(function: &FunctionDecl) -> Option<(Span, &str, &'static str)> {
+    untyped_parameter(&function.params).map(|parameter| {
+        (
+            parameter.name.span,
+            parameter.name.name.as_str(),
+            "parameter",
+        )
+    })
+}
+
+fn untyped_parameter(parameters: &[Parameter]) -> Option<&Parameter> {
+    parameters.iter().find(|parameter| parameter.ty.is_none())
+}
+
+fn source_snippet(source: &str, span: Span) -> String {
+    let start = source[..span.start.min(source.len())]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let end = source[span.end.min(source.len())..]
+        .find('\n')
+        .map_or(source.len(), |index| span.end.min(source.len()) + index);
+    source[start..end].trim().to_owned()
+}
+
 fn package_label(manifest_path: Option<&Path>) -> String {
     manifest_path
         .and_then(|path| parse_manifest(path).ok().map(|manifest| (path, manifest)))
@@ -558,7 +674,7 @@ fn unsafe_policy_error(reason: &str, span: Span, capability: &str) -> PackageErr
         stage: "unsafe policy",
         span,
         message: format!(
-            "unsafe capability `{capability}` is not allowed; add it and this source path to `[package.unsafe]`, while native ABI remains library-only and tests remain safe-only"
+            "E0701: unsafe capability `{capability}` is not allowed; add it and this source path to `[package.unsafe]`, while native ABI remains library-only and tests remain safe-only"
         ),
     }
 }

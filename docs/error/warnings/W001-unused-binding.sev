@@ -1,0 +1,7 @@
+# W001 / lint::unused-binding: unused binding
+# The value is computed but never read. Remove it, use it, or prefix the name
+# with `_` when the unused value is intentional.
+
+def main():
+    answer = 42
+    print("done")

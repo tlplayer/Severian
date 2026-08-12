@@ -83,6 +83,21 @@ sev doctor
 sev --help
 ```
 
+GPU Mode's Popcorn CLI accepts a single Python submission rather than a raw
+executable. `sev kernel export popcorn` compiles a recognized Severian tensor
+operation into that compatibility format. The first supported contract is
+leaderboard 544 (`vectorsum_v2`):
+
+```sh
+sev kernel export popcorn kernel.sev --entry reductionSum --output submission.py
+popcorn submit submission.py --leaderboard vectorsum_v2 --gpu A100 --mode benchmark
+```
+
+The generated computation is a Triton device kernel operating on Torch's
+existing allocations and stream; it does not spawn a Severian process during
+measurement. See [docs/POPCORN.md](docs/POPCORN.md) for supported options and
+the current ABI boundary.
+
 ### Naming lint
 
 `sev lint [path]` enforces naming by semantic role: variables, functions,
@@ -262,6 +277,15 @@ Valued declarations use one concrete type before the name.
 ```sev
 int width = 1920
 int height = 1080
+```
+
+Triple double quotes create block strings. Embedded newlines and quotes are
+preserved as string data:
+
+```sev
+message = """first line
+second "quoted" line
+"""
 ```
 
 Uninitialized fields use `name: Type`, because class schemas tend to evolve and
@@ -492,10 +516,18 @@ examples/
 name = "geometry-app"
 version = "0.1.0"
 edition = "2026"
+type-safe = true
 
 [dependencies]
 geometry = { version = "0.1.0", path = "../geometry" }
 ```
+
+`type-safe = true` provides a progressive optimization boundary. In that
+package, a parameter or field which would silently default to `Any` produces
+`E0201` with its source line and an annotation suggestion. Packages without the
+option remain flexible, and explicitly writing `Any` always records intentional
+dynamic typing. See [`docs/error`](docs/error/README.md) for the categorized
+compiler diagnostic catalog.
 
 `from geometry import Point` resolves `geometry` from the current package, the
 standard library, or a dependency selected by the manifest and lockfile. Source
@@ -664,8 +696,10 @@ copy = clone numbers
 owned = move copy
 ```
 
-Parameter declarations contain names and types, not ownership modes. Parameters
-are viewed by default. A call may use `view`, `borrow`, `clone`, or `move` on an
+Parameter declarations contain names and optional types, not ownership modes.
+An omitted type defaults to `Any` unless the package enables `type-safe`; native
+ABI parameters always require explicit types. Parameters are viewed by default.
+A call may use `view`, `borrow`, `clone`, or `move` on an
 argument when the ownership operation must be explicit.
 
 ```sev

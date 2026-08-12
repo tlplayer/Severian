@@ -1,0 +1,9 @@
+# W002 / lint::discarded-task: discarded task handle
+# Dropping a task handle hides failure, cancellation, ordering, and lifetime.
+# Bind the handle and await it unless detached execution is intentional.
+
+def work():
+    print("working")
+
+def main():
+    async work() with self

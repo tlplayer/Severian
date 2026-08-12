@@ -146,7 +146,7 @@ impl<'source> Lexer<'source> {
             if content.starts_with('\t') {
                 return Err(LexError {
                     span: Span::new(offset + indentation, offset + indentation + 1),
-                    message: "tabs are not allowed for indentation".into(),
+                    message: "E0102: tabs are not allowed for indentation".into(),
                 });
             }
 
@@ -220,7 +220,7 @@ impl<'source> Lexer<'source> {
             if indentation != *self.indents.last().unwrap() {
                 return Err(LexError {
                     span: Span::new(offset, offset + indentation),
-                    message: "indentation does not match an outer block".into(),
+                    message: "E0102: indentation does not match an outer block".into(),
                 });
             }
         }
@@ -439,7 +439,7 @@ impl<'source> Lexer<'source> {
         let Some(relative_end) = self.source[content_start..].find("\"\"\"") else {
             return Err(LexError {
                 span: Span::new(start, self.source.len()),
-                message: "unterminated triple-quoted string literal".into(),
+                message: "E0101: unterminated triple-quoted block string literal".into(),
             });
         };
         let content_end = content_start + relative_end;

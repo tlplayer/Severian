@@ -233,6 +233,8 @@ fn frontend_path(
     severian_package::enforce_unsafe_policy(manifest_path.as_deref(), path, &source)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     let ast = parse_source(&source)?;
+    severian_package::enforce_type_safe_policy(manifest_path.as_deref(), &ast, &source)
+        .map_err(|error| CompileError::Package(error.to_string()))?;
     let project_root = manifest_path
         .as_deref()
         .and_then(Path::parent)
@@ -256,6 +258,14 @@ fn frontend_path(
     let local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     for interface in &local_interfaces {
+        severian_package::enforce_type_safe_policy(
+            manifest_path.as_deref(),
+            &interface.module,
+            &interface.source,
+        )
+        .map_err(|error| {
+            CompileError::Package(format!("{}: {error}", interface.source_path.display()))
+        })?;
         for official in load_official_interfaces(&interface.module)? {
             insert_official_interface(&mut interfaces, official)?;
         }

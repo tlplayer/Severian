@@ -1,0 +1,8 @@
+# E0801: unhandled recoverable result
+# A Result must be propagated, switched over, or explicitly discarded with a
+# reviewable reason. Ignoring it hides failures.
+
+import file
+
+def main():
+    file.write("state.txt", "state")
