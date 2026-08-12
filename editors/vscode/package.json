@@ -1,8 +1,8 @@
 {
   "name": "severian-language",
   "displayName": "Severian Language",
-  "description": "Syntax highlighting and editor behavior for the Severian programming language.",
-  "version": "0.2.0",
+  "description": "Syntax highlighting, editor behavior, and native coverage gutters for the Severian programming language.",
+  "version": "0.3.0",
   "publisher": "severian",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
@@ -17,6 +17,13 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:severian",
+    "onCommand:severian.coverage.run",
+    "onCommand:severian.coverage.load",
+    "onCommand:severian.coverage.clear"
+  ],
   "categories": [
     "Programming Languages"
   ],
@@ -27,7 +34,7 @@
     "programming language"
   ],
   "scripts": {
-    "check": "python3 tests/check_grammar.py",
+    "check": "python3 tests/check_grammar.py && node --test tests/coverage-data.test.js",
     "package": "vsce package --out severian-language.vsix",
     "publish": "vsce publish"
   },
@@ -54,6 +61,53 @@
         "scopeName": "source.severian",
         "path": "./syntaxes/severian.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "severian.coverage.run",
+        "title": "Run Coverage",
+        "category": "Severian",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "severian.coverage.load",
+        "title": "Load Coverage Gutters",
+        "category": "Severian"
+      },
+      {
+        "command": "severian.coverage.clear",
+        "title": "Clear Coverage Gutters",
+        "category": "Severian"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "severian.coverage.run",
+          "when": "editorLangId == severian",
+          "group": "navigation@10"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Severian Coverage",
+      "properties": {
+        "severian.coverage.executable": {
+          "type": "string",
+          "default": "sev",
+          "description": "Path to the Severian compiler executable used to run coverage."
+        },
+        "severian.coverage.target": {
+          "type": "string",
+          "default": "",
+          "description": "Source or project directory passed to `sev coverage`, relative to the workspace. When empty, the nearest `package.toml` or workspace root is used."
+        },
+        "severian.coverage.autoLoad": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically load existing Severian coverage reports and refresh gutters when they change."
+        }
+      }
+    }
   }
 }

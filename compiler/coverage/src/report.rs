@@ -82,6 +82,19 @@ pub fn read_language_hits(path: &Path) -> io::Result<BTreeSet<CoverageRegionId>>
         .collect()
 }
 
+/// Writes one deterministic hit file containing the union collected for a
+/// coverage run. Consumers should prefer this over per-target runtime files,
+/// which can remain in the report directory after target names change.
+pub fn save_language_hits(path: &Path, hits: &BTreeSet<CoverageRegionId>) -> io::Result<()> {
+    use std::fmt::Write as _;
+
+    let mut contents = String::new();
+    for id in hits {
+        let _ = writeln!(contents, "{}", id.0);
+    }
+    fs::write(path, contents)
+}
+
 /// Builds aggregate and per-file source coverage from Severian regions.
 pub fn language_report(
     source_map: &CoverageSourceMap,

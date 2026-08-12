@@ -280,6 +280,7 @@ fn assurance_commands_produce_coverage_mutation_and_memory_results() {
     let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
     assert!(coverage_stdout.contains("Lines      100.00%"));
     assert!(root.join("target/coverage/coverage-report.json").is_file());
+    assert!(root.join("target/coverage/coverage.hits").is_file());
 
     let mutation = Command::new(env!("CARGO_BIN_EXE_sev"))
         .args(["test", "--mutate", "--limit", "1"])

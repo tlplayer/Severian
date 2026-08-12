@@ -111,9 +111,9 @@ sev memory path --leaks
 coverage for every valid `.sev` source discovered below `path`. It executes
 ordinary native tests, excludes integration-test bodies from the numerator, and
 leaves main-only programs visibly uncovered. Machine-readable
-`coverage-report.json` and `coverage-map.json` files are written under
-`target/coverage`. A directory run keeps collecting after a broken target and
-lists every source it could not compile or execute.
+`coverage-report.json`, `coverage-map.json`, and consolidated `coverage.hits`
+files are written under `target/coverage`. A directory run keeps collecting
+after a broken target and lists every source it could not compile or execute.
 
 Mutation testing changes typed HIR after semantic and ownership checking, then
 rebuilds and runs the original tests. Its initial deterministic operators cover

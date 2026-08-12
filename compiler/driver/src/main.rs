@@ -841,6 +841,9 @@ fn coverage(input: &Path) -> Result<(), String> {
     all_regions
         .save_json(&map_path)
         .map_err(|error| error.to_string())?;
+    let hits_path = report_root.join("coverage.hits");
+    severian_coverage::save_language_hits(&hits_path, &all_hits)
+        .map_err(|error| error.to_string())?;
     let (report, files) = severian_coverage::language_report(&all_regions, &all_hits);
     let report_path = report_root.join("coverage-report.json");
     severian_coverage::save_language_report(&report_path, &report, &files)
