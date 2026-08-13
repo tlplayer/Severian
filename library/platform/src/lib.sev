@@ -76,6 +76,7 @@ unsafe:
     native("__sev_network_receive") def network_receive(socket: Any, count: int) -> Result[string, IOError]
     native("__sev_network_close") def network_close(socket: Any) -> Result[unit, IOError]
     native("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
+    native("__sev_https_download") def https_download(url: string, destination: string) -> Result[unit, IOError]
     native("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
     native("__sev_platform_enumerate") def core_enumerate[type](values: list[type]) -> list[tuple[int, type]]
     native("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]

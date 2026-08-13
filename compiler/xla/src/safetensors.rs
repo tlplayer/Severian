@@ -16,25 +16,45 @@ use std::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SafeTensorDType {
+    Bool,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F8E4M3FN,
+    F8E5M2,
     BF16,
     F16,
     F32,
     F64,
-    I32,
-    I64,
-    U8,
+    C64,
+    C128,
 }
 
 impl SafeTensorDType {
     fn parse(value: &str) -> Result<Self> {
         match value {
+            "BOOL" => Ok(Self::Bool),
+            "I8" => Ok(Self::I8),
+            "I16" => Ok(Self::I16),
+            "I32" => Ok(Self::I32),
+            "I64" => Ok(Self::I64),
+            "U8" => Ok(Self::U8),
+            "U16" => Ok(Self::U16),
+            "U32" => Ok(Self::U32),
+            "U64" => Ok(Self::U64),
+            "F8_E4M3" | "F8_E4M3FN" => Ok(Self::F8E4M3FN),
+            "F8_E5M2" => Ok(Self::F8E5M2),
             "BF16" => Ok(Self::BF16),
             "F16" => Ok(Self::F16),
             "F32" => Ok(Self::F32),
             "F64" => Ok(Self::F64),
-            "I32" => Ok(Self::I32),
-            "I64" => Ok(Self::I64),
-            "U8" => Ok(Self::U8),
+            "C64" => Ok(Self::C64),
+            "C128" => Ok(Self::C128),
             other => Err(XlaError::Pjrt(format!(
                 "unsupported Safetensors dtype `{other}`"
             ))),
@@ -43,10 +63,35 @@ impl SafeTensorDType {
 
     fn byte_width(self) -> usize {
         match self {
-            Self::BF16 | Self::F16 => 2,
+            Self::Bool | Self::I8 | Self::U8 | Self::F8E4M3FN | Self::F8E5M2 => 1,
+            Self::I16 | Self::U16 | Self::BF16 | Self::F16 => 2,
             Self::F32 | Self::I32 => 4,
-            Self::F64 | Self::I64 => 8,
-            Self::U8 => 1,
+            Self::U32 => 4,
+            Self::F64 | Self::I64 | Self::U64 | Self::C64 => 8,
+            Self::C128 => 16,
+        }
+    }
+
+    pub const fn element_type(self) -> crate::pjrt::ElementType {
+        use crate::pjrt::ElementType as Element;
+        match self {
+            Self::Bool => Element::Pred,
+            Self::I8 => Element::S8,
+            Self::I16 => Element::S16,
+            Self::I32 => Element::S32,
+            Self::I64 => Element::S64,
+            Self::U8 => Element::U8,
+            Self::U16 => Element::U16,
+            Self::U32 => Element::U32,
+            Self::U64 => Element::U64,
+            Self::F8E4M3FN => Element::F8E4M3FN,
+            Self::F8E5M2 => Element::F8E5M2,
+            Self::F16 => Element::F16,
+            Self::BF16 => Element::BF16,
+            Self::F32 => Element::F32,
+            Self::F64 => Element::F64,
+            Self::C64 => Element::C64,
+            Self::C128 => Element::C128,
         }
     }
 }
@@ -205,6 +250,20 @@ impl SafeTensorStore {
         client.buffer_from_host(host, device)
     }
 
+    pub fn upload(
+        &self,
+        client: &PjrtClient,
+        name: &str,
+        device: Option<&crate::Device>,
+    ) -> Result<Buffer> {
+        let tensor = self.get(name)?;
+        let host = HostBuffer::new(
+            crate::pjrt::Shape::new(tensor.entry.dtype.element_type(), tensor.entry.shape.clone()),
+            tensor.bytes().to_vec(),
+        )?;
+        client.buffer_from_host(host, device)
+    }
+
     fn shard_mapping(&self, shard: &Path) -> Result<Arc<Mmap>> {
         if let Some(mapping) = self.mappings.lock().unwrap().get(shard).cloned() {
             return Ok(mapping);
@@ -342,6 +401,23 @@ impl SafeTensorStore {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn maps_safetensors_dtypes_to_explicit_pjrt_types() {
+        assert_eq!(
+            SafeTensorDType::parse("F8_E4M3").unwrap().element_type(),
+            crate::pjrt::ElementType::F8E4M3FN
+        );
+        assert_eq!(
+            SafeTensorDType::parse("F8_E5M2").unwrap().element_type(),
+            crate::pjrt::ElementType::F8E5M2
+        );
+        assert_eq!(
+            SafeTensorDType::parse("F32").unwrap().element_type(),
+            crate::pjrt::ElementType::F32
+        );
+        assert_eq!(SafeTensorDType::parse("C128").unwrap().byte_width(), 16);
+    }
 
     #[test]
     fn reads_indexed_bf16_tensor_without_reencoding_payload() {

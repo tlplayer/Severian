@@ -4,6 +4,16 @@ use severian_hir::{
 };
 
 #[test]
+fn tensor_dtype_promotion_is_language_defined() {
+    use TensorElementType as T;
+    assert_eq!(T::promote(T::F8E4M3FN, T::F8E5M2), Some(T::F16));
+    assert_eq!(T::promote(T::F16, T::BF16), Some(T::F32));
+    assert_eq!(T::promote(T::F16, T::F32), Some(T::F32));
+    assert_eq!(T::promote(T::I8, T::U8), Some(T::I16));
+    assert_eq!(T::promote(T::C64, T::F64), Some(T::C128));
+}
+
+#[test]
 fn finds_the_main_function() {
     let program = Program {
         metadata: Default::default(),

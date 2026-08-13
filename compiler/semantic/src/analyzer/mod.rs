@@ -43,15 +43,38 @@ impl std::error::Error for SemanticError {}
 struct Signature {
     target: CallTarget,
     params: Vec<SignatureParameter>,
-    returns: ValueType,
+    returns: SignatureType,
 }
 
 #[derive(Clone)]
 struct SignatureParameter {
     name: String,
-    ty: ValueType,
+    ty: SignatureType,
     function_return: Option<ValueType>,
     default: Option<Expr>,
+}
+
+#[derive(Clone)]
+enum SignatureType {
+    Concrete(ValueType),
+    TensorGeneric(GenericTensorType),
+}
+
+#[derive(Clone)]
+struct GenericTensorType {
+    variable: String,
+    constraints: Vec<severian_hir::TensorElementConstraint>,
+    rank: Option<u8>,
+    dimensions: [TensorDimension; 8],
+}
+
+impl SignatureType {
+    fn erased(&self) -> ValueType {
+        match self {
+            Self::Concrete(ty) => *ty,
+            Self::TensorGeneric(_) => ValueType::TensorAny,
+        }
+    }
 }
 
 #[derive(Clone)]

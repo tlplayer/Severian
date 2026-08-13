@@ -35,6 +35,11 @@ def identify_format(source: string) -> Result[string, types.ModelLoadError]:
             return "huggingface-safetensors"
         if path.exists(path.join(source, "saved_model.pb")):
             return "tensorflow-saved-model"
+    # A non-local owner/repository pair is the conventional Hugging Face model
+    # identifier accepted by model.load("owner/model").
+    if not path.exists(source) and size(source.split("/")) == 2 and "." not in path.basename(source):
+        _safe = safe_identifier(source)
+        return "huggingface-safetensors"
     return failure(types.ModelLoadError("could not identify model format: " + source))
 
 def safe_identifier(identifier: string) -> Result[string, types.ModelLoadError]:
@@ -76,17 +81,30 @@ def verify(path_name: string, expected_sha256: string) -> Result[string, types.M
 def download_verified(url: string, destination: string, expected_sha256: string) -> Result[string, types.ModelLoadError | IOError]:
     assert(url.starts_with("https://"), "remote model downloads require HTTPS")
     if path.exists(destination):
+        if expected_sha256.is_empty():
+            return sha256_file(destination)
         return verify(destination, expected_sha256)
-    body = http.get(url)
-    bytes = platform.string_encode(body)
-    digest = platform.hash_sha256_bytes(bytes)
-    if digest.lower() != expected_sha256.lower():
-        return failure(types.ModelLoadError("downloaded artifact SHA-256 mismatch"))
     _directory = platform.directory_make_all(path.dirname(destination))
     temporary = destination + ".partial"
-    _written = file.write_bytes(temporary, bytes)
+    _downloaded = platform.https_download(url, temporary)
+    digest = sha256_file(temporary)
+    if not expected_sha256.is_empty() and digest.lower() != expected_sha256.lower():
+        return failure(types.ModelLoadError("downloaded artifact SHA-256 mismatch"))
     _renamed = platform.file_rename(temporary, destination)
     return digest
+
+def required_huggingface_file(name: string) -> bool:
+    leaf = path.basename(name)
+    return (
+        name.ends_with(".safetensors")
+        or name.ends_with(".safetensors.index.json")
+        or leaf in [
+            "config.json", "generation_config.json", "tokenizer.json",
+            "tokenizer_config.json", "special_tokens_map.json", "vocab.json",
+            "merges.txt", "tokenizer.model", "preprocessor_config.json",
+            "processor_config.json", "feature_extractor_config.json",
+        ]
+    )
 
 def resolve_huggingface(source: string) -> Result[ResolvedArtifact, types.ModelLoadError | IOError | JsonError]:
     specification = safe_identifier(source[5:])
@@ -98,7 +116,7 @@ def resolve_huggingface(source: string) -> Result[ResolvedArtifact, types.ModelL
         identifier = safe_identifier(parts[0])
         revision = safe_identifier(parts[1])
     # Resolve a moving branch once, then cache exclusively by immutable commit.
-    api = "https://huggingface.co/api/models/" + identifier + "/revision/" + revision
+    api = "https://huggingface.co/api/models/" + identifier + "/revision/" + revision + "?blobs=true"
     metadata_text = http.get(api)
     metadata: Any = json.decode[Any](metadata_text)
     commit = json.as_string(json.object_get(metadata, "sha"))
@@ -108,10 +126,12 @@ def resolve_huggingface(source: string) -> Result[ResolvedArtifact, types.ModelL
     siblings = json.object_get(metadata, "siblings")
     for sibling in json.as_list(siblings):
         name = json.as_string(json.object_get(sibling, "rfilename"))
-        if name == "config.json" or name == "model.safetensors" or name == "model.safetensors.index.json" or name.ends_with(".safetensors"):
-            lfs = json.object_get(sibling, "lfs")
-            digest = json.as_string(json.object_get(lfs, "sha256"))
-            assert(size(digest) == 64, "remote model file is missing its LFS SHA-256")
+        if required_huggingface_file(name):
+            digest := ""
+            if "lfs" in json.object_keys(sibling):
+                lfs = json.object_get(sibling, "lfs")
+                if "sha256" in json.object_keys(lfs):
+                    digest = json.as_string(json.object_get(lfs, "sha256"))
             url = "https://huggingface.co/" + identifier + "/resolve/" + commit + "/" + name
             _verified = download_verified(url, path.join(destination, name), digest)
     return ResolvedArtifact(source, destination, "huggingface-safetensors", commit)
@@ -120,6 +140,8 @@ def resolve(source: string, expected_sha256: string = "") -> Result[ResolvedArti
     format = identify_format(source)
     if source.starts_with("hf://"):
         return resolve_huggingface(source)
+    if format == "huggingface-safetensors" and not path.exists(source):
+        return resolve_huggingface("hf://" + source)
     if source.starts_with("https://"):
         if expected_sha256.is_empty():
             return failure(types.ModelLoadError("direct HTTPS model loads require sha256"))

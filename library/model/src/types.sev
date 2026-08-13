@@ -9,12 +9,23 @@ class TensorValue:
     dtype: string
     shape: list[int]
     values: list[float]
+    # Metadata-only checkpoint tensors retain their exact file range. Weight
+    # binding can map this storage without first converting it through f64.
+    source_path: string = ""
+    byte_start: int = 0
+    byte_end: int = 0
 
     def elements() -> int:
         count := 1
         for dimension in shape:
             count *= dimension
         return count
+
+    def is_materialized() -> bool:
+        return size(values) > 0
+
+    def is_mapped() -> bool:
+        return not source_path.is_empty() and byte_end >= byte_start
 
 class GraphNode:
     name: string
@@ -81,4 +92,3 @@ class ModelArtifact:
 
     def summary() -> string:
         return architecture + " (" + format + ", " + dtype + " on " + device + ")"
-

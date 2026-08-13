@@ -20,6 +20,7 @@ import "src/preprocessing.sev" as preprocessing
 import "src/serialization.sev" as serialization
 import "src/tensor_ops.sev" as tensor_ops
 import "src/types.sev" as types
+import "src/weights.sev" as weight_runtime
 
 # Public model types stay in this facade so user code never needs to import an
 # implementation submodule just to declare a field.
@@ -174,6 +175,7 @@ class DataLoader:
 # successful load produces this Severian-owned graph and parameter object.
 class NeuralNet:
     artifact: types.ModelArtifact
+    weight_bindings: weight_runtime.ModelWeights = weight_runtime.ModelWeights("")
     training_mode: bool = false
     compiled: bool = false
 
@@ -205,11 +207,32 @@ class NeuralNet:
     def weights() -> list[types.TensorValue]:
         return artifact.graph.initializers
 
+    def weight_f8e4m3fn(name: string) -> Result[Tensor[f8e4m3fn], types.ModelLoadError | IOError | JsonError]:
+        return weight_bindings.f8e4m3fn(name)
+
+    def weight_f8e5m2(name: string) -> Result[Tensor[f8e5m2], types.ModelLoadError | IOError | JsonError]:
+        return weight_bindings.f8e5m2(name)
+
+    def weight_f16(name: string) -> Result[Tensor[f16], types.ModelLoadError | IOError | JsonError]:
+        return weight_bindings.f16(name)
+
+    def weight_bf16(name: string) -> Result[Tensor[bf16], types.ModelLoadError | IOError | JsonError]:
+        return weight_bindings.bf16(name)
+
+    def weight_f32(name: string) -> Result[Tensor[f32], types.ModelLoadError | IOError | JsonError]:
+        return weight_bindings.f32(name)
+
     def state() -> list[types.TensorValue]:
         return artifact.graph.initializers
 
     def summary() -> string:
         return artifact.summary() + ", " + string(size(artifact.graph.nodes)) + " operations, " + string(size(artifact.graph.initializers)) + " tensors"
+
+    def encode(text: string) -> list[int]:
+        return platform.qwen_tokenize(artifact.resolved_source, text)
+
+    def decode_token(token: int) -> string:
+        return platform.qwen_decode_token(artifact.resolved_source, token)
 
     def to(device: string):
         artifact.device = device
@@ -261,6 +284,13 @@ class NeuralNet:
 def identify_format(source: string) -> Result[string, types.ModelLoadError]:
     return artifacts.identify_format(source)
 
+def validate_imported_graph(graph: types.ModelGraph) -> Result[unit, types.ModelLoadError]:
+    switch graph.validate():
+        ok _value:
+            return
+        failure invalid:
+            return failure(types.ModelLoadError(invalid.message))
+
 def load(
     source: string,
     device: string = "auto",
@@ -281,13 +311,17 @@ def load(
         graph = safetensors_importer.import_model(resolved.local_path)
     else:
         return failure(types.ModelLoadError("unsupported model import format: " + resolved.format))
+    _valid = validate_imported_graph(graph)
     config := json.decode[Any]("{}")
     config_path = path.join(resolved.local_path if path.is_dir(resolved.local_path) else path.dirname(resolved.local_path), "config.json")
     if path.exists(config_path):
         config_text = file.read_text(config_path)
         config = json.decode[Any](config_text)
-    artifact = types.ModelArtifact(source, resolved.local_path, resolved.format, graph.name, device, dtype, config, graph.initializers, graph, resolved.content_sha256)
-    return NeuralNet(artifact)
+    selected_dtype := dtype
+    if selected_dtype == "auto" and size(graph.initializers) > 0:
+        selected_dtype = graph.initializers[0].dtype
+    artifact = types.ModelArtifact(source, resolved.local_path, resolved.format, graph.name, device, selected_dtype, config, graph.initializers, graph, resolved.content_sha256)
+    return NeuralNet(artifact, weight_runtime.open(resolved.local_path))
 
 # Generic estimator protocol helpers.
 def fit(estimator: Any, features: Any, targets: Any) -> Any:
@@ -352,23 +386,23 @@ def arange(start: float, stop: float = 0.0, step: float = 1.0) -> Tensor[f64]:
     return tensor_ops.arange(start, stop, step)
 def linspace(start: float, stop: float, steps: int) -> Tensor[f64]:
     return tensor_ops.linspace(start, stop, steps)
-def shape(input: Tensor[f64]) -> list[int]:
+def shape[type](input: Tensor[type]) -> list[int]:
     return tensor_ops.shape(input)
-def size(input: Tensor[f64]) -> int:
+def size[type](input: Tensor[type]) -> int:
     return tensor_ops.size_of(input)
-def reshape(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
+def reshape[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
     return tensor_ops.reshape(input, dimensions)
-def view(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
+def view[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
     return tensor_ops.view(input, dimensions)
-def flatten(input: Tensor[f64], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[f64]:
+def flatten[type](input: Tensor[type], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[type]:
     return tensor_ops.flatten(input, start_dimension, end_dimension)
-def squeeze(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
+def squeeze[type](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
     return tensor_ops.squeeze(input, dimension)
-def unsqueeze(input: Tensor[f64], dimension: int) -> Tensor[f64]:
+def unsqueeze[type](input: Tensor[type], dimension: int) -> Tensor[type]:
     return tensor_ops.unsqueeze(input, dimension)
-def transpose(input: Tensor[f64], first: int = -2, second: int = -1) -> Tensor[f64]:
+def transpose[type](input: Tensor[type], first: int = -2, second: int = -1) -> Tensor[type]:
     return tensor_ops.transpose(input, first, second)
-def permute(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
+def permute[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
     return tensor_ops.permute(input, dimensions)
 def concat(inputs: list[Tensor[f64]], dimension: int = 0) -> Tensor[f64]:
     return tensor_ops.concat(inputs, dimension)
@@ -394,17 +428,17 @@ def std(input: Tensor[f64], correction: int = 1) -> float:
     return tensor_ops.std(input, correction)
 def var(input: Tensor[f64], correction: int = 1) -> float:
     return tensor_ops.var(input, correction)
-def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_ops.matmul(left, right)
-def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def add[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_ops.add(left, right)
-def subtract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def subtract[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_ops.subtract(left, right)
-def multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def multiply[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_ops.multiply(left, right)
-def divide(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def divide[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_ops.divide(left, right)
-def scale(input: Tensor[f64], factor: float) -> Tensor[f64]:
+def scale[type: Float](input: Tensor[type], factor: float) -> Tensor[type]:
     return tensor_ops.scale(input, factor)
 def dot(left: Tensor[f64], right: Tensor[f64]) -> float:
     return tensor_ops.dot(left, right)
@@ -422,7 +456,7 @@ def sort(input: Tensor[f64], descending: bool = false) -> Tensor[f64]:
     return tensor_ops.sort(input, descending)
 def argsort(input: Tensor[f64], descending: bool = false) -> list[int]:
     return tensor_ops.argsort(input, descending)
-def exp(input: Tensor[f64]) -> Tensor[f64]:
+def exp[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.exp(input)
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.log(input)
@@ -436,19 +470,19 @@ def abs(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.abs(input)
 def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:
     return tensor_ops.pow(input, exponent)
-def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
+def softmax[type: Float](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
     return tensor_ops.softmax(input, dimension)
 def log_softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     return tensor_ops.log_softmax(input, dimension)
-def sigmoid(input: Tensor[f64]) -> Tensor[f64]:
+def sigmoid[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.sigmoid(input)
-def relu(input: Tensor[f64]) -> Tensor[f64]:
+def relu[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.relu(input)
-def gelu(input: Tensor[f64]) -> Tensor[f64]:
+def gelu[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.gelu(input)
-def silu(input: Tensor[f64]) -> Tensor[f64]:
+def silu[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.silu(input)
-def tanh(input: Tensor[f64]) -> Tensor[f64]:
+def tanh[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_ops.tanh(input)
 
 # Layers.

@@ -641,13 +641,7 @@ pub(super) fn encode_field_type(ty: ValueType) -> String {
 }
 
 fn encode_tensor_type(tensor: TensorType) -> String {
-    let element = match tensor.element {
-        TensorElementType::BF16 => "bf16",
-        TensorElementType::F32 => "f32",
-        TensorElementType::F64 => "f64",
-        TensorElementType::I32 => "i32",
-        TensorElementType::I64 => "i64",
-    };
+    let element = tensor.element.name();
     let Some(rank) = tensor.rank else {
         return format!("tensor:{element}:*");
     };
@@ -689,14 +683,7 @@ pub(super) fn decode_field_type(value: &str) -> Option<ValueType> {
 fn decode_tensor_type(value: &str) -> Option<TensorType> {
     let mut parts = value.splitn(4, ':');
     (parts.next()? == "tensor").then_some(())?;
-    let element = match parts.next()? {
-        "bf16" => TensorElementType::BF16,
-        "f32" => TensorElementType::F32,
-        "f64" => TensorElementType::F64,
-        "i32" => TensorElementType::I32,
-        "i64" => TensorElementType::I64,
-        _ => return None,
-    };
+    let element = TensorElementType::parse(parts.next()?)?;
     let rank = parts.next()?;
     if rank == "*" {
         return Some(TensorType::dynamic(element));

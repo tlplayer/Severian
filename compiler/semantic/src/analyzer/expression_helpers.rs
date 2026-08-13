@@ -24,6 +24,7 @@ pub(super) fn lower_declared_call(
     aliases: &HashMap<String, String>,
 ) -> Result<(Expression, ValueType), SemanticError> {
     let mut supplied: Vec<Option<Expression>> = vec![None; signature.params.len()];
+    let mut tensor_types = HashMap::new();
     let mut positional = 0;
     for argument in &call.args {
         let index = if let Some(name) = &argument.name {
@@ -44,7 +45,12 @@ pub(super) fn lower_declared_call(
             ));
         }
         let (value, ty) = lower_expression(&argument.value, scope, signatures, aliases)?;
-        compatible(argument.span, ty, signature.params[index].ty)?;
+        compatible_signature(
+            argument.span,
+            ty,
+            &signature.params[index].ty,
+            &mut tensor_types,
+        )?;
         supplied[index] = Some(value);
     }
     let args = supplied
@@ -88,8 +94,83 @@ pub(super) fn lower_declared_call(
             },
             args,
         },
-        signature.returns,
+        instantiate_signature_type(&signature.returns, &tensor_types),
     ))
+}
+
+fn compatible_signature(
+    span: Span,
+    actual: ValueType,
+    expected: &SignatureType,
+    bindings: &mut HashMap<String, TensorElementType>,
+) -> Result<(), SemanticError> {
+    let SignatureType::TensorGeneric(generic) = expected else {
+        return compatible(span, actual, expected.erased());
+    };
+    if actual == ValueType::Any || actual == ValueType::TensorAny {
+        return Ok(());
+    }
+    let ValueType::Tensor(actual) = actual else {
+        return Err(error(span, "generic tensor parameter requires a tensor"));
+    };
+    if !generic
+        .constraints
+        .iter()
+        .all(|constraint| actual.element.satisfies(*constraint))
+    {
+        return Err(error(
+            span,
+            format!(
+                "tensor element `{}` does not satisfy the constraints on `{}`",
+                actual.element.name(),
+                generic.variable
+            ),
+        ));
+    }
+    if let Some(bound) = bindings.get(&generic.variable) {
+        if *bound != actual.element {
+            return Err(error(
+                span,
+                format!(
+                    "generic tensor `{}` was bound to `{}`, then used with `{}`",
+                    generic.variable,
+                    bound.name(),
+                    actual.element.name()
+                ),
+            ));
+        }
+    } else {
+        bindings.insert(generic.variable.clone(), actual.element);
+    }
+    let expected_shape = TensorType {
+        element: actual.element,
+        rank: generic.rank,
+        dimensions: generic.dimensions,
+    };
+    if actual.is_compatible_with(expected_shape) {
+        Ok(())
+    } else {
+        Err(error(span, "tensor rank or dimensions do not match"))
+    }
+}
+
+fn instantiate_signature_type(
+    ty: &SignatureType,
+    bindings: &HashMap<String, TensorElementType>,
+) -> ValueType {
+    match ty {
+        SignatureType::Concrete(ty) => *ty,
+        SignatureType::TensorGeneric(generic) => {
+            let Some(element) = bindings.get(&generic.variable).copied() else {
+                return ValueType::TensorAny;
+            };
+            ValueType::Tensor(TensorType {
+                element,
+                rank: generic.rank,
+                dimensions: generic.dimensions,
+            })
+        }
+    }
 }
 
 pub(super) fn collection_length(expression: &Expr) -> Option<usize> {
@@ -258,39 +339,128 @@ pub(super) fn lower_collection(
 pub(super) fn lower_signature(
     name: &str,
     native_symbol: Option<&str>,
+    generic_params: &[severian_ast::GenericParameter],
     params: &[severian_ast::Parameter],
     return_type: Option<&Type>,
 ) -> Result<Signature, SemanticError> {
+    let generic_params = generic_params
+        .iter()
+        .map(|parameter| {
+            let constraints = parameter
+                .constraints
+                .iter()
+                .map(tensor_constraint)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((parameter.name.name.clone(), constraints))
+        })
+        .collect::<Result<HashMap<_, _>, SemanticError>>()?;
     let params = params
         .iter()
         .map(|param| {
             Ok(SignatureParameter {
                 name: param.name.name.clone(),
-                ty: param
-                    .ty
-                    .as_ref()
-                    .map(lower_type)
-                    .transpose()?
-                    .unwrap_or(ValueType::Any),
+                ty: param.ty.as_ref().map_or_else(
+                    || Ok(SignatureType::Concrete(ValueType::Any)),
+                    |ty| lower_signature_type(ty, &generic_params),
+                )?,
                 function_return: function_return_type(param.ty.as_ref()),
                 default: param.default.clone(),
             })
         })
         .collect::<Result<Vec<_>, SemanticError>>()?;
-    let returns = return_type
-        .map(lower_type)
-        .transpose()?
-        .unwrap_or(ValueType::Unit);
+    let returns = return_type.map_or_else(
+        || Ok(SignatureType::Concrete(ValueType::Unit)),
+        |ty| lower_signature_type(ty, &generic_params),
+    )?;
     let target = match native_symbol {
         Some(symbol) => CallTarget::native(name, symbol),
         None => CallTarget::source(name),
     }
-    .with_signature(params.iter().map(|param| param.ty), returns);
+    .with_signature(
+        params.iter().map(|param| param.ty.erased()),
+        returns.erased(),
+    );
     Ok(Signature {
         target,
         params,
         returns,
     })
+}
+
+fn tensor_constraint(ty: &Type) -> Result<severian_hir::TensorElementConstraint, SemanticError> {
+    let Type::Named(path) = ty else {
+        return Err(error(ty.span(), "tensor dtype constraint must be a named capability"));
+    };
+    let name = path
+        .segments
+        .first()
+        .map(|segment| segment.name.as_str())
+        .unwrap_or("");
+    use severian_hir::TensorElementConstraint as Constraint;
+    match name {
+        "DType" | "dtype" | "Any" | "any" => Ok(Constraint::Any),
+        "Numeric" | "numeric" => Ok(Constraint::Numeric),
+        "Integer" | "integer" => Ok(Constraint::Integer),
+        "SignedInteger" | "signed_integer" => Ok(Constraint::SignedInteger),
+        "UnsignedInteger" | "unsigned_integer" => Ok(Constraint::UnsignedInteger),
+        "Float" | "float" => Ok(Constraint::Float),
+        "Complex" | "complex" => Ok(Constraint::Complex),
+        _ => Err(error(
+            ty.span(),
+            format!("unknown tensor dtype constraint `{name}`"),
+        )),
+    }
+}
+
+fn lower_signature_type(
+    ty: &Type,
+    generics: &HashMap<String, Vec<severian_hir::TensorElementConstraint>>,
+) -> Result<SignatureType, SemanticError> {
+    let Type::Named(path) = ty else {
+        return lower_type(ty).map(SignatureType::Concrete);
+    };
+    if !path
+        .segments
+        .first()
+        .is_some_and(|segment| segment.name == "Tensor")
+    {
+        return lower_type(ty).map(SignatureType::Concrete);
+    }
+    let Some(Type::Named(element)) = path.args.first().and_then(TypeArg::as_type) else {
+        return lower_type(ty).map(SignatureType::Concrete);
+    };
+    let Some(variable) = element.segments.first().map(|segment| segment.name.as_str()) else {
+        return lower_type(ty).map(SignatureType::Concrete);
+    };
+    let Some(constraints) = generics.get(variable) else {
+        return lower_type(ty).map(SignatureType::Concrete);
+    };
+    let mut dimensions = [TensorDimension::Dynamic; 8];
+    if path.args.len().saturating_sub(1) > dimensions.len() {
+        return Err(error(path.span, "tensor rank exceeds the supported maximum of 8"));
+    }
+    for (axis, argument) in path.args[1..].iter().enumerate() {
+        dimensions[axis] = match argument {
+            TypeArg::Dimension { size, .. } => TensorDimension::Static(*size),
+            TypeArg::Type { ty, .. }
+                if matches!(ty.as_ref(), Type::Named(name) if name.segments.first().is_some_and(|part| part.name == "dynamic")) =>
+            {
+                TensorDimension::Dynamic
+            }
+            _ => {
+                return Err(error(
+                    argument.span(),
+                    "tensor dimensions must be integers or `dynamic`",
+                ))
+            }
+        };
+    }
+    Ok(SignatureType::TensorGeneric(GenericTensorType {
+        variable: variable.to_string(),
+        constraints: constraints.clone(),
+        rank: (path.args.len() > 1).then_some((path.args.len() - 1) as u8),
+        dimensions,
+    }))
 }
 
 pub(super) fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {

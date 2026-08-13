@@ -1,0 +1,218 @@
+import math
+import random
+
+# Focused speech-generation primitives shared by native TTS models.  The
+# model-specific network and audio codec stay behind small interfaces; the
+# masking schedule and classifier-free decoding are ordinary Severian code.
+
+class SpeechGenerationConfig:
+    num_step: int = 32
+    guidance_scale: float = 2.0
+    time_shift: float = 0.1
+    layer_penalty: float = 5.0
+    position_temperature: float = 5.0
+    class_temperature: float = 0.0
+
+class VoiceClonePrompt:
+    audio_tokens: list[list[int]]
+    text: string
+    rms: float
+
+class AudioLogits:
+    values: list[float]
+    codebooks: int
+    frames: int
+    vocabulary: int
+
+    def at(codebook: int, frame: int, token: int) -> float:
+        return values[(codebook * frames + frame) * vocabulary + token]
+
+class TokenPrediction:
+    tokens: list[int]
+    confidence: list[float]
+
+trait MaskedAudioModel:
+    predict(tokens: list[list[int]]) -> AudioLogits
+
+trait AudioCodec:
+    encode(samples: list[float], sample_rate: int) -> list[list[int]]
+    decode(tokens: list[list[int]]) -> list[float]
+    sampling_rate() -> int
+
+class FixedAudioModel: MaskedAudioModel
+    output: AudioLogits
+
+    def predict(_tokens: list[list[int]]) -> AudioLogits:
+        return output
+
+def time_steps(
+    count: int,
+    shift: float = 0.1,
+    start: float = 0.0,
+    end: float = 1.0,
+) -> list[float]:
+    assert(count > 0)
+    assert(shift > 0.0)
+    output := []
+    for step in range(0, count + 1):
+        raw = start + (end - start) * float(step) / float(count)
+        output.append(shift * raw / (1.0 + (shift - 1.0) * raw))
+    return output
+
+def unmask_schedule(total_tokens: int, count: int, shift: float = 0.1) -> list[int]:
+    assert(total_tokens >= 0)
+    steps = time_steps(count, shift)
+    remaining := total_tokens
+    output := []
+    for step in range(0, count):
+        amount := remaining
+        if step + 1 < count:
+            amount = min(remaining, math.ceil(float(total_tokens) * (steps[step + 1] - steps[step])))
+        output.append(amount)
+        remaining -= amount
+    return output
+
+def log_softmax(values: list[float]) -> list[float]:
+    assert(size(values) > 0)
+    maximum := values[0]
+    for value in values[1:]:
+        if value > maximum:
+            maximum = value
+    denominator := 0.0
+    for value in values:
+        denominator += math.exp(value - maximum)
+    normalizer = maximum + math.log(denominator)
+    output := []
+    for value in values:
+        output.append(value - normalizer)
+    return output
+
+def gumbel(value: float, temperature: float) -> float:
+    if temperature <= 0.0:
+        return value
+    # Keep the logarithms finite without changing the sampling distribution in
+    # any meaningful way at f64 precision.
+    uniform = [0.0000000001, [0.9999999999, random.random()].minimum()].maximum()
+    noise = -math.log(-math.log(uniform))
+    return value / temperature + noise
+
+def predict_tokens(
+    conditional: AudioLogits,
+    unconditional: AudioLogits,
+    guidance_scale: float,
+    mask_token: int,
+    class_temperature: float = 0.0,
+) -> TokenPrediction:
+    assert(conditional.codebooks == unconditional.codebooks)
+    assert(conditional.frames == unconditional.frames)
+    assert(conditional.vocabulary == unconditional.vocabulary)
+    assert(mask_token >= 0 and mask_token < conditional.vocabulary)
+    predicted := []
+    confidence := []
+    for codebook in range(0, conditional.codebooks):
+        for frame in range(0, conditional.frames):
+            conditional_row: list[float] = []
+            unconditional_row: list[float] = []
+            for token in range(0, conditional.vocabulary):
+                conditional_row.append(conditional.at(codebook, frame, token))
+                unconditional_row.append(unconditional.at(codebook, frame, token))
+            conditional_probs = log_softmax(conditional_row)
+            unconditional_probs = log_softmax(unconditional_row)
+            guided: list[float] = []
+            for token in range(0, conditional.vocabulary):
+                value := float(conditional_probs[token])
+                if guidance_scale != 0.0:
+                    value += guidance_scale * (conditional_probs[token] - unconditional_probs[token])
+                guided.append(value)
+            normalized_guidance = log_softmax(guided)
+            best_token := 0
+            best_sample := -999999999999.0
+            best_confidence := -999999999999.0
+            for token in range(0, conditional.vocabulary):
+                if token == mask_token:
+                    continue
+                if normalized_guidance[token] > best_confidence:
+                    best_confidence = normalized_guidance[token]
+                sampled = gumbel(normalized_guidance[token], class_temperature)
+                if sampled > best_sample:
+                    best_sample = sampled
+                    best_token = token
+            predicted.append(best_token)
+            confidence.append(best_confidence)
+    return TokenPrediction(predicted, confidence)
+
+def select_positions(
+    confidence: list[float],
+    tokens: list[int],
+    amount: int,
+    codebooks: int,
+    frames: int,
+    mask_token: int,
+    layer_penalty: float = 5.0,
+    temperature: float = 0.0,
+) -> list[int]:
+    assert(size(confidence) == size(tokens))
+    assert(size(tokens) == codebooks * frames)
+    candidates: list[int] = []
+    scores: list[float] = []
+    for index in indices(tokens):
+        if tokens[index] == mask_token:
+            layer = index / frames
+            candidates.append(index)
+            scores.append(gumbel(confidence[index] - float(layer) * layer_penalty, temperature))
+    selected := []
+    count = min(amount, size(candidates))
+    while size(selected) < count:
+        best := 0
+        for position in range(1, size(candidates)):
+            if scores[position] > scores[best]:
+                best = position
+        selected.append(candidates.pop(best))
+        scores.pop(best)
+    return selected
+
+def estimate_audio_tokens(
+    text: string,
+    reference_text: string = "Nice to meet you.",
+    reference_tokens: int = 25,
+    speed: float = 1.0,
+) -> int:
+    assert(speed > 0.0)
+    reference_weight := [1, size(reference_text.strip())].maximum()
+    target_weight := [1, size(text.strip())].maximum()
+    estimate = float(reference_tokens * target_weight) / float(reference_weight) / speed
+    return [1, math.floor(estimate)].maximum()
+
+def flatten_tokens(tokens: list[list[int]]) -> list[int]:
+    output := []
+    for codebook in tokens:
+        output.extend(codebook)
+    return output
+
+def token_matrix(tokens: list[int], codebooks: int, frames: int) -> list[list[int]]:
+    assert(size(tokens) == codebooks * frames)
+    output := []
+    for codebook in range(0, codebooks):
+        output.append(tokens[codebook * frames:(codebook + 1) * frames])
+    return output
+
+test "OmniVoice time shift and unmask schedule reveal every token exactly once":
+    steps = time_steps(4, 0.1)
+    assert(steps[0] == 0.0)
+    assert(steps[4] > 0.999999)
+    schedule = unmask_schedule(37, 4, 0.1)
+    assert(schedule.sum() == 37)
+    assert(schedule[3] > 0)
+
+test "classifier-free guidance excludes the audio mask token":
+    conditional = AudioLogits([0.0, 5.0, 100.0, 0.0, 4.0, 100.0], 1, 2, 3)
+    unconditional = AudioLogits([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 1, 2, 3)
+    prediction = predict_tokens(conditional, unconditional, 2.0, 2)
+    assert(prediction.tokens == [1, 1])
+
+test "layer penalty prefers early codebooks when confidence ties":
+    selected = select_positions([1.0, 1.0, 1.0, 1.0], [9, 9, 9, 9], 2, 2, 2, 9, 5.0)
+    assert(selected.sorted() == [0, 1])
+
+test "speech duration estimate follows reference rate and speed":
+    assert(estimate_audio_tokens("abcdefghij", "abcde", 20, 2.0) == 20)

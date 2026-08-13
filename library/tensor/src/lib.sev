@@ -1,5 +1,6 @@
 import file
 import json
+import path
 
 class SafeTensorEntry:
     name: string
@@ -18,6 +19,37 @@ class SafeTensorEntry:
             elements *= dimension
         assert(byte_end - byte_start == elements * 2)
         return mapped_bf_16(mapping, byte_start, shape)
+
+    def f32() -> Tensor[f32]:
+        assert(dtype == "F32")
+        elements := 1
+        for dimension in shape:
+            assert(dimension >= 0)
+            elements *= dimension
+        assert(byte_end - byte_start == elements * 4)
+        return mapped_f_32(mapping, byte_start, shape)
+
+    def f16() -> Tensor[f16]:
+        assert(dtype == "F16")
+        assert(byte_end - byte_start == elements() * 2)
+        return mapped_f_16(mapping, byte_start, shape)
+
+    def f8e4m3fn() -> Tensor[f8e4m3fn]:
+        assert(dtype in ["F8_E4M3", "F8_E4M3FN"])
+        assert(byte_end - byte_start == elements())
+        return mapped_f8_e4_m3_fn(mapping, byte_start, shape)
+
+    def f8e5m2() -> Tensor[f8e5m2]:
+        assert(dtype == "F8_E5M2")
+        assert(byte_end - byte_start == elements())
+        return mapped_f8_e5_m2(mapping, byte_start, shape)
+
+    def elements() -> int:
+        count := 1
+        for dimension in shape:
+            assert(dimension >= 0)
+            count *= dimension
+        return count
 
     def bytes() -> int:
         return byte_end - byte_start
@@ -70,9 +102,24 @@ class SafeTensorStore:
         return SafeTensorEntry(name, dtype, shape, byte_start, byte_end, shard, mapping)
 
 def open_safetensors(model_directory: string) -> Result[SafeTensorStore, IOError]:
-    index_file = file.read(model_directory + "/model.safetensors.index.json")
-    index = index_file.value()
-    weight_map = json.object_get(index, "weight_map")
+    index_path = model_directory + "/model.safetensors.index.json"
+    if path.exists(index_path):
+        index_file = file.read(index_path)
+        index = index_file.value()
+        weight_map = json.object_get(index, "weight_map")
+        return SafeTensorStore(model_directory, weight_map, [], [], [], [])
+    model_path = model_directory + "/model.safetensors"
+    handle = file.open(model_path)
+    prefix = file.read_exact(handle, 8)
+    header_length = file.little_endian_u64(prefix)
+    header_bytes = file.read_exact(handle, header_length)
+    header_text = file.utf8(header_bytes)
+    header = json.decode[Any](header_text)
+    _closed = file.close(handle)
+    weight_map := json.decode[Any]("{}")
+    for name in json.object_keys(header):
+        if name != "__metadata__":
+            json.object_set(weight_map, name, "model.safetensors")
     return SafeTensorStore(model_directory, weight_map, [], [], [], [])
 
 unsafe:
@@ -104,45 +151,82 @@ unsafe:
 
     native("__sev_tensor_to_list") def values(value: Tensor[f64]) -> list[float]
 
-    native("__sev_tensor_shape") def ranked_shape(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_shape") def ranked_shape[type](value: Tensor[type]) -> list[int]
 
-    native("__sev_tensor_strides") def ranked_strides(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_strides") def ranked_strides[type](value: Tensor[type]) -> list[int]
 
-    native("__sev_tensor_slice") def ranked_slice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
+    native("__sev_tensor_slice") def ranked_slice[type](value: Tensor[type], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[type]
 
-    native("__sev_tensor_materialize") def ranked_materialize(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_materialize") def ranked_materialize[type](value: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_sum") def ranked_sum(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_sum") def ranked_sum[type: Numeric](value: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_relu") def ranked_relu(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu") def ranked_relu[type: Float](value: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_add") def ranked_add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_add") def ranked_add[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_matmul") def ranked_matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_subtract") def ranked_subtract[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_transpose") def ranked_transpose(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_multiply") def ranked_multiply[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_scale") def ranked_scale(value: Tensor[f64], scale: float) -> Tensor[f64]
+    native("__sev_tensor_divide") def ranked_divide[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_softmax_rows") def ranked_softmax_rows(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_matmul") def ranked_matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_layer_norm") def ranked_layer_norm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_transpose") def ranked_transpose[type](value: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_relu_backward") def ranked_relu_backward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_transpose") def ranked_permute[type](value: Tensor[type], axes: list[int]) -> Tensor[type]
 
-    native("__sev_tensor_softmax_backward") def ranked_softmax_backward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_scale") def ranked_scale[type: Float](value: Tensor[type], scale: float) -> Tensor[type]
 
-    native("__sev_tensor_layer_norm_backward") def ranked_layer_norm_backward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_softmax_rows") def ranked_softmax_rows[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_exp") def ranked_exp[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_rsqrt") def ranked_rsqrt[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_sigmoid") def ranked_sigmoid[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_gelu") def ranked_gelu[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_silu") def ranked_silu[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_tanh") def ranked_tanh[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_gather") def ranked_gather[type, index: Integer](value: Tensor[type], indices: Tensor[index]) -> Tensor[type]
+
+    # Storage and compute dtype changes are explicit. Model code can keep FP8
+    # weights while promoting arithmetic to f16/f32 accumulation.
+    native("__sev_tensor_to_f8e4m3fn") def to_f8_e4_m3_fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]
+    native("__sev_tensor_to_f8e5m2") def to_f8_e5_m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]
+    native("__sev_tensor_to_f16") def to_f_16[type: Numeric](value: Tensor[type]) -> Tensor[f16]
+    native("__sev_tensor_to_bf16") def to_bf_16[type: Numeric](value: Tensor[type]) -> Tensor[bf16]
+    native("__sev_tensor_to_f32") def to_f_32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
+    native("__sev_tensor_to_f64") def to_f_64[type: Numeric](value: Tensor[type]) -> Tensor[f64]
+
+    native("__sev_tensor_layer_norm") def ranked_layer_norm[type: Float](value: Tensor[type], epsilon: float = 0.00001) -> Tensor[type]
+
+    native("__sev_tensor_relu_backward") def ranked_relu_backward[type: Float](input: Tensor[type], upstream: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_softmax_backward") def ranked_softmax_backward[type: Float](output: Tensor[type], upstream: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_layer_norm_backward") def ranked_layer_norm_backward[type: Float](input: Tensor[type], upstream: Tensor[type], epsilon: float = 0.00001) -> Tensor[type]
 
     native("__sev_tensor_backward_mse") def ranked_backward_mse(output: Tensor[f64])
 
-    native("__sev_tensor_gradient") def ranked_gradient(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_gradient") def ranked_gradient[type: Float](value: Tensor[type]) -> Tensor[type]
 
-    native("__sev_tensor_sgd") def ranked_sgd(value: Tensor[f64], learning_rate: float) -> Tensor[f64]
+    native("__sev_tensor_sgd") def ranked_sgd[type: Float](value: Tensor[type], learning_rate: float) -> Tensor[type]
 
     native("__sev_safetensor_bf16_view") def mapped_bf_16(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[bf16]
 
     native("__sev_safetensor_bf16_shape") def mapped_bf_16_shape(value: Tensor[bf16]) -> list[int]
+    native("__sev_safetensor_f32_view") def mapped_f_32(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f32]
+    native("__sev_safetensor_f32_shape") def mapped_f_32_shape(value: Tensor[f32]) -> list[int]
+    native("__sev_safetensor_f16_view") def mapped_f_16(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f16]
+    native("__sev_safetensor_f8e4m3fn_view") def mapped_f8_e4_m3_fn(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f8e4m3fn]
+    native("__sev_safetensor_f8e5m2_view") def mapped_f8_e5_m2(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f8e5m2]
+    native("__sev_safetensor_shape") def mapped_shape[type](value: Tensor[type]) -> list[int]
     native("__sev_tensor_bf16_shape") def shape_bf_16(value: Tensor[bf16]) -> list[int]
 
 # These are compiler-recognized tensor primitives. On the XLA target they are
@@ -186,14 +270,26 @@ unsafe:
     native("__sev_tensor_ones") def ones(shape: list[int]) -> Tensor[f64]
     native("__sev_tensor_empty") def empty(shape: list[int]) -> Tensor[f64]
     native("__sev_tensor_arange") def arange(stop: int) -> Tensor[f64]
-    native("__sev_tensor_reshape") def reshape(value: Tensor[f64], shape: list[int]) -> Tensor[f64]
-    native("__sev_tensor_transpose") def transpose(value: Tensor[f64]) -> Tensor[f64]
-    native("__sev_tensor_matmul") def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
-    native("__sev_tensor_sum") def sum(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_reshape") def reshape[type](value: Tensor[type], shape: list[int]) -> Tensor[type]
+    native("__sev_tensor_transpose") def transpose[type](value: Tensor[type]) -> Tensor[type]
+    native("__sev_tensor_matmul") def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    native("__sev_tensor_sum") def sum[type: Numeric](value: Tensor[type]) -> Tensor[type]
     native("__sev_tensor_mean") def mean(value: Tensor[f64]) -> float
     native("__sev_tensor_max") def max(value: Tensor[f64]) -> float
     native("__sev_tensor_min") def min(value: Tensor[f64]) -> float
-    native("__sev_tensor_softmax_rows") def softmax(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_rows") def softmax[type: Float](value: Tensor[type]) -> Tensor[type]
+
+def compute_as_f32[type: Numeric](value: Tensor[type]) -> Tensor[f32]:
+    return to_f_32(value)
+
+def store_as_f8e4m3fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]:
+    return to_f8_e4_m3_fn(value)
+
+def store_as_f8e5m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]:
+    return to_f8_e5_m2(value)
+
+def matmul_accumulate_f32[input: Float, weight: Float](left: Tensor[input], right: Tensor[weight]) -> Tensor[f32]:
+    return ranked_matmul(to_f_32(left), to_f_32(right))
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

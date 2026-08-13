@@ -98,11 +98,21 @@ pub struct FunctionDecl {
     pub native_symbol: Option<String>,
     pub decorators: Vec<Decorator>,
     pub name: Ident,
+    pub generic_params: Vec<GenericParameter>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub contract: Option<FunctionContract>,
     pub body: Block,
     pub tests: Vec<TestBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParameter {
+    pub span: Span,
+    pub name: Ident,
+    /// Capability constraints are intersected. For example, `T: Numeric +
+    /// Float` accepts only floating-point tensor elements.
+    pub constraints: Vec<Type>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

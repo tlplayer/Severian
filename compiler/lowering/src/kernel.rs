@@ -185,9 +185,11 @@ impl KernelIr {
                 "reduction.sum Triton lowering currently requires f32, found {}",
                 tensor_element_name(element)
             )),
-            (KernelOperation::ElementwiseRelu { .. }, TensorElementType::BF16)
-            | (KernelOperation::ElementwiseRelu { .. }, TensorElementType::F32)
-            | (KernelOperation::ElementwiseRelu { .. }, TensorElementType::F64) => Ok(()),
+            (KernelOperation::ElementwiseRelu { .. }, element)
+                if element.satisfies(severian_hir::TensorElementConstraint::Float) =>
+            {
+                Ok(())
+            }
             (KernelOperation::ElementwiseRelu { .. }, element) => Err(format!(
                 "elementwise.relu requires a floating-point tensor, found {}",
                 tensor_element_name(element)
@@ -241,13 +243,7 @@ impl fmt::Display for KernelError {
 impl std::error::Error for KernelError {}
 
 pub(crate) const fn tensor_element_name(element: TensorElementType) -> &'static str {
-    match element {
-        TensorElementType::BF16 => "bf16",
-        TensorElementType::F32 => "f32",
-        TensorElementType::F64 => "f64",
-        TensorElementType::I32 => "i32",
-        TensorElementType::I64 => "i64",
-    }
+    element.name()
 }
 
 #[cfg(test)]

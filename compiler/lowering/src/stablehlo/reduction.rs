@@ -89,28 +89,65 @@ pub fn reduce_min(
 
 fn zero_literal(element: TensorElementType) -> &'static str {
     match element {
-        TensorElementType::BF16 | TensorElementType::F32 | TensorElementType::F64 => "0.0",
-        TensorElementType::I32 | TensorElementType::I64 => "0",
+        TensorElementType::F8E4M3FN
+        | TensorElementType::F8E5M2
+        | TensorElementType::F16
+        | TensorElementType::BF16
+        | TensorElementType::F32
+        | TensorElementType::F64
+        | TensorElementType::C64
+        | TensorElementType::C128 => "0.0",
+        TensorElementType::Bool => "false",
+        TensorElementType::I8
+        | TensorElementType::I16
+        | TensorElementType::I32
+        | TensorElementType::I64
+        | TensorElementType::U8
+        | TensorElementType::U16
+        | TensorElementType::U32
+        | TensorElementType::U64 => "0",
     }
 }
 
 fn minimum_literal(element: TensorElementType) -> &'static str {
     match element {
+        TensorElementType::Bool => "false",
+        TensorElementType::I8 => "-128",
+        TensorElementType::I16 => "-32768",
+        TensorElementType::I32 => "-2147483648",
+        TensorElementType::I64 => "-9223372036854775808",
+        TensorElementType::U8
+        | TensorElementType::U16
+        | TensorElementType::U32
+        | TensorElementType::U64 => "0",
+        TensorElementType::F8E4M3FN => "0xFE",
+        TensorElementType::F8E5M2 => "0xFC",
+        TensorElementType::F16 => "0xFC00",
         TensorElementType::BF16 => "0xFF80",
         TensorElementType::F32 => "0xFF800000",
         TensorElementType::F64 => "0xFFF0000000000000",
-        TensorElementType::I32 => "-2147483648",
-        TensorElementType::I64 => "-9223372036854775808",
+        TensorElementType::C64 | TensorElementType::C128 => "0.0",
     }
 }
 
 fn maximum_literal(element: TensorElementType) -> &'static str {
     match element {
+        TensorElementType::Bool => "true",
+        TensorElementType::I8 => "127",
+        TensorElementType::I16 => "32767",
+        TensorElementType::I32 => "2147483647",
+        TensorElementType::I64 => "9223372036854775807",
+        TensorElementType::U8 => "255",
+        TensorElementType::U16 => "65535",
+        TensorElementType::U32 => "4294967295",
+        TensorElementType::U64 => "18446744073709551615",
+        TensorElementType::F8E4M3FN => "0x7E",
+        TensorElementType::F8E5M2 => "0x7C",
+        TensorElementType::F16 => "0x7C00",
         TensorElementType::BF16 => "0x7F80",
         TensorElementType::F32 => "0x7F800000",
         TensorElementType::F64 => "0x7FF0000000000000",
-        TensorElementType::I32 => "2147483647",
-        TensorElementType::I64 => "9223372036854775807",
+        TensorElementType::C64 | TensorElementType::C128 => "0.0",
     }
 }
 

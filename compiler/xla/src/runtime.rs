@@ -21,12 +21,17 @@ unsafe extern "C" {
 }
 
 #[repr(C)]
-struct MappedBf16Tensor {
+struct MappedTensor {
+    magic: u64,
+    dtype: i32,
+    element_bytes: i32,
     rank: i64,
     shape: *const i64,
     elements: i64,
-    data: *const u16,
+    data: *const c_void,
 }
+
+const MAPPED_TENSOR_MAGIC: u64 = 0x5345_5654_454E_534F;
 
 struct RuntimeState {
     client: XlaClient,
@@ -80,17 +85,45 @@ fn upload_host(runtime: &mut RuntimeState, host: HostBuffer) -> *mut c_void {
     handle
 }
 
-unsafe fn upload_mapped_bf16(runtime: &mut RuntimeState, pointer: *mut c_void) {
-    let tensor = &*pointer.cast::<MappedBf16Tensor>();
-    if tensor.rank <= 0 || tensor.elements < 0 || tensor.shape.is_null() || tensor.data.is_null() {
-        fail("invalid mapped BF16 tensor passed to XLA");
+unsafe fn upload_mapped_tensor(runtime: &mut RuntimeState, pointer: *mut c_void) {
+    let tensor = &*pointer.cast::<MappedTensor>();
+    if tensor.magic != MAPPED_TENSOR_MAGIC
+        || tensor.rank <= 0
+        || tensor.elements < 0
+        || tensor.shape.is_null()
+        || tensor.data.is_null()
+    {
+        fail("invalid mapped tensor passed to XLA");
+    }
+    let element = match tensor.dtype {
+        0 => ElementType::Pred,
+        1 => ElementType::S8,
+        2 => ElementType::S16,
+        3 => ElementType::S32,
+        4 => ElementType::S64,
+        5 => ElementType::U8,
+        6 => ElementType::U16,
+        7 => ElementType::U32,
+        8 => ElementType::U64,
+        9 => ElementType::F8E4M3FN,
+        10 => ElementType::F8E5M2,
+        11 => ElementType::F16,
+        12 => ElementType::BF16,
+        13 => ElementType::F32,
+        14 => ElementType::F64,
+        15 => ElementType::C64,
+        16 => ElementType::C128,
+        other => fail(format!("mapped tensor has unknown dtype tag {other}")),
+    };
+    if tensor.element_bytes as usize != element.byte_width() {
+        fail("mapped tensor dtype and element width disagree");
     }
     let dimensions = slice::from_raw_parts(tensor.shape, tensor.rank as usize).to_vec();
     let byte_len = (tensor.elements as usize)
-        .checked_mul(2)
-        .unwrap_or_else(|| fail("mapped BF16 tensor byte size overflow"));
+        .checked_mul(element.byte_width())
+        .unwrap_or_else(|| fail("mapped tensor byte size overflow"));
     let bytes = slice::from_raw_parts(tensor.data.cast::<u8>(), byte_len).to_vec();
-    let host = HostBuffer::new(Shape::new(ElementType::BF16, dimensions), bytes)
+    let host = HostBuffer::new(Shape::new(element, dimensions), bytes)
         .unwrap_or_else(|error| fail(error));
     let buffer = runtime
         .client
@@ -391,7 +424,7 @@ pub unsafe extern "C" fn __sev_xla_execute(
             fail("null tensor argument");
         }
         if !runtime.buffers.contains_key(&(pointer as usize)) {
-            upload_mapped_bf16(runtime, pointer);
+            upload_mapped_tensor(runtime, pointer);
         }
     }
     if !runtime.executables.contains_key(&function) {

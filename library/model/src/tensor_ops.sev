@@ -16,10 +16,10 @@ def tensor(values: list[float], shape: list[int]) -> Tensor[f64]:
 def values(input: Tensor[f64]) -> list[float]:
     return tensor_runtime.values(input)
 
-def shape(input: Tensor[f64]) -> list[int]:
+def shape[type](input: Tensor[type]) -> list[int]:
     return tensor_runtime.ranked_shape(input)
 
-def size_of(input: Tensor[f64]) -> int:
+def size_of[type](input: Tensor[type]) -> int:
     return product(shape(input))
 
 def zeros(shape: list[int]) -> Tensor[f64]:
@@ -92,7 +92,7 @@ def linspace(start: float, stop: float, steps: int) -> Tensor[f64]:
         data.append(start + stride * index)
     return tensor(data, [steps])
 
-def reshape(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
+def reshape[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
     inferred := -1
     known := 1
     result_shape := dimensions[0:size(dimensions)]
@@ -109,10 +109,10 @@ def reshape(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
     assert(product(result_shape) == size_of(input), "reshape changes element count")
     return tensor_runtime.reshape(input, result_shape)
 
-def view(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
+def view[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
     return reshape(input, dimensions)
 
-def flatten(input: Tensor[f64], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[f64]:
+def flatten[type](input: Tensor[type], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[type]:
     dimensions = shape(input)
     end := end_dimension
     if end < 0:
@@ -129,7 +129,7 @@ def flatten(input: Tensor[f64], start_dimension: int = 0, end_dimension: int = -
         flattened.append(dimensions[index])
     return reshape(input, flattened)
 
-def squeeze(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
+def squeeze[type](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
     dimensions = shape(input)
     squeezed := []
     for index, extent in enumerate(dimensions):
@@ -139,7 +139,7 @@ def squeeze(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
         assert(dimensions[dimension] == 1, "squeezed dimension must have extent one")
     return reshape(input, squeezed)
 
-def unsqueeze(input: Tensor[f64], dimension: int) -> Tensor[f64]:
+def unsqueeze[type](input: Tensor[type], dimension: int) -> Tensor[type]:
     dimensions = shape(input)
     axis := dimension
     if axis < 0:
@@ -154,21 +154,13 @@ def unsqueeze(input: Tensor[f64], dimension: int) -> Tensor[f64]:
             output.append(dimensions[source])
     return reshape(input, output)
 
-def transpose(input: Tensor[f64], first: int = -2, second: int = -1) -> Tensor[f64]:
+def transpose[type](input: Tensor[type], first: int = -2, second: int = -1) -> Tensor[type]:
     dimensions = shape(input)
     assert(size(dimensions) == 2, "current transpose implementation requires a matrix")
-    rows = dimensions[0]
-    columns = dimensions[1]
-    source = values(input)
-    output := []
-    for column in range(0, columns):
-        for row in range(0, rows):
-            output.append(source[row * columns + column])
-    return tensor(output, [columns, rows])
+    return tensor_runtime.ranked_transpose(input)
 
-def permute(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
-    assert(size(dimensions) == 2 and dimensions == [1, 0], "current permute supports matrix transposition")
-    return transpose(input)
+def permute[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
+    return tensor_runtime.ranked_permute(input, dimensions)
 
 def concat(inputs: list[Tensor[f64]], dimension: int = 0) -> Tensor[f64]:
     assert(size(inputs) > 0)
@@ -270,28 +262,22 @@ def var(input: Tensor[f64], correction: int = 1) -> float:
 def std(input: Tensor[f64], correction: int = 1) -> float:
     return math.sqrt(var(input, correction))
 
-def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_runtime.matmul(left, right)
 
-def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def add[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
     return tensor_runtime.ranked_add(left, right)
 
-def subtract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    left_values = values(left)
-    right_values = values(right)
-    return tensor(indices(left_values).map(|index| left_values[index] - right_values[index % size(right_values)]), shape(left))
+def subtract[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_subtract(left, right)
 
-def multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    left_values = values(left)
-    right_values = values(right)
-    return tensor(indices(left_values).map(|index| left_values[index] * right_values[index % size(right_values)]), shape(left))
+def multiply[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_multiply(left, right)
 
-def divide(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    left_values = values(left)
-    right_values = values(right)
-    return tensor(indices(left_values).map(|index| left_values[index] / right_values[index % size(right_values)]), shape(left))
+def divide[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_divide(left, right)
 
-def scale(input: Tensor[f64], factor: float) -> Tensor[f64]:
+def scale[type: Float](input: Tensor[type], factor: float) -> Tensor[type]:
     return tensor_runtime.ranked_scale(input, factor)
 
 def dot(left: Tensor[f64], right: Tensor[f64]) -> float:
@@ -365,8 +351,8 @@ def map_values(input: Tensor[f64], operation: Any) -> Tensor[f64]:
         output.append(operation(value))
     return tensor(output, shape(input))
 
-def exp(input: Tensor[f64]) -> Tensor[f64]:
-    return map_values(input, |value| math.exp(value))
+def exp[type: Float](input: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_exp(input)
 
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.log(value))
@@ -386,31 +372,26 @@ def abs(input: Tensor[f64]) -> Tensor[f64]:
 def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:
     return map_values(input, |value| math.pow(value, exponent))
 
-def sigmoid(input: Tensor[f64]) -> Tensor[f64]:
-    return map_values(input, |value| 1.0 / (1.0 + math.exp(-value)))
+def sigmoid[type: Float](input: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_sigmoid(input)
 
 def scalar_tanh(value: float) -> float:
     positive = math.exp(2.0 * value)
     return (positive - 1.0) / (positive + 1.0)
 
-def relu(input: Tensor[f64]) -> Tensor[f64]:
+def relu[type: Float](input: Tensor[type]) -> Tensor[type]:
     return tensor_runtime.ranked_relu(input)
 
-def gelu(input: Tensor[f64]) -> Tensor[f64]:
-    return map_values(input, |value| 0.5 * value * (1.0 + scalar_tanh(0.7978845608028654 * (value + 0.044715 * value * value * value))))
+def gelu[type: Float](input: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_gelu(input)
 
-def silu(input: Tensor[f64]) -> Tensor[f64]:
-    source = values(input)
-    gates = values(sigmoid(input))
-    output := []
-    for index in indices(source):
-        output.append(source[index] * gates[index])
-    return tensor(output, shape(input))
+def silu[type: Float](input: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_silu(input)
 
-def tanh(input: Tensor[f64]) -> Tensor[f64]:
-    return map_values(input, |value| scalar_tanh(value))
+def tanh[type: Float](input: Tensor[type]) -> Tensor[type]:
+    return tensor_runtime.ranked_tanh(input)
 
-def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
+def softmax[type: Float](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
     assert(dimension == -1 or dimension == size(shape(input)) - 1)
     return tensor_runtime.softmax(input)
 

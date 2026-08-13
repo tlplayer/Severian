@@ -1,0 +1,17 @@
+[package]
+name = "model.speech"
+version = "0.1.0"
+edition = "2026"
+description = "Masked-audio and voice-cloning generation primitives"
+
+[lib]
+path = "../src/speech.sev"
+
+[dependencies]
+math = { path = "../../math", version = "0.1.0" }
+random = { path = "../../random", version = "0.1.0" }
+
+[package.metadata.library]
+category = "machine-learning"
+implementation = "source"
+status = "experimental"

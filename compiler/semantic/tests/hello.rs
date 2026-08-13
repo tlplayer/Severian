@@ -92,6 +92,23 @@ fn assignment_propagates_results_while_try_equal_captures_them() {
 }
 
 #[test]
+fn numeric_parse_intrinsics_return_results() {
+    let source = concat!(
+        "def main():\n",
+        "    integer ?= int.parse(\"42\")\n",
+        "    decimal ?= float.parse(\"1.25\")\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    for instruction in &hir.main().unwrap().instructions {
+        let Instruction::Let { value, .. } = instruction else {
+            panic!("expected retained numeric parse Result");
+        };
+        assert_eq!(value.ty(), Some(ValueType::Result));
+    }
+}
+
+#[test]
 fn try_equal_rejects_non_result_expressions() {
     let ast = parse(&lex("def main():\n    value ?= 42\n").unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
@@ -186,7 +203,71 @@ fn tensor_wildcard_parameters_reject_non_tensor_values() {
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
-    assert!(error.message.contains("expected TensorAny"));
+    assert!(error.message.contains("generic tensor parameter requires a tensor"));
+}
+
+#[test]
+fn generic_tensor_return_preserves_fp8_dtype_at_call_site() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"identity\") def identity[T: Float](value: Tensor[T]) -> Tensor[T]\n",
+        "\n",
+        "def apply(value: Tensor[f8e4m3fn]) -> Tensor[f8e4m3fn]:\n",
+        "    return identity(value)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[1].instructions[0] else {
+        panic!("expected generic identity return");
+    };
+    assert_eq!(
+        value.ty(),
+        Some(ValueType::Tensor(severian_hir::TensorType::dynamic(
+            TensorElementType::F8E4M3FN,
+        )))
+    );
+}
+
+#[test]
+fn generic_tensor_constraints_reject_the_wrong_dtype_class() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"softmax\") def softmax[T: Float](value: Tensor[T]) -> Tensor[T]\n",
+        "\n",
+        "def wrong(value: Tensor[i8]) -> Tensor[i8]:\n",
+        "    return softmax(value)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("does not satisfy the constraints"));
+}
+
+#[test]
+fn repeated_tensor_type_variables_require_one_dtype() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"add\") def add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
+        "\n",
+        "def wrong(left: Tensor[f16], right: Tensor[f32]) -> Tensor[f32]:\n",
+        "    return add(left, right)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("was bound to `f16`, then used with `f32`"));
+}
+
+#[test]
+fn parses_the_complete_tensor_dtype_surface() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"types\") def types(",
+        "a: Tensor[bool], b: Tensor[i8], c: Tensor[i16], d: Tensor[i32], e: Tensor[i64], ",
+        "f: Tensor[u8], g: Tensor[u16], h: Tensor[u32], i: Tensor[u64], ",
+        "j: Tensor[f8e4m3fn], k: Tensor[f8e5m2], l: Tensor[f16], m: Tensor[bf16], ",
+        "n: Tensor[f32], o: Tensor[f64], p: Tensor[c64], q: Tensor[c128])\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
 }
 
 #[test]

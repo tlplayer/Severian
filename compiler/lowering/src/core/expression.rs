@@ -2555,6 +2555,7 @@ impl LowerContext<'_> {
                         "read" => Some(("__sev_builtin_read", ValueType::Result)),
                         "http.get" => Some(("__sev_builtin_http_get", ValueType::Result)),
                         "int.parse" => Some(("__sev_builtin_int_parse", ValueType::Result)),
+                        "float.parse" => Some(("__sev_builtin_float_parse", ValueType::Result)),
                         "file.write" => Some(("__sev_builtin_file_write", ValueType::Result)),
                         _ => None,
                     };

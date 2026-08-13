@@ -72,7 +72,7 @@ impl Parser<'_> {
         self.expect_simple(TokenKind::RightParen, "`)` after native linker symbol")?;
         self.expect_simple(TokenKind::Def, "`def` after native linker symbol")?;
         let name = self.expect_identifier("native function name")?;
-        self.parse_generic_parameters()?;
+        let generic_params = self.parse_generic_parameters()?;
         let params = self.parse_parameters()?;
         if let Some(parameter) = params.iter().find(|parameter| parameter.ty.is_none()) {
             return Err(ParseError {
@@ -98,6 +98,7 @@ impl Parser<'_> {
             native_symbol: Some(symbol),
             decorators: Vec::new(),
             name,
+            generic_params,
             params,
             return_type,
             contract: None,
@@ -109,24 +110,37 @@ impl Parser<'_> {
         })
     }
 
-    pub(super) fn parse_generic_parameters(&mut self) -> Result<(), ParseError> {
+    pub(super) fn parse_generic_parameters(
+        &mut self,
+    ) -> Result<Vec<GenericParameter>, ParseError> {
         if self.take_simple(&TokenKind::LeftBracket).is_none() {
-            return Ok(());
+            return Ok(Vec::new());
         }
+        let mut parameters = Vec::new();
         while !self.at(&TokenKind::RightBracket) {
-            self.expect_identifier("generic parameter")?;
+            let name = self.expect_identifier("generic parameter")?;
+            let start = name.span.start;
+            let mut constraints = Vec::new();
             if self.take_simple(&TokenKind::Colon).is_some() {
-                self.parse_type()?;
+                constraints.push(self.parse_type()?);
+                while self.take_simple(&TokenKind::Plus).is_some() {
+                    constraints.push(self.parse_type()?);
+                }
             }
-            if self.take_simple(&TokenKind::Plus).is_some() {
-                self.parse_type()?;
-            }
+            let end = constraints
+                .last()
+                .map_or(name.span.end, |constraint| constraint.span().end);
+            parameters.push(GenericParameter {
+                span: Span::new(start, end),
+                name,
+                constraints,
+            });
             if self.take_simple(&TokenKind::Comma).is_none() {
                 break;
             }
         }
         self.expect_simple(TokenKind::RightBracket, "`]`")?;
-        Ok(())
+        Ok(parameters)
     }
 
     pub(super) fn parse_function_with_decorators(
@@ -135,7 +149,7 @@ impl Parser<'_> {
     ) -> Result<FunctionDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Def, "`def`")?.span.start;
         let name = self.expect_identifier("function name")?;
-        self.parse_generic_parameters()?;
+        let generic_params = self.parse_generic_parameters()?;
         let params = self.parse_parameters()?;
         let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
             Some(self.parse_type()?)
@@ -162,6 +176,7 @@ impl Parser<'_> {
             native_symbol: None,
             decorators,
             name,
+            generic_params,
             params,
             return_type,
             contract,

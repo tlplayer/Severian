@@ -190,10 +190,14 @@ pub fn element_type_to_raw(element: ElementType) -> api::PJRT_Buffer_Type {
         ElementType::U16 => api::PJRT_BUFFER_TYPE_U16,
         ElementType::U32 => api::PJRT_BUFFER_TYPE_U32,
         ElementType::U64 => api::PJRT_BUFFER_TYPE_U64,
+        ElementType::F8E4M3FN => api::PJRT_BUFFER_TYPE_F8E4M3FN,
+        ElementType::F8E5M2 => api::PJRT_BUFFER_TYPE_F8E5M2,
         ElementType::F16 => api::PJRT_BUFFER_TYPE_F16,
         ElementType::BF16 => api::PJRT_BUFFER_TYPE_BF16,
         ElementType::F32 => api::PJRT_BUFFER_TYPE_F32,
         ElementType::F64 => api::PJRT_BUFFER_TYPE_F64,
+        ElementType::C64 => api::PJRT_BUFFER_TYPE_C64,
+        ElementType::C128 => api::PJRT_BUFFER_TYPE_C128,
     }
 }
 
@@ -208,10 +212,14 @@ fn element_type_from_raw(element: api::PJRT_Buffer_Type) -> Result<ElementType> 
         api::PJRT_BUFFER_TYPE_U16 => Ok(ElementType::U16),
         api::PJRT_BUFFER_TYPE_U32 => Ok(ElementType::U32),
         api::PJRT_BUFFER_TYPE_U64 => Ok(ElementType::U64),
+        api::PJRT_BUFFER_TYPE_F8E4M3FN => Ok(ElementType::F8E4M3FN),
+        api::PJRT_BUFFER_TYPE_F8E5M2 => Ok(ElementType::F8E5M2),
         api::PJRT_BUFFER_TYPE_F16 => Ok(ElementType::F16),
         api::PJRT_BUFFER_TYPE_F32 => Ok(ElementType::F32),
         api::PJRT_BUFFER_TYPE_F64 => Ok(ElementType::F64),
         api::PJRT_BUFFER_TYPE_BF16 => Ok(ElementType::BF16),
+        api::PJRT_BUFFER_TYPE_C64 => Ok(ElementType::C64),
+        api::PJRT_BUFFER_TYPE_C128 => Ok(ElementType::C128),
         other => Err(crate::XlaError::Pjrt(format!(
             "PJRT returned unknown buffer element type {other}"
         ))),

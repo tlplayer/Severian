@@ -207,11 +207,7 @@ pub(super) fn static_tensor_elements(tensor: severian_hir::TensorType) -> Option
 }
 
 pub(super) fn tensor_element_bytes(element: severian_hir::TensorElementType) -> i64 {
-    match element {
-        severian_hir::TensorElementType::BF16 => 2,
-        severian_hir::TensorElementType::F32 | severian_hir::TensorElementType::I32 => 4,
-        severian_hir::TensorElementType::F64 | severian_hir::TensorElementType::I64 => 8,
-    }
+    i64::from(element.storage_bytes())
 }
 
 pub(super) fn mlir_type(ty: ValueType) -> &'static str {

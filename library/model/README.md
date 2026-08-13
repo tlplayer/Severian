@@ -41,6 +41,13 @@ preprocessing, metrics, regression/classification, trees and ensembles,
 clustering, PCA/SVD/NMF, and anomaly estimators. These are Severian
 implementations rather than framework adapters.
 
+Native masked-audio models can import `model.speech` and reuse the
+OmniVoice-compatible speech helpers
+instead of reimplementing generation in each application. The surface includes
+time-shifted unmask schedules, classifier-free guidance, Gumbel selection,
+codebook-layer penalties, reference-rate duration estimates, voice-clone prompt
+data, and the token-selection primitives used by iterative masked decoding.
+
 Compiler lowering of imported `ModelGraph` nodes to MLIR, Triton, and XLA is a
 separate pass. The importers deliberately produce a compiler-owned IR now so
 that later lowering does not change the public API or add framework runtimes.

@@ -27,6 +27,18 @@ fn parses_the_hello_fixture_into_the_source_ast() {
 }
 
 #[test]
+fn preserves_generic_parameters_and_capability_constraints() {
+    let source = "def add[T: Numeric + Float](left: Tensor[T], right: Tensor[T]) -> Tensor[T]:\n    return left\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    assert_eq!(function.generic_params.len(), 1);
+    assert_eq!(function.generic_params[0].name.name, "T");
+    assert_eq!(function.generic_params[0].constraints.len(), 2);
+}
+
+#[test]
 fn rejects_a_missing_function_body() {
     let tokens = lex("def main():\n").unwrap();
     let error = parse(&tokens).unwrap_err();

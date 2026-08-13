@@ -543,7 +543,7 @@ pub(super) fn lower_expression_kind(
             if rule.action == severian_ast::ChaosAction::Return {
                 let declared_return = signatures
                     .get(&function.name)
-                    .map_or(return_type, |signature| signature.returns);
+                    .map_or(return_type, |signature| signature.returns.erased());
                 compatible(rule.value.span(), value_type, declared_return)?;
             }
             Ok((

@@ -99,6 +99,10 @@ pub const PJRT_BUFFER_TYPE_F16: PJRT_Buffer_Type = 10;
 pub const PJRT_BUFFER_TYPE_F32: PJRT_Buffer_Type = 11;
 pub const PJRT_BUFFER_TYPE_F64: PJRT_Buffer_Type = 12;
 pub const PJRT_BUFFER_TYPE_BF16: PJRT_Buffer_Type = 13;
+pub const PJRT_BUFFER_TYPE_C64: PJRT_Buffer_Type = 14;
+pub const PJRT_BUFFER_TYPE_C128: PJRT_Buffer_Type = 15;
+pub const PJRT_BUFFER_TYPE_F8E5M2: PJRT_Buffer_Type = 16;
+pub const PJRT_BUFFER_TYPE_F8E4M3FN: PJRT_Buffer_Type = 17;
 
 pub type PJRT_HostBufferSemantics = i32;
 pub const PJRT_HOST_BUFFER_IMMUTABLE_ONLY_DURING_CALL: PJRT_HostBufferSemantics = 0;

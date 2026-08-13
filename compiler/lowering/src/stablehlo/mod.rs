@@ -430,7 +430,7 @@ fn lower_tensor_intrinsic(
 ) -> Result<MlirValue, StableHloLoweringError> {
     let op = normalized_tensor_operation(&target.name);
     match op.as_str() {
-        "gather" => {
+        "gather" | "rankedgather" => {
             require_arity(&op, args, 2)?;
             let table = args[0]
                 .tensor_type()
@@ -478,7 +478,7 @@ fn lower_tensor_intrinsic(
                 result_type,
             ))
         }
-        "transpose" => {
+        "transpose" | "rankedpermute" => {
             require_arity(&op, args, 1)?;
             let axes = integer_list_argument(source_args.get(1), &target.name)?;
             Ok(emitter.transpose(&args[0], &axes, result_type))
@@ -504,11 +504,11 @@ fn lower_tensor_intrinsic(
                 result_type,
             ))
         }
-        "scale" | "addscalar" => {
+        "scale" | "rankedscale" | "addscalar" => {
             require_arity(&op, args, 1)?;
             let literal = float_argument(source_args.get(1), &target.name)?;
             let scalar = emitter.splat(&literal, result_type);
-            if op == "scale" {
+            if op == "scale" || op == "rankedscale" {
                 Ok(emitter.multiply(&args[0], &scalar, result_type))
             } else {
                 Ok(emitter.add(&args[0], &scalar, result_type))
@@ -668,17 +668,17 @@ pub fn lower_tensor_call(
             Ok(emitter.add(&args[0], &args[1], result_type))
         }
 
-        "sub" | "subtract" | "tensorsub" => {
+        "sub" | "subtract" | "rankedsubtract" | "tensorsub" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.subtract(&args[0], &args[1], result_type))
         }
 
-        "mul" | "multiply" | "tensormul" => {
+        "mul" | "multiply" | "rankedmultiply" | "tensormul" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.multiply(&args[0], &args[1], result_type))
         }
 
-        "div" | "divide" | "tensordiv" => {
+        "div" | "divide" | "rankeddivide" | "tensordiv" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.divide(&args[0], &args[1], result_type))
         }
@@ -710,6 +710,15 @@ pub fn lower_tensor_call(
         "reshape" | "tensorreshape" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.reshape(&args[0], result_type))
+        }
+
+        "rankedtranspose" => {
+            require_arity(&op, args, 1)?;
+            let rank = result_type
+                .rank
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            let axes = (0..u64::from(rank)).rev().collect::<Vec<_>>();
+            Ok(emitter.transpose(&args[0], &axes, result_type))
         }
 
         "broadcast" | "broadcastlike" | "broadcastindim" | "tensorbroadcast" => {
@@ -757,27 +766,27 @@ pub fn lower_tensor_call(
             Ok(activation::relu(emitter, &args[0], result_type))
         }
 
-        "silu" | "swish" | "tensorsilu" => {
+        "silu" | "rankedsilu" | "swish" | "tensorsilu" => {
             require_arity(&op, args, 1)?;
             Ok(activation::silu(emitter, &args[0], result_type))
         }
 
-        "exp" | "exponential" | "tensorexp" => {
+        "exp" | "rankedexp" | "exponential" | "tensorexp" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.exponential(&args[0], result_type))
         }
 
-        "tanh" | "tensortanh" => {
+        "tanh" | "rankedtanh" | "tensortanh" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.tanh(&args[0], result_type))
         }
 
-        "rsqrt" | "tensorrsqrt" => {
+        "rsqrt" | "rankedrsqrt" | "tensorrsqrt" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.rsqrt(&args[0], result_type))
         }
 
-        "sigmoid" | "logistic" | "tensorsigmoid" => {
+        "sigmoid" | "rankedsigmoid" | "logistic" | "tensorsigmoid" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.logistic(&args[0], result_type))
         }
@@ -813,12 +822,12 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "gelu" | "tensorgelu" => {
+        "gelu" | "rankedgelu" | "tensorgelu" => {
             require_arity(&op, args, 1)?;
             Ok(activation::gelu_tanh(emitter, &args[0], result_type))
         }
 
-        "softmax" | "softmaxlastaxis" | "tensorsoftmax" => {
+        "softmax" | "rankedsoftmaxrows" | "softmaxlastaxis" | "tensorsoftmax" => {
             require_arity(&op, args, 1)?;
             let reduced_type = normalization::last_axis_reduced_type(result_type)?;
             Ok(normalization::softmax_last_axis(
@@ -868,7 +877,16 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "bf16to" | "f32to" | "to" | "convert" => {
+        "bf16to"
+        | "f32to"
+        | "tof8e4m3fn"
+        | "tof8e5m2"
+        | "tof16"
+        | "tobf16"
+        | "tof32"
+        | "tof64"
+        | "to"
+        | "convert" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.convert(&args[0], result_type))
         }

@@ -14,19 +14,24 @@ pub enum ElementType {
     U16,
     U32,
     U64,
+    F8E4M3FN,
+    F8E5M2,
     F16,
     BF16,
     F32,
     F64,
+    C64,
+    C128,
 }
 
 impl ElementType {
     pub fn byte_width(self) -> usize {
         match self {
-            Self::Pred | Self::S8 | Self::U8 => 1,
+            Self::Pred | Self::S8 | Self::U8 | Self::F8E4M3FN | Self::F8E5M2 => 1,
             Self::S16 | Self::U16 | Self::F16 | Self::BF16 => 2,
             Self::S32 | Self::U32 | Self::F32 => 4,
-            Self::S64 | Self::U64 | Self::F64 => 8,
+            Self::S64 | Self::U64 | Self::F64 | Self::C64 => 8,
+            Self::C128 => 16,
         }
     }
 }

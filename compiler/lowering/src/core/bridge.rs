@@ -509,6 +509,7 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_builtin_read(void *path) { (void)path; return __sev_variant_new(\"ok\", __sev_box_string(\"settings\")); }\n",
         "void *__sev_builtin_http_get(void *url) { (void)url; return __sev_variant_new(\"ok\", __sev_box_string(\"response\")); }\n",
         "void *__sev_builtin_int_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); char *end = NULL; long value = strtol(text, &end, 10); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid integer\")); return __sev_variant_new(\"ok\", __sev_box_i64(value)); }\n",
+        "void *__sev_builtin_float_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); char *end = NULL; double value = strtod(text, &end); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); return __sev_variant_new(\"ok\", __sev_box_f64(value)); }\n",
         "\n",
     ));
     source.push_str(
@@ -1441,6 +1442,32 @@ void __sev_process_exit(int64_t status) { exit((int)status); }
 
 void *__sev_http_request(void *method_raw, void *url_raw, void *body_raw) {
   (void)body_raw;
+  const char *method = method_raw; const char *requested_url = url_raw;
+  if (strncmp(requested_url, "https://", 8) == 0) {
+    if (strcmp(method, "GET") != 0) return sev_failure("HTTPS runtime currently supports GET requests");
+    int output[2]; if (pipe(output) != 0) return sev_failure("could not create HTTPS response pipe");
+    pid_t child = fork();
+    if (child == 0) {
+      close(output[0]);
+      if (dup2(output[1], STDOUT_FILENO) < 0) _exit(126);
+      close(output[1]);
+      execlp("curl", "curl", "--silent", "--show-error", "--fail", "--location",
+             "--proto", "=https", "--tlsv1.2", requested_url, (char *)NULL);
+      _exit(127);
+    }
+    close(output[1]);
+    if (child < 0) { close(output[0]); return sev_failure("could not start HTTPS client"); }
+    size_t capacity = 8192, used = 0; char *response = sev_allocate(capacity); ssize_t received;
+    while ((received = read(output[0], response + used, capacity - used - 1)) > 0) {
+      used += (size_t)received;
+      if (capacity - used < 2) { capacity *= 2; response = realloc(response, capacity); if (!response) abort(); }
+    }
+    close(output[0]);
+    int status = 0; if (waitpid(child, &status, 0) < 0 || received < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+      return sev_failure("HTTPS request failed");
+    response[used] = '\0';
+    return __sev_variant_new("ok", __sev_box_string(response));
+  }
   const char *url = url_raw; const char *prefix = "http://";
   if (strncmp(url, prefix, strlen(prefix)) != 0) return sev_failure("only http:// URLs are supported");
   const char *authority = url + strlen(prefix); const char *slash = strchr(authority, '/');
@@ -1453,6 +1480,23 @@ void *__sev_http_request(void *method_raw, void *url_raw, void *body_raw) {
   size_t capacity = 8192, used = 0; char *response = sev_allocate(capacity); ssize_t received;
   while ((received = recv(*socket_handle, response + used, capacity - used - 1, 0)) > 0) { used += (size_t)received; if (capacity - used < 2) { capacity *= 2; response = realloc(response, capacity); if (!response) abort(); } }
   close(*socket_handle); if (received < 0) return sev_failure("HTTP receive failed"); response[used] = '\0'; char *body = strstr(response, "\r\n\r\n"); return __sev_variant_new("ok", __sev_box_string(body ? body + 4 : response));
+}
+
+void *__sev_https_download(void *url_raw, void *destination_raw) {
+  const char *url = url_raw; const char *destination = destination_raw;
+  if (strncmp(url, "https://", 8) != 0 || !destination || !*destination)
+    return sev_failure("downloads require an HTTPS URL and destination");
+  pid_t child = fork();
+  if (child == 0) {
+    execlp("curl", "curl", "--silent", "--show-error", "--fail", "--location",
+           "--proto", "=https", "--tlsv1.2", "--output", destination, url, (char *)NULL);
+    _exit(127);
+  }
+  if (child < 0) return sev_failure("could not start HTTPS download");
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    return sev_failure("HTTPS download failed");
+  return __sev_variant_new("ok", NULL);
 }
 
 bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
@@ -1967,7 +2011,10 @@ int64_t __sev_host_page_size(void) {
         native_symbols.contains("__sev_tensor_backward_mse"),
         rocm,
     ));
-    if native_symbols.contains("__sev_safetensor_bf16_view") {
+    if native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_safetensor_"))
+    {
         source.push_str(severian_platform::safetensors_source());
     }
     if has_model_graph {

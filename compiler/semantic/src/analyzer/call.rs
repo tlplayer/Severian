@@ -34,7 +34,7 @@ pub(super) fn lower_call(
     }
     if let Expr::Member(member) = call.callee.as_ref() {
         if let Expr::Identifier(object) = member.object.as_ref() {
-            if object.name == "int" && member.member.name == "parse" {
+            if (object.name == "int" || object.name == "float") && member.member.name == "parse" {
                 let args = call
                     .args
                     .iter()
@@ -44,7 +44,7 @@ pub(super) fn lower_call(
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok((
                     Expression::Call {
-                        target: CallTarget::source("int.parse"),
+                        target: CallTarget::source(object.name.clone() + ".parse"),
                         args,
                     },
                     ValueType::Result,

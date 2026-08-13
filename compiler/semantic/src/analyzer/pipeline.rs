@@ -192,10 +192,11 @@ pub fn analyze_with_packages(
                 }
                 continue;
             }
-            let (name, native_symbol, params, return_type) = match item {
+            let (name, native_symbol, generic_params, params, return_type) = match item {
                 Item::Function(function) => (
                     &function.name,
                     function.native_symbol.as_deref(),
+                    function.generic_params.as_slice(),
                     function.params.as_slice(),
                     function.return_type.as_ref(),
                 ),
@@ -210,7 +211,8 @@ pub fn analyze_with_packages(
                         .or_insert(class);
                 }
             }
-            let signature = lower_signature(&key, native_symbol, params, return_type)?;
+            let signature =
+                lower_signature(&key, native_symbol, generic_params, params, return_type)?;
             if signatures.insert(key.clone(), signature.clone()).is_some() {
                 return Err(error(
                     name.span,
@@ -223,10 +225,11 @@ pub fn analyze_with_packages(
         }
     }
     for item in &module.items {
-        let (name, native_symbol, params, return_type) = match item {
+        let (name, native_symbol, generic_params, params, return_type) = match item {
             Item::Function(function) => (
                 &function.name,
                 function.native_symbol.as_deref(),
+                function.generic_params.as_slice(),
                 function.params.as_slice(),
                 function.return_type.as_ref(),
             ),
@@ -235,7 +238,13 @@ pub fn analyze_with_packages(
         if let Some(class) = return_type.and_then(class_type_name) {
             aliases.insert(format!("__function_return_class.{}", name.name), class);
         }
-        let signature = lower_signature(&name.name, native_symbol, params, return_type)?;
+        let signature = lower_signature(
+            &name.name,
+            native_symbol,
+            generic_params,
+            params,
+            return_type,
+        )?;
         if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
                 name.span,
@@ -290,13 +299,14 @@ pub fn analyze_with_packages(
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
         for (index, parameter) in signature.params.iter().enumerate() {
+            let parameter_type = parameter.ty.erased();
             let default = parameter
                 .default
                 .as_ref()
                 .map(|value| {
                     let (value, ty) =
                         lower_expression(value, &scope, &signatures, &function_aliases)?;
-                    compatible(value_span(&parameter.default), ty, parameter.ty)?;
+                    compatible(value_span(&parameter.default), ty, parameter_type)?;
                     Ok(value)
                 })
                 .transpose()?;
@@ -304,7 +314,7 @@ pub fn analyze_with_packages(
                 parameter.name.clone(),
                 Binding {
                     reference: source_binding(&function.params[index].name),
-                    ty: parameter.ty,
+                    ty: parameter_type,
                     class: function
                         .params
                         .get(index)
@@ -320,7 +330,7 @@ pub fn analyze_with_packages(
             );
             params.push(Parameter {
                 name: scope[&parameter.name].reference.clone(),
-                ty: parameter.ty,
+                ty: parameter_type,
                 default,
                 receiver: function
                     .params
@@ -332,12 +342,12 @@ pub fn analyze_with_packages(
         let mut instructions = lower_block(
             &function.body,
             &mut scope,
-            signature.returns,
+            signature.returns.erased(),
             &signatures,
             &function_aliases,
         )?;
         if function.native_symbol.is_none()
-            && signature.returns != ValueType::Unit
+            && signature.returns.erased() != ValueType::Unit
             && !always_returns(&instructions)
         {
             return Err(error(
@@ -387,7 +397,7 @@ pub fn analyze_with_packages(
             decorators,
             contract,
             params,
-            return_type: signature.returns,
+            return_type: signature.returns.erased(),
             instructions,
             tests,
         });

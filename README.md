@@ -839,6 +839,14 @@ switch outcome:
 A fallible expression can also be switched directly. `?=` requires a binding
 name and a `Result` expression; it never unwraps or throws the failure.
 
+Numeric parsing follows the same result flow for both integer and floating
+point input:
+
+```sev
+count = int.parse("42")
+ratio = float.parse("1.25")
+```
+
 Inside a function returning `Result[type, exception]`, returning a value of
 `type` produces the successful result. Returning an expression that already has
 the exact declared `Result` type forwards it unchanged. A bare `return` produces

@@ -1,0 +1,38 @@
+import path
+import tensor
+import "src/types.sev" as types
+
+# Typed weight binding is intentionally separate from graph construction. A
+# checkpoint entry can only become Tensor[T] through a dtype-checking method;
+# model code cannot accidentally reinterpret F32 bytes as BF16.
+class ModelWeights:
+    model_directory: string
+
+    def entry(name: string) -> Result[tensor.SafeTensorEntry, types.ModelLoadError | IOError | JsonError]:
+        if model_directory.is_empty():
+            return failure(types.ModelLoadError("this model has no mapped checkpoint"))
+        store = tensor.open_safetensors(model_directory)
+        return store.get(name)
+
+    def f8e4m3fn(name: string) -> Result[Tensor[f8e4m3fn], types.ModelLoadError | IOError | JsonError]:
+        value = entry(name)
+        return value.f8e4m3fn()
+
+    def f8e5m2(name: string) -> Result[Tensor[f8e5m2], types.ModelLoadError | IOError | JsonError]:
+        value = entry(name)
+        return value.f8e5m2()
+
+    def f16(name: string) -> Result[Tensor[f16], types.ModelLoadError | IOError | JsonError]:
+        value = entry(name)
+        return value.f16()
+
+    def bf16(name: string) -> Result[Tensor[bf16], types.ModelLoadError | IOError | JsonError]:
+        value = entry(name)
+        return value.bf16()
+
+    def f32(name: string) -> Result[Tensor[f32], types.ModelLoadError | IOError | JsonError]:
+        value = entry(name)
+        return value.f32()
+
+def open(source: string) -> ModelWeights:
+    return ModelWeights(source if path.is_dir(source) else path.dirname(source))
