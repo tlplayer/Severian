@@ -193,6 +193,26 @@ fn tensor_wildcard_parameters_infer_each_callers_dtype() {
 }
 
 #[test]
+fn conventional_tensor_type_variables_are_interface_wildcards() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"accept_t\") def accept_t(value: Tensor[T])\n",
+        "    native(\"accept_k\") def accept_k(value: Tensor[K])\n",
+        "    native(\"accept_v\") def accept_v(value: Tensor[V])\n",
+        "\n",
+        "def accept_all(float: Tensor[f32], integer: Tensor[i8]):\n",
+        "    accept_t(float)\n",
+        "    accept_k(integer)\n",
+        "    accept_v(float)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    for function in &hir.functions[..3] {
+        assert_eq!(function.params[0].ty, ValueType::TensorAny);
+    }
+}
+
+#[test]
 fn tensor_wildcard_parameters_reject_non_tensor_values() {
     let source = concat!(
         "unsafe:\n",

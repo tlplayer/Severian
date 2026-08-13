@@ -9,6 +9,38 @@ that every program has bounded memory use or releases every allocation before
 process exit. Intentional process-lifetime retention, reference cycles, unsafe
 native code, and foreign libraries remain distinct concerns.
 
+## Function arguments and ownership
+
+Passing an argument does not implicitly clone it. Scalar values use their native
+value representation; collections, objects, strings, and tensors pass their
+existing runtime handle. The ownership pass infers each parameter's strongest
+effect from the function body:
+
+- read-only use is a shared `view`;
+- mutation or `borrow` is an exclusive borrow;
+- `move` is an ownership transfer;
+- `clone` is the explicit copy operation.
+
+The inferred effect is enforced at every call site. Loans end after their last
+use rather than at the end of the lexical scope. Consequently, mutation after a
+view's last use is accepted, while using a value after a call to an inferred
+consuming parameter is rejected. Today these checks establish aliasing and
+use-after-move safety; they do not insert lifetime-driven heap releases.
+
+Effect inference currently examines direct uses in each function body. It does
+not yet compute a transitive call-graph fixed point or serialize effects in
+package interfaces. A call whose implementation is unavailable to the current
+program, including a native declaration, defaults to a shared view unless the
+argument explicitly requests `borrow` or `move`.
+
+The native runtime's collection `clone` copies the collection header and item
+pointer array. It is a shallow container copy, so referenced/boxed elements are
+shared. Other value kinds currently lower `clone` to the same runtime value and
+need type-specific clone implementations before they can promise a deep copy.
+
+See `docs/examples/05-ownership-borrowing/04-inferred-parameter-effects.sev`
+for an executable profile example.
+
 ## Development commands
 
 ```sh

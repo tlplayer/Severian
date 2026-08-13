@@ -22,7 +22,9 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                     if matches!(
                         path.args.first().and_then(TypeArg::as_type),
                         Some(Type::Named(element))
-                            if element.segments.first().is_some_and(|part| part.name == "type")
+                            if element.segments.first().is_some_and(|part| {
+                                is_conventional_type_variable(&part.name)
+                            })
                     ) =>
                 {
                     Ok(ValueType::TensorAny)
@@ -37,6 +39,10 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
         }
         _ => Err(error(ty.span(), "type is not supported yet")),
     }
+}
+
+fn is_conventional_type_variable(name: &str) -> bool {
+    matches!(name, "type" | "T" | "K" | "V")
 }
 
 pub(super) fn lower_tensor_type(

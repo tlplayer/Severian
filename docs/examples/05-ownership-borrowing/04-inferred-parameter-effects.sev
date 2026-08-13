@@ -1,0 +1,31 @@
+# Parameter effects are inferred from the function body. Calls do not copy
+# owned values unless the caller explicitly uses clone.
+
+def total(values: list[int]) -> int:
+    result := 0
+    for value in values:
+        result += value
+    return result
+
+def append_value(values: list[int], value: int):
+    writable = borrow values
+    writable.append(value)
+
+def consume(values: list[int]) -> int:
+    owned = move values
+    return size(owned)
+
+test with profile "inferred view borrow and move":
+    values := [1, 2, 3]
+
+    shared = view values
+    assert(total(shared) == 6)
+
+    # The shared loan ends at its last use, so this inferred exclusive borrow
+    # is valid without an extra scope.
+    append_value(values, 4)
+    assert(total(values) == 10)
+
+    copied = clone values
+    assert(consume(copied) == 4)
+    # `copied` is moved by the call because consume's body transfers ownership.
