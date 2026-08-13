@@ -1,0 +1,164 @@
+import random
+
+class Dataset:
+    features: list[Any]
+    targets: list[Any]
+
+    def size() -> int:
+        return size(features)
+
+    def map(operation: Any) -> Dataset:
+        mapped := []
+        for feature in features:
+            mapped.append(operation(feature))
+        return Dataset(mapped, targets[0:size(targets)])
+
+    def filter(predicate: Any) -> Dataset:
+        selected_features := []
+        selected_targets := []
+        for index in indices(features):
+            if predicate(features[index], targets[index]):
+                selected_features.append(features[index])
+                selected_targets.append(targets[index])
+        return Dataset(selected_features, selected_targets)
+
+    def shuffle() -> Dataset:
+        order = indices(features)
+        random.shuffle(order)
+        shuffled_features := []
+        shuffled_targets := []
+        for index in order:
+            shuffled_features.append(features[index])
+            shuffled_targets.append(targets[index])
+        return Dataset(shuffled_features, shuffled_targets)
+
+    def batch(batch_size: int, drop_last: bool = false) -> list[Dataset]:
+        assert(batch_size > 0)
+        batches := []
+        start := 0
+        while start < size(features):
+            stop = min([start + batch_size, size(features)])
+            if not drop_last or stop - start == batch_size:
+                batches.append(Dataset(features[start:stop], targets[start:stop]))
+            start = stop
+        return batches
+
+    def cache() -> Dataset:
+        return Dataset(features[0:size(features)], targets[0:size(targets)])
+
+    def prefetch(count: int = 1) -> Dataset:
+        assert(count > 0)
+        return self
+
+class DataLoader:
+    source: Dataset
+    batch_size: int = 1
+    shuffled: bool = false
+    drop_last: bool = false
+
+    def batches() -> list[Dataset]:
+        selected = source.shuffle() if shuffled else source
+        return selected.batch(batch_size, drop_last)
+
+def dataset(features: list[Any], targets: list[Any]) -> Dataset:
+    assert(size(features) == size(targets))
+    return Dataset(features, targets)
+
+def dataloader(source: Dataset, batch_size: int = 1, shuffle: bool = false, drop_last: bool = false) -> DataLoader:
+    return DataLoader(source, batch_size, shuffle, drop_last)
+
+def train_test_split(
+    features: list[Any],
+    targets: list[Any],
+    test_size: float = 0.25,
+    shuffle: bool = true,
+    seed: int = 0,
+) -> tuple[list[Any], list[Any], list[Any], list[Any]]:
+    assert(size(features) == size(targets))
+    assert(test_size > 0.0 and test_size < 1.0)
+    order = indices(features)
+    if shuffle:
+        random.seed(seed)
+        random.shuffle(order)
+    test_count = max([1, int(size(order) * test_size)])
+    train_features := []
+    test_features := []
+    train_targets := []
+    test_targets := []
+    for position, index in enumerate(order):
+        if position < test_count:
+            test_features.append(features[index])
+            test_targets.append(targets[index])
+        else:
+            train_features.append(features[index])
+            train_targets.append(targets[index])
+    return (train_features, test_features, train_targets, test_targets)
+
+class KFold:
+    splits: int = 5
+    shuffled: bool = false
+    seed: int = 0
+
+    def split(count: int) -> list[tuple[list[int], list[int]]]:
+        assert(splits > 1 and splits <= count)
+        order = range(0, count)
+        if shuffled:
+            random.seed(seed)
+            random.shuffle(order)
+        folds := []
+        for fold in range(0, splits):
+            start = fold * count / splits
+            stop = (fold + 1) * count / splits
+            validation = order[start:stop]
+            training = order[0:start] + order[stop:count]
+            folds.append((training, validation))
+        return folds
+
+class StratifiedKFold:
+    splits: int = 5
+    shuffled: bool = false
+    seed: int = 0
+
+    def split(targets: list[int]) -> list[tuple[list[int], list[int]]]:
+        validation_folds := []
+        for _fold in range(0, splits):
+            validation_folds.append([])
+        classes = targets.unique()
+        for label in classes:
+            members := []
+            for index, target in enumerate(targets):
+                if target == label:
+                    members.append(index)
+            if shuffled:
+                random.seed(seed + label)
+                random.shuffle(members)
+            for position, index in enumerate(members):
+                validation_folds[position % splits].append(index)
+        output := []
+        for validation in validation_folds:
+            training := []
+            for index in indices(targets):
+                if index not in validation:
+                    training.append(index)
+            output.append((training, validation))
+        return output
+
+def kfold(splits: int = 5, shuffle: bool = false, seed: int = 0) -> KFold:
+    return KFold(splits, shuffle, seed)
+
+def stratified_kfold(splits: int = 5, shuffle: bool = false, seed: int = 0) -> StratifiedKFold:
+    return StratifiedKFold(splits, shuffle, seed)
+
+def cross_validate(estimator: Any, features: list[Any], targets: list[Any], folds: int = 5) -> list[float]:
+    scores := []
+    for training, validation in KFold(folds, true, 0).split(size(features)):
+        train_x = training.map(|index| features[index])
+        train_y = training.map(|index| targets[index])
+        valid_x = validation.map(|index| features[index])
+        valid_y = validation.map(|index| targets[index])
+        fitted = estimator.fit(train_x, train_y)
+        scores.append(fitted.score(valid_x, valid_y))
+    return scores
+
+def cross_val_score(estimator: Any, features: list[Any], targets: list[Any], folds: int = 5) -> list[float]:
+    return cross_validate(estimator, features, targets, folds)

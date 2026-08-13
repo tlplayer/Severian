@@ -115,6 +115,9 @@ def as_int_list(value: Any) -> list[int]:
 def as_string_list(value: Any) -> list[string]:
     return platform.jsonas_string_list(value)
 
+def as_list(value: Any) -> list[Any]:
+    return platform.jsonas_list(value)
+
 def is_null(value: Any) -> bool:
     return platform.jsonis_null(value)
 

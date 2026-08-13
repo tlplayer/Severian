@@ -2,7 +2,7 @@ def scale(value: float, factor: float = 1.0) -> float:
     return value * factor
 
 def describe(label: string, value: float) -> string:
-    return f"{label}: {value}"
+    return label + ": " + string(value)
 
 def main():
     print(describe("width", scale(12.0, factor = 2.0)))

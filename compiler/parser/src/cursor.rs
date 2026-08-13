@@ -33,6 +33,12 @@ impl Parser<'_> {
                 span: token.span,
                 name: "send".into(),
             }),
+            // `view` is an ownership operator only in expression-leading
+            // position. Tensor APIs may still expose `model.view(...)`.
+            TokenKind::View => Ok(Ident {
+                span: token.span,
+                name: "view".into(),
+            }),
             _ => Err(ParseError {
                 span: token.span,
                 message: format!("expected {expected}"),

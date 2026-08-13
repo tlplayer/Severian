@@ -69,6 +69,7 @@ unsafe:
     native("__sev_process_exit") def process_exit(status: int)
     native("__sev_process_arguments") def process_arguments() -> list[string]
     native("__sev_hash_md5") def hash_md5(value: string) -> string
+    native("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
     native("__sev_network_connect") def network_connect(address: string) -> Result[Any, IOError]
     native("__sev_network_accept") def network_accept(listener: TCPListener) -> Result[Any, IOError]
     native("__sev_network_send") def network_send(socket: Any, message: string) -> Result[int, IOError]
@@ -169,6 +170,7 @@ unsafe:
     native("__sev_json_as_int_list") def jsonas_int_list(value: Any) -> list[int]
 
     native("__sev_json_as_string_list") def jsonas_string_list(value: Any) -> list[string]
+    native("__sev_json_as_list") def jsonas_list(value: Any) -> list[Any]
     native("__sev_json_is_null") def jsonis_null(value: Any) -> bool
     native("__sev_json_kind") def jsonkind(value: Any) -> string
 

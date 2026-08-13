@@ -414,6 +414,39 @@ pub(super) fn lower_call(
     if let Some(signature) = signatures.get(canonical) {
         return lower_declared_call(call, canonical, signature, scope, signatures, aliases);
     }
+    if let Some(binding) = scope.get(&callee.name) {
+        if let Some(class) = &binding.class {
+            let has_forward = aliases
+                .get(&format!("__class_methods.{class}"))
+                .is_some_and(|methods| methods.split(',').any(|method| method == "forward"));
+            if has_forward {
+                let args = call
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        lower_expression(&arg.value, scope, signatures, aliases)
+                            .map(|(argument, _)| argument)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let return_type = aliases
+                    .get(&format!("__class_method_return.{class}.forward"))
+                    .and_then(|value| decode_field_type(value))
+                    .unwrap_or(ValueType::Any);
+                return Ok((
+                    Expression::MethodCall {
+                        object: Box::new(Expression::Variable(binding.reference.clone())),
+                        method: "forward".into(),
+                        args,
+                    },
+                    return_type,
+                ));
+            }
+            return Err(error(
+                call.callee.span(),
+                format!("class `{class}` is not callable; define `forward` to make it callable"),
+            ));
+        }
+    }
     if scope
         .get(&callee.name)
         .is_some_and(|binding| binding.ty == ValueType::Function)

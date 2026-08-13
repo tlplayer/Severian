@@ -1,0 +1,129 @@
+import file
+import json
+import path
+import "src/artifacts.sev" as artifacts
+import "src/types.sev" as types
+
+def header_tensors(shard_path: string) -> Result[list[types.TensorValue], types.ModelLoadError | IOError | JsonError]:
+    handle = file.open(shard_path)
+    prefix = file.read_exact(handle, 8)
+    header_length = file.little_endian_u64(prefix)
+    assert(header_length > 1 and header_length < 100000000, "invalid safetensors header length")
+    header_text = file.utf8(file.read_exact(handle, header_length))
+    _closed = file.close(handle)
+    header: Any = json.decode[Any](header_text)
+    output := []
+    for name in json.object_keys(header):
+        if name == "__metadata__":
+            continue
+        metadata = json.object_get(header, name)
+        dtype = json.as_string(json.object_get(metadata, "dtype")).lower()
+        shape = json.as_int_list(json.object_get(metadata, "shape"))
+        offsets = json.as_int_list(json.object_get(metadata, "data_offsets"))
+        assert(size(offsets) == 2 and offsets[0] >= 0 and offsets[1] >= offsets[0])
+        elements := 1
+        for dimension in shape:
+            elements *= dimension
+        width = 8 if dtype in ["f64", "i64", "u64"] else 4 if dtype in ["f32", "i32", "u32"] else 2 if dtype in ["f16", "bf16", "i16", "u16"] else 1
+        assert(offsets[1] - offsets[0] == elements * width, "safetensors byte range does not match shape/dtype")
+        output.append(types.TensorValue(name, dtype, shape, []))
+    return output
+
+def load_parameters(source: string) -> Result[list[types.TensorValue], types.ModelLoadError | IOError | JsonError]:
+    if not path.is_dir(source):
+        return header_tensors(source)
+    index_path = path.join(source, "model.safetensors.index.json")
+    if path.exists(index_path):
+        index_text = file.read_text(index_path)
+        index: Any = json.decode[Any](index_text)
+        weight_map = json.object_get(index, "weight_map")
+        shards = json.object_values(weight_map).map(|value| json.as_string(value)).unique().sorted()
+        output := []
+        for shard in shards:
+            output.extend(header_tensors(path.join(source, shard)))
+        return output
+    return header_tensors(path.join(source, "model.safetensors"))
+
+def attribute() -> Any:
+    return json.decode[Any]("{}")
+
+def qwen_graph(config: Any, parameters: list[types.TensorValue]) -> types.ModelGraph:
+    layers = json.as_int(json.object_get(config, "num_hidden_layers"))
+    hidden = json.as_int(json.object_get(config, "hidden_size"))
+    current := "embedded"
+    nodes := [types.GraphNode("token_embedding", "embedding", ["model.embed_tokens.weight", "input_ids"], [current], attribute())]
+    for layer in range(0, layers):
+        prefix = "model.layers." + string(layer)
+        residual = current
+        normalized = prefix + ".attention_norm.output"
+        nodes.append(types.GraphNode(prefix + ".input_layernorm", "layer_norm", [current, prefix + ".input_layernorm.weight"], [normalized], attribute()))
+        query = prefix + ".q"
+        key = prefix + ".k"
+        value = prefix + ".v"
+        nodes.append(types.GraphNode(prefix + ".q_proj", "matmul", [normalized, prefix + ".self_attn.q_proj.weight"], [query], attribute()))
+        nodes.append(types.GraphNode(prefix + ".k_proj", "matmul", [normalized, prefix + ".self_attn.k_proj.weight"], [key], attribute()))
+        nodes.append(types.GraphNode(prefix + ".v_proj", "matmul", [normalized, prefix + ".self_attn.v_proj.weight"], [value], attribute()))
+        key_transposed = prefix + ".k_transposed"
+        scores = prefix + ".attention_scores"
+        probabilities = prefix + ".attention_probabilities"
+        context = prefix + ".attention_context"
+        projected = prefix + ".attention_output"
+        nodes.append(types.GraphNode(prefix + ".key_transpose", "transpose", [key], [key_transposed], attribute()))
+        nodes.append(types.GraphNode(prefix + ".attention_matmul", "matmul", [query, key_transposed], [scores], attribute()))
+        nodes.append(types.GraphNode(prefix + ".attention_softmax", "softmax", [scores], [probabilities], attribute()))
+        nodes.append(types.GraphNode(prefix + ".context", "matmul", [probabilities, value], [context], attribute()))
+        nodes.append(types.GraphNode(prefix + ".o_proj", "matmul", [context, prefix + ".self_attn.o_proj.weight"], [projected], attribute()))
+        attention_residual = prefix + ".attention_residual"
+        nodes.append(types.GraphNode(prefix + ".attention_add", "add", [residual, projected], [attention_residual], attribute()))
+        post_norm = prefix + ".post_norm.output"
+        nodes.append(types.GraphNode(prefix + ".post_attention_layernorm", "layer_norm", [attention_residual, prefix + ".post_attention_layernorm.weight"], [post_norm], attribute()))
+        gate = prefix + ".gate"
+        up = prefix + ".up"
+        activated = prefix + ".activated_gate"
+        gated = prefix + ".gated_up"
+        down = prefix + ".down"
+        nodes.append(types.GraphNode(prefix + ".gate_proj", "matmul", [post_norm, prefix + ".mlp.gate_proj.weight"], [gate], attribute()))
+        nodes.append(types.GraphNode(prefix + ".up_proj", "matmul", [post_norm, prefix + ".mlp.up_proj.weight"], [up], attribute()))
+        nodes.append(types.GraphNode(prefix + ".silu", "silu", [gate], [activated], attribute()))
+        nodes.append(types.GraphNode(prefix + ".gate_multiply", "multiply", [activated, up], [gated], attribute()))
+        nodes.append(types.GraphNode(prefix + ".down_proj", "matmul", [gated, prefix + ".mlp.down_proj.weight"], [down], attribute()))
+        current = prefix + ".output"
+        nodes.append(types.GraphNode(prefix + ".mlp_add", "add", [attention_residual, down], [current], attribute()))
+    normalized = "model.norm.output"
+    logits = "logits"
+    nodes.append(types.GraphNode("model.norm", "layer_norm", [current, "model.norm.weight"], [normalized], attribute()))
+    output_weight = "lm_head.weight" if "lm_head.weight" in parameters.map(|value| value.name) else "model.embed_tokens.weight"
+    nodes.append(types.GraphNode("lm_head", "matmul", [normalized, output_weight], [logits], attribute()))
+    return types.ModelGraph("qwen", [types.TensorValue("input_ids", "i64", [-1, -1], [])], [logits], nodes, parameters)
+
+def inferred_linear_graph(parameters: list[types.TensorValue]) -> Result[types.ModelGraph, types.ModelLoadError]:
+    nodes := []
+    current := "input"
+    input_width := -1
+    for parameter in parameters:
+        if parameter.name.ends_with("weight") and size(parameter.shape) == 2:
+            base = parameter.name[0:size(parameter.name) - 6]
+            bias = base + "bias"
+            inputs = [current, parameter.name]
+            if bias in parameters.map(|value| value.name):
+                inputs.append(bias)
+            output = base + "output"
+            nodes.append(types.GraphNode(base + "linear", "gemm", inputs, [output], attribute()))
+            current = output
+            if input_width < 0:
+                input_width = parameter.shape[1]
+    if size(nodes) == 0:
+        return failure(types.ModelLoadError("safetensors file has no inferable architecture; load it into a declared network"))
+    return types.ModelGraph("safetensors_linear", [types.TensorValue("input", "f32", [-1, input_width], [])], [current], nodes, parameters)
+
+def import_model(source: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError | JsonError]:
+    parameters = load_parameters(source)
+    directory = source if path.is_dir(source) else path.dirname(source)
+    config_path = path.join(directory, "config.json")
+    if path.exists(config_path):
+        config_text = file.read_text(config_path)
+        config: Any = json.decode[Any](config_text)
+        model_type = json.as_string(json.object_get(config, "model_type"))
+        if model_type in ["qwen2", "qwen3", "qwen2_moe"]:
+            return qwen_graph(config, parameters)
+    return inferred_linear_graph(parameters)

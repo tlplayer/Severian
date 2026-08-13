@@ -176,7 +176,7 @@ fn build_is_blocked_below_seventy_five_percent_line_coverage() {
         .unwrap();
 
     assert!(!build.status.success());
-    assert!(String::from_utf8_lossy(&build.stderr).contains("75% line coverage requirement"));
+    assert!(String::from_utf8_lossy(&build.stderr).contains("required threshold is 75.00%"));
     assert!(!root.join("target/debug/uncovered-demo").exists());
     std::fs::remove_dir_all(root).unwrap();
 }

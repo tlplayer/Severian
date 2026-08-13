@@ -12,14 +12,17 @@ sources = ["src/lib.sev"]
 path = "src/lib.sev"
 
 [dependencies]
+file = { path = "../file", version = "0.1.0" }
+hash = { path = "../hash", version = "0.1.0" }
+http = { path = "../http", version = "0.1.0" }
+json = { path = "../json", version = "0.1.0" }
+math = { path = "../math", version = "0.1.0" }
+path = { path = "../path", version = "0.1.0" }
+platform = { path = "../platform", version = "0.1.0" }
+random = { path = "../random", version = "0.1.0" }
 tensor = { path = "../tensor", version = "0.1.0" }
 
 [package.metadata.library]
 category = "machine-learning"
 implementation = "native"
 status = "experimental"
-
-[package.metadata.compiler]
-symbols = { Relu = "relu_list", FastSigmoid = "fast_sigmoid_list", FastTanh = "fast_tanh_list", Swish = "swish_list", J = "jacobian_list" }
-fusion-aliases = { relu_list = "tensor.relu", fast_sigmoid_list = "tensor.fast_sigmoid", fast_tanh_list = "tensor.fast_tanh", swish_list = "tensor.swish" }
-graph-operations = { graph_input = "input", graph_relu = "relu", graph_add = "add", graph_matmul = "matmul", run_graph = "run" }

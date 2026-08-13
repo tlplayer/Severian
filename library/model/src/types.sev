@@ -1,0 +1,84 @@
+class ModelLoadError:
+    message: string
+
+class ModelValidationError:
+    message: string
+
+class TensorValue:
+    name: string
+    dtype: string
+    shape: list[int]
+    values: list[float]
+
+    def elements() -> int:
+        count := 1
+        for dimension in shape:
+            count *= dimension
+        return count
+
+class GraphNode:
+    name: string
+    operation: string
+    inputs: list[string]
+    outputs: list[string]
+    attributes: Any
+
+class ModelGraph:
+    name: string
+    inputs: list[TensorValue]
+    outputs: list[string]
+    nodes: list[GraphNode]
+    initializers: list[TensorValue]
+
+    def initializer(name: string) -> Result[TensorValue, ModelValidationError]:
+        for value in initializers:
+            if value.name == name:
+                return value
+        return failure(ModelValidationError("missing initializer: " + name))
+
+    def validate() -> Result[unit, ModelValidationError]:
+        available := []
+        for input in inputs:
+            assert(size(input.shape) > 0, "model inputs must have a shape")
+            available.append(input.name)
+        for initializer in initializers:
+            if size(initializer.values) > 0:
+                assert(initializer.elements() == size(initializer.values), "initializer shape does not match its values")
+            available.append(initializer.name)
+        supported = [
+            "identity", "add", "subtract", "multiply", "divide", "matmul", "gemm",
+            "relu", "sigmoid", "tanh", "gelu", "silu", "softmax", "log_softmax",
+            "reshape", "flatten", "transpose", "concat", "layer_norm", "batch_norm",
+            "conv1d", "conv2d", "max_pool1d", "max_pool2d", "avg_pool1d", "avg_pool2d",
+            "embedding", "dropout",
+        ]
+        for node in nodes:
+            if node.operation not in supported:
+                return failure(ModelValidationError("unsupported imported operator: " + node.operation))
+            for input_name in node.inputs:
+                if not input_name.is_empty() and input_name not in available:
+                    return failure(ModelValidationError(
+                        "node " + node.name + " reads unavailable value " + input_name,
+                    ))
+            for output_name in node.outputs:
+                available.append(output_name)
+        for output_name in outputs:
+            if output_name not in available:
+                return failure(ModelValidationError("graph output is unavailable: " + output_name))
+        return
+
+class ModelArtifact:
+    source: string
+    resolved_source: string
+    format: string
+    architecture: string
+    device: string
+    dtype: string
+    config: Any
+    parameters: Any
+    graph: ModelGraph
+    content_sha256: string
+
+    def summary() -> string:
+        return architecture + " (" + format + ", " + dtype + " on " + device + ")"
+

@@ -1,0 +1,475 @@
+import math
+import random
+import "src/tensor_ops.sev" as tensor_ops
+
+trait Module:
+    forward(input: Tensor[f64]) -> Tensor[f64]
+    parameters() -> list[Tensor[f64]]
+
+class Linear: Module
+    weight: Tensor[f64]
+    bias: Tensor[f64]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        projected = tensor_ops.matmul(input, weight)
+        dimensions = tensor_ops.shape(projected)
+        source = tensor_ops.values(projected)
+        offsets = tensor_ops.values(bias)
+        for index in indices(source):
+            source[index] += offsets[index % dimensions[size(dimensions) - 1]]
+        return tensor_ops.tensor(source, dimensions)
+
+    def parameters() -> list[Tensor[f64]]:
+        return [weight, bias]
+
+class Embedding: Module
+    weight: Tensor[f64]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        indices = tensor_ops.values(input)
+        dimensions = tensor_ops.shape(weight)
+        table = tensor_ops.values(weight)
+        output := []
+        for raw_index in indices:
+            index = int(raw_index)
+            assert(index >= 0 and index < dimensions[0])
+            output.extend(table[index * dimensions[1]:(index + 1) * dimensions[1]])
+        return tensor_ops.tensor(output, tensor_ops.shape(input) + [dimensions[1]])
+
+    def parameters() -> list[Tensor[f64]]:
+        return [weight]
+
+class Convolution: Module
+    weight: Tensor[f64]
+    bias: Tensor[f64]
+    stride: list[int]
+    padding: list[int]
+    dimensions: int
+    transposed: bool = false
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        input_shape = tensor_ops.shape(input)
+        kernel_shape = tensor_ops.shape(weight)
+        assert(dimensions in [1, 2], "conv3d requires backend lowering and is represented but not interpreted")
+        assert(not transposed, "transposed convolution is represented for lowering but not interpreted")
+        batch = input_shape[0]
+        channels = input_shape[1]
+        output_channels = kernel_shape[0]
+        height = 1 if dimensions == 1 else input_shape[2]
+        width = input_shape[2] if dimensions == 1 else input_shape[3]
+        kernel_height = 1 if dimensions == 1 else kernel_shape[2]
+        kernel_width = kernel_shape[2] if dimensions == 1 else kernel_shape[3]
+        output_height = 1 if dimensions == 1 else (height + 2 * padding[0] - kernel_height) / stride[0] + 1
+        output_width = (width + 2 * padding[size(padding) - 1] - kernel_width) / stride[size(stride) - 1] + 1
+        source = tensor_ops.values(input)
+        kernels = tensor_ops.values(weight)
+        offsets = tensor_ops.values(bias)
+        output := []
+        for batch_index in range(0, batch):
+            for output_channel in range(0, output_channels):
+                for output_y in range(0, output_height):
+                    for output_x in range(0, output_width):
+                        total = offsets[output_channel]
+                        for input_channel in range(0, channels):
+                            for kernel_y in range(0, kernel_height):
+                                for kernel_x in range(0, kernel_width):
+                                    input_y = output_y * stride[0] + kernel_y - padding[0]
+                                    input_x = output_x * stride[size(stride) - 1] + kernel_x - padding[size(padding) - 1]
+                                    if input_y >= 0 and input_y < height and input_x >= 0 and input_x < width:
+                                        source_index = ((batch_index * channels + input_channel) * height + input_y) * width + input_x
+                                        kernel_index = ((output_channel * channels + input_channel) * kernel_height + kernel_y) * kernel_width + kernel_x
+                                        total += source[source_index] * kernels[kernel_index]
+                        output.append(total)
+        result_shape = [batch, output_channels, output_width] if dimensions == 1 else [batch, output_channels, output_height, output_width]
+        return tensor_ops.tensor(output, result_shape)
+
+    def parameters() -> list[Tensor[f64]]:
+        return [weight, bias]
+
+class Pool: Module
+    kernel_size: int
+    stride: int
+    mode: string
+    dimensions: int
+    adaptive_output: int = 0
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        input_shape = tensor_ops.shape(input)
+        assert(dimensions in [1, 2])
+        batch = input_shape[0]
+        channels = input_shape[1]
+        height = 1 if dimensions == 1 else input_shape[2]
+        width = input_shape[2] if dimensions == 1 else input_shape[3]
+        output_height = 1 if dimensions == 1 else ((height - kernel_size) / stride + 1)
+        output_width = (width - kernel_size) / stride + 1
+        if adaptive_output > 0:
+            output_height = 1 if dimensions == 1 else adaptive_output
+            output_width = adaptive_output
+        source = tensor_ops.values(input)
+        output := []
+        for batch_index in range(0, batch):
+            for channel in range(0, channels):
+                for output_y in range(0, output_height):
+                    for output_x in range(0, output_width):
+                        start_y = 0 if dimensions == 1 else output_y * height / output_height
+                        stop_y = 1 if dimensions == 1 else (output_y + 1) * height / output_height
+                        start_x = output_x * width / output_width
+                        stop_x = (output_x + 1) * width / output_width
+                        selected := []
+                        for y in range(start_y, stop_y):
+                            for x in range(start_x, stop_x):
+                                selected.append(source[((batch_index * channels + channel) * height + y) * width + x])
+                        output.append(max(selected) if mode == "max" else sum(selected) / size(selected))
+        result_shape = [batch, channels, output_width] if dimensions == 1 else [batch, channels, output_height, output_width]
+        return tensor_ops.tensor(output, result_shape)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class LayerNorm: Module
+    epsilon: float = 0.00001
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        width = dimensions[size(dimensions) - 1]
+        source = tensor_ops.values(input)
+        output := []
+        for row_start in range(0, size(source), width):
+            row = source[row_start:row_start + width]
+            center = sum(row) / width
+            variance := 0.0
+            for value in row:
+                variance += (value - center) * (value - center)
+            scale = 1.0 / math.sqrt(variance / width + epsilon)
+            output.extend(row.map(|value| (value - center) * scale))
+        return tensor_ops.tensor(output, dimensions)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class BatchNorm: Module
+    epsilon: float = 0.00001
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        assert(size(dimensions) >= 2)
+        channels = dimensions[1]
+        source = tensor_ops.values(input)
+        channel_stride = tensor_ops.product(dimensions[2:size(dimensions)])
+        batch_stride = channels * channel_stride
+        means = [0.0] * channels
+        variances = [0.0] * channels
+        count = dimensions[0] * channel_stride
+        for batch in range(0, dimensions[0]):
+            for channel in range(0, channels):
+                for offset in range(0, channel_stride):
+                    means[channel] += source[batch * batch_stride + channel * channel_stride + offset]
+        for channel in indices(means):
+            means[channel] /= count
+        for batch in range(0, dimensions[0]):
+            for channel in range(0, channels):
+                for offset in range(0, channel_stride):
+                    index = batch * batch_stride + channel * channel_stride + offset
+                    difference = source[index] - means[channel]
+                    variances[channel] += difference * difference
+        output = source[0:size(source)]
+        for batch in range(0, dimensions[0]):
+            for channel in range(0, channels):
+                scale = 1.0 / math.sqrt(variances[channel] / count + epsilon)
+                for offset in range(0, channel_stride):
+                    index = batch * batch_stride + channel * channel_stride + offset
+                    output[index] = (source[index] - means[channel]) * scale
+        return tensor_ops.tensor(output, dimensions)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class GroupNorm: Module
+    groups: int
+    epsilon: float = 0.00001
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        assert(dimensions[1] % groups == 0)
+        reshaped = tensor_ops.reshape(input, [dimensions[0] * groups, tensor_ops.product(dimensions[1:size(dimensions)]) / groups])
+        return tensor_ops.reshape(LayerNorm(epsilon).forward(reshaped), dimensions)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class Dropout: Module
+    probability: float = 0.5
+    training: bool = true
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        if not training or probability == 0.0:
+            return input
+        assert(probability >= 0.0 and probability < 1.0)
+        scale = 1.0 / (1.0 - probability)
+        output := []
+        for value in tensor_ops.values(input):
+            output.append(0.0 if random.random() < probability else value * scale)
+        return tensor_ops.tensor(output, tensor_ops.shape(input))
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class Activation: Module
+    kind: string
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        if kind == "relu":
+            return tensor_ops.relu(input)
+        if kind == "gelu":
+            return tensor_ops.gelu(input)
+        if kind == "silu":
+            return tensor_ops.silu(input)
+        if kind == "sigmoid":
+            return tensor_ops.sigmoid(input)
+        if kind == "softmax":
+            return tensor_ops.softmax(input)
+        assert(false, "unknown activation: " + kind)
+        return input
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class Flatten: Module
+    start_dimension: int = 1
+    end_dimension: int = -1
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        return tensor_ops.flatten(input, start_dimension, end_dimension)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class Reshape: Module
+    dimensions: list[int]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        return tensor_ops.reshape(input, dimensions)
+
+    def parameters() -> list[Tensor[f64]]:
+        return []
+
+class Sequential: Module
+    layers: list[Module]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        output := input
+        for layer in layers:
+            output = layer.forward(output)
+        return output
+
+    def parameters() -> list[Tensor[f64]]:
+        output := []
+        for layer in layers:
+            output.extend(layer.parameters())
+        return output
+
+class MultiheadAttention: Module
+    query: Linear
+    key: Linear
+    value: Linear
+    output: Linear
+    heads: int
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        q = query.forward(input)
+        k = key.forward(input)
+        v = value.forward(input)
+        width = tensor_ops.shape(q)[1]
+        scores = tensor_ops.matmul(q, tensor_ops.transpose(k))
+        scaled = tensor_ops.tensor(tensor_ops.values(scores).map(|item| item / math.sqrt(width)), tensor_ops.shape(scores))
+        context = tensor_ops.matmul(tensor_ops.softmax(scaled), v)
+        return output.forward(context)
+
+    def parameters() -> list[Tensor[f64]]:
+        return query.parameters() + key.parameters() + value.parameters() + output.parameters()
+
+class RNN: Module
+    input_weight: Tensor[f64]
+    hidden_weight: Tensor[f64]
+    bias: Tensor[f64]
+    hidden_size: int
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        hidden = tensor_ops.zeros([1, hidden_size])
+        output := []
+        rows = tensor_ops.values(input)
+        for step in range(0, dimensions[0]):
+            current = tensor_ops.tensor(rows[step * dimensions[1]:(step + 1) * dimensions[1]], [1, dimensions[1]])
+            combined = Linear(input_weight, bias).forward(current)
+            recurrent = tensor_ops.matmul(hidden, hidden_weight)
+            hidden = tensor_ops.tanh(tensor_ops.tensor(
+                tensor_ops.values(combined).zip(tensor_ops.values(recurrent)).map(|pair| pair[0] + pair[1]),
+                [1, hidden_size],
+            ))
+            output.extend(tensor_ops.values(hidden))
+        return tensor_ops.tensor(output, [dimensions[0], hidden_size])
+
+    def parameters() -> list[Tensor[f64]]:
+        return [input_weight, hidden_weight, bias]
+
+class LSTM: Module
+    gates: Linear
+    hidden_size: int
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        hidden = [0.0] * hidden_size
+        cell = [0.0] * hidden_size
+        output := []
+        source = tensor_ops.values(input)
+        for step in range(0, dimensions[0]):
+            joined = source[step * dimensions[1]:(step + 1) * dimensions[1]] + hidden
+            gate_values = tensor_ops.values(gates.forward(tensor_ops.tensor(joined, [1, size(joined)])))
+            for index in range(0, hidden_size):
+                forget = 1.0 / (1.0 + math.exp(-gate_values[index]))
+                ingest = 1.0 / (1.0 + math.exp(-gate_values[hidden_size + index]))
+                candidate = (math.exp(2.0 * gate_values[2 * hidden_size + index]) - 1.0) / (math.exp(2.0 * gate_values[2 * hidden_size + index]) + 1.0)
+                expose = 1.0 / (1.0 + math.exp(-gate_values[3 * hidden_size + index]))
+                cell[index] = forget * cell[index] + ingest * candidate
+                hidden[index] = expose * ((math.exp(2.0 * cell[index]) - 1.0) / (math.exp(2.0 * cell[index]) + 1.0))
+            output.extend(hidden)
+        return tensor_ops.tensor(output, [dimensions[0], hidden_size])
+
+    def parameters() -> list[Tensor[f64]]:
+        return gates.parameters()
+
+class GRU: Module
+    gates: Linear
+    hidden_size: int
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        dimensions = tensor_ops.shape(input)
+        hidden = [0.0] * hidden_size
+        output := []
+        source = tensor_ops.values(input)
+        for step in range(0, dimensions[0]):
+            joined = source[step * dimensions[1]:(step + 1) * dimensions[1]] + hidden
+            gate_values = tensor_ops.values(gates.forward(tensor_ops.tensor(joined, [1, size(joined)])))
+            for index in range(0, hidden_size):
+                update = 1.0 / (1.0 + math.exp(-gate_values[index]))
+                candidate_raw = gate_values[2 * hidden_size + index]
+                candidate = (math.exp(2.0 * candidate_raw) - 1.0) / (math.exp(2.0 * candidate_raw) + 1.0)
+                hidden[index] = update * hidden[index] + (1.0 - update) * candidate
+            output.extend(hidden)
+        return tensor_ops.tensor(output, [dimensions[0], hidden_size])
+
+    def parameters() -> list[Tensor[f64]]:
+        return gates.parameters()
+
+class TransformerEncoderLayer: Module
+    attention: MultiheadAttention
+    feed_forward: Sequential
+    first_norm: LayerNorm
+    second_norm: LayerNorm
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        attended = attention.forward(input)
+        first = tensor_ops.tensor(
+            tensor_ops.values(input).zip(tensor_ops.values(attended)).map(|pair| pair[0] + pair[1]),
+            tensor_ops.shape(input),
+        )
+        normalized = first_norm.forward(first)
+        projected = feed_forward.forward(normalized)
+        second = tensor_ops.tensor(
+            tensor_ops.values(normalized).zip(tensor_ops.values(projected)).map(|pair| pair[0] + pair[1]),
+            tensor_ops.shape(normalized),
+        )
+        return second_norm.forward(second)
+
+    def parameters() -> list[Tensor[f64]]:
+        return attention.parameters() + feed_forward.parameters()
+
+class Transformer: Module
+    layers: list[Module]
+
+    def forward(input: Tensor[f64]) -> Tensor[f64]:
+        return Sequential(layers).forward(input)
+
+    def parameters() -> list[Tensor[f64]]:
+        return Sequential(layers).parameters()
+
+def initialized_linear(inputs: int, outputs: int) -> Linear:
+    scale = math.sqrt(2.0 / max([1, inputs + outputs]))
+    weight = tensor_ops.tensor(tensor_ops.values(tensor_ops.randn([inputs, outputs])).map(|value| value * scale), [inputs, outputs])
+    return Linear(weight, tensor_ops.zeros([outputs]))
+
+def linear(inputs: int, outputs: int, bias: bool = true) -> Linear:
+    layer = initialized_linear(inputs, outputs)
+    if not bias:
+        layer.bias = tensor_ops.zeros([outputs])
+    return layer
+
+def dense(inputs: int, outputs: int, bias: bool = true) -> Linear:
+    return linear(inputs, outputs, bias)
+
+def embedding(vocabulary: int, dimensions: int) -> Embedding:
+    return Embedding(tensor_ops.randn([vocabulary, dimensions]))
+
+def conv1d(input_channels: int, output_channels: int, kernel_size: int, stride: int = 1, padding: int = 0) -> Convolution:
+    return Convolution(tensor_ops.randn([output_channels, input_channels, kernel_size]), tensor_ops.zeros([output_channels]), [stride], [padding], 1)
+
+def conv2d(input_channels: int, output_channels: int, kernel_size: int, stride: int = 1, padding: int = 0) -> Convolution:
+    return Convolution(tensor_ops.randn([output_channels, input_channels, kernel_size, kernel_size]), tensor_ops.zeros([output_channels]), [stride, stride], [padding, padding], 2)
+
+def conv3d(input_channels: int, output_channels: int, kernel_size: int, stride: int = 1, padding: int = 0) -> Convolution:
+    return Convolution(tensor_ops.randn([output_channels, input_channels, kernel_size, kernel_size, kernel_size]), tensor_ops.zeros([output_channels]), [stride, stride, stride], [padding, padding, padding], 3)
+
+def conv_transpose2d(input_channels: int, output_channels: int, kernel_size: int, stride: int = 1, padding: int = 0) -> Convolution:
+    return Convolution(tensor_ops.randn([input_channels, output_channels, kernel_size, kernel_size]), tensor_ops.zeros([output_channels]), [stride, stride], [padding, padding], 2, true)
+
+def max_pool1d(kernel_size: int, stride: int = 0) -> Pool:
+    return Pool(kernel_size, kernel_size if stride == 0 else stride, "max", 1)
+def max_pool2d(kernel_size: int, stride: int = 0) -> Pool:
+    return Pool(kernel_size, kernel_size if stride == 0 else stride, "max", 2)
+def avg_pool1d(kernel_size: int, stride: int = 0) -> Pool:
+    return Pool(kernel_size, kernel_size if stride == 0 else stride, "average", 1)
+def avg_pool2d(kernel_size: int, stride: int = 0) -> Pool:
+    return Pool(kernel_size, kernel_size if stride == 0 else stride, "average", 2)
+def adaptive_avg_pool2d(output_size: int) -> Pool:
+    return Pool(1, 1, "average", 2, output_size)
+def batch_norm() -> BatchNorm:
+    return BatchNorm()
+def layer_norm(epsilon: float = 0.00001) -> LayerNorm:
+    return LayerNorm(epsilon)
+def group_norm(groups: int, epsilon: float = 0.00001) -> GroupNorm:
+    return GroupNorm(groups, epsilon)
+def dropout(probability: float = 0.5) -> Dropout:
+    return Dropout(probability)
+def relu() -> Activation:
+    return Activation("relu")
+def gelu() -> Activation:
+    return Activation("gelu")
+def silu() -> Activation:
+    return Activation("silu")
+def sigmoid() -> Activation:
+    return Activation("sigmoid")
+def softmax() -> Activation:
+    return Activation("softmax")
+def flatten(start_dimension: int = 1, end_dimension: int = -1) -> Flatten:
+    return Flatten(start_dimension, end_dimension)
+def reshape(dimensions: list[int]) -> Reshape:
+    return Reshape(dimensions)
+def sequential(layers: list[Module]) -> Sequential:
+    return Sequential(layers)
+def attention(query: Linear, key: Linear, value: Linear, output: Linear, heads: int = 1) -> MultiheadAttention:
+    return MultiheadAttention(query, key, value, output, heads)
+def multihead_attention(width: int, heads: int = 1) -> MultiheadAttention:
+    return MultiheadAttention(linear(width, width), linear(width, width), linear(width, width), linear(width, width), heads)
+def rnn(inputs: int, hidden: int) -> RNN:
+    return RNN(tensor_ops.randn([inputs, hidden]), tensor_ops.randn([hidden, hidden]), tensor_ops.zeros([hidden]), hidden)
+def lstm(inputs: int, hidden: int) -> LSTM:
+    return LSTM(linear(inputs + hidden, 4 * hidden), hidden)
+def gru(inputs: int, hidden: int) -> GRU:
+    return GRU(linear(inputs + hidden, 3 * hidden), hidden)
+def transformer_encoder(layers: list[Module]) -> Transformer:
+    return Transformer(layers)
+def transformer_decoder(layers: list[Module]) -> Transformer:
+    return Transformer(layers)
+def transformer(layers: list[Module]) -> Transformer:
+    return Transformer(layers)

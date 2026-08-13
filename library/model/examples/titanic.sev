@@ -28,7 +28,7 @@ def main():
         preprocessing.OneHot(["Sex", "Embarked"]),
         preprocessing.Standardize(["Age", "Fare"]),
         linear.LogisticRegression(
-            learningRate=0.05,
+            learning_rate=0.05,
             epochs=500,
             regularization=0.001,
         ),

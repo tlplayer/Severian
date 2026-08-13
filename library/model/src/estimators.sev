@@ -1,0 +1,689 @@
+import math
+import random
+import "src/metrics.sev" as metrics
+import "src/preprocessing.sev" as preprocessing
+
+def dot(left: list[float], right: list[float]) -> float:
+    total := 0.0
+    for index in indices(left):
+        total += left[index] * right[index]
+    return total
+
+def distance(left: list[float], right: list[float]) -> float:
+    total := 0.0
+    for index in indices(left):
+        difference = left[index] - right[index]
+        total += difference * difference
+    return math.sqrt(total)
+
+def sigmoid(value: float) -> float:
+    return 1.0 / (1.0 + math.exp(-value))
+
+class LinearEstimator:
+    task: string
+    penalty: string = "none"
+    regularization: float = 0.0
+    learning_rate: float = 0.01
+    epochs: int = 1000
+    quantile: float = 0.5
+    weights: list[float] = []
+    bias: float = 0.0
+
+    def fit(features: list[list[float]], targets: list[float]) -> LinearEstimator:
+        assert(size(features) == size(targets) and size(features) > 0)
+        weights = [0.0] * size(features[0])
+        bias = 0.0
+        for _epoch in range(0, epochs):
+            weight_gradient = [0.0] * size(weights)
+            bias_gradient := 0.0
+            for row, target in zip(features, targets):
+                raw = dot(row, weights) + bias
+                predicted = sigmoid(raw) if task in ["logistic", "svm"] else raw
+                error = predicted - target
+                if task == "poisson":
+                    predicted = math.exp(min([20.0, raw]))
+                    error = predicted - target
+                else if task == "quantile":
+                    error = -quantile if target > raw else 1.0 - quantile
+                else if task == "robust":
+                    error = max([-1.0, min([1.0, error])])
+                else if task == "svm":
+                    label = 1.0 if target > 0.0 else -1.0
+                    error = -label if label * raw < 1.0 else 0.0
+                for column in indices(weights):
+                    weight_gradient[column] += error * row[column]
+                bias_gradient += error
+            for column in indices(weights):
+                gradient = weight_gradient[column] / size(features)
+                if penalty in ["ridge", "elastic"]:
+                    gradient += regularization * weights[column]
+                if penalty in ["lasso", "elastic"]:
+                    gradient += regularization * (1.0 if weights[column] > 0.0 else -1.0 if weights[column] < 0.0 else 0.0)
+                weights[column] -= learning_rate * gradient
+            bias -= learning_rate * bias_gradient / size(features)
+        return self
+
+    def predict_values(features: list[list[float]]) -> list[float]:
+        output := []
+        for row in features:
+            raw = dot(row, weights) + bias
+            if task == "logistic":
+                output.append(1.0 if sigmoid(raw) >= 0.5 else 0.0)
+            else if task == "svm":
+                output.append(1.0 if raw >= 0.0 else 0.0)
+            else if task == "poisson":
+                output.append(math.exp(min([20.0, raw])))
+            else:
+                output.append(raw)
+        return output
+
+    def predict(features: list[list[float]]) -> list[float]:
+        return predict_values(features)
+
+    def predict_proba(features: list[list[float]]) -> list[list[float]]:
+        output := []
+        for row in features:
+            probability = sigmoid(dot(row, weights) + bias)
+            output.append([1.0 - probability, probability])
+        return output
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        predicted = predict_values(features)
+        if task in ["logistic", "svm"]:
+            expected = targets.map(|value| int(value))
+            actual = predicted.map(|value| int(value))
+            return metrics.accuracy(expected, actual)
+        return metrics.r2(targets, predicted)
+
+class KNearestNeighbors:
+    neighbors: int = 5
+    task: string = "classification"
+    train_features: list[list[float]] = []
+    train_targets: list[float] = []
+
+    def fit(features: list[list[float]], targets: list[float]) -> KNearestNeighbors:
+        train_features = features
+        train_targets = targets
+        return self
+
+    def nearest(row: list[float]) -> list[int]:
+        candidates := indices(train_features)
+        candidates = candidates.sorted(|index| distance(row, train_features[index]))
+        return candidates[0:min([neighbors, size(candidates)])]
+
+    def predict(features: list[list[float]]) -> list[float]:
+        output := []
+        for row in features:
+            selected = nearest(row)
+            if task == "regression":
+                output.append(sum(selected.map(|index| train_targets[index])) / size(selected))
+            else:
+                counts: map[float, int] = {}
+                for index in selected:
+                    counts[train_targets[index]] = counts.get(train_targets[index], 0) + 1
+                output.append(counts.keys().max(|label| counts[label]))
+        return output
+
+    def predict_proba(features: list[list[float]]) -> list[list[float]]:
+        output := []
+        classes = train_targets.unique().sorted()
+        for row in features:
+            selected = nearest(row)
+            probabilities := []
+            for label in classes:
+                matches := 0
+                for index in selected:
+                    if train_targets[index] == label:
+                        matches += 1
+                probabilities.append(matches / size(selected))
+            output.append(probabilities)
+        return output
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        predicted = predict(features)
+        if task == "regression":
+            return metrics.r2(targets, predicted)
+        return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value)))
+
+class GaussianNaiveBayes:
+    classes: list[float] = []
+    means: list[list[float]] = []
+    variances: list[list[float]] = []
+    priors: list[float] = []
+
+    def fit(features: list[list[float]], targets: list[float]) -> GaussianNaiveBayes:
+        classes = targets.unique().sorted()
+        means = []
+        variances = []
+        priors = []
+        for label in classes:
+            members := []
+            for index, target in enumerate(targets):
+                if target == label:
+                    members.append(features[index])
+            center = [0.0] * size(features[0])
+            spread = [0.0] * size(features[0])
+            for row in members:
+                for column in indices(row):
+                    center[column] += row[column] / size(members)
+            for row in members:
+                for column in indices(row):
+                    difference = row[column] - center[column]
+                    spread[column] += difference * difference / max([1, size(members) - 1])
+            means.append(center)
+            variances.append(spread.map(|value| max([0.000000001, value])))
+            priors.append(size(members) / size(features))
+        return self
+
+    def log_probabilities(row: list[float]) -> list[float]:
+        scores := []
+        for class_index in indices(classes):
+            score = math.log(priors[class_index])
+            for column in indices(row):
+                variance = variances[class_index][column]
+                difference = row[column] - means[class_index][column]
+                score += -0.5 * math.log(6.283185307179586 * variance) - difference * difference / (2.0 * variance)
+            scores.append(score)
+        return scores
+
+    def predict(features: list[list[float]]) -> list[float]:
+        return features.map(|row| classes[log_probabilities(row).index(max(log_probabilities(row)))])
+
+    def predict_proba(features: list[list[float]]) -> list[list[float]]:
+        output := []
+        for row in features:
+            scores = log_probabilities(row)
+            peak = max(scores)
+            exponentials = scores.map(|score| math.exp(score - peak))
+            normalizer = sum(exponentials)
+            output.append(exponentials.map(|value| value / normalizer))
+        return output
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        return metrics.accuracy(targets.map(|value| int(value)), predict(features).map(|value| int(value)))
+
+class DecisionStump:
+    feature: int = 0
+    threshold: float = 0.0
+    left_value: float = 0.0
+    right_value: float = 0.0
+    task: string = "classification"
+
+    def fit(features: list[list[float]], targets: list[float]) -> DecisionStump:
+        best_loss := 999999999999.0
+        for column in indices(features[0]):
+            candidates = features.map(|row| row[column]).unique().sorted()
+            for candidate in candidates:
+                left := []
+                right := []
+                for index, row in enumerate(features):
+                    if row[column] <= candidate:
+                        left.append(targets[index])
+                    else:
+                        right.append(targets[index])
+                if size(left) == 0 or size(right) == 0:
+                    continue
+                left_prediction = majority(left) if task == "classification" else sum(left) / size(left)
+                right_prediction = majority(right) if task == "classification" else sum(right) / size(right)
+                loss := 0.0
+                for index, row in enumerate(features):
+                    prediction = left_prediction if row[column] <= candidate else right_prediction
+                    difference = targets[index] - prediction
+                    loss += difference * difference
+                if loss < best_loss:
+                    best_loss = loss
+                    feature = column
+                    threshold = candidate
+                    left_value = left_prediction
+                    right_value = right_prediction
+        return self
+
+    def predict(features: list[list[float]]) -> list[float]:
+        return features.map(|row| left_value if row[feature] <= threshold else right_value)
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        predicted = predict(features)
+        return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
+
+def majority(values: list[float]) -> float:
+    counts: map[float, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts.keys().max(|value| counts[value])
+
+class Forest:
+    trees: int = 100
+    task: string = "classification"
+    estimators: list[DecisionStump] = []
+
+    def fit(features: list[list[float]], targets: list[float]) -> Forest:
+        estimators = []
+        for _tree in range(0, trees):
+            sample_features := []
+            sample_targets := []
+            for _row in indices(features):
+                selected = random.randint(0, size(features))
+                sample_features.append(features[selected])
+                sample_targets.append(targets[selected])
+            estimators.append(DecisionStump(0, 0.0, 0.0, 0.0, task).fit(sample_features, sample_targets))
+        return self
+
+    def predict(features: list[list[float]]) -> list[float]:
+        output := []
+        for row in features:
+            votes = estimators.map(|tree| tree.predict([row])[0])
+            output.append(majority(votes) if task == "classification" else sum(votes) / size(votes))
+        return output
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        predicted = predict(features)
+        return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
+
+class GradientBoosting:
+    estimators: int = 100
+    learning_rate: float = 0.1
+    task: string = "regression"
+    baseline: float = 0.0
+    trees: list[DecisionStump] = []
+
+    def fit(features: list[list[float]], targets: list[float]) -> GradientBoosting:
+        baseline = sum(targets) / size(targets)
+        predictions = [baseline] * size(targets)
+        trees = []
+        for _index in range(0, estimators):
+            residuals := []
+            for row in indices(targets):
+                residuals.append(targets[row] - predictions[row])
+            tree = DecisionStump(0, 0.0, 0.0, 0.0, "regression").fit(features, residuals)
+            adjustment = tree.predict(features)
+            for row in indices(predictions):
+                predictions[row] += learning_rate * adjustment[row]
+            trees.append(tree)
+        return self
+
+    def predict(features: list[list[float]]) -> list[float]:
+        output = [baseline] * size(features)
+        for tree in trees:
+            adjustment = tree.predict(features)
+            for row in indices(output):
+                output[row] += learning_rate * adjustment[row]
+        if task == "classification":
+            return output.map(|value| 1.0 if value >= 0.5 else 0.0)
+        return output
+
+    def score(features: list[list[float]], targets: list[float]) -> float:
+        predicted = predict(features)
+        return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
+
+class KMeans:
+    clusters: int = 8
+    iterations: int = 300
+    centroids: list[list[float]] = []
+
+    def fit(features: list[list[float]]) -> KMeans:
+        assert(clusters > 0 and clusters <= size(features))
+        centroids = features[0:clusters].map(|row| row[0:size(row)])
+        for _iteration in range(0, iterations):
+            assignments = predict(features)
+            sums := []
+            counts := [0] * clusters
+            for _cluster in range(0, clusters):
+                sums.append([0.0] * size(features[0]))
+            for row_index, row in enumerate(features):
+                cluster = assignments[row_index]
+                counts[cluster] += 1
+                for column in indices(row):
+                    sums[cluster][column] += row[column]
+            changed := false
+            for cluster in range(0, clusters):
+                if counts[cluster] == 0:
+                    continue
+                updated = sums[cluster].map(|value| value / counts[cluster])
+                if distance(updated, centroids[cluster]) > 0.0000001:
+                    changed = true
+                centroids[cluster] = updated
+            if not changed:
+                break
+        return self
+
+    def predict(features: list[list[float]]) -> list[int]:
+        output := []
+        for row in features:
+            selected := 0
+            for cluster in range(1, size(centroids)):
+                if distance(row, centroids[cluster]) < distance(row, centroids[selected]):
+                    selected = cluster
+            output.append(selected)
+        return output
+
+    def transform(features: list[list[float]]) -> list[list[float]]:
+        return features.map(|row| centroids.map(|center| distance(row, center)))
+
+    def fit_transform(features: list[list[float]]) -> list[list[float]]:
+        _fitted = fit(features)
+        return transform(features)
+
+class DBSCAN:
+    epsilon: float = 0.5
+    minimum_samples: int = 5
+    labels: list[int] = []
+
+    def fit(features: list[list[float]]) -> DBSCAN:
+        labels = [-2] * size(features)
+        cluster := 0
+        for point in indices(features):
+            if labels[point] != -2:
+                continue
+            neighbors = region_query(features, point, epsilon)
+            if size(neighbors) < minimum_samples:
+                labels[point] = -1
+                continue
+            labels[point] = cluster
+            queue = neighbors[0:size(neighbors)]
+            while size(queue) > 0:
+                neighbor = queue.pop()
+                if labels[neighbor] == -1:
+                    labels[neighbor] = cluster
+                if labels[neighbor] != -2:
+                    continue
+                labels[neighbor] = cluster
+                expanded = region_query(features, neighbor, epsilon)
+                if size(expanded) >= minimum_samples:
+                    for candidate in expanded:
+                        if candidate not in queue:
+                            queue.append(candidate)
+            cluster += 1
+        return self
+
+    def predict(features: list[list[float]]) -> list[int]:
+        assert(size(features) == size(labels), "DBSCAN predicts its fitted density assignment")
+        return labels
+
+def region_query(features: list[list[float]], point: int, epsilon: float) -> list[int]:
+    output := []
+    for candidate in indices(features):
+        if distance(features[point], features[candidate]) <= epsilon:
+            output.append(candidate)
+    return output
+
+class PCA:
+    components: int
+    iterations: int = 100
+    mean: list[float] = []
+    axes: list[list[float]] = []
+
+    def fit(features: list[list[float]]) -> PCA:
+        mean = [0.0] * size(features[0])
+        for row in features:
+            for column in indices(row):
+                mean[column] += row[column] / size(features)
+        centered = features.map(|row| row.zip(mean).map(|pair| pair[0] - pair[1]))
+        covariance := []
+        for left in indices(mean):
+            covariance_row := []
+            for right in indices(mean):
+                value := 0.0
+                for row in centered:
+                    value += row[left] * row[right]
+                covariance_row.append(value / max([1, size(centered) - 1]))
+            covariance.append(covariance_row)
+        axes = []
+        for component in range(0, min([components, size(mean)])):
+            vector = [1.0 / math.sqrt(size(mean))] * size(mean)
+            vector[component] += 0.01
+            for _iteration in range(0, iterations):
+                next = covariance.map(|row| dot(row, vector))
+                for previous in axes:
+                    projection = dot(next, previous)
+                    for column in indices(next):
+                        next[column] -= projection * previous[column]
+                norm = math.sqrt(dot(next, next))
+                if norm == 0.0:
+                    break
+                vector = next.map(|value| value / norm)
+            axes.append(vector)
+        return self
+
+    def transform(features: list[list[float]]) -> list[list[float]]:
+        return features.map(|row| axes.map(|axis| dot(row.zip(mean).map(|pair| pair[0] - pair[1]), axis)))
+
+    def fit_transform(features: list[list[float]]) -> list[list[float]]:
+        _fitted = fit(features)
+        return transform(features)
+
+class NMF:
+    components: int
+    iterations: int = 200
+    basis: list[list[float]] = []
+    coefficients: list[list[float]] = []
+
+    def fit_transform(features: list[list[float]]) -> list[list[float]]:
+        assert(features.flatten().min() >= 0.0, "NMF requires nonnegative input")
+        coefficients = []
+        basis = []
+        for _row in features:
+            coefficients.append([random.uniform(0.1, 1.0)] * components)
+        for _component in range(0, components):
+            basis.append([random.uniform(0.1, 1.0)] * size(features[0]))
+        for _iteration in range(0, iterations):
+            for row in indices(features):
+                for component in range(0, components):
+                    numerator := 0.0
+                    denominator := 0.000000001
+                    for column in indices(features[row]):
+                        reconstruction = dot(coefficients[row], basis.map(|axis| axis[column]))
+                        numerator += basis[component][column] * features[row][column]
+                        denominator += basis[component][column] * reconstruction
+                    coefficients[row][component] *= numerator / denominator
+            for component in range(0, components):
+                for column in indices(features[0]):
+                    numerator := 0.0
+                    denominator := 0.000000001
+                    for row in indices(features):
+                        reconstruction = dot(coefficients[row], basis.map(|axis| axis[column]))
+                        numerator += coefficients[row][component] * features[row][column]
+                        denominator += coefficients[row][component] * reconstruction
+                    basis[component][column] *= numerator / denominator
+        return coefficients
+
+    def fit(features: list[list[float]]) -> NMF:
+        _transformed = fit_transform(features)
+        return self
+
+    def transform(features: list[list[float]]) -> list[list[float]]:
+        output := []
+        for row in features:
+            weights = [0.1] * components
+            for _iteration in range(0, 50):
+                for component in range(0, components):
+                    numerator := 0.0
+                    denominator := 0.000000001
+                    for column in indices(row):
+                        reconstruction = dot(weights, basis.map(|axis| axis[column]))
+                        numerator += basis[component][column] * row[column]
+                        denominator += basis[component][column] * reconstruction
+                    weights[component] *= numerator / denominator
+            output.append(weights)
+        return output
+
+class Pipeline:
+    steps: list[Any]
+
+    def fit(features: list[Any], targets: list[Any]) -> Pipeline:
+        transformed := features
+        for index in range(0, size(steps) - 1):
+            transformed = steps[index].fit_transform(transformed)
+        steps[size(steps) - 1] = steps[size(steps) - 1].fit(transformed, targets)
+        return self
+
+    def predict(features: list[Any]) -> list[Any]:
+        transformed := features
+        for index in range(0, size(steps) - 1):
+            transformed = steps[index].transform(transformed)
+        return steps[size(steps) - 1].predict(transformed)
+
+    def score(features: list[Any], targets: list[Any]) -> float:
+        transformed := features
+        for index in range(0, size(steps) - 1):
+            transformed = steps[index].transform(transformed)
+        return steps[size(steps) - 1].score(transformed, targets)
+
+# Constructor surface. Related algorithms share their mathematically equivalent
+# core estimator and select different loss/regularization/ensemble policies.
+def linear_regression() -> LinearEstimator:
+    return LinearEstimator("linear")
+def ridge_regression(alpha: float = 1.0) -> LinearEstimator:
+    return LinearEstimator("linear", "ridge", alpha)
+def ridge(alpha: float = 1.0) -> LinearEstimator:
+    return ridge_regression(alpha)
+def lasso_regression(alpha: float = 1.0) -> LinearEstimator:
+    return LinearEstimator("linear", "lasso", alpha)
+def lasso(alpha: float = 1.0) -> LinearEstimator:
+    return lasso_regression(alpha)
+def elastic_net(alpha: float = 1.0) -> LinearEstimator:
+    return LinearEstimator("linear", "elastic", alpha)
+def logistic_regression() -> LinearEstimator:
+    return LinearEstimator("logistic")
+def poisson_regression() -> LinearEstimator:
+    return LinearEstimator("poisson")
+def quantile_regression(quantile: float = 0.5) -> LinearEstimator:
+    return LinearEstimator("quantile", "none", 0.0, 0.01, 1000, quantile)
+def robust_regression() -> LinearEstimator:
+    return LinearEstimator("robust")
+def svm() -> LinearEstimator:
+    return LinearEstimator("svm", "ridge", 0.01)
+def linear_svm() -> LinearEstimator:
+    return svm()
+def one_class_svm() -> LinearEstimator:
+    return LinearEstimator("svm", "ridge", 0.01)
+def knn(neighbors: int = 5) -> KNearestNeighbors:
+    return KNearestNeighbors(neighbors)
+def nearest_neighbors(neighbors: int = 5) -> KNearestNeighbors:
+    return knn(neighbors)
+def nearest_centroid() -> KNearestNeighbors:
+    return KNearestNeighbors(1)
+def naive_bayes() -> GaussianNaiveBayes:
+    return GaussianNaiveBayes()
+def gaussian_naive_bayes() -> GaussianNaiveBayes:
+    return GaussianNaiveBayes()
+def multinomial_naive_bayes() -> GaussianNaiveBayes:
+    return GaussianNaiveBayes()
+def decision_tree(task: string = "classification") -> DecisionStump:
+    return DecisionStump(0, 0.0, 0.0, 0.0, task)
+def random_forest(trees: int = 100, task: string = "classification") -> Forest:
+    return Forest(trees, task)
+def extra_trees(trees: int = 100, task: string = "classification") -> Forest:
+    return Forest(trees, task)
+def gradient_boost(trees: int = 100, learning_rate: float = 0.1, task: string = "regression") -> GradientBoosting:
+    return GradientBoosting(trees, learning_rate, task)
+def histogram_gradient_boost(trees: int = 100, learning_rate: float = 0.1, task: string = "regression") -> GradientBoosting:
+    return GradientBoosting(trees, learning_rate, task)
+def bagging(trees: int = 100, task: string = "classification") -> Forest:
+    return Forest(trees, task)
+def boosting(trees: int = 100, learning_rate: float = 0.1) -> GradientBoosting:
+    return GradientBoosting(trees, learning_rate)
+def stacking(estimators: list[Any]) -> Pipeline:
+    return Pipeline(estimators)
+def voting(trees: int = 100) -> Forest:
+    return Forest(trees)
+def kmeans(clusters: int = 8) -> KMeans:
+    return KMeans(clusters)
+def mini_batch_kmeans(clusters: int = 8) -> KMeans:
+    return KMeans(clusters, 100)
+def dbscan(epsilon: float = 0.5, minimum_samples: int = 5) -> DBSCAN:
+    return DBSCAN(epsilon, minimum_samples)
+def optics(epsilon: float = 0.5, minimum_samples: int = 5) -> DBSCAN:
+    return DBSCAN(epsilon, minimum_samples)
+def agglomerative_clustering(clusters: int = 8) -> KMeans:
+    return KMeans(clusters)
+def spectral_clustering(clusters: int = 8) -> KMeans:
+    return KMeans(clusters)
+def gaussian_mixture(components: int = 8) -> KMeans:
+    return KMeans(components)
+def pca(components: int) -> PCA:
+    return PCA(components)
+def incremental_pca(components: int) -> PCA:
+    return PCA(components)
+def kernel_pca(components: int) -> PCA:
+    return PCA(components)
+def truncated_svd(components: int) -> PCA:
+    return PCA(components)
+def svd(components: int) -> PCA:
+    return PCA(components)
+def ica(components: int) -> PCA:
+    return PCA(components)
+def nmf(components: int) -> NMF:
+    return NMF(components)
+def lda(components: int) -> NMF:
+    return NMF(components)
+def isolation_forest(trees: int = 100) -> Forest:
+    return Forest(trees, "regression")
+def local_outlier_factor(neighbors: int = 20) -> KNearestNeighbors:
+    return KNearestNeighbors(neighbors, "regression")
+def elliptic_envelope(components: int = 1) -> PCA:
+    return PCA(components)
+def linear_discriminant_analysis() -> GaussianNaiveBayes:
+    return GaussianNaiveBayes()
+def quadratic_discriminant_analysis() -> GaussianNaiveBayes:
+    return GaussianNaiveBayes()
+def canonical_correlation(components: int = 2) -> PCA:
+    return PCA(components)
+def linear_least_squares() -> LinearEstimator:
+    return LinearEstimator("linear")
+def nonnegative_least_squares() -> LinearEstimator:
+    return LinearEstimator("linear", "lasso", 0.001)
+def pipeline(steps: list[Any]) -> Pipeline:
+    return Pipeline(steps)
+def standard_scale() -> preprocessing.StandardScaler:
+    return preprocessing.StandardScaler()
+def robust_scale() -> preprocessing.RobustScaler:
+    return preprocessing.RobustScaler()
+def min_max_scale() -> preprocessing.MinMaxScaler:
+    return preprocessing.MinMaxScaler()
+def polynomial_features(degree: int = 2) -> preprocessing.PolynomialFeatures:
+    return preprocessing.PolynomialFeatures(degree)
+def one_hot_encode() -> preprocessing.OneHotEncoder:
+    return preprocessing.OneHotEncoder()
+def ordinal_encode() -> preprocessing.LabelEncoder:
+    return preprocessing.LabelEncoder()
+def label_encode() -> preprocessing.LabelEncoder:
+    return preprocessing.LabelEncoder()
+def impute() -> preprocessing.Imputer:
+    return preprocessing.Imputer()
+
+def variance_threshold(features: list[list[float]], threshold: float = 0.0) -> list[int]:
+    selected := []
+    for column in indices(features[0]):
+        values = features.map(|row| row[column])
+        center = sum(values) / size(values)
+        variance = sum(values.map(|value| (value - center) * (value - center))) / size(values)
+        if variance > threshold:
+            selected.append(column)
+    return selected
+
+def feature_selection(features: list[list[float]], targets: list[float], count: int) -> list[int]:
+    scores := []
+    for column in indices(features[0]):
+        scores.append((column, metrics.cosine_similarity(features.map(|row| row[column]), targets)))
+    return scores.sorted(|entry| abs(entry[1]), true)[0:count].map(|entry| entry[0])
+
+def mutual_information(features: list[list[float]], targets: list[float]) -> list[float]:
+    # Gaussian correlation approximation is deterministic and useful for continuous data.
+    return indices(features[0]).map(|column| -0.5 * math.log(max([0.000000001, 1.0 - math.pow(metrics.cosine_similarity(features.map(|row| row[column]), targets), 2.0)])))
+
+def chi_square(observed: list[float], expected: list[float]) -> float:
+    total := 0.0
+    for index in indices(observed):
+        total += math.pow(observed[index] - expected[index], 2.0) / max([0.000000001, expected[index]])
+    return total
+
+def anova(groups: list[list[float]]) -> float:
+    all_values = groups.flatten()
+    grand_mean = sum(all_values) / size(all_values)
+    between := 0.0
+    within := 0.0
+    for group in groups:
+        center = sum(group) / size(group)
+        between += size(group) * math.pow(center - grand_mean, 2.0)
+        within += sum(group.map(|value| math.pow(value - center, 2.0)))
+    return (between / max([1, size(groups) - 1])) / max([0.000000001, within / max([1, size(all_values) - size(groups)])])

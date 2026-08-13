@@ -6,6 +6,11 @@ version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/container"
 
 [[packages]]
+name = "json"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../json"
+
+[[packages]]
 name = "model"
 version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model"
@@ -14,6 +19,16 @@ source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-con
 name = "model.neuralnet"
 version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model/neuralnet"
+
+[[packages]]
+name = "os"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/path/../os"
+
+[[packages]]
+name = "path"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../path"
 
 [[packages]]
 name = "platform"

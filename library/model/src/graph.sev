@@ -1,0 +1,113 @@
+import json
+import "src/layers.sev" as layers
+import "src/tensor_ops.sev" as tensor_ops
+import "src/types.sev" as types
+
+def initializer_tensor(value: types.TensorValue) -> Tensor[f64]:
+    assert(size(value.values) == value.elements(), "initializer " + value.name + " is metadata-only and must be materialized before execution")
+    return tensor_ops.tensor(value.values, value.shape)
+
+def attribute_int(attributes: Any, name: string, fallback: int) -> int:
+    return json.as_int(json.object_get(attributes, name)) if name in json.object_keys(attributes) else fallback
+
+def attribute_float(attributes: Any, name: string, fallback: float) -> float:
+    return json.as_float(json.object_get(attributes, name)) if name in json.object_keys(attributes) else fallback
+
+def attribute_ints(attributes: Any, name: string, fallback: list[int]) -> list[int]:
+    return json.as_int_list(json.object_get(attributes, name)) if name in json.object_keys(attributes) else fallback
+
+def execute_node(node: types.GraphNode, environment: map[string, Tensor[f64]]) -> Tensor[f64]:
+    operation = node.operation
+    inputs = node.inputs.map(|name| environment[name])
+    if operation == "identity" or operation == "dropout":
+        return inputs[0]
+    if operation == "add":
+        left = tensor_ops.values(inputs[0])
+        right = tensor_ops.values(inputs[1])
+        if size(right) < size(left):
+            right = range(0, size(left)).map(|index| right[index % size(right)])
+        return tensor_ops.tensor(indices(left).map(|index| left[index] + right[index]), tensor_ops.shape(inputs[0]))
+    if operation == "subtract":
+        left = tensor_ops.values(inputs[0])
+        right = tensor_ops.values(inputs[1])
+        return tensor_ops.tensor(indices(left).map(|index| left[index] - right[index % size(right)]), tensor_ops.shape(inputs[0]))
+    if operation == "multiply":
+        left = tensor_ops.values(inputs[0])
+        right = tensor_ops.values(inputs[1])
+        return tensor_ops.tensor(indices(left).map(|index| left[index] * right[index % size(right)]), tensor_ops.shape(inputs[0]))
+    if operation == "divide":
+        left = tensor_ops.values(inputs[0])
+        right = tensor_ops.values(inputs[1])
+        return tensor_ops.tensor(indices(left).map(|index| left[index] / right[index % size(right)]), tensor_ops.shape(inputs[0]))
+    if operation == "matmul":
+        return tensor_ops.matmul(inputs[0], inputs[1])
+    if operation == "gemm":
+        weight = inputs[1]
+        # ONNX/Keras/PyTorch store dense weights in different orientations.
+        if tensor_ops.shape(inputs[0])[size(tensor_ops.shape(inputs[0])) - 1] == tensor_ops.shape(weight)[1]:
+            weight = tensor_ops.transpose(weight)
+        output = tensor_ops.matmul(inputs[0], weight)
+        if size(inputs) == 3:
+            values = tensor_ops.values(output)
+            bias = tensor_ops.values(inputs[2])
+            output = tensor_ops.tensor(indices(values).map(|index| values[index] + bias[index % size(bias)]), tensor_ops.shape(output))
+        return output
+    if operation == "relu":
+        return tensor_ops.relu(inputs[0])
+    if operation == "sigmoid":
+        return tensor_ops.sigmoid(inputs[0])
+    if operation == "tanh":
+        return tensor_ops.tanh(inputs[0])
+    if operation == "gelu":
+        return tensor_ops.gelu(inputs[0])
+    if operation == "silu":
+        return tensor_ops.silu(inputs[0])
+    if operation == "softmax":
+        return tensor_ops.softmax(inputs[0])
+    if operation == "log_softmax":
+        return tensor_ops.log_softmax(inputs[0])
+    if operation == "flatten":
+        return tensor_ops.flatten(inputs[0], attribute_int(node.attributes, "axis", 1))
+    if operation == "reshape":
+        dimensions = attribute_ints(node.attributes, "shape", [])
+        if size(inputs) > 1:
+            dimensions = tensor_ops.values(inputs[1]).map(|value| int(value))
+        return tensor_ops.reshape(inputs[0], dimensions)
+    if operation == "transpose":
+        return tensor_ops.transpose(inputs[0])
+    if operation == "concat":
+        return tensor_ops.concat(inputs, attribute_int(node.attributes, "axis", 0))
+    if operation == "layer_norm":
+        return layers.LayerNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(inputs[0])
+    if operation == "batch_norm":
+        return layers.BatchNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(inputs[0])
+    if operation == "embedding":
+        return layers.Embedding(inputs[0]).forward(inputs[1])
+    if operation in ["conv1d", "conv2d"]:
+        dimensions = 1 if operation == "conv1d" else 2
+        bias = inputs[2] if size(inputs) > 2 else tensor_ops.zeros([tensor_ops.shape(inputs[1])[0]])
+        strides = attribute_ints(node.attributes, "strides", [1] * dimensions)
+        padding = attribute_ints(node.attributes, "pads", [0] * dimensions)
+        return layers.Convolution(inputs[1], bias, strides, padding, dimensions).forward(inputs[0])
+    if operation in ["max_pool1d", "max_pool2d", "avg_pool1d", "avg_pool2d"]:
+        dimensions = 1 if operation.ends_with("1d") else 2
+        mode = "max" if operation.starts_with("max") else "average"
+        kernel = attribute_ints(node.attributes, "kernel_shape", [2])[0]
+        stride = attribute_ints(node.attributes, "strides", [kernel])[0]
+        return layers.Pool(kernel, stride, mode, dimensions).forward(inputs[0])
+    assert(false, "imported graph operator is not interpretable: " + operation)
+    return inputs[0]
+
+def execute(graph: types.ModelGraph, input: Tensor[f64]) -> Tensor[f64]:
+    _valid = graph.validate()
+    assert(size(graph.inputs) == 1, "single-call model execution currently accepts one graph input")
+    environment: map[string, Tensor[f64]] = {}
+    environment[graph.inputs[0].name] = input
+    for initializer in graph.initializers:
+        environment[initializer.name] = initializer_tensor(initializer)
+    for node in graph.nodes:
+        output = execute_node(node, environment)
+        assert(size(node.outputs) == 1, "multi-output imported operations require explicit decomposition")
+        environment[node.outputs[0]] = output
+    assert(size(graph.outputs) == 1, "single-call model execution requires one graph output")
+    return environment[graph.outputs[0]]
