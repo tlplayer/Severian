@@ -8,27 +8,27 @@ def larger(left: int, right: int) -> int:
         return left
     return right
 
-def longestCommonSubsequence(first: string, second: string) -> int:
+def longest_common_subsequence(first: string, second: string) -> int:
     row := [0]
     while size(row) <= size(second):
         row.append(0)
 
-    for firstIndex in range(0, size(first)):
+    for first_index in range(0, size(first)):
         diagonal := 0
-        for secondIndex in range(0, size(second)):
-            previous = row[secondIndex + 1]
-            if first[firstIndex] == second[secondIndex]:
-                row[secondIndex + 1] = diagonal + 1
+        for second_index in range(0, size(second)):
+            previous = row[second_index + 1]
+            if first[first_index] == second[second_index]:
+                row[second_index + 1] = diagonal + 1
             else:
-                row[secondIndex + 1] = larger(row[secondIndex + 1], row[secondIndex])
+                row[second_index + 1] = larger(row[second_index + 1], row[second_index])
             diagonal = previous
     return row[size(second)]
 
 test "shared subsequence":
-    assert(longestCommonSubsequence("abcde", "ace") == 3)
+    assert(longest_common_subsequence("abcde", "ace") == 3)
 
 test "identical strings":
-    assert(longestCommonSubsequence("abc", "abc") == 3)
+    assert(longest_common_subsequence("abc", "abc") == 3)
 
 test "disjoint strings":
-    assert(longestCommonSubsequence("abc", "def") == 0)
+    assert(longest_common_subsequence("abc", "def") == 0)

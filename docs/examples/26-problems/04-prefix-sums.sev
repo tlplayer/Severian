@@ -1,4 +1,4 @@
-def prefixSums(values: list[int]) -> list[int]:
+def prefix_sums(values: list[int]) -> list[int]:
     output := []
     total := 0
 
@@ -9,10 +9,10 @@ def prefixSums(values: list[int]) -> list[int]:
     return output
 
 test "builds inclusive prefix sums":
-    assert(prefixSums([1, 2, 3, 4]) == [1, 3, 6, 10])
+    assert(prefix_sums([1, 2, 3, 4]) == [1, 3, 6, 10])
 
 test "handles negative values":
-    assert(prefixSums([5, -2, 3]) == [5, 3, 6])
+    assert(prefix_sums([5, -2, 3]) == [5, 3, 6])
 
 test "handles empty input":
-    assert(prefixSums([]) == [])
+    assert(prefix_sums([]) == [])

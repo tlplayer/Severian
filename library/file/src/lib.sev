@@ -113,7 +113,7 @@ def read(path: string) -> Result[file_interface.File, IOError | file_interface.F
 
 # Compatibility aliases remain temporarily for older packages. New Severian
 # code uses complete snake_case names and receives no abbreviation burden.
-def readBytes(handle: Any, count: int) -> Result[list[int], IOError]:
+def read_bytes(handle: Any, count: int) -> Result[list[int], IOError]:
     return read_bytes_from(handle, count)
 
 def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
@@ -122,7 +122,7 @@ def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
 def mappedBytes(mapping: Any) -> int:
     return mapped_bytes(mapping)
 
-def littleEndianU64(data: list[int]) -> int:
+def little_endian_u_64(data: list[int]) -> int:
     return little_endian_u64(data)
 
 test "native file round trip":
@@ -173,11 +173,11 @@ test "read returns parsed JSON and YAML objects":
     yaml_file := loaded_yaml
     assert(json_file.kind() == "json")
     assert(json_file.keys() == ["name", "languages"])
-    assert(platform.jsonAsString(json_file.get("name")) == "Ada")
+    assert(platform.jsonas_string(json_file.get("name")) == "Ada")
     json_file.set("name", "Grace")
     _json_saved = json_file.write()
     changed_json = read("/tmp/severian-library-format.json")
-    assert(platform.jsonAsString(changed_json.get("name")) == "Grace")
+    assert(platform.jsonas_string(changed_json.get("name")) == "Grace")
     assert(yaml_file.kind() == "yaml")
     assert(yaml_file.values_for("engineers") == ["Ada", "Grace"])
     assert(yaml_file.scalar("status") == "ready")

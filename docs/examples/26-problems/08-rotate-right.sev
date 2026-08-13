@@ -1,4 +1,4 @@
-def rotateRight(values: list[int], steps: int) -> list[int]:
+def rotate_right(values: list[int], steps: int) -> list[int]:
     count = size(values)
 
     if count == 0:
@@ -14,13 +14,13 @@ def rotateRight(values: list[int], steps: int) -> list[int]:
     return output
 
 test "rotates by two":
-    assert(rotateRight([1, 2, 3, 4, 5], 2) == [4, 5, 1, 2, 3])
+    assert(rotate_right([1, 2, 3, 4, 5], 2) == [4, 5, 1, 2, 3])
 
 test "normalizes a large rotation":
-    assert(rotateRight([1, 2, 3], 5) == [2, 3, 1])
+    assert(rotate_right([1, 2, 3], 5) == [2, 3, 1])
 
 test "zero rotation preserves values":
-    assert(rotateRight([1, 2, 3], 0) == [1, 2, 3])
+    assert(rotate_right([1, 2, 3], 0) == [1, 2, 3])
 
 test "empty input remains empty":
-    assert(rotateRight([], 100) == [])
+    assert(rotate_right([], 100) == [])

@@ -1,4 +1,4 @@
-def validParentheses(text: string) -> bool:
+def valid_parentheses(text: string) -> bool:
     stack := []
 
     for character in text:
@@ -23,17 +23,17 @@ def validParentheses(text: string) -> bool:
     return size(stack) == 0
 
 test "accepts balanced nesting":
-    assert(validParentheses("([]{})"))
+    assert(valid_parentheses("([]{})"))
 
 test "accepts an empty string":
-    assert(validParentheses(""))
+    assert(valid_parentheses(""))
 
 test "rejects crossed nesting":
-    assert(not validParentheses("([)]"))
-    assert(not validParentheses("(]"))
+    assert(not valid_parentheses("([)]"))
+    assert(not valid_parentheses("(]"))
 
 test "rejects an unmatched close":
-    assert(not validParentheses("]"))
+    assert(not valid_parentheses("]"))
 
 test "rejects an unmatched open":
-    assert(not validParentheses("(("))
+    assert(not valid_parentheses("(("))

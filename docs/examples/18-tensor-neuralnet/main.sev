@@ -1,9 +1,9 @@
 import tensor
 
-def portableForward(input: list[float]) -> list[float]:
-    return tensor.parallelRelu(input)
+def portable_forward(input: list[float]) -> list[float]:
+    return tensor.parallel_relu(input)
 
 def main():
     input = [-2.0, 3.0, -4.0, 5.0]
-    print(portableForward(input))
-    print(tensor.parallelRelu(input))
+    print(portable_forward(input))
+    print(tensor.parallel_relu(input))

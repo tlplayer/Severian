@@ -1,6 +1,6 @@
 # Tags: concurrency, channel, queue, fan-in
 
-def channelSuite():
+def channel_suite():
     pass = 0
 
 test "two producers":

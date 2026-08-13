@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: array, stack, simulation
 
-def asteroidCollision(asteroids: list[int]) -> list[int]:
+def asteroid_collision(asteroids: list[int]) -> list[int]:
     stack := []
     top := 0
 
@@ -41,10 +41,10 @@ def asteroidCollision(asteroids: list[int]) -> list[int]:
     return result
 
 test "right asteroid survives":
-    assert(asteroidCollision([5, 10, -5]) == [5, 10])
+    assert(asteroid_collision([5, 10, -5]) == [5, 10])
 
 test "equal asteroids disappear":
-    assert(asteroidCollision([8, -8]) == [])
+    assert(asteroid_collision([8, -8]) == [])
 
 test "moving apart":
-    assert(asteroidCollision([10, 2, -5]) == [10])
+    assert(asteroid_collision([10, 2, -5]) == [10])

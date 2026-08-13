@@ -17,7 +17,7 @@ def partition(values: list[int], left: int, right: int) -> int:
     values[right] = temporary
     return store
 
-def kthLargestQuickselect(values: list[int], k: int) -> int:
+def kth_largest_quickselect(values: list[int], k: int) -> int:
     target = size(values) - k
     left := 0
     right := size(values) - 1
@@ -32,10 +32,10 @@ def kthLargestQuickselect(values: list[int], k: int) -> int:
     return values[target]
 
 test "second largest":
-    assert(kthLargestQuickselect([3, 2, 1, 5, 6, 4], 2) == 5)
+    assert(kth_largest_quickselect([3, 2, 1, 5, 6, 4], 2) == 5)
 
 test "duplicates":
-    assert(kthLargestQuickselect([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
+    assert(kth_largest_quickselect([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
 
 test "smallest requested":
-    assert(kthLargestQuickselect([2, 1], 2) == 1)
+    assert(kth_largest_quickselect([2, 1], 2) == 1)

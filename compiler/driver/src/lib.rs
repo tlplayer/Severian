@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod architecture;
+pub mod build_cache;
 mod compile;
 pub mod coverage;
 mod error;

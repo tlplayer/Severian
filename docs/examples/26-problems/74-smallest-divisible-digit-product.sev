@@ -3,7 +3,7 @@
 # Difficulty: easy
 # Tags: math, enumeration, number-theory
 
-def digitProduct(value: int) -> int:
+def digit_product(value: int) -> int:
     if value == 0:
         return 0
     product := 1
@@ -13,17 +13,17 @@ def digitProduct(value: int) -> int:
         remaining = remaining / 10
     return product
 
-def smallestNumber(start: int, divisor: int) -> int:
+def smallest_number(start: int, divisor: int) -> int:
     candidate := start
-    while digitProduct(candidate) % divisor != 0:
+    while digit_product(candidate) % divisor != 0:
         candidate += 1
     return candidate
 
 test "already divisible":
-    assert(smallestNumber(10, 2) == 10)
-    assert(smallestNumber(22, 4) == 22)
+    assert(smallest_number(10, 2) == 10)
+    assert(smallest_number(22, 4) == 22)
 
 test "searches upward":
-    assert(smallestNumber(19, 2) == 20)
-    assert(smallestNumber(15, 3) == 16)
-    assert(smallestNumber(33, 8) == 38)
+    assert(smallest_number(19, 2) == 20)
+    assert(smallest_number(15, 3) == 16)
+    assert(smallest_number(33, 8) == 38)

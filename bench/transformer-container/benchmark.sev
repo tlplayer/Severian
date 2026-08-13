@@ -1,6 +1,6 @@
 import model
 from model import neuralnet as nn
-from platform import monotonicNs
+from platform import monotonic_ns
 
 def main():
     tokens = model.tensor([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
@@ -14,10 +14,10 @@ def main():
     for warmup in range(0, 20):
         output = encoder.forward(tokens)
 
-    started = monotonicNs()
+    started = monotonic_ns()
     for iteration in range(0, 500):
         output = encoder.forward(tokens)
-    elapsed = monotonicNs() - started
+    elapsed = monotonic_ns() - started
 
     values = model.values(output)
     print(elapsed)

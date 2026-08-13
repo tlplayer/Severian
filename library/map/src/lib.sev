@@ -22,4 +22,4 @@ def clear[key, value](values: map[key, value]):
     platform.map_clear(values)
 
 def setdefault[key, value](values: map[key, value], name: key, fallback: value) -> value:
-    return values.setDefault(name, fallback)
+    return values.set_default(name, fallback)

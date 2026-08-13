@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: array, prefix-product, math
 
-def productExceptSelf(values: list[int]) -> list[int]:
+def product_except_self(values: list[int]) -> list[int]:
     output := []
     for _ in values:
         output.append(1)
@@ -21,10 +21,10 @@ def productExceptSelf(values: list[int]) -> list[int]:
     return output
 
 test "positive values":
-    assert(productExceptSelf([1, 2, 3, 4]) == [24, 12, 8, 6])
+    assert(product_except_self([1, 2, 3, 4]) == [24, 12, 8, 6])
 
 test "contains zero":
-    assert(productExceptSelf([-1, 1, 0, -3, 3]) == [0, 0, 9, 0, 0])
+    assert(product_except_self([-1, 1, 0, -3, 3]) == [0, 0, 9, 0, 0])
 
 test "two values":
-    assert(productExceptSelf([2, 5]) == [5, 2])
+    assert(product_except_self([2, 5]) == [5, 2])

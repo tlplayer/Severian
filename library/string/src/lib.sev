@@ -22,10 +22,10 @@ def find(value: string, needle: string) -> int:
     return value.find(needle)
 
 def startswith(value: string, prefix: string) -> bool:
-    return value.startsWith(prefix)
+    return value.starts_with(prefix)
 
 def endswith(value: string, suffix: string) -> bool:
-    return value.endsWith(suffix)
+    return value.ends_with(suffix)
 
 def lower(value: string) -> string:
     return value.lower()

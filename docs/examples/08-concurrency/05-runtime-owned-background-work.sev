@@ -1,7 +1,7 @@
-def refreshCache():
+def refresh_cache():
     print("cache refreshed")
 
 def main():
     # This example deliberately demonstrates detached runtime ownership.
     unsafe:
-        async refreshCache() with runtime
+        async refresh_cache() with runtime

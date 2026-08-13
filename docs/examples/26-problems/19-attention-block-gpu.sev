@@ -7,10 +7,10 @@ def attention(
     value: Tensor[f64],
 ) -> Tensor[f64]:
     with gpu:
-        key_transposed = tensor.rankedTranspose(key)
-        scores = tensor.rankedMatmul(query, key_transposed)
-        probabilities = tensor.rankedSoftmaxRows(scores)
-        return tensor.rankedMatmul(probabilities, value)
+        key_transposed = tensor.ranked_transpose(key)
+        scores = tensor.ranked_matmul(query, key_transposed)
+        probabilities = tensor.ranked_softmax_rows(scores)
+        return tensor.ranked_matmul(probabilities, value)
 
 test "zero query and key produce a uniform weighted value":
     query = tensor.ranked([0.0, 0.0, 0.0, 0.0], [2, 2])
@@ -19,5 +19,5 @@ test "zero query and key produce a uniform weighted value":
 
     result = attention(query, key, value)
 
-    assert(tensor.rankedShape(result) == [2, 2])
-    assert(tensor.rankedValues(result) == [4.0, 6.0, 4.0, 6.0])
+    assert(tensor.ranked_shape(result) == [2, 2])
+    assert(tensor.ranked_values(result) == [4.0, 6.0, 4.0, 6.0])

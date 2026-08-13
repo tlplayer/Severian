@@ -3,13 +3,13 @@
 # Difficulty: medium
 # Tags: array, binary-search, math
 
-def hoursAtSpeed(piles: list[int], speed: int) -> int:
+def hours_at_speed(piles: list[int], speed: int) -> int:
     hours := 0
     for pile in piles:
         hours += (pile + speed - 1) / speed
     return hours
 
-def minEatingSpeed(piles: list[int], availableHours: int) -> int:
+def min_eating_speed(piles: list[int], available_hours: int) -> int:
     high := piles[0]
     for pile in piles:
         if pile > high:
@@ -17,7 +17,7 @@ def minEatingSpeed(piles: list[int], availableHours: int) -> int:
 
     while low < high with low := 1:
         middle = low + (high - low) / 2
-        if hoursAtSpeed(piles, middle) <= availableHours:
+        if hours_at_speed(piles, middle) <= available_hours:
             high = middle
         else:
             low = middle + 1
@@ -25,10 +25,10 @@ def minEatingSpeed(piles: list[int], availableHours: int) -> int:
     return low
 
 test "representative piles":
-    assert(minEatingSpeed([3, 6, 7, 11], 8) == 4)
+    assert(min_eating_speed([3, 6, 7, 11], 8) == 4)
 
 test "tight deadline":
-    assert(minEatingSpeed([30, 11, 23, 4, 20], 5) == 30)
+    assert(min_eating_speed([30, 11, 23, 4, 20], 5) == 30)
 
 test "one extra hour":
-    assert(minEatingSpeed([30, 11, 23, 4, 20], 6) == 23)
+    assert(min_eating_speed([30, 11, 23, 4, 20], 6) == 23)

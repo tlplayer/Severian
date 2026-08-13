@@ -3,62 +3,62 @@
 # Difficulty: medium
 # Tags: trie, design, string, array
 
-def letterIndex(character: string) -> int:
+def letter_index(character: string) -> int:
     alphabet = "abcdefghijklmnopqrstuvwxyz"
     for index in range(0, size(alphabet)):
         if alphabet[index] == character:
             return index
     return -1
 
-def emptyTrieNode() -> list[int]:
+def empty_trie_node() -> list[int]:
     node := []
     for index in range(0, 27):
         node.append(0)
     return node
 
-def buildTrie(words: list[string]) -> list[list[int]]:
-    trie := [emptyTrieNode()]
+def build_trie(words: list[string]) -> list[list[int]]:
+    trie := [empty_trie_node()]
     for word in words:
         node := 0
         for position in range(0, size(word)):
-            letter = letterIndex(word[position])
+            letter = letter_index(word[position])
             child := trie[node][letter]
             if child == 0:
-                trie.append(emptyTrieNode())
+                trie.append(empty_trie_node())
                 child = size(trie) - 1
                 trie[node][letter] = child
             node = child
         trie[node][26] = 1
     return trie
 
-def trieContains(trie: list[list[int]], word: string) -> bool:
+def trie_contains(trie: list[list[int]], word: string) -> bool:
     node := 0
     for position in range(0, size(word)):
-        letter = letterIndex(word[position])
+        letter = letter_index(word[position])
         node = trie[node][letter]
         if node == 0:
             return false
     return trie[node][26] == 1
 
-def trieStartsWith(trie: list[list[int]], prefix: string) -> bool:
+def trie_starts_with(trie: list[list[int]], prefix: string) -> bool:
     node := 0
     for position in range(0, size(prefix)):
-        letter = letterIndex(prefix[position])
+        letter = letter_index(prefix[position])
         node = trie[node][letter]
         if node == 0:
             return false
     return true
 
 test "word and prefix":
-    trie := buildTrie(["apple"])
-    assert(trieContains(trie, "apple"))
-    assert(not trieContains(trie, "app"))
-    assert(trieStartsWith(trie, "app"))
+    trie := build_trie(["apple"])
+    assert(trie_contains(trie, "apple"))
+    assert(not trie_contains(trie, "app"))
+    assert(trie_starts_with(trie, "app"))
 
 test "inserted prefix":
-    trie := buildTrie(["apple", "app"])
-    assert(trieContains(trie, "app"))
+    trie := build_trie(["apple", "app"])
+    assert(trie_contains(trie, "app"))
 
 test "missing branch":
-    trie := buildTrie(["cat", "car"])
-    assert(not trieStartsWith(trie, "cab"))
+    trie := build_trie(["cat", "car"])
+    assert(not trie_starts_with(trie, "cab"))

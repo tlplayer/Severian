@@ -3,11 +3,11 @@ import tensor
 
 class Qwen2AttentionWeights:
     query: Tensor[bf16]
-    queryBias: Tensor[bf16]
+    query_bias: Tensor[bf16]
     key: Tensor[bf16]
-    keyBias: Tensor[bf16]
+    key_bias: Tensor[bf16]
     value: Tensor[bf16]
-    valueBias: Tensor[bf16]
+    value_bias: Tensor[bf16]
     output: Tensor[bf16]
 
 class KvCache:
@@ -18,101 +18,101 @@ class AttentionResult:
     output: Tensor[bf16]
     cache: KvCache
 
-def stableSoftmax(scores: Tensor[f32]) -> Tensor[f32]:
-    maximum := tensor.maxLastF32(scores)
-    maximum = tensor.broadcastLikeF32(maximum, scores)
-    shifted = tensor.subtractF32(scores, maximum)
-    exponentials = tensor.expF32(shifted)
-    denominator := tensor.sumLastF32(exponentials)
-    denominator = tensor.broadcastLikeF32(denominator, scores)
-    return tensor.divideF32(exponentials, denominator)
+def stable_softmax(scores: Tensor[f32]) -> Tensor[f32]:
+    maximum := tensor.max_last_f_32(scores)
+    maximum = tensor.broadcast_like_f_32(maximum, scores)
+    shifted = tensor.subtract_f_32(scores, maximum)
+    exponentials = tensor.exp_f_32(shifted)
+    denominator := tensor.sum_last_f_32(exponentials)
+    denominator = tensor.broadcast_like_f_32(denominator, scores)
+    return tensor.divide_f_32(exponentials, denominator)
 
-def groupedQueryAttention(
+def grouped_query_attention(
     query: Tensor[bf16],
     key: Tensor[bf16],
     value: Tensor[bf16],
-    causalMask: Tensor[f32],
-    kvRepeat: int,
-    headDimension: int,
+    causal_mask: Tensor[f32],
+    kv_repeat: int,
+    head_dimension: int,
 ) -> Tensor[bf16]:
-    repeatedKey = repeatKeyValue(key, kvRepeat)
-    repeatedValue = repeatKeyValue(value, kvRepeat)
-    transposedKey = tensor.transposeBf16(repeatedKey, [0, 1, 3, 2])
-    scores := tensor.batchedMatmulF32(
-        tensor.bf16ToF32(query),
-        tensor.bf16ToF32(transposedKey),
+    repeated_key = repeat_key_value(key, kv_repeat)
+    repeated_value = repeat_key_value(value, kv_repeat)
+    transposed_key = tensor.transpose_bf_16(repeated_key, [0, 1, 3, 2])
+    scores := tensor.batched_matmul_f_32(
+        tensor.bf16_to_f_32(query),
+        tensor.bf16_to_f_32(transposed_key),
     )
-    scores = tensor.scaleF32(scores, 1.0 / (float(headDimension) ** 0.5))
-    scores = tensor.addF32(scores, causalMask)
-    probabilities = stableSoftmax(scores)
-    context = tensor.batchedMatmulF32(probabilities, tensor.bf16ToF32(repeatedValue))
-    return tensor.f32ToBf16(context)
+    scores = tensor.scale_f_32(scores, 1.0 / (float(head_dimension) ** 0.5))
+    scores = tensor.add_f_32(scores, causal_mask)
+    probabilities = stable_softmax(scores)
+    context = tensor.batched_matmul_f_32(probabilities, tensor.bf16_to_f_32(repeated_value))
+    return tensor.f32_to_bf_16(context)
 
-def repeatKeyValue(value: Tensor[bf16], repeats: int) -> Tensor[bf16]:
-    shape = tensor.shapeBf16(value)
+def repeat_key_value(value: Tensor[bf16], repeats: int) -> Tensor[bf16]:
+    shape = tensor.shape_bf_16(value)
     assert(size(shape) == 4)
-    expanded := tensor.reshapeBf16(
+    expanded := tensor.reshape_bf_16(
         value,
         [shape[0], shape[1], 1, shape[2], shape[3]],
     )
-    expanded = tensor.broadcastBf16(
+    expanded = tensor.broadcast_bf_16(
         expanded,
         [shape[0], shape[1], repeats, shape[2], shape[3]],
     )
-    return tensor.reshapeBf16(
+    return tensor.reshape_bf_16(
         expanded,
         [shape[0], shape[1] * repeats, shape[2], shape[3]],
     )
 
-def appendCache(
+def append_cache(
     cache: KvCache,
     key: Tensor[bf16],
     value: Tensor[bf16],
     position: int,
 ) -> KvCache:
-    keys = tensor.dynamicUpdateSliceBf16(cache.keys, key, [0, 0, position, 0])
-    values = tensor.dynamicUpdateSliceBf16(cache.values, value, [0, 0, position, 0])
+    keys = tensor.dynamic_update_slice_bf_16(cache.keys, key, [0, 0, position, 0])
+    values = tensor.dynamic_update_slice_bf_16(cache.values, value, [0, 0, position, 0])
     return KvCache(keys, values)
 
-def selfAttention(
+def self_attention(
     input: Tensor[bf16],
     weights: Qwen2AttentionWeights,
     cache: KvCache,
     rotary: rope.RopeValues,
-    causalMask: Tensor[f32],
+    causal_mask: Tensor[f32],
     position: int,
-    numHeads: int,
-    numKvHeads: int,
-    headDimension: int,
+    num_heads: int,
+    num_kv_heads: int,
+    head_dimension: int,
 ) -> AttentionResult:
-    queryWeight = tensor.transposeBf16(weights.query, [1, 0])
-    keyWeight = tensor.transposeBf16(weights.key, [1, 0])
-    valueWeight = tensor.transposeBf16(weights.value, [1, 0])
-    query := tensor.matmulBf16(input, queryWeight)
-    key := tensor.matmulBf16(input, keyWeight)
-    value := tensor.matmulBf16(input, valueWeight)
-    query = tensor.addBf16(query, tensor.broadcastLikeBf16(weights.queryBias, query))
-    key = tensor.addBf16(key, tensor.broadcastLikeBf16(weights.keyBias, key))
-    value = tensor.addBf16(value, tensor.broadcastLikeBf16(weights.valueBias, value))
-    inputShape = tensor.shapeBf16(input)
-    query = tensor.reshapeBf16(query, [inputShape[0], inputShape[1], numHeads, headDimension])
-    key = tensor.reshapeBf16(key, [inputShape[0], inputShape[1], numKvHeads, headDimension])
-    value = tensor.reshapeBf16(value, [inputShape[0], inputShape[1], numKvHeads, headDimension])
-    query = tensor.transposeBf16(query, [0, 2, 1, 3])
-    key = tensor.transposeBf16(key, [0, 2, 1, 3])
-    value = tensor.transposeBf16(value, [0, 2, 1, 3])
-    query = rope.applyRotary(query, rotary, headDimension / 2)
-    key = rope.applyRotary(key, rotary, headDimension / 2)
-    updatedCache = appendCache(cache, key, value, position)
-    attended := groupedQueryAttention(
+    query_weight = tensor.transpose_bf_16(weights.query, [1, 0])
+    key_weight = tensor.transpose_bf_16(weights.key, [1, 0])
+    value_weight = tensor.transpose_bf_16(weights.value, [1, 0])
+    query := tensor.matmul_bf_16(input, query_weight)
+    key := tensor.matmul_bf_16(input, key_weight)
+    value := tensor.matmul_bf_16(input, value_weight)
+    query = tensor.add_bf_16(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
+    key = tensor.add_bf_16(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
+    value = tensor.add_bf_16(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
+    input_shape = tensor.shape_bf_16(input)
+    query = tensor.reshape_bf_16(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
+    key = tensor.reshape_bf_16(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    value = tensor.reshape_bf_16(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    query = tensor.transpose_bf_16(query, [0, 2, 1, 3])
+    key = tensor.transpose_bf_16(key, [0, 2, 1, 3])
+    value = tensor.transpose_bf_16(value, [0, 2, 1, 3])
+    query = rope.apply_rotary(query, rotary, head_dimension / 2)
+    key = rope.apply_rotary(key, rotary, head_dimension / 2)
+    updated_cache = append_cache(cache, key, value, position)
+    attended := grouped_query_attention(
         query,
-        updatedCache.keys,
-        updatedCache.values,
-        causalMask,
-        numHeads / numKvHeads,
-        headDimension,
+        updated_cache.keys,
+        updated_cache.values,
+        causal_mask,
+        num_heads / num_kv_heads,
+        head_dimension,
     )
-    attended = tensor.transposeBf16(attended, [0, 2, 1, 3])
-    attended = tensor.reshapeBf16(attended, [-1, -1, numHeads * headDimension])
-    outputWeight = tensor.transposeBf16(weights.output, [1, 0])
-    return AttentionResult(tensor.matmulBf16(attended, outputWeight), updatedCache)
+    attended = tensor.transpose_bf_16(attended, [0, 2, 1, 3])
+    attended = tensor.reshape_bf_16(attended, [-1, -1, num_heads * head_dimension])
+    output_weight = tensor.transpose_bf_16(weights.output, [1, 0])
+    return AttentionResult(tensor.matmul_bf_16(attended, output_weight), updated_cache)

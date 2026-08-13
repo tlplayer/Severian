@@ -3,24 +3,24 @@
 # Difficulty: medium
 # Tags: binary-search-tree, binary-tree, tree, depth-first-search, recursion
 
-def validNode(tree: list[int], present: list[bool], index: int, lower: int, upper: int, hasLower: bool, hasUpper: bool) -> bool:
+def valid_node(tree: list[int], present: list[bool], index: int, lower: int, upper: int, has_lower: bool, has_upper: bool) -> bool:
     if index >= size(tree) or not present[index]:
         return true
     value = tree[index]
-    if hasLower and value <= lower:
+    if has_lower and value <= lower:
         return false
-    if hasUpper and value >= upper:
+    if has_upper and value >= upper:
         return false
-    return validNode(tree, present, index * 2 + 1, lower, value, hasLower, true) and validNode(tree, present, index * 2 + 2, value, upper, true, hasUpper)
+    return valid_node(tree, present, index * 2 + 1, lower, value, has_lower, true) and valid_node(tree, present, index * 2 + 2, value, upper, true, has_upper)
 
-def isValidBst(tree: list[int], present: list[bool]) -> bool:
-    return validNode(tree, present, 0, 0, 0, false, false)
+def is_valid_bst(tree: list[int], present: list[bool]) -> bool:
+    return valid_node(tree, present, 0, 0, 0, false, false)
 
 test "valid tree":
-    assert(isValidBst([2, 1, 3], [true, true, true]))
+    assert(is_valid_bst([2, 1, 3], [true, true, true]))
 
 test "deep violation":
-    assert(not isValidBst([5, 1, 4, 0, 0, 3, 6], [true, true, true, false, false, true, true]))
+    assert(not is_valid_bst([5, 1, 4, 0, 0, 3, 6], [true, true, true, false, false, true, true]))
 
 test "empty tree":
-    assert(isValidBst([], []))
+    assert(is_valid_bst([], []))

@@ -400,7 +400,7 @@ pub(super) fn intern_type(
                         .unwrap_or_else(|| types.intern(TypeKind::Any));
                     types.intern(TypeKind::Option(some))
                 }
-                "fn" => {
+                "Function" => {
                     let any = types.intern(TypeKind::Any);
                     let (parameters, returns) = arguments
                         .split_last()
@@ -526,7 +526,7 @@ pub(super) fn class_type_name(ty: &Type) -> Option<String> {
             | "set"
             | "Tensor"
             | "Channel"
-            | "fn"
+            | "Function"
             | "Result"
             | "Option"
     ) {

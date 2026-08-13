@@ -3,17 +3,17 @@
 # Difficulty: medium
 # Tags: string, hash-table, sorting, counting
 
-def closeStrings(first: string, second: string) -> bool:
-    firstCounts = first.frequencies()
-    secondCounts = second.frequencies()
-    return firstCounts.keys().sorted() == secondCounts.keys().sorted() and firstCounts.values().sorted() == secondCounts.values().sorted()
+def close_strings(first: string, second: string) -> bool:
+    first_counts = first.frequencies()
+    second_counts = second.frequencies()
+    return first_counts.keys().sorted() == second_counts.keys().sorted() and first_counts.values().sorted() == second_counts.values().sorted()
 
 test "same transformations":
-    assert(closeStrings("abc", "bca"))
+    assert(close_strings("abc", "bca"))
 
 test "different character sets":
-    assert(not closeStrings("a", "aa"))
-    assert(not closeStrings("cabbba", "aabbss"))
+    assert(not close_strings("a", "aa"))
+    assert(not close_strings("cabbba", "aabbss"))
 
 test "frequency permutation":
-    assert(closeStrings("cabbba", "abbccc"))
+    assert(close_strings("cabbba", "abbccc"))

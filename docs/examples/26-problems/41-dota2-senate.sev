@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: string, queue, greedy, simulation
 
-def predictPartyVictory(senate: string) -> string:
+def predict_party_victory(senate: string) -> string:
     radiant := []
     dire := []
     for index in range(0, size(senate)):
@@ -12,27 +12,27 @@ def predictPartyVictory(senate: string) -> string:
         else:
             dire.append(index)
 
-    radiantHead := 0
-    direHead := 0
+    radiant_head := 0
+    dire_head := 0
     turn := size(senate)
-    while radiantHead < size(radiant) and direHead < size(dire):
-        if radiant[radiantHead] < dire[direHead]:
+    while radiant_head < size(radiant) and dire_head < size(dire):
+        if radiant[radiant_head] < dire[dire_head]:
             radiant.append(turn)
         else:
             dire.append(turn)
-        radiantHead += 1
-        direHead += 1
+        radiant_head += 1
+        dire_head += 1
         turn += 1
 
-    if radiantHead < size(radiant):
+    if radiant_head < size(radiant):
         return "Radiant"
     return "Dire"
 
 test "radiant wins":
-    assert(predictPartyVictory("RD") == "Radiant")
+    assert(predict_party_victory("RD") == "Radiant")
 
 test "dire survives a cycle":
-    assert(predictPartyVictory("RDD") == "Dire")
+    assert(predict_party_victory("RDD") == "Dire")
 
 test "longer contest":
-    assert(predictPartyVictory("DRRDRDRDRDDRDRDR") == "Radiant")
+    assert(predict_party_victory("DRRDRDRDRDDRDRDR") == "Radiant")

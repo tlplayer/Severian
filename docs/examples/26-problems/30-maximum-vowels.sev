@@ -3,30 +3,30 @@
 # Difficulty: medium
 # Tags: string, sliding-window
 
-def isVowel(character: string) -> bool:
+def is_vowel(character: string) -> bool:
     return character == "a" or character == "e" or character == "i" or character == "o" or character == "u"
 
-def maxVowels(text: string, width: int) -> int:
+def max_vowels(text: string, width: int) -> int:
     vowels := 0
     for index in range(0, width):
-        if isVowel(text[index]):
+        if is_vowel(text[index]):
             vowels += 1
 
     best := vowels
     for right in range(width, size(text)):
-        if isVowel(text[right]):
+        if is_vowel(text[right]):
             vowels += 1
-        if isVowel(text[right - width]):
+        if is_vowel(text[right - width]):
             vowels -= 1
         if vowels > best:
             best = vowels
     return best
 
 test "representative window":
-    assert(maxVowels("abciiidef", 3) == 3)
+    assert(max_vowels("abciiidef", 3) == 3)
 
 test "single vowel":
-    assert(maxVowels("leetcode", 3) == 2)
+    assert(max_vowels("leetcode", 3) == 2)
 
 test "no vowels":
-    assert(maxVowels("rhythms", 4) == 0)
+    assert(max_vowels("rhythms", 4) == 0)

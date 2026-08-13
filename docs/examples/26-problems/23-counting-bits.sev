@@ -3,20 +3,20 @@
 # Difficulty: easy
 # Tags: dynamic-programming, bit-manipulation, math
 
-def countBits(n: int) -> list[int]:
+def count_bits(n: int) -> list[int]:
     bits := [0]
     for value in range(1, n + 1):
         bits.append(bits[value / 2] + value % 2)
     return bits
 
 test "zero":
-    assert(countBits(0) == [0])
+    assert(count_bits(0) == [0])
 
 test "two":
-    assert(countBits(2) == [0, 1, 1])
+    assert(count_bits(2) == [0, 1, 1])
 
 test "five":
-    assert(countBits(5) == [0, 1, 1, 2, 1, 2])
+    assert(count_bits(5) == [0, 1, 1, 2, 1, 2])
 
 test "power boundary":
-    assert(countBits(8) == [0, 1, 1, 2, 1, 2, 2, 3, 1])
+    assert(count_bits(8) == [0, 1, 1, 2, 1, 2, 2, 3, 1])

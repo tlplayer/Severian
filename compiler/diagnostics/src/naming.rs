@@ -186,6 +186,18 @@ impl Checker<'_> {
                             self.name(segment, Role::Module);
                         }
                         for imported in names {
+                            let role = if imported
+                                .name
+                                .name
+                                .chars()
+                                .next()
+                                .is_some_and(char::is_uppercase)
+                            {
+                                Role::Type
+                            } else {
+                                Role::Function
+                            };
+                            self.name(&imported.name, role);
                             if let Some(alias) = &imported.alias {
                                 self.name(alias, Role::Variable);
                             }
@@ -373,7 +385,7 @@ impl Checker<'_> {
                     } else {
                         Role::Function
                     };
-                    self.name_without_fix(&member.member, role);
+                    self.name_direct_fix(&member.member, role);
                     self.expression(&member.object);
                 } else {
                     self.expression(&call.callee);
@@ -387,7 +399,7 @@ impl Checker<'_> {
             }
             Expr::Member(member) => {
                 self.expression(&member.object);
-                self.name_without_fix(&member.member, Role::Variable);
+                self.name_direct_fix(&member.member, Role::Variable);
             }
             Expr::Binary(binary) => {
                 self.expression(&binary.left);
@@ -495,6 +507,17 @@ impl Checker<'_> {
 
     fn name_without_fix(&mut self, identifier: &Ident, role: Role) {
         self.check_name(identifier, role, false);
+    }
+
+    fn name_direct_fix(&mut self, identifier: &Ident, role: Role) {
+        let expected = expected_name(&identifier.name, role);
+        self.check_name(identifier, role, false);
+        if expected != identifier.name {
+            self.report.direct_edits.push(TextEdit {
+                span: identifier.span,
+                replacement: expected,
+            });
+        }
     }
 
     fn check_name(&mut self, identifier: &Ident, role: Role, fixable: bool) {
@@ -913,6 +936,42 @@ mod tests {
         );
         let (report, _) = lint(source);
         assert_eq!(report.diagnostics.warning_count(), 0);
+    }
+
+    #[test]
+    fn fixes_imported_member_names() {
+        let source = concat!(
+            "import tensor\n",
+            "def main():\n",
+            "    values = tensor.rankedValues(input_value)\n",
+        );
+        let (report, tokens) = lint(source);
+        assert_eq!(
+            apply_safe_fixes(source, &tokens, &report),
+            concat!(
+                "import tensor\n",
+                "def main():\n",
+                "    values = tensor.ranked_values(input_value)\n",
+            )
+        );
+    }
+
+    #[test]
+    fn fixes_imported_function_names_and_calls() {
+        let source = concat!(
+            "from platform import monotonicNs\n",
+            "def main():\n",
+            "    print(monotonicNs())\n",
+        );
+        let (report, tokens) = lint(source);
+        assert_eq!(
+            apply_safe_fixes(source, &tokens, &report),
+            concat!(
+                "from platform import monotonic_ns\n",
+                "def main():\n",
+                "    print(monotonic_ns())\n",
+            )
+        );
     }
 
     #[test]

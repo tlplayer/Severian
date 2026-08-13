@@ -1,5 +1,5 @@
 unsafe:
-    native("__sev_monotonic_ns") def monotonicNs() -> int
+    native("__sev_monotonic_ns") def monotonic_ns() -> int
 
     native("__sev_qwen_tokenize") def qwen_tokenize(model_path: string, text: string) -> list[int]
 
@@ -97,7 +97,7 @@ unsafe:
     native("__sev_file_read_exact") def fileReadExact(handle: Any, count: int) -> Result[list[int], IOError]
     native("__sev_file_read_exact") def file_read_exact(handle: Any, count: int) -> Result[list[int], IOError]
 
-    native("__sev_bytes_utf8") def bytesUtf8(bytes: list[int]) -> Result[string, IOError]
+    native("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> Result[string, IOError]
     native("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> Result[string, IOError]
 
     native("__sev_file_seek") def fileSeek(handle: Any, offset: int) -> Result[unit, IOError]
@@ -138,51 +138,51 @@ test "native file ABI":
             assert(false, error)
 
 unsafe:
-    native("__sev_json_decode") def jsonDecode(text: string) -> Result[Any, JsonError]
+    native("__sev_json_decode") def jsondecode(text: string) -> Result[Any, JsonError]
 
 test "native JSON decode ABI":
-    switch jsonDecode("42"):
+    switch jsondecode("42"):
         ok value:
             assert(value == 42)
         failure error:
             assert(false, error)
 
 unsafe:
-    native("__sev_json_encode") def jsonEncode(value: Any) -> string
+    native("__sev_json_encode") def jsonencode(value: Any) -> string
 
-    native("__sev_json_object_get") def jsonObjectGet(value: Any, key: string) -> Any
+    native("__sev_json_object_get") def jsonobject_get(value: Any, key: string) -> Any
 
-    native("__sev_json_object_keys") def jsonObjectKeys(value: Any) -> list[string]
+    native("__sev_json_object_keys") def jsonobject_keys(value: Any) -> list[string]
 
-    native("__sev_json_object_values") def jsonObjectValues(value: Any) -> list[Any]
+    native("__sev_json_object_values") def jsonobject_values(value: Any) -> list[Any]
 
-    native("__sev_json_object_set") def jsonObjectSet(value: Any, key: string, item: Any)
+    native("__sev_json_object_set") def jsonobject_set(value: Any, key: string, item: Any)
 
-    native("__sev_json_as_string") def jsonAsString(value: Any) -> string
+    native("__sev_json_as_string") def jsonas_string(value: Any) -> string
 
-    native("__sev_json_as_int") def jsonAsInt(value: Any) -> int
+    native("__sev_json_as_int") def jsonas_int(value: Any) -> int
 
-    native("__sev_json_as_float") def jsonAsFloat(value: Any) -> float
+    native("__sev_json_as_float") def jsonas_float(value: Any) -> float
 
-    native("__sev_json_as_bool") def jsonAsBool(value: Any) -> bool
+    native("__sev_json_as_bool") def jsonas_bool(value: Any) -> bool
 
-    native("__sev_json_as_int_list") def jsonAsIntList(value: Any) -> list[int]
+    native("__sev_json_as_int_list") def jsonas_int_list(value: Any) -> list[int]
 
-    native("__sev_json_as_string_list") def jsonAsStringList(value: Any) -> list[string]
-    native("__sev_json_is_null") def jsonIsNull(value: Any) -> bool
-    native("__sev_json_kind") def jsonKind(value: Any) -> string
+    native("__sev_json_as_string_list") def jsonas_string_list(value: Any) -> list[string]
+    native("__sev_json_is_null") def jsonis_null(value: Any) -> bool
+    native("__sev_json_kind") def jsonkind(value: Any) -> string
 
 test "native JSON encode ABI":
-    assert(jsonEncode([1, 2, 3]) == "[1,2,3]")
+    assert(jsonencode([1, 2, 3]) == "[1,2,3]")
 
 unsafe:
-    native("__sev_log_info") def logInfo(message: string)
+    native("__sev_log_info") def log_info(message: string)
 
 test "native log ABI":
-    logInfo("platform ready")
+    log_info("platform ready")
 
 unsafe:
-    native("__sev_log_error") def logError(message: string, cause: Any)
+    native("__sev_log_error") def log_error(message: string, cause: Any)
 
     native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
 
@@ -197,45 +197,45 @@ test with integration "native network ABI":
         ok echoed:
             assert(echoed == "platform loopback")
         failure error:
-            logError("native network ABI failed", error)
+            log_error("native network ABI failed", error)
             assert(false, error)
 
 unsafe:
-    native("__sev_regex_matches") def regexMatches(text: string, pattern: string) -> bool
+    native("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool
 
 test "native regex ABI":
-    assert(regexMatches("release-42", "^[a-z]+-[0-9]+$"))
+    assert(regex_matches("release-42", "^[a-z]+-[0-9]+$"))
 
 unsafe:
-    native("__sev_host_container_backend") def hostContainerBackend() -> string
+    native("__sev_host_container_backend") def host_container_backend() -> string
 
-    native("__sev_host_kvm_api_version") def hostKvmApiVersion() -> int
+    native("__sev_host_kvm_api_version") def host_kvm_api_version() -> int
 
-    native("__sev_host_kvm_create_probe") def hostKvmCreateProbe() -> bool
+    native("__sev_host_kvm_create_probe") def host_kvm_create_probe() -> bool
 
     native("__sev_host_page_size") def host_page_size() -> int
 
-    native("__sev_database_open") def databaseOpen(path: string) -> Result[Database, DatabaseError]
+    native("__sev_database_open") def database_open(path: string) -> Result[Database, DatabaseError]
 
-    native("__sev_database_execute") def databaseExecute(database: Database, sql: string) -> Result[int, DatabaseError]
+    native("__sev_database_execute") def database_execute(database: Database, sql: string) -> Result[int, DatabaseError]
 
-    native("__sev_database_query") def databaseQuery(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+    native("__sev_database_query") def database_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    native("__sev_database_close") def databaseClose(database: Database) -> Result[unit, DatabaseError]
+    native("__sev_database_close") def database_close(database: Database) -> Result[unit, DatabaseError]
 
-    native("__sev_database_server_start") def databaseServerStart(path: string) -> Result[DatabaseServer, DatabaseError]
+    native("__sev_database_server_start") def database_server_start(path: string) -> Result[DatabaseServer, DatabaseError]
 
-    native("__sev_database_server_address") def databaseServerAddress(server: DatabaseServer) -> string
+    native("__sev_database_server_address") def database_server_address(server: DatabaseServer) -> string
 
-    native("__sev_database_server_connect") def databaseServerConnect(address: string) -> Result[DatabaseConnection, DatabaseError]
+    native("__sev_database_server_connect") def database_server_connect(address: string) -> Result[DatabaseConnection, DatabaseError]
 
-    native("__sev_database_server_execute") def databaseServerExecute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
+    native("__sev_database_server_execute") def database_server_execute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
 
-    native("__sev_database_server_query") def databaseServerQuery(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
+    native("__sev_database_server_query") def database_server_query(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    native("__sev_database_server_close") def databaseServerClose(connection: DatabaseConnection) -> Result[unit, DatabaseError]
+    native("__sev_database_server_close") def database_server_close(connection: DatabaseConnection) -> Result[unit, DatabaseError]
 
-    native("__sev_database_server_stop") def databaseServerStop(server: DatabaseServer) -> Result[unit, DatabaseError]
+    native("__sev_database_server_stop") def database_server_stop(server: DatabaseServer) -> Result[unit, DatabaseError]
 
     native("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Result[Database, DatabaseError]
     native("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]

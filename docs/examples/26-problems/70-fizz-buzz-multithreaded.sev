@@ -3,64 +3,64 @@
 # Difficulty: medium
 # Tags: concurrency, channel, simulation
 
-def fizzWorker(n: int, gate: Channel[int], output: Channel[string]):
+def fizz_worker(n: int, gate: Channel[int], output: Channel[string]):
     for value in range(1, n + 1):
         if value % 3 == 0 and value % 5 != 0:
             await gate
             emitted = async send "fizz" with output
             await emitted
 
-def buzzWorker(n: int, gate: Channel[int], output: Channel[string]):
+def buzz_worker(n: int, gate: Channel[int], output: Channel[string]):
     for value in range(1, n + 1):
         if value % 5 == 0 and value % 3 != 0:
             await gate
             emitted = async send "buzz" with output
             await emitted
 
-def fizzBuzzWorker(n: int, gate: Channel[int], output: Channel[string]):
+def fizz_buzz_worker(n: int, gate: Channel[int], output: Channel[string]):
     for value in range(1, n + 1):
         if value % 15 == 0:
             await gate
             emitted = async send "fizzbuzz" with output
             await emitted
 
-def numberWorker(n: int, gate: Channel[int], output: Channel[string]):
+def number_worker(n: int, gate: Channel[int], output: Channel[string]):
     for value in range(1, n + 1):
         if value % 3 != 0 and value % 5 != 0:
             await gate
             emitted = async send string(value) with output
             await emitted
 
-def concurrentFizzBuzz(n: int) -> list[string]:
-    fizzGate = Channel[int] with Buffer(1)
-    buzzGate = Channel[int] with Buffer(1)
-    bothGate = Channel[int] with Buffer(1)
-    numberGate = Channel[int] with Buffer(1)
+def concurrent_fizz_buzz(n: int) -> list[string]:
+    fizz_gate = Channel[int] with Buffer(1)
+    buzz_gate = Channel[int] with Buffer(1)
+    both_gate = Channel[int] with Buffer(1)
+    number_gate = Channel[int] with Buffer(1)
     output = Channel[string] with Buffer(1)
-    fizzTask = async fizzWorker(n, fizzGate, output) with self
-    buzzTask = async buzzWorker(n, buzzGate, output) with self
-    bothTask = async fizzBuzzWorker(n, bothGate, output) with self
-    numberTask = async numberWorker(n, numberGate, output) with self
+    fizz_task = async fizz_worker(n, fizz_gate, output) with self
+    buzz_task = async buzz_worker(n, buzz_gate, output) with self
+    both_task = async fizz_buzz_worker(n, both_gate, output) with self
+    number_task = async number_worker(n, number_gate, output) with self
     result := []
     for value in range(1, n + 1):
         if value % 15 == 0:
-            signal = async send 1 with bothGate
+            signal = async send 1 with both_gate
             await signal
         else value % 3 == 0:
-            signal = async send 1 with fizzGate
+            signal = async send 1 with fizz_gate
             await signal
         else value % 5 == 0:
-            signal = async send 1 with buzzGate
+            signal = async send 1 with buzz_gate
             await signal
         else:
-            signal = async send 1 with numberGate
+            signal = async send 1 with number_gate
             await signal
         result.append(await output)
-    await fizzTask, buzzTask, bothTask, numberTask
+    await fizz_task, buzz_task, both_task, number_task
     return result
 
 test "through fifteen":
-    assert(concurrentFizzBuzz(15) == ["1", "2", "fizz", "4", "buzz", "fizz", "7", "8", "fizz", "buzz", "11", "fizz", "13", "14", "fizzbuzz"])
+    assert(concurrent_fizz_buzz(15) == ["1", "2", "fizz", "4", "buzz", "fizz", "7", "8", "fizz", "buzz", "11", "fizz", "13", "14", "fizzbuzz"])
 
 test "small prefix":
-    assert(concurrentFizzBuzz(5) == ["1", "2", "fizz", "4", "buzz"])
+    assert(concurrent_fizz_buzz(5) == ["1", "2", "fizz", "4", "buzz"])

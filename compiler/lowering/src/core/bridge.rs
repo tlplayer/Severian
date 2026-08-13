@@ -57,9 +57,23 @@ pub(super) fn native_bridge_source_for_target(
         "typedef struct { uint64_t magic; const char *tag; sev_value *field; } sev_variant;\n\n",
         "typedef struct { uint64_t magic; int64_t rank; int64_t *shape; int64_t *strides; int64_t size; } sev_tensor_header;\n\n",
         "typedef struct { void *function; void *environment; } sev_closure;\n\n",
+        "typedef struct sev_allocation { struct sev_allocation *previous; struct sev_allocation *next; size_t size; long double alignment; } sev_allocation;\n",
         "static uint64_t sev_allocated_bytes = 0;\n",
         "static uint64_t sev_allocation_count = 0;\n",
-        "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); __atomic_fetch_add(&sev_allocated_bytes, size, __ATOMIC_RELAXED); __atomic_fetch_add(&sev_allocation_count, 1, __ATOMIC_RELAXED); return value; }\n",
+        "static pthread_mutex_t sev_allocation_mutex = PTHREAD_MUTEX_INITIALIZER;\n",
+        "static sev_allocation *sev_allocations = NULL;\n",
+        "static bool sev_cleanup_registered = false;\n",
+        "static void sev_cleanup_allocations(void) { pthread_mutex_lock(&sev_allocation_mutex); sev_allocation *allocation = sev_allocations; sev_allocations = NULL; pthread_mutex_unlock(&sev_allocation_mutex); while (allocation) { sev_allocation *next = allocation->next; free(allocation); allocation = next; } }\n",
+        "static void *sev_allocate(size_t size) { sev_allocation *allocation = calloc(1, sizeof(*allocation) + size); if (!allocation) abort(); allocation->size = size; pthread_mutex_lock(&sev_allocation_mutex); if (!sev_cleanup_registered) { if (atexit(sev_cleanup_allocations) != 0) abort(); sev_cleanup_registered = true; } allocation->next = sev_allocations; if (sev_allocations) sev_allocations->previous = allocation; sev_allocations = allocation; pthread_mutex_unlock(&sev_allocation_mutex); __atomic_fetch_add(&sev_allocated_bytes, size, __ATOMIC_RELAXED); __atomic_fetch_add(&sev_allocation_count, 1, __ATOMIC_RELAXED); return allocation + 1; }\n",
+        "static void sev_release(void *value) { if (!value) return; sev_allocation *allocation = (sev_allocation *)value - 1; pthread_mutex_lock(&sev_allocation_mutex); if (allocation->previous) allocation->previous->next = allocation->next; else sev_allocations = allocation->next; if (allocation->next) allocation->next->previous = allocation->previous; pthread_mutex_unlock(&sev_allocation_mutex); free(allocation); }\n",
+        "static void *sev_reallocate(void *value, size_t size) { if (!value) return sev_allocate(size); sev_allocation *old = (sev_allocation *)value - 1; void *replacement = sev_allocate(size); memcpy(replacement, value, old->size < size ? old->size : size); sev_release(value); return replacement; }\n",
+        "static void *sev_callocate(size_t count, size_t size) { if (size && count > SIZE_MAX / size) abort(); return sev_allocate(count * size); }\n",
+        "static char *sev_duplicate(const char *value) { size_t size = strlen(value) + 1; char *copy = sev_allocate(size); memcpy(copy, value, size); return copy; }\n",
+        "static void sev_system_release(void *value) { free(value); }\n",
+        "#define free(value) sev_release(value)\n",
+        "#define realloc(value, size) sev_reallocate(value, size)\n",
+        "#define calloc(count, size) sev_callocate(count, size)\n",
+        "#define strdup(value) sev_duplicate(value)\n",
         "void __sev_coverage_hit(int64_t id) { const char *path = getenv(\"SEVERIAN_COVERAGE_FILE\"); if (!path || !*path) return; int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666); if (fd < 0) abort(); char line[32]; int size = snprintf(line, sizeof(line), \"%lu\\n\", (uint64_t)id); if (size <= 0 || write(fd, line, (size_t)size) != size) { close(fd); abort(); } close(fd); }\n",
         "int64_t __sev_monotonic_ns(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (int64_t)value.tv_sec * 1000000000 + value.tv_nsec; }\n",
         "int64_t __sev_allocation_bytes(void) { return (int64_t)__atomic_load_n(&sev_allocated_bytes, __ATOMIC_RELAXED); }\n",
@@ -820,7 +834,7 @@ void *__sev_process_arguments(void) {
     size_t length = count > 0 && buffer[count - 1] == '\0' ? (size_t)count - 1 : (size_t)count;
     __sev_collection_push(arguments, __sev_box_string(sev_string_range(buffer, 0, (int64_t)length)));
   }
-  free(buffer);
+  sev_system_release(buffer);
   fclose(file);
   return arguments;
 }

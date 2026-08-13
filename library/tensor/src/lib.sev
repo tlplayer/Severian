@@ -5,8 +5,8 @@ class SafeTensorEntry:
     name: string
     dtype: string
     shape: list[int]
-    byteStart: int
-    byteEnd: int
+    byte_start: int
+    byte_end: int
     shard: string
     mapping: Any
 
@@ -16,64 +16,64 @@ class SafeTensorEntry:
         for dimension in shape:
             assert(dimension >= 0)
             elements *= dimension
-        assert(byteEnd - byteStart == elements * 2)
-        return mappedBf16(mapping, byteStart, shape)
+        assert(byte_end - byte_start == elements * 2)
+        return mapped_bf_16(mapping, byte_start, shape)
 
     def bytes() -> int:
-        return byteEnd - byteStart
+        return byte_end - byte_start
 
 class SafeTensorStore:
-    modelDirectory: string
-    weightMap: Any
-    loadedShardNames: list[string]
-    loadedMappings: list[Any]
-    loadedHeaders: list[Any]
-    loadedDataStarts: list[int]
+    model_directory: string
+    weight_map: Any
+    loaded_shard_names: list[string]
+    loaded_mappings: list[Any]
+    loaded_headers: list[Any]
+    loaded_data_starts: list[int]
 
     def keys() -> list[string]:
-        return json.object_keys(weightMap)
+        return json.object_keys(weight_map)
 
     def get(name: string) -> Result[SafeTensorEntry, IOError]:
-        shard = json.as_string(json.object_get(weightMap, name))
-        shardIndex := -1
-        for index in indices(loadedShardNames):
-            if loadedShardNames[index] == shard:
-                shardIndex = index
-        if shardIndex < 0:
-            path = modelDirectory + "/" + shard
+        shard = json.as_string(json.object_get(weight_map, name))
+        shard_index := -1
+        for index in indices(loaded_shard_names):
+            if loaded_shard_names[index] == shard:
+                shard_index = index
+        if shard_index < 0:
+            path = model_directory + "/" + shard
             handle = file.open(path)
             prefix = file.read_exact(handle, 8)
-            headerLength = file.little_endian_u64(prefix)
-            headerBytes = file.read_exact(handle, headerLength)
-            headerText = file.utf8(headerBytes)
+            header_length = file.little_endian_u64(prefix)
+            header_bytes = file.read_exact(handle, header_length)
+            header_text = file.utf8(header_bytes)
             closed = file.close(handle)
-            header = json.decode[Any](headerText)
+            header = json.decode[Any](header_text)
             mapping = file.map(path)
-            loadedShardNames.append(shard)
-            loadedMappings.append(mapping)
-            loadedHeaders.append(header)
-            loadedDataStarts.append(8 + headerLength)
-            shardIndex = size(loadedShardNames) - 1
-        header = loadedHeaders[shardIndex]
-        mapping = loadedMappings[shardIndex]
+            loaded_shard_names.append(shard)
+            loaded_mappings.append(mapping)
+            loaded_headers.append(header)
+            loaded_data_starts.append(8 + header_length)
+            shard_index = size(loaded_shard_names) - 1
+        header = loaded_headers[shard_index]
+        mapping = loaded_mappings[shard_index]
         metadata = json.object_get(header, name)
         dtype = json.as_string(json.object_get(metadata, "dtype"))
         shape = json.as_int_list(json.object_get(metadata, "shape"))
         offsets = json.as_int_list(json.object_get(metadata, "data_offsets"))
         assert(size(offsets) == 2)
-        dataStart = loadedDataStarts[shardIndex]
-        byteStart = dataStart + offsets[0]
-        byteEnd = dataStart + offsets[1]
-        assert(byteStart >= dataStart)
-        assert(byteEnd >= byteStart)
-        assert(byteEnd <= file.mapped_bytes(mapping))
-        return SafeTensorEntry(name, dtype, shape, byteStart, byteEnd, shard, mapping)
+        data_start = loaded_data_starts[shard_index]
+        byte_start = data_start + offsets[0]
+        byte_end = data_start + offsets[1]
+        assert(byte_start >= data_start)
+        assert(byte_end >= byte_start)
+        assert(byte_end <= file.mapped_bytes(mapping))
+        return SafeTensorEntry(name, dtype, shape, byte_start, byte_end, shard, mapping)
 
-def openSafetensors(modelDirectory: string) -> Result[SafeTensorStore, IOError]:
-    indexFile = file.read(modelDirectory + "/model.safetensors.index.json")
-    index = indexFile.value()
-    weightMap = json.object_get(index, "weight_map")
-    return SafeTensorStore(modelDirectory, weightMap, [], [], [], [])
+def open_safetensors(model_directory: string) -> Result[SafeTensorStore, IOError]:
+    index_file = file.read(model_directory + "/model.safetensors.index.json")
+    index = index_file.value()
+    weight_map = json.object_get(index, "weight_map")
+    return SafeTensorStore(model_directory, weight_map, [], [], [], [])
 
 unsafe:
     # Backend handle construction and lifetime live at the tensor boundary.
@@ -100,87 +100,87 @@ unsafe:
 
     native("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
 
-    native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
+    native("__sev_tensor_to_list") def ranked_values(value: Tensor[f64]) -> list[float]
 
     native("__sev_tensor_to_list") def values(value: Tensor[f64]) -> list[float]
 
-    native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_shape") def ranked_shape(value: Tensor[f64]) -> list[int]
 
-    native("__sev_tensor_strides") def rankedStrides(value: Tensor[f64]) -> list[int]
+    native("__sev_tensor_strides") def ranked_strides(value: Tensor[f64]) -> list[int]
 
-    native("__sev_tensor_slice") def rankedSlice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
+    native("__sev_tensor_slice") def ranked_slice(value: Tensor[f64], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[f64]
 
-    native("__sev_tensor_materialize") def rankedMaterialize(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_materialize") def ranked_materialize(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_sum") def rankedSum(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_sum") def ranked_sum(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_relu") def rankedRelu(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu") def ranked_relu(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_add") def rankedAdd(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_add") def ranked_add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_matmul") def rankedMatmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_matmul") def ranked_matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_transpose") def rankedTranspose(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_transpose") def ranked_transpose(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_scale") def rankedScale(value: Tensor[f64], scale: float) -> Tensor[f64]
+    native("__sev_tensor_scale") def ranked_scale(value: Tensor[f64], scale: float) -> Tensor[f64]
 
-    native("__sev_tensor_softmax_rows") def rankedSoftmaxRows(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_rows") def ranked_softmax_rows(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_layer_norm") def rankedLayerNorm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_layer_norm") def ranked_layer_norm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
-    native("__sev_tensor_relu_backward") def rankedReluBackward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_relu_backward") def ranked_relu_backward(input: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_softmax_backward") def rankedSoftmaxBackward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_softmax_backward") def ranked_softmax_backward(output: Tensor[f64], upstream: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_layer_norm_backward") def rankedLayerNormBackward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_tensor_layer_norm_backward") def ranked_layer_norm_backward(input: Tensor[f64], upstream: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
 
-    native("__sev_tensor_backward_mse") def rankedBackwardMse(output: Tensor[f64])
+    native("__sev_tensor_backward_mse") def ranked_backward_mse(output: Tensor[f64])
 
-    native("__sev_tensor_gradient") def rankedGradient(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_tensor_gradient") def ranked_gradient(value: Tensor[f64]) -> Tensor[f64]
 
-    native("__sev_tensor_sgd") def rankedSgd(value: Tensor[f64], learningRate: float) -> Tensor[f64]
+    native("__sev_tensor_sgd") def ranked_sgd(value: Tensor[f64], learning_rate: float) -> Tensor[f64]
 
-    native("__sev_safetensor_bf16_view") def mappedBf16(mapping: Any, byteOffset: int, shape: list[int]) -> Tensor[bf16]
+    native("__sev_safetensor_bf16_view") def mapped_bf_16(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[bf16]
 
-    native("__sev_safetensor_bf16_shape") def mappedBf16Shape(value: Tensor[bf16]) -> list[int]
-    native("__sev_tensor_bf16_shape") def shapeBf16(value: Tensor[bf16]) -> list[int]
+    native("__sev_safetensor_bf16_shape") def mapped_bf_16_shape(value: Tensor[bf16]) -> list[int]
+    native("__sev_tensor_bf16_shape") def shape_bf_16(value: Tensor[bf16]) -> list[int]
 
 # These are compiler-recognized tensor primitives. On the XLA target they are
 # decomposed into StableHLO; they are not opaque model/runtime operations.
-    native("__sev_tensor_bf16_add") def addBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_f32_add") def addF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_multiply") def multiplyBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_f32_multiply") def multiplyF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_subtract") def subtractF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_divide") def divideF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_matmul") def matmulBf16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_f32_batched_matmul") def batchedMatmulF32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_reshape") def reshapeBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_f32_reshape") def reshapeF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
-    native("__sev_tensor_bf16_transpose") def transposeBf16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_f32_transpose") def transposeF32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
-    native("__sev_tensor_bf16_to_f32") def bf16ToF32(value: Tensor[bf16]) -> Tensor[f32]
-    native("__sev_tensor_f32_to_bf16") def f32ToBf16(value: Tensor[f32]) -> Tensor[bf16]
-    native("__sev_tensor_f32_mean_last") def meanLastF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_max_last") def maxLastF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_sum_last") def sumLastF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_rsqrt") def rsqrtF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_exp") def expF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_sigmoid") def sigmoidBf16(value: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_f32_broadcast_like") def broadcastLikeF32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_broadcast_like") def broadcastLikeBf16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_bf16_broadcast") def broadcastBf16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_f32_broadcast") def broadcastF32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
-    native("__sev_tensor_bf16_gather") def gatherBf16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
-    native("__sev_tensor_bf16_dynamic_slice") def dynamicSliceBf16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_bf16_dynamic_update_slice") def dynamicUpdateSliceBf16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_bf16_dynamic_update_slice_axis") def dynamicUpdateSliceAxisBf16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
-    native("__sev_tensor_f32_scale") def scaleF32(value: Tensor[f32], scale: float) -> Tensor[f32]
-    native("__sev_tensor_f32_cosine") def cosineF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_sine") def sineF32(value: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_f32_slice") def sliceF32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
-    native("__sev_tensor_f32_concatenate") def concatenateF32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
-    native("__sev_tensor_f32_add_scalar") def addScalarF32(value: Tensor[f32], scalar: float) -> Tensor[f32]
+    native("__sev_tensor_bf16_add") def add_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_add") def add_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_multiply") def multiply_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_multiply") def multiply_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_subtract") def subtract_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_divide") def divide_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_matmul") def matmul_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_batched_matmul") def batched_matmul_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_reshape") def reshape_bf_16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_reshape") def reshape_f_32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_transpose") def transpose_bf_16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_transpose") def transpose_f_32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_to_f32") def bf16_to_f_32(value: Tensor[bf16]) -> Tensor[f32]
+    native("__sev_tensor_f32_to_bf16") def f32_to_bf_16(value: Tensor[f32]) -> Tensor[bf16]
+    native("__sev_tensor_f32_mean_last") def mean_last_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_max_last") def max_last_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_sum_last") def sum_last_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_rsqrt") def rsqrt_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_exp") def exp_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_sigmoid") def sigmoid_bf_16(value: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_f32_broadcast_like") def broadcast_like_f_32(value: Tensor[f32], target: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_bf16_broadcast_like") def broadcast_like_bf_16(value: Tensor[bf16], target: Tensor[bf16]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_broadcast") def broadcast_bf_16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_f32_broadcast") def broadcast_f_32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
+    native("__sev_tensor_bf16_gather") def gather_bf_16(value: Tensor[bf16], indices: Tensor[i64]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_slice") def dynamic_slice_bf_16(value: Tensor[bf16], starts: list[int], sizes: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_update_slice") def dynamic_update_slice_bf_16(value: Tensor[bf16], update: Tensor[bf16], starts: list[int]) -> Tensor[bf16]
+    native("__sev_tensor_bf16_dynamic_update_slice_axis") def dynamic_update_slice_axis_bf_16(value: Tensor[bf16], update: Tensor[bf16], index: Tensor[i64], axis: int) -> Tensor[bf16]
+    native("__sev_tensor_f32_scale") def scale_f_32(value: Tensor[f32], scale: float) -> Tensor[f32]
+    native("__sev_tensor_f32_cosine") def cosine_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_sine") def sine_f_32(value: Tensor[f32]) -> Tensor[f32]
+    native("__sev_tensor_f32_slice") def slice_f_32(value: Tensor[f32], starts: list[int], limits: list[int], strides: list[int]) -> Tensor[f32]
+    native("__sev_tensor_f32_concatenate") def concatenate_f_32(values: list[Tensor[f32]], axis: int) -> Tensor[f32]
+    native("__sev_tensor_f32_add_scalar") def add_scalar_f_32(value: Tensor[f32], scalar: float) -> Tensor[f32]
     native("__sev_tensor_from_list") def tensor(values: list[float], shape: list[int]) -> Tensor[f64]
     native("__sev_tensor_zeros") def zeros(shape: list[int]) -> Tensor[f64]
     native("__sev_tensor_ones") def ones(shape: list[int]) -> Tensor[f64]
@@ -197,80 +197,80 @@ unsafe:
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
-    assert(rankedShape(value) == [2, 2])
-    assert(rankedValues(value) == [1.0, 2.0, 3.0, 4.0])
-    assert(rankedStrides(value) == [2, 1])
+    assert(ranked_shape(value) == [2, 2])
+    assert(ranked_values(value) == [1.0, 2.0, 3.0, 4.0])
+    assert(ranked_strides(value) == [2, 1])
 
 test "ranked slices are strided views with explicit materialization":
     value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
-    sliced = rankedSlice(value, [0, 0], [2, 3], [1, 2])
-    assert(rankedShape(sliced) == [2, 2])
-    assert(rankedStrides(sliced) == [3, 2])
-    assert(rankedValues(sliced) == [1.0, 3.0, 4.0, 6.0])
-    materialized = rankedMaterialize(sliced)
-    assert(rankedStrides(materialized) == [2, 1])
-    assert(rankedValues(materialized) == [1.0, 3.0, 4.0, 6.0])
+    sliced = ranked_slice(value, [0, 0], [2, 3], [1, 2])
+    assert(ranked_shape(sliced) == [2, 2])
+    assert(ranked_strides(sliced) == [3, 2])
+    assert(ranked_values(sliced) == [1.0, 3.0, 4.0, 6.0])
+    materialized = ranked_materialize(sliced)
+    assert(ranked_strides(materialized) == [2, 1])
+    assert(ranked_values(materialized) == [1.0, 3.0, 4.0, 6.0])
 
 test "ranked ReLU executes the native linalg kernel":
     value = ranked([-2.0, 0.0, 3.0], [3])
-    assert(rankedValues(rankedRelu(value)) == [0.0, 0.0, 3.0])
+    assert(ranked_values(ranked_relu(value)) == [0.0, 0.0, 3.0])
 
 test "ranked elementwise addition executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0], [3])
     right = ranked([4.0, 5.0, 6.0], [3])
-    assert(rankedValues(rankedAdd(left, right)) == [5.0, 7.0, 9.0])
+    assert(ranked_values(ranked_add(left, right)) == [5.0, 7.0, 9.0])
 
 test "ranked elementwise addition follows trailing-axis broadcasting":
     left = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
     right = ranked([10.0, 20.0, 30.0], [3])
-    assert(rankedValues(rankedAdd(left, right)) == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0])
+    assert(ranked_values(ranked_add(left, right)) == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0])
 
 test "ranked sum lowers as a reduction":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
-    assert(rankedValues(rankedSum(value)) == [10.0])
+    assert(ranked_values(ranked_sum(value)) == [10.0])
 
 test "rank-two contraction executes the native linalg kernel":
     left = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
     right = ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
-    assert(rankedValues(rankedMatmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
+    assert(ranked_values(ranked_matmul(left, right)) == [19.0, 22.0, 43.0, 50.0])
 
 test "ranked transpose swaps tensor axes":
     value = ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
-    assert(rankedValues(rankedTranspose(value)) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
+    assert(ranked_values(ranked_transpose(value)) == [1.0, 4.0, 2.0, 5.0, 3.0, 6.0])
 
 test "ranked scaling is elementwise":
     value = ranked([1.0, -2.0], [1, 2])
-    assert(rankedValues(rankedScale(value, 0.5)) == [0.5, -1.0])
+    assert(ranked_values(ranked_scale(value, 0.5)) == [0.5, -1.0])
 
 test "row softmax normalizes a constant row":
     value = ranked([0.0, 0.0], [1, 2])
-    assert(rankedValues(rankedSoftmaxRows(value)) == [0.5, 0.5])
+    assert(ranked_values(ranked_softmax_rows(value)) == [0.5, 0.5])
 
 test "layer normalization centers a constant row":
     value = ranked([2.0, 2.0], [1, 2])
-    assert(rankedValues(rankedLayerNorm(value)) == [0.0, 0.0])
+    assert(ranked_values(ranked_layer_norm(value)) == [0.0, 0.0])
 
 test "ranked ReLU backward masks inactive elements":
     input = ranked([-1.0, 2.0], [1, 2])
     upstream = ranked([3.0, 4.0], [1, 2])
-    assert(rankedValues(rankedReluBackward(input, upstream)) == [0.0, 4.0])
+    assert(ranked_values(ranked_relu_backward(input, upstream)) == [0.0, 4.0])
 
 test "row softmax backward removes a constant upstream":
     output = ranked([0.25, 0.75], [1, 2])
     upstream = ranked([1.0, 1.0], [1, 2])
-    assert(rankedValues(rankedSoftmaxBackward(output, upstream)) == [0.0, 0.0])
+    assert(ranked_values(ranked_softmax_backward(output, upstream)) == [0.0, 0.0])
 
 test "layer norm backward removes a constant upstream":
     input = ranked([-1.0, 1.0], [1, 2])
     upstream = ranked([1.0, 1.0], [1, 2])
-    assert(rankedValues(rankedLayerNormBackward(input, upstream)) == [0.0, 0.0])
+    assert(ranked_values(ranked_layer_norm_backward(input, upstream)) == [0.0, 0.0])
 
 test "reverse mode accumulates gradients and SGD updates a leaf":
     input = ranked([-1.0, 2.0], [1, 2])
-    output = rankedRelu(input)
-    rankedBackwardMse(output)
-    assert(rankedValues(rankedGradient(input)) == [0.0, 2.0])
-    assert(rankedValues(rankedSgd(input, 0.1)) == [-1.0, 1.8])
+    output = ranked_relu(input)
+    ranked_backward_mse(output)
+    assert(ranked_values(ranked_gradient(input)) == [0.0, 2.0])
+    assert(ranked_values(ranked_sgd(input, 0.1)) == [-1.0, 1.8])
 
 def vector(values: list[float]) -> list[float]:
     return values
@@ -287,7 +287,7 @@ def relu(values: list[float]) -> list[float]:
 test "relu clips negative values":
     assert(relu([-2.0, 0.0, 3.0]) == [0.0, 0.0, 3.0])
 
-def reluChunk(values: list[float], start: int, end: int) -> list[float]:
+def relu_chunk(values: list[float], start: int, end: int) -> list[float]:
     output := []
     for index in range(start, end):
         value = values[index]
@@ -297,12 +297,12 @@ def reluChunk(values: list[float], start: int, end: int) -> list[float]:
             output.append(0.0)
     return output
 
-def parallelRelu(values: list[float]) -> list[float]:
+def parallel_relu(values: list[float]) -> list[float]:
     middle = size(values) / 2
-    leftTask = async reluChunk(values, 0, middle) with self
-    rightTask = async reluChunk(values, middle, size(values)) with self
-    left = await leftTask
-    right = await rightTask
+    left_task = async relu_chunk(values, 0, middle) with self
+    right_task = async relu_chunk(values, middle, size(values)) with self
+    left = await left_task
+    right = await right_task
 
     output := []
     for value in left:
@@ -312,9 +312,9 @@ def parallelRelu(values: list[float]) -> list[float]:
     return output
 
 test "parallel relu preserves element order":
-    assert(parallelRelu([-2.0, 3.0, -4.0, 5.0]) == [0.0, 3.0, 0.0, 5.0])
+    assert(parallel_relu([-2.0, 3.0, -4.0, 5.0]) == [0.0, 3.0, 0.0, 5.0])
 
-def matVec(
+def mat_vec(
     weights: list[float],
     rows: int,
     columns: int,
@@ -329,7 +329,7 @@ def matVec(
     return output
 
 test "rank-two tensor-vector product":
-    result = matVec([1.0, 2.0, 3.0, 4.0], 2, 2, [5.0, 6.0])
+    result = mat_vec([1.0, 2.0, 3.0, 4.0], 2, 2, [5.0, 6.0])
     assert(result == [17.0, 39.0])
 
 def add(left: list[float], right: list[float]) -> list[float]:
@@ -338,7 +338,7 @@ def add(left: list[float], right: list[float]) -> list[float]:
         output.append(left[index] + right[index])
     return output
 
-def reluJacobian(values: list[float]) -> list[float]:
+def relu_jacobian(values: list[float]) -> list[float]:
     width = size(values)
     jacobian := []
     for row in range(0, width):
@@ -350,14 +350,14 @@ def reluJacobian(values: list[float]) -> list[float]:
     return jacobian
 
 test "relu jacobian is a flattened diagonal tensor":
-    assert(reluJacobian([2.0, -1.0]) == [1.0, 0.0, 0.0, 0.0])
+    assert(relu_jacobian([2.0, -1.0]) == [1.0, 0.0, 0.0, 0.0])
 
-def absValue(value: float) -> float:
+def abs_value(value: float) -> float:
     if value < 0.0:
         return -value
     return value
 
-def leakyRelu(values: list[float], slope: float = 0.01) -> list[float]:
+def leaky_relu(values: list[float], slope: float = 0.01) -> list[float]:
     output := []
     for value in values:
         if value > 0.0:
@@ -367,41 +367,41 @@ def leakyRelu(values: list[float], slope: float = 0.01) -> list[float]:
     return output
 
 test "leaky relu retains a negative gradient":
-    assert(leakyRelu([-2.0, 3.0], 0.5) == [-1.0, 3.0])
+    assert(leaky_relu([-2.0, 3.0], 0.5) == [-1.0, 3.0])
 
-def fastSigmoidScalar(value: float) -> float:
-    return 0.5 + value / (2.0 * (1.0 + absValue(value)))
+def fast_sigmoid_scalar(value: float) -> float:
+    return 0.5 + value / (2.0 * (1.0 + abs_value(value)))
 
-def fastSigmoid(values: list[float]) -> list[float]:
+def fast_sigmoid(values: list[float]) -> list[float]:
     output := []
     for value in values:
-        output.append(fastSigmoidScalar(value))
+        output.append(fast_sigmoid_scalar(value))
     return output
 
 test "fast sigmoid is centered at one half":
-    assert(fastSigmoid([0.0]) == [0.5])
+    assert(fast_sigmoid([0.0]) == [0.5])
 
-def fastTanhScalar(value: float) -> float:
-    return value / (1.0 + absValue(value))
+def fast_tanh_scalar(value: float) -> float:
+    return value / (1.0 + abs_value(value))
 
-def fastTanh(values: list[float]) -> list[float]:
+def fast_tanh(values: list[float]) -> list[float]:
     output := []
     for value in values:
-        output.append(fastTanhScalar(value))
+        output.append(fast_tanh_scalar(value))
     return output
 
 test "fast tanh is centered at zero":
-    assert(fastTanh([0.0]) == [0.0])
+    assert(fast_tanh([0.0]) == [0.0])
 
-def geluScalar(value: float) -> float:
+def gelu_scalar(value: float) -> float:
     cubic = value ** 3
     curved = 0.7978845608 * (value + 0.044715 * cubic)
-    return 0.5 * value * (1.0 + fastTanhScalar(curved))
+    return 0.5 * value * (1.0 + fast_tanh_scalar(curved))
 
 def gelu(values: list[float]) -> list[float]:
     output := []
     for value in values:
-        output.append(geluScalar(value))
+        output.append(gelu_scalar(value))
     return output
 
 test "gelu preserves the origin":
@@ -410,13 +410,13 @@ test "gelu preserves the origin":
 def swish(values: list[float]) -> list[float]:
     output := []
     for value in values:
-        output.append(value * fastSigmoidScalar(value))
+        output.append(value * fast_sigmoid_scalar(value))
     return output
 
 test "swish preserves the origin":
     assert(swish([0.0]) == [0.0])
 
-def reluBackward(input: list[float], upstream: list[float]) -> list[float]:
+def relu_backward(input: list[float], upstream: list[float]) -> list[float]:
     gradient := []
     for index in indices(input):
         if input[index] > 0.0:
@@ -425,7 +425,7 @@ def reluBackward(input: list[float], upstream: list[float]) -> list[float]:
             gradient.append(0.0)
     return gradient
 
-def reluBackwardChunk(
+def relu_backward_chunk(
     input: list[float],
     upstream: list[float],
     start: int,
@@ -440,9 +440,9 @@ def reluBackwardChunk(
     return gradient
 
 test "relu backward masks inactive values":
-    assert(reluBackward([-2.0, 3.0], [1.0, 1.0]) == [0.0, 1.0])
+    assert(relu_backward([-2.0, 3.0], [1.0, 1.0]) == [0.0, 1.0])
 
-def leakyReluBackward(
+def leaky_relu_backward(
     input: list[float],
     upstream: list[float],
     slope: float = 0.01,
@@ -455,17 +455,17 @@ def leakyReluBackward(
             gradient.append(upstream[index] * slope)
     return gradient
 
-def fastSigmoidJacobian(values: list[float]) -> list[float]:
+def fast_sigmoid_jacobian(values: list[float]) -> list[float]:
     width = size(values)
     jacobian := []
     for row in range(0, width):
         for column in range(0, width):
             if row == column:
-                scale = 1.0 + absValue(values[row])
+                scale = 1.0 + abs_value(values[row])
                 jacobian.append(1.0 / (2.0 * scale * scale))
             else:
                 jacobian.append(0.0)
     return jacobian
 
 test "sigmoid jacobian contains the centered derivative":
-    assert(fastSigmoidJacobian([0.0, 0.0]) == [0.5, 0.0, 0.0, 0.5])
+    assert(fast_sigmoid_jacobian([0.0, 0.0]) == [0.5, 0.0, 0.0, 0.5])

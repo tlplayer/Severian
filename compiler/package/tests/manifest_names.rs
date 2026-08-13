@@ -1,4 +1,4 @@
-use severian_package::nearest_manifest;
+use severian_package::{find_manifest, nearest_manifest};
 use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
@@ -44,6 +44,27 @@ fn old_manifest_names_are_not_discovered() {
     .unwrap();
 
     assert!(nearest_manifest(&directory).is_none());
+
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn standalone_sources_do_not_inherit_an_ancestor_workspace_manifest() {
+    let directory = temporary_directory();
+    let source = directory.join("bench/kernel.sev");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(
+        directory.join("package.toml"),
+        "[workspace]\nmembers = []\n",
+    )
+    .unwrap();
+    std::fs::write(&source, "def kernel():\n    return\n").unwrap();
+
+    assert!(find_manifest(&source).is_none());
+    assert_eq!(
+        nearest_manifest(source.parent().unwrap()),
+        Some(directory.join("package.toml"))
+    );
 
     let _ = std::fs::remove_dir_all(directory);
 }

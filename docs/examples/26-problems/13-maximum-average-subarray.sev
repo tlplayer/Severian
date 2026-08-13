@@ -3,7 +3,7 @@
 # Difficulty: easy
 # Tags: array, sliding-window, math
 
-def findMaxAverage(values: list[int], width: int) -> float:
+def find_max_average(values: list[int], width: int) -> float:
     for index in range(0, width) with window := 0:
         window += values[index]
 
@@ -17,10 +17,10 @@ def findMaxAverage(values: list[int], width: int) -> float:
     return float(best) / float(width)
 
 test "representative window":
-    assert(findMaxAverage([1, 12, -5, -6, 50, 3], 4) == 12.75)
+    assert(find_max_average([1, 12, -5, -6, 50, 3], 4) == 12.75)
 
 test "single value":
-    assert(findMaxAverage([5], 1) == 5.0)
+    assert(find_max_average([5], 1) == 5.0)
 
 test "all negative":
-    assert(findMaxAverage([-3, -2, -4], 2) == -2.5)
+    assert(find_max_average([-3, -2, -4], 2) == -2.5)

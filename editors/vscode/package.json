@@ -21,10 +21,12 @@
   "activationEvents": [
     "onLanguage:severian",
     "onCommand:severian.run",
+    "onCommand:severian.runWith",
     "onCommand:severian.test",
     "onCommand:severian.profile",
     "onCommand:severian.debug",
     "onCommand:severian.build",
+    "onCommand:severian.buildWith",
     "onCommand:severian.coverage.run",
     "onCommand:severian.coverage.load",
     "onCommand:severian.coverage.clear"
@@ -75,6 +77,12 @@
         "icon": "$(run)"
       },
       {
+        "command": "severian.runWith",
+        "title": "Run With…",
+        "category": "Severian",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "severian.test",
         "title": "Test",
         "category": "Severian",
@@ -97,6 +105,12 @@
         "title": "Build",
         "category": "Severian",
         "icon": "$(tools)"
+      },
+      {
+        "command": "severian.buildWith",
+        "title": "Build With…",
+        "category": "Severian",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "severian.coverage.run",
@@ -123,6 +137,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "severian.runWith",
+          "when": "editorLangId == severian",
+          "group": "navigation@1.1"
+        },
+        {
           "command": "severian.test",
           "when": "editorLangId == severian",
           "group": "navigation@2"
@@ -141,6 +160,11 @@
           "command": "severian.build",
           "when": "editorLangId == severian",
           "group": "navigation@5"
+        },
+        {
+          "command": "severian.buildWith",
+          "when": "editorLangId == severian",
+          "group": "navigation@5.1"
         },
         {
           "command": "severian.coverage.run",

@@ -3,7 +3,7 @@
 # Difficulty: easy
 # Tags: string, two-pointers
 
-def isSubsequence(candidate: string, text: string) -> bool:
+def is_subsequence(candidate: string, text: string) -> bool:
     matched := 0
     for index in range(0, size(text)):
         if matched < size(candidate):
@@ -12,10 +12,10 @@ def isSubsequence(candidate: string, text: string) -> bool:
     return matched == size(candidate)
 
 test "ordered characters":
-    assert(isSubsequence("abc", "ahbgdc"))
+    assert(is_subsequence("abc", "ahbgdc"))
 
 test "wrong order":
-    assert(not isSubsequence("axc", "ahbgdc"))
+    assert(not is_subsequence("axc", "ahbgdc"))
 
 test "empty candidate":
-    assert(isSubsequence("", "anything"))
+    assert(is_subsequence("", "anything"))

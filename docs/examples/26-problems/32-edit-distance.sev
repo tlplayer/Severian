@@ -11,28 +11,28 @@ def minimum3(first: int, second: int, third: int) -> int:
         result = third
     return result
 
-def minDistance(first: string, second: string) -> int:
+def min_distance(first: string, second: string) -> int:
     row := [0]
     while size(row) <= size(second):
         row.append(size(row))
 
-    for firstIndex in range(0, size(first)):
+    for first_index in range(0, size(first)):
         diagonal := row[0]
-        row[0] = firstIndex + 1
-        for secondIndex in range(0, size(second)):
-            above = row[secondIndex + 1]
-            if first[firstIndex] == second[secondIndex]:
-                row[secondIndex + 1] = diagonal
+        row[0] = first_index + 1
+        for second_index in range(0, size(second)):
+            above = row[second_index + 1]
+            if first[first_index] == second[second_index]:
+                row[second_index + 1] = diagonal
             else:
-                row[secondIndex + 1] = 1 + minimum3(diagonal, above, row[secondIndex])
+                row[second_index + 1] = 1 + minimum3(diagonal, above, row[second_index])
             diagonal = above
     return row[size(second)]
 
 test "horse to ros":
-    assert(minDistance("horse", "ros") == 3)
+    assert(min_distance("horse", "ros") == 3)
 
 test "intention to execution":
-    assert(minDistance("intention", "execution") == 5)
+    assert(min_distance("intention", "execution") == 5)
 
 test "empty source":
-    assert(minDistance("", "abc") == 3)
+    assert(min_distance("", "abc") == 3)

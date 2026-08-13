@@ -3,19 +3,19 @@ import pql
 import storage
 
 def open(path: string) -> Result[Database, DatabaseError]:
-    return platform.databaseOpen(path)
+    return platform.database_open(path)
 
 def memory() -> Result[Database, DatabaseError]:
     return open(":memory:")
 
 def execute(database: Database, statement: string) -> Result[int, DatabaseError]:
-    return platform.databaseExecute(database, statement)
+    return platform.database_execute(database, statement)
 
 def query(database: Database, statement: string) -> Result[list[list[string]], DatabaseError]:
-    return platform.databaseQuery(database, statement)
+    return platform.database_query(database, statement)
 
 def close(database: Database) -> Result[unit, DatabaseError]:
-    return platform.databaseClose(database)
+    return platform.database_close(database)
 
 def begin(database: Database) -> Result[int, DatabaseError]:
     return execute(database, "BEGIN")
@@ -26,32 +26,32 @@ def commit(database: Database) -> Result[int, DatabaseError]:
 def rollback(database: Database) -> Result[int, DatabaseError]:
     return execute(database, "ROLLBACK")
 
-def queryPql(database: Database, schema: pql.Schema, statement: pql.Query) -> Result[list[list[string]], DatabaseError]:
+def query_pql(database: Database, schema: pql.Schema, statement: pql.Query) -> Result[list[list[string]], DatabaseError]:
     assert(pql.valid(schema, statement))
     return query(database, pql.sql(schema, statement, "sqlite"))
 
 def start(path: string) -> Result[DatabaseServer, DatabaseError]:
-    return platform.databaseServerStart(path)
+    return platform.database_server_start(path)
 
 def address(server: DatabaseServer) -> string:
-    return platform.databaseServerAddress(server)
+    return platform.database_server_address(server)
 
-def connect(serverAddress: string) -> Result[DatabaseConnection, DatabaseError]:
-    return platform.databaseServerConnect(serverAddress)
+def connect(server_address: string) -> Result[DatabaseConnection, DatabaseError]:
+    return platform.database_server_connect(server_address)
 
-def remoteExecute(connection: DatabaseConnection, statement: string) -> Result[int, DatabaseError]:
-    return platform.databaseServerExecute(connection, statement)
+def remote_execute(connection: DatabaseConnection, statement: string) -> Result[int, DatabaseError]:
+    return platform.database_server_execute(connection, statement)
 
-def remoteQuery(connection: DatabaseConnection, statement: string) -> Result[list[list[string]], DatabaseError]:
-    return platform.databaseServerQuery(connection, statement)
+def remote_query(connection: DatabaseConnection, statement: string) -> Result[list[list[string]], DatabaseError]:
+    return platform.database_server_query(connection, statement)
 
 def disconnect(connection: DatabaseConnection) -> Result[unit, DatabaseError]:
-    return platform.databaseServerClose(connection)
+    return platform.database_server_close(connection)
 
 def stop(server: DatabaseServer) -> Result[unit, DatabaseError]:
-    return platform.databaseServerStop(server)
+    return platform.database_server_stop(server)
 
-def mustExecute(database: Database, statement: string) -> int:
+def must_execute(database: Database, statement: string) -> int:
     switch execute(database, statement):
         ok changed:
             return changed
@@ -59,29 +59,29 @@ def mustExecute(database: Database, statement: string) -> int:
             assert(false, error)
             return -1
 
-def mustClose(database: Database):
+def must_close(database: Database):
     switch close(database):
         ok:
             return
         failure error:
             assert(false, error)
 
-def mustRemoteExecute(connection: DatabaseConnection, statement: string) -> int:
-    switch remoteExecute(connection, statement):
+def must_remote_execute(connection: DatabaseConnection, statement: string) -> int:
+    switch remote_execute(connection, statement):
         ok changed:
             return changed
         failure error:
             assert(false, error)
             return -1
 
-def mustDisconnect(connection: DatabaseConnection):
+def must_disconnect(connection: DatabaseConnection):
     switch disconnect(connection):
         ok:
             return
         failure error:
             assert(false, error)
 
-def mustStop(server: DatabaseServer):
+def must_stop(server: DatabaseServer):
     switch stop(server):
         ok:
             return
@@ -118,9 +118,9 @@ test "transactions roll back mutations":
         ok database:
             switch execute(database, "CREATE TABLE events(id INTEGER PRIMARY KEY, name TEXT)"):
                 ok _:
-                    mustExecute(database, "BEGIN")
-                    mustExecute(database, "INSERT INTO events(id, name) VALUES (1, 'temporary')")
-                    mustExecute(database, "ROLLBACK")
+                    must_execute(database, "BEGIN")
+                    must_execute(database, "INSERT INTO events(id, name) VALUES (1, 'temporary')")
+                    must_execute(database, "ROLLBACK")
                     switch query(database, "SELECT COUNT(*) FROM events"):
                         ok rows:
                             assert(rows[0][0] == "0")
@@ -134,11 +134,11 @@ test "transactions roll back mutations":
 test "PQL validation feeds executable SQL":
     switch memory():
         ok database:
-            mustExecute(database, "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)")
-            mustExecute(database, "INSERT INTO users(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
+            must_execute(database, "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)")
+            must_execute(database, "INSERT INTO users(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
             schema = pql.Schema("users", ["id", "name"], ["int", "string"], [false, true], "id")
             statement = pql.Query("users", ["id", "name"], ["id", "name"], [false, false], "", "", [])
-            switch queryPql(database, schema, statement):
+            switch query_pql(database, schema, statement):
                 ok rows:
                     assert(size(rows) == 2)
                     assert(rows[0][0] == "1")
@@ -154,10 +154,10 @@ test "persistent databases survive reconnect":
     path = "/tmp/severian-database-persistence.sqlite"
     switch open(path):
         ok database:
-            mustExecute(database, "CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY, value TEXT)")
-            mustExecute(database, "DELETE FROM settings")
-            mustExecute(database, "INSERT INTO settings(id, value) VALUES (1, 'durable')")
-            mustClose(database)
+            must_execute(database, "CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY, value TEXT)")
+            must_execute(database, "DELETE FROM settings")
+            must_execute(database, "INSERT INTO settings(id, value) VALUES (1, 'durable')")
+            must_close(database)
         failure error:
             assert(false, error)
     switch open(path):
@@ -169,7 +169,7 @@ test "persistent databases survive reconnect":
                     assert(rows[0][1] == "durable")
                 failure error:
                     assert(false, error)
-            mustClose(database)
+            must_close(database)
         failure error:
             assert(false, error)
 
@@ -178,9 +178,9 @@ test with integration "database server accepts remote execute and query clients"
         ok server:
             switch connect(address(server)):
                 ok connection:
-                    mustRemoteExecute(connection, "CREATE TABLE jobs(id INTEGER PRIMARY KEY, state TEXT)")
-                    mustRemoteExecute(connection, "INSERT INTO jobs(id, state) VALUES (1, 'queued'), (2, 'running')")
-                    switch remoteQuery(connection, "SELECT id, state FROM jobs ORDER BY id"):
+                    must_remote_execute(connection, "CREATE TABLE jobs(id INTEGER PRIMARY KEY, state TEXT)")
+                    must_remote_execute(connection, "INSERT INTO jobs(id, state) VALUES (1, 'queued'), (2, 'running')")
+                    switch remote_query(connection, "SELECT id, state FROM jobs ORDER BY id"):
                         ok rows:
                             assert(size(rows) == 2)
                             assert(rows[0][0] == "1")
@@ -189,9 +189,9 @@ test with integration "database server accepts remote execute and query clients"
                             assert(rows[1][1] == "running")
                         failure error:
                             assert(false, error)
-                    mustDisconnect(connection)
+                    must_disconnect(connection)
                 failure error:
                     assert(false, error)
-            mustStop(server)
+            must_stop(server)
         failure error:
             assert(false, error)

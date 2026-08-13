@@ -8,22 +8,22 @@ def greater(left: int, right: int) -> int:
         return left
     return right
 
-def maxProfit(prices: list[int], fee: int) -> int:
+def max_profit(prices: list[int], fee: int) -> int:
     cash := 0
     holding := 0 - prices[0]
 
     for index in range(1, size(prices)):
-        previousCash = cash
+        previous_cash = cash
         cash = greater(cash, holding + prices[index] - fee)
-        holding = greater(holding, previousCash - prices[index])
+        holding = greater(holding, previous_cash - prices[index])
 
     return cash
 
 test "two transactions":
-    assert(maxProfit([1, 3, 2, 8, 4, 9], 2) == 8)
+    assert(max_profit([1, 3, 2, 8, 4, 9], 2) == 8)
 
 test "delayed sale":
-    assert(maxProfit([1, 3, 7, 5, 10, 3], 3) == 6)
+    assert(max_profit([1, 3, 7, 5, 10, 3], 3) == 6)
 
 test "no profitable sale":
-    assert(maxProfit([5, 4, 3], 1) == 0)
+    assert(max_profit([5, 4, 3], 1) == 0)

@@ -53,7 +53,7 @@ def encode_mapping(mapping: map[string, list[string]]) -> string:
 def mapping_values(mapping: map[string, list[string]], key: string) -> list[string]:
     return mapping.get(key, [])
 
-class YAML:
+class Yaml:
     source_path: string
     mapping: map[string, list[string]]
 
@@ -107,7 +107,7 @@ class YAML:
     def set(key: string, value: Any):
         if json.kind(value) == "array":
             mapping[key] = json.as_string_list(value)
-        elif json.kind(value) == "string":
+        else json.kind(value) == "string":
             mapping[key] = [json.as_string(value)]
         else:
             mapping[key] = [json.encode(value)]
@@ -129,11 +129,11 @@ class YAML:
         values = mapping_values(mapping, key)
         return values[0] if size(values) > 0 else fallback
 
-def document(text: string) -> YAML:
-    return YAML("", parse_mapping(text))
+def document(text: string) -> Yaml:
+    return Yaml("", parse_mapping(text))
 
-def file_document(path: string, text: string) -> YAML:
-    return YAML(path, parse_mapping(text))
+def file_document(path: string, text: string) -> Yaml:
+    return Yaml(path, parse_mapping(text))
 
 test "YAML mapping documents support lists and scalars":
     value := document("engineers:\n- Ada\n- Grace\nstatus: ready\n")

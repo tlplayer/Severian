@@ -4,62 +4,62 @@ import rope
 import tensor
 
 class Qwen2DecoderWeights:
-    inputNorm: Tensor[bf16]
+    input_norm: Tensor[bf16]
     attention: attention.Qwen2AttentionWeights
-    postAttentionNorm: Tensor[bf16]
+    post_attention_norm: Tensor[bf16]
     mlp: mlp.Qwen2MlpWeights
 
 class DecoderResult:
     hidden: Tensor[bf16]
     cache: attention.KvCache
 
-def rmsNorm(
+def rms_norm(
     input: Tensor[bf16],
     weight: Tensor[bf16],
     epsilon: float,
 ) -> Tensor[bf16]:
-    inputF32 = tensor.bf16ToF32(input)
-    square = tensor.multiplyF32(inputF32, inputF32)
-    variance := tensor.meanLastF32(square)
-    variance = tensor.addScalarF32(variance, epsilon)
-    inverseRms := tensor.rsqrtF32(variance)
-    inverseRms = tensor.broadcastLikeF32(inverseRms, inputF32)
-    normalized = tensor.multiplyF32(inputF32, inverseRms)
-    normalizedBf16 = tensor.f32ToBf16(normalized)
-    broadcastWeight = tensor.broadcastLikeBf16(weight, normalizedBf16)
-    return tensor.multiplyBf16(normalizedBf16, broadcastWeight)
+    input_f_32 = tensor.bf16_to_f_32(input)
+    square = tensor.multiply_f_32(input_f_32, input_f_32)
+    variance := tensor.mean_last_f_32(square)
+    variance = tensor.add_scalar_f_32(variance, epsilon)
+    inverse_rms := tensor.rsqrt_f_32(variance)
+    inverse_rms = tensor.broadcast_like_f_32(inverse_rms, input_f_32)
+    normalized = tensor.multiply_f_32(input_f_32, inverse_rms)
+    normalized_bf_16 = tensor.f32_to_bf_16(normalized)
+    broadcast_weight = tensor.broadcast_like_bf_16(weight, normalized_bf_16)
+    return tensor.multiply_bf_16(normalized_bf_16, broadcast_weight)
 
-def decoderLayer(
+def decoder_layer(
     hidden: Tensor[bf16],
     weights: Qwen2DecoderWeights,
     cache: attention.KvCache,
     rotary: rope.RopeValues,
-    causalMask: Tensor[f32],
+    causal_mask: Tensor[f32],
     position: int,
     epsilon: float,
-    numHeads: int,
-    numKvHeads: int,
-    headDimension: int,
+    num_heads: int,
+    num_kv_heads: int,
+    head_dimension: int,
 ) -> DecoderResult:
     current := hidden
     residual := current
-    normalized := rmsNorm(current, weights.inputNorm, epsilon)
-    attended = attention.selfAttention(
+    normalized := rms_norm(current, weights.input_norm, epsilon)
+    attended = attention.self_attention(
         normalized,
         weights.attention,
         cache,
         rotary,
-        causalMask,
+        causal_mask,
         position,
-        numHeads,
-        numKvHeads,
-        headDimension,
+        num_heads,
+        num_kv_heads,
+        head_dimension,
     )
-    current = tensor.addBf16(residual, attended.output)
+    current = tensor.add_bf_16(residual, attended.output)
     residual = current
-    normalized = rmsNorm(current, weights.postAttentionNorm, epsilon)
-    feedForward = mlp.qwen2Mlp(normalized, weights.mlp)
+    normalized = rms_norm(current, weights.post_attention_norm, epsilon)
+    feed_forward = mlp.qwen2_mlp(normalized, weights.mlp)
     return DecoderResult(
-        tensor.addBf16(residual, feedForward),
+        tensor.add_bf_16(residual, feed_forward),
         attended.cache,
     )

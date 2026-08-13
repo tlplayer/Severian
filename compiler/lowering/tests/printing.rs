@@ -447,7 +447,7 @@ fn reports_unranked_tensor_regions_instead_of_panicking() {
                 id: HirId::synthetic(1),
                 ty: tensor,
                 expression: Box::new(Expression::Call {
-                    target: CallTarget::native("tensor.rankedMatmul", "__sev_tensor_matmul")
+                    target: CallTarget::native("tensor.ranked_matmul", "__sev_tensor_matmul")
                         .with_signature([tensor, tensor], tensor),
                     args: vec![
                         Expression::Typed {

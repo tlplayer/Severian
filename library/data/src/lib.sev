@@ -50,13 +50,13 @@ def normalized_key(row: Row, columns: list[string], lowercase_columns: list[stri
         if column in lowercase_columns:
             value = value.lower()
         values.append(value)
-    return platform.jsonEncode(values)
+    return platform.jsonencode(values)
 
-def callback_key(row: Row, columns: list[string], normalize: fn[string, Any, Any]) -> string:
+def callback_key(row: Row, columns: list[string], normalize: Function[string, Any, Any]) -> string:
     values := []
     for column in columns:
         values.append(normalize(column, row.get(column)))
-    return platform.jsonEncode(values)
+    return platform.jsonencode(values)
 
 def project_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> Data:
     selected := []
@@ -76,7 +76,7 @@ def deduplicate_records(source_columns: list[string], source_rows: list[list[Any
             seen[key] = true
     return Data(source_columns, retained)
 
-def deduplicate_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: fn[string, Any, Any]) -> Data:
+def deduplicate_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: Function[string, Any, Any]) -> Data:
     seen := {}
     retained := []
     for values in source_rows:
@@ -87,7 +87,7 @@ def deduplicate_records_by(source_columns: list[string], source_rows: list[list[
             seen[key] = true
     return Data(source_columns, retained)
 
-def index_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: fn[string, Any, Any]) -> map[string, bool]:
+def index_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: Function[string, Any, Any]) -> map[string, bool]:
     index := {}
     for values in source_rows:
         index[callback_key(Row(source_columns, values), columns, normalize)] = true
@@ -211,7 +211,7 @@ class Data:
             transformed.append(values)
         return Data(columns_data, transformed)
 
-    def transform(column: string, operation: fn[Any, Any]) -> Data:
+    def transform(column: string, operation: Function[Any, Any]) -> Data:
         position = column_position(columns_data, column)
         transformed := []
         for original in rows_data:
@@ -240,7 +240,7 @@ class Data:
                 filtered.append(values)
         return Data(columns_data, filtered)
 
-    def filter(predicate: fn[Row, bool]) -> Data:
+    def filter(predicate: Function[Row, bool]) -> Data:
         filtered := []
         for values in rows_data:
             row = Row(columns_data, values)
@@ -266,13 +266,13 @@ class Data:
     def unique_normalized(columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Data:
         return deduplicate_records(columns_data, rows_data, columns, lowercase_columns, trim_strings)
 
-    def unique_by(columns: list[string], normalize: fn[string, Any, Any]) -> Data:
+    def unique_by(columns: list[string], normalize: Function[string, Any, Any]) -> Data:
         return deduplicate_records_by(columns_data, rows_data, columns, normalize)
 
     def index(columns: list[string]) -> map[string, bool]:
         return index_records_by(columns_data, rows_data, columns, |column, value| value)
 
-    def index_by(columns: list[string], normalize: fn[string, Any, Any]) -> map[string, bool]:
+    def index_by(columns: list[string], normalize: Function[string, Any, Any]) -> map[string, bool]:
         return index_records_by(columns_data, rows_data, columns, normalize)
 
     def group(columns: list[string]) -> list[Data]:

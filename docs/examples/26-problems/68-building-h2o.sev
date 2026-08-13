@@ -3,38 +3,38 @@
 # Difficulty: medium
 # Tags: concurrency, barrier, channel
 
-def releaseHydrogen(permit: Channel[int], completed: Channel[int], output: Channel[string]):
+def release_hydrogen(permit: Channel[int], completed: Channel[int], output: Channel[string]):
     await permit
     emitted = async send "H" with output
     await emitted
     done = async send 1 with completed
     await done
 
-def releaseOxygen(completed: Channel[int], output: Channel[string]):
+def release_oxygen(completed: Channel[int], output: Channel[string]):
     await completed
     await completed
     emitted = async send "O" with output
     await emitted
 
-def buildWater(molecules: int) -> list[string]:
+def build_water(molecules: int) -> list[string]:
     result := []
     for _ in range(molecules):
         hydrogen = Channel[int] with Buffer(2)
         completed = Channel[int] with Buffer(2)
         output = Channel[string] with Buffer(3)
-        firstPermit = async send 1 with hydrogen
-        secondPermit = async send 1 with hydrogen
-        oxygenTask = async releaseOxygen(completed, output) with self
-        firstHydrogen = async releaseHydrogen(hydrogen, completed, output) with self
-        secondHydrogen = async releaseHydrogen(hydrogen, completed, output) with self
+        first_permit = async send 1 with hydrogen
+        second_permit = async send 1 with hydrogen
+        oxygen_task = async release_oxygen(completed, output) with self
+        first_hydrogen = async release_hydrogen(hydrogen, completed, output) with self
+        second_hydrogen = async release_hydrogen(hydrogen, completed, output) with self
         result.append(await output)
         result.append(await output)
         result.append(await output)
-        await firstPermit, secondPermit, firstHydrogen, secondHydrogen, oxygenTask
+        await first_permit, second_permit, first_hydrogen, second_hydrogen, oxygen_task
     return result
 
 test "two molecules":
-    assert(buildWater(2) == ["H", "H", "O", "H", "H", "O"])
+    assert(build_water(2) == ["H", "H", "O", "H", "H", "O"])
 
 test "single molecule":
-    assert(buildWater(1) == ["H", "H", "O"])
+    assert(build_water(1) == ["H", "H", "O"])

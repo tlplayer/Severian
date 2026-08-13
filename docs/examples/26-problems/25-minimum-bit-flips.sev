@@ -3,30 +3,30 @@
 # Difficulty: medium
 # Tags: bit-manipulation, math
 
-def minFlips(a: int, b: int, c: int) -> int:
+def min_flips(a: int, b: int, c: int) -> int:
     flips := 0
     left := a
     right := b
     target := c
     while left > 0 or right > 0 or target > 0:
-        aBit = left % 2
-        bBit = right % 2
-        cBit = target % 2
-        if cBit == 1:
-            if aBit == 0 and bBit == 0:
+        a_bit = left % 2
+        b_bit = right % 2
+        c_bit = target % 2
+        if c_bit == 1:
+            if a_bit == 0 and b_bit == 0:
                 flips += 1
         else:
-            flips += aBit + bBit
+            flips += a_bit + b_bit
         left = left / 2
         right = right / 2
         target = target / 2
     return flips
 
 test "representative values":
-    assert(minFlips(2, 6, 5) == 3)
+    assert(min_flips(2, 6, 5) == 3)
 
 test "one required flip":
-    assert(minFlips(4, 2, 7) == 1)
+    assert(min_flips(4, 2, 7) == 1)
 
 test "already equal":
-    assert(minFlips(1, 2, 3) == 0)
+    assert(min_flips(1, 2, 3) == 0)

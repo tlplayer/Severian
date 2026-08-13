@@ -3,25 +3,25 @@
 # Difficulty: medium
 # Tags: heap-priority-queue, sorting, array
 
-def findKthLargest(values: list[int], k: int) -> int:
+def find_kth_largest(values: list[int], k: int) -> int:
     heap := []
     for value in values:
-        heap.heapPush(value)
+        heap.heap_push(value)
         if size(heap) > k:
-            heap.heapPop()
+            heap.heap_pop()
     return heap[0]
 
-def findKthLargestConcise(values: list[int], k: int) -> int:
+def find_kth_largest_concise(values: list[int], k: int) -> int:
     return values.sorted()[size(values) - k]
 
 test "second largest":
-    assert(findKthLargest([3, 2, 1, 5, 6, 4], 2) == 5)
-    assert(findKthLargestConcise([3, 2, 1, 5, 6, 4], 2) == 5)
+    assert(find_kth_largest([3, 2, 1, 5, 6, 4], 2) == 5)
+    assert(find_kth_largest_concise([3, 2, 1, 5, 6, 4], 2) == 5)
 
 test "duplicates":
-    assert(findKthLargest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
-    assert(findKthLargestConcise([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
+    assert(find_kth_largest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
+    assert(find_kth_largest_concise([3, 2, 3, 1, 2, 4, 5, 5, 6], 4) == 4)
 
 test "only value":
-    assert(findKthLargest([-1], 1) == -1)
-    assert(findKthLargestConcise([-1], 1) == -1)
+    assert(find_kth_largest([-1], 1) == -1)
+    assert(find_kth_largest_concise([-1], 1) == -1)

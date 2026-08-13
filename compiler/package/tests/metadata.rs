@@ -22,14 +22,14 @@ fn loads_package_owned_symbols_and_fusion_contracts() {
         .find(|interface| interface.name == "model")
         .unwrap();
 
-    assert_eq!(model.compiler.symbols["Relu"], "reluList");
+    assert_eq!(model.compiler.symbols["Relu"], "relu_list");
     assert!(model
         .compiler
         .fusion_aliases
         .iter()
-        .any(|alias| { alias.function == "model.reluList" && alias.target == "tensor.relu" }));
+        .any(|alias| { alias.function == "model.relu_list" && alias.target == "tensor.relu" }));
     assert!(model.compiler.graph_rules.iter().any(|rule| {
-        rule.function == "model.graphMatmul" && rule.operation == GraphOperation::Matmul
+        rule.function == "model.graph_matmul" && rule.operation == GraphOperation::Matmul
     }));
     let tensor = interfaces
         .iter()
@@ -53,16 +53,21 @@ fn loads_only_reachable_official_interfaces() {
             .map(|interface| interface.name.as_str())
             .collect::<Vec<_>>(),
         [
+            "csv",
+            "data",
             "file",
             "json",
             "platform",
             "src.file_binary",
             "src.file_csv",
             "src.file_interface",
+            "src.file_json",
             "src.file_mp3",
             "src.file_text",
             "src.file_wav",
+            "src.file_yaml",
             "tensor",
+            "yaml",
         ]
     );
 }
@@ -74,7 +79,7 @@ fn loads_transitive_packages_from_compiler_embedded_sources() {
         EmbeddedOfficialPackage {
             name: "alpha",
             manifest: "[package]\nname = \"alpha\"\nversion = \"1.0.0\"\n",
-            source: "import \"src/alpha_widget.sev\" as alpha_widget\nimport beta\n\ndef alphaValue() -> int:\n    return beta.betaValue()\n",
+            source: "import \"src/alpha_widget.sev\" as alpha_widget\nimport beta\n\ndef alpha_value() -> int:\n    return beta.beta_value()\n",
             modules: &[severian_package::EmbeddedOfficialModule {
                 path: "src/alpha_widget.sev",
                 source: "class Widget:\n    value: int\n",
@@ -83,7 +88,7 @@ fn loads_transitive_packages_from_compiler_embedded_sources() {
         EmbeddedOfficialPackage {
             name: "beta",
             manifest: "[package]\nname = \"beta\"\nversion = \"1.0.0\"\n",
-            source: "def betaValue() -> int:\n    return 42\n",
+            source: "def beta_value() -> int:\n    return 42\n",
             modules: &[],
         },
     ];

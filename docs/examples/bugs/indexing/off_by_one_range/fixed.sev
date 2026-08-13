@@ -1,4 +1,4 @@
-def lowerBound(values: list[int], target: int) -> int:
+def lower_bound(values: list[int], target: int) -> int:
     low := 0
     high := size(values)
 
@@ -16,5 +16,5 @@ def main():
     for i in indices(values):
         print(values[i])
 
-    assert(lowerBound(values, 20) == 1)
-    assert(lowerBound(values, 25) == 2)
+    assert(lower_bound(values, 20) == 1)
+    assert(lower_bound(values, 25) == 2)

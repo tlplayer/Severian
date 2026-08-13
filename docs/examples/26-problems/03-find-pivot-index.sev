@@ -5,7 +5,7 @@
 # Return the first index whose left-hand sum equals its right-hand sum, or -1
 # when no such index exists.
 
-def pivotIndex(values: list[int]) -> int:
+def pivot_index(values: list[int]) -> int:
     total = values.sum()
     for index, value in enumerate(values) with left := 0:
         right = total - left - value
@@ -16,13 +16,13 @@ def pivotIndex(values: list[int]) -> int:
     return -1
 
 test "pivot in the middle":
-    assert(pivotIndex([1, 7, 3, 6, 5, 6]) == 3)
+    assert(pivot_index([1, 7, 3, 6, 5, 6]) == 3)
 
 test "no pivot":
-    assert(pivotIndex([1, 2, 3]) == -1)
+    assert(pivot_index([1, 2, 3]) == -1)
 
 test "first index is the pivot":
-    assert(pivotIndex([2, 1, -1]) == 0)
+    assert(pivot_index([2, 1, -1]) == 0)
 
 test "single value":
-    assert(pivotIndex([9]) == 0)
+    assert(pivot_index([9]) == 0)

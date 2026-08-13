@@ -1,16 +1,16 @@
 import platform
 
 def matches(text: string, pattern: string) -> bool:
-    return platform.regexMatches(text, pattern)
+    return platform.regex_matches(text, pattern)
 
 def compile(pattern: string) -> string:
     return pattern
 
 def match(pattern: string, text: string) -> bool:
-    return platform.regexMatches(text, "^" + pattern)
+    return platform.regex_matches(text, "^" + pattern)
 
 def search(pattern: string, text: string) -> bool:
-    return platform.regexMatches(text, pattern)
+    return platform.regex_matches(text, pattern)
 
 def findall(pattern: string, text: string) -> list[string]:
     return platform.regex_findall(text, pattern)

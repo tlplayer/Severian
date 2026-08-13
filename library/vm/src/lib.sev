@@ -4,13 +4,13 @@ class MachineSpec:
     name: string
     image: string
     cpus: int
-    memoryMiB: int
+    memory_mi_b: int
     filesystems: list[string]
     networks: list[string]
     disks: list[string]
     init: string
 
-def vmErrors(spec: MachineSpec) -> list[string]:
+def vm_errors(spec: MachineSpec) -> list[string]:
     failures := []
     if spec.name == "":
         failures.append("machine name is empty")
@@ -18,18 +18,18 @@ def vmErrors(spec: MachineSpec) -> list[string]:
         failures.append("machine image is empty")
     if spec.cpus < 1:
         failures.append("machine requires at least one vCPU")
-    if spec.memoryMiB < 16:
+    if spec.memory_mi_b < 16:
         failures.append("machine requires at least 16 MiB")
     if spec.init == "":
         failures.append("machine init process is empty")
     return failures
 
-def vmValid(spec: MachineSpec) -> bool:
-    return size(vmErrors(spec)) == 0
+def vm_valid(spec: MachineSpec) -> bool:
+    return size(vm_errors(spec)) == 0
 
-def vmLaunchPlan(spec: MachineSpec) -> list[string]:
-    assert(vmValid(spec))
-    plan := ["vm " + spec.name, "image " + spec.image, "vcpus " + string(spec.cpus), "memory-mib " + string(spec.memoryMiB), "page-size " + string(platform.host_page_size()), "init " + spec.init]
+def vm_launch_plan(spec: MachineSpec) -> list[string]:
+    assert(vm_valid(spec))
+    plan := ["vm " + spec.name, "image " + spec.image, "vcpus " + string(spec.cpus), "memory-mib " + string(spec.memory_mi_b), "page-size " + string(platform.host_page_size()), "init " + spec.init]
     for filesystem in spec.filesystems:
         plan.append("filesystem " + string(filesystem))
     for network in spec.networks:
@@ -40,11 +40,11 @@ def vmLaunchPlan(spec: MachineSpec) -> list[string]:
 
 test "VM specifications validate resources":
     invalid = MachineSpec("", "", 0, 8, [], [], [], "")
-    assert(vmErrors(invalid) == ["machine name is empty", "machine image is empty", "machine requires at least one vCPU", "machine requires at least 16 MiB", "machine init process is empty"])
+    assert(vm_errors(invalid) == ["machine name is empty", "machine image is empty", "machine requires at least one vCPU", "machine requires at least 16 MiB", "machine init process is empty"])
 
 test "VM plans include filesystems networking storage and processes":
     machine = MachineSpec("worker-1", "sev://images/worker:v1", 4, 2048, ["rootfs:ro", "config:ro"], ["cluster0"], ["data:20GiB"], "/bin/worker")
-    plan = vmLaunchPlan(machine)
+    plan = vm_launch_plan(machine)
     assert(plan[0] == "vm worker-1")
     assert(plan[6] == "filesystem rootfs:ro")
     assert(plan[8] == "network cluster0")

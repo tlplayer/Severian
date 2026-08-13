@@ -428,7 +428,7 @@ fn retains_formatted_string_operands_for_native_lowering() {
 #[test]
 fn retains_first_class_function_return_types() {
     let source = concat!(
-        "def apply(op: fn[int, int, int], left: int, right: int) -> int:\n",
+        "def apply(op: Function[int, int, int], left: int, right: int) -> int:\n",
         "    return op(left, right)\n",
     );
     let ast = parse(&lex(source).unwrap()).unwrap();

@@ -7,16 +7,16 @@ class Workload:
     name: string
     image: string
     replicas: int
-    cpuMillis: int
-    memoryMiB: int
+    cpumillis: int
+    memory_mi_b: int
     port: int
     volume: string
     version: string
 
 class Node:
     name: string
-    cpuMillis: int
-    memoryMiB: int
+    cpumillis: int
+    memory_mi_b: int
     healthy: bool
 
 class ObservedWorkload:
@@ -24,7 +24,7 @@ class ObservedWorkload:
     ready: int
     version: string
 
-def workloadErrors(workload: Workload) -> list[string]:
+def workload_errors(workload: Workload) -> list[string]:
     failures := []
     if workload.namespace == "":
         failures.append("namespace is empty")
@@ -34,30 +34,30 @@ def workloadErrors(workload: Workload) -> list[string]:
         failures.append("workload image is empty")
     if workload.replicas < 0:
         failures.append("replicas cannot be negative")
-    if workload.cpuMillis < 1 or workload.memoryMiB < 1:
+    if workload.cpumillis < 1 or workload.memory_mi_b < 1:
         failures.append("resource requests must be positive")
     if workload.port < 1 or workload.port > 65535:
         failures.append("service port is invalid")
     return failures
 
-def workloadValid(workload: Workload) -> bool:
-    return size(workloadErrors(workload)) == 0
+def workload_valid(workload: Workload) -> bool:
+    return size(workload_errors(workload)) == 0
 
 def schedule(workload: Workload, nodes: list[Node]) -> list[string]:
-    assert(workloadValid(workload))
+    assert(workload_valid(workload))
     placements := []
     if size(nodes) == 0:
         return ["unscheduled " + workload.name + ": no nodes"]
     for replica in range(0, workload.replicas):
         node = nodes[replica % size(nodes)]
-        if node.healthy and node.cpuMillis >= workload.cpuMillis and node.memoryMiB >= workload.memoryMiB:
+        if node.healthy and node.cpumillis >= workload.cpumillis and node.memory_mi_b >= workload.memory_mi_b:
             placements.append(workload.name + "-" + string(replica) + " -> " + node.name)
         else:
             placements.append("unscheduled " + workload.name + "-" + string(replica))
     return placements
 
 def reconcile(workload: Workload, observed: ObservedWorkload) -> list[string]:
-    assert(workloadValid(workload))
+    assert(workload_valid(workload))
     actions := []
     if observed.replicas < 0:
         actions.append("create " + workload.namespace + "/" + workload.name)
@@ -73,14 +73,14 @@ def reconcile(workload: Workload, observed: ObservedWorkload) -> list[string]:
         actions.append("stable")
     return actions
 
-def healthStatus(successes: int, failures: int, healthyThreshold: int, failureThreshold: int) -> string:
-    if failures >= failureThreshold:
+def health_status(successes: int, failures: int, healthy_threshold: int, failure_threshold: int) -> string:
+    if failures >= failure_threshold:
         return "unhealthy"
-    if successes >= healthyThreshold:
+    if successes >= healthy_threshold:
         return "healthy"
     return "probing"
 
-def queuePressure(queued: int, capacity: int) -> string:
+def queue_pressure(queued: int, capacity: int) -> string:
     assert(queued >= 0)
     assert(capacity > 0)
     if queued >= capacity:
@@ -91,40 +91,40 @@ def queuePressure(queued: int, capacity: int) -> string:
         return "moderate"
     return "low"
 
-def inferenceHealth(readyWorkers: int, desiredWorkers: int, completed: int, accepted: int) -> string:
-    if readyWorkers < desiredWorkers:
+def inference_health(ready_workers: int, desired_workers: int, completed: int, accepted: int) -> string:
+    if ready_workers < desired_workers:
         return "degraded"
     if completed < accepted:
         return "draining"
     return "ready"
 
-def workerRecovery(workerId: int, generation: int, healthy: bool) -> string:
+def worker_recovery(worker_id: int, generation: int, healthy: bool) -> string:
     if healthy:
-        return "worker " + string(workerId) + " healthy generation " + string(generation)
-    return "restart worker " + string(workerId) + " generation " + string(generation + 1)
+        return "worker " + string(worker_id) + " healthy generation " + string(generation)
+    return "restart worker " + string(worker_id) + " generation " + string(generation + 1)
 
-def serviceAddress(workload: Workload, domain: string) -> string:
+def service_address(workload: Workload, domain: string) -> string:
     return workload.name + "." + workload.namespace + ".svc." + domain + ":" + string(workload.port)
 
-def rolloutPlan(workload: Workload, fromVersion: string, maxUnavailable: int) -> list[string]:
-    assert(maxUnavailable >= 0)
-    return ["rollout " + workload.name, "from " + fromVersion, "to " + workload.version, "maxUnavailable " + string(maxUnavailable), "health before promote", "rollback on failure"]
+def rollout_plan(workload: Workload, from_version: string, max_unavailable: int) -> list[string]:
+    assert(max_unavailable >= 0)
+    return ["rollout " + workload.name, "from " + from_version, "to " + workload.version, "maxUnavailable " + string(max_unavailable), "health before promote", "rollback on failure"]
 
-def volumeClaim(workload: Workload, sizeGiB: int, storageClass: string) -> list[string]:
-    assert(sizeGiB > 0)
-    return ["claim " + workload.namespace + "/" + workload.volume, "sizeGiB " + string(sizeGiB), "class " + storageClass, "mount /var/lib/" + workload.name]
+def volume_claim(workload: Workload, size_gi_b: int, storage_class: string) -> list[string]:
+    assert(size_gi_b > 0)
+    return ["claim " + workload.namespace + "/" + workload.volume, "sizeGiB " + string(size_gi_b), "class " + storage_class, "mount /var/lib/" + workload.name]
 
-def initializeControllerHistory(connection: Database) -> int:
-    return database.mustExecute(connection, "CREATE TABLE controller_events(id INTEGER PRIMARY KEY, namespace TEXT, workload TEXT, action TEXT)")
+def initialize_controller_history(connection: Database) -> int:
+    return database.must_execute(connection, "CREATE TABLE controller_events(id INTEGER PRIMARY KEY, namespace TEXT, workload TEXT, action TEXT)")
 
-def recordControllerEvent(connection: Database, workload: Workload, action: string) -> int:
+def record_controller_event(connection: Database, workload: Workload, action: string) -> int:
     statement = "INSERT INTO controller_events(namespace, workload, action) VALUES ('" + workload.namespace + "', '" + workload.name + "', '" + action + "')"
-    return database.mustExecute(connection, statement)
+    return database.must_execute(connection, statement)
 
-def controllerHistory(connection: Database) -> Result[list[list[string]], DatabaseError]:
+def controller_history(connection: Database) -> Result[list[list[string]], DatabaseError]:
     return database.query(connection, "SELECT namespace, workload, action FROM controller_events ORDER BY id")
 
-def controllerSql() -> string:
+def controller_sql() -> string:
     events = pql.Schema("controller_events", ["id", "namespace", "workload", "action"], ["int", "string", "string", "string"], [false, false, false, false], "id")
     query = pql.Query("controller_events", ["id", "action"], ["id", "action"], [false, false], "namespace", "string", [])
     return pql.sql(events, query, "postgres")
@@ -140,36 +140,36 @@ test "reconciliation handles rollout scale and repair":
     assert(reconcile(workload, observed) == ["rollout v1->v2", "scale 2->4", "repair 1"])
 
 test "health checks have explicit thresholds":
-    assert(healthStatus(3, 0, 3, 2) == "healthy")
-    assert(healthStatus(0, 2, 3, 2) == "unhealthy")
-    assert(healthStatus(1, 0, 3, 2) == "probing")
+    assert(health_status(3, 0, 3, 2) == "healthy")
+    assert(health_status(0, 2, 3, 2) == "unhealthy")
+    assert(health_status(1, 0, 3, 2) == "probing")
 
 test "inference pressure and recovery policy is deterministic":
-    assert(queuePressure(0, 8) == "low")
-    assert(queuePressure(4, 8) == "moderate")
-    assert(queuePressure(6, 8) == "high")
-    assert(queuePressure(8, 8) == "saturated")
-    assert(inferenceHealth(2, 2, 12, 12) == "ready")
-    assert(inferenceHealth(1, 2, 12, 12) == "degraded")
-    assert(inferenceHealth(2, 2, 10, 12) == "draining")
-    assert(workerRecovery(3, 1, false) == "restart worker 3 generation 2")
+    assert(queue_pressure(0, 8) == "low")
+    assert(queue_pressure(4, 8) == "moderate")
+    assert(queue_pressure(6, 8) == "high")
+    assert(queue_pressure(8, 8) == "saturated")
+    assert(inference_health(2, 2, 12, 12) == "ready")
+    assert(inference_health(1, 2, 12, 12) == "degraded")
+    assert(inference_health(2, 2, 10, 12) == "draining")
+    assert(worker_recovery(3, 1, false) == "restart worker 3 generation 2")
 
 test "service discovery and volumes are deterministic":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
-    assert(serviceAddress(workload, "cluster.local") == "api.prod.svc.cluster.local:8080")
-    assert(volumeClaim(workload, 20, "fast") == ["claim prod/api-state", "sizeGiB 20", "class fast", "mount /var/lib/api"])
+    assert(service_address(workload, "cluster.local") == "api.prod.svc.cluster.local:8080")
+    assert(volume_claim(workload, 20, "fast") == ["claim prod/api-state", "sizeGiB 20", "class fast", "mount /var/lib/api"])
 
 test "rollouts include promotion and rollback policy":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
-    assert(rolloutPlan(workload, "v1", 1) == ["rollout api", "from v1", "to v2", "maxUnavailable 1", "health before promote", "rollback on failure"])
+    assert(rollout_plan(workload, "v1", 1) == ["rollout api", "from v1", "to v2", "maxUnavailable 1", "health before promote", "rollback on failure"])
 
 test "controller history executes against the database":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
     switch database.memory():
         ok connection:
-            initializeControllerHistory(connection)
-            assert(recordControllerEvent(connection, workload, "stable") == 1)
-            switch controllerHistory(connection):
+            initialize_controller_history(connection)
+            assert(record_controller_event(connection, workload, "stable") == 1)
+            switch controller_history(connection):
                 ok rows:
                     assert(rows[0][0] == "prod")
                     assert(rows[0][1] == "api")
@@ -180,4 +180,4 @@ test "controller history executes against the database":
             assert(false, error)
 
 test "controller queries are PQL validated before emission":
-    assert(controllerSql() == "SELECT id, action FROM controller_events WHERE namespace = $1")
+    assert(controller_sql() == "SELECT id, action FROM controller_events WHERE namespace = $1")

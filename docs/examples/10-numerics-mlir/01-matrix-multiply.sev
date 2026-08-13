@@ -2,6 +2,6 @@ import tensor
 
 def main():
     x = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    y = tensor.rankedMatmul(x, x)
+    y = tensor.ranked_matmul(x, x)
 
-    print(tensor.rankedShape(y))
+    print(tensor.ranked_shape(y))

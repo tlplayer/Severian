@@ -3,21 +3,21 @@
 # Difficulty: easy
 # Tags: geometry, math, enumeration
 
-def checkStraightLine(points: list[list[int]]) -> bool:
-    deltaX = points[1][0] - points[0][0]
-    deltaY = points[1][1] - points[0][1]
+def check_straight_line(points: list[list[int]]) -> bool:
+    delta_x = points[1][0] - points[0][0]
+    delta_y = points[1][1] - points[0][1]
     for index in range(2, size(points)):
-        currentX = points[index][0] - points[0][0]
-        currentY = points[index][1] - points[0][1]
-        if deltaX * currentY != deltaY * currentX:
+        current_x = points[index][0] - points[0][0]
+        current_y = points[index][1] - points[0][1]
+        if delta_x * current_y != delta_y * current_x:
             return false
     return true
 
 test "diagonal line":
-    assert(checkStraightLine([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]]))
+    assert(check_straight_line([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]]))
 
 test "bent line":
-    assert(not checkStraightLine([[1, 1], [2, 2], [3, 4], [4, 5]]))
+    assert(not check_straight_line([[1, 1], [2, 2], [3, 4], [4, 5]]))
 
 test "vertical line":
-    assert(checkStraightLine([[2, 1], [2, 3], [2, -4]]))
+    assert(check_straight_line([[2, 1], [2, 3], [2, -4]]))

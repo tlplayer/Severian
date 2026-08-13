@@ -3,32 +3,32 @@
 # Difficulty: hard
 # Tags: suffix-array, string, sorting, string-matching
 
-def characterRank(character: string) -> int:
+def character_rank(character: string) -> int:
     alphabet = "abcdefghijklmnopqrstuvwxyz"
     for index in range(0, size(alphabet)):
         if alphabet[index] == character:
             return index
     return -1
 
-def suffixLess(text: string, left: int, right: int) -> bool:
-    leftIndex := left
-    rightIndex := right
-    while leftIndex < size(text) and rightIndex < size(text):
-        leftRank = characterRank(text[leftIndex])
-        rightRank = characterRank(text[rightIndex])
-        if leftRank != rightRank:
-            return leftRank < rightRank
-        leftIndex += 1
-        rightIndex += 1
-    return leftIndex == size(text) and rightIndex != size(text)
+def suffix_less(text: string, left: int, right: int) -> bool:
+    left_index := left
+    right_index := right
+    while left_index < size(text) and right_index < size(text):
+        left_rank = character_rank(text[left_index])
+        right_rank = character_rank(text[right_index])
+        if left_rank != right_rank:
+            return left_rank < right_rank
+        left_index += 1
+        right_index += 1
+    return left_index == size(text) and right_index != size(text)
 
-def suffixArray(text: string) -> list[int]:
+def suffix_array(text: string) -> list[int]:
     suffixes := []
     for index in range(0, size(text)):
         suffixes.append(index)
     for index in range(1, size(suffixes)):
         cursor := index
-        while cursor > 0 and suffixLess(text, suffixes[cursor], suffixes[cursor - 1]):
+        while cursor > 0 and suffix_less(text, suffixes[cursor], suffixes[cursor - 1]):
             temporary = suffixes[cursor]
             suffixes[cursor] = suffixes[cursor - 1]
             suffixes[cursor - 1] = temporary
@@ -36,10 +36,10 @@ def suffixArray(text: string) -> list[int]:
     return suffixes
 
 test "banana":
-    assert(suffixArray("banana") == [5, 3, 1, 0, 4, 2])
+    assert(suffix_array("banana") == [5, 3, 1, 0, 4, 2])
 
 test "repeated character":
-    assert(suffixArray("aaa") == [2, 1, 0])
+    assert(suffix_array("aaa") == [2, 1, 0])
 
 test "empty text":
-    assert(suffixArray("") == [])
+    assert(suffix_array("") == [])

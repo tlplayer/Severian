@@ -1,4 +1,4 @@
-def mergeSorted(left: list[int], right: list[int]) -> list[int]:
+def merge_sorted(left: list[int], right: list[int]) -> list[int]:
     output := []
     left_index := 0
     right_index := 0
@@ -22,11 +22,11 @@ def mergeSorted(left: list[int], right: list[int]) -> list[int]:
     return output
 
 test "merges two sorted lists":
-    assert(mergeSorted([1, 3, 5], [2, 4, 6]) == [1, 2, 3, 4, 5, 6])
+    assert(merge_sorted([1, 3, 5], [2, 4, 6]) == [1, 2, 3, 4, 5, 6])
 
 test "handles duplicates":
-    assert(mergeSorted([1, 2, 2], [2, 3]) == [1, 2, 2, 2, 3])
+    assert(merge_sorted([1, 2, 2], [2, 3]) == [1, 2, 2, 2, 3])
 
 test "handles an empty side":
-    assert(mergeSorted([], [1, 2]) == [1, 2])
-    assert(mergeSorted([1, 2], []) == [1, 2])
+    assert(merge_sorted([], [1, 2]) == [1, 2])
+    assert(merge_sorted([1, 2], []) == [1, 2])

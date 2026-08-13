@@ -3,8 +3,8 @@ import agent
 class HarnessConfig:
     workspace: string
     goal: string
-    verificationCommand: string
-    statePath: string
+    verification_command: string
+    state_path: string
     attempts: int
 
 class HarnessStep:
@@ -22,21 +22,21 @@ class HarnessResult:
 def config(
     workspace: string,
     goal: string,
-    verificationCommand: string,
-    statePath: string,
+    verification_command: string,
+    state_path: string,
     attempts: int,
 ) -> HarnessConfig:
     assert(workspace != "")
     assert(goal != "")
-    assert(verificationCommand != "")
-    assert(statePath != "")
+    assert(verification_command != "")
+    assert(state_path != "")
     assert(attempts > 0)
 
     return HarnessConfig(
         workspace,
         goal,
-        verificationCommand,
-        statePath,
+        verification_command,
+        state_path,
         attempts,
     )
 
@@ -77,17 +77,17 @@ def failed(
         steps,
     )
 
-def verificationPassed(result: agent.CommandResult) -> bool:
-    return result.exitCode == 0 and not result.timedOut
+def verification_passed(result: agent.CommandResult) -> bool:
+    return result.exit_code == 0 and not result.timed_out
 
-def verificationFailure(result: agent.CommandResult) -> string:
+def verification_failure(result: agent.CommandResult) -> string:
     message := "verification failed"
 
-    if result.timedOut:
+    if result.timed_out:
         message = message + ": timeout"
 
-    if result.exitCode != 0:
-        message = message + ": exit " + string(result.exitCode)
+    if result.exit_code != 0:
+        message = message + ": exit " + string(result.exit_code)
 
     if result.stderr != "":
         message = message + "\n" + result.stderr
@@ -97,28 +97,28 @@ def verificationFailure(result: agent.CommandResult) -> string:
 
     return message
 
-def runVerification(
+def run_verification(
     harness: HarnessConfig,
     limits: agent.AgentLimits,
 ) -> agent.CommandResult:
     return agent.verify(
         harness.workspace,
-        harness.verificationCommand,
+        harness.verification_command,
         limits,
     )
 
-def runIteration(
+def run_iteration(
     harness: HarnessConfig,
     iteration: int,
-    modelConfig: agent.ModelConfig,
+    model_config: agent.ModelConfig,
     limits: agent.AgentLimits,
 ) -> HarnessStep:
-    result = agent.runAgent(
+    result = agent.run_agent(
         harness.workspace,
         harness.goal,
-        harness.verificationCommand,
-        harness.statePath,
-        modelConfig,
+        harness.verification_command,
+        harness.state_path,
+        model_config,
         limits,
     )
 
@@ -139,14 +139,14 @@ def runIteration(
 
 def run(
     harness: HarnessConfig,
-    modelConfig: agent.ModelConfig,
+    model_config: agent.ModelConfig,
     limits: agent.AgentLimits,
 ) -> HarnessResult:
     steps := []
 
-    initial = runVerification(harness, limits)
+    initial = run_verification(harness, limits)
 
-    if verificationPassed(initial):
+    if verification_passed(initial):
         steps.append(
             step(
                 0,
@@ -167,23 +167,23 @@ def run(
             0,
             "initial verification",
             false,
-            verificationFailure(initial),
+            verification_failure(initial),
         )
     )
 
     for iteration in range(1, harness.attempts + 1):
-        current = runIteration(
+        current = run_iteration(
             harness,
             iteration,
-            modelConfig,
+            model_config,
             limits,
         )
 
         steps.append(current)
 
-        verification = runVerification(harness, limits)
+        verification = run_verification(harness, limits)
 
-        if verificationPassed(verification):
+        if verification_passed(verification):
             steps.append(
                 step(
                     iteration,
@@ -204,7 +204,7 @@ def run(
                 iteration,
                 "verification",
                 false,
-                verificationFailure(verification),
+                verification_failure(verification),
             )
         )
 
@@ -214,36 +214,36 @@ def run(
         steps,
     )
 
-def defaultConfig(
+def default_config(
     workspace: string,
     goal: string,
-    verificationCommand: string,
+    verification_command: string,
 ) -> HarnessConfig:
     return config(
         workspace,
         goal,
-        verificationCommand,
+        verification_command,
         workspace + "/.sev/harness-state.json",
         20,
     )
 
-def runDefault(
+def run_default(
     workspace: string,
     goal: string,
-    verificationCommand: string,
+    verification_command: string,
 ) -> HarnessResult:
-    harness = defaultConfig(
+    harness = default_config(
         workspace,
         goal,
-        verificationCommand,
+        verification_command,
     )
 
-    modelConfig = agent.defaultModelConfig()
-    limits = agent.defaultAgentLimits()
+    model_config = agent.default_model_config()
+    limits = agent.default_agent_limits()
 
     return run(
         harness,
-        modelConfig,
+        model_config,
         limits,
     )
 
@@ -276,7 +276,7 @@ test "harness configuration preserves limits":
 
     assert(harness.workspace == ".")
     assert(harness.goal == "implement agent support")
-    assert(harness.verificationCommand == "sev test")
+    assert(harness.verification_command == "sev test")
     assert(harness.attempts == 5)
 
 test "successful harness result is explicit":
@@ -318,7 +318,7 @@ test "verification requires zero exit and no timeout":
         false,
     )
 
-    failedExit = agent.CommandResult(
+    failed_exit = agent.CommandResult(
         "sev test",
         1,
         "",
@@ -326,7 +326,7 @@ test "verification requires zero exit and no timeout":
         false,
     )
 
-    timedOut = agent.CommandResult(
+    timed_out = agent.CommandResult(
         "sev test",
         0,
         "",
@@ -334,6 +334,6 @@ test "verification requires zero exit and no timeout":
         true,
     )
 
-    assert(verificationPassed(passed))
-    assert(not verificationPassed(failedExit))
-    assert(not verificationPassed(timedOut))
+    assert(verification_passed(passed))
+    assert(not verification_passed(failed_exit))
+    assert(not verification_passed(timed_out))

@@ -17,9 +17,9 @@ def compress(characters: list[string]) -> int:
         write += 1
         count = end - read
         if count > 1:
-            countText = string(count)
-            for index in range(0, size(countText)):
-                characters[write] = countText[index]
+            count_text = string(count)
+            for index in range(0, size(count_text)):
+                characters[write] = count_text[index]
                 write += 1
         read = end
 

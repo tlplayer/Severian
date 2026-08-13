@@ -3,411 +3,411 @@ import tensor
 # Qwen2.5-3B serving prefill consumes one exact 256-token request. The model
 # graph is compiler-lowered StableHLO; the resulting K/V tensors remain on GPU.
 
-def modelToF32(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
-    return tensor.bf16ToF32(value)
+def model_to_f_32(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
+    return tensor.bf16_to_f_32(value)
 
-def modelToBf16(value: Tensor[f32, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.f32ToBf16(value)
+def model_to_bf_16(value: Tensor[f32, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.f32_to_bf_16(value)
 
-def modelMultiplyF32(left: Tensor[f32, 1, 256, 2048], right: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
-    return tensor.multiplyF32(left, right)
+def model_multiply_f_32(left: Tensor[f32, 1, 256, 2048], right: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
+    return tensor.multiply_f_32(left, right)
 
-def modelMeanLast(value: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256]:
-    return tensor.meanLastF32(value)
+def model_mean_last(value: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256]:
+    return tensor.mean_last_f_32(value)
 
-def stabilizeMean(value: Tensor[f32, 1, 256]) -> Tensor[f32, 1, 256]:
-    return tensor.addScalarF32(value, 0.000001)
+def stabilize_mean(value: Tensor[f32, 1, 256]) -> Tensor[f32, 1, 256]:
+    return tensor.add_scalar_f_32(value, 0.000001)
 
-def inverseMean(value: Tensor[f32, 1, 256]) -> Tensor[f32, 1, 256]:
-    return tensor.rsqrtF32(value)
+def inverse_mean(value: Tensor[f32, 1, 256]) -> Tensor[f32, 1, 256]:
+    return tensor.rsqrt_f_32(value)
 
-def broadcastMean(value: Tensor[f32, 1, 256], target: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
-    return tensor.broadcastLikeF32(value, target)
+def broadcast_mean(value: Tensor[f32, 1, 256], target: Tensor[f32, 1, 256, 2048]) -> Tensor[f32, 1, 256, 2048]:
+    return tensor.broadcast_like_f_32(value, target)
 
-def broadcastNorm(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.broadcastLikeBf16(value, target)
+def broadcast_norm(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.broadcast_like_bf_16(value, target)
 
-def modelMultiplyBf16(left: Tensor[bf16, 1, 256, 2048], right: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.multiplyBf16(left, right)
+def model_multiply_bf_16(left: Tensor[bf16, 1, 256, 2048], right: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.multiply_bf_16(left, right)
 
-def modelAddBf16(left: Tensor[bf16, 1, 256, 2048], right: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.addBf16(left, right)
+def model_add_bf_16(left: Tensor[bf16, 1, 256, 2048], right: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.add_bf_16(left, right)
 
-def qwenRmsNorm(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    valueF32 = modelToF32(value)
-    square = modelMultiplyF32(valueF32, valueF32)
-    variance = modelMeanLast(square)
-    inverse = inverseMean(stabilizeMean(variance))
-    normalizedF32 = modelMultiplyF32(valueF32, broadcastMean(inverse, valueF32))
-    normalized = modelToBf16(normalizedF32)
-    return modelMultiplyBf16(normalized, broadcastNorm(weight, normalized))
+def qwen_rms_norm(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    value_f_32 = model_to_f_32(value)
+    square = model_multiply_f_32(value_f_32, value_f_32)
+    variance = model_mean_last(square)
+    inverse = inverse_mean(stabilize_mean(variance))
+    normalized_f_32 = model_multiply_f_32(value_f_32, broadcast_mean(inverse, value_f_32))
+    normalized = model_to_bf_16(normalized_f_32)
+    return model_multiply_bf_16(normalized, broadcast_norm(weight, normalized))
 
-def transposeModelWeight(weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 2048, 2048]:
-    return tensor.transposeBf16(weight, [1, 0])
+def transpose_model_weight(weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 2048, 2048]:
+    return tensor.transpose_bf_16(weight, [1, 0])
 
-def transposeKvWeight(weight: Tensor[bf16, 256, 2048]) -> Tensor[bf16, 2048, 256]:
-    return tensor.transposeBf16(weight, [1, 0])
+def transpose_kv_weight(weight: Tensor[bf16, 256, 2048]) -> Tensor[bf16, 2048, 256]:
+    return tensor.transpose_bf_16(weight, [1, 0])
 
-def transposeMlpWeight(weight: Tensor[bf16, 11008, 2048]) -> Tensor[bf16, 2048, 11008]:
-    return tensor.transposeBf16(weight, [1, 0])
+def transpose_mlp_weight(weight: Tensor[bf16, 11008, 2048]) -> Tensor[bf16, 2048, 11008]:
+    return tensor.transpose_bf_16(weight, [1, 0])
 
-def transposeDownWeight(weight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 11008, 2048]:
-    return tensor.transposeBf16(weight, [1, 0])
+def transpose_down_weight(weight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 11008, 2048]:
+    return tensor.transpose_bf_16(weight, [1, 0])
 
-def transposeEmbedding(weight: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 2048, 151936]:
-    return tensor.transposeBf16(weight, [1, 0])
+def transpose_embedding(weight: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 2048, 151936]:
+    return tensor.transpose_bf_16(weight, [1, 0])
 
-def queryProjection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.matmulBf16(value, weight)
+def query_projection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.matmul_bf_16(value, weight)
 
-def kvProjection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 256]) -> Tensor[bf16, 1, 256, 256]:
-    return tensor.matmulBf16(value, weight)
+def kv_projection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 256]) -> Tensor[bf16, 1, 256, 256]:
+    return tensor.matmul_bf_16(value, weight)
 
-def broadcastQueryBias(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.broadcastLikeBf16(value, target)
+def broadcast_query_bias(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.broadcast_like_bf_16(value, target)
 
-def broadcastKvBias(value: Tensor[bf16, 256], target: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 256]:
-    return tensor.broadcastLikeBf16(value, target)
+def broadcast_kv_bias(value: Tensor[bf16, 256], target: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 256]:
+    return tensor.broadcast_like_bf_16(value, target)
 
-def addKv(left: Tensor[bf16, 1, 256, 256], right: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 256]:
-    return tensor.addBf16(left, right)
+def add_kv(left: Tensor[bf16, 1, 256, 256], right: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 256]:
+    return tensor.add_bf_16(left, right)
 
-def reshapeQuery(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 16, 128]:
-    return tensor.reshapeBf16(value, [1, 256, 16, 128])
+def reshape_query(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 256, 16, 128]:
+    return tensor.reshape_bf_16(value, [1, 256, 16, 128])
 
-def reshapeKv(value: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 2, 128]:
-    return tensor.reshapeBf16(value, [1, 256, 2, 128])
+def reshape_kv(value: Tensor[bf16, 1, 256, 256]) -> Tensor[bf16, 1, 256, 2, 128]:
+    return tensor.reshape_bf_16(value, [1, 256, 2, 128])
 
-def transposeQuery(value: Tensor[bf16, 1, 256, 16, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
-    return tensor.transposeBf16(value, [0, 2, 1, 3])
+def transpose_query(value: Tensor[bf16, 1, 256, 16, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
+    return tensor.transpose_bf_16(value, [0, 2, 1, 3])
 
-def transposeKv(value: Tensor[bf16, 1, 256, 2, 128]) -> Tensor[bf16, 1, 2, 256, 128]:
-    return tensor.transposeBf16(value, [0, 2, 1, 3])
+def transpose_kv(value: Tensor[bf16, 1, 256, 2, 128]) -> Tensor[bf16, 1, 2, 256, 128]:
+    return tensor.transpose_bf_16(value, [0, 2, 1, 3])
 
-def queryHeadsToF32(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.bf16ToF32(value)
+def query_heads_to_f_32(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.bf16_to_f_32(value)
 
-def kvHeadsToF32(value: Tensor[bf16, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.bf16ToF32(value)
+def kv_heads_to_f_32(value: Tensor[bf16, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.bf16_to_f_32(value)
 
-def queryScaleOne(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.scaleF32(value, 1.0)
+def query_scale_one(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.scale_f_32(value, 1.0)
 
-def queryScaleZero(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.scaleF32(value, 0.0)
+def query_scale_zero(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.scale_f_32(value, 0.0)
 
-def kvScaleOne(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.scaleF32(value, 1.0)
+def kv_scale_one(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.scale_f_32(value, 1.0)
 
-def kvScaleZero(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.scaleF32(value, 0.0)
+def kv_scale_zero(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.scale_f_32(value, 0.0)
 
-def queryAddF32(left: Tensor[f32, 1, 16, 256, 128], right: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.addF32(left, right)
+def query_add_f_32(left: Tensor[f32, 1, 16, 256, 128], right: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.add_f_32(left, right)
 
-def kvAddF32(left: Tensor[f32, 1, 2, 256, 128], right: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.addF32(left, right)
+def kv_add_f_32(left: Tensor[f32, 1, 2, 256, 128], right: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.add_f_32(left, right)
 
-def queryMultiplyF32(left: Tensor[f32, 1, 16, 256, 128], right: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.multiplyF32(left, right)
+def query_multiply_f_32(left: Tensor[f32, 1, 16, 256, 128], right: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.multiply_f_32(left, right)
 
-def kvMultiplyF32(left: Tensor[f32, 1, 2, 256, 128], right: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.multiplyF32(left, right)
+def kv_multiply_f_32(left: Tensor[f32, 1, 2, 256, 128], right: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.multiply_f_32(left, right)
 
-def broadcastQueryRope(value: Tensor[f32, 1, 1, 256, 128], target: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.broadcastLikeF32(value, target)
+def broadcast_query_rope(value: Tensor[f32, 1, 1, 256, 128], target: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.broadcast_like_f_32(value, target)
 
-def broadcastKvRope(value: Tensor[f32, 1, 1, 256, 128], target: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    return tensor.broadcastLikeF32(value, target)
+def broadcast_kv_rope(value: Tensor[f32, 1, 1, 256, 128], target: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    return tensor.broadcast_like_f_32(value, target)
 
-def queryFirstHalf(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 64]:
-    return tensor.sliceF32(value, [0, 0, 0, 0], [1, 16, 256, 64], [1, 1, 1, 1])
+def query_first_half(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 64]:
+    return tensor.slice_f_32(value, [0, 0, 0, 0], [1, 16, 256, 64], [1, 1, 1, 1])
 
-def querySecondHalf(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 64]:
-    return tensor.sliceF32(value, [0, 0, 0, 64], [1, 16, 256, 128], [1, 1, 1, 1])
+def query_second_half(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 64]:
+    return tensor.slice_f_32(value, [0, 0, 0, 64], [1, 16, 256, 128], [1, 1, 1, 1])
 
-def kvFirstHalf(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 64]:
-    return tensor.sliceF32(value, [0, 0, 0, 0], [1, 2, 256, 64], [1, 1, 1, 1])
+def kv_first_half(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 64]:
+    return tensor.slice_f_32(value, [0, 0, 0, 0], [1, 2, 256, 64], [1, 1, 1, 1])
 
-def kvSecondHalf(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 64]:
-    return tensor.sliceF32(value, [0, 0, 0, 64], [1, 2, 256, 128], [1, 1, 1, 1])
+def kv_second_half(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 64]:
+    return tensor.slice_f_32(value, [0, 0, 0, 64], [1, 2, 256, 128], [1, 1, 1, 1])
 
-def negateQueryHalf(value: Tensor[f32, 1, 16, 256, 64]) -> Tensor[f32, 1, 16, 256, 64]:
-    zero = queryHalfZero(value)
-    return tensor.subtractF32(zero, value)
+def negate_query_half(value: Tensor[f32, 1, 16, 256, 64]) -> Tensor[f32, 1, 16, 256, 64]:
+    zero = query_half_zero(value)
+    return tensor.subtract_f_32(zero, value)
 
-def negateKvHalf(value: Tensor[f32, 1, 2, 256, 64]) -> Tensor[f32, 1, 2, 256, 64]:
-    zero = kvHalfZero(value)
-    return tensor.subtractF32(zero, value)
+def negate_kv_half(value: Tensor[f32, 1, 2, 256, 64]) -> Tensor[f32, 1, 2, 256, 64]:
+    zero = kv_half_zero(value)
+    return tensor.subtract_f_32(zero, value)
 
-def queryHalfZero(value: Tensor[f32, 1, 16, 256, 64]) -> Tensor[f32, 1, 16, 256, 64]:
-    return tensor.scaleF32(value, 0.0)
+def query_half_zero(value: Tensor[f32, 1, 16, 256, 64]) -> Tensor[f32, 1, 16, 256, 64]:
+    return tensor.scale_f_32(value, 0.0)
 
-def kvHalfZero(value: Tensor[f32, 1, 2, 256, 64]) -> Tensor[f32, 1, 2, 256, 64]:
-    return tensor.scaleF32(value, 0.0)
+def kv_half_zero(value: Tensor[f32, 1, 2, 256, 64]) -> Tensor[f32, 1, 2, 256, 64]:
+    return tensor.scale_f_32(value, 0.0)
 
-def rotateHalfQuery(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    first = queryFirstHalf(value)
-    second = querySecondHalf(value)
-    negativeSecond = negateQueryHalf(second)
-    return tensor.concatenateF32([negativeSecond, first], 3)
+def rotate_half_query(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    first = query_first_half(value)
+    second = query_second_half(value)
+    negative_second = negate_query_half(second)
+    return tensor.concatenate_f_32([negative_second, first], 3)
 
-def rotateHalfKv(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    first = kvFirstHalf(value)
-    second = kvSecondHalf(value)
-    negativeSecond = negateKvHalf(second)
-    return tensor.concatenateF32([negativeSecond, first], 3)
+def rotate_half_kv(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    first = kv_first_half(value)
+    second = kv_second_half(value)
+    negative_second = negate_kv_half(second)
+    return tensor.concatenate_f_32([negative_second, first], 3)
 
-def applyQueryRope(value: Tensor[f32, 1, 16, 256, 128], cosine: Tensor[f32, 1, 1, 256, 128], sine: Tensor[f32, 1, 1, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    cosineValues = broadcastQueryRope(cosine, value)
-    sineValues = broadcastQueryRope(sine, value)
-    rotatedValue = rotateHalfQuery(value)
-    direct = queryMultiplyF32(value, cosineValues)
-    rotated = queryMultiplyF32(rotatedValue, sineValues)
-    return queryAddF32(direct, rotated)
+def apply_query_rope(value: Tensor[f32, 1, 16, 256, 128], cosine: Tensor[f32, 1, 1, 256, 128], sine: Tensor[f32, 1, 1, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    cosine_values = broadcast_query_rope(cosine, value)
+    sine_values = broadcast_query_rope(sine, value)
+    rotated_value = rotate_half_query(value)
+    direct = query_multiply_f_32(value, cosine_values)
+    rotated = query_multiply_f_32(rotated_value, sine_values)
+    return query_add_f_32(direct, rotated)
 
-def applyKvRope(value: Tensor[f32, 1, 2, 256, 128], cosine: Tensor[f32, 1, 1, 256, 128], sine: Tensor[f32, 1, 1, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
-    cosineValues = broadcastKvRope(cosine, value)
-    sineValues = broadcastKvRope(sine, value)
-    rotatedValue = rotateHalfKv(value)
-    direct = kvMultiplyF32(value, cosineValues)
-    rotated = kvMultiplyF32(rotatedValue, sineValues)
-    return kvAddF32(direct, rotated)
+def apply_kv_rope(value: Tensor[f32, 1, 2, 256, 128], cosine: Tensor[f32, 1, 1, 256, 128], sine: Tensor[f32, 1, 1, 256, 128]) -> Tensor[f32, 1, 2, 256, 128]:
+    cosine_values = broadcast_kv_rope(cosine, value)
+    sine_values = broadcast_kv_rope(sine, value)
+    rotated_value = rotate_half_kv(value)
+    direct = kv_multiply_f_32(value, cosine_values)
+    rotated = kv_multiply_f_32(rotated_value, sine_values)
+    return kv_add_f_32(direct, rotated)
 
-def expandKey(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 1, 256, 128]:
-    return tensor.reshapeF32(value, [1, 2, 1, 256, 128])
+def expand_key(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[f32, 1, 2, 1, 256, 128]:
+    return tensor.reshape_f_32(value, [1, 2, 1, 256, 128])
 
-def expandValue(value: Tensor[bf16, 1, 2, 256, 128]) -> Tensor[bf16, 1, 2, 1, 256, 128]:
-    return tensor.reshapeBf16(value, [1, 2, 1, 256, 128])
+def expand_value(value: Tensor[bf16, 1, 2, 256, 128]) -> Tensor[bf16, 1, 2, 1, 256, 128]:
+    return tensor.reshape_bf_16(value, [1, 2, 1, 256, 128])
 
-def repeatKey(value: Tensor[f32, 1, 2, 1, 256, 128]) -> Tensor[f32, 1, 2, 8, 256, 128]:
-    return tensor.broadcastF32(value, [1, 2, 8, 256, 128])
+def repeat_key(value: Tensor[f32, 1, 2, 1, 256, 128]) -> Tensor[f32, 1, 2, 8, 256, 128]:
+    return tensor.broadcast_f_32(value, [1, 2, 8, 256, 128])
 
-def repeatValue(value: Tensor[bf16, 1, 2, 1, 256, 128]) -> Tensor[bf16, 1, 2, 8, 256, 128]:
-    return tensor.broadcastBf16(value, [1, 2, 8, 256, 128])
+def repeat_value(value: Tensor[bf16, 1, 2, 1, 256, 128]) -> Tensor[bf16, 1, 2, 8, 256, 128]:
+    return tensor.broadcast_bf_16(value, [1, 2, 8, 256, 128])
 
-def mergeKeyHeads(value: Tensor[f32, 1, 2, 8, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.reshapeF32(value, [1, 16, 256, 128])
+def merge_key_heads(value: Tensor[f32, 1, 2, 8, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.reshape_f_32(value, [1, 16, 256, 128])
 
-def mergeValueHeads(value: Tensor[bf16, 1, 2, 8, 256, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
-    return tensor.reshapeBf16(value, [1, 16, 256, 128])
+def merge_value_heads(value: Tensor[bf16, 1, 2, 8, 256, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
+    return tensor.reshape_bf_16(value, [1, 16, 256, 128])
 
-def valueHeadsToF32(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.bf16ToF32(value)
+def value_heads_to_f_32(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.bf16_to_f_32(value)
 
-def transposeKey(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 128, 256]:
-    return tensor.transposeF32(value, [0, 1, 3, 2])
+def transpose_key(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 128, 256]:
+    return tensor.transpose_f_32(value, [0, 1, 3, 2])
 
-def attentionScores(query: Tensor[f32, 1, 16, 256, 128], key: Tensor[f32, 1, 16, 128, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.batchedMatmulF32(query, key)
+def attention_scores(query: Tensor[f32, 1, 16, 256, 128], key: Tensor[f32, 1, 16, 128, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.batched_matmul_f_32(query, key)
 
-def scaleScores(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.scaleF32(value, 0.08838834764831845)
+def scale_scores(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.scale_f_32(value, 0.08838834764831845)
 
-def broadcastMask(value: Tensor[f32, 1, 1, 256, 256], target: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.broadcastLikeF32(value, target)
+def broadcast_mask(value: Tensor[f32, 1, 1, 256, 256], target: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.broadcast_like_f_32(value, target)
 
-def applyCausalMask(value: Tensor[f32, 1, 16, 256, 256], mask: Tensor[f32, 1, 1, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    expandedMask = broadcastMask(mask, value)
-    return tensor.addF32(value, expandedMask)
+def apply_causal_mask(value: Tensor[f32, 1, 16, 256, 256], mask: Tensor[f32, 1, 1, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    expanded_mask = broadcast_mask(mask, value)
+    return tensor.add_f_32(value, expanded_mask)
 
-def scoresMax(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256]:
-    return tensor.maxLastF32(value)
+def scores_max(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256]:
+    return tensor.max_last_f_32(value)
 
-def broadcastScores(value: Tensor[f32, 1, 16, 256], target: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.broadcastLikeF32(value, target)
+def broadcast_scores(value: Tensor[f32, 1, 16, 256], target: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.broadcast_like_f_32(value, target)
 
-def subtractScores(left: Tensor[f32, 1, 16, 256, 256], right: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.subtractF32(left, right)
+def subtract_scores(left: Tensor[f32, 1, 16, 256, 256], right: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.subtract_f_32(left, right)
 
-def expScores(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.expF32(value)
+def exp_scores(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.exp_f_32(value)
 
-def scoresSum(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256]:
-    return tensor.sumLastF32(value)
+def scores_sum(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256]:
+    return tensor.sum_last_f_32(value)
 
-def divideScores(left: Tensor[f32, 1, 16, 256, 256], right: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    return tensor.divideF32(left, right)
+def divide_scores(left: Tensor[f32, 1, 16, 256, 256], right: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    return tensor.divide_f_32(left, right)
 
-def stableSoftmaxSingle(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
-    maximum = scoresMax(value)
-    shifted = subtractScores(value, broadcastScores(maximum, value))
-    exponentials = expScores(shifted)
-    denominator = scoresSum(exponentials)
-    return divideScores(exponentials, broadcastScores(denominator, exponentials))
+def stable_softmax_single(value: Tensor[f32, 1, 16, 256, 256]) -> Tensor[f32, 1, 16, 256, 256]:
+    maximum = scores_max(value)
+    shifted = subtract_scores(value, broadcast_scores(maximum, value))
+    exponentials = exp_scores(shifted)
+    denominator = scores_sum(exponentials)
+    return divide_scores(exponentials, broadcast_scores(denominator, exponentials))
 
-def attentionContext(probabilities: Tensor[f32, 1, 16, 256, 256], values: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
-    return tensor.batchedMatmulF32(probabilities, values)
+def attention_context(probabilities: Tensor[f32, 1, 16, 256, 256], values: Tensor[f32, 1, 16, 256, 128]) -> Tensor[f32, 1, 16, 256, 128]:
+    return tensor.batched_matmul_f_32(probabilities, values)
 
-def contextToBf16(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
-    return tensor.f32ToBf16(value)
+def context_to_bf_16(value: Tensor[f32, 1, 16, 256, 128]) -> Tensor[bf16, 1, 16, 256, 128]:
+    return tensor.f32_to_bf_16(value)
 
-def transposeContext(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[bf16, 1, 256, 16, 128]:
-    return tensor.transposeBf16(value, [0, 2, 1, 3])
+def transpose_context(value: Tensor[bf16, 1, 16, 256, 128]) -> Tensor[bf16, 1, 256, 16, 128]:
+    return tensor.transpose_bf_16(value, [0, 2, 1, 3])
 
-def mergeContext(value: Tensor[bf16, 1, 256, 16, 128]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.reshapeBf16(value, [1, 256, 2048])
+def merge_context(value: Tensor[bf16, 1, 256, 16, 128]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.reshape_bf_16(value, [1, 256, 2048])
 
-def outputProjection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.matmulBf16(value, weight)
+def output_projection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.matmul_bf_16(value, weight)
 
-def mlpProjection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 1, 256, 11008]:
-    return tensor.matmulBf16(value, weight)
+def mlp_projection(value: Tensor[bf16, 1, 256, 2048], weight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 1, 256, 11008]:
+    return tensor.matmul_bf_16(value, weight)
 
-def mlpSigmoid(value: Tensor[bf16, 1, 256, 11008]) -> Tensor[bf16, 1, 256, 11008]:
-    return tensor.sigmoidBf16(value)
+def mlp_sigmoid(value: Tensor[bf16, 1, 256, 11008]) -> Tensor[bf16, 1, 256, 11008]:
+    return tensor.sigmoid_bf_16(value)
 
-def mlpMultiply(left: Tensor[bf16, 1, 256, 11008], right: Tensor[bf16, 1, 256, 11008]) -> Tensor[bf16, 1, 256, 11008]:
-    return tensor.multiplyBf16(left, right)
+def mlp_multiply(left: Tensor[bf16, 1, 256, 11008], right: Tensor[bf16, 1, 256, 11008]) -> Tensor[bf16, 1, 256, 11008]:
+    return tensor.multiply_bf_16(left, right)
 
-def mlpDown(value: Tensor[bf16, 1, 256, 11008], weight: Tensor[bf16, 11008, 2048]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.matmulBf16(value, weight)
+def mlp_down(value: Tensor[bf16, 1, 256, 11008], weight: Tensor[bf16, 11008, 2048]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.matmul_bf_16(value, weight)
 
-def qwenMlp(value: Tensor[bf16, 1, 256, 2048], gateWeight: Tensor[bf16, 11008, 2048], upWeight: Tensor[bf16, 11008, 2048], downWeight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 1, 256, 2048]:
-    gate = mlpProjection(value, transposeMlpWeight(gateWeight))
-    up = mlpProjection(value, transposeMlpWeight(upWeight))
-    activated = mlpMultiply(gate, mlpSigmoid(gate))
-    return mlpDown(mlpMultiply(activated, up), transposeDownWeight(downWeight))
+def qwen_mlp(value: Tensor[bf16, 1, 256, 2048], gate_weight: Tensor[bf16, 11008, 2048], up_weight: Tensor[bf16, 11008, 2048], down_weight: Tensor[bf16, 2048, 11008]) -> Tensor[bf16, 1, 256, 2048]:
+    gate = mlp_projection(value, transpose_mlp_weight(gate_weight))
+    up = mlp_projection(value, transpose_mlp_weight(up_weight))
+    activated = mlp_multiply(gate, mlp_sigmoid(gate))
+    return mlp_down(mlp_multiply(activated, up), transpose_down_weight(down_weight))
 
 @tensor
-def embeddingKernel(embedding: Tensor[bf16, 151936, 2048], inputIds: Tensor[i64, 1, 256]) -> Tensor[bf16, 1, 256, 2048]:
-    return tensor.gatherBf16(embedding, inputIds)
+def embedding_kernel(embedding: Tensor[bf16, 151936, 2048], input_ids: Tensor[i64, 1, 256]) -> Tensor[bf16, 1, 256, 2048]:
+    return tensor.gather_bf_16(embedding, input_ids)
 
 @tensor
-def qwen2LayerKernel(
+def qwen2_layer_kernel(
     hidden: Tensor[bf16, 1, 256, 2048],
-    inputNorm: Tensor[bf16, 2048],
-    queryWeight: Tensor[bf16, 2048, 2048],
-    queryBias: Tensor[bf16, 2048],
-    keyWeight: Tensor[bf16, 256, 2048],
-    keyBias: Tensor[bf16, 256],
-    valueWeight: Tensor[bf16, 256, 2048],
-    valueBias: Tensor[bf16, 256],
-    outputWeight: Tensor[bf16, 2048, 2048],
-    postNorm: Tensor[bf16, 2048],
-    gateWeight: Tensor[bf16, 11008, 2048],
-    upWeight: Tensor[bf16, 11008, 2048],
-    downWeight: Tensor[bf16, 2048, 11008],
+    input_norm: Tensor[bf16, 2048],
+    query_weight: Tensor[bf16, 2048, 2048],
+    query_bias: Tensor[bf16, 2048],
+    key_weight: Tensor[bf16, 256, 2048],
+    key_bias: Tensor[bf16, 256],
+    value_weight: Tensor[bf16, 256, 2048],
+    value_bias: Tensor[bf16, 256],
+    output_weight: Tensor[bf16, 2048, 2048],
+    post_norm: Tensor[bf16, 2048],
+    gate_weight: Tensor[bf16, 11008, 2048],
+    up_weight: Tensor[bf16, 11008, 2048],
+    down_weight: Tensor[bf16, 2048, 11008],
     cosine: Tensor[f32, 1, 1, 256, 128],
     sine: Tensor[f32, 1, 1, 256, 128],
     mask: Tensor[f32, 1, 1, 256, 256],
 ) -> Tensor[bf16, 1, 256, 2048]:
-    normalized = qwenRmsNorm(hidden, inputNorm)
-    projectedQuery = queryProjection(normalized, transposeModelWeight(queryWeight))
-    projectedKey = kvProjection(normalized, transposeKvWeight(keyWeight))
-    projectedValue = kvProjection(normalized, transposeKvWeight(valueWeight))
-    query = modelAddBf16(projectedQuery, broadcastQueryBias(queryBias, projectedQuery))
-    key = addKv(projectedKey, broadcastKvBias(keyBias, projectedKey))
-    value = addKv(projectedValue, broadcastKvBias(valueBias, projectedValue))
-    queryHeads = transposeQuery(reshapeQuery(query))
-    keyHeads = transposeKv(reshapeKv(key))
-    valueHeads = transposeKv(reshapeKv(value))
-    queryF32 = queryHeadsToF32(queryHeads)
-    keyF32 = kvHeadsToF32(keyHeads)
-    queryRotary = applyQueryRope(queryF32, cosine, sine)
-    keyRotary = applyKvRope(keyF32, cosine, sine)
-    repeatedKey = mergeKeyHeads(repeatKey(expandKey(keyRotary)))
-    repeatedValue = valueHeadsToF32(mergeValueHeads(repeatValue(expandValue(valueHeads))))
-    scores = applyCausalMask(scaleScores(attentionScores(queryRotary, transposeKey(repeatedKey))), mask)
-    probabilities = stableSoftmaxSingle(scores)
-    context = mergeContext(transposeContext(contextToBf16(attentionContext(probabilities, repeatedValue))))
-    attended = outputProjection(context, transposeModelWeight(outputWeight))
-    residual = modelAddBf16(hidden, attended)
-    feedForward = qwenMlp(qwenRmsNorm(residual, postNorm), gateWeight, upWeight, downWeight)
-    return modelAddBf16(residual, feedForward)
+    normalized = qwen_rms_norm(hidden, input_norm)
+    projected_query = query_projection(normalized, transpose_model_weight(query_weight))
+    projected_key = kv_projection(normalized, transpose_kv_weight(key_weight))
+    projected_value = kv_projection(normalized, transpose_kv_weight(value_weight))
+    query = model_add_bf_16(projected_query, broadcast_query_bias(query_bias, projected_query))
+    key = add_kv(projected_key, broadcast_kv_bias(key_bias, projected_key))
+    value = add_kv(projected_value, broadcast_kv_bias(value_bias, projected_value))
+    query_heads = transpose_query(reshape_query(query))
+    key_heads = transpose_kv(reshape_kv(key))
+    value_heads = transpose_kv(reshape_kv(value))
+    query_f_32 = query_heads_to_f_32(query_heads)
+    key_f_32 = kv_heads_to_f_32(key_heads)
+    query_rotary = apply_query_rope(query_f_32, cosine, sine)
+    key_rotary = apply_kv_rope(key_f_32, cosine, sine)
+    repeated_key = merge_key_heads(repeat_key(expand_key(key_rotary)))
+    repeated_value = value_heads_to_f_32(merge_value_heads(repeat_value(expand_value(value_heads))))
+    scores = apply_causal_mask(scale_scores(attention_scores(query_rotary, transpose_key(repeated_key))), mask)
+    probabilities = stable_softmax_single(scores)
+    context = merge_context(transpose_context(context_to_bf_16(attention_context(probabilities, repeated_value))))
+    attended = output_projection(context, transpose_model_weight(output_weight))
+    residual = model_add_bf_16(hidden, attended)
+    feed_forward = qwen_mlp(qwen_rms_norm(residual, post_norm), gate_weight, up_weight, down_weight)
+    return model_add_bf_16(residual, feed_forward)
 
-def logitsProjection(value: Tensor[bf16, 1, 256, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 256, 151936]:
-    return tensor.matmulBf16(value, embedding)
-
-@tensor
-def logitsKernel(hidden: Tensor[bf16, 1, 256, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 256, 151936]:
-    return logitsProjection(qwenRmsNorm(hidden, normWeight), transposeEmbedding(embedding))
-
-
-def lastHidden(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 1, 2048]:
-    return tensor.dynamicSliceBf16(value, [0, 255, 0], [1, 1, 2048])
-
-def lastToF32(value: Tensor[bf16, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
-    return tensor.bf16ToF32(value)
-
-def lastToBf16(value: Tensor[f32, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
-    return tensor.f32ToBf16(value)
-
-def lastMultiplyF32(left: Tensor[f32, 1, 1, 2048], right: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
-    return tensor.multiplyF32(left, right)
-
-def lastMean(value: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1]:
-    return tensor.meanLastF32(value)
-
-def lastStabilize(value: Tensor[f32, 1, 1]) -> Tensor[f32, 1, 1]:
-    return tensor.addScalarF32(value, 0.000001)
-
-def lastInverse(value: Tensor[f32, 1, 1]) -> Tensor[f32, 1, 1]:
-    return tensor.rsqrtF32(value)
-
-def lastBroadcastMean(value: Tensor[f32, 1, 1], target: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
-    return tensor.broadcastLikeF32(value, target)
-
-def lastBroadcastNorm(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
-    return tensor.broadcastLikeBf16(value, target)
-
-def lastMultiplyBf16(left: Tensor[bf16, 1, 1, 2048], right: Tensor[bf16, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
-    return tensor.multiplyBf16(left, right)
-
-def lastRmsNorm(value: Tensor[bf16, 1, 1, 2048], weight: Tensor[bf16, 2048]) -> Tensor[bf16, 1, 1, 2048]:
-    valueF32 = lastToF32(value)
-    square = lastMultiplyF32(valueF32, valueF32)
-    variance = lastMean(square)
-    stabilized = lastStabilize(variance)
-    inverse = lastInverse(stabilized)
-    normalizedF32 = lastMultiplyF32(valueF32, lastBroadcastMean(inverse, valueF32))
-    normalized = lastToBf16(normalizedF32)
-    return lastMultiplyBf16(normalized, lastBroadcastNorm(weight, normalized))
-
-def lastLogitsProjection(value: Tensor[bf16, 1, 1, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 1, 151936]:
-    return tensor.matmulBf16(value, embedding)
-
-def prefillKvToBf16(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[bf16, 1, 2, 256, 128]:
-    return tensor.f32ToBf16(value)
-
-def updatePrefillCache(cache: Tensor[bf16, 1, 2, 288, 128], update: Tensor[bf16, 1, 2, 256, 128], index: Tensor[i64, 1]) -> Tensor[bf16, 1, 2, 288, 128]:
-    return tensor.dynamicUpdateSliceAxisBf16(cache, update, index, 2)
+def logits_projection(value: Tensor[bf16, 1, 256, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 256, 151936]:
+    return tensor.matmul_bf_16(value, embedding)
 
 @tensor
-def lastLogitsKernel(hidden: Tensor[bf16, 1, 256, 2048], normWeight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 1, 151936]:
-    finalHidden = lastHidden(hidden)
-    return lastLogitsProjection(lastRmsNorm(finalHidden, normWeight), transposeEmbedding(embedding))
+def logits_kernel(hidden: Tensor[bf16, 1, 256, 2048], norm_weight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 256, 151936]:
+    return logits_projection(qwen_rms_norm(hidden, norm_weight), transpose_embedding(embedding))
+
+
+def last_hidden(value: Tensor[bf16, 1, 256, 2048]) -> Tensor[bf16, 1, 1, 2048]:
+    return tensor.dynamic_slice_bf_16(value, [0, 255, 0], [1, 1, 2048])
+
+def last_to_f_32(value: Tensor[bf16, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
+    return tensor.bf16_to_f_32(value)
+
+def last_to_bf_16(value: Tensor[f32, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
+    return tensor.f32_to_bf_16(value)
+
+def last_multiply_f_32(left: Tensor[f32, 1, 1, 2048], right: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
+    return tensor.multiply_f_32(left, right)
+
+def last_mean(value: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1]:
+    return tensor.mean_last_f_32(value)
+
+def last_stabilize(value: Tensor[f32, 1, 1]) -> Tensor[f32, 1, 1]:
+    return tensor.add_scalar_f_32(value, 0.000001)
+
+def last_inverse(value: Tensor[f32, 1, 1]) -> Tensor[f32, 1, 1]:
+    return tensor.rsqrt_f_32(value)
+
+def last_broadcast_mean(value: Tensor[f32, 1, 1], target: Tensor[f32, 1, 1, 2048]) -> Tensor[f32, 1, 1, 2048]:
+    return tensor.broadcast_like_f_32(value, target)
+
+def last_broadcast_norm(value: Tensor[bf16, 2048], target: Tensor[bf16, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
+    return tensor.broadcast_like_bf_16(value, target)
+
+def last_multiply_bf_16(left: Tensor[bf16, 1, 1, 2048], right: Tensor[bf16, 1, 1, 2048]) -> Tensor[bf16, 1, 1, 2048]:
+    return tensor.multiply_bf_16(left, right)
+
+def last_rms_norm(value: Tensor[bf16, 1, 1, 2048], weight: Tensor[bf16, 2048]) -> Tensor[bf16, 1, 1, 2048]:
+    value_f_32 = last_to_f_32(value)
+    square = last_multiply_f_32(value_f_32, value_f_32)
+    variance = last_mean(square)
+    stabilized = last_stabilize(variance)
+    inverse = last_inverse(stabilized)
+    normalized_f_32 = last_multiply_f_32(value_f_32, last_broadcast_mean(inverse, value_f_32))
+    normalized = last_to_bf_16(normalized_f_32)
+    return last_multiply_bf_16(normalized, last_broadcast_norm(weight, normalized))
+
+def last_logits_projection(value: Tensor[bf16, 1, 1, 2048], embedding: Tensor[bf16, 2048, 151936]) -> Tensor[bf16, 1, 1, 151936]:
+    return tensor.matmul_bf_16(value, embedding)
+
+def prefill_kv_to_bf_16(value: Tensor[f32, 1, 2, 256, 128]) -> Tensor[bf16, 1, 2, 256, 128]:
+    return tensor.f32_to_bf_16(value)
+
+def update_prefill_cache(cache: Tensor[bf16, 1, 2, 288, 128], update: Tensor[bf16, 1, 2, 256, 128], index: Tensor[i64, 1]) -> Tensor[bf16, 1, 2, 288, 128]:
+    return tensor.dynamic_update_slice_axis_bf_16(cache, update, index, 2)
 
 @tensor
-def prefillKeyCacheKernel(
+def last_logits_kernel(hidden: Tensor[bf16, 1, 256, 2048], norm_weight: Tensor[bf16, 2048], embedding: Tensor[bf16, 151936, 2048]) -> Tensor[bf16, 1, 1, 151936]:
+    final_hidden = last_hidden(hidden)
+    return last_logits_projection(last_rms_norm(final_hidden, norm_weight), transpose_embedding(embedding))
+
+@tensor
+def prefill_key_cache_kernel(
     hidden: Tensor[bf16, 1, 256, 2048],
-    inputNorm: Tensor[bf16, 2048],
-    keyWeight: Tensor[bf16, 256, 2048],
-    keyBias: Tensor[bf16, 256],
+    input_norm: Tensor[bf16, 2048],
+    key_weight: Tensor[bf16, 256, 2048],
+    key_bias: Tensor[bf16, 256],
     cosine: Tensor[f32, 1, 1, 256, 128],
     sine: Tensor[f32, 1, 1, 256, 128],
     cache: Tensor[bf16, 1, 2, 288, 128],
     index: Tensor[i64, 1],
 ) -> Tensor[bf16, 1, 2, 288, 128]:
-    normalized = qwenRmsNorm(hidden, inputNorm)
-    projected = kvProjection(normalized, transposeKvWeight(keyWeight))
-    key = addKv(projected, broadcastKvBias(keyBias, projected))
-    keyHeads = transposeKv(reshapeKv(key))
-    rotary = applyKvRope(kvHeadsToF32(keyHeads), cosine, sine)
-    update = prefillKvToBf16(rotary)
-    return updatePrefillCache(cache, update, index)
+    normalized = qwen_rms_norm(hidden, input_norm)
+    projected = kv_projection(normalized, transpose_kv_weight(key_weight))
+    key = add_kv(projected, broadcast_kv_bias(key_bias, projected))
+    key_heads = transpose_kv(reshape_kv(key))
+    rotary = apply_kv_rope(kv_heads_to_f_32(key_heads), cosine, sine)
+    update = prefill_kv_to_bf_16(rotary)
+    return update_prefill_cache(cache, update, index)
 
 @tensor
-def prefillValueCacheKernel(
+def prefill_value_cache_kernel(
     hidden: Tensor[bf16, 1, 256, 2048],
-    inputNorm: Tensor[bf16, 2048],
-    valueWeight: Tensor[bf16, 256, 2048],
-    valueBias: Tensor[bf16, 256],
+    input_norm: Tensor[bf16, 2048],
+    value_weight: Tensor[bf16, 256, 2048],
+    value_bias: Tensor[bf16, 256],
     cache: Tensor[bf16, 1, 2, 288, 128],
     index: Tensor[i64, 1],
 ) -> Tensor[bf16, 1, 2, 288, 128]:
-    normalized = qwenRmsNorm(hidden, inputNorm)
-    projected = kvProjection(normalized, transposeKvWeight(valueWeight))
-    value = addKv(projected, broadcastKvBias(valueBias, projected))
-    update = transposeKv(reshapeKv(value))
-    return updatePrefillCache(cache, update, index)
+    normalized = qwen_rms_norm(hidden, input_norm)
+    projected = kv_projection(normalized, transpose_kv_weight(value_weight))
+    value = add_kv(projected, broadcast_kv_bias(value_bias, projected))
+    update = transpose_kv(reshape_kv(value))
+    return update_prefill_cache(cache, update, index)

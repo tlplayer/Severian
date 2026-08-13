@@ -5,7 +5,7 @@
 # Count paths from the upper-left to the lower-right of a grid when movement is
 # restricted to one cell right or one cell down.
 
-def uniquePaths(rows: int, columns: int) -> int:
+def unique_paths(rows: int, columns: int) -> int:
     paths := []
     while size(paths) < columns:
         paths.append(1)
@@ -17,13 +17,13 @@ def uniquePaths(rows: int, columns: int) -> int:
     return paths[columns - 1]
 
 test "rectangular grid":
-    assert(uniquePaths(3, 7) == 28)
+    assert(unique_paths(3, 7) == 28)
 
 test "narrow grid":
-    assert(uniquePaths(3, 2) == 3)
+    assert(unique_paths(3, 2) == 3)
 
 test "single row":
-    assert(uniquePaths(1, 8) == 1)
+    assert(unique_paths(1, 8) == 1)
 
 test "single cell":
-    assert(uniquePaths(1, 1) == 1)
+    assert(unique_paths(1, 1) == 1)

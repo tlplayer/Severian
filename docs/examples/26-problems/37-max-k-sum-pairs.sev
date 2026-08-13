@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: array, two-pointers, counting
 
-def maxOperations(values: list[int], target: int) -> int:
+def max_operations(values: list[int], target: int) -> int:
     used := []
     for _ in values:
         used.append(false)
@@ -23,10 +23,10 @@ def maxOperations(values: list[int], target: int) -> int:
     return operations
 
 test "two pairs":
-    assert(maxOperations([1, 2, 3, 4], 5) == 2)
+    assert(max_operations([1, 2, 3, 4], 5) == 2)
 
 test "duplicate values":
-    assert(maxOperations([3, 1, 3, 4, 3], 6) == 1)
+    assert(max_operations([3, 1, 3, 4, 3], 6) == 1)
 
 test "no pair":
-    assert(maxOperations([1, 1, 1], 5) == 0)
+    assert(max_operations([1, 1, 1], 5) == 0)

@@ -177,7 +177,7 @@ pub(super) fn enforce_manifest_unsafe_policy(
     span: Span,
     interface_library: bool,
 ) -> Result<(), PackageError> {
-    let package = package_name(manifest, manifest_path)?;
+    let package = package_name(manifest, manifest_path).unwrap_or("workspace");
     let configuration = manifest
         .get("package")
         .and_then(toml::Value::as_table)

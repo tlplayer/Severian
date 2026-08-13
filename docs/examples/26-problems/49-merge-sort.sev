@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: merge-sort, divide-and-conquer, sorting, array
 
-def mergeRuns(values: list[int], temporary: list[int], left: int, middle: int, right: int):
+def merge_runs(values: list[int], temporary: list[int], left: int, middle: int, right: int):
     first := left
     second := middle
     output := left
@@ -26,7 +26,7 @@ def mergeRuns(values: list[int], temporary: list[int], left: int, middle: int, r
     for index in range(left, right):
         values[index] = temporary[index]
 
-def sortArray(values: list[int]) -> list[int]:
+def sort_array(values: list[int]) -> list[int]:
     temporary := []
     for value in values:
         temporary.append(0)
@@ -40,16 +40,16 @@ def sortArray(values: list[int]) -> list[int]:
                 middle = size(values)
             if right > size(values):
                 right = size(values)
-            mergeRuns(values, temporary, left, middle, right)
+            merge_runs(values, temporary, left, middle, right)
             left += width * 2
         width *= 2
     return values
 
 test "mixed values":
-    assert(sortArray([5, 2, 3, 1]) == [1, 2, 3, 5])
+    assert(sort_array([5, 2, 3, 1]) == [1, 2, 3, 5])
 
 test "duplicates and negatives":
-    assert(sortArray([5, 1, 1, 2, 0, 0, -1]) == [-1, 0, 0, 1, 1, 2, 5])
+    assert(sort_array([5, 1, 1, 2, 0, 0, -1]) == [-1, 0, 0, 1, 1, 2, 5])
 
 test "empty array":
-    assert(sortArray([]) == [])
+    assert(sort_array([]) == [])

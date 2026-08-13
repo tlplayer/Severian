@@ -6,14 +6,14 @@ class Qwen2MlpWeights:
     down: Tensor[bf16]
 
 def silu(value: Tensor[bf16]) -> Tensor[bf16]:
-    return tensor.multiplyBf16(value, tensor.sigmoidBf16(value))
+    return tensor.multiply_bf_16(value, tensor.sigmoid_bf_16(value))
 
-def qwen2Mlp(input: Tensor[bf16], weights: Qwen2MlpWeights) -> Tensor[bf16]:
-    gateWeight = tensor.transposeBf16(weights.gate, [1, 0])
-    upWeight = tensor.transposeBf16(weights.up, [1, 0])
-    downWeight = tensor.transposeBf16(weights.down, [1, 0])
-    gate = tensor.matmulBf16(input, gateWeight)
-    up = tensor.matmulBf16(input, upWeight)
+def qwen2_mlp(input: Tensor[bf16], weights: Qwen2MlpWeights) -> Tensor[bf16]:
+    gate_weight = tensor.transpose_bf_16(weights.gate, [1, 0])
+    up_weight = tensor.transpose_bf_16(weights.up, [1, 0])
+    down_weight = tensor.transpose_bf_16(weights.down, [1, 0])
+    gate = tensor.matmul_bf_16(input, gate_weight)
+    up = tensor.matmul_bf_16(input, up_weight)
     activated = silu(gate)
-    hidden = tensor.multiplyBf16(activated, up)
-    return tensor.matmulBf16(hidden, downWeight)
+    hidden = tensor.multiply_bf_16(activated, up)
+    return tensor.matmul_bf_16(hidden, down_weight)

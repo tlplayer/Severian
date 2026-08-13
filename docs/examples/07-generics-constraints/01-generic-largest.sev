@@ -1,5 +1,5 @@
 trait Ordered:
-    lessThan(other: Self) -> bool
+    less_than(other: Self) -> bool
 
     
 def largest[type: Ordered](values: list[type]) -> Option[type]:
@@ -9,7 +9,7 @@ def largest[type: Ordered](values: list[type]) -> Option[type]:
     best := values[0]
 
     for value in values:
-        if best.lessThan(value):
+        if best.less_than(value):
             best = value
 
     return present(best)

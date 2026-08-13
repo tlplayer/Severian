@@ -5,8 +5,8 @@ from model import metrics
 from model import linear
 
 def main():
-    train = data.readCsv("train.csv")
-    testData = data.readCsv("test.csv")
+    train = data.read_csv("train.csv")
+    test_data = data.read_csv("test.csv")
 
     features = [
         "Pclass",
@@ -21,9 +21,9 @@ def main():
     pipeline = model.Pipeline([
         preprocessing.Select(features),
         preprocessing.Impute({
-            "Age": preprocessing.Median,
-            "Fare": preprocessing.Median,
-            "Embarked": preprocessing.MostFrequent,
+            "Age": preprocessing.median,
+            "Fare": preprocessing.median,
+            "Embarked": preprocessing.most_frequent,
         }),
         preprocessing.OneHot(["Sex", "Embarked"]),
         preprocessing.Standardize(["Age", "Fare"]),
@@ -36,12 +36,12 @@ def main():
 
     pipeline.fit(train, target="Survived")
 
-    predictions = pipeline.predict(testData)
+    predictions = pipeline.predict(test_data)
 
-    data.writeCsv(
+    data.write_csv(
         "submission.csv",
         {
-            "PassengerId": testData["PassengerId"],
+            "PassengerId": test_data["PassengerId"],
             "Survived": predictions,
         },
     )

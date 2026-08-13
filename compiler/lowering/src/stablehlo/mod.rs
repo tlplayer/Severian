@@ -591,7 +591,8 @@ fn normalized_tensor_operation(function: &str) -> String {
         .rsplit_once('.')
         .map(|(_, leaf)| leaf)
         .unwrap_or(function)
-        .to_ascii_lowercase();
+        .to_ascii_lowercase()
+        .replace('_', "");
     op.strip_suffix("bf16")
         .or_else(|| op.strip_suffix("f32"))
         .unwrap_or(&op)
@@ -662,27 +663,27 @@ pub fn lower_tensor_call(
     let op = normalized_tensor_operation(function);
 
     match op.as_str() {
-        "add" | "rankedadd" | "tensor_add" => {
+        "add" | "rankedadd" | "tensoradd" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.add(&args[0], &args[1], result_type))
         }
 
-        "sub" | "subtract" | "tensor_sub" => {
+        "sub" | "subtract" | "tensorsub" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.subtract(&args[0], &args[1], result_type))
         }
 
-        "mul" | "multiply" | "tensor_mul" => {
+        "mul" | "multiply" | "tensormul" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.multiply(&args[0], &args[1], result_type))
         }
 
-        "div" | "divide" | "tensor_div" => {
+        "div" | "divide" | "tensordiv" => {
             require_arity(&op, args, 2)?;
             Ok(emitter.divide(&args[0], &args[1], result_type))
         }
 
-        "matmul" | "batchedmatmul" | "rankedmatmul" | "tensor_matmul" => {
+        "matmul" | "batchedmatmul" | "rankedmatmul" | "tensormatmul" => {
             require_arity(&op, args, 2)?;
             match result_type.rank {
                 Some(2) => Ok(linear::matmul_2d(emitter, &args[0], &args[1], result_type)),
@@ -706,12 +707,12 @@ pub fn lower_tensor_call(
             }
         }
 
-        "reshape" | "tensor_reshape" => {
+        "reshape" | "tensorreshape" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.reshape(&args[0], result_type))
         }
 
-        "broadcast" | "broadcastlike" | "broadcast_in_dim" | "tensor_broadcast" => {
+        "broadcast" | "broadcastlike" | "broadcastindim" | "tensorbroadcast" => {
             if args.is_empty() || args.len() > 2 {
                 return Err(StableHloLoweringError::InvalidArity {
                     operation: op,
@@ -751,55 +752,55 @@ pub fn lower_tensor_call(
             Ok(emitter.broadcast_in_dim(&args[0], &dimensions, result_type))
         }
 
-        "relu" | "rankedrelu" | "tensor_relu" => {
+        "relu" | "rankedrelu" | "tensorrelu" => {
             require_arity(&op, args, 1)?;
             Ok(activation::relu(emitter, &args[0], result_type))
         }
 
-        "silu" | "swish" | "tensor_silu" => {
+        "silu" | "swish" | "tensorsilu" => {
             require_arity(&op, args, 1)?;
             Ok(activation::silu(emitter, &args[0], result_type))
         }
 
-        "exp" | "exponential" | "tensor_exp" => {
+        "exp" | "exponential" | "tensorexp" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.exponential(&args[0], result_type))
         }
 
-        "tanh" | "tensor_tanh" => {
+        "tanh" | "tensortanh" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.tanh(&args[0], result_type))
         }
 
-        "rsqrt" | "tensor_rsqrt" => {
+        "rsqrt" | "tensorrsqrt" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.rsqrt(&args[0], result_type))
         }
 
-        "sigmoid" | "logistic" | "tensor_sigmoid" => {
+        "sigmoid" | "logistic" | "tensorsigmoid" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.logistic(&args[0], result_type))
         }
 
-        "sum" | "rankedsum" | "sumlast" | "reduce_sum" | "tensor_sum" => {
+        "sum" | "rankedsum" | "sumlast" | "reducesum" | "tensorsum" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_sum(emitter, &args[0], &axes, result_type))
         }
 
-        "max" | "maxlast" | "reduce_max" | "tensor_max" => {
+        "max" | "maxlast" | "reducemax" | "tensormax" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_max(emitter, &args[0], &axes, result_type))
         }
 
-        "min" | "reduce_min" | "tensor_min" => {
+        "min" | "reducemin" | "tensormin" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             Ok(reduction::reduce_min(emitter, &args[0], &axes, result_type))
         }
 
-        "mean" | "meanlast" | "reduce_mean" | "tensor_mean" => {
+        "mean" | "meanlast" | "reducemean" | "tensormean" => {
             require_arity(&op, args, 1)?;
             let axes = reduced_suffix_axes(&op, &args[0], result_type)?;
             let count = static_reduction_count(&op, &args[0], &axes)?;
@@ -812,12 +813,12 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "gelu" | "tensor_gelu" => {
+        "gelu" | "tensorgelu" => {
             require_arity(&op, args, 1)?;
             Ok(activation::gelu_tanh(emitter, &args[0], result_type))
         }
 
-        "softmax" | "softmax_last_axis" | "tensor_softmax" => {
+        "softmax" | "softmaxlastaxis" | "tensorsoftmax" => {
             require_arity(&op, args, 1)?;
             let reduced_type = normalization::last_axis_reduced_type(result_type)?;
             Ok(normalization::softmax_last_axis(
@@ -828,7 +829,7 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "rms_norm" | "rmsnorm" | "tensor_rms_norm" => {
+        "rmsnorm" | "tensorrmsnorm" => {
             require_arity(&op, args, 2)?;
             let input_type = args[0]
                 .tensor_type()
@@ -847,7 +848,7 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "layer_norm" | "layernorm" | "tensor_layer_norm" => {
+        "layernorm" | "tensorlayernorm" => {
             require_arity(&op, args, 3)?;
             let input_type = args[0]
                 .tensor_type()

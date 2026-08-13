@@ -12,4 +12,4 @@ test "full desired-state workflow":
 
 def main():
     print(deployment())
-    print(orchestrator.controllerSql())
+    print(orchestrator.controller_sql())

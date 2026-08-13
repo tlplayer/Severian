@@ -6,7 +6,7 @@
 def manhattan(first: list[int], second: list[int]) -> int:
     return abs(first[0] - second[0]) + abs(first[1] - second[1])
 
-def minCostConnectPoints(points: list[list[int]]) -> int:
+def min_cost_connect_points(points: list[list[int]]) -> int:
     count = size(points)
     used := [false]
     distance := [0]
@@ -30,10 +30,10 @@ def minCostConnectPoints(points: list[list[int]]) -> int:
     return total
 
 test "five points":
-    assert(minCostConnectPoints([[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]) == 20)
+    assert(min_cost_connect_points([[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]) == 20)
 
 test "three points":
-    assert(minCostConnectPoints([[3, 12], [-2, 5], [-4, 1]]) == 18)
+    assert(min_cost_connect_points([[3, 12], [-2, 5], [-4, 1]]) == 18)
 
 test "single point":
-    assert(minCostConnectPoints([[0, 0]]) == 0)
+    assert(min_cost_connect_points([[0, 0]]) == 0)

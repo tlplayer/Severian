@@ -76,7 +76,7 @@ class Application:
         assert(max_tokens > 0)
         assert(max_tokens <= max_max_tokens)
 
-        input_ids = tokenizer.encodeChat([
+        input_ids = tokenizer.encode_chat([
             {"role": "user", "content": prompt},
         ])
 
@@ -90,7 +90,7 @@ class Application:
         generated := []
         next_token := model.argmax(state.logits)
 
-        while size(generated) < max_tokens and not tokenizer.isEndToken(next_token):
+        while size(generated) < max_tokens and not tokenizer.is_end_token(next_token):
             generated.push(next_token)
 
             # Decode one token with the KV cache returned by the previous
@@ -101,7 +101,7 @@ class Application:
         return tokenizer.decode(generated)
 
 
-def downloadIfMissing(url: string, destination: string) -> Result[unit, exception]:
+def download_if_missing(url: string, destination: string) -> Result[unit, exception]:
     if os.exists(destination):
         information = os.stat(destination)
         assert(information.size > 0)
@@ -118,13 +118,13 @@ def downloadIfMissing(url: string, destination: string) -> Result[unit, exceptio
     assert(information.size > 0)
 
 
-def prepareModelFiles() -> Result[ModelFiles, exception]:
+def prepare_model_files() -> Result[ModelFiles, exception]:
     created = os.mkdir(model_root)
 
-    config_download = downloadIfMissing(config_url, config_path)
-    weights_download = downloadIfMissing(weights_url, weights_path)
-    tokenizer_download = downloadIfMissing(tokenizer_url, tokenizer_path)
-    tokenizer_config_download = downloadIfMissing(
+    config_download = download_if_missing(config_url, config_path)
+    weights_download = download_if_missing(weights_url, weights_path)
+    tokenizer_download = download_if_missing(tokenizer_url, tokenizer_path)
+    tokenizer_config_download = download_if_missing(
         TOKENIZER_config_url,
         TOKENIZER_config_path,
     )
@@ -137,8 +137,8 @@ def prepareModelFiles() -> Result[ModelFiles, exception]:
     )
 
 
-def loadApplication() -> Result[Application, exception]:
-    files = prepareModelFiles()
+def load_application() -> Result[Application, exception]:
+    files = prepare_model_files()
 
     config_file = file.read(files.config)
     config_text = config_file.text()
@@ -155,22 +155,22 @@ def loadApplication() -> Result[Application, exception]:
     assert(config.torch_dtype == "bfloat16")
 
     print("loading safetensors")
-    weights = model.loadSafetensors(files.weights)
+    weights = model.load_safetensors(files.weights)
 
     print("loading tokenizer")
-    tokenizer = model.loadTokenizer(
+    tokenizer = model.load_tokenizer(
         files.tokenizer,
         files.tokenizer_config,
     )
 
     print("building qwen2 graph")
-    graph = models.qwen2ForCausalLM(config, move weights)
+    graph = models.qwen_2_for_causal_lm(config, move weights)
 
     # This is the point of the torture test:
     # Severian must lower the graph to StableHLO, compile it through XLA,
     # create/load a PJRT executable, and retain it for repeated requests.
     print("compiling with xla")
-    executable = model.compileCausalLM(
+    executable = model.compile_causal_lm(
         move graph,
         "xla",
         max_sequence_length,
@@ -187,7 +187,7 @@ def loadApplication() -> Result[Application, exception]:
     return app
 
 
-def handleRequest(
+def handle_request(
     request: http.Request,
     app: Application,
 ) -> Result[http.Response, exception]:
@@ -229,7 +229,7 @@ def handleRequest(
 
 
 def main() -> Result[unit, exception]:
-    app = loadApplication()
+    app = load_application()
 
     print("model", model_id)
     print("backend", app.executable.backend())
@@ -241,14 +241,14 @@ def main() -> Result[unit, exception]:
     # unbounded native threads.
     served = http.serve(
         "127.0.0.1:8080",
-        handleRequest,
+        handle_request,
         move app,
     )
 
     return
 
 test with integ "end to end test, download model and run 4 inferences with expected outputs":
-    app = llm_server_torture.loadApplication()
+    app = llm_server_torture.load_application()
 
     assert(app.executable.backend() == "xla")
 

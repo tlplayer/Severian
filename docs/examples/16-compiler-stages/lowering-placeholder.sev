@@ -1,7 +1,0 @@
-import tensor
-
-def main():
-#replace with tensor
-    a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    b = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    print(tensor.rankedValues(tensor.rankedMatmul(a, b)))

@@ -1,9 +1,9 @@
 import distributed
 
-def reluShard(values: list[float], workers: int, worker: int) -> list[float]:
+def relu_shard(values: list[float], workers: int, worker: int) -> list[float]:
     output := []
-    start = distributed.shardStart(size(values), workers, worker)
-    end = distributed.shardEnd(size(values), workers, worker)
+    start = distributed.shard_start(size(values), workers, worker)
+    end = distributed.shard_end(size(values), workers, worker)
     for index in range(start, end):
         if values[index] > 0.0:
             output.append(values[index])
@@ -13,9 +13,9 @@ def reluShard(values: list[float], workers: int, worker: int) -> list[float]:
 
 def main():
     values = [-3.0, 2.0, -1.0, 4.0, 5.0, -2.0, 7.0, -8.0]
-    print(distributed.shardStart(size(values), 4, 2))
-    print(distributed.shardEnd(size(values), 4, 2))
-    print(reluShard(values, 4, 2))
+    print(distributed.shard_start(size(values), 4, 2))
+    print(distributed.shard_end(size(values), 4, 2))
+    print(relu_shard(values, 4, 2))
 
 test "distributed shards retain deterministic ownership":
-    assert(reluShard([-3.0, 2.0, -1.0, 4.0], 2, 1) == [0.0, 4.0])
+    assert(relu_shard([-3.0, 2.0, -1.0, 4.0], 2, 1) == [0.0, 4.0])

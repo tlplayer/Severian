@@ -3,16 +3,16 @@
 def double(value: int) -> int:
     return value * 2
 
-def parentWork(value: int) -> int:
+def parent_work(value: int) -> int:
     child = async double(value) with self
     return await child + 1
 
 test "nested task result":
-    parent = async parentWork(20) with self
+    parent = async parent_work(20) with self
     assert(await parent == 41)
 
 test "separate task trees":
-    first = async parentWork(4) with self
-    second = async parentWork(7) with self
+    first = async parent_work(4) with self
+    second = async parent_work(7) with self
     assert(await first == 9)
     assert(await second == 15)

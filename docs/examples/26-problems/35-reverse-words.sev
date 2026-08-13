@@ -3,14 +3,14 @@
 # Difficulty: medium
 # Tags: string, two-pointers
 
-def reverseWords(text: string) -> string:
+def reverse_words(text: string) -> string:
     return text.words().reversed().join(" ")
 
 test "ordinary sentence":
-    assert(reverseWords("the sky is blue") == "blue is sky the")
+    assert(reverse_words("the sky is blue") == "blue is sky the")
 
 test "outer whitespace":
-    assert(reverseWords("  hello world  ") == "world hello")
+    assert(reverse_words("  hello world  ") == "world hello")
 
 test "repeated whitespace":
-    assert(reverseWords("a good   example") == "example good a")
+    assert(reverse_words("a good   example") == "example good a")

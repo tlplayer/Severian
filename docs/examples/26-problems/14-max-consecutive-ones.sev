@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: array, sliding-window
 
-def longestOnes(values: list[int], flips: int) -> int:
+def longest_ones(values: list[int], flips: int) -> int:
     zeroes := 0
     best := 0
 
@@ -21,10 +21,10 @@ def longestOnes(values: list[int], flips: int) -> int:
     return best
 
 test "two flips":
-    assert(longestOnes([1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0], 2) == 6)
+    assert(longest_ones([1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0], 2) == 6)
 
 test "three flips":
-    assert(longestOnes([0, 0, 1, 1, 1, 0, 0], 3) == 6)
+    assert(longest_ones([0, 0, 1, 1, 1, 0, 0], 3) == 6)
 
 test "no flips":
-    assert(longestOnes([1, 1, 0, 1], 0) == 2)
+    assert(longest_ones([1, 1, 0, 1], 0) == 2)

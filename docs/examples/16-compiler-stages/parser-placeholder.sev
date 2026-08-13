@@ -1,6 +1,0 @@
-def main():
-    print("parser fixture")
-
-test with integration "parser fixture output":
-    main()
-    assert("parser fixture" in stdout)

@@ -6,23 +6,23 @@ enum ChatEvent:
     Say(client_id: int, text: string)
     Leave(client_id: int)
 
-def joinMessage(clientId: int) -> string:
+def join_message(clientId: int) -> string:
     return "client " + string(clientId) + " joined"
 
 test "join messages include the client id":
-    assert(joinMessage(7) == "client 7 joined")
+    assert(join_message(7) == "client 7 joined")
 
 def broadcast(clients: map[int, Channel[string]], text: string):
     for _, outbound in clients:
         async send clone text with outbound
 
-def runHub(events: Channel[ChatEvent]):
+def run_hub(events: Channel[ChatEvent]):
     clients := {}
 
     switch events while running with running := true:
         Join from events:
             clients[client_id] = move outbound
-            broadcast(view clients, joinMessage(client_id))
+            broadcast(view clients, join_message(client_id))
 
         Say from events:
             broadcast(view clients, string(client_id) + ": " + text)
@@ -35,10 +35,10 @@ def runHub(events: Channel[ChatEvent]):
             log.error("chat event channel collapsed", error)
             running = false
 
-def writeClient(writer: network.TCPWriter, outbound: Channel[string]):
+def write_client(writer: network.TCPWriter, outbound: Channel[string]):
     switch outbound while connected with connected := true:
         message from outbound:
-            switch await writer.writeLine(message):
+            switch await writer.write_line(message):
                 ok _:
                     log.info("chat message delivered")
 
@@ -48,12 +48,12 @@ def writeClient(writer: network.TCPWriter, outbound: Channel[string]):
         fail _:
             connected = false
 
-def readClient(
+def read_client(
     client_id: int,
     reader: network.TCPReader,
     events: Channel[ChatEvent],
 ):
-    switch await reader.readLine() while true:
+    switch await reader.read_line() while true:
         ok message:
             await send Say(client_id, move message) with events
 
@@ -61,7 +61,7 @@ def readClient(
             await send Leave(client_id) with events
             return
 
-def serveClient(
+def serve_client(
     client_id: int,
     connection: network.TCPConnection,
     events: Channel[ChatEvent],
@@ -70,20 +70,20 @@ def serveClient(
     outbound = Channel[string] with Buffer(64)
 
     await send Join(client_id, clone outbound) with events
-    writing = async writeClient(writer, outbound) with self and writer and outbound
-    reading = async readClient(client_id, reader, clone events) with self and reader
+    writing = async write_client(writer, outbound) with self and writer and outbound
+    reading = async read_client(client_id, reader, clone events) with self and reader
 
     await reading, writing
 
-def runServer() -> Result[unit, IOError]:
+def run_server() -> Result[unit, IOError]:
     listener = network.listen("127.0.0.1:7000")
     events = Channel[ChatEvent] with Buffer(256)
-    hub = async runHub(clone events) with self
+    hub = async run_hub(clone events) with self
 
     with listener:
         while true with next_client_id := 1:
             connection = await listener.accept()
-            async serveClient(next_client_id, connection, clone events) with self and connection
+            async serve_client(next_client_id, connection, clone events) with self and connection
             next_client_id += 1
 
     await hub

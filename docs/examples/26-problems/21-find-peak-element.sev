@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: array, binary-search
 
-def findPeakElement(values: list[int]) -> int:
+def find_peak_element(values: list[int]) -> int:
     high := size(values) - 1
     while low < high with low := 0:
         middle = low + (high - low) / 2
@@ -14,10 +14,10 @@ def findPeakElement(values: list[int]) -> int:
     return low
 
 test "single peak":
-    assert(findPeakElement([1, 2, 3, 1]) == 2)
+    assert(find_peak_element([1, 2, 3, 1]) == 2)
 
 test "peak at start":
-    assert(findPeakElement([3, 2, 1]) == 0)
+    assert(find_peak_element([3, 2, 1]) == 0)
 
 test "single value":
-    assert(findPeakElement([7]) == 0)
+    assert(find_peak_element([7]) == 0)

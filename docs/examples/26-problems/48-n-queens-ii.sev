@@ -3,34 +3,34 @@
 # Difficulty: hard
 # Tags: backtracking, recursion, bitmask, combinatorics
 
-def powerOfTwo(position: int) -> int:
+def power_of_two(position: int) -> int:
     value := 1
     for index in range(0, position):
         value *= 2
     return value
 
 def occupied(mask: int, position: int) -> bool:
-    return mask / powerOfTwo(position) % 2 == 1
+    return mask / power_of_two(position) % 2 == 1
 
-def searchQueens(size: int, row: int, columns: int, descending: int, ascending: int) -> int:
+def search_queens(size: int, row: int, columns: int, descending: int, ascending: int) -> int:
     if row == size:
         return 1
     solutions := 0
     for column in range(0, size):
-        downIndex = row - column + size - 1
-        upIndex = row + column
-        if not occupied(columns, column) and not occupied(descending, downIndex) and not occupied(ascending, upIndex):
-            solutions += searchQueens(size, row + 1, columns + powerOfTwo(column), descending + powerOfTwo(downIndex), ascending + powerOfTwo(upIndex))
+        down_index = row - column + size - 1
+        up_index = row + column
+        if not occupied(columns, column) and not occupied(descending, down_index) and not occupied(ascending, up_index):
+            solutions += search_queens(size, row + 1, columns + power_of_two(column), descending + power_of_two(down_index), ascending + power_of_two(up_index))
     return solutions
 
-def totalNQueens(size: int) -> int:
-    return searchQueens(size, 0, 0, 0, 0)
+def total_n_queens(size: int) -> int:
+    return search_queens(size, 0, 0, 0, 0)
 
 test "one queen":
-    assert(totalNQueens(1) == 1)
+    assert(total_n_queens(1) == 1)
 
 test "four queens":
-    assert(totalNQueens(4) == 2)
+    assert(total_n_queens(4) == 2)
 
 test "five queens":
-    assert(totalNQueens(5) == 10)
+    assert(total_n_queens(5) == 10)

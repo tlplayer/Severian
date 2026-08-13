@@ -4,15 +4,15 @@ def square(value: float) -> float:
 test "square":
     assert(square(3.0) == 9.0)
 
-def squareRoot(value: float) -> float:
+def square_root(value: float) -> float:
     return value ** .5
 
 test "square root":
-    assert(squareRoot(9.0) == 3.0)
+    assert(square_root(9.0) == 3.0)
 
 def main():
     print(square(3.0))
-    print(squareRoot(9.0))
+    print(square_root(9.0))
 
 test with integration "native exponentiation":
     main()

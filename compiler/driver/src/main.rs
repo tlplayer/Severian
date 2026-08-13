@@ -1,4 +1,5 @@
 use severian_backend::{NativeCompileOptions, NativeSanitizer};
+use severian_driver::build_cache::BuildGateCache;
 use severian_driver::{
     check_path, compile_dependency_path, compile_native, compile_native_integration_tests,
     compile_native_profile_tests, compile_native_tests, compile_native_with_options, compile_path,
@@ -711,6 +712,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
 
     let policy = BuildPolicy::for_input(&input).map_err(|error| error.to_string())?;
     let targets = resolve_targets(&input)?;
+    let gate_cache = BuildGateCache::discover(&policy.root, &input)?;
     build_progress(
         message_format,
         &format!(
@@ -723,21 +725,32 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 .join(" -> ")
         ),
     );
-    build_progress(message_format, "[compile] RUN");
-    let findings = collect_build_findings(&input, max_errors)?;
-    render_build_findings(&findings, message_format);
-    let error_count = findings
-        .iter()
-        .filter(|finding| finding.severity == "error")
-        .count();
-    if error_count > 0 {
-        return Err(format!(
-            "build stopped after {error_count} independent error(s); no artifacts were emitted"
-        ));
+    if gate_cache.is_fresh(BuildGate::Compile) {
+        build_progress(message_format, "[compile] CACHED");
+    } else {
+        gate_cache.invalidate_from(BuildGate::Compile, &policy.pipeline)?;
+        build_progress(message_format, "[compile] RUN");
+        let findings = collect_build_findings(&input, max_errors)?;
+        render_build_findings(&findings, message_format);
+        let error_count = findings
+            .iter()
+            .filter(|finding| finding.severity == "error")
+            .count();
+        if error_count > 0 {
+            return Err(format!(
+                "build stopped after {error_count} independent error(s); no artifacts were emitted"
+            ));
+        }
+        gate_cache.record(BuildGate::Compile)?;
+        build_progress(message_format, "[compile] PASS");
     }
-    build_progress(message_format, "[compile] PASS");
 
     for gate in policy.pipeline.iter().copied().skip(1) {
+        if gate_cache.is_fresh(gate) {
+            build_progress(message_format, &format!("[{}] CACHED", gate.name()));
+            continue;
+        }
+        gate_cache.invalidate_from(gate, &policy.pipeline)?;
         build_progress(message_format, &format!("[{}] RUN", gate.name()));
         match gate {
             BuildGate::Compile => unreachable!("compile is the first and unique gate"),
@@ -750,6 +763,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             }
             BuildGate::Integration => integration_test_targets(&input)?,
         }
+        gate_cache.record(gate)?;
         build_progress(message_format, &format!("[{}] PASS", gate.name()));
     }
     let mut libraries = HashSet::new();

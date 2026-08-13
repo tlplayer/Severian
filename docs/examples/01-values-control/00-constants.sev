@@ -1,9 +1,9 @@
-int MaxRetries = 3
-float Pi = 3.1415926
+int MAX_RETRIES = 3
+float PI = 3.1415926
 
 def main():
-    print(MaxRetries)
-    print(Pi)
+    print(MAX_RETRIES)
+    print(PI)
 
 test with integration "constant output":
     main()

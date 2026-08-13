@@ -1,22 +1,22 @@
-def normalizeFields(text: string) -> string:
+def normalize_fields(text: string) -> string:
     return text.split(",").join(" | ")
 
 def summarize(values: list[int]) -> list[int]:
     return [values.minimum(), values.maximum(), values.sum()]
 
-def consumeStack(values: list[int]) -> list[int]:
+def consume_stack(values: list[int]) -> list[int]:
     last = values.last()
     popped = values.pop()
     return [last, popped, values.last()]
 
-def weightedTotal(values: list[int]) -> int:
+def weighted_total(values: list[int]) -> int:
     for index, value in enumerate(values) with total := 0:
         total += index * value
     return total
 
-def dotProduct(left: list[int], right: list[int]) -> int:
-    for leftValue, rightValue in zip(left, right) with total := 0:
-        total += leftValue * rightValue
+def dot_product(left: list[int], right: list[int]) -> int:
+    for left_value, right_value in zip(left, right) with total := 0:
+        total += left_value * right_value
     return total
 
 def classify(value: int) -> string:
@@ -27,7 +27,7 @@ def classify(value: int) -> string:
     else:
         return "positive"
 
-def sumUntilNegative(values: list[int]) -> int:
+def sum_until_negative(values: list[int]) -> int:
     total := 0
     for value in values:
         if value < 0:
@@ -38,19 +38,19 @@ def sumUntilNegative(values: list[int]) -> int:
     return total
 
 def main():
-    print(normalizeFields("alpha,beta,gamma"))
+    print(normalize_fields("alpha,beta,gamma"))
     print(summarize([4, -2, 7, 1]))
-    print(weightedTotal([5, 10, 20]))
-    print(dotProduct([1, 2, 3], [4, 5]))
-    print(sumUntilNegative([2, 0, 5, -1, 100]))
+    print(weighted_total([5, 10, 20]))
+    print(dot_product([1, 2, 3], [4, 5]))
+    print(sum_until_negative([2, 0, 5, -1, 100]))
 
 test "string and reduction helpers":
-    assert(normalizeFields("alpha,beta,gamma") == "alpha | beta | gamma")
-    assert(normalizeFields("a,,b") == "a |  | b")
+    assert(normalize_fields("alpha,beta,gamma") == "alpha | beta | gamma")
+    assert(normalize_fields("a,,b") == "a |  | b")
     assert(summarize([4, -2, 7, 1]) == [-2, 7, 10])
 
 test "stack helpers":
-    assert(consumeStack([3, 5, 8]) == [8, 8, 5])
+    assert(consume_stack([3, 5, 8]) == [8, 8, 5])
 
 test "Python-style iteration and indexing":
     values := [10, 20, 30]
@@ -59,8 +59,8 @@ test "Python-style iteration and indexing":
     assert(values == [10, 7, 30])
     assert("n"[-1] == "n")
     assert(4 not in [1, 2, 3])
-    assert(weightedTotal([5, 10, 20]) == 50)
-    assert(dotProduct([1, 2, 3], [4, 5]) == 14)
+    assert(weighted_total([5, 10, 20]) == 50)
+    assert(dot_product([1, 2, 3], [4, 5]) == 14)
     assert(any([false, true, false]))
     assert(all([true, true, true]))
     assert(not any([]))
@@ -84,28 +84,28 @@ test "slices ranges and richer collections":
     assert(queue == [2, 9, 5])
 
     heap := []
-    heap.heapPush(5)
-    heap.heapPush(2)
-    heap.heapPush(7)
-    heap.heapPush(1)
-    assert(heap.heapPop() == 1)
-    assert(heap.heapPop() == 2)
+    heap.heap_push(5)
+    heap.heap_push(2)
+    heap.heap_push(7)
+    heap.heap_push(1)
+    assert(heap.heap_pop() == 1)
+    assert(heap.heap_pop() == 2)
 
     counts = [2, 1, 2, 3, 2].frequencies()
     assert(counts.get(2, 0) == 3)
     assert(counts.get(8, 0) == 0)
     defaults := {"known": 4}
-    assert(defaults.setDefault("known", 9) == 4)
-    assert(defaults.setDefault("new", 7) == 7)
+    assert(defaults.set_default("known", 9) == 4)
+    assert(defaults.set_default("new", 7) == 7)
     assert(defaults["new"] == 7)
 
     assert({1, 2}.union({2, 3}) == {1, 2, 3})
     assert({1, 2}.intersection({2, 3}) == {2})
-    assert({1, 2}.symmetricDifference({2, 3}) == {1, 3})
+    assert({1, 2}.symmetric_difference({2, 3}) == {1, 3})
     assert("  Hello Severian  ".strip().lower() == "hello severian")
     assert("banana".replace("na", "X") == "baXX")
-    assert("severian".startsWith("sev"))
-    assert("severian".endsWith("ian"))
+    assert("severian".starts_with("sev"))
+    assert("severian".ends_with("ian"))
     assert("banana".find("nan") == 2)
     assert("banana".count("an") == 2)
 
@@ -118,7 +118,7 @@ test "slices ranges and richer collections":
     assert(classify(1) == "positive")
     assert(1 < 2 < 3)
     assert(not (3 < 2 < 4))
-    assert(sumUntilNegative([2, 0, 5, -1, 100]) == 7)
+    assert(sum_until_negative([2, 0, 5, -1, 100]) == 7)
     assert([left + right for left, right in zip([1, 2], [10, 20])] == [11, 22])
     assert([left * right for left in [1, 2] for right in [3, 4] if left * right > 3] == [4, 6, 8])
     assert({value % 3 for value in range(6)} == {0, 1, 2})
@@ -131,8 +131,8 @@ test "slices ranges and richer collections":
     assert("éé🙂".characters() == ["é", "é", "🙂"])
     assert("éé🙂".frequencies()["é"] == 2)
     offset = 3
-    addOffset = |value| value + offset
-    assert(addOffset(4) == 7)
+    add_offset = |value| value + offset
+    assert(add_offset(4) == 7)
     assert([1, 2, 3].map(|value| value * 2) == [2, 4, 6])
     assert([1, 2, 3, 4].filter(|value| value % 2 == 0) == [2, 4])
     assert([1, 2, 3, 4].reduce(|total, value| total + value, 0) == 10)

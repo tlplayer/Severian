@@ -1,6 +1,6 @@
 import file
 import json
-from platform import monotonicNs
+from platform import monotonic_ns
 import qwen2
 import qwen2_config
 import qwen_kernels
@@ -8,24 +8,24 @@ import qwen_tokenizer
 import safetensor_weights
 import tensor
 
-def forward(weights: qwen2.Qwen2Weights, promptTokens: list[int]) -> Tensor[bf16, 1, 32, 151936]:
-    inputIds = tensor.from_i64_tokens_32(promptTokens)
-    cosine = tensor.rope_cosine_32(promptTokens)
-    sine = tensor.rope_sine_32(promptTokens)
-    mask = tensor.causal_mask_32(promptTokens)
-    hidden := qwen_kernels.embeddingKernel(weights.embedding, inputIds)
+def forward(weights: qwen2.Qwen2Weights, prompt_tokens: list[int]) -> Tensor[bf16, 1, 32, 151936]:
+    input_ids = tensor.from_i64_tokens_32(prompt_tokens)
+    cosine = tensor.rope_cosine_32(prompt_tokens)
+    sine = tensor.rope_sine_32(prompt_tokens)
+    mask = tensor.causal_mask_32(prompt_tokens)
+    hidden := qwen_kernels.embedding_kernel(weights.embedding, input_ids)
     for layer in weights.layers:
-        hidden = qwen_kernels.qwen2LayerKernel(
+        hidden = qwen_kernels.qwen2_layer_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.query,
-            layer.attention.queryBias,
+            layer.attention.query_bias,
             layer.attention.key,
-            layer.attention.keyBias,
+            layer.attention.key_bias,
             layer.attention.value,
-            layer.attention.valueBias,
+            layer.attention.value_bias,
             layer.attention.output,
-            layer.postAttentionNorm,
+            layer.post_attention_norm,
             layer.mlp.gate,
             layer.mlp.up,
             layer.mlp.down,
@@ -33,85 +33,85 @@ def forward(weights: qwen2.Qwen2Weights, promptTokens: list[int]) -> Tensor[bf16
             sine,
             mask,
         )
-    logits = qwen_kernels.logitsKernel(hidden, weights.finalNorm, weights.embedding)
+    logits = qwen_kernels.logits_kernel(hidden, weights.final_norm, weights.embedding)
     return logits
 
-def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
-    modelPath = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
-    processStart = monotonicNs()
-    configText = file.read_text(modelPath + "/config.json")
-    configRead = monotonicNs()
-    print("config_read_ns", configRead)
-    config = qwen2_config.parseQwen2Config(configText)
-    configParsed = monotonicNs()
-    print("config_parsed_ns", configParsed)
-    store = safetensor_weights.openSafeTensorStore(modelPath)
-    indexParsed = monotonicNs()
-    print("index_parsed_ns", indexParsed)
-    weights = qwen2.loadQwen2Weights(store, config.numHiddenLayers)
-    weightsMapped = monotonicNs()
-    print("weights_mapped_ns", weightsMapped)
+def run_benchmark() -> Result[qwen2.Qwen2Weights, exception]:
+    model_path = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
+    process_start = monotonic_ns()
+    config_text = file.read_text(model_path + "/config.json")
+    config_read = monotonic_ns()
+    print("config_read_ns", config_read)
+    config = qwen2_config.parse_qwen_2_config(config_text)
+    config_parsed = monotonic_ns()
+    print("config_parsed_ns", config_parsed)
+    store = safetensor_weights.open_safe_tensor_store(model_path)
+    index_parsed = monotonic_ns()
+    print("index_parsed_ns", index_parsed)
+    weights = qwen2.load_qwen_2_weights(store, config.num_hidden_layers)
+    weights_mapped = monotonic_ns()
+    print("weights_mapped_ns", weights_mapped)
 
-    assert(config.vocabSize == 151936)
-    assert(config.hiddenSize == 2048)
-    assert(config.intermediateSize == 11008)
-    assert(config.numHiddenLayers == 36)
-    assert(config.numAttentionHeads == 16)
-    assert(config.numKeyValueHeads == 2)
-    assert(config.headDimension() == 128)
-    assert(config.kvRepeat() == 8)
-    assert(config.tieWordEmbeddings)
+    assert(config.vocab_size == 151936)
+    assert(config.hidden_size == 2048)
+    assert(config.intermediate_size == 11008)
+    assert(config.num_hidden_layers == 36)
+    assert(config.num_attention_heads == 16)
+    assert(config.num_key_value_heads == 2)
+    assert(config.head_dimension() == 128)
+    assert(config.kv_repeat() == 8)
+    assert(config.tie_word_embeddings)
 
-    print("process_start_ns", processStart)
-    print("checkpoint_tensor_count", size(json.objectKeys(store.weightMap)))
+    print("process_start_ns", process_start)
+    print("checkpoint_tensor_count", size(json.object_keys(store.weight_map)))
     print("loaded_layers", size(weights.layers))
-    fixtureText = file.read_text("benchmarks/inference/example_inputs.json")
-    fixtureDocument = json.decode[Any](fixtureText)
-    fixture = json.objectGet(fixtureDocument, "32")
-    prompt = json.asString(json.objectGet(fixture, "prompt_text"))
-    promptTokens = json.asIntList(json.objectGet(fixture, "input_ids"))
-    attentionMask = json.asIntList(json.objectGet(fixture, "attention_mask"))
-    positionIds = json.asIntList(json.objectGet(fixture, "position_ids"))
-    expectedTokens = json.asIntList(json.objectGet(fixture, "expected_output_ids"))
-    logitsPosition = json.asInt(json.objectGet(fixture, "logits_position"))
-    assert(size(promptTokens) == 32)
-    assert(size(attentionMask) == 32)
-    assert(size(positionIds) == 32)
-    assert(size(expectedTokens) == 1)
-    assert(logitsPosition == 31)
-    for position in positionIds:
-        assert(attentionMask[position] == 1)
-        assert(positionIds[position] == position)
-    assert(qwen_tokenizer.encode(modelPath, prompt) == promptTokens)
-    warmupStart = monotonicNs()
-    warmupLogits = forward(weights, promptTokens)
-    warmupToken = tensor.argmax_at_active_position(warmupLogits, promptTokens)
-    assert(warmupToken == expectedTokens[0])
-    modelReady = monotonicNs()
-    inferenceStart = monotonicNs()
-    logits = forward(weights, promptTokens)
-    forwardEnd = monotonicNs()
-    nextToken = tensor.argmax_at_active_position(logits, promptTokens)
-    firstToken = monotonicNs()
-    nextText = qwen_tokenizer.decodeToken(modelPath, nextToken)
+    fixture_text = file.read_text("benchmarks/inference/example_inputs.json")
+    fixture_document = json.decode[Any](fixture_text)
+    fixture = json.object_get(fixture_document, "32")
+    prompt = json.as_string(json.object_get(fixture, "prompt_text"))
+    prompt_tokens = json.as_int_list(json.object_get(fixture, "input_ids"))
+    attention_mask = json.as_int_list(json.object_get(fixture, "attention_mask"))
+    position_ids = json.as_int_list(json.object_get(fixture, "position_ids"))
+    expected_tokens = json.as_int_list(json.object_get(fixture, "expected_output_ids"))
+    logits_position = json.as_int(json.object_get(fixture, "logits_position"))
+    assert(size(prompt_tokens) == 32)
+    assert(size(attention_mask) == 32)
+    assert(size(position_ids) == 32)
+    assert(size(expected_tokens) == 1)
+    assert(logits_position == 31)
+    for position in position_ids:
+        assert(attention_mask[position] == 1)
+        assert(position_ids[position] == position)
+    assert(qwen_tokenizer.encode(model_path, prompt) == prompt_tokens)
+    warmup_start = monotonic_ns()
+    warmup_logits = forward(weights, prompt_tokens)
+    warmup_token = tensor.argmax_at_active_position(warmup_logits, prompt_tokens)
+    assert(warmup_token == expected_tokens[0])
+    model_ready = monotonic_ns()
+    inference_start = monotonic_ns()
+    logits = forward(weights, prompt_tokens)
+    forward_end = monotonic_ns()
+    next_token = tensor.argmax_at_active_position(logits, prompt_tokens)
+    first_token = monotonic_ns()
+    next_text = qwen_tokenizer.decode_token(model_path, next_token)
     print("prompt", prompt)
-    print("prompt_token_count", size(promptTokens))
-    print("logits_position", logitsPosition)
-    print("warmup_token", warmupToken)
-    print("next_token", nextToken)
-    print("next_text", nextText)
-    print("model_ready_ns", modelReady)
-    print("first_token_ns", firstToken)
-    print("load_ns", modelReady - processStart)
-    print("warmup_ns", modelReady - warmupStart)
-    print("prefill_ns", forwardEnd - inferenceStart)
-    print("ttft_ns", forwardEnd - inferenceStart)
-    assert(nextToken == warmupToken)
-    assert(nextToken == expectedTokens[0])
+    print("prompt_token_count", size(prompt_tokens))
+    print("logits_position", logits_position)
+    print("warmup_token", warmup_token)
+    print("next_token", next_token)
+    print("next_text", next_text)
+    print("model_ready_ns", model_ready)
+    print("first_token_ns", first_token)
+    print("load_ns", model_ready - process_start)
+    print("warmup_ns", model_ready - warmup_start)
+    print("prefill_ns", forward_end - inference_start)
+    print("ttft_ns", forward_end - inference_start)
+    assert(next_token == warmup_token)
+    assert(next_token == expected_tokens[0])
     return weights
 
 def main():
-    switch runBenchmark():
+    switch run_benchmark():
         ok weights:
             assert(size(weights.layers) == 36)
         failure error:

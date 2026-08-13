@@ -1,12 +1,12 @@
 import parallel
 import tensor
 
-def addRowBias(
+def add_row_bias(
     matrix: Tensor[f64],
     bias: Tensor[f64],
 ) -> Tensor[f64]:
     with gpu:
-        return tensor.rankedAdd(matrix, bias)
+        return tensor.ranked_add(matrix, bias)
 
 test "gpu add follows trailing axis broadcasting":
     matrix = tensor.ranked(
@@ -14,10 +14,10 @@ test "gpu add follows trailing axis broadcasting":
         [2, 3],
     )
     bias = tensor.ranked([10.0, 20.0, 30.0], [3])
-    result = addRowBias(matrix, bias)
+    result = add_row_bias(matrix, bias)
 
-    assert(tensor.rankedShape(result) == [2, 3])
+    assert(tensor.ranked_shape(result) == [2, 3])
     assert(
-        tensor.rankedValues(result)
+        tensor.ranked_values(result)
         == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0]
     )

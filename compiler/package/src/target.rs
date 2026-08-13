@@ -1,7 +1,12 @@
 use super::*;
 
 pub fn find_manifest(source: &Path) -> Option<PathBuf> {
-    source.parent()?.ancestors().find_map(manifest_in)
+    source.parent()?.ancestors().find_map(|directory| {
+        let path = manifest_in(directory)?;
+        parse_manifest(&path)
+            .ok()
+            .and_then(|manifest| manifest.get("package").is_some().then_some(path))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

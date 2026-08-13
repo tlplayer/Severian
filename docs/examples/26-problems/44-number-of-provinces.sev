@@ -3,13 +3,13 @@
 # Difficulty: medium
 # Tags: graph, matrix, depth-first-search, union-find
 
-def findRoot(parent: list[int], city: int) -> int:
+def find_root(parent: list[int], city: int) -> int:
     root := city
     while parent[root] != root:
         root = parent[root]
     return root
 
-def provincesUnionFind(connected: list[list[int]]) -> int:
+def provinces_union_find(connected: list[list[int]]) -> int:
     parent := []
     for city in indices(connected):
         parent.append(city)
@@ -17,20 +17,20 @@ def provincesUnionFind(connected: list[list[int]]) -> int:
     for first in indices(connected):
         for second in range(first + 1, size(connected)):
             if connected[first][second] == 1:
-                firstRoot = findRoot(parent, first)
-                secondRoot = findRoot(parent, second)
-                if firstRoot != secondRoot:
-                    parent[secondRoot] = firstRoot
+                first_root = find_root(parent, first)
+                second_root = find_root(parent, second)
+                if first_root != second_root:
+                    parent[second_root] = first_root
                     provinces -= 1
     return provinces
 
-def visitProvince(connected: list[list[int]], visited: list[bool], city: int):
+def visit_province(connected: list[list[int]], visited: list[bool], city: int):
     visited[city] = true
     for neighbor in indices(connected):
         if connected[city][neighbor] == 1 and not visited[neighbor]:
-            visitProvince(connected, visited, neighbor)
+            visit_province(connected, visited, neighbor)
 
-def provincesDepthFirst(connected: list[list[int]]) -> int:
+def provinces_depth_first(connected: list[list[int]]) -> int:
     visited := []
     for city in indices(connected):
         visited.append(false)
@@ -38,18 +38,18 @@ def provincesDepthFirst(connected: list[list[int]]) -> int:
     for city in indices(connected):
         if not visited[city]:
             provinces += 1
-            visitProvince(connected, visited, city)
+            visit_province(connected, visited, city)
     return provinces
 
 test "two provinces":
     graph = [[1, 1, 0], [1, 1, 0], [0, 0, 1]]
-    assert(provincesUnionFind(graph) == 2)
-    assert(provincesDepthFirst(graph) == 2)
+    assert(provinces_union_find(graph) == 2)
+    assert(provinces_depth_first(graph) == 2)
 
 test "separate components":
     graph = [[1, 0, 0], [0, 1, 1], [0, 1, 1]]
-    assert(provincesUnionFind(graph) == 2)
+    assert(provinces_union_find(graph) == 2)
 
 test "single city":
-    assert(provincesUnionFind([[1]]) == 1)
-    assert(provincesDepthFirst([[1]]) == 1)
+    assert(provinces_union_find([[1]]) == 1)
+    assert(provinces_depth_first([[1]]) == 1)

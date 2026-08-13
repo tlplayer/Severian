@@ -2,10 +2,10 @@ import model
 
 @model(Relu, FastSigmoid, J)
 def main():
-    X = [-2.0, 0.0, 3.0]
-    values = Relu(X)
+    x = [-2.0, 0.0, 3.0]
+    values = Relu(x)
     centered = FastSigmoid([0.0])
-    jacobian = J(X)
+    jacobian = J(x)
 
     print(values)
     print(centered)

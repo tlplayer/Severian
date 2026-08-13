@@ -3,37 +3,37 @@
 # Difficulty: medium
 # Tags: concurrency, channel, synchronization
 
-def emitFoo(count: int, fooGate: Channel[int], barGate: Channel[int], output: Channel[string]):
+def emit_foo(count: int, foo_gate: Channel[int], bar_gate: Channel[int], output: Channel[string]):
     for _ in range(count):
-        await fooGate
+        await foo_gate
         emitted = async send "foo" with output
         await emitted
-        opened = async send 1 with barGate
+        opened = async send 1 with bar_gate
         await opened
 
-def emitBar(count: int, barGate: Channel[int], fooGate: Channel[int], output: Channel[string]):
+def emit_bar(count: int, bar_gate: Channel[int], foo_gate: Channel[int], output: Channel[string]):
     for _ in range(count):
-        await barGate
+        await bar_gate
         emitted = async send "bar" with output
         await emitted
-        opened = async send 1 with fooGate
+        opened = async send 1 with foo_gate
         await opened
 
-def fooBar(count: int) -> list[string]:
-    fooGate = Channel[int] with Buffer(1)
-    barGate = Channel[int] with Buffer(1)
+def foo_bar(count: int) -> list[string]:
+    foo_gate = Channel[int] with Buffer(1)
+    bar_gate = Channel[int] with Buffer(1)
     output = Channel[string] with Buffer(2)
-    seed = async send 1 with fooGate
-    fooTask = async emitFoo(count, fooGate, barGate, output) with self
-    barTask = async emitBar(count, barGate, fooGate, output) with self
+    seed = async send 1 with foo_gate
+    foo_task = async emit_foo(count, foo_gate, bar_gate, output) with self
+    bar_task = async emit_bar(count, bar_gate, foo_gate, output) with self
     result := []
     for _ in range(count * 2):
         result.append(await output)
-    await seed, fooTask, barTask
+    await seed, foo_task, bar_task
     return result
 
 test "three alternations":
-    assert(fooBar(3) == ["foo", "bar", "foo", "bar", "foo", "bar"])
+    assert(foo_bar(3) == ["foo", "bar", "foo", "bar", "foo", "bar"])
 
 test "single alternation":
-    assert(fooBar(1) == ["foo", "bar"])
+    assert(foo_bar(1) == ["foo", "bar"])

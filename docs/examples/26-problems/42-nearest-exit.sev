@@ -3,41 +3,41 @@
 # Difficulty: medium
 # Tags: matrix, breadth-first-search, queue, graph, shortest-path
 
-def nearestExit(maze: list[list[string]], entrance: list[int]) -> int:
-    rowQueue := [entrance[0]]
-    columnQueue := [entrance[1]]
-    distanceQueue := [0]
+def nearest_exit(maze: list[list[string]], entrance: list[int]) -> int:
+    row_queue := [entrance[0]]
+    column_queue := [entrance[1]]
+    distance_queue := [0]
     head := 0
     maze[entrance[0]][entrance[1]] = "+"
-    rowSteps = [-1, 1, 0, 0]
-    columnSteps = [0, 0, -1, 1]
+    row_steps = [-1, 1, 0, 0]
+    column_steps = [0, 0, -1, 1]
 
-    while head < size(rowQueue):
-        row = rowQueue[head]
-        column = columnQueue[head]
-        distance = distanceQueue[head]
+    while head < size(row_queue):
+        row = row_queue[head]
+        column = column_queue[head]
+        distance = distance_queue[head]
         head += 1
 
         for direction in range(0, 4):
-            nextRow = row + rowSteps[direction]
-            nextColumn = column + columnSteps[direction]
-            if nextRow >= 0 and nextRow < size(maze):
-                if nextColumn >= 0 and nextColumn < size(maze[0]):
-                    if maze[nextRow][nextColumn] == ".":
-                        nextDistance = distance + 1
-                        if nextRow == 0 or nextRow == size(maze) - 1 or nextColumn == 0 or nextColumn == size(maze[0]) - 1:
-                            return nextDistance
-                        maze[nextRow][nextColumn] = "+"
-                        rowQueue.append(nextRow)
-                        columnQueue.append(nextColumn)
-                        distanceQueue.append(nextDistance)
+            next_row = row + row_steps[direction]
+            next_column = column + column_steps[direction]
+            if next_row >= 0 and next_row < size(maze):
+                if next_column >= 0 and next_column < size(maze[0]):
+                    if maze[next_row][next_column] == ".":
+                        next_distance = distance + 1
+                        if next_row == 0 or next_row == size(maze) - 1 or next_column == 0 or next_column == size(maze[0]) - 1:
+                            return next_distance
+                        maze[next_row][next_column] = "+"
+                        row_queue.append(next_row)
+                        column_queue.append(next_column)
+                        distance_queue.append(next_distance)
     return -1
 
 test "nearby side exit":
-    assert(nearestExit([["+", "+", ".", "+"], [".", ".", ".", "+"], ["+", "+", "+", "."]], [1, 2]) == 1)
+    assert(nearest_exit([["+", "+", ".", "+"], [".", ".", ".", "+"], ["+", "+", "+", "."]], [1, 2]) == 1)
 
 test "walk around walls":
-    assert(nearestExit([["+", "+", "+"], [".", ".", "."], ["+", "+", "+"]], [1, 0]) == 2)
+    assert(nearest_exit([["+", "+", "+"], [".", ".", "."], ["+", "+", "+"]], [1, 0]) == 2)
 
 test "no exit":
-    assert(nearestExit([[".", "+"]], [0, 0]) == -1)
+    assert(nearest_exit([[".", "+"]], [0, 0]) == -1)

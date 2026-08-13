@@ -14,9 +14,9 @@ def rob(values: list[int]) -> int:
     current := 0
 
     for value in values:
-        withCurrent = maximum(previous + value, current)
+        with_current = maximum(previous + value, current)
         previous = current
-        current = withCurrent
+        current = with_current
 
     return current
 

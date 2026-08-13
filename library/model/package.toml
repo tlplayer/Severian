@@ -20,6 +20,6 @@ implementation = "native"
 status = "experimental"
 
 [package.metadata.compiler]
-symbols = { Relu = "reluList", FastSigmoid = "fastSigmoidList", FastTanh = "fastTanhList", Swish = "swishList", J = "jacobianList" }
-fusion-aliases = { reluList = "tensor.relu", fastSigmoidList = "tensor.fastSigmoid", fastTanhList = "tensor.fastTanh", swishList = "tensor.swish" }
-graph-operations = { graphInput = "input", graphRelu = "relu", graphAdd = "add", graphMatmul = "matmul", runGraph = "run" }
+symbols = { Relu = "relu_list", FastSigmoid = "fast_sigmoid_list", FastTanh = "fast_tanh_list", Swish = "swish_list", J = "jacobian_list" }
+fusion-aliases = { relu_list = "tensor.relu", fast_sigmoid_list = "tensor.fast_sigmoid", fast_tanh_list = "tensor.fast_tanh", swish_list = "tensor.swish" }
+graph-operations = { graph_input = "input", graph_relu = "relu", graph_add = "add", graph_matmul = "matmul", run_graph = "run" }

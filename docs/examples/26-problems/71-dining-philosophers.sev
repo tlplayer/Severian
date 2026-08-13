@@ -10,24 +10,24 @@ class Table:
         meals += 1
         return philosopher
 
-def diningRound() -> list[int]:
+def dining_round() -> list[int]:
     table := Table(0)
     zero = async table.dine(0) with self and lock
     one = async table.dine(1) with self and lock
     two = async table.dine(2) with self and lock
     three = async table.dine(3) with self and lock
     four = async table.dine(4) with self and lock
-    zeroResult = await zero
-    oneResult = await one
-    twoResult = await two
-    threeResult = await three
-    fourResult = await four
-    result = [zeroResult, oneResult, twoResult, threeResult, fourResult]
+    zero_result = await zero
+    one_result = await one
+    two_result = await two
+    three_result = await three
+    four_result = await four
+    result = [zero_result, one_result, two_result, three_result, four_result]
     assert(table.meals == 5)
     return result
 
 test "every philosopher eats":
-    assert(diningRound() == [0, 1, 2, 3, 4])
+    assert(dining_round() == [0, 1, 2, 3, 4])
 
 test "second round completes without deadlock":
-    assert(diningRound().sum() == 10)
+    assert(dining_round().sum() == 10)

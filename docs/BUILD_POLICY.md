@@ -13,6 +13,15 @@ not weakened substitutes for a successful build. Incremental work should come
 from reusable compiler artifacts and gate caches, never from changing which
 checks count.
 
+Successful gates are recorded under `target/build-gates`. Their fingerprint
+includes all Severian sources and manifests in the policy root, the selected
+input, the compiler executable identity, and the host platform. An unchanged
+gate prints `CACHED`. When a gate must run, its old result and every downstream
+result are invalidated before execution; an interrupted build can therefore
+resume only from gates whose inputs and successful result still match. Build
+outputs, virtual environments, editor metadata, and dependency directories are
+excluded from the fingerprint.
+
 The complete policy is declarative in `package.toml`:
 
 ```toml

@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: counting-sort, bucket-sort, sorting, counting, array
 
-def countingSort(values: list[int]) -> list[int]:
+def counting_sort(values: list[int]) -> list[int]:
     if size(values) == 0:
         return []
     smallest := values[0]
@@ -25,10 +25,10 @@ def countingSort(values: list[int]) -> list[int]:
     return result
 
 test "negative values":
-    assert(countingSort([5, -1, 3, 5, 0]) == [-1, 0, 3, 5, 5])
+    assert(counting_sort([5, -1, 3, 5, 0]) == [-1, 0, 3, 5, 5])
 
 test "already sorted":
-    assert(countingSort([1, 2, 3]) == [1, 2, 3])
+    assert(counting_sort([1, 2, 3]) == [1, 2, 3])
 
 test "empty array":
-    assert(countingSort([]) == [])
+    assert(counting_sort([]) == [])

@@ -155,7 +155,7 @@ pub(super) fn lower_expression_kind(
                     }
                     return Ok((
                         Expression::Call {
-                            target: CallTarget::source("tensor.rankedMatmul"),
+                            target: CallTarget::source("tensor.ranked_matmul"),
                             args: vec![left, right],
                         },
                         left_type,

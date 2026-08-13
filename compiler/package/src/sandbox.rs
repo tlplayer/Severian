@@ -39,7 +39,14 @@ fn visit(root: &Path, directory: &Path) -> Result<(), PackageError> {
             )));
         }
         if path.is_dir() {
-            if matches!(entry.file_name().to_str(), Some(".git" | "target")) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(
+                name.as_ref(),
+                ".git" | "target" | "node_modules" | ".codex" | ".agents"
+            ) || name == ".venv"
+                || name.starts_with(".venv-")
+            {
                 continue;
             }
             visit(root, &path)?;
@@ -76,4 +83,25 @@ fn visit(root: &Path, directory: &Path) -> Result<(), PackageError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignores_local_environment_and_build_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "severian-package-sandbox-environments-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".venv-local/bin")).unwrap();
+        fs::create_dir_all(root.join("target/generated")).unwrap();
+        fs::write(root.join(".venv-local/bin/Activate.ps1"), "activate").unwrap();
+        fs::write(root.join("target/generated/install.sh"), "install").unwrap();
+
+        validate_package_payload(&root).unwrap();
+        let _ = fs::remove_dir_all(root);
+    }
 }

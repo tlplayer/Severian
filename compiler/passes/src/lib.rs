@@ -465,18 +465,18 @@ mod tests {
     fn model_graph_common_subexpressions_are_shared() {
         let graph_rules = [
             GraphRule {
-                function: "models.graphInput".into(),
+                function: "models.graph_input".into(),
                 operation: GraphOperation::Input,
             },
             GraphRule {
-                function: "models.graphMatmul".into(),
+                function: "models.graph_matmul".into(),
                 operation: GraphOperation::Matmul,
             },
         ];
         let call = || Expression::Call {
             // Package function bodies carry the local spelling after linking;
             // user call sites may carry the qualified spelling.
-            target: CallTarget::source("graphMatmul"),
+            target: CallTarget::source("graph_matmul"),
             args: vec![
                 Expression::Variable("input".into()),
                 Expression::Variable("weights".into()),

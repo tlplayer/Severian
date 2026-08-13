@@ -28,12 +28,10 @@ paths while staying Severian-first:
 | `08-concurrency` | `async`, `await`, bounded channels, channel switches, tasks, safe shared state shapes, and narrowly exempted runtime-owned task examples. |
 | `09-systems-unsafe` | A source-scoped pointer exception plus a safe host-boundary API shape; direct native ABI declarations remain library-only. |
 | `10-numerics-mlir` | Tensor-style code that should lower cleanly to MLIR. |
-| `11-testing` | Function-attached and constructor-attached tests. |
 | `12-enums-aliases` | Placeholder enum and type alias syntax. |
 | `13-method-mutation` | Placeholder method mutation contracts. |
 | `14-packages` | Cargo-like official package layout and manifest. |
 | `15-tests` | Ordinary, property, benchmark, chaos, integration, and composed tests. |
-| `16-compiler-stages` | Placeholder parser/semantic/ownership/lowering fixture stages. |
 | `17-servers` | TCP request/response, channel-based chat, and map/reduce services. |
 | `18-tensor-neuralnet` | Imported tensor kernels, neural-network activations, task parallelism, and Jacobians. |
 | `19-distributed-learning` | Large sharded forward/backward passes with deterministic native task reduction. |

@@ -19,4 +19,4 @@ def difference[type](left: set[type], right: set[type]) -> set[type]:
     return left.difference(right)
 
 def symmetric_difference[type](left: set[type], right: set[type]) -> set[type]:
-    return left.symmetricDifference(right)
+    return left.symmetric_difference(right)

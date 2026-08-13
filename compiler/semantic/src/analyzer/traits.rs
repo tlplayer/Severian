@@ -179,7 +179,7 @@ pub(super) fn declaration_type_key(ty: &Type) -> String {
         } => {
             let mut parts = params.iter().map(declaration_type_key).collect::<Vec<_>>();
             parts.push(declaration_type_key(returns));
-            format!("fn[{}]", parts.join(", "))
+            format!("Function[{}]", parts.join(", "))
         }
         Type::Future { output, .. } => format!("Future[{}]", declaration_type_key(output)),
         Type::Reference { mutable, inner, .. } => format!(

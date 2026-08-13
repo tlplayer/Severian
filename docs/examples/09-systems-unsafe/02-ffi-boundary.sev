@@ -1,8 +1,8 @@
-def cStrlen(text: string) -> usize:
+def c_strlen(text: string) -> usize:
     return text.length()
 
 def strlen(text: string) -> usize:
-    return cStrlen(text)
+    return c_strlen(text)
 
 def main():
     print(strlen("severian"))

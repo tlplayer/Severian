@@ -2,18 +2,18 @@ import tensor
 import model
 
 def algebra():
-    A = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    B = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    product = tensor.rankedMatmul(A, B)
-    jacobian = model.jacobianList([1.0, 0.0])
+    a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    b = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    product = tensor.ranked_matmul(a, b)
+    jacobian = model.jacobian_list([1.0, 0.0])
     zero = tensor.ranked([0.0], [1, 1])
-    print(tensor.rankedValues(product))
+    print(tensor.ranked_values(product))
     print(jacobian)
-    print(tensor.rankedValues(zero))
+    print(tensor.ranked_values(zero))
 
 @model(Relu, FastTanh, Swish)
-def forward(X: list[float]) -> list[float]:
-    return Swish(FastTanh(Relu(X)))
+def forward(x: list[float]) -> list[float]:
+    return Swish(FastTanh(Relu(x)))
 
 def main():
     algebra()

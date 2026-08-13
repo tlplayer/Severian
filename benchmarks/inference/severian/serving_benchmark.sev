@@ -1,6 +1,6 @@
 import file
 import json
-from platform import monotonicNs
+from platform import monotonic_ns
 import qwen2
 import qwen2_config
 import qwen_decode_kernels
@@ -10,63 +10,63 @@ import tensor
 
 class RequestState:
     id: int
-    keyCaches: list[Tensor[bf16]]
-    valueCaches: list[Tensor[bf16]]
+    key_caches: list[Tensor[bf16]]
+    value_caches: list[Tensor[bf16]]
     token: int
-    outputTokens: list[int]
-    tokenTimesNs: list[int]
-    startedNs: int
-    firstTokenNs: int
-    completedNs: int
+    output_tokens: list[int]
+    token_times_ns: list[int]
+    started_ns: int
+    first_token_ns: int
+    completed_ns: int
 
-def prefillRequest(
-    requestId: int,
-    startedNs: int,
+def prefill_request(
+    request_id: int,
+    started_ns: int,
     weights: qwen2.Qwen2Weights,
-    inputIds: Tensor[i64],
+    input_ids: Tensor[i64],
     cosine: Tensor[f32],
     sine: Tensor[f32],
     mask: Tensor[f32],
-    cacheIndex: Tensor[i64],
+    cache_index: Tensor[i64],
 ) -> RequestState:
-    keyCaches := []
-    valueCaches := []
-    hidden := qwen_prefill_kernels.embeddingKernel(weights.embedding, inputIds)
-    for layerIndex in range(0, 36):
-        layer = weights.layers[layerIndex]
-        emptyKey = tensor.empty_kv_cache()
-        keyCache = qwen_prefill_kernels.prefillKeyCacheKernel(
+    key_caches := []
+    value_caches := []
+    hidden := qwen_prefill_kernels.embedding_kernel(weights.embedding, input_ids)
+    for layer_index in range(0, 36):
+        layer = weights.layers[layer_index]
+        empty_key = tensor.empty_kv_cache()
+        key_cache = qwen_prefill_kernels.prefill_key_cache_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.key,
-            layer.attention.keyBias,
+            layer.attention.key_bias,
             cosine,
             sine,
-            emptyKey,
-            cacheIndex,
+            empty_key,
+            cache_index,
         )
-        tensor.release(emptyKey)
-        emptyValue = tensor.empty_kv_cache()
-        valueCache = qwen_prefill_kernels.prefillValueCacheKernel(
+        tensor.release(empty_key)
+        empty_value = tensor.empty_kv_cache()
+        value_cache = qwen_prefill_kernels.prefill_value_cache_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.value,
-            layer.attention.valueBias,
-            emptyValue,
-            cacheIndex,
+            layer.attention.value_bias,
+            empty_value,
+            cache_index,
         )
-        tensor.release(emptyValue)
-        nextHidden = qwen_prefill_kernels.qwen2LayerKernel(
+        tensor.release(empty_value)
+        next_hidden = qwen_prefill_kernels.qwen2_layer_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.query,
-            layer.attention.queryBias,
+            layer.attention.query_bias,
             layer.attention.key,
-            layer.attention.keyBias,
+            layer.attention.key_bias,
             layer.attention.value,
-            layer.attention.valueBias,
+            layer.attention.value_bias,
             layer.attention.output,
-            layer.postAttentionNorm,
+            layer.post_attention_norm,
             layer.mlp.gate,
             layer.mlp.up,
             layer.mlp.down,
@@ -75,237 +75,237 @@ def prefillRequest(
             mask,
         )
         tensor.release(hidden)
-        hidden = nextHidden
-        keyCaches.append(keyCache)
-        valueCaches.append(valueCache)
-    logits = qwen_prefill_kernels.lastLogitsKernel(hidden, weights.finalNorm, weights.embedding)
+        hidden = next_hidden
+        key_caches.append(key_cache)
+        value_caches.append(value_cache)
+    logits = qwen_prefill_kernels.last_logits_kernel(hidden, weights.final_norm, weights.embedding)
     token = tensor.argmax(logits)
-    firstTokenNs = monotonicNs()
+    first_token_ns = monotonic_ns()
     tensor.release(logits)
     tensor.release(hidden)
     return RequestState(
-        requestId,
-        keyCaches,
-        valueCaches,
+        request_id,
+        key_caches,
+        value_caches,
         token,
         [token],
-        [firstTokenNs],
-        startedNs,
-        firstTokenNs,
+        [first_token_ns],
+        started_ns,
+        first_token_ns,
         0,
     )
 
-def decodeRequest(
+def decode_request(
     state: RequestState,
     weights: qwen2.Qwen2Weights,
     cosine: Tensor[f32],
     sine: Tensor[f32],
     mask: Tensor[f32],
-    cacheIndex: Tensor[i64],
+    cache_index: Tensor[i64],
 ) -> RequestState:
-    inputIds = tensor.from_i64_token(state.token)
-    hidden := qwen_decode_kernels.embeddingKernel(weights.embedding, inputIds)
-    tensor.release(inputIds)
-    for layerIndex in range(0, 36):
-        layer = weights.layers[layerIndex]
-        oldKey = state.keyCaches[layerIndex]
-        keyCache = qwen_decode_kernels.updateKeyCacheKernel(
+    input_ids = tensor.from_i64_token(state.token)
+    hidden := qwen_decode_kernels.embedding_kernel(weights.embedding, input_ids)
+    tensor.release(input_ids)
+    for layer_index in range(0, 36):
+        layer = weights.layers[layer_index]
+        old_key = state.key_caches[layer_index]
+        key_cache = qwen_decode_kernels.update_key_cache_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.key,
-            layer.attention.keyBias,
+            layer.attention.key_bias,
             cosine,
             sine,
-            oldKey,
-            cacheIndex,
+            old_key,
+            cache_index,
         )
-        tensor.release(oldKey)
-        state.keyCaches[layerIndex] = keyCache
-        oldValue = state.valueCaches[layerIndex]
-        valueCache = qwen_decode_kernels.updateValueCacheKernel(
+        tensor.release(old_key)
+        state.key_caches[layer_index] = key_cache
+        old_value = state.value_caches[layer_index]
+        value_cache = qwen_decode_kernels.update_value_cache_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.value,
-            layer.attention.valueBias,
-            oldValue,
-            cacheIndex,
+            layer.attention.value_bias,
+            old_value,
+            cache_index,
         )
-        tensor.release(oldValue)
-        state.valueCaches[layerIndex] = valueCache
-        nextHidden = qwen_decode_kernels.qwen2LayerKernel(
+        tensor.release(old_value)
+        state.value_caches[layer_index] = value_cache
+        next_hidden = qwen_decode_kernels.qwen2_layer_kernel(
             hidden,
-            layer.inputNorm,
+            layer.input_norm,
             layer.attention.query,
-            layer.attention.queryBias,
+            layer.attention.query_bias,
             layer.attention.output,
-            layer.postAttentionNorm,
+            layer.post_attention_norm,
             layer.mlp.gate,
             layer.mlp.up,
             layer.mlp.down,
-            keyCache,
-            valueCache,
+            key_cache,
+            value_cache,
             cosine,
             sine,
             mask,
         )
         tensor.release(hidden)
-        hidden = nextHidden
-    logits = qwen_decode_kernels.logitsKernel(hidden, weights.finalNorm, weights.embedding)
+        hidden = next_hidden
+    logits = qwen_decode_kernels.logits_kernel(hidden, weights.final_norm, weights.embedding)
     token = tensor.argmax(logits)
-    tokenTimeNs = monotonicNs()
+    token_time_ns = monotonic_ns()
     tensor.release(logits)
     tensor.release(hidden)
-    state.outputTokens.append(token)
-    state.tokenTimesNs.append(tokenTimeNs)
+    state.output_tokens.append(token)
+    state.token_times_ns.append(token_time_ns)
     return RequestState(
         state.id,
-        state.keyCaches,
-        state.valueCaches,
+        state.key_caches,
+        state.value_caches,
         token,
-        state.outputTokens,
-        state.tokenTimesNs,
-        state.startedNs,
-        state.firstTokenNs,
-        tokenTimeNs,
+        state.output_tokens,
+        state.token_times_ns,
+        state.started_ns,
+        state.first_token_ns,
+        token_time_ns,
     )
 
-def releaseRequest(state: RequestState):
-    for layerIndex in range(0, 36):
-        tensor.release(state.keyCaches[layerIndex])
-        tensor.release(state.valueCaches[layerIndex])
+def release_request(state: RequestState):
+    for layer_index in range(0, 36):
+        tensor.release(state.key_caches[layer_index])
+        tensor.release(state.value_caches[layer_index])
 
-def runWave(
-    firstRequestId: int,
-    requestCount: int,
-    emitMeasurements: bool,
+def run_wave(
+    first_request_id: int,
+    request_count: int,
+    emit_measurements: bool,
     weights: qwen2.Qwen2Weights,
-    inputIds: Tensor[i64],
-    prefillCosine: Tensor[f32],
-    prefillSine: Tensor[f32],
-    prefillMask: Tensor[f32],
-    prefillIndex: Tensor[i64],
+    input_ids: Tensor[i64],
+    prefill_cosine: Tensor[f32],
+    prefill_sine: Tensor[f32],
+    prefill_mask: Tensor[f32],
+    prefill_index: Tensor[i64],
 ):
-    waveStartNs = monotonicNs()
+    wave_start_ns = monotonic_ns()
     states := []
-    for offset in range(0, requestCount):
-        states.append(prefillRequest(
-            firstRequestId + offset,
-            waveStartNs,
+    for offset in range(0, request_count):
+        states.append(prefill_request(
+            first_request_id + offset,
+            wave_start_ns,
             weights,
-            inputIds,
-            prefillCosine,
-            prefillSine,
-            prefillMask,
-            prefillIndex,
+            input_ids,
+            prefill_cosine,
+            prefill_sine,
+            prefill_mask,
+            prefill_index,
         ))
     for position in range(256, 287):
         cosine = tensor.rope_cosine_at(position)
         sine = tensor.rope_sine_at(position)
         mask = tensor.causal_mask_at(position)
-        cacheIndex = tensor.from_i64_position(position)
-        for requestIndex in range(0, requestCount):
-            states[requestIndex] = decodeRequest(
-                states[requestIndex], weights, cosine, sine, mask, cacheIndex,
+        cache_index = tensor.from_i64_position(position)
+        for request_index in range(0, request_count):
+            states[request_index] = decode_request(
+                states[request_index], weights, cosine, sine, mask, cache_index,
             )
         tensor.release(cosine)
         tensor.release(sine)
         tensor.release(mask)
-        tensor.release(cacheIndex)
+        tensor.release(cache_index)
     for state in states:
-        assert(size(state.outputTokens) == 32)
-        assert(size(state.tokenTimesNs) == 32)
-        if emitMeasurements:
+        assert(size(state.output_tokens) == 32)
+        assert(size(state.token_times_ns) == 32)
+        if emit_measurements:
             print(
                 "request_measurement",
                 state.id,
-                state.startedNs,
-                state.firstTokenNs,
-                state.completedNs,
-                json.encode(state.outputTokens),
-                json.encode(state.tokenTimesNs),
+                state.started_ns,
+                state.first_token_ns,
+                state.completed_ns,
+                json.encode(state.output_tokens),
+                json.encode(state.token_times_ns),
             )
-        releaseRequest(state)
+        release_request(state)
 
-def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
-    modelPath = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
-    processStartNs = monotonicNs()
-    configText = file.read_text(modelPath + "/config.json")
-    config = qwen2_config.parseQwen2Config(configText)
-    store = safetensor_weights.openSafeTensorStore(modelPath)
-    weights = qwen2.loadQwen2Weights(store, config.numHiddenLayers)
-    weightsMappedNs = monotonicNs()
-    assert(config.vocabSize == 151936)
-    assert(config.hiddenSize == 2048)
-    assert(config.intermediateSize == 11008)
-    assert(config.numHiddenLayers == 36)
-    assert(config.numAttentionHeads == 16)
-    assert(config.numKeyValueHeads == 2)
-    assert(config.headDimension() == 128)
-    assert(config.tieWordEmbeddings)
+def run_benchmark() -> Result[qwen2.Qwen2Weights, exception]:
+    model_path = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
+    process_start_ns = monotonic_ns()
+    config_text = file.read_text(model_path + "/config.json")
+    config = qwen2_config.parse_qwen_2_config(config_text)
+    store = safetensor_weights.open_safe_tensor_store(model_path)
+    weights = qwen2.load_qwen_2_weights(store, config.num_hidden_layers)
+    weights_mapped_ns = monotonic_ns()
+    assert(config.vocab_size == 151936)
+    assert(config.hidden_size == 2048)
+    assert(config.intermediate_size == 11008)
+    assert(config.num_hidden_layers == 36)
+    assert(config.num_attention_heads == 16)
+    assert(config.num_key_value_heads == 2)
+    assert(config.head_dimension() == 128)
+    assert(config.tie_word_embeddings)
 
-    fixtureText = file.read_text("benchmarks/inference/inputs.json")
-    fixtureDocument = json.decode[Any](fixtureText)
-    fixture = json.objectGet(fixtureDocument, "256")
-    promptTokens = json.asIntList(json.objectGet(fixture, "input_ids"))
-    outputTokens = json.asInt(json.objectGet(fixture, "output_tokens"))
-    assert(size(promptTokens) == 256)
-    assert(outputTokens == 32)
+    fixture_text = file.read_text("benchmarks/inference/inputs.json")
+    fixture_document = json.decode[Any](fixture_text)
+    fixture = json.object_get(fixture_document, "256")
+    prompt_tokens = json.as_int_list(json.object_get(fixture, "input_ids"))
+    output_tokens = json.as_int(json.object_get(fixture, "output_tokens"))
+    assert(size(prompt_tokens) == 256)
+    assert(output_tokens == 32)
 
-    inputIds = tensor.from_i64_tokens_256(promptTokens)
-    prefillCosine = tensor.rope_cosine_256()
-    prefillSine = tensor.rope_sine_256()
-    prefillMask = tensor.causal_mask_256()
-    prefillIndex = tensor.from_i64_position(0)
+    input_ids = tensor.from_i64_tokens_256(prompt_tokens)
+    prefill_cosine = tensor.rope_cosine_256()
+    prefill_sine = tensor.rope_sine_256()
+    prefill_mask = tensor.causal_mask_256()
+    prefill_index = tensor.from_i64_position(0)
 
-    warmupStartNs = monotonicNs()
-    runWave(
+    warmup_start_ns = monotonic_ns()
+    run_wave(
         -1,
         1,
         false,
         weights,
-        inputIds,
-        prefillCosine,
-        prefillSine,
-        prefillMask,
-        prefillIndex,
+        input_ids,
+        prefill_cosine,
+        prefill_sine,
+        prefill_mask,
+        prefill_index,
     )
-    modelReadyNs = monotonicNs()
-    benchmarkStartNs = modelReadyNs
+    model_ready_ns = monotonic_ns()
+    benchmark_start_ns = model_ready_ns
     for wave in range(0, 5):
-        runWave(
+        run_wave(
             wave * 16,
             16,
             true,
             weights,
-            inputIds,
-            prefillCosine,
-            prefillSine,
-            prefillMask,
-            prefillIndex,
+            input_ids,
+            prefill_cosine,
+            prefill_sine,
+            prefill_mask,
+            prefill_index,
         )
-    benchmarkEndNs = monotonicNs()
+    benchmark_end_ns = monotonic_ns()
 
-    print("process_start_ns", processStartNs)
-    print("weights_mapped_ns", weightsMappedNs)
-    print("warmup_start_ns", warmupStartNs)
-    print("model_ready_ns", modelReadyNs)
-    print("benchmark_start_ns", benchmarkStartNs)
-    print("benchmark_end_ns", benchmarkEndNs)
+    print("process_start_ns", process_start_ns)
+    print("weights_mapped_ns", weights_mapped_ns)
+    print("warmup_start_ns", warmup_start_ns)
+    print("model_ready_ns", model_ready_ns)
+    print("benchmark_start_ns", benchmark_start_ns)
+    print("benchmark_end_ns", benchmark_end_ns)
     print("input_tokens", 256)
     print("output_tokens", 32)
     print("request_count", 80)
     print("concurrency", 16)
     print("scheduler", "round_robin_batch_one")
 
-    tensor.release(inputIds)
-    tensor.release(prefillCosine)
-    tensor.release(prefillSine)
-    tensor.release(prefillMask)
-    tensor.release(prefillIndex)
+    tensor.release(input_ids)
+    tensor.release(prefill_cosine)
+    tensor.release(prefill_sine)
+    tensor.release(prefill_mask)
+    tensor.release(prefill_index)
     return weights
 
 def main():
-    switch runBenchmark():
+    switch run_benchmark():
         ok weights:
             assert(size(weights.layers) == 36)
         failure error:

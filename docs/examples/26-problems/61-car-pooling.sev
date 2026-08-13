@@ -3,13 +3,13 @@
 # Difficulty: medium
 # Tags: sweep-line, prefix-sum, sorting, simulation
 
-def carPooling(trips: list[list[int]], capacity: int) -> bool:
-    lastStop := 0
+def car_pooling(trips: list[list[int]], capacity: int) -> bool:
+    last_stop := 0
     for trip in trips:
-        if trip[2] > lastStop:
-            lastStop = trip[2]
+        if trip[2] > last_stop:
+            last_stop = trip[2]
     changes := []
-    for stop in range(0, lastStop + 1):
+    for stop in range(0, last_stop + 1):
         changes.append(0)
     for trip in trips:
         changes[trip[1]] += trip[0]
@@ -22,10 +22,10 @@ def carPooling(trips: list[list[int]], capacity: int) -> bool:
     return true
 
 test "capacity exceeded":
-    assert(not carPooling([[2, 1, 5], [3, 3, 7]], 4))
+    assert(not car_pooling([[2, 1, 5], [3, 3, 7]], 4))
 
 test "capacity fits":
-    assert(carPooling([[2, 1, 5], [3, 3, 7]], 5))
+    assert(car_pooling([[2, 1, 5], [3, 3, 7]], 5))
 
 test "drop before pickup":
-    assert(carPooling([[3, 2, 7], [3, 7, 9]], 3))
+    assert(car_pooling([[3, 2, 7], [3, 7, 9]], 3))

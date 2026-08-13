@@ -1,18 +1,18 @@
 import tensor
 
 def transform(a: Tensor[f64], b: Tensor[f64], scale: f64) -> Tensor[f64]:
-    product = tensor.rankedMatmul(a, b)
-    return tensor.rankedScale(product, scale)
+    product = tensor.ranked_matmul(a, b)
+    return tensor.ranked_scale(product, scale)
 
 test:
     a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
     b = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
 
-    assert(tensor.rankedValues(transform(a, b, 0.5)) == [0.5, 0.0, 0.0, 0.5])
+    assert(tensor.ranked_values(transform(a, b, 0.5)) == [0.5, 0.0, 0.0, 0.5])
 
 def main():
     a = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
     b = tensor.ranked([1.0, 1.0, 1.0, 1.0], [2, 2])
 
     result = transform(a, b, 0.5)
-    print(tensor.rankedValues(result))
+    print(tensor.ranked_values(result))

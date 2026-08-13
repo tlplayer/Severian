@@ -3,7 +3,7 @@
 # Difficulty: hard
 # Tags: monotonic-stack, stack, array
 
-def largestRectangleArea(heights: list[int]) -> int:
+def largest_rectangle_area(heights: list[int]) -> int:
     stack := []
     best := 0
     index := 0
@@ -24,10 +24,10 @@ def largestRectangleArea(heights: list[int]) -> int:
     return best
 
 test "mixed histogram":
-    assert(largestRectangleArea([2, 1, 5, 6, 2, 3]) == 10)
+    assert(largest_rectangle_area([2, 1, 5, 6, 2, 3]) == 10)
 
 test "two bars":
-    assert(largestRectangleArea([2, 4]) == 4)
+    assert(largest_rectangle_area([2, 4]) == 4)
 
 test "empty histogram":
-    assert(largestRectangleArea([]) == 0)
+    assert(largest_rectangle_area([]) == 0)

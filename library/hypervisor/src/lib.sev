@@ -6,39 +6,39 @@ class VirtualCpu:
     entry: int
 
 class MemoryRegion:
-    guestAddress: int
+    guest_address: int
     bytes: int
     writable: bool
 
 class Interrupt:
     vector: int
-    targetCpu: int
+    target_cpu: int
 
 class Device:
     kind: string
     identifier: string
 
 def backend() -> string:
-    version = platform.hostKvmApiVersion()
+    version = platform.host_kvm_api_version()
     return "kvm:" + string(version) if version >= 0 else "unavailable"
 
-def canCreateMachine() -> bool:
-    return platform.hostKvmCreateProbe()
+def can_create_machine() -> bool:
+    return platform.host_kvm_create_probe()
 
-def memoryErrors(region: MemoryRegion) -> list[string]:
+def memory_errors(region: MemoryRegion) -> list[string]:
     failures := []
-    pageSize = platform.host_page_size()
-    if region.guestAddress < 0:
+    page_size = platform.host_page_size()
+    if region.guest_address < 0:
         failures.append("guest address is negative")
-    if region.bytes < pageSize:
+    if region.bytes < page_size:
         failures.append("memory region is smaller than one page")
-    if region.guestAddress % pageSize != 0:
+    if region.guest_address % page_size != 0:
         failures.append("guest address is not page aligned")
-    if region.bytes % pageSize != 0:
+    if region.bytes % page_size != 0:
         failures.append("memory size is not page aligned")
     return failures
 
-def hypervisorLaunchPlan(
+def hypervisor_launch_plan(
     cpus: list[VirtualCpu],
     memory: list[MemoryRegion],
     interrupts: list[Interrupt],
@@ -48,31 +48,31 @@ def hypervisorLaunchPlan(
     for cpu in cpus:
         plan.append("vcpu " + string(cpu.id) + " entry=" + string(cpu.entry))
     for region in memory:
-        assert(size(memoryErrors(region)) == 0)
-        plan.append("memory " + string(region.guestAddress) + ":" + string(region.bytes))
+        assert(size(memory_errors(region)) == 0)
+        plan.append("memory " + string(region.guest_address) + ":" + string(region.bytes))
     for interrupt in interrupts:
-        plan.append("interrupt " + string(interrupt.vector) + " cpu=" + string(interrupt.targetCpu))
+        plan.append("interrupt " + string(interrupt.vector) + " cpu=" + string(interrupt.target_cpu))
     for device in devices:
         plan.append("device " + string(device.kind) + ":" + string(device.identifier))
     return plan
 
 test "KVM discovery reports reality rather than inventing availability":
     detected = backend()
-    assert(detected == "unavailable" or platform.hostKvmApiVersion() >= 0)
+    assert(detected == "unavailable" or platform.host_kvm_api_version() >= 0)
 
 test "guest memory mappings require host page alignment":
-    pageSize = platform.host_page_size()
-    assert(memoryErrors(MemoryRegion(1, pageSize - 1, true)) == ["memory region is smaller than one page", "guest address is not page aligned", "memory size is not page aligned"])
-    assert(memoryErrors(MemoryRegion(0, pageSize, true)) == [])
+    page_size = platform.host_page_size()
+    assert(memory_errors(MemoryRegion(1, page_size - 1, true)) == ["memory region is smaller than one page", "guest address is not page aligned", "memory size is not page aligned"])
+    assert(memory_errors(MemoryRegion(0, page_size, true)) == [])
 
 test "hypervisor plans include CPUs memory interrupts and devices":
-    pageSize = platform.host_page_size()
-    plan = hypervisorLaunchPlan([VirtualCpu(0, 4096)], [MemoryRegion(0, pageSize, true)], [Interrupt(32, 0)], [Device("virtio-block", "root")])
+    page_size = platform.host_page_size()
+    plan = hypervisor_launch_plan([VirtualCpu(0, 4096)], [MemoryRegion(0, page_size, true)], [Interrupt(32, 0)], [Device("virtio-block", "root")])
     assert(plan[1] == "vcpu 0 entry=4096")
-    assert(plan[2] == "memory 0:" + string(pageSize))
+    assert(plan[2] == "memory 0:" + string(page_size))
     assert(plan[3] == "interrupt 32 cpu=0")
     assert(plan[4] == "device virtio-block:root")
 
 test "KVM create probe is safe when the backend is unavailable":
-    created = canCreateMachine()
+    created = can_create_machine()
     assert(created or not created)

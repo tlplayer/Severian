@@ -4,20 +4,20 @@ class ContainerSpec:
     name: string
     image: string
     command: list[string]
-    cpuMillis: int
-    memoryMiB: int
+    cpumillis: int
+    memory_mi_b: int
     namespaces: list[string]
     mounts: list[string]
     networks: list[string]
     volumes: list[string]
 
-def containerHas(values: list[string], expected: string) -> bool:
+def container_has(values: list[string], expected: string) -> bool:
     for value in values:
         if value == expected:
             return true
     return false
 
-def containerErrors(spec: ContainerSpec) -> list[string]:
+def container_errors(spec: ContainerSpec) -> list[string]:
     failures := []
     if spec.name == "":
         failures.append("container name is empty")
@@ -25,22 +25,22 @@ def containerErrors(spec: ContainerSpec) -> list[string]:
         failures.append("container image is empty")
     if size(spec.command) == 0:
         failures.append("container command is empty")
-    if spec.cpuMillis < 1:
+    if spec.cpumillis < 1:
         failures.append("CPU limit must be positive")
-    if spec.memoryMiB < 1:
+    if spec.memory_mi_b < 1:
         failures.append("memory limit must be positive")
-    if not containerHas(spec.namespaces, "pid"):
+    if not container_has(spec.namespaces, "pid"):
         failures.append("pid namespace is required")
-    if not containerHas(spec.namespaces, "mount"):
+    if not container_has(spec.namespaces, "mount"):
         failures.append("mount namespace is required")
     return failures
 
-def containerValid(spec: ContainerSpec) -> bool:
-    return size(containerErrors(spec)) == 0
+def container_valid(spec: ContainerSpec) -> bool:
+    return size(container_errors(spec)) == 0
 
-def containerCreatePlan(spec: ContainerSpec) -> list[string]:
-    assert(containerValid(spec))
-    plan := ["container " + spec.name, "backend " + platform.hostContainerBackend(), "image " + spec.image, "cpu.max " + string(spec.cpuMillis), "memory.max " + string(spec.memoryMiB)]
+def container_create_plan(spec: ContainerSpec) -> list[string]:
+    assert(container_valid(spec))
+    plan := ["container " + spec.name, "backend " + platform.host_container_backend(), "image " + spec.image, "cpu.max " + string(spec.cpumillis), "memory.max " + string(spec.memory_mi_b)]
     for argument in spec.command:
         plan.append("exec " + string(argument))
     for namespace in spec.namespaces:
@@ -55,11 +55,11 @@ def containerCreatePlan(spec: ContainerSpec) -> list[string]:
 
 test "container specifications validate namespaces and cgroups":
     invalid = ContainerSpec("api", "", [], 0, 0, ["network"], [], [], [])
-    assert(containerErrors(invalid) == ["container image is empty", "container command is empty", "CPU limit must be positive", "memory limit must be positive", "pid namespace is required", "mount namespace is required"])
+    assert(container_errors(invalid) == ["container image is empty", "container command is empty", "CPU limit must be positive", "memory limit must be positive", "pid namespace is required", "mount namespace is required"])
 
 test "container plans cover the complete isolation surface":
     spec = ContainerSpec("api", "sev://images/api:v3", ["/bin/api", "--port=8080"], 500, 256, ["pid", "mount", "network", "user"], ["rootfs:ro"], ["frontend"], ["state:/var/lib/api"])
-    plan = containerCreatePlan(spec)
+    plan = container_create_plan(spec)
     assert(plan[0] == "container api")
     assert(plan[2] == "image sev://images/api:v3")
     assert(plan[10] == "namespace user")
@@ -68,10 +68,10 @@ test "container plans cover the complete isolation surface":
     assert(plan[13] == "volume state:/var/lib/api")
 
 test "container backend discovery is explicit":
-    backend = platform.hostContainerBackend()
+    backend = platform.host_container_backend()
     assert(backend == "linux" or backend == "unavailable")
 
 test "container resource limits are retained":
     spec = ContainerSpec("job", "sev://images/job:v1", ["/bin/job"], 250, 128, ["pid", "mount"], [], [], [])
-    assert(containerCreatePlan(spec)[3] == "cpu.max 250")
-    assert(containerCreatePlan(spec)[4] == "memory.max 128")
+    assert(container_create_plan(spec)[3] == "cpu.max 250")
+    assert(container_create_plan(spec)[4] == "memory.max 128")

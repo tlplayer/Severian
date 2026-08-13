@@ -6,7 +6,7 @@
 def vowel(character: string) -> bool:
     return character == "a" or character == "e" or character == "i" or character == "o" or character == "u" or character == "A" or character == "E" or character == "I" or character == "O" or character == "U"
 
-def reverseVowels(text: string) -> string:
+def reverse_vowels(text: string) -> string:
     characters := text.characters()
 
     right := size(characters) - 1
@@ -25,10 +25,10 @@ def reverseVowels(text: string) -> string:
     return characters.join("")
 
 test "hello":
-    assert(reverseVowels("hello") == "holle")
+    assert(reverse_vowels("hello") == "holle")
 
 test "mixed vowels":
-    assert(reverseVowels("leetcode") == "leotcede")
+    assert(reverse_vowels("leetcode") == "leotcede")
 
 test "preserves vowel case":
-    assert(reverseVowels("aA") == "Aa")
+    assert(reverse_vowels("aA") == "Aa")

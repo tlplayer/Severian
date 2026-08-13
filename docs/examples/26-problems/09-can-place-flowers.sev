@@ -3,7 +3,7 @@
 # Difficulty: easy
 # Tags: array, greedy
 
-def openPlot(flowerbed: list[int], index: int) -> bool:
+def open_plot(flowerbed: list[int], index: int) -> bool:
     if flowerbed[index] != 0:
         return false
     if index > 0:
@@ -14,22 +14,22 @@ def openPlot(flowerbed: list[int], index: int) -> bool:
             return false
     return true
 
-def canPlaceFlowers(flowerbed: list[int], needed: int) -> bool:
+def can_place_flowers(flowerbed: list[int], needed: int) -> bool:
     planted := 0
     for index in indices(flowerbed):
-        if openPlot(flowerbed, index):
+        if open_plot(flowerbed, index):
             flowerbed[index] = 1
             planted += 1
     return planted >= needed
 
 test "one flower fits":
-    assert(canPlaceFlowers([1, 0, 0, 0, 1], 1))
+    assert(can_place_flowers([1, 0, 0, 0, 1], 1))
 
 test "two flowers do not fit":
-    assert(not canPlaceFlowers([1, 0, 0, 0, 1], 2))
+    assert(not can_place_flowers([1, 0, 0, 0, 1], 2))
 
 test "empty request":
-    assert(canPlaceFlowers([1], 0))
+    assert(can_place_flowers([1], 0))
 
 test "single open plot":
-    assert(canPlaceFlowers([0], 1))
+    assert(can_place_flowers([0], 1))

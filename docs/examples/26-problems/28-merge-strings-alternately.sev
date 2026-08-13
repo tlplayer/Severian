@@ -3,7 +3,7 @@
 # Difficulty: easy
 # Tags: string, two-pointers
 
-def mergeAlternately(first: string, second: string) -> string:
+def merge_alternately(first: string, second: string) -> string:
     merged := ""
     limit := size(first)
     if size(second) > limit:
@@ -17,10 +17,10 @@ def mergeAlternately(first: string, second: string) -> string:
     return merged
 
 test "equal lengths":
-    assert(mergeAlternately("abc", "pqr") == "apbqcr")
+    assert(merge_alternately("abc", "pqr") == "apbqcr")
 
 test "longer second string":
-    assert(mergeAlternately("ab", "pqrs") == "apbqrs")
+    assert(merge_alternately("ab", "pqrs") == "apbqrs")
 
 test "empty first string":
-    assert(mergeAlternately("", "xyz") == "xyz")
+    assert(merge_alternately("", "xyz") == "xyz")

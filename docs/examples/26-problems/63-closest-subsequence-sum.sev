@@ -3,13 +3,13 @@
 # Difficulty: hard
 # Tags: meet-in-the-middle, bitmask, enumeration, combinatorics
 
-def subsetSums(values: list[int], start: int, end: int) -> list[int]:
+def subset_sums(values: list[int], start: int, end: int) -> list[int]:
     length = end - start
-    combinationCount := 1
+    combination_count := 1
     for index in range(0, length):
-        combinationCount *= 2
+        combination_count *= 2
     sums := []
-    for mask in range(0, combinationCount):
+    for mask in range(0, combination_count):
         remaining := mask
         total := 0
         for offset in range(0, length):
@@ -19,23 +19,23 @@ def subsetSums(values: list[int], start: int, end: int) -> list[int]:
         sums.append(total)
     return sums
 
-def minAbsDifference(values: list[int], goal: int) -> int:
+def min_abs_difference(values: list[int], goal: int) -> int:
     middle = size(values) / 2
-    leftSums = subsetSums(values, 0, middle)
-    rightSums = subsetSums(values, middle, size(values))
+    left_sums = subset_sums(values, 0, middle)
+    right_sums = subset_sums(values, middle, size(values))
     best := abs(goal)
-    for left in leftSums:
-        for right in rightSums:
+    for left in left_sums:
+        for right in right_sums:
             difference = abs(goal - left - right)
             if difference < best:
                 best = difference
     return best
 
 test "exact target":
-    assert(minAbsDifference([5, -7, 3, 5], 6) == 0)
+    assert(min_abs_difference([5, -7, 3, 5], 6) == 0)
 
 test "nearest target":
-    assert(minAbsDifference([7, -9, 15, -2], -5) == 1)
+    assert(min_abs_difference([7, -9, 15, -2], -5) == 1)
 
 test "single value":
-    assert(minAbsDifference([1], 3) == 2)
+    assert(min_abs_difference([1], 3) == 2)

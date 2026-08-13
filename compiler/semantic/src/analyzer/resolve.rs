@@ -157,9 +157,9 @@ pub(super) fn file_class_for_literal_path(path: &str) -> Option<&'static str> {
     } else if extension.eq_ignore_ascii_case("csv") {
         Some("CSV")
     } else if extension.eq_ignore_ascii_case("json") {
-        Some("JSON")
+        Some("Json")
     } else if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
-        Some("YAML")
+        Some("Yaml")
     } else if extension.eq_ignore_ascii_case("mp3") {
         Some("MP3")
     } else if [

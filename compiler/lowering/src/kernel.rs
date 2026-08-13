@@ -404,14 +404,15 @@ fn lower_return(expression: &Expression, function: &Function) -> Option<KernelOp
         .rsplit_once('.')
         .map(|(_, name)| name)
         .unwrap_or(&target.name)
-        .to_ascii_lowercase();
+        .to_ascii_lowercase()
+        .replace('_', "");
     let operation = operation
         .strip_suffix("bf16")
         .or_else(|| operation.strip_suffix("f32"))
         .unwrap_or(&operation);
     if !matches!(
         operation,
-        "sum" | "rankedsum" | "sumlast" | "reduce_sum" | "tensor_sum"
+        "sum" | "rankedsum" | "sumlast" | "reducesum" | "tensorsum"
     ) || args.len() != 1
     {
         return None;

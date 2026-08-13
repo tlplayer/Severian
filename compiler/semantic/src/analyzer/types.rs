@@ -29,7 +29,7 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 }
                 "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
                 "Channel" => Ok(ValueType::Channel),
-                "fn" => Ok(ValueType::Function),
+                "Function" => Ok(ValueType::Function),
                 "Result" => Ok(ValueType::Result),
                 "Option" => Ok(ValueType::Option),
                 _ => Ok(ValueType::Any),

@@ -7,4 +7,4 @@ def contract(left: Tensor[f64, dynamic, dynamic], right: Tensor[f64, dynamic, dy
 test:
     left = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
     right = tensor.ranked([2.0, 3.0, 4.0, 5.0], [2, 2])
-    assert(tensor.rankedValues(contract(left, right)) == [2.0, 3.0, 4.0, 5.0])
+    assert(tensor.ranked_values(contract(left, right)) == [2.0, 3.0, 4.0, 5.0])

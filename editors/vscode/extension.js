@@ -20,7 +20,7 @@ function activate(context) {
   const coveredDecoration = vscode.window.createTextEditorDecorationType({
     gutterIconPath: context.asAbsolutePath('images/coverage-covered.svg'),
     gutterIconSize: 'contain',
-    overviewRulerColor: new vscode.ThemeColor('testing.iconPassed'),
+    overviewRulerColor: new vscode.ThemeColor('charts.blue'),
     overviewRulerLane: vscode.OverviewRulerLane.Left,
     isWholeLine: true,
   });
@@ -219,7 +219,7 @@ function activate(context) {
       .trim() || 'sev';
     contractDiagnostics.clear();
     toolingOutput.clear();
-    const arguments = [action, ...options, run.target];
+    const arguments = [action, run.target, ...options];
     toolingOutput.appendLine(`$ ${executable} ${arguments.join(' ')}`);
     toolingOutput.show(true);
     const result = await spawnTool(executable, arguments, run.cwd, toolingOutput);
@@ -234,6 +234,37 @@ function activate(context) {
         await vscode.window.showTextDocument(document, { selection: first.range });
       }
     }
+  }
+
+  async function runWith() {
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '$(run) Run', description: 'Build and run the active target', action: 'run' },
+        { label: '$(beaker) Test', description: 'Run its tests', action: 'test' },
+        { label: '$(dashboard) Profile', description: 'Run profile tests', action: 'test', options: ['--profile'] },
+        { label: '$(run-all) Coverage', description: 'Run tests and refresh coverage gutters', coverage: true },
+        { label: '$(debug-alt) Debug', description: 'Launch in an interactive debugger', debug: true },
+      ],
+      { placeHolder: 'Run the active Severian target with…' },
+    );
+    if (!choice) return;
+    if (choice.coverage) return runCoverage();
+    if (choice.debug) return debugTool();
+    return runTool(choice.action, choice.options || []);
+  }
+
+  async function buildWith() {
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '$(tools) Native executable', description: 'Build the default native artifact', options: [] },
+        { label: '$(verified) Native + verifier', description: 'Verify after every compiler stage', options: ['--verify-each'] },
+        { label: '$(file-code) LLVM IR', description: 'Emit LLVM intermediate representation', options: ['--emit', 'llvm'] },
+        { label: '$(file-binary) Assembly', description: 'Emit native assembly', options: ['--emit', 'asm'] },
+        { label: '$(symbol-structure) XLA StableHLO', description: 'Emit StableHLO for the XLA target', options: ['--emit', 'stablehlo', '--target', 'xla'] },
+      ],
+      { placeHolder: 'Build the active Severian target with…' },
+    );
+    if (choice) await runTool('build', choice.options);
   }
 
   function debugTool() {
@@ -276,10 +307,12 @@ function activate(context) {
     vscode.commands.registerCommand('severian.coverage.load', () => loadCoverage(true)),
     vscode.commands.registerCommand('severian.coverage.clear', clearCoverage),
     vscode.commands.registerCommand('severian.run', () => runTool('run')),
+    vscode.commands.registerCommand('severian.runWith', runWith),
     vscode.commands.registerCommand('severian.test', () => runTool('test')),
     vscode.commands.registerCommand('severian.profile', () => runTool('test', ['--profile'])),
     vscode.commands.registerCommand('severian.debug', debugTool),
     vscode.commands.registerCommand('severian.build', () => runTool('build')),
+    vscode.commands.registerCommand('severian.buildWith', buildWith),
     vscode.window.onDidChangeVisibleTextEditors(render),
     vscode.window.onDidChangeActiveTextEditor(render),
     vscode.workspace.onDidChangeConfiguration((event) => {

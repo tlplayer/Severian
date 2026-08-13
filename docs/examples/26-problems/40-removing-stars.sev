@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: string, stack
 
-def removeStars(text: string) -> string:
+def remove_stars(text: string) -> string:
     stack := []
     top := 0
     for index in range(0, size(text)):
@@ -23,10 +23,10 @@ def removeStars(text: string) -> string:
     return result
 
 test "several removals":
-    assert(removeStars("leet**cod*e") == "lecoe")
+    assert(remove_stars("leet**cod*e") == "lecoe")
 
 test "everything removed":
-    assert(removeStars("erase*****") == "")
+    assert(remove_stars("erase*****") == "")
 
 test "interleaved removals":
-    assert(removeStars("abb*cdfg*****x*") == "a")
+    assert(remove_stars("abb*cdfg*****x*") == "a")

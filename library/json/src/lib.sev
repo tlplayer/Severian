@@ -8,7 +8,7 @@ trait Document:
     value() -> Any
     encode() -> string
 
-class JSON: Document
+class Json: Document
     source_path: string
     document: Any
 
@@ -28,24 +28,24 @@ class JSON: Document
         return "application/json"
 
     def size() -> int:
-        return size(platform.string_encode(platform.jsonEncode(document)))
+        return size(platform.string_encode(platform.jsonencode(document)))
 
     def bytes() -> int:
-        return size(platform.string_encode(platform.jsonEncode(document)))
+        return size(platform.string_encode(platform.jsonencode(document)))
 
     def raw() -> list[int]:
-        return platform.string_encode(platform.jsonEncode(document))
+        return platform.string_encode(platform.jsonencode(document))
 
     def text() -> Result[string, IOError]:
-        return platform.jsonEncode(document)
+        return platform.jsonencode(document)
 
     def write() -> Result[unit, IOError]:
         if size(source_path) == 0:
             return failure(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
-        return platform.file_write(source_path, platform.jsonEncode(document))
+        return platform.file_write(source_path, platform.jsonencode(document))
 
     def write_to(path: string) -> Result[unit, IOError]:
-        return platform.file_write(path, platform.jsonEncode(document))
+        return platform.file_write(path, platform.jsonencode(document))
 
     def keys() -> list[string]:
         return object_keys(document) if kind(document) == "object" else []
@@ -65,13 +65,13 @@ class JSON: Document
     def encode() -> string:
         return encode(document)
 
-def document(text: string) -> Result[JSON, JsonError]:
+def document(text: string) -> Result[Json, JsonError]:
     value = decode[Any](text)
-    return JSON("", value)
+    return Json("", value)
 
-def file_document(path: string, text: string) -> Result[JSON, JsonError]:
+def file_document(path: string, text: string) -> Result[Json, JsonError]:
     value = decode[Any](text)
-    return JSON(path, value)
+    return Json(path, value)
 
 def loads[type](text: string) -> Result[type, JsonError]:
     return decode[type](text)
@@ -80,46 +80,46 @@ def dumps[type](value: type) -> string:
     return encode(value)
 
 def decode[type](text: string) -> Result[type, JsonError]:
-    return platform.jsonDecode(text)
+    return platform.jsondecode(text)
 
 def encode[type](value: type) -> string:
-    return platform.jsonEncode(value)
+    return platform.jsonencode(value)
 
 def object_get(value: Any, key: string) -> Any:
-    return platform.jsonObjectGet(value, key)
+    return platform.jsonobject_get(value, key)
 
 def object_keys(value: Any) -> list[string]:
-    return platform.jsonObjectKeys(value)
+    return platform.jsonobject_keys(value)
 
 def object_values(value: Any) -> list[Any]:
-    return platform.jsonObjectValues(value)
+    return platform.jsonobject_values(value)
 
 def object_set(value: Any, key: string, item: Any):
-    platform.jsonObjectSet(value, key, item)
+    platform.jsonobject_set(value, key, item)
 
 def as_string(value: Any) -> string:
-    return platform.jsonAsString(value)
+    return platform.jsonas_string(value)
 
 def as_int(value: Any) -> int:
-    return platform.jsonAsInt(value)
+    return platform.jsonas_int(value)
 
 def as_float(value: Any) -> float:
-    return platform.jsonAsFloat(value)
+    return platform.jsonas_float(value)
 
 def as_bool(value: Any) -> bool:
-    return platform.jsonAsBool(value)
+    return platform.jsonas_bool(value)
 
 def as_int_list(value: Any) -> list[int]:
-    return platform.jsonAsIntList(value)
+    return platform.jsonas_int_list(value)
 
 def as_string_list(value: Any) -> list[string]:
-    return platform.jsonAsStringList(value)
+    return platform.jsonas_string_list(value)
 
 def is_null(value: Any) -> bool:
-    return platform.jsonIsNull(value)
+    return platform.jsonis_null(value)
 
 def kind(value: Any) -> string:
-    return platform.jsonKind(value)
+    return platform.jsonkind(value)
 
 # Compatibility aliases while callers migrate to the snake_case surface.
 def objectGet(value: Any, key: string) -> Any:
@@ -148,7 +148,7 @@ def asStringList(value: Any) -> list[string]:
 
 test "JSON document supports memory and mutation":
     decoded = decode[Any]("{\"name\":\"Ada\",\"languages\":2}")
-    value := JSON("", decoded)
+    value := Json("", decoded)
     assert(value.keys() == ["name", "languages"])
     assert(as_string(value.get("name")) == "Ada")
     value.set("name", "Grace")

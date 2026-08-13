@@ -3,33 +3,33 @@
 # Difficulty: medium
 # Tags: dynamic-programming, math
 
-def numTilings(n: int) -> int:
+def num_tilings(n: int) -> int:
     if n == 1:
         return 1
     if n == 2:
         return 2
 
-    threeBack := 1
-    twoBack := 1
-    oneBack := 2
+    three_back := 1
+    two_back := 1
+    one_back := 2
 
     while width <= n with width := 3:
-        current = (2 * oneBack + threeBack) % 1000000007
-        threeBack = twoBack
-        twoBack = oneBack
-        oneBack = current
+        current = (2 * one_back + three_back) % 1000000007
+        three_back = two_back
+        two_back = one_back
+        one_back = current
         width += 1
 
-    return oneBack
+    return one_back
 
 test "one column":
-    assert(numTilings(1) == 1)
+    assert(num_tilings(1) == 1)
 
 test "three columns":
-    assert(numTilings(3) == 5)
+    assert(num_tilings(3) == 5)
 
 test "five columns":
-    assert(numTilings(5) == 24)
+    assert(num_tilings(5) == 24)
 
 test "larger board":
-    assert(numTilings(30) == 312342182)
+    assert(num_tilings(30) == 312342182)

@@ -3,7 +3,7 @@
 # Difficulty: medium
 # Tags: binary-indexed-tree, prefix-sum, data-stream, array
 
-def lowBit(index: int) -> int:
+def low_bit(index: int) -> int:
     value := index
     factor := 1
     while value % 2 == 0:
@@ -15,9 +15,9 @@ def add(tree: list[int], index: int, delta: int):
     node := index + 1
     while node < size(tree):
         tree[node] += delta
-        node += lowBit(node)
+        node += low_bit(node)
 
-def buildFenwick(values: list[int]) -> list[int]:
+def build_fenwick(values: list[int]) -> list[int]:
     tree := [0]
     for value in values:
         tree.append(0)
@@ -30,24 +30,24 @@ def prefix(tree: list[int], index: int) -> int:
     total := 0
     while node > 0:
         total += tree[node]
-        node -= lowBit(node)
+        node -= low_bit(node)
     return total
 
-def fenwickRange(tree: list[int], left: int, right: int) -> int:
+def fenwick_range(tree: list[int], left: int, right: int) -> int:
     if left == 0:
         return prefix(tree, right)
     return prefix(tree, right) - prefix(tree, left - 1)
 
 test "prefix and range":
-    tree := buildFenwick([1, 3, 5, 7])
+    tree := build_fenwick([1, 3, 5, 7])
     assert(prefix(tree, 2) == 9)
-    assert(fenwickRange(tree, 1, 3) == 15)
+    assert(fenwick_range(tree, 1, 3) == 15)
 
 test "streamed update":
-    tree := buildFenwick([1, 3, 5])
+    tree := build_fenwick([1, 3, 5])
     add(tree, 1, -1)
-    assert(fenwickRange(tree, 0, 2) == 8)
+    assert(fenwick_range(tree, 0, 2) == 8)
 
 test "single value":
-    tree := buildFenwick([9])
+    tree := build_fenwick([9])
     assert(prefix(tree, 0) == 9)

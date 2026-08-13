@@ -1,10 +1,10 @@
 import data
 import platform
 
-class CSVError:
+class CsvError:
     message: string
 
-class CSVRow:
+class CsvRow:
     headers_data: list[string]
     cells: list[string]
 
@@ -92,11 +92,11 @@ class CSV: data.Source
     def header() -> list[string]:
         return headers_of(records_data)
 
-    def rows() -> list[CSVRow]:
-        result: list[CSVRow] = []
+    def rows() -> list[CsvRow]:
+        result: list[CsvRow] = []
         fields = headers_of(records_data)
         for cells in records_of(records_data):
-            result.append(CSVRow(fields, cells))
+            result.append(CsvRow(fields, cells))
         return result
 
     def records() -> list[list[string]]:
@@ -127,22 +127,22 @@ class CSV: data.Source
             return ""
         return values[row][position]
 
-    def cell(row: int, column: string) -> Result[string, CSVError]:
+    def cell(row: int, column: string) -> Result[string, CsvError]:
         position = column_index_of(records_data, column)
         values = records_of(records_data)
         if position < 0:
-            return failure(CSVError("CSV column does not exist: " + column))
+            return failure(CsvError("CSV column does not exist: " + column))
         if row < 0 or row >= size(values):
-            return failure(CSVError("CSV row is outside the document"))
+            return failure(CsvError("CSV row is outside the document"))
         return values[row][position] if position < size(values[row]) else ""
 
-    def set(row: int, column: string, value: string) -> Result[unit, CSVError]:
+    def set(row: int, column: string, value: string) -> Result[unit, CsvError]:
         position = column_index_of(records_data, column)
         record = row + 1
         if position < 0:
-            return failure(CSVError("CSV column does not exist: " + column))
+            return failure(CsvError("CSV column does not exist: " + column))
         if record < 1 or record >= size(records_data):
-            return failure(CSVError("CSV row is outside the document"))
+            return failure(CsvError("CSV row is outside the document"))
         while size(records_data[record]) <= position:
             records_data[record].append("")
         records_data[record][position] = value

@@ -264,7 +264,7 @@
           "name": "storage.type.primitive.severian"
         },
         {
-          "match": "\\b(Tensor|Result|TestResult|Option|Channel|Buffer|Path)\\b",
+          "match": "\\b(Tensor|Result|TestResult|Option|Function|Channel|Buffer|Path)\\b",
           "name": "support.type.builtin.severian"
         },
         {

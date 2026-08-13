@@ -202,7 +202,13 @@ impl Resolver {
         let root = canonical
             .parent()
             .ok_or_else(|| PackageError::Manifest("manifest has no parent directory".into()))?;
-        validate_package_payload(root)?;
+        // A workspace-only manifest owns project policy and member discovery,
+        // not a publishable payload. Validate concrete package roots when they
+        // are visited; scanning the workspace root would incorrectly classify
+        // repository tooling and local environments as package installers.
+        if manifest.get("package").is_some() {
+            validate_package_payload(root)?;
+        }
         if let Some(dependencies) = manifest.get("dependencies").and_then(toml::Value::as_table) {
             for (import_name, specification) in dependencies {
                 let dependency = self.resolve_one(import_name, specification, root)?;

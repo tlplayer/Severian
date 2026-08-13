@@ -17,10 +17,10 @@ implementation = "source-and-compiler-contracts"
 status = "experimental"
 
 [package.metadata.compiler]
-symbols = { X = "rankedMatmul" }
+symbols = { X = "ranked_matmul" }
 
 [package.metadata.compiler.fusion]
 runtime-symbol = "__sev_fused_activations"
 packing-bits = 4
 max-chain = 16
-operations = { relu = 1, fastSigmoid = 2, fastTanh = 3, gelu = 4, swish = 5 }
+operations = { relu = 1, fast_sigmoid = 2, fast_tanh = 3, gelu = 4, swish = 5 }

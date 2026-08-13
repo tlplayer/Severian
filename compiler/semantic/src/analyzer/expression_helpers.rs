@@ -297,7 +297,7 @@ pub(super) fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
     let Type::Named(path) = ty? else {
         return None;
     };
-    if path.segments.first()?.name != "fn" {
+    if path.segments.first()?.name != "Function" {
         return None;
     }
     path.args

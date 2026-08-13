@@ -23,7 +23,7 @@ fn top_level_emit_reaches_every_active_compiler_representation() {
             "import tensor\n\n",
             "@tensor\n",
             "def add(left: Tensor[f64, dynamic], right: Tensor[f64, dynamic]) -> Tensor[f64, dynamic]:\n",
-            "    return tensor.rankedAdd(left, right)\n",
+            "    return tensor.ranked_add(left, right)\n",
             "\n",
             "def one() -> int:\n    return 1\n",
             "\n",
