@@ -7,6 +7,8 @@ target/
 /benchmarks/inference/.venv-pytorch/
 /benchmarks/inference/models/
 /benchmarks/inference/results/
+/benchmarks/popcorn/*/build/
+/benchmarks/popcorn/*/results/
 __pycache__/
 /bench/onnx-gold/generated/
 *.mlir

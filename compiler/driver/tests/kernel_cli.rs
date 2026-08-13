@@ -48,7 +48,7 @@ fn inspect_explains_automatic_backend_selection() {
 
 #[test]
 fn emit_writes_a_standalone_triton_module() {
-    let artifact = temporary_file("reduction.ttir.mlir");
+    let artifact = temporary_file("reduction.ttir");
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .args(["kernel", "emit"])
         .arg(fixture())
@@ -69,9 +69,10 @@ fn emit_writes_a_standalone_triton_module() {
     );
     let source = std::fs::read_to_string(&artifact).unwrap();
     assert!(source.contains("tt.func public @reduction_sum"));
-    assert!(source.contains("severian_operation = \"reduction.sum\""));
-    assert!(source.contains("tensor<256xf32>"));
-    assert!(source.contains("tt.atomic_rmw fadd"));
+    assert!(source.contains("\"severian.operation\" = \"reduction.sum\""));
+    assert!(source.contains("tensor<1024xf32>"));
+    assert!(source.contains("scf.for"));
+    assert!(source.contains("tt.store %output, %total"));
     assert!(!source.contains("import torch"));
     assert!(!source.contains("import triton"));
     assert!(!source.contains("custom_kernel"));
@@ -106,7 +107,7 @@ fn direct_kernel_invocation_compiles_the_selected_artifact() {
     let target = fixture()
         .parent()
         .unwrap()
-        .join("target/debug/reduction_sum.ttir.mlir");
+        .join("target/debug/reduction_sum.ttir");
     let _ = std::fs::remove_file(&target);
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg(fixture())

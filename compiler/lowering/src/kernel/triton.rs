@@ -1,6 +1,7 @@
 use super::{tensor_element_name, KernelBackend, KernelError, KernelIr, KernelOperation};
 
-const BLOCK_SIZE: u32 = 256;
+const ELEMENTWISE_BLOCK_SIZE: u32 = 256;
+const REDUCTION_BLOCK_SIZE: u32 = 1024;
 
 /// Host-independent launch metadata carried beside TTIR. Runtime integration
 /// can consume this without importing Triton or Torch through Python.
@@ -14,14 +15,18 @@ pub struct TritonLaunch {
 
 impl TritonLaunch {
     pub fn for_kernel(kernel: &KernelIr) -> Self {
+        let (block_size, programs) = match kernel.operation {
+            KernelOperation::ReductionSum { .. } => (REDUCTION_BLOCK_SIZE, "1".into()),
+            KernelOperation::ElementwiseRelu { .. } => (
+                ELEMENTWISE_BLOCK_SIZE,
+                format!("ceil_div(element_count, {ELEMENTWISE_BLOCK_SIZE})"),
+            ),
+        };
         Self {
             entry: kernel.name.clone(),
-            block_size: BLOCK_SIZE,
-            programs: format!("ceil_div(element_count, {BLOCK_SIZE})"),
-            requires_zeroed_output: matches!(
-                kernel.operation,
-                KernelOperation::ReductionSum { .. }
-            ),
+            block_size,
+            programs,
+            requires_zeroed_output: false,
         }
     }
 }
@@ -40,11 +45,11 @@ pub fn emit_triton_ir(kernel: &KernelIr) -> Result<String, KernelError> {
     let element = tensor_element_name(input.element);
     let launch = TritonLaunch::for_kernel(kernel);
     let body = match kernel.operation {
-        KernelOperation::ReductionSum { .. } => reduction_sum_body(element),
-        KernelOperation::ElementwiseRelu { .. } => relu_body(element),
+        KernelOperation::ReductionSum { .. } => reduction_sum_body(element, launch.block_size),
+        KernelOperation::ElementwiseRelu { .. } => relu_body(element, launch.block_size),
     };
     Ok(format!(
-        "module attributes {{severian_kernel = {entry:?}, severian_operation = {operation:?}, severian_launch_programs = {programs:?}, severian_launch_block_size = {block_size} : i32, severian_launch_requires_zeroed_output = {requires_zeroed_output}}} {{\n  tt.func public @{symbol}(%input: !tt.ptr<{element}>, %output: !tt.ptr<{element}>, %element_count: i32) attributes {{noinline = false}} {{\n{body}  }}\n}}\n",
+        "module attributes {{\"severian.kernel\" = {entry:?}, \"severian.operation\" = {operation:?}, \"severian.launch.programs\" = {programs:?}, \"severian.launch.block_size\" = {block_size} : i32, \"severian.launch.requires_zeroed_output\" = {requires_zeroed_output}}} {{\n  tt.func public @{symbol}(%input: !tt.ptr<{element}>, %output: !tt.ptr<{element}>, %element_count: i32) attributes {{noinline = false}} {{\n{body}  }}\n}}\n",
         entry = kernel.name,
         operation = kernel.operation.name(),
         programs = launch.programs,
@@ -54,26 +59,26 @@ pub fn emit_triton_ir(kernel: &KernelIr) -> Result<String, KernelError> {
     ))
 }
 
-fn common_prefix(element: &str) -> String {
+fn common_prefix(element: &str, block_size: u32) -> String {
     format!(
         "    %c{block}_i32 = arith.constant {block} : i32\n    %program = tt.get_program_id x : i32\n    %block_start = arith.muli %program, %c{block}_i32 : i32\n    %range = tt.make_range {{end = {block} : i32, start = 0 : i32}} : tensor<{block}xi32>\n    %starts = tt.splat %block_start : i32 -> tensor<{block}xi32>\n    %offsets = arith.addi %starts, %range : tensor<{block}xi32>\n    %counts = tt.splat %element_count : i32 -> tensor<{block}xi32>\n    %mask = arith.cmpi slt, %offsets, %counts : tensor<{block}xi32>\n    %input_splat = tt.splat %input : !tt.ptr<{element}> -> tensor<{block}x!tt.ptr<{element}>>\n    %input_ptrs = tt.addptr %input_splat, %offsets : tensor<{block}x!tt.ptr<{element}>>, tensor<{block}xi32>\n",
-        block = BLOCK_SIZE,
+        block = block_size,
     )
 }
 
-fn reduction_sum_body(element: &str) -> String {
-    let prefix = common_prefix(element);
+fn reduction_sum_body(element: &str, block_size: u32) -> String {
     format!(
-        "{prefix}    %zero = arith.constant dense<0.000000e+00> : tensor<{block}x{element}>\n    %values = tt.load %input_ptrs, %mask, %zero : tensor<{block}x!tt.ptr<{element}>>\n    %partial = \"tt.reduce\"(%values) <{{axis = 0 : i32}}> ({{\n    ^bb0(%left: {element}, %right: {element}):\n      %sum = arith.addf %left, %right : {element}\n      tt.reduce.return %sum : {element}\n    }}) : (tensor<{block}x{element}>) -> {element}\n    %old = tt.atomic_rmw fadd, acq_rel, gpu, %output, %partial : (!tt.ptr<{element}>, {element}) -> {element}\n    tt.return\n",
-        block = BLOCK_SIZE,
+        "    %c0_index = arith.constant 0 : index\n    %c1_index = arith.constant 1 : index\n    %c{block}_i32 = arith.constant {block} : i32\n    %c{last}_i32 = arith.constant {last} : i32\n    %zero_scalar = arith.constant 0.000000e+00 : {element}\n    %zero = arith.constant dense<0.000000e+00> : tensor<{block}x{element}>\n    %adjusted_count = arith.addi %element_count, %c{last}_i32 : i32\n    %block_count = arith.divsi %adjusted_count, %c{block}_i32 : i32\n    %block_count_index = arith.index_cast %block_count : i32 to index\n    %range = tt.make_range {{end = {block} : i32, start = 0 : i32}} : tensor<{block}xi32>\n    %input_splat = tt.splat %input : !tt.ptr<{element}> -> tensor<{block}x!tt.ptr<{element}>>\n    %counts = tt.splat %element_count : i32 -> tensor<{block}xi32>\n    %total = scf.for %block_index = %c0_index to %block_count_index step %c1_index iter_args(%accumulator = %zero_scalar) -> ({element}) {{\n      %block_index_i32 = arith.index_cast %block_index : index to i32\n      %block_start = arith.muli %block_index_i32, %c{block}_i32 : i32\n      %starts = tt.splat %block_start : i32 -> tensor<{block}xi32>\n      %offsets = arith.addi %starts, %range : tensor<{block}xi32>\n      %mask = arith.cmpi slt, %offsets, %counts : tensor<{block}xi32>\n      %input_ptrs = tt.addptr %input_splat, %offsets : tensor<{block}x!tt.ptr<{element}>>, tensor<{block}xi32>\n      %values = tt.load %input_ptrs, %mask, %zero : tensor<{block}x!tt.ptr<{element}>>\n      %partial = \"tt.reduce\"(%values) <{{axis = 0 : i32}}> ({{\n      ^bb0(%left: {element}, %right: {element}):\n        %sum = arith.addf %left, %right : {element}\n        tt.reduce.return %sum : {element}\n      }}) : (tensor<{block}x{element}>) -> {element}\n      %next = arith.addf %accumulator, %partial : {element}\n      scf.yield %next : {element}\n    }}\n    tt.store %output, %total : !tt.ptr<{element}>\n    tt.return\n",
+        block = block_size,
+        last = block_size - 1,
     )
 }
 
-fn relu_body(element: &str) -> String {
-    let prefix = common_prefix(element);
+fn relu_body(element: &str, block_size: u32) -> String {
+    let prefix = common_prefix(element, block_size);
     format!(
         "{prefix}    %zero = arith.constant dense<0.000000e+00> : tensor<{block}x{element}>\n    %values = tt.load %input_ptrs, %mask, %zero : tensor<{block}x!tt.ptr<{element}>>\n    %activated = arith.maximumf %values, %zero : tensor<{block}x{element}>\n    %output_splat = tt.splat %output : !tt.ptr<{element}> -> tensor<{block}x!tt.ptr<{element}>>\n    %output_ptrs = tt.addptr %output_splat, %offsets : tensor<{block}x!tt.ptr<{element}>>, tensor<{block}xi32>\n    tt.store %output_ptrs, %activated, %mask : tensor<{block}x!tt.ptr<{element}>>\n    tt.return\n",
-        block = BLOCK_SIZE,
+        block = block_size,
     )
 }
 
@@ -118,9 +123,10 @@ mod tests {
         let source = emit_triton_ir(&kernel(KernelOperation::ReductionSum { input: 0 })).unwrap();
         assert!(source.contains("tt.func public @special"));
         assert!(source.contains("\"tt.reduce\""));
-        assert!(source.contains("tt.atomic_rmw fadd"));
-        assert!(source.contains("severian_launch_programs"));
-        assert!(source.contains("severian_launch_requires_zeroed_output = true"));
+        assert!(source.contains("scf.for"));
+        assert!(source.contains("tt.store %output, %total"));
+        assert!(source.contains("\"severian.launch.programs\" = \"1\""));
+        assert!(source.contains("\"severian.launch.requires_zeroed_output\" = false"));
         assert!(!source.contains("import "));
         assert!(!source.contains("python"));
         assert!(!source.contains("torch"));
@@ -132,6 +138,6 @@ mod tests {
             emit_triton_ir(&kernel(KernelOperation::ElementwiseRelu { input: 0 })).unwrap();
         assert!(source.contains("arith.maximumf"));
         assert!(source.contains("tt.store"));
-        assert!(!source.contains("tt.atomic_rmw"));
+        assert!(!source.contains("scf.for"));
     }
 }

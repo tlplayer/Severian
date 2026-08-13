@@ -47,7 +47,7 @@ Kernel artifacts are emitted without a benchmark-specific ABI:
 
 ```sh
 sev kernel emit source.sev --entry reduction_sum --backend triton \
-  --target cuda:sm_90 --output reduction_sum.ttir.mlir
+  --target cuda:sm_90 --output reduction_sum.ttir
 
 sev kernel emit source.sev --entry reduction_sum --backend xla \
   --output reduction_sum.stablehlo.mlir
@@ -55,9 +55,13 @@ sev kernel emit source.sev --entry reduction_sum --backend xla \
 
 The initial specialized operations are tensor reduction sum and elementwise
 ReLU. Severian emits Triton's MLIR dialect directly: `tt.func`, program IDs,
-masked pointer loads/stores, reductions, and atomics. The artifact carries
-launch metadata as MLIR module attributes. It contains no generated Python,
-Torch import, or Python-side Triton launcher.
+loops, masked pointer loads/stores, and reductions. The artifact carries launch
+metadata as MLIR module attributes. It contains no generated Python, Torch
+import, or Python-side Triton launcher. The first sum lowering deliberately
+uses one program that loops over tiles and stores the final scalar, making it
+correct for an uninitialized output buffer. A parallel two-stage reduction is
+the next performance optimization; the compiler does not hide initialization
+or a fallback calculation in a host adapter.
 
 Automatic selection is hardware-aware. Concrete targets such as `cuda:sm_90`
 and `rocm:gfx1100` enable the specialized route. Generic `gpu`, `nvidia`, and

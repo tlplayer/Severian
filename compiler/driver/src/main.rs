@@ -1595,7 +1595,7 @@ fn emit_non_executable_module(
             let (artifact, extension) = match selection.selected {
                 KernelBackend::Triton => (
                     emit_triton_ir(&kernel).map_err(|error| error.to_string())?,
-                    "ttir.mlir",
+                    "ttir",
                 ),
                 KernelBackend::Xla => (
                     emit_stablehlo(&kernel)
