@@ -192,3 +192,57 @@ fn profile_flag_runs_only_profile_tests() {
     let all = run_test(&path);
     assert!(!all.status.success());
 }
+
+#[test]
+fn profile_memory_mode_reports_speed_and_allocation_metrics() {
+    let path = source(
+        "profile-memory",
+        concat!(
+            "def measured() -> int:\n    return 42\n",
+            "test with profile \"developer diagnostics\" -> TestResult with\n",
+            "{\n",
+            "    defer time < 2s,\n",
+            "    defer memory < 32mb,\n",
+            "    defer allocations < 10000,\n",
+            "}:\n",
+            "    assert(measured() == 42)\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("test")
+        .arg("--profile")
+        .arg("--memory")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Memory + profile checking"));
+    assert!(stdout.contains("Profile developer diagnostics"));
+    assert!(stdout.contains("time_ns "));
+    assert!(stdout.contains("allocated_bytes "));
+    assert!(stdout.contains("allocations "));
+    assert!(stdout.contains("Memory + profile summary"));
+}
+
+#[test]
+fn leak_checking_requires_address_sanitizer() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args([
+            "test",
+            "--profile",
+            "--memory",
+            "--leaks",
+            "--sanitizer",
+            "undefined",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("`--leaks` requires the address sanitizer"));
+}

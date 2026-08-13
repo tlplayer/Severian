@@ -1,7 +1,9 @@
+use severian_backend::{NativeCompileOptions, NativeSanitizer};
 use severian_driver::{
     check_path, compile_dependency_path, compile_native, compile_native_profile_tests,
     compile_native_tests, compile_native_with_options, compile_path, inspect_toolchain,
-    native_profile_test_count, native_test_compilation, native_test_count, Compilation,
+    native_profile_test_compilation, native_profile_test_count, native_test_compilation,
+    native_test_count, Compilation,
 };
 use severian_package::BinaryTarget;
 use std::{
@@ -1609,6 +1611,9 @@ fn test_command(args: &[String]) -> Result<(), String> {
     let mut input = None;
     let mut mutate = false;
     let mut profile = false;
+    let mut memory = false;
+    let mut leaks = false;
+    let mut sanitizers = Vec::new();
     let mut limit = None;
     let mut index = 0;
     while index < args.len() {
@@ -1620,6 +1625,23 @@ fn test_command(args: &[String]) -> Result<(), String> {
             "--profile" => {
                 profile = true;
                 index += 1;
+            }
+            "--memory" => {
+                memory = true;
+                index += 1;
+            }
+            "--leaks" => {
+                memory = true;
+                leaks = true;
+                index += 1;
+            }
+            "--sanitizer" if index + 1 < args.len() => {
+                memory = true;
+                let sanitizer = parse_native_sanitizer(&args[index + 1])?;
+                if !sanitizers.contains(&sanitizer) {
+                    sanitizers.push(sanitizer);
+                }
+                index += 2;
             }
             "--limit" if index + 1 < args.len() => {
                 limit = Some(
@@ -1637,10 +1659,12 @@ fn test_command(args: &[String]) -> Result<(), String> {
         }
     }
     let input = input.unwrap_or_else(|| PathBuf::from("."));
-    if mutate && profile {
-        Err("`--profile` cannot be combined with `--mutate`".into())
+    if mutate && (profile || memory) {
+        Err("`--mutate` cannot be combined with `--profile` or `--memory`".into())
     } else if mutate {
         mutation_test_targets(&input, limit)
+    } else if memory {
+        memory_test_targets(&input, profile, sanitizers, leaks)
     } else {
         test_targets(&input, profile)
     }
@@ -1940,13 +1964,7 @@ fn memory_command(args: &[String]) -> Result<(), String> {
                 index += 1;
             }
             "--sanitizer" if index + 1 < args.len() => {
-                let sanitizer = match args[index + 1].as_str() {
-                    "address" => severian_backend::NativeSanitizer::Address,
-                    "thread" => severian_backend::NativeSanitizer::Thread,
-                    "memory" => severian_backend::NativeSanitizer::Memory,
-                    "undefined" => severian_backend::NativeSanitizer::Undefined,
-                    value => return Err(format!("unknown sanitizer `{value}`")),
-                };
+                let sanitizer = parse_native_sanitizer(&args[index + 1])?;
                 if !sanitizers.contains(&sanitizer) {
                     sanitizers.push(sanitizer);
                 }
@@ -1960,46 +1978,81 @@ fn memory_command(args: &[String]) -> Result<(), String> {
         }
     }
     let input = input.ok_or_else(usage)?;
-    if sanitizers.is_empty() {
-        sanitizers.extend([
-            severian_backend::NativeSanitizer::Address,
-            severian_backend::NativeSanitizer::Undefined,
-        ]);
+    memory_test_targets(&input, false, sanitizers, leaks)
+}
+
+fn parse_native_sanitizer(value: &str) -> Result<NativeSanitizer, String> {
+    match value {
+        "address" => Ok(NativeSanitizer::Address),
+        "thread" => Ok(NativeSanitizer::Thread),
+        "memory" => Ok(NativeSanitizer::Memory),
+        "undefined" => Ok(NativeSanitizer::Undefined),
+        value => Err(format!("unknown sanitizer `{value}`")),
     }
-    let has_thread = sanitizers.contains(&severian_backend::NativeSanitizer::Thread);
-    let has_memory = sanitizers.contains(&severian_backend::NativeSanitizer::Memory);
+}
+
+fn memory_test_targets(
+    input: &Path,
+    profile_only: bool,
+    mut sanitizers: Vec<NativeSanitizer>,
+    leaks: bool,
+) -> Result<(), String> {
+    if sanitizers.is_empty() {
+        sanitizers.extend([NativeSanitizer::Address, NativeSanitizer::Undefined]);
+    }
+    let has_thread = sanitizers.contains(&NativeSanitizer::Thread);
+    let has_memory = sanitizers.contains(&NativeSanitizer::Memory);
     if (has_thread || has_memory) && sanitizers.len() > 1 {
         return Err(
             "thread and memory sanitizers must run alone; address may be combined with undefined"
                 .into(),
         );
     }
+    if leaks && !sanitizers.contains(&NativeSanitizer::Address) {
+        return Err("`--leaks` requires the address sanitizer".into());
+    }
 
-    let options = severian_backend::NativeCompileOptions {
+    let options = NativeCompileOptions {
         sanitizers,
-        ..severian_backend::NativeCompileOptions::default()
+        ..NativeCompileOptions::default()
     };
-    let targets = resolve_targets(&input)?;
+    let targets = resolve_targets(input)?;
     let mut executed = 0;
     let mut findings = 0;
     let mut tool_failures = 0;
     for target in targets {
         let compilation = compile_path(&target.source)
             .map_err(|error| format!("{}: {error}", target.source.display()))?;
-        if native_test_count(&compilation.hir) == 0 {
+        let count = if profile_only {
+            native_profile_test_count(&compilation.hir)
+        } else {
+            native_test_count(&compilation.hir)
+        };
+        if count == 0 {
             continue;
         }
-        let (runnable, count) = native_test_compilation(&compilation)
-            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        let (runnable, count) = if profile_only {
+            native_profile_test_compilation(&compilation)
+        } else {
+            native_test_compilation(&compilation)
+        }
+        .map_err(|error| format!("{}: {error}", target.source.display()))?;
         let directory = target.package_root.join("target").join("memory");
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-        let binary = directory.join(format!("{}-tests", target.name));
+        let suffix = if profile_only {
+            "profile-tests"
+        } else {
+            "tests"
+        };
+        let binary = directory.join(format!("{}-{suffix}", target.name));
         compile_native_with_options(&runnable, &binary, &options)
             .map_err(|error| format!("{}: {error}", target.source.display()))?;
-        println!(
-            "Memory checking {} ({count} test(s))",
-            target.source.display()
-        );
+        let label = if profile_only {
+            "Memory + profile checking"
+        } else {
+            "Memory checking"
+        };
+        println!("{label} {} ({count} test(s))", target.source.display());
         let output = Command::new(&binary)
             .env(
                 "ASAN_OPTIONS",
@@ -2035,7 +2088,12 @@ fn memory_command(args: &[String]) -> Result<(), String> {
             );
         }
     }
-    println!("Memory summary: {executed} target(s), {findings} target(s) with findings, {tool_failures} tool failure(s)");
+    let label = if profile_only {
+        "Memory + profile summary"
+    } else {
+        "Memory summary"
+    };
+    println!("{label}: {executed} target(s), {findings} target(s) with findings, {tool_failures} tool failure(s)");
     if findings == 0 && tool_failures == 0 {
         Ok(())
     } else {
@@ -2339,6 +2397,8 @@ fn usage() -> String {
         "  run [path] [-- args...]        build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --profile          run only profile tests and enforce profile contracts",
+        "  test [path] --memory [--leaks] run tests with native memory diagnostics",
+        "  test [path] --profile --memory report speed/allocations with memory diagnostics",
         "  debug [path]                   build with debug symbols and launch lldb or gdb",
         "  test [path] --mutate [--limit N] run deterministic mutation testing",
         "  coverage <path>                run tests and report Severian source coverage",

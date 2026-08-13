@@ -179,52 +179,82 @@ fn selected_test(test: &Test, profile_only: bool) -> bool {
 }
 
 fn test_instructions(test: &Test) -> Vec<Instruction> {
-    let Some(contract) = &test.contract else {
+    if !test.modes.contains(&TestMode::Profile) {
         return test.instructions.clone();
-    };
-    if test.modes.contains(&TestMode::Profile) {
-        let mut instructions = Vec::new();
-        for (name, symbol) in [
-            ("__contract_start_time", "__sev_monotonic_ns"),
-            ("__contract_start_memory", "__sev_allocation_bytes"),
-            ("__contract_start_allocations", "__sev_allocation_count"),
-        ] {
-            instructions.push(Instruction::Let {
-                name: name.into(),
-                value: native_metric(symbol),
-            });
-        }
-        instructions.extend(test.instructions.clone());
-        for (name, start, symbol) in [
-            ("time", "__contract_start_time", "__sev_monotonic_ns"),
-            (
-                "memory",
-                "__contract_start_memory",
-                "__sev_allocation_bytes",
-            ),
-            (
-                "allocations",
-                "__contract_start_allocations",
-                "__sev_allocation_count",
-            ),
-        ] {
-            instructions.push(Instruction::Let {
-                name: name.into(),
-                value: typed(
-                    ValueType::Int,
-                    Expression::Binary {
-                        left: Box::new(native_metric(symbol)),
-                        op: BinaryOp::Sub,
-                        right: Box::new(typed(ValueType::Int, Expression::Variable(start.into()))),
-                    },
-                ),
-            });
-        }
-        instructions.extend(contract.clauses.iter().map(contract_check));
-        return instructions;
     }
 
-    test.instructions.clone()
+    let mut instructions = Vec::new();
+    for (name, symbol) in [
+        ("__contract_start_time", "__sev_monotonic_ns"),
+        ("__contract_start_memory", "__sev_allocation_bytes"),
+        ("__contract_start_allocations", "__sev_allocation_count"),
+    ] {
+        instructions.push(Instruction::Let {
+            name: name.into(),
+            value: native_metric(symbol),
+        });
+    }
+    instructions.extend(test.instructions.clone());
+    for (name, start, symbol) in [
+        ("time", "__contract_start_time", "__sev_monotonic_ns"),
+        (
+            "memory",
+            "__contract_start_memory",
+            "__sev_allocation_bytes",
+        ),
+        (
+            "allocations",
+            "__contract_start_allocations",
+            "__sev_allocation_count",
+        ),
+    ] {
+        instructions.push(Instruction::Let {
+            name: name.into(),
+            value: typed(
+                ValueType::Int,
+                Expression::Binary {
+                    left: Box::new(native_metric(symbol)),
+                    op: BinaryOp::Sub,
+                    right: Box::new(typed(ValueType::Int, Expression::Variable(start.into()))),
+                },
+            ),
+        });
+    }
+    instructions.extend(profile_report(test));
+    if let Some(contract) = &test.contract {
+        instructions.extend(contract.clauses.iter().map(contract_check));
+    }
+    instructions
+}
+
+fn profile_report(test: &Test) -> Vec<Instruction> {
+    let name = test.name.as_deref().unwrap_or("unnamed profile test");
+    [
+        (
+            "Profile",
+            typed(ValueType::String, Expression::String(name.into())),
+        ),
+        (
+            "time_ns",
+            typed(ValueType::Int, Expression::Variable("time".into())),
+        ),
+        (
+            "allocated_bytes",
+            typed(ValueType::Int, Expression::Variable("memory".into())),
+        ),
+        (
+            "allocations",
+            typed(ValueType::Int, Expression::Variable("allocations".into())),
+        ),
+    ]
+    .into_iter()
+    .map(|(label, value)| {
+        Instruction::Print(Expression::PrintArgs(vec![
+            typed(ValueType::String, Expression::String(label.into())),
+            value,
+        ]))
+    })
+    .collect()
 }
 
 fn native_metric(symbol: &str) -> Expression {

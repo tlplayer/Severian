@@ -29,14 +29,19 @@ test with property and chaos "generated inputs under injected failures":
 - Profile tests expose `time` in nanoseconds, `memory` in allocated bytes, and
   `allocations` as a count. Unit literals such as `1ms` and `32mb` are normalized
   by the compiler. Bounds are checked after the measured body, including lower
-  bounds, so stubbed work cannot satisfy `1ms < time`.
+  bounds, so stubbed work cannot satisfy `1ms < time`. The runner always prints
+  all three measurements, even when the test does not declare a profile
+  contract.
 - Compatible modes compose with `and`. The API-contract comma rule does not
   apply to test modes.
 
 The files in this directory demonstrate each form and representative use cases.
 
 Run every test with `sev test`. Run only profile tests and enforce their runtime
-contracts with `sev test --profile`.
+contracts with `sev test --profile`. During development, use
+`sev test --profile --memory` to combine the profile report with native address
+and undefined-behavior sanitizers. Add `--leaks` to enable the stricter,
+opt-in leak pass.
 
 `when function return/throw value` is test-only syntax. It is valid in both an
 ordinary `test:` and a `test with chaos` block, and is a compile-time error

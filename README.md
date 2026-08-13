@@ -92,6 +92,8 @@ sev run main.sev
 sev build
 sev test
 sev test --profile
+sev test --profile --memory
+sev test --profile --memory --leaks
 sev debug main.sev
 sev clean
 ```
@@ -103,13 +105,18 @@ sev run
 sev build
 sev test
 sev test --profile
+sev test --profile --memory
+sev test --profile --memory --leaks
 sev debug
 ```
 
 `run` builds and executes, `build` reports the project's compiler diagnostics,
 and `test` runs all native tests and their contracts. `test --profile` selects
 only profile tests and enforces their time, memory, allocation, and runtime
-contracts. `debug` creates an unoptimized native build with debug symbols and
+contracts. Every profile test prints elapsed nanoseconds, cumulative bytes
+allocated, and allocation count. Add `--memory` to run those tests under native
+memory and undefined-behavior sanitizers; add `--leaks` for opt-in leak
+detection. `debug` creates an unoptimized native build with debug symbols and
 launches LLDB or GDB; `SEVERIAN_DEBUGGER` selects another debugger. `clean`
 removes only the resolved project's generated `target` directory.
 
@@ -157,6 +164,9 @@ triggers compiler sanitizers:
 sev coverage path
 sev test path --mutate
 sev test path --mutate --limit 20
+sev test path --memory
+sev test path --profile --memory
+sev test path --profile --memory --leaks
 sev memory path
 sev memory path --sanitizer thread
 sev memory path --leaks
@@ -176,11 +186,18 @@ arithmetic, comparison, Boolean, and logical changes. Compile-invalid mutants
 are reported separately rather than counted as killed; surviving mutants still
 need human review because some changes are semantically equivalent.
 
-`sev memory` defaults to AddressSanitizer plus UndefinedBehaviorSanitizer.
+`sev test --memory` and `sev memory` default to AddressSanitizer plus
+UndefinedBehaviorSanitizer. Combining `--profile --memory` focuses the run on
+profile tests while preserving their speed and allocation report. This makes a
+single development run useful for performance regressions, invalid memory
+access, undefined behavior, and (with `--leaks`) leaked allocations.
 ThreadSanitizer and MemorySanitizer run alone because their runtimes are not
 compatible with the default pair. Leak checking is opt-in because the current
 native value runtime intentionally retains process-lifetime allocations and
 some restricted environments cannot run LeakSanitizer.
+
+The guarantees and limits of these checks are documented in
+[the Severian memory model](docs/MEMORY_MODEL.md).
 
 Internal compiler dependencies carry both local `path` entries and registry
 versions, so the compiler crates can be published in dependency order and the
