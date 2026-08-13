@@ -93,7 +93,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
 
 fn kernel_command(args: &[String]) -> Result<(), String> {
     use severian_lowering::kernel::{
-        emit_stablehlo, emit_triton_python, find, select_backend, KernelBackend, KernelTarget,
+        emit_stablehlo, emit_triton_ir, find, select_backend, KernelBackend, KernelTarget,
     };
 
     let action = args.first().map(String::as_str).ok_or_else(kernel_usage)?;
@@ -127,12 +127,8 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
                 })
             }
             "--target" => {
-                target = match value.as_str() {
-                    "cpu" => KernelTarget::Cpu,
-                    "gpu" => KernelTarget::Gpu,
-                    "tpu" => KernelTarget::Tpu,
-                    _ => return Err(format!("unknown kernel target `{value}`")),
-                }
+                target = KernelTarget::parse(value)
+                    .map_err(|error| format!("invalid kernel target `{value}`: {error}"))?;
             }
             "--output" if action == "emit" => output = Some(PathBuf::from(value)),
             _ => {
@@ -167,7 +163,7 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
     }
 
     let artifact = match selection.selected {
-        KernelBackend::Triton => emit_triton_python(&kernel).map_err(|error| error.to_string())?,
+        KernelBackend::Triton => emit_triton_ir(&kernel).map_err(|error| error.to_string())?,
         KernelBackend::Xla => emit_stablehlo(&kernel)
             .map_err(|error| error.to_string())?
             .as_str()
@@ -198,7 +194,7 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
 }
 
 fn kernel_usage() -> String {
-    "usage:\n  sev kernel inspect <source.sev> [--entry NAME] [--backend auto|xla|triton|llvm] [--target cpu|gpu|tpu]\n  sev kernel emit <source.sev> [--entry NAME] [--backend auto|xla|triton] [--target gpu|tpu] [--output PATH]".into()
+    "usage:\n  sev kernel inspect <source.sev> [--entry NAME] [--backend auto|xla|triton|llvm] [--target cpu|gpu|tpu|nvidia|amd|cuda:sm_NN|rocm:gfxNNNN]\n  sev kernel emit <source.sev> [--entry NAME] [--backend auto|xla|triton] [--target gpu|tpu|nvidia|amd|cuda:sm_NN|rocm:gfxNNNN] [--output PATH]".into()
 }
 
 fn add_command(args: &[String]) -> Result<(), String> {
@@ -1590,7 +1586,7 @@ fn emit_non_executable_module(
     let kernels = severian_lowering::kernel::collect(&compilation.optimized_hir);
     if !kernels.is_empty() {
         use severian_lowering::kernel::{
-            emit_stablehlo, emit_triton_python, select_backend, KernelBackend, KernelTarget,
+            emit_stablehlo, emit_triton_ir, select_backend, KernelBackend, KernelTarget,
         };
         let mut outputs = Vec::new();
         for kernel in kernels {
@@ -1598,8 +1594,8 @@ fn emit_non_executable_module(
                 .map_err(|error| error.to_string())?;
             let (artifact, extension) = match selection.selected {
                 KernelBackend::Triton => (
-                    emit_triton_python(&kernel).map_err(|error| error.to_string())?,
-                    "triton.py",
+                    emit_triton_ir(&kernel).map_err(|error| error.to_string())?,
+                    "ttir.mlir",
                 ),
                 KernelBackend::Xla => (
                     emit_stablehlo(&kernel)

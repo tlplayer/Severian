@@ -6,7 +6,10 @@ pub fn validate_architecture(value: &str) -> bool {
         return false;
     };
 
-    let digits = digits.strip_suffix('f').unwrap_or(digits);
+    let digits = digits
+        .strip_suffix('a')
+        .or_else(|| digits.strip_suffix('f'))
+        .unwrap_or(digits);
     !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit())
 }
 

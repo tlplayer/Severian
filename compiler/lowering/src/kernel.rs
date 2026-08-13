@@ -1,16 +1,22 @@
 //! Backend-neutral tensor-kernel planning and specialized backend emission.
 //!
-//! This is the boundary between Severian semantics and accelerator backends.
-//! Benchmark adapters belong outside this module; emitted kernels expose a
-//! small `launch` API and contain no knowledge of a particular harness.
+//! The kernel IR describes semantics once. Backend policy then routes portable
+//! graphs through StableHLO/XLA and recognized GPU kernels through native
+//! Triton IR. Neither path depends on Python or a benchmark harness.
 
-use severian_hir::{
-    Expression, Function, FunctionId, Instruction, Program, TensorElementType, TensorType,
-    ValueType,
-};
-use severian_mlir::Module;
+mod ir;
+mod selection;
+mod stablehlo;
+mod triton;
+
+pub use ir::{collect, find};
+pub use selection::select_backend;
+pub use stablehlo::emit_stablehlo;
+pub use triton::{emit_triton_ir, TritonLaunch};
+
+use severian_hir::{FunctionId, TensorElementType, TensorType};
+use severian_platform::{resolve_target, GpuVendor, Target};
 use std::fmt;
-use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelBackend {
@@ -31,37 +37,123 @@ impl KernelBackend {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KernelTarget {
     Cpu,
+    /// A deployment GPU whose vendor has not been fixed yet.
     Gpu,
+    Nvidia {
+        architecture: Option<String>,
+    },
+    Amd {
+        architecture: Option<String>,
+    },
     Tpu,
 }
 
 impl KernelTarget {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Cpu => "cpu",
-            Self::Gpu => "gpu",
-            Self::Tpu => "tpu",
+    pub fn parse(specification: &str) -> Result<Self, String> {
+        match specification.trim().to_ascii_lowercase().as_str() {
+            "gpu" => return Ok(Self::Gpu),
+            "tpu" => return Ok(Self::Tpu),
+            _ => {}
+        }
+        match resolve_target(specification).map_err(|error| error.to_string())? {
+            Target::Cpu(_) => Ok(Self::Cpu),
+            Target::Gpu(target) => match target.vendor {
+                GpuVendor::Nvidia => Ok(Self::Nvidia {
+                    architecture: target.architecture,
+                }),
+                GpuVendor::Amd => Ok(Self::Amd {
+                    architecture: target.architecture,
+                }),
+                GpuVendor::Unknown => Ok(Self::Gpu),
+            },
+            Target::Xla { platform, .. } => {
+                if platform.as_deref() == Some("tpu") {
+                    Ok(Self::Tpu)
+                } else {
+                    Ok(Self::Gpu)
+                }
+            }
+            Target::Spirv { .. } => Ok(Self::Gpu),
         }
     }
+
+    pub fn name(&self) -> String {
+        match self {
+            Self::Cpu => "cpu".into(),
+            Self::Gpu => "gpu".into(),
+            Self::Nvidia { architecture } => architecture
+                .as_deref()
+                .map_or_else(|| "nvidia".into(), |arch| format!("cuda:{arch}")),
+            Self::Amd { architecture } => architecture
+                .as_deref()
+                .map_or_else(|| "amd".into(), |arch| format!("rocm:{arch}")),
+            Self::Tpu => "tpu".into(),
+        }
+    }
+
+    pub const fn is_gpu(&self) -> bool {
+        matches!(self, Self::Gpu | Self::Nvidia { .. } | Self::Amd { .. })
+    }
+
+    /// Returns whether automatic policy may select Triton for this target.
+    pub fn supports_triton(&self) -> bool {
+        match self {
+            Self::Nvidia {
+                architecture: Some(architecture),
+            } => supported_nvidia_architecture(architecture),
+            Self::Amd {
+                architecture: Some(_),
+            } => true,
+            Self::Cpu | Self::Gpu | Self::Tpu => false,
+            Self::Nvidia { architecture: None } | Self::Amd { architecture: None } => false,
+        }
+    }
+
+    pub fn is_known_triton_incompatible(&self) -> bool {
+        matches!(
+            self,
+            Self::Nvidia {
+                architecture: Some(architecture)
+            } if !supported_nvidia_architecture(architecture)
+        )
+    }
+}
+
+fn supported_nvidia_architecture(architecture: &str) -> bool {
+    architecture
+        .strip_prefix("sm_")
+        .and_then(|value| value.trim_end_matches(['a', 'f']).parse::<u16>().ok())
+        .is_some_and(|compute_capability| compute_capability >= 80)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelOperation {
     ReductionSum { input: usize },
+    ElementwiseRelu { input: usize },
 }
 
 impl KernelOperation {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::ReductionSum { .. } => "reduction.sum",
+            Self::ElementwiseRelu { .. } => "elementwise.relu",
+        }
+    }
+
+    pub const fn input(&self) -> usize {
+        match self {
+            Self::ReductionSum { input } | Self::ElementwiseRelu { input } => *input,
         }
     }
 
     pub const fn supports_triton(&self) -> bool {
-        matches!(self, Self::ReductionSum { .. })
+        matches!(
+            self,
+            Self::ReductionSum { .. } | Self::ElementwiseRelu { .. }
+        )
     }
 }
 
@@ -73,6 +165,35 @@ pub struct KernelIr {
     pub result: TensorType,
     pub operation: KernelOperation,
     pub policy: KernelBackend,
+}
+
+impl KernelIr {
+    pub fn triton_support(&self) -> Result<(), String> {
+        if !self.operation.supports_triton() {
+            return Err(format!(
+                "operation `{}` has no direct Triton lowering",
+                self.operation.name()
+            ));
+        }
+        let input = self
+            .parameters
+            .get(self.operation.input())
+            .ok_or_else(|| format!("kernel input {} does not exist", self.operation.input()))?;
+        match (self.operation, input.element) {
+            (KernelOperation::ReductionSum { .. }, TensorElementType::F32) => Ok(()),
+            (KernelOperation::ReductionSum { .. }, element) => Err(format!(
+                "reduction.sum Triton lowering currently requires f32, found {}",
+                tensor_element_name(element)
+            )),
+            (KernelOperation::ElementwiseRelu { .. }, TensorElementType::BF16)
+            | (KernelOperation::ElementwiseRelu { .. }, TensorElementType::F32)
+            | (KernelOperation::ElementwiseRelu { .. }, TensorElementType::F64) => Ok(()),
+            (KernelOperation::ElementwiseRelu { .. }, element) => Err(format!(
+                "elementwise.relu requires a floating-point tensor, found {}",
+                tensor_element_name(element)
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +221,7 @@ impl fmt::Display for KernelError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoKernels => formatter.write_str(
-                "no specialized tensor kernels were found; the first direct GPU lowering supports tensor reduction sum",
+                "no specialized tensor kernels were found; direct return expressions currently support reduction sum and ReLU",
             ),
             Self::UnknownEntry(entry) => write!(formatter, "no kernel entry named `{entry}` was found"),
             Self::AmbiguousEntries(entries) => write!(
@@ -108,11 +229,7 @@ impl fmt::Display for KernelError {
                 "multiple kernel entries were found ({}); select one with `--entry`",
                 entries.join(", ")
             ),
-            Self::UnsupportedBackend {
-                kernel,
-                backend,
-                reason,
-            } => write!(
+            Self::UnsupportedBackend { kernel, backend, reason } => write!(
                 formatter,
                 "kernel `{kernel}` cannot use backend `{}`: {reason}",
                 backend.name()
@@ -123,311 +240,7 @@ impl fmt::Display for KernelError {
 
 impl std::error::Error for KernelError {}
 
-pub fn collect(program: &Program) -> Vec<KernelIr> {
-    program
-        .functions
-        .iter()
-        .filter_map(lower_function)
-        .collect()
-}
-
-pub fn find(program: &Program, entry: Option<&str>) -> Result<KernelIr, KernelError> {
-    let kernels = collect(program);
-    if let Some(entry) = entry {
-        return kernels
-            .into_iter()
-            .find(|kernel| kernel.name == entry)
-            .ok_or_else(|| KernelError::UnknownEntry(entry.into()));
-    }
-    match kernels.as_slice() {
-        [] => Err(KernelError::NoKernels),
-        [kernel] => Ok(kernel.clone()),
-        _ => Err(KernelError::AmbiguousEntries(
-            kernels.into_iter().map(|kernel| kernel.name).collect(),
-        )),
-    }
-}
-
-pub fn select_backend(
-    kernel: &KernelIr,
-    requested: KernelBackend,
-    target: KernelTarget,
-) -> Result<KernelSelection, KernelError> {
-    let (selected, reason, fallback) = match requested {
-        KernelBackend::Auto => match target {
-            KernelTarget::Gpu if kernel.operation.supports_triton() => (
-                KernelBackend::Triton,
-                format!(
-                    "recognized `{}` on a GPU target; direct kernel lowering is available",
-                    kernel.operation.name()
-                ),
-                Some(KernelBackend::Xla),
-            ),
-            KernelTarget::Gpu => (
-                KernelBackend::Xla,
-                "no direct GPU lowering is available; use the portable tensor backend".into(),
-                None,
-            ),
-            KernelTarget::Tpu => (
-                KernelBackend::Xla,
-                "TPU execution uses StableHLO and PJRT".into(),
-                None,
-            ),
-            KernelTarget::Cpu => (
-                KernelBackend::Llvm,
-                "CPU execution uses the native LLVM path".into(),
-                None,
-            ),
-        },
-        KernelBackend::Triton => {
-            if target != KernelTarget::Gpu {
-                return Err(KernelError::UnsupportedBackend {
-                    kernel: kernel.name.clone(),
-                    backend: requested,
-                    reason: "Triton kernels require a GPU target".into(),
-                });
-            }
-            if !kernel.operation.supports_triton() {
-                return Err(KernelError::UnsupportedBackend {
-                    kernel: kernel.name.clone(),
-                    backend: requested,
-                    reason: format!(
-                        "operation `{}` has no direct Triton lowering",
-                        kernel.operation.name()
-                    ),
-                });
-            }
-            (
-                KernelBackend::Triton,
-                "the Triton backend was explicitly requested".into(),
-                Some(KernelBackend::Xla),
-            )
-        }
-        KernelBackend::Xla => (
-            KernelBackend::Xla,
-            "the portable StableHLO/XLA backend was explicitly requested".into(),
-            None,
-        ),
-        KernelBackend::Llvm => {
-            if target != KernelTarget::Cpu {
-                return Err(KernelError::UnsupportedBackend {
-                    kernel: kernel.name.clone(),
-                    backend: requested,
-                    reason: "the LLVM kernel path currently targets the CPU".into(),
-                });
-            }
-            (
-                KernelBackend::Llvm,
-                "the native LLVM backend was explicitly requested".into(),
-                None,
-            )
-        }
-    };
-    Ok(KernelSelection {
-        requested,
-        selected,
-        target,
-        reason,
-        fallback,
-    })
-}
-
-/// Emits a standalone Python module whose Triton frontend lowers the kernel to
-/// TritonIR. The module deliberately exports only `launch`; benchmark-specific
-/// call signatures are supplied by adapters outside the compiler.
-pub fn emit_triton_python(kernel: &KernelIr) -> Result<String, KernelError> {
-    if !kernel.operation.supports_triton() {
-        return Err(KernelError::UnsupportedBackend {
-            kernel: kernel.name.clone(),
-            backend: KernelBackend::Triton,
-            reason: format!(
-                "operation `{}` has no direct Triton lowering",
-                kernel.operation.name()
-            ),
-        });
-    }
-    let input = match kernel.operation {
-        KernelOperation::ReductionSum { input } => input,
-    };
-    let element = tensor_element_name(kernel.parameters[input].element);
-    Ok(format!(
-        r#"# Generated by Severian. This is a standalone Triton kernel artifact.
-# Source entry: {entry}
-# Kernel IR operation: {operation}
-import torch
-import triton
-import triton.language as tl
-
-SEVERIAN_KERNEL_NAME = {entry:?}
-SEVERIAN_KERNEL_OPERATION = {operation:?}
-SEVERIAN_ELEMENT_TYPE = {element:?}
-
-@triton.jit
-def _severian_kernel(input_pointer, output_pointer, element_count: tl.constexpr, BLOCK_SIZE: tl.constexpr):
-    program = tl.program_id(0)
-    offsets = program * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    values = tl.load(input_pointer + offsets, mask=offsets < element_count, other=0.0)
-    partial = tl.sum(values, axis=0)
-    tl.atomic_add(output_pointer, partial)
-
-def launch(input_tensor, output_tensor=None, block_size=1024):
-    if output_tensor is None:
-        output_tensor = torch.zeros((), device=input_tensor.device, dtype=input_tensor.dtype)
-    else:
-        output_tensor.zero_()
-    element_count = input_tensor.numel()
-    grid = (triton.cdiv(element_count, block_size),)
-    _severian_kernel[grid](
-        input_tensor,
-        output_tensor,
-        element_count,
-        BLOCK_SIZE=block_size,
-    )
-    return output_tensor.reshape(-1)[0]
-"#,
-        entry = kernel.name,
-        operation = kernel.operation.name(),
-        element = element,
-    ))
-}
-
-/// Emits the portable StableHLO representation from the same kernel IR used
-/// by specialized backends. This keeps backend parity independent of legacy
-/// source-level intrinsic aliases.
-pub fn emit_stablehlo(kernel: &KernelIr) -> Result<Module, KernelError> {
-    use crate::stablehlo::{reduction, MlirValue, StableHloEmitter};
-    use crate::tensor::tensor_type;
-
-    let input_index = match kernel.operation {
-        KernelOperation::ReductionSum { input } => input,
-    };
-    let input = kernel.parameters.get(input_index).copied().ok_or_else(|| {
-        KernelError::UnsupportedBackend {
-            kernel: kernel.name.clone(),
-            backend: KernelBackend::Xla,
-            reason: format!("kernel input {input_index} does not exist"),
-        }
-    })?;
-    let rank = input.rank.ok_or_else(|| KernelError::UnsupportedBackend {
-        kernel: kernel.name.clone(),
-        backend: KernelBackend::Xla,
-        reason: "StableHLO requires ranked tensor metadata".into(),
-    })?;
-    let argument = MlirValue::from_tensor("%arg0", input);
-    let mut emitter = StableHloEmitter::new();
-    let value = match kernel.operation {
-        KernelOperation::ReductionSum { .. } => reduction::reduce_sum(
-            &mut emitter,
-            &argument,
-            &(0..u64::from(rank)).collect::<Vec<_>>(),
-            kernel.result,
-        ),
-    };
-    let mut output = String::from("module {\n");
-    writeln!(
-        output,
-        "  func.func @main(%arg0: {}) -> {} {{",
-        tensor_type(input),
-        tensor_type(kernel.result)
-    )
-    .expect("writing to a String cannot fail");
-    output.push_str(emitter.as_str());
-    writeln!(output, "    return {} : {}", value.name, value.ty)
-        .expect("writing to a String cannot fail");
-    output.push_str("  }\n}\n");
-    Ok(Module::new(output))
-}
-
-fn lower_function(function: &Function) -> Option<KernelIr> {
-    if function.native_symbol.is_some() || function.params.len() != 1 {
-        return None;
-    }
-    let parameters = function
-        .params
-        .iter()
-        .map(|parameter| match parameter.ty {
-            ValueType::Tensor(tensor) => Some(tensor),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let ValueType::Tensor(declared_result) = function.return_type else {
-        return None;
-    };
-    let operation = lower_body(&function.instructions, function)?;
-    let result = match operation {
-        KernelOperation::ReductionSum { .. } => TensorType::ranked(declared_result.element, &[])
-            .expect("a scalar tensor is always representable"),
-    };
-    Some(KernelIr {
-        function: function.id,
-        name: function.name.clone(),
-        parameters,
-        result,
-        operation,
-        policy: compile_policy(function),
-    })
-}
-
-fn compile_policy(function: &Function) -> KernelBackend {
-    let Some(policy) = function
-        .decorators
-        .iter()
-        .find(|decorator| decorator.package == "compile")
-        .and_then(|decorator| decorator.symbols.first())
-    else {
-        return KernelBackend::Auto;
-    };
-    match policy.as_str() {
-        "xla" => KernelBackend::Xla,
-        "triton" => KernelBackend::Triton,
-        _ => KernelBackend::Auto,
-    }
-}
-
-fn lower_body(instructions: &[Instruction], function: &Function) -> Option<KernelOperation> {
-    let [instruction] = instructions else {
-        return None;
-    };
-    match instruction {
-        Instruction::Return(Some(value)) => lower_return(value, function),
-        Instruction::With { instructions, .. } => lower_body(instructions, function),
-        _ => None,
-    }
-}
-
-fn lower_return(expression: &Expression, function: &Function) -> Option<KernelOperation> {
-    let Expression::Call { target, args } = expression.kind() else {
-        return None;
-    };
-    let operation = target
-        .name
-        .rsplit_once('.')
-        .map(|(_, name)| name)
-        .unwrap_or(&target.name)
-        .to_ascii_lowercase()
-        .replace('_', "");
-    let operation = operation
-        .strip_suffix("bf16")
-        .or_else(|| operation.strip_suffix("f32"))
-        .unwrap_or(&operation);
-    if !matches!(
-        operation,
-        "sum" | "rankedsum" | "sumlast" | "reducesum" | "tensorsum"
-    ) || args.len() != 1
-    {
-        return None;
-    }
-    let Expression::Variable(input_name) = args[0].kind() else {
-        return None;
-    };
-    let input = function
-        .params
-        .iter()
-        .position(|parameter| parameter.name == *input_name)?;
-    Some(KernelOperation::ReductionSum { input })
-}
-
-const fn tensor_element_name(element: TensorElementType) -> &'static str {
+pub(crate) const fn tensor_element_name(element: TensorElementType) -> &'static str {
     match element {
         TensorElementType::BF16 => "bf16",
         TensorElementType::F32 => "f32",
@@ -440,71 +253,18 @@ const fn tensor_element_name(element: TensorElementType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_hir::{CallTarget, Parameter, TensorDimension};
-
-    fn tensor() -> TensorType {
-        TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap()
-    }
-
-    fn reduction_program() -> Program {
-        let tensor = tensor();
-        Program {
-            functions: vec![Function {
-                id: FunctionId::from_name("reduce"),
-                name: "reduce".into(),
-                native_symbol: None,
-                decorators: Vec::new(),
-                contract: None,
-                params: vec![Parameter {
-                    name: "value".into(),
-                    ty: ValueType::Tensor(tensor),
-                    default: None,
-                    receiver: None,
-                }],
-                return_type: ValueType::Tensor(tensor),
-                instructions: vec![Instruction::Return(Some(Expression::Call {
-                    target: CallTarget::source("tensor.sum"),
-                    args: vec![Expression::Variable("value".into())],
-                }))],
-                tests: Vec::new(),
-            }],
-            ..Program::default()
-        }
-    }
 
     #[test]
-    fn automatic_gpu_selection_uses_triton_with_xla_fallback() {
-        let kernel = find(&reduction_program(), None).unwrap();
-        let selection = select_backend(&kernel, KernelBackend::Auto, KernelTarget::Gpu).unwrap();
-        assert_eq!(selection.selected, KernelBackend::Triton);
-        assert_eq!(selection.fallback, Some(KernelBackend::Xla));
-    }
-
-    #[test]
-    fn emitted_module_has_no_benchmark_protocol() {
-        let kernel = find(&reduction_program(), None).unwrap();
-        let source = emit_triton_python(&kernel).unwrap();
-        assert!(source.contains("def launch("));
-        assert!(source.contains("@triton.jit"));
-        assert!(!source.contains("custom_kernel"));
-        assert!(!source.contains("from task import"));
-    }
-
-    #[test]
-    fn portable_emission_uses_the_same_kernel_ir() {
-        let kernel = find(&reduction_program(), None).unwrap();
-        let source = emit_stablehlo(&kernel).unwrap();
-        assert!(source.as_str().contains("stablehlo.reduce"));
-        assert!(source.as_str().contains("-> tensor<f32>"));
-    }
-
-    #[test]
-    fn does_not_discard_surrounding_source_operations() {
-        let mut program = reduction_program();
-        program.functions[0].instructions.insert(
-            0,
-            Instruction::Evaluate(Expression::Variable("value".into())),
-        );
-        assert!(collect(&program).is_empty());
+    fn generic_gpu_does_not_claim_triton_support() {
+        assert!(!KernelTarget::Gpu.supports_triton());
+        assert!(!KernelTarget::parse("nvidia").unwrap().supports_triton());
+        assert!(KernelTarget::parse("cuda:sm_90").unwrap().supports_triton());
+        assert!(KernelTarget::parse("cuda:sm_90a")
+            .unwrap()
+            .supports_triton());
+        assert!(!KernelTarget::parse("cuda:sm_75").unwrap().supports_triton());
+        assert!(KernelTarget::parse("rocm:gfx1100")
+            .unwrap()
+            .supports_triton());
     }
 }

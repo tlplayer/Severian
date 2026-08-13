@@ -12,7 +12,7 @@ typed HIR
 Severian kernel IR
       |
       +-- StableHLO --> XLA/PJRT
-      +-- Triton frontend --> TritonIR --> GPU kernel
+      +-- native TTIR --> Triton MLIR compiler --> GPU kernel
       +-- LLVM dialect --> native CPU code
 ```
 
@@ -23,7 +23,7 @@ retained as the fallback. CPU code continues through the native LLVM path.
 Backend selection is inspectable:
 
 ```sh
-sev kernel inspect source.sev --entry reductionSum --target gpu
+sev kernel inspect source.sev --entry reduction_sum --target cuda:sm_90
 ```
 
 Source may request a policy without importing a compiler package:
@@ -31,7 +31,7 @@ Source may request a policy without importing a compiler package:
 ```sev
 @compile(triton)
 def reduction_sum(value: Tensor[f32, dynamic]) -> Tensor[f32]:
-    return tensor.sumLastF32(value)
+    return tensor.sum_last_f_32(value)
 ```
 
 `@compile(auto)`, `@compile(xla)`, and `@compile(triton)` are built-in compiler
@@ -46,19 +46,27 @@ they do not change Severian language semantics.
 Kernel artifacts are emitted without a benchmark-specific ABI:
 
 ```sh
-sev kernel emit source.sev --entry reductionSum --backend triton \
-  --output reduction_sum.triton.py
+sev kernel emit source.sev --entry reduction_sum --backend triton \
+  --target cuda:sm_90 --output reduction_sum.ttir.mlir
 
-sev kernel emit source.sev --entry reductionSum --backend xla \
+sev kernel emit source.sev --entry reduction_sum --backend xla \
   --output reduction_sum.stablehlo.mlir
 ```
 
-The initial specialized operation is tensor reduction sum. The emitted Python
-module is a thin carrier for a generated Triton kernel and exports `launch`.
-The Triton frontend lowers that kernel to TritonIR for the installed GPU
-toolchain. Future lowering can replace this carrier with serialized TritonIR
-without changing kernel IR, selection, or benchmark adapters.
+The initial specialized operations are tensor reduction sum and elementwise
+ReLU. Severian emits Triton's MLIR dialect directly: `tt.func`, program IDs,
+masked pointer loads/stores, reductions, and atomics. The artifact carries
+launch metadata as MLIR module attributes. It contains no generated Python,
+Torch import, or Python-side Triton launcher.
 
-Popcorn integration lives under `benchmarks/popcorn`. It consumes emitted
-artifacts just like any other external harness and is intentionally absent from
-the compiler and language.
+Automatic selection is hardware-aware. Concrete targets such as `cuda:sm_90`
+and `rocm:gfx1100` enable the specialized route. Generic `gpu`, `nvidia`, and
+`amd` targets stay on StableHLO/XLA because they do not assert a compatible
+architecture. NVIDIA architectures below `sm_80` also stay on XLA. An explicit
+`@compile(triton)` may emit portable TTIR when the architecture is unspecified,
+but a known unsupported architecture is rejected instead of producing a
+misleading artifact.
+
+External harness integration remains outside the compiler and language. A
+harness must compile TTIR and bind the emitted pointer/count ABI; legacy Python
+submission adapters cannot consume these artifacts directly.

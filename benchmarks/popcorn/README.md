@@ -16,22 +16,15 @@ target/debug/sev kernel inspect \
 target/debug/sev kernel emit \
   benchmarks/popcorn/vectorsum_v2/kernel.sev \
   --entry reduction_sum --backend triton \
-  --output target/popcorn/reduction_sum.triton.py
-
-python3 benchmarks/popcorn/bundle.py \
-  target/popcorn/reduction_sum.triton.py \
-  benchmarks/popcorn/vectorsum_v2/adapter.py \
-  target/popcorn/submission.py \
-  --leaderboard vectorsum_v2 --gpu A100
-
-popcorn submit target/popcorn/submission.py \
-  --leaderboard vectorsum_v2 --gpu A100 --mode benchmark
+  --output target/popcorn/reduction_sum.ttir.mlir
 ```
 
-The generated Triton module contains `launch`, compiler metadata, and the
-device kernel. It contains no `custom_kernel`, task imports, leaderboard names,
-or Popcorn directives. `bundle.py` only satisfies the harness's current
-single-file submission rule.
+The generated artifact is native Triton MLIR. It contains the device kernel and
+launch metadata, with no Python or Torch dependency. The legacy `bundle.py`
+and `vectorsum_v2/adapter.py` files remain only as documentation of Popcorn's
+Python submission protocol; they cannot execute TTIR and are not part of the
+compiler path. A native Popcorn runner must compile the TTIR and bind its
+pointer/count ABI before submission.
 
 `sev kernel inspect` explains the selected backend and fallback. `sev kernel
 emit --backend xla` emits StableHLO for the same Severian entry, which makes it

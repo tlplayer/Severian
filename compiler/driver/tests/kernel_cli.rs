@@ -22,7 +22,14 @@ fn inspect_explains_automatic_backend_selection() {
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .args(["kernel", "inspect"])
         .arg(fixture())
-        .args(["--entry", "reduction_sum", "--target", "gpu"])
+        .args([
+            "--entry",
+            "reduction_sum",
+            "--backend",
+            "auto",
+            "--target",
+            "cuda:sm_90",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -32,7 +39,8 @@ fn inspect_explains_automatic_backend_selection() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("operation: reduction.sum"));
-    assert!(stdout.contains("requested backend: triton"));
+    assert!(stdout.contains("target: cuda:sm_90"));
+    assert!(stdout.contains("requested backend: auto"));
     assert!(stdout.contains("selected backend: triton"));
     assert!(stdout.contains("fallback: xla"));
     assert!(!stdout.contains("popcorn"));
@@ -40,7 +48,7 @@ fn inspect_explains_automatic_backend_selection() {
 
 #[test]
 fn emit_writes_a_standalone_triton_module() {
-    let artifact = temporary_file("reduction.triton.py");
+    let artifact = temporary_file("reduction.ttir.mlir");
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .args(["kernel", "emit"])
         .arg(fixture())
@@ -60,22 +68,14 @@ fn emit_writes_a_standalone_triton_module() {
         String::from_utf8_lossy(&output.stderr)
     );
     let source = std::fs::read_to_string(&artifact).unwrap();
-    assert!(source.contains("def launch("));
-    assert!(source.contains("SEVERIAN_KERNEL_OPERATION = \"reduction.sum\""));
-    assert!(source.contains("SEVERIAN_ELEMENT_TYPE = \"f32\""));
+    assert!(source.contains("tt.func public @reduction_sum"));
+    assert!(source.contains("severian_operation = \"reduction.sum\""));
+    assert!(source.contains("tensor<256xf32>"));
+    assert!(source.contains("tt.atomic_rmw fadd"));
+    assert!(!source.contains("import torch"));
+    assert!(!source.contains("import triton"));
     assert!(!source.contains("custom_kernel"));
     assert!(!source.contains("leaderboard"));
-
-    let syntax = Command::new("python3")
-        .args(["-m", "py_compile"])
-        .arg(&artifact)
-        .output()
-        .unwrap();
-    assert!(
-        syntax.status.success(),
-        "{}",
-        String::from_utf8_lossy(&syntax.stderr)
-    );
     let _ = std::fs::remove_file(artifact);
 }
 
@@ -106,7 +106,7 @@ fn direct_kernel_invocation_compiles_the_selected_artifact() {
     let target = fixture()
         .parent()
         .unwrap()
-        .join("target/debug/reduction_sum.triton.py");
+        .join("target/debug/reduction_sum.ttir.mlir");
     let _ = std::fs::remove_file(&target);
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg(fixture())
