@@ -55,6 +55,19 @@ def randn(shape: list[int]) -> Tensor[f64]:
             data.append(radius * math.sin(6.283185307179586 * u2))
     return tensor(data, shape)
 
+def randint(low: int, high: int, shape: list[int]) -> Tensor[f64]:
+    assert(high > low)
+    data := []
+    for _index in range(0, product(shape)):
+        data.append(float(random.randint(low, high)))
+    return tensor(data, shape)
+
+def seed(value: int):
+    random.seed(value)
+
+def floor(value: float) -> int:
+    return math.floor(value)
+
 def arange(start: float, stop: float = 0.0, step: float = 1.0) -> Tensor[f64]:
     actual_start := start
     actual_stop := stop
@@ -260,6 +273,27 @@ def std(input: Tensor[f64], correction: int = 1) -> float:
 def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_runtime.matmul(left, right)
 
+def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    return tensor_runtime.ranked_add(left, right)
+
+def subtract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    left_values = values(left)
+    right_values = values(right)
+    return tensor(indices(left_values).map(|index| left_values[index] - right_values[index % size(right_values)]), shape(left))
+
+def multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    left_values = values(left)
+    right_values = values(right)
+    return tensor(indices(left_values).map(|index| left_values[index] * right_values[index % size(right_values)]), shape(left))
+
+def divide(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+    left_values = values(left)
+    right_values = values(right)
+    return tensor(indices(left_values).map(|index| left_values[index] / right_values[index % size(right_values)]), shape(left))
+
+def scale(input: Tensor[f64], factor: float) -> Tensor[f64]:
+    return tensor_runtime.ranked_scale(input, factor)
+
 def dot(left: Tensor[f64], right: Tensor[f64]) -> float:
     left_values = values(left)
     right_values = values(right)
@@ -339,6 +373,12 @@ def log(input: Tensor[f64]) -> Tensor[f64]:
 
 def sqrt(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.sqrt(value))
+
+def sin(input: Tensor[f64]) -> Tensor[f64]:
+    return map_values(input, |value| math.sin(value))
+
+def cos(input: Tensor[f64]) -> Tensor[f64]:
+    return map_values(input, |value| math.cos(value))
 
 def abs(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| value if value >= 0.0 else -value)

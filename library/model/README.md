@@ -47,3 +47,11 @@ that later lowering does not change the public API or add framework runtimes.
 
 The lower-level `tensor` and `models` packages remain available for compiler
 fixtures, graph construction, autodiff experiments, and backend work.
+
+## Examples
+
+- `examples/transformer_classifier.sev` is a native translation of a PyTorch
+  transformer sequence-classification workload. It imports only `model` and
+  includes synthetic data generation, sinusoidal positions, transformer
+  blocks, clipped classifier-head training, warmup/cosine scheduling,
+  validation, checkpoint restore, attention inspection, and inference.
