@@ -1,0 +1,19 @@
+[package]
+name = "plot"
+version = "0.1.0"
+edition = "2026"
+description = "Composable statistical charts for lists, data tables, and tensors"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+data = { path = "../data", version = "0.1.0" }
+graphics = { path = "../graphics", version = "0.1.0" }
+math = { path = "../math", version = "0.1.0" }
+tensor = { path = "../tensor", version = "0.1.0" }
+
+[package.metadata.library]
+category = "visualization"
+implementation = "source"
+status = "experimental"

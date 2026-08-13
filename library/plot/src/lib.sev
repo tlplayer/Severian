@@ -1,0 +1,279 @@
+import data
+import graphics
+import math
+import tensor
+
+class PlotError:
+    detail: string
+
+    def message() -> string:
+        return detail
+
+class Series:
+    kind: string
+    x_values: list[float]
+    y_values: list[float]
+    label: string
+    color: graphics.Color
+
+def palette(index: int) -> graphics.Color:
+    choice = index % 6
+    if choice == 0:
+        return graphics.blue()
+    if choice == 1:
+        return graphics.red()
+    if choice == 2:
+        return graphics.green()
+    if choice == 3:
+        return graphics.rgb(147, 51, 234)
+    if choice == 4:
+        return graphics.rgb(234, 88, 12)
+    return graphics.rgb(8, 145, 178)
+
+def minimum(values: list[float]) -> float:
+    result := values[0]
+    for value in values:
+        if value < result:
+            result = value
+    return result
+
+def maximum(values: list[float]) -> float:
+    result := values[0]
+    for value in values:
+        if value > result:
+            result = value
+    return result
+
+def numeric_column(table: data.Data, name: string) -> Result[list[float], PlotError]:
+    if not table.has_column(name):
+        return failure(PlotError("missing data column: " + name))
+    result: list[float] = []
+    for value in table.column(name):
+        result.append(float(value))
+    return result
+
+def add_series(series: list[Series], kind: string, x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+    if size(x) == 0:
+        return failure(PlotError("plot series cannot be empty"))
+    if size(x) != size(y):
+        return failure(PlotError("plot x and y series must have equal length"))
+    series.append(Series(kind, x, y, label, palette(size(series))))
+    return size(series)
+
+def histogram_series(series: list[Series], values: list[float], bins: int, label: string) -> Result[int, PlotError]:
+    if size(values) == 0:
+        return failure(PlotError("histogram values cannot be empty"))
+    if bins <= 0:
+        return failure(PlotError("histogram bins must be positive"))
+    low = minimum(values)
+    high = maximum(values)
+    span := high - low
+    if span == 0.0:
+        span = 1.0
+    counts: list[float] = []
+    centers: list[float] = []
+    for bin in range(bins):
+        counts.append(0.0)
+        centers.append(low + (float(bin) + 0.5) * span / float(bins))
+    for value in values:
+        position := math.floor((value - low) * float(bins) / span)
+        if position >= bins:
+            position = bins - 1
+        if position < 0:
+            position = 0
+        counts[position] += 1.0
+    return add_series(series, "bar", centers, counts, label)
+
+class Chart:
+    width_data: int
+    height_data: int
+    title_text: string
+    x_label_text: string
+    y_label_text: string
+    series_data: list[Series]
+
+    def Chart():
+        width_data = 800
+        height_data = 500
+        title_text = ""
+        x_label_text = ""
+        y_label_text = ""
+        series_data = []
+
+    def Chart(width: int, height: int):
+        assert(width >= 200, "chart width must be at least 200")
+        assert(height >= 160, "chart height must be at least 160")
+        width_data = width
+        height_data = height
+        title_text = ""
+        x_label_text = ""
+        y_label_text = ""
+        series_data = []
+
+    def title(value: string):
+        title_text = value
+
+    def x_label(value: string):
+        x_label_text = value
+
+    def y_label(value: string):
+        y_label_text = value
+
+    def add(kind: string, x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+        return add_series(series_data, kind, x, y, label)
+
+    def line(x: list[float], y: list[float]) -> Result[int, PlotError]:
+        return add_series(series_data, "line", x, y, "")
+
+    def line_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+        return add_series(series_data, "line", x, y, label)
+
+    def scatter(x: list[float], y: list[float]) -> Result[int, PlotError]:
+        return add_series(series_data, "scatter", x, y, "")
+
+    def scatter_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+        return add_series(series_data, "scatter", x, y, label)
+
+    def bar(x: list[float], y: list[float]) -> Result[int, PlotError]:
+        return add_series(series_data, "bar", x, y, "")
+
+    def bar_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+        return add_series(series_data, "bar", x, y, label)
+
+    def histogram(values: list[float], bins: int) -> Result[int, PlotError]:
+        return histogram_series(series_data, values, bins, "")
+
+    def histogram_labeled(values: list[float], bins: int, label: string) -> Result[int, PlotError]:
+        return histogram_series(series_data, values, bins, label)
+
+    def line_data(table: data.Data, x: string, y: string) -> Result[int, PlotError]:
+        x_values ?= numeric_column(table, x)
+        y_values ?= numeric_column(table, y)
+        return add_series(series_data, "line", x_values, y_values, "")
+
+    def line_data_labeled(table: data.Data, x: string, y: string, label: string) -> Result[int, PlotError]:
+        x_values ?= numeric_column(table, x)
+        y_values ?= numeric_column(table, y)
+        return add_series(series_data, "line", x_values, y_values, label)
+
+    def line_tensor(x: Tensor[f64], y: Tensor[f64]) -> Result[int, PlotError]:
+        return add_series(series_data, "line", tensor.values(x), tensor.values(y), "")
+
+    def line_tensor_labeled(x: Tensor[f64], y: Tensor[f64], label: string) -> Result[int, PlotError]:
+        return add_series(series_data, "line", tensor.values(x), tensor.values(y), label)
+
+    def render() -> graphics.Canvas:
+        return render_chart(width_data, height_data, title_text, x_label_text, y_label_text, series_data)
+
+    def save(path: string) -> Result[unit, IOError]:
+        return render_chart(width_data, height_data, title_text, x_label_text, y_label_text, series_data).save(path)
+
+def render_chart(
+    width_data: int,
+    height_data: int,
+    title_text: string,
+    x_label_text: string,
+    y_label_text: string,
+    series_data: list[Series],
+) -> graphics.Canvas:
+    target = graphics.Canvas(width_data, height_data, graphics.white())
+    left := 70
+    top := 50
+    right = width_data - 30
+    bottom = height_data - 70
+    plot_width = right - left
+    plot_height = bottom - top
+
+    all_x: list[float] = []
+    all_y: list[float] = []
+    for series in series_data:
+        for value in series.x_values:
+            all_x.append(value)
+        for value in series.y_values:
+            all_y.append(value)
+
+    x_low := 0.0
+    x_high := 1.0
+    y_low := 0.0
+    y_high := 1.0
+    if size(all_x) > 0:
+        x_low = minimum(all_x)
+        x_high = maximum(all_x)
+        y_low = minimum(all_y)
+        y_high = maximum(all_y)
+    if x_low == x_high:
+        x_high = x_low + 1.0
+    if y_low == y_high:
+        y_high = y_low + 1.0
+
+    target.line(left, bottom, right, bottom, graphics.black())
+    target.line(left, top, left, bottom, graphics.black())
+    target.text_styled(left, bottom + 22, string(x_low), graphics.gray(), 11, "start")
+    target.text_styled(right, bottom + 22, string(x_high), graphics.gray(), 11, "end")
+    target.text_styled(left - 8, bottom, string(y_low), graphics.gray(), 11, "end")
+    target.text_styled(left - 8, top + 4, string(y_high), graphics.gray(), 11, "end")
+
+    for series in series_data:
+        previous_x := 0
+        previous_y := 0
+        for index in indices(series.x_values):
+            x = left + math.floor((series.x_values[index] - x_low) * float(plot_width) / (x_high - x_low))
+            y = bottom - math.floor((series.y_values[index] - y_low) * float(plot_height) / (y_high - y_low))
+            if series.kind == "line" and index > 0:
+                target.line_width(previous_x, previous_y, x, y, series.color, 2)
+            if series.kind == "scatter":
+                target.circle(x, y, 4, series.color)
+            if series.kind == "bar":
+                bar_width = plot_width / size(series.x_values)
+                bar_height = bottom - y
+                target.rectangle(x - bar_width / 3, y, max(1, bar_width * 2 / 3), bar_height, series.color)
+            previous_x = x
+            previous_y = y
+
+    if size(title_text) > 0:
+        target.text_styled(width_data / 2, 28, title_text, graphics.black(), 18, "middle")
+    if size(x_label_text) > 0:
+        target.text_styled((left + right) / 2, height_data - 20, x_label_text, graphics.black(), 13, "middle")
+    if size(y_label_text) > 0:
+        target.text_styled(8, top - 12, y_label_text, graphics.black(), 13, "start")
+
+    legend_y := top + 8
+    for series in series_data:
+        if size(series.label) > 0:
+            target.rectangle(right - 130, legend_y - 9, 12, 12, series.color)
+            target.text_styled(right - 112, legend_y + 1, series.label, graphics.black(), 12, "start")
+            legend_y += 18
+    return target
+
+test "line charts render axes labels series and legend":
+    chart := Chart(640, 400)
+    _series ?= chart.line_labeled([0.0, 1.0, 2.0], [0.0, 1.0, 4.0], "square")
+    chart.title("x squared")
+    chart.x_label("x")
+    chart.y_label("y")
+    document = chart.render().svg()
+    assert(document.contains("x squared"))
+    assert(document.contains("square"))
+    assert(document.contains("<line"))
+
+test "scatter bar and histogram share one explicit chart":
+    chart := Chart()
+    _scatter ?= chart.scatter([1.0, 2.0], [2.0, 3.0])
+    _bar ?= chart.bar([1.0, 2.0], [4.0, 1.0])
+    _histogram ?= chart.histogram([0.0, 0.2, 0.8, 1.0], 2)
+    document = chart.render().svg()
+    assert(document.contains("<circle"))
+    assert(document.contains("<rect"))
+
+test "tensor values are accepted without caller conversion":
+    chart := Chart()
+    x = tensor.ranked([0.0, 1.0, 2.0], [3])
+    y = tensor.ranked([0.0, 1.0, 4.0], [3])
+    count ?= chart.line_tensor(x, y)
+    assert(count == 1)
+
+test "data columns are accepted by name without caller conversion":
+    table = data.Data(["step", "loss"], [[0.0, 4.0], [1.0, 2.0], [2.0, 1.0]])
+    chart := Chart()
+    count ?= chart.line_data(table, "step", "loss")
+    assert(count == 1)

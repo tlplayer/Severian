@@ -12,6 +12,7 @@ __pycache__/
 *.mlir
 *.stderr
 *.stdout
+*.lock
 tmp/*
 ./tmp
 !library/*/src/lib.stderr

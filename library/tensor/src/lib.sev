@@ -102,6 +102,8 @@ unsafe:
 
     native("__sev_tensor_to_list") def rankedValues(value: Tensor[f64]) -> list[float]
 
+    native("__sev_tensor_to_list") def values(value: Tensor[f64]) -> list[float]
+
     native("__sev_tensor_shape") def rankedShape(value: Tensor[f64]) -> list[int]
 
     native("__sev_tensor_strides") def rankedStrides(value: Tensor[f64]) -> list[int]

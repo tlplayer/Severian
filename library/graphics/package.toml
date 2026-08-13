@@ -1,0 +1,16 @@
+[package]
+name = "graphics"
+version = "0.1.0"
+edition = "2026"
+description = "Backend-neutral drawing surfaces and deterministic headless rendering"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }
+
+[package.metadata.library]
+category = "visualization"
+implementation = "source"
+status = "experimental"

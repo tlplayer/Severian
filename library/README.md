@@ -21,6 +21,12 @@ The initial general-purpose surface is available through flat imports such as
 on the supplied collection; OS-backed behavior is implemented behind the
 trusted `platform` boundary.
 
+Visualization is split into two layers: `graphics` owns explicit rendering
+targets and drawing primitives, while `plot` builds charts from lists, `Data`,
+and tensors without global figure state. The portable reference backend is
+headless SVG; window, event, and GPU backends remain behind the same public
+render-target model.
+
 Length and storage use distinct compiler-level vocabulary: `len(value)` and
 `size(value)` are exact aliases for the number of elements, while
 `bytes(value)` and `bits(value)` report storage size. `capacity(value)` reports
