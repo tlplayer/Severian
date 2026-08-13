@@ -1504,6 +1504,17 @@ fn file_read_result_class(expression: &Expr, aliases: &HashMap<String, String>) 
         return None;
     };
     let called = called_function_name(call.callee.as_ref(), aliases);
+    let package_file_read = matches!(
+        call.callee.as_ref(),
+        Expr::Member(member)
+            if member.member.name == "read"
+                && matches!(
+                    member.object.as_ref(),
+                    Expr::Identifier(module)
+                        if module.name == "file"
+                            || aliases.get(&module.name).is_some_and(|name| name == "file")
+                )
+    );
     let literal_class = call.args.first().and_then(|argument| {
         let Expr::Literal(Literal::String { value, .. }) = &argument.value else {
             return None;
@@ -1512,7 +1523,7 @@ fn file_read_result_class(expression: &Expr, aliases: &HashMap<String, String>) 
     });
     let local_file_read = called.as_deref() == Some("read")
         && (literal_class.is_some() || aliases.contains_key("__trait.File"));
-    if called.as_deref() != Some("file.read") && !local_file_read {
+    if called.as_deref() != Some("file.read") && !package_file_read && !local_file_read {
         return None;
     }
     Some(literal_class.unwrap_or("File").to_owned())
@@ -2016,27 +2027,52 @@ fn lower_block(
                     ));
                 }
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
+                let propagates = inferred == ValueType::Result;
                 let declared = binding.ty.as_ref().map(lower_type).transpose()?;
-                if let Some(declared) = declared {
+                if let Some(declared) = declared.filter(|_| !propagates) {
                     compatible(binding.span, inferred, declared)?;
                 }
-                let ty = declared.unwrap_or(inferred);
+                // `=` and `:=` are the propagation boundary for a Result. The
+                // binding receives the success payload; an explicit annotation
+                // therefore describes that payload rather than the Result
+                // carrier itself.
+                let ty = if propagates {
+                    declared.unwrap_or(ValueType::Any)
+                } else {
+                    declared.unwrap_or(inferred)
+                };
                 let integer_max = binding
                     .ty
                     .as_ref()
                     .filter(|ty| named_type_is(ty, "u8"))
                     .map(|_| u8::MAX as i64);
                 let known_integer = constant_integer(source);
-                let class = expression_class(source, scope, aliases);
+                let receiver = propagates
+                    .then(|| file_read_receiver_type(source, aliases))
+                    .flatten();
+                let class = binding
+                    .ty
+                    .as_ref()
+                    .and_then(class_type_name)
+                    .or_else(|| receiver.as_ref().map(|receiver| receiver.name.clone()))
+                    .or_else(|| expression_class(source, scope, aliases));
                 if scope
                     .get(&binding.name.name)
                     .is_some_and(|existing| existing.field || existing.mutable)
                 {
-                    instructions.push(Instruction::Assign {
-                        target: Expression::Variable(binding.name.name.clone()),
-                        op: AssignmentOp::Assign,
-                        value,
-                    });
+                    if propagates {
+                        instructions.push(Instruction::TryLet {
+                            name: binding.name.name.clone(),
+                            value,
+                            receiver,
+                        });
+                    } else {
+                        instructions.push(Instruction::Assign {
+                            target: Expression::Variable(binding.name.name.clone()),
+                            op: AssignmentOp::Assign,
+                            value,
+                        });
+                    }
                     continue;
                 }
                 if scope
@@ -2060,18 +2096,35 @@ fn lower_block(
                         format!("duplicate binding `{}`", binding.name.name),
                     ));
                 }
-                instructions.push(Instruction::Let {
-                    name: binding.name.name.clone(),
-                    value,
-                });
+                if propagates {
+                    instructions.push(Instruction::TryLet {
+                        name: binding.name.name.clone(),
+                        value,
+                        receiver,
+                    });
+                } else {
+                    instructions.push(Instruction::Let {
+                        name: binding.name.name.clone(),
+                        value,
+                    });
+                }
             }
             Stmt::DestructureLet(binding) => {
-                let (value, _) = lower_expression(&binding.value, scope, signatures, aliases)?;
+                let (value, value_type) =
+                    lower_expression(&binding.value, scope, signatures, aliases)?;
                 let temporary = format!("__destructure_{}", binding.span.start);
-                instructions.push(Instruction::Let {
-                    name: temporary.clone(),
-                    value,
-                });
+                if value_type == ValueType::Result {
+                    instructions.push(Instruction::TryLet {
+                        name: temporary.clone(),
+                        value,
+                        receiver: None,
+                    });
+                } else {
+                    instructions.push(Instruction::Let {
+                        name: temporary.clone(),
+                        value,
+                    });
+                }
                 for (index, name) in binding.names.iter().enumerate() {
                     scope.insert(
                         name.name.clone(),
@@ -2126,8 +2179,18 @@ fn lower_block(
                         "assignment target is not mutable",
                     ));
                 }
-                let (value, value_type) =
+                let (mut value, mut value_type) =
                     lower_expression(&assignment.value, scope, signatures, aliases)?;
+                if value_type == ValueType::Result {
+                    let temporary = format!("__assignment_{}", assignment.span.start);
+                    instructions.push(Instruction::TryLet {
+                        name: temporary.clone(),
+                        value,
+                        receiver: None,
+                    });
+                    value = Expression::Variable(temporary);
+                    value_type = ValueType::Any;
+                }
                 if target_type != ValueType::Any && value_type != ValueType::Any {
                     compatible(assignment.span, value_type, target_type)?;
                 }
@@ -2145,26 +2208,38 @@ fn lower_block(
                 });
             }
             Stmt::TryBind(binding) => {
-                let (value, _) = lower_expression(&binding.value, scope, signatures, aliases)?;
-                let receiver = file_read_receiver_type(&binding.value, aliases);
-                let class = receiver.as_ref().map(|receiver| receiver.name.clone());
-                scope.insert(
-                    binding.name.name.clone(),
-                    Binding {
-                        ty: ValueType::Any,
-                        class,
-                        function_return: None,
-                        collection_len: None,
-                        mutable: false,
-                        field: false,
-                        integer_max: None,
-                        known_integer: None,
-                    },
-                );
-                instructions.push(Instruction::TryLet {
+                let (value, inferred) =
+                    lower_expression(&binding.value, scope, signatures, aliases)?;
+                if !matches!(inferred, ValueType::Result | ValueType::Any) {
+                    return Err(error(
+                        binding.value.span(),
+                        "`?=` safely captures a Result and requires a fallible expression",
+                    ));
+                }
+                if scope
+                    .insert(
+                        binding.name.name.clone(),
+                        Binding {
+                            ty: ValueType::Result,
+                            class: None,
+                            function_return: None,
+                            collection_len: None,
+                            mutable: false,
+                            field: false,
+                            integer_max: None,
+                            known_integer: None,
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(error(
+                        binding.name.span,
+                        format!("duplicate binding `{}`", binding.name.name),
+                    ));
+                }
+                instructions.push(Instruction::Let {
                     name: binding.name.name.clone(),
                     value,
-                    receiver,
                 });
             }
             Stmt::Expr(expression) => {
@@ -2981,8 +3056,13 @@ fn lower_expression_kind(
             ))
         }
         Expr::Await(task) => {
-            let (value, _) = lower_expression(&task.value, scope, signatures, aliases)?;
-            Ok((Expression::Await(Box::new(value)), ValueType::Any))
+            let (value, task_type) = lower_expression(&task.value, scope, signatures, aliases)?;
+            let awaited_type = match value.kind() {
+                Expression::Task { value, .. } => value.ty().unwrap_or(ValueType::Any),
+                _ if task_type == ValueType::Channel => ValueType::Any,
+                _ => task_type,
+            };
+            Ok((Expression::Await(Box::new(value)), awaited_type))
         }
         Expr::Channel(channel) => {
             let capacity = lower_expression(&channel.capacity, scope, signatures, aliases)?.0;

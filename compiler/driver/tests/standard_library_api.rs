@@ -66,8 +66,8 @@ def main():
     assert(environment.get("SEVERIAN_LIBRARY_TEST") == "ready")
     assert(environment.remove("SEVERIAN_LIBRARY_TEST"))
     json_path = "/tmp/severian-standard-library-api.json"
-    _written ?= file.write(json_path, "{\"answer\":42}")
-    loaded_json ?= file.read("/tmp/severian-standard-library-api.json")
+    _written = file.write(json_path, "{\"answer\":42}")
+    loaded_json = file.read("/tmp/severian-standard-library-api.json")
     assert(loaded_json.kind() == "json")
     assert(loaded_json.get("answer") == 42)
     assert(json.dumps([1, 2, 3]) == "[1,2,3]")
@@ -177,7 +177,7 @@ class PlaylistReader: file.Reader
         return [".m3u"]
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
-        content ?= platform.file_read(path)
+        content = platform.file_read(path)
         return Playlist(path, content.split("\n"))
 
 def main():

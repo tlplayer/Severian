@@ -43,9 +43,9 @@ class BinaryReader: file_interface.Reader
         return []
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        handle ?= platform.file_open_binary(path)
-        length ?= platform.file_size(handle)
-        loaded ?= platform.file_read_exact(handle, length)
+        handle = platform.file_open_binary(path)
+        length = platform.file_size(handle)
+        loaded = platform.file_read_exact(handle, length)
         data: list[int] = loaded
-        _closed ?= platform.file_close(handle)
+        _closed = platform.file_close(handle)
         return Binary(path, data)

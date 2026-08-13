@@ -7,11 +7,11 @@ format package:
 ```sev
 import file
 
-people ?= file.read("people.csv")
+people = file.read("people.csv")
 print(people.headers())
 print(people.rows()[0].get("name"))
 
-settings ?= file.read("settings.json")
+settings = file.read("settings.json")
 print(settings.get("voice"))
 ```
 
@@ -39,7 +39,7 @@ import csv
 import file
 
 memory = csv.document("name,note\nAda,compiler\n")
-disk ?= file.read("people.csv")
+disk = file.read("people.csv")
 
 assert(memory.kind() == disk.kind())
 ```
@@ -47,10 +47,10 @@ assert(memory.kind() == disk.kind())
 Every path-backed object remembers its source path, so writes are symmetric:
 
 ```sev
-config ?= file.read("settings.json")
+config = file.read("settings.json")
 config := config
 config.set("voice", "belinda")
-_saved ?= config.write()
+_saved = config.write()
 ```
 
 ## Extension readers
@@ -67,7 +67,7 @@ class PlaylistReader: file.Reader
         return [".m3u", ".m3u8"]
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
-        content ?= platform.file_read(path)
+        content = platform.file_read(path)
         return Playlist(path, content.split("\n"))
 
 def install():

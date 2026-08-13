@@ -52,6 +52,53 @@ fn bare_return_from_unit_result_produces_ok_variant() {
 }
 
 #[test]
+fn assignment_propagates_results_while_try_equal_captures_them() {
+    let source = concat!(
+        "def read() -> Result[int, string]:\n",
+        "    return 42\n",
+        "\n",
+        "def stable() -> Result[int, string]:\n",
+        "    value = read()\n",
+        "    return value\n",
+        "\n",
+        "def changeable() -> Result[int, string]:\n",
+        "    value := read()\n",
+        "    value += 1\n",
+        "    return value\n",
+        "\n",
+        "def handled() -> int:\n",
+        "    outcome ?= read()\n",
+        "    switch outcome:\n",
+        "        ok value:\n",
+        "            return value\n",
+        "        failure _:\n",
+        "            return 0\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+
+    assert!(matches!(
+        hir.functions[1].instructions[0],
+        Instruction::TryLet { .. }
+    ));
+    assert!(matches!(
+        hir.functions[2].instructions[0],
+        Instruction::TryLet { .. }
+    ));
+    let Instruction::Let { value, .. } = &hir.functions[3].instructions[0] else {
+        panic!("expected `?=` to retain the complete Result");
+    };
+    assert_eq!(value.ty(), Some(ValueType::Result));
+}
+
+#[test]
+fn try_equal_rejects_non_result_expressions() {
+    let ast = parse(&lex("def main():\n    value ?= 42\n").unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("requires a fallible expression"));
+}
+
+#[test]
 fn intrinsic_size_is_not_shadowed_by_a_linked_package_function() {
     let source = "def count(values: list[int]) -> int:\n    return size(values)\n";
     let interface = "def size(path: string) -> Result[int, IOError]:\n    return failure(IOError(\"unused\"))\n";
@@ -461,7 +508,7 @@ fn refines_literal_file_reads_to_the_extension_class() {
         "import file\n",
         "\n",
         "def sample_rate() -> int:\n",
-        "    audio ?= file.read(\"sound.WAV\")\n",
+        "    audio = file.read(\"sound.WAV\")\n",
         "    return audio.sample_rate\n",
         "\n",
         "def switched_sample_rate() -> int:\n",
@@ -472,13 +519,22 @@ fn refines_literal_file_reads_to_the_extension_class() {
         "            return 0\n",
     );
     let literal = parse(&lex(literal_source).unwrap()).unwrap();
-    analyze_with_interfaces(&literal, &[("file".into(), interface.clone())]).unwrap();
+    let literal_hir =
+        analyze_with_interfaces(&literal, &[("file".into(), interface.clone())]).unwrap();
+    let Instruction::TryLet {
+        receiver: Some(receiver),
+        ..
+    } = &literal_hir.functions[0].instructions[0]
+    else {
+        panic!("expected fallible assignment to preserve its success receiver");
+    };
+    assert_eq!(receiver.name, "WAV");
 
     let dynamic_source = concat!(
         "import file\n",
         "\n",
         "def sample_rate(path: string) -> int:\n",
-        "    audio ?= file.read(path)\n",
+        "    audio = file.read(path)\n",
         "    return audio.sample_rate\n",
     );
     let dynamic = parse(&lex(dynamic_source).unwrap()).unwrap();

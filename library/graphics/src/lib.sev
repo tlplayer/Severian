@@ -158,7 +158,7 @@ def canvas(width: int, height: int, background: Color) -> Result[Canvas, Graphic
     return Canvas(width, height, background)
 
 test "headless canvas records explicit drawing commands":
-    target ?= canvas(320, 200, white())
+    target = canvas(320, 200, white())
     target.line_width(1, 2, 30, 40, black(), 2)
     target.rectangle(10, 20, 50, 25, blue())
     target.circle_outline(100, 80, 12, red(), 3)
@@ -170,7 +170,7 @@ test "headless canvas records explicit drawing commands":
     assert(document.contains("Severian &amp; SVG"))
 
 test "clear replaces the background and prior frame commands":
-    target ?= canvas(20, 20, black())
+    target = canvas(20, 20, black())
     target.circle(10, 10, 4, white())
     target.clear(blue())
     document = target.svg()

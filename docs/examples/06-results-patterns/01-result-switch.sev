@@ -1,9 +1,9 @@
 def load(path: Path) -> Result[string, IOError]:
-    data ?= read(path)
+    data = read(path)
     return data
 
 test "propagates loaded data":
-    result = load("settings.toml")
+    result ?= load("settings.toml")
 
     switch result:
         ok data:
@@ -13,7 +13,7 @@ test "propagates loaded data":
             assert(false, error)
 
 def main():
-    result = load("settings.toml")
+    result ?= load("settings.toml")
 
     switch result:
         ok data:

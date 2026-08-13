@@ -971,13 +971,13 @@ body = <span class="special">await</span> worker
 
                     <p>
                         Results are visible in the type system. The
-                        <code>?=</code> operator binds success and propagates
-                        failure.
+                        <code>=</code> takes success and propagates failure;
+                        <code>?=</code> keeps the result for safe handling.
                     </p>
 
                     <div class="mini-code">
 def load(path: Path) -> Result[string, IOError]:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;data <span class="special">?=</span> read(path)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data <span class="special">=</span> read(path)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;return data
                     </div>
                 </article>

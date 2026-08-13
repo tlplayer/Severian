@@ -7,10 +7,10 @@ contents, typed documents, streams, mappings, and locks.
 import os
 
 if os.exists(path):
-    information ?= os.stat(path)
+    information = os.stat(path)
     print(information.size, information.modified_seconds)
 
-entries ?= os.ls(directory)
+entries = os.ls(directory)
 ```
 
 `stat()` is the metadata boundary. Callers should not assemble metadata from

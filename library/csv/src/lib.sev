@@ -158,7 +158,7 @@ test "CSV documents support rows, quoting, and mutation":
     value := document("name,note\nAda,\"compiler, author\"\n")
     assert(value.rows()[0].get("name") == "Ada")
     assert(value.get(0, "note") == "compiler, author")
-    _changed ?= value.set(0, "note", "language designer")
+    _changed = value.set(0, "note", "language designer")
     assert(value.encode() == "name,note\nAda,language designer\n")
     table = value.data().require_columns(["id", "name"])
     assert(table.columns() == ["id", "name", "note"])

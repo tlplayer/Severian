@@ -9,7 +9,7 @@ class JsonReader: file_interface.Reader
         return [".json"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        content ?= platform.file_read(path)
+        content = platform.file_read(path)
         switch json.file_document(path, content):
             ok document:
                 return document

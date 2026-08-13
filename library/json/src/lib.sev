@@ -66,11 +66,11 @@ class JSON: Document
         return encode(document)
 
 def document(text: string) -> Result[JSON, JsonError]:
-    value ?= decode[Any](text)
+    value = decode[Any](text)
     return JSON("", value)
 
 def file_document(path: string, text: string) -> Result[JSON, JsonError]:
-    value ?= decode[Any](text)
+    value = decode[Any](text)
     return JSON(path, value)
 
 def loads[type](text: string) -> Result[type, JsonError]:
@@ -147,7 +147,7 @@ def asStringList(value: Any) -> list[string]:
     return as_string_list(value)
 
 test "JSON document supports memory and mutation":
-    decoded ?= decode[Any]("{\"name\":\"Ada\",\"languages\":2}")
+    decoded = decode[Any]("{\"name\":\"Ada\",\"languages\":2}")
     value := JSON("", decoded)
     assert(value.keys() == ["name", "languages"])
     assert(as_string(value.get("name")) == "Ada")

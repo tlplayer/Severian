@@ -76,7 +76,7 @@ class Application:
         assert(max_tokens > 0)
         assert(max_tokens <= max_max_tokens)
 
-        input_ids ?= tokenizer.encodeChat([
+        input_ids = tokenizer.encodeChat([
             {"role": "user", "content": prompt},
         ])
 
@@ -85,7 +85,7 @@ class Application:
 
         # This must execute the compiled XLA/PJRT program. It must not call
         # Python, Transformers, llama.cpp, vLLM, ONNX Runtime, or a remote API.
-        state ?= executable.prefill(input_ids)
+        state = executable.prefill(input_ids)
 
         generated := []
         next_token := model.argmax(state.logits)
@@ -95,7 +95,7 @@ class Application:
 
             # Decode one token with the KV cache returned by the previous
             # compiled execution. The cache is moved, not copied.
-            state ?= executable.decode(next_token, move state.cache)
+            state = executable.decode(next_token, move state.cache)
             next_token = model.argmax(state.logits)
 
         return tokenizer.decode(generated)
@@ -103,28 +103,28 @@ class Application:
 
 def downloadIfMissing(url: string, destination: string) -> Result[unit, exception]:
     if os.exists(destination):
-        information ?= os.stat(destination)
+        information = os.stat(destination)
         assert(information.size > 0)
         return
 
     print("downloading", url)
 
     # Must support HTTPS, redirects, streaming writes, and files around 1 GB.
-    response ?= http.download(url, destination)
+    response = http.download(url, destination)
 
     assert(response.status == 200)
     assert(os.exists(destination))
-    information ?= os.stat(destination)
+    information = os.stat(destination)
     assert(information.size > 0)
 
 
 def prepareModelFiles() -> Result[ModelFiles, exception]:
-    created ?= os.mkdir(model_root)
+    created = os.mkdir(model_root)
 
-    config_download ?= downloadIfMissing(config_url, config_path)
-    weights_download ?= downloadIfMissing(weights_url, weights_path)
-    tokenizer_download ?= downloadIfMissing(tokenizer_url, tokenizer_path)
-    tokenizer_config_download ?= downloadIfMissing(
+    config_download = downloadIfMissing(config_url, config_path)
+    weights_download = downloadIfMissing(weights_url, weights_path)
+    tokenizer_download = downloadIfMissing(tokenizer_url, tokenizer_path)
+    tokenizer_config_download = downloadIfMissing(
         TOKENIZER_config_url,
         TOKENIZER_config_path,
     )
@@ -138,11 +138,11 @@ def prepareModelFiles() -> Result[ModelFiles, exception]:
 
 
 def loadApplication() -> Result[Application, exception]:
-    files ?= prepareModelFiles()
+    files = prepareModelFiles()
 
-    config_file ?= file.read(files.config)
-    config_text ?= config_file.text()
-    config ?= json.decode[QwenConfig](config_text)
+    config_file = file.read(files.config)
+    config_text = config_file.text()
+    config = json.decode[QwenConfig](config_text)
 
     # Fail early if a wrong model was downloaded or config decoding is broken.
     assert(config.hidden_size == 896)
@@ -155,22 +155,22 @@ def loadApplication() -> Result[Application, exception]:
     assert(config.torch_dtype == "bfloat16")
 
     print("loading safetensors")
-    weights ?= model.loadSafetensors(files.weights)
+    weights = model.loadSafetensors(files.weights)
 
     print("loading tokenizer")
-    tokenizer ?= model.loadTokenizer(
+    tokenizer = model.loadTokenizer(
         files.tokenizer,
         files.tokenizer_config,
     )
 
     print("building qwen2 graph")
-    graph ?= models.qwen2ForCausalLM(config, move weights)
+    graph = models.qwen2ForCausalLM(config, move weights)
 
     # This is the point of the torture test:
     # Severian must lower the graph to StableHLO, compile it through XLA,
     # create/load a PJRT executable, and retain it for repeated requests.
     print("compiling with xla")
-    executable ?= model.compileCausalLM(
+    executable = model.compileCausalLM(
         move graph,
         "xla",
         max_sequence_length,
@@ -181,7 +181,7 @@ def loadApplication() -> Result[Application, exception]:
     app = Application(move tokenizer, move executable)
 
     # Force actual compilation/execution before the server reports ready.
-    warmup ?= app.complete("Reply with one word: ready", 4)
+    warmup = app.complete("Reply with one word: ready", 4)
     assert(size(warmup) > 0)
 
     return app
@@ -203,7 +203,7 @@ def handleRequest(
         )
 
     if request.method == "POST" and request.path == "/v1/completions":
-        payload ?= json.decode[CompletionRequest](request.body)
+        payload = json.decode[CompletionRequest](request.body)
 
         max_tokens := payload.max_tokens
         if max_tokens <= 0:
@@ -211,7 +211,7 @@ def handleRequest(
         if max_tokens > max_max_tokens:
             max_tokens = max_max_tokens
 
-        text ?= app.complete(payload.prompt, max_tokens)
+        text = app.complete(payload.prompt, max_tokens)
 
         return http.Response.json(
             200,
@@ -229,7 +229,7 @@ def handleRequest(
 
 
 def main() -> Result[unit, exception]:
-    app ?= loadApplication()
+    app = loadApplication()
 
     print("model", model_id)
     print("backend", app.executable.backend())
@@ -239,7 +239,7 @@ def main() -> Result[unit, exception]:
     # The HTTP server must keep `app` alive, use the Severian runtime for
     # concurrent connections, and apply backpressure rather than spawning
     # unbounded native threads.
-    served ?= http.serve(
+    served = http.serve(
         "127.0.0.1:8080",
         handleRequest,
         move app,
@@ -248,29 +248,29 @@ def main() -> Result[unit, exception]:
     return
 
 test with integ "end to end test, download model and run 4 inferences with expected outputs":
-    app ?= llm_server_torture.loadApplication()
+    app = llm_server_torture.loadApplication()
 
     assert(app.executable.backend() == "xla")
 
-    arithmetic ?= app.complete(
+    arithmetic = app.complete(
         "Answer with exactly one character and nothing else. What is 2 + 2?",
         8,
     )
     assert(arithmetic == "4")
 
-    capital ?= app.complete(
+    capital = app.complete(
         "Answer with exactly one word and nothing else. What is the capital of France?",
         8,
     )
     assert(capital == "Paris")
 
-    literal ?= app.complete(
+    literal = app.complete(
         "Output exactly the lowercase word blue and nothing else.",
         8,
     )
     assert(literal == "blue")
 
-    opposite ?= app.complete(
+    opposite = app.complete(
         "Answer with exactly one lowercase word and nothing else. What is the opposite of hot?",
         8,
     )

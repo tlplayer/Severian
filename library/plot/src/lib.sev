@@ -147,13 +147,13 @@ class Chart:
         return histogram_series(series_data, values, bins, label)
 
     def line_data(table: data.Data, x: string, y: string) -> Result[int, PlotError]:
-        x_values ?= numeric_column(table, x)
-        y_values ?= numeric_column(table, y)
+        x_values = numeric_column(table, x)
+        y_values = numeric_column(table, y)
         return add_series(series_data, "line", x_values, y_values, "")
 
     def line_data_labeled(table: data.Data, x: string, y: string, label: string) -> Result[int, PlotError]:
-        x_values ?= numeric_column(table, x)
-        y_values ?= numeric_column(table, y)
+        x_values = numeric_column(table, x)
+        y_values = numeric_column(table, y)
         return add_series(series_data, "line", x_values, y_values, label)
 
     def line_tensor(x: Tensor[f64], y: Tensor[f64]) -> Result[int, PlotError]:
@@ -247,7 +247,7 @@ def render_chart(
 
 test "line charts render axes labels series and legend":
     chart := Chart(640, 400)
-    _series ?= chart.line_labeled([0.0, 1.0, 2.0], [0.0, 1.0, 4.0], "square")
+    _series = chart.line_labeled([0.0, 1.0, 2.0], [0.0, 1.0, 4.0], "square")
     chart.title("x squared")
     chart.x_label("x")
     chart.y_label("y")
@@ -258,9 +258,9 @@ test "line charts render axes labels series and legend":
 
 test "scatter bar and histogram share one explicit chart":
     chart := Chart()
-    _scatter ?= chart.scatter([1.0, 2.0], [2.0, 3.0])
-    _bar ?= chart.bar([1.0, 2.0], [4.0, 1.0])
-    _histogram ?= chart.histogram([0.0, 0.2, 0.8, 1.0], 2)
+    _scatter = chart.scatter([1.0, 2.0], [2.0, 3.0])
+    _bar = chart.bar([1.0, 2.0], [4.0, 1.0])
+    _histogram = chart.histogram([0.0, 0.2, 0.8, 1.0], 2)
     document = chart.render().svg()
     assert(document.contains("<circle"))
     assert(document.contains("<rect"))
@@ -269,11 +269,11 @@ test "tensor values are accepted without caller conversion":
     chart := Chart()
     x = tensor.ranked([0.0, 1.0, 2.0], [3])
     y = tensor.ranked([0.0, 1.0, 4.0], [3])
-    count ?= chart.line_tensor(x, y)
+    count = chart.line_tensor(x, y)
     assert(count == 1)
 
 test "data columns are accepted by name without caller conversion":
     table = data.Data(["step", "loss"], [[0.0, 4.0], [1.0, 2.0], [2.0, 1.0]])
     chart := Chart()
-    count ?= chart.line_data(table, "step", "loss")
+    count = chart.line_data(table, "step", "loss")
     assert(count == 1)

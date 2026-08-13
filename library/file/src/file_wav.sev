@@ -46,11 +46,11 @@ class WavReader: file_interface.Reader
         return [".wav"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        handle ?= platform.file_open_binary(path)
-        length ?= platform.file_size(handle)
-        loaded ?= platform.file_read_exact(handle, length)
+        handle = platform.file_open_binary(path)
+        length = platform.file_size(handle)
+        loaded = platform.file_read_exact(handle, length)
         data: list[int] = loaded
-        _closed ?= platform.file_close(handle)
+        _closed = platform.file_close(handle)
         if size(data) < 44:
             return failure(file_interface.FormatError("WAV file is shorter than its required header"))
         if data[0:4] != [82, 73, 70, 70] or data[8:12] != [87, 65, 86, 69]:

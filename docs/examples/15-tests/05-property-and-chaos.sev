@@ -8,7 +8,7 @@ test with property and chaos "first is safe for generated lists":
     # Property generation varies list contents and shape. Chaos injection then
     # explores every reachable failure point for each bounded generated case.
     values = [10, 20, 30]
-    result = first(values)
+    result ?= first(values)
 
     switch result:
         ok value:

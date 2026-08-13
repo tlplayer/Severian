@@ -11,8 +11,8 @@ def exists(path: string) -> bool:
     return platform.file_exists(path)
 
 def stat(path: string) -> Result[Stat, IOError]:
-    byte_size ?= platform.file_size_path(path)
-    modified ?= platform.file_modified_seconds(path)
+    byte_size = platform.file_size_path(path)
+    modified = platform.file_modified_seconds(path)
     return Stat(
         path,
         byte_size,
@@ -54,12 +54,12 @@ def cp(source: string, destination: string) -> Result[unit, IOError]:
 
 test "filesystem namespace and stat metadata":
     directory = "/tmp/severian-library-os"
-    _created ?= make_directories(directory)
+    _created = make_directories(directory)
     assert(exists(directory))
-    information ?= stat(directory)
+    information = stat(directory)
     assert(information.is_directory)
     assert(not information.is_file)
-    entries ?= list(directory)
+    entries = list(directory)
     assert(size(entries) >= 0)
-    aliases ?= ls(directory)
+    aliases = ls(directory)
     assert(aliases == entries)

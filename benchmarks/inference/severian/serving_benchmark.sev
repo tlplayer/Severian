@@ -229,10 +229,10 @@ def runWave(
 def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     modelPath = "benchmarks/inference/models/Qwen2.5-3B-Instruct"
     processStartNs = monotonicNs()
-    configText ?= file.read_text(modelPath + "/config.json")
-    config ?= qwen2_config.parseQwen2Config(configText)
-    store ?= safetensor_weights.openSafeTensorStore(modelPath)
-    weights ?= qwen2.loadQwen2Weights(store, config.numHiddenLayers)
+    configText = file.read_text(modelPath + "/config.json")
+    config = qwen2_config.parseQwen2Config(configText)
+    store = safetensor_weights.openSafeTensorStore(modelPath)
+    weights = qwen2.loadQwen2Weights(store, config.numHiddenLayers)
     weightsMappedNs = monotonicNs()
     assert(config.vocabSize == 151936)
     assert(config.hiddenSize == 2048)
@@ -243,8 +243,8 @@ def runBenchmark() -> Result[qwen2.Qwen2Weights, exception]:
     assert(config.headDimension() == 128)
     assert(config.tieWordEmbeddings)
 
-    fixtureText ?= file.read_text("benchmarks/inference/inputs.json")
-    fixtureDocument ?= json.decode[Any](fixtureText)
+    fixtureText = file.read_text("benchmarks/inference/inputs.json")
+    fixtureDocument = json.decode[Any](fixtureText)
     fixture = json.objectGet(fixtureDocument, "256")
     promptTokens = json.asIntList(json.objectGet(fixture, "input_ids"))
     outputTokens = json.asInt(json.objectGet(fixture, "output_tokens"))

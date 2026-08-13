@@ -23,13 +23,13 @@ def loadAttentionWeights(
     store: tensor.SafeTensorStore,
     prefix: string,
 ) -> Result[attention.Qwen2AttentionWeights, IOError]:
-    query ?= store.get(prefix + ".q_proj.weight")
-    queryBias ?= store.get(prefix + ".q_proj.bias")
-    key ?= store.get(prefix + ".k_proj.weight")
-    keyBias ?= store.get(prefix + ".k_proj.bias")
-    value ?= store.get(prefix + ".v_proj.weight")
-    valueBias ?= store.get(prefix + ".v_proj.bias")
-    output ?= store.get(prefix + ".o_proj.weight")
+    query = store.get(prefix + ".q_proj.weight")
+    queryBias = store.get(prefix + ".q_proj.bias")
+    key = store.get(prefix + ".k_proj.weight")
+    keyBias = store.get(prefix + ".k_proj.bias")
+    value = store.get(prefix + ".v_proj.weight")
+    valueBias = store.get(prefix + ".v_proj.bias")
+    output = store.get(prefix + ".o_proj.weight")
     return attention.Qwen2AttentionWeights(
         query.bf16(), queryBias.bf16(),
         key.bf16(), keyBias.bf16(),
@@ -41,30 +41,30 @@ def loadMlpWeights(
     store: tensor.SafeTensorStore,
     prefix: string,
 ) -> Result[mlp.Qwen2MlpWeights, IOError]:
-    gate ?= store.get(prefix + ".gate_proj.weight")
-    up ?= store.get(prefix + ".up_proj.weight")
-    down ?= store.get(prefix + ".down_proj.weight")
+    gate = store.get(prefix + ".gate_proj.weight")
+    up = store.get(prefix + ".up_proj.weight")
+    down = store.get(prefix + ".down_proj.weight")
     return mlp.Qwen2MlpWeights(gate.bf16(), up.bf16(), down.bf16())
 
 def loadQwen2Weights(
     store: tensor.SafeTensorStore,
     numLayers: int,
 ) -> Result[Qwen2Weights, IOError]:
-    embeddingEntry ?= store.get("model.embed_tokens.weight")
+    embeddingEntry = store.get("model.embed_tokens.weight")
     layers := []
     for layer in range(0, numLayers):
         prefix = "model.layers." + string(layer)
-        inputNorm ?= store.get(prefix + ".input_layernorm.weight")
-        postNorm ?= store.get(prefix + ".post_attention_layernorm.weight")
-        attentionWeights ?= loadAttentionWeights(store, prefix + ".self_attn")
-        mlpWeights ?= loadMlpWeights(store, prefix + ".mlp")
+        inputNorm = store.get(prefix + ".input_layernorm.weight")
+        postNorm = store.get(prefix + ".post_attention_layernorm.weight")
+        attentionWeights = loadAttentionWeights(store, prefix + ".self_attn")
+        mlpWeights = loadMlpWeights(store, prefix + ".mlp")
         layers.append(decoder_layer.Qwen2DecoderWeights(
             inputNorm.bf16(),
             attentionWeights,
             postNorm.bf16(),
             mlpWeights,
         ))
-    finalNorm ?= store.get("model.norm.weight")
+    finalNorm = store.get("model.norm.weight")
     return Qwen2Weights(embeddingEntry.bf16(), layers, finalNorm.bf16())
 
 def embed(inputIds: Tensor[i64], weights: Qwen2Weights) -> Tensor[bf16]:

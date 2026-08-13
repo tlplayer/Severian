@@ -9,7 +9,7 @@ test with chaos "read results":
 
     for event in chaos:
         events_seen += 1
-        result = read()
+        result ?= read()
         # Validate the returned result under this event.
 
     assert(events_seen == 2)
@@ -21,13 +21,13 @@ test with chaos "read exceptions":
 
     for event in chaos:
         events_seen += 1
-        result = read()
+        result ?= read()
         # Validate local handling or deliberate propagation.
 
     assert(events_seen == 2)
 
 def wrapper() -> Result[int, IOError | BoundsError]:
-    buffer ?= read()
+    buffer = read()
     return buffer[0]
 
 test with chaos "wrapper inherits read failures":
@@ -36,7 +36,7 @@ test with chaos "wrapper inherits read failures":
 
     for event in chaos:
         events_seen += 1
-        result = wrapper()
+        result ?= wrapper()
         # Validate wrapper's handling or deliberate propagation for each event.
 
     assert(events_seen == 4)

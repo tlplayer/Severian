@@ -3,7 +3,7 @@ import database
 def runClient(connection: DatabaseConnection):
     database.mustRemoteExecute(connection, "CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT)")
     database.mustRemoteExecute(connection, "INSERT INTO people(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
-    result = database.remoteQuery(connection, "SELECT id, name FROM people ORDER BY id")
+    result ?= database.remoteQuery(connection, "SELECT id, name FROM people ORDER BY id")
     database.mustDisconnect(connection)
     switch result:
         ok rows:

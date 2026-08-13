@@ -28,15 +28,17 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 
 - Modules, `import`, `from ... import ...`, functions, classes, constructors,
   traits, fields, and trait methods.
-- Statements for stable `=` bindings, changeable `:=` bindings, assignment,
+- Statements for stable `=` bindings, changeable `:=` bindings, safe `?=`
+  result capture, assignment,
   assertions, returns, loops, `while condition with setup` clauses, ordinary
   switches, repeating multi-channel switches, unsafe blocks, break, continue,
   and expression statements.
 - Function and constructor declarations can carry attached `test:` blocks.
 - Expressions for literals, identifiers, calls, members, collections, indexing,
   conditionals, switches, lambdas, math operators, concurrency, and ownership.
-  `name ?= expression` is represented as a try-bind statement for error
-  propagation; the binding name is required.
+  A `Result` on the right of `=` or `:=` is propagated by semantic lowering;
+  `name ?= expression` remains a distinct statement that stores the complete
+  result for local handling.
 - Patterns for wildcard, literals, identifiers, tuples, lists, constructors, and
   alternatives.
 - Types for named paths, collections, functions, results, options, futures, and

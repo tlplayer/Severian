@@ -49,5 +49,5 @@ class TextReader: file_interface.Reader
         return [".txt", ".text", ".md", ".sev", ".toml", ".xml", ".html", ".log", ".lua"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        content ?= platform.file_read(path)
+        content = platform.file_read(path)
         return Text(path, content)

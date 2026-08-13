@@ -49,14 +49,14 @@ test with chaos "read results":
     chaos.add(when read return Failure(PermissionDenied))
 
     for event in chaos:
-        result = read()
+        result ?= read()
 
 test with chaos "read exceptions":
     chaos.add(when read throw PermissionDenied)
     chaos.add(when read throw TimedOut)
 
     for event in chaos:
-        result = read()
+        result ?= read()
 ```
 
 Multiple named tests divide the catalog into understandable slices. Each event

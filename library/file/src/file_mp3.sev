@@ -44,10 +44,10 @@ class Mp3Reader: file_interface.Reader
         return [".mp3"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        handle ?= platform.file_open_binary(path)
-        length ?= platform.file_size(handle)
-        loaded ?= platform.file_read_exact(handle, length)
+        handle = platform.file_open_binary(path)
+        length = platform.file_size(handle)
+        loaded = platform.file_read_exact(handle, length)
         data: list[int] = loaded
-        _closed ?= platform.file_close(handle)
+        _closed = platform.file_close(handle)
         has_id3 = size(data) >= 3 and data[0:3] == [73, 68, 51]
         return MP3(path, data, has_id3)

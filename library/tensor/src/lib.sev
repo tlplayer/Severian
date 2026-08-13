@@ -41,14 +41,14 @@ class SafeTensorStore:
                 shardIndex = index
         if shardIndex < 0:
             path = modelDirectory + "/" + shard
-            handle ?= file.open(path)
-            prefix ?= file.read_exact(handle, 8)
+            handle = file.open(path)
+            prefix = file.read_exact(handle, 8)
             headerLength = file.little_endian_u64(prefix)
-            headerBytes ?= file.read_exact(handle, headerLength)
-            headerText ?= file.utf8(headerBytes)
-            closed ?= file.close(handle)
-            header ?= json.decode[Any](headerText)
-            mapping ?= file.map(path)
+            headerBytes = file.read_exact(handle, headerLength)
+            headerText = file.utf8(headerBytes)
+            closed = file.close(handle)
+            header = json.decode[Any](headerText)
+            mapping = file.map(path)
             loadedShardNames.append(shard)
             loadedMappings.append(mapping)
             loadedHeaders.append(header)
@@ -70,7 +70,7 @@ class SafeTensorStore:
         return SafeTensorEntry(name, dtype, shape, byteStart, byteEnd, shard, mapping)
 
 def openSafetensors(modelDirectory: string) -> Result[SafeTensorStore, IOError]:
-    indexFile ?= file.read(modelDirectory + "/model.safetensors.index.json")
+    indexFile = file.read(modelDirectory + "/model.safetensors.index.json")
     index = indexFile.value()
     weightMap = json.object_get(index, "weight_map")
     return SafeTensorStore(modelDirectory, weightMap, [], [], [], [])

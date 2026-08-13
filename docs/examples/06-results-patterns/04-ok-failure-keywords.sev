@@ -2,7 +2,7 @@ def parseCount(text: string) -> Result[int, ParseError]:
     if text == "":
         return failure(ParseError("empty count"))
 
-    value ?= int.parse(text)
+    value = int.parse(text)
     return value
 
 test "valid count":
@@ -22,7 +22,7 @@ test "empty count":
             assert(reason.message == "empty count")
 
 def main():
-    result = parseCount("42")
+    result ?= parseCount("42")
 
     switch result:
         ok count:

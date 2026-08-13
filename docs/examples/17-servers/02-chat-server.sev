@@ -76,13 +76,13 @@ def serveClient(
     await reading, writing
 
 def runServer() -> Result[unit, IOError]:
-    listener ?= network.listen("127.0.0.1:7000")
+    listener = network.listen("127.0.0.1:7000")
     events = Channel[ChatEvent] with Buffer(256)
     hub = async runHub(clone events) with self
 
     with listener:
         while true with next_client_id := 1:
-            connection ?= await listener.accept()
+            connection = await listener.accept()
             async serveClient(next_client_id, connection, clone events) with self and connection
             next_client_id += 1
 

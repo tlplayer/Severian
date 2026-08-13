@@ -23,5 +23,5 @@ test "out of bounds":
             assert(true)
 
 def main():
-    result = byteAt([65, 66, 67], 1)
+    result ?= byteAt([65, 66, 67], 1)
     print(result)

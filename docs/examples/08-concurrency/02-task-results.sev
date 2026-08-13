@@ -1,10 +1,10 @@
 def fetch(url: string) -> Result[string, IOError]:
-    body ?= http.get(url)
+    body = http.get(url)
     return body
 
 test:
     task = async fetch("https://example.test") with self
-    result = await task
+    result ?= await task
 
     switch result:
         ok body:

@@ -68,6 +68,23 @@ fn parses_a_for_loop_setup_binding() {
 }
 
 #[test]
+fn keeps_result_capture_distinct_from_assignment() {
+    let source = concat!(
+        "def main():\n",
+        "    outcome ?= read(\"settings.toml\")\n",
+        "    value = read(\"settings.toml\")\n",
+        "    changing := read(\"settings.toml\")\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    assert!(matches!(function.body.statements[0], Stmt::TryBind(_)));
+    assert!(matches!(function.body.statements[1], Stmt::Let(_)));
+    assert!(matches!(function.body.statements[2], Stmt::Let(_)));
+}
+
+#[test]
 fn parses_an_explicit_native_abi_declaration() {
     let source = concat!(
         "unsafe:\n",

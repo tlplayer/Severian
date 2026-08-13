@@ -8,7 +8,7 @@ test "server greeting is deterministic":
     assert(greeting("ping") == "hello from severian: ping")
 
 def respond(connection: network.TCPConnection) -> Result[unit, IOError]:
-    request ?= await connection.readLine()
+    request = await connection.readLine()
     return await connection.writeLine(greeting(request))
 
 def serve(connection: network.TCPConnection):
@@ -20,8 +20,8 @@ def serve(connection: network.TCPConnection):
                 log.error("request failed", error)
 
 def runServer() -> Result[unit, IOError]:
-    listener ?= network.listen("127.0.0.1:8080")
+    listener = network.listen("127.0.0.1:8080")
 
     while true with listener:
-        connection ?= await listener.accept()
+        connection = await listener.accept()
         async serve(connection) with self and connection

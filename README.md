@@ -785,28 +785,37 @@ exception.
 
 ```sev
 def load(path: Path) -> Result[string, IOError]:
-    data ?= read(path)
+    data = read(path)
     return data
 ```
 
-`?=` requires a binding name. It binds the successful value and returns early
-from the current function when it receives a failure outcome. It is invalid to
-write `?=` without storing that value. Return an exact `Result` directly when no
-successful value needs to be stored.
+Assignment chooses how a `Result` is treated. `=` creates a stable binding and
+`:=` creates a changeable binding; either one takes the successful value or
+immediately propagates the failure from the current function. This keeps the
+risk visible at the point where the value is taken instead of adding a second
+error format to the function declaration.
 
-Inside a function returning `Result[type, exception]`, returning a value of
-`type` produces the successful result. Returning an expression that already has
-the exact declared `Result` type forwards it unchanged. A bare `return` produces
-a successful `unit` result when the declared success type is `unit`.
+Use `?=` to keep the complete `Result` without propagating it. The binding can
+then be handled safely with `switch`:
 
 ```sev
-switch result:
+outcome ?= read(path)
+
+switch outcome:
     ok body:
         print(body)
 
     failure error:
         print(error)
 ```
+
+A fallible expression can also be switched directly. `?=` requires a binding
+name and a `Result` expression; it never unwraps or throws the failure.
+
+Inside a function returning `Result[type, exception]`, returning a value of
+`type` produces the successful result. Returning an expression that already has
+the exact declared `Result` type forwards it unchanged. A bare `return` produces
+a successful `unit` result when the declared success type is `unit`.
 
 Severian uses `switch` for structural branching. The word `match` is reserved
 for domain syntax, such as regex helpers imported by a decorator.
