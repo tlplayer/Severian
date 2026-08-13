@@ -161,13 +161,36 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_map_set_default(!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_frequencies(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_strip(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_lstrip(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_rstrip(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_lower(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_upper(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_capitalize(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_title(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_swapcase(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_collapse_space(!llvm.ptr, i1) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_split_lines(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_split_limit(!llvm.ptr, !llvm.ptr, i64, i1) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_replace(!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_replace_limit(!llvm.ptr, !llvm.ptr, !llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_starts_with(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_string_ends_with(!llvm.ptr, !llvm.ptr) -> i1\n",
+        "  llvm.func @__sev_string_contains(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_string_find(!llvm.ptr, !llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_string_rfind(!llvm.ptr, !llvm.ptr) -> i64\n",
         "  llvm.func @__sev_string_count(!llvm.ptr, !llvm.ptr) -> i64\n",
+        "  llvm.func @__sev_string_predicate(!llvm.ptr, i64) -> i1\n",
+        "  llvm.func @__sev_string_remove_affix(!llvm.ptr, !llvm.ptr, i1, i1) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_translate(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_replace_many(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_remove(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_remove_matches(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_repeat(!llvm.ptr, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_pad(!llvm.ptr, i64, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_take(!llvm.ptr, i64, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_segment(!llvm.ptr, !llvm.ptr, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_between(!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_string_partition(!llvm.ptr, !llvm.ptr, i1) -> !llvm.ptr\n",
         "  llvm.func @__sev_print_value(!llvm.ptr)\n",
         "  llvm.func @__sev_print_collection(!llvm.ptr)\n\n",
         "  llvm.func @__sev_print_value_inline(!llvm.ptr)\n",
@@ -1822,7 +1845,8 @@ impl LowerContext<'_> {
             } if matches!(
                 method.as_str(),
                 "append_left" | "appendleft" | "extend" | "remove" | "heap_push" | "heapPush"
-            ) && args.len() == 1 =>
+            ) && args.len() == 1
+                && !(method == "remove" && object.ty() == Some(ValueType::String)) =>
             {
                 let (mut object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
@@ -1889,6 +1913,25 @@ impl LowerContext<'_> {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_collection_reversed({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                 (result, ValueType::List)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "filter"
+                && args.len() == 1
+                && object.ty() == Some(ValueType::String) =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let characters = self.fresh_value();
+                writeln!(self.output, "    {characters} = llvm.call @__sev_string_characters({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                let filtered =
+                    self.lower_collection_transform_from_value(characters, &args[0], true);
+                let separator = self.string_address("");
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_collection_join({filtered}, {separator}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
             }
             Expression::MethodCall {
                 object,
@@ -2018,6 +2061,21 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
+            } if method == "join" && args.len() == 1 && object.ty() == Some(ValueType::String) => {
+                let (separator, separator_type) = self.lower_expression(object);
+                let separator = self
+                    .unbox_value((separator, separator_type), ValueType::String)
+                    .0;
+                let values = self.lower_expression(&args[0]);
+                let values = self.unbox_value(values, ValueType::List).0;
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_collection_join({values}, {separator}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
             } if method == "join"
                 && args.len() == 1
                 && !self.has_known_class_method(object, method) =>
@@ -2115,13 +2173,18 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "characters" | "words") && args.is_empty() => {
+            } if matches!(
+                method.as_str(),
+                "characters" | "words" | "splitlines" | "split_lines" | "lines"
+            ) && args.is_empty() =>
+            {
                 let (object, object_type) = self.lower_expression(object);
                 let object = self.unbox_value((object, object_type), ValueType::String).0;
                 let result = self.fresh_value();
                 let function = match method.as_str() {
                     "characters" => "__sev_string_characters",
                     "words" => "__sev_string_words",
+                    "splitlines" | "split_lines" | "lines" => "__sev_string_split_lines",
                     _ => unreachable!(),
                 };
                 writeln!(
@@ -2157,33 +2220,101 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if method == "split" && args.len() == 1 => {
+            } if method == "split" && args.is_empty() => {
                 let (object, object_type) = self.lower_expression(object);
                 let object = self.unbox_value((object, object_type), ValueType::String).0;
-                let separator = self.lower_expression(&args[0]);
-                let separator = self.unbox_value(separator, ValueType::String).0;
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @__sev_string_split({object}, {separator}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_words({object}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                 (result, ValueType::List)
             }
             Expression::MethodCall {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "strip" | "lower" | "upper") && args.is_empty() => {
+            } if matches!(method.as_str(), "split" | "rsplit") && (1..=2).contains(&args.len()) => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let separator = self.lower_expression(&args[0]);
+                let separator = self.unbox_value(separator, ValueType::String).0;
+                let limit = if let Some(limit) = args.get(1) {
+                    let limit = self.lower_expression(limit);
+                    self.unbox_value(limit, ValueType::Int).0
+                } else {
+                    let limit = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {limit} = llvm.mlir.constant(-1 : i64) : i64"
+                    )
+                    .unwrap();
+                    limit
+                };
+                let reverse = i32::from(method == "rsplit");
+                let reverse_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {reverse_value} = llvm.mlir.constant({reverse} : i1) : i1"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_split_limit({object}, {separator}, {limit}, {reverse_value}) : (!llvm.ptr, !llvm.ptr, i64, i1) -> !llvm.ptr").unwrap();
+                (result, ValueType::List)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(
+                method.as_str(),
+                "strip"
+                    | "lstrip"
+                    | "rstrip"
+                    | "lower"
+                    | "upper"
+                    | "capitalize"
+                    | "title"
+                    | "swapcase"
+                    | "collapse_space"
+                    | "normalize_space"
+                    | "collapse_horizontal_space"
+            ) && args.is_empty() =>
+            {
                 let (object, object_type) = self.lower_expression(object);
                 let object = self.unbox_value((object, object_type), ValueType::String).0;
                 let function = match method.as_str() {
                     "strip" => "__sev_string_strip",
+                    "lstrip" => "__sev_string_lstrip",
+                    "rstrip" => "__sev_string_rstrip",
                     "lower" => "__sev_string_lower",
-                    _ => "__sev_string_upper",
+                    "upper" => "__sev_string_upper",
+                    "capitalize" => "__sev_string_capitalize",
+                    "title" => "__sev_string_title",
+                    "swapcase" => "__sev_string_swapcase",
+                    _ => "__sev_string_collapse_space",
                 };
                 let result = self.fresh_value();
-                writeln!(
-                    self.output,
-                    "    {result} = llvm.call @{function}({object}) : (!llvm.ptr) -> !llvm.ptr"
-                )
-                .unwrap();
+                if matches!(
+                    method.as_str(),
+                    "collapse_space" | "normalize_space" | "collapse_horizontal_space"
+                ) {
+                    let horizontal = if method == "collapse_horizontal_space" {
+                        1
+                    } else {
+                        0
+                    };
+                    let horizontal_value = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {horizontal_value} = llvm.mlir.constant({horizontal} : i1) : i1"
+                    )
+                    .unwrap();
+                    writeln!(self.output, "    {result} = llvm.call @{function}({object}, {horizontal_value}) : (!llvm.ptr, i1) -> !llvm.ptr").unwrap();
+                } else {
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @{function}({object}) : (!llvm.ptr) -> !llvm.ptr"
+                    )
+                    .unwrap();
+                }
                 (result, ValueType::String)
             }
             Expression::MethodCall {
@@ -2192,7 +2323,60 @@ impl LowerContext<'_> {
                 args,
             } if matches!(
                 method.as_str(),
-                "starts_with" | "startsWith" | "ends_with" | "endsWith" | "find" | "count"
+                "is_empty"
+                    | "is_space"
+                    | "is_alpha"
+                    | "is_digit"
+                    | "is_alnum"
+                    | "is_ascii"
+                    | "is_lower"
+                    | "is_upper"
+                    | "is_ascii_alnum"
+                    | "is_word"
+                    | "is_punctuation"
+            ) && args.is_empty() =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let operation = match method.as_str() {
+                    "is_empty" => 0,
+                    "is_space" => 1,
+                    "is_alpha" => 2,
+                    "is_digit" => 3,
+                    "is_alnum" => 4,
+                    "is_ascii" => 5,
+                    "is_lower" => 6,
+                    "is_upper" => 7,
+                    "is_ascii_alnum" => 8,
+                    "is_word" => 9,
+                    _ => 10,
+                };
+                let operation_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {operation_value} = llvm.mlir.constant({operation} : i64) : i64"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_predicate({object}, {operation_value}) : (!llvm.ptr, i64) -> i1").unwrap();
+                (result, ValueType::Bool)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(
+                method.as_str(),
+                "starts_with"
+                    | "startsWith"
+                    | "ends_with"
+                    | "endsWith"
+                    | "contains"
+                    | "find"
+                    | "rfind"
+                    | "index"
+                    | "rindex"
+                    | "count"
             ) && args.len() == 1 =>
             {
                 let (object, object_type) = self.lower_expression(object);
@@ -2202,26 +2386,262 @@ impl LowerContext<'_> {
                 let function = match method.as_str() {
                     "starts_with" | "startsWith" => "__sev_string_starts_with",
                     "ends_with" | "endsWith" => "__sev_string_ends_with",
+                    "contains" => "__sev_string_contains",
                     "find" => "__sev_string_find",
+                    "rfind" => "__sev_string_rfind",
+                    "index" => "__sev_string_find",
+                    "rindex" => "__sev_string_rfind",
                     _ => "__sev_string_count",
                 };
                 let result = self.fresh_value();
                 let ty = if matches!(
                     method.as_str(),
-                    "starts_with" | "startsWith" | "ends_with" | "endsWith"
+                    "starts_with" | "startsWith" | "ends_with" | "endsWith" | "contains"
                 ) {
                     ValueType::Bool
                 } else {
                     ValueType::Int
                 };
                 writeln!(self.output, "    {result} = llvm.call @{function}({object}, {needle}) : (!llvm.ptr, !llvm.ptr) -> {}", mlir_type(ty)).unwrap();
+                if matches!(method.as_str(), "index" | "rindex") {
+                    let found = self.fresh_value();
+                    let zero = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                    )
+                    .unwrap();
+                    writeln!(
+                        self.output,
+                        "    {found} = llvm.icmp \"sge\" {result}, {zero} : i64"
+                    )
+                    .unwrap();
+                    let ok = self.fresh_block();
+                    let missing = self.fresh_block();
+                    writeln!(
+                        self.output,
+                        "    llvm.cond_br {found}, ^bb{ok}, ^bb{missing}"
+                    )
+                    .unwrap();
+                    writeln!(self.output, "  ^bb{missing}:").unwrap();
+                    writeln!(
+                        self.output,
+                        "    llvm.call @abort() : () -> ()\n    llvm.unreachable"
+                    )
+                    .unwrap();
+                    writeln!(self.output, "  ^bb{ok}:").unwrap();
+                }
                 (result, ty)
             }
             Expression::MethodCall {
                 object,
                 method,
                 args,
-            } if method == "replace" && args.len() == 2 => {
+            } if matches!(
+                method.as_str(),
+                "trim_prefix" | "trim_suffix" | "remove_prefix" | "remove_suffix"
+            ) && args.len() == 1 =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let affix = self.lower_expression(&args[0]);
+                let affix = self.unbox_value(affix, ValueType::String).0;
+                let suffix = i32::from(method.ends_with("suffix"));
+                let repeated = i32::from(method.starts_with("trim_"));
+                let suffix_value = self.fresh_value();
+                let repeated_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {suffix_value} = llvm.mlir.constant({suffix} : i1) : i1"
+                )
+                .unwrap();
+                writeln!(
+                    self.output,
+                    "    {repeated_value} = llvm.mlir.constant({repeated} : i1) : i1"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_remove_affix({object}, {affix}, {suffix_value}, {repeated_value}) : (!llvm.ptr, !llvm.ptr, i1, i1) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(method.as_str(), "translate" | "replace_many") && args.len() == 1 => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let mapping = self.lower_expression(&args[0]);
+                let mapping = self.unbox_value(mapping, ValueType::Map).0;
+                let function = if method == "translate" {
+                    "__sev_string_translate"
+                } else {
+                    "__sev_string_replace_many"
+                };
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @{function}({object}, {mapping}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "remove" || method == "remove_all" => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let removal = self.lower_expression(&args[0]);
+                let result = self.fresh_value();
+                if method == "remove" {
+                    let removal_type = removal.1;
+                    if removal_type == ValueType::List {
+                        let matches = self.unbox_value(removal, ValueType::List).0;
+                        writeln!(self.output, "    {result} = llvm.call @__sev_string_remove_matches({object}, {matches}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                    } else {
+                        let characters = self.unbox_value(removal, ValueType::String).0;
+                        writeln!(self.output, "    {result} = llvm.call @__sev_string_remove({object}, {characters}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                    }
+                } else {
+                    let needle = self.unbox_value(removal, ValueType::String).0;
+                    let empty = self.string_address("");
+                    writeln!(self.output, "    {result} = llvm.call @__sev_string_replace({object}, {needle}, {empty}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                }
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "repeat" && args.len() == 1 => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let count = self.lower_expression(&args[0]);
+                let count = self.unbox_value(count, ValueType::Int).0;
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_repeat({object}, {count}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(method.as_str(), "pad_left" | "pad_right" | "center")
+                && args.len() == 1 =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let width = self.lower_expression(&args[0]);
+                let width = self.unbox_value(width, ValueType::Int).0;
+                let alignment = match method.as_str() {
+                    "pad_left" => 0,
+                    "pad_right" => 1,
+                    _ => 2,
+                };
+                let alignment_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {alignment_value} = llvm.mlir.constant({alignment} : i64) : i64"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_pad({object}, {width}, {alignment_value}) : (!llvm.ptr, i64, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(method.as_str(), "first" | "take" | "last" | "drop")
+                && args.len() == 1 =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let count = self.lower_expression(&args[0]);
+                let count = self.unbox_value(count, ValueType::Int).0;
+                let operation = match method.as_str() {
+                    "first" | "take" => 0,
+                    "last" => 1,
+                    _ => 2,
+                };
+                let operation_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {operation_value} = llvm.mlir.constant({operation} : i64) : i64"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_take({object}, {count}, {operation_value}) : (!llvm.ptr, i64, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "slice" && args.len() == 2 => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let start = self.lower_expression(&args[0]);
+                let start = self.unbox_value(start, ValueType::Int).0;
+                let end = self.lower_expression(&args[1]);
+                let end = self.unbox_value(end, ValueType::Int).0;
+                let step = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {step} = llvm.mlir.constant(1 : i64) : i64"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_slice({object}, {start}, {end}, {step}) : (!llvm.ptr, i64, i64, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(
+                method.as_str(),
+                "before" | "after" | "before_last" | "after_last"
+            ) && args.len() == 1 =>
+            {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let separator = self.lower_expression(&args[0]);
+                let separator = self.unbox_value(separator, ValueType::String).0;
+                let operation = match method.as_str() {
+                    "before" => 0,
+                    "after" => 1,
+                    "before_last" => 2,
+                    _ => 3,
+                };
+                let operation_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {operation_value} = llvm.mlir.constant({operation} : i64) : i64"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_segment({object}, {separator}, {operation_value}) : (!llvm.ptr, !llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "between" && args.len() == 2 => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let opener = self.lower_expression(&args[0]);
+                let opener = self.unbox_value(opener, ValueType::String).0;
+                let closer = self.lower_expression(&args[1]);
+                let closer = self.unbox_value(closer, ValueType::String).0;
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_between({object}, {opener}, {closer}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "replace" && (2..=3).contains(&args.len()) => {
                 let (object, object_type) = self.lower_expression(object);
                 let object = self.unbox_value((object, object_type), ValueType::String).0;
                 let old = self.lower_expression(&args[0]);
@@ -2229,8 +2649,34 @@ impl LowerContext<'_> {
                 let new = self.lower_expression(&args[1]);
                 let new = self.unbox_value(new, ValueType::String).0;
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @__sev_string_replace({object}, {old}, {new}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                if let Some(limit) = args.get(2) {
+                    let limit = self.lower_expression(limit);
+                    let limit = self.unbox_value(limit, ValueType::Int).0;
+                    writeln!(self.output, "    {result} = llvm.call @__sev_string_replace_limit({object}, {old}, {new}, {limit}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                } else {
+                    writeln!(self.output, "    {result} = llvm.call @__sev_string_replace({object}, {old}, {new}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                }
                 (result, ValueType::String)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if matches!(method.as_str(), "partition" | "rpartition") && args.len() == 1 => {
+                let (object, object_type) = self.lower_expression(object);
+                let object = self.unbox_value((object, object_type), ValueType::String).0;
+                let separator = self.lower_expression(&args[0]);
+                let separator = self.unbox_value(separator, ValueType::String).0;
+                let reverse = i32::from(method == "rpartition");
+                let reverse_value = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {reverse_value} = llvm.mlir.constant({reverse} : i1) : i1"
+                )
+                .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_string_partition({object}, {separator}, {reverse_value}) : (!llvm.ptr, !llvm.ptr, i1) -> !llvm.ptr").unwrap();
+                (result, ValueType::Tuple)
             }
             Expression::MethodCall {
                 object,
@@ -5836,7 +6282,14 @@ fn collect_expression_strings(expression: &Expression, strings: &mut Vec<String>
             strings.push(member.clone());
             collect_expression_strings(object, strings);
         }
-        Expression::MethodCall { object, args, .. } => {
+        Expression::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            if matches!(method.as_str(), "filter" | "remove_all") {
+                strings.push(String::new());
+            }
             collect_expression_strings(object, strings);
             for arg in args {
                 collect_expression_strings(arg, strings);
@@ -6293,6 +6746,43 @@ fn native_bridge_source_for_target(
         "void *__sev_string_characters(void *raw) { const unsigned char *text = raw; int64_t bytes = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); for (int64_t offset = 0; offset < bytes;) { int64_t width = sev_utf8_width(text[offset]); __sev_collection_push(result, __sev_box_string(sev_string_range((const char *)text, offset, width))); offset += width; } return result; }\n",
         "void *__sev_string_words(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); int64_t index = 0; while (index < size) { while (index < size && isspace((unsigned char)text[index])) index += 1; int64_t start = index; while (index < size && !isspace((unsigned char)text[index])) index += 1; if (start < index) __sev_collection_push(result, __sev_box_string(sev_string_range(text, start, index - start))); } return result; }\n",
         "void *__sev_string_split(void *raw, void *separator_raw) { const char *text = raw; const char *separator = separator_raw; int64_t separator_size = __sev_strlen(separator_raw); if (separator_size == 0) abort(); sev_collection *result = __sev_collection_new(0); const char *start = text; const char *match = NULL; while ((match = strstr(start, separator)) != NULL) { __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)(match - start)))); start = match + separator_size; } __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)strlen(start)))); return result; }\n",
+        r#"void *__sev_string_split_limit(void *raw, void *separator_raw, int64_t limit, bool reverse) {
+  const char *text = raw;
+  const char *separator = separator_raw;
+  int64_t separator_size = __sev_strlen(separator_raw);
+  if (separator_size == 0) abort();
+  if (!reverse) {
+    sev_collection *result = __sev_collection_new(0);
+    const char *start = text;
+    const char *match = NULL;
+    int64_t splits = 0;
+    while ((limit < 0 || splits < limit) && (match = strstr(start, separator)) != NULL) {
+      __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)(match - start))));
+      start = match + separator_size;
+      splits += 1;
+    }
+    __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)strlen(start))));
+    return result;
+  }
+  sev_collection *backward = __sev_collection_new(0);
+  int64_t end = __sev_strlen(raw);
+  int64_t splits = 0;
+  while (limit < 0 || splits < limit) {
+    int64_t found = -1;
+    for (int64_t index = 0; index + separator_size <= end; ++index) {
+      if (memcmp(text + index, separator, (size_t)separator_size) == 0) found = index;
+    }
+    if (found < 0) break;
+    __sev_collection_push(backward, __sev_box_string(sev_string_range(text, found + separator_size, end - found - separator_size)));
+    end = found;
+    splits += 1;
+  }
+  __sev_collection_push(backward, __sev_box_string(sev_string_range(text, 0, end)));
+  sev_collection *result = __sev_collection_new(0);
+  for (int64_t index = backward->size; index > 0; --index) __sev_collection_push(result, backward->items[index - 1]);
+  return result;
+}
+"#,
         r#"void *__sev_csv_parse(void *raw) {
   const char *text = raw;
   size_t input_size = strlen(text);
@@ -6465,11 +6955,126 @@ fn native_bridge_source_for_target(
         "void *__sev_platform_abs(void *value) { return __sev_abs(value); }\n",
         "void *__sev_string_lower(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)tolower((unsigned char)text[index]); return result; }\n",
         "void *__sev_string_upper(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)toupper((unsigned char)text[index]); return result; }\n",
+        "void *__sev_string_capitalize(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)(index == 0 ? toupper((unsigned char)text[index]) : tolower((unsigned char)text[index])); return result; }\n",
+        "void *__sev_string_title(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); bool boundary = true; for (int64_t index = 0; index < size; ++index) { unsigned char value = (unsigned char)text[index]; result[index] = (char)(boundary ? toupper(value) : tolower(value)); boundary = !isalnum(value); } return result; }\n",
+        "void *__sev_string_swapcase(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) { unsigned char value = (unsigned char)text[index]; result[index] = (char)(islower(value) ? toupper(value) : (isupper(value) ? tolower(value) : value)); } return result; }\n",
+        "void *__sev_string_collapse_space(void *raw, bool horizontal) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); int64_t write = 0; bool pending = false; for (int64_t index = 0; index < size; ++index) { unsigned char value = (unsigned char)text[index]; bool space = horizontal ? (value == ' ' || value == '\\t' || value == '\\r') : isspace(value); if (space) { if (write > 0) pending = true; } else { if (pending) result[write++] = ' '; result[write++] = (char)value; pending = false; } } result[write] = '\\0'; return result; }\n",
+        "void *__sev_string_split_lines(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); int64_t start = 0; for (int64_t index = 0; index < size; ++index) { if (text[index] != '\\n' && text[index] != '\\r') continue; __sev_collection_push(result, __sev_box_string(sev_string_range(text, start, index - start))); if (text[index] == '\\r' && index + 1 < size && text[index + 1] == '\\n') index += 1; start = index + 1; } if (start < size) __sev_collection_push(result, __sev_box_string(sev_string_range(text, start, size - start))); return result; }\n",
         "bool __sev_string_starts_with(void *raw, void *needle_raw) { const char *text = raw; const char *needle = needle_raw; size_t size = strlen(needle); return strncmp(text, needle, size) == 0; }\n",
         "bool __sev_string_ends_with(void *raw, void *needle_raw) { const char *text = raw; const char *needle = needle_raw; size_t text_size = strlen(text); size_t size = strlen(needle); return size <= text_size && strcmp(text + text_size - size, needle) == 0; }\n",
+        "bool __sev_string_contains(void *raw, void *needle_raw) { return strstr(raw, needle_raw) != NULL; }\n",
         "int64_t __sev_string_find(void *raw, void *needle_raw) { const char *text = raw; const char *found = strstr(text, needle_raw); return found ? (int64_t)(found - text) : -1; }\n",
+        "int64_t __sev_string_rfind(void *raw, void *needle_raw) { const char *text = raw; const char *needle = needle_raw; size_t needle_size = strlen(needle); if (needle_size == 0) return (int64_t)strlen(text); const char *found = NULL; const char *cursor = text; while ((cursor = strstr(cursor, needle)) != NULL) { found = cursor; cursor += 1; } return found ? (int64_t)(found - text) : -1; }\n",
         "int64_t __sev_string_count(void *raw, void *needle_raw) { const char *text = raw; const char *needle = needle_raw; size_t size = strlen(needle); if (size == 0) return (int64_t)strlen(text) + 1; int64_t count = 0; const char *cursor = text; while ((cursor = strstr(cursor, needle)) != NULL) { count += 1; cursor += size; } return count; }\n",
+        "bool __sev_string_predicate(void *raw, int64_t operation) { const unsigned char *text = raw; int64_t size = __sev_strlen(raw); if (operation == 0) return size == 0; if (operation == 5) { for (int64_t i = 0; i < size; ++i) if (text[i] >= 128) return false; return true; } if (size == 0) return false; bool has_lower = false; bool has_upper = false; for (int64_t i = 0; i < size; ++i) { unsigned char value = text[i]; if (operation == 1 && !isspace(value)) return false; if (operation == 2 && (value >= 128 || !isalpha(value))) return false; if (operation == 3 && (value >= 128 || !isdigit(value))) return false; if ((operation == 4 || operation == 8) && (value >= 128 || !isalnum(value))) return false; if (operation == 9 && (size != 1 || value >= 128 || (!isalnum(value) && value != '_'))) return false; if (operation == 10 && (size != 1 || value >= 128 || !ispunct(value))) return false; if (islower(value)) has_lower = true; if (isupper(value)) has_upper = true; } if (operation == 6) return has_lower && !has_upper; if (operation == 7) return has_upper && !has_lower; return true; }\n",
+        "void *__sev_string_remove_affix(void *raw, void *affix_raw, bool suffix, bool repeated) { const char *text = raw; const char *affix = affix_raw; int64_t start = 0; int64_t end = __sev_strlen(raw); int64_t size = __sev_strlen(affix_raw); if (size == 0) return sev_string_range(text, 0, end); if (suffix) { while (end - start >= size && memcmp(text + end - size, affix, (size_t)size) == 0) { end -= size; if (!repeated) break; } } else { while (end - start >= size && memcmp(text + start, affix, (size_t)size) == 0) { start += size; if (!repeated) break; } } return sev_string_range(text, start, end - start); }\n",
+        r#"void *__sev_string_translate(void *raw, void *mapping_raw) {
+  const unsigned char *text = raw;
+  sev_map *mapping = mapping_raw;
+  int64_t bytes = __sev_strlen(raw);
+  size_t output_size = 0;
+  for (int64_t offset = 0; offset < bytes;) {
+    int64_t width = sev_utf8_width(text[offset]);
+    sev_value *replacement = NULL;
+    for (int64_t entry = 0; entry < mapping->size; ++entry) {
+      sev_value *key = mapping->keys[entry];
+      if (key && key->kind == SEV_STRING && (int64_t)strlen(key->as.string) == width && memcmp(text + offset, key->as.string, (size_t)width) == 0) {
+        replacement = mapping->values[entry];
+        break;
+      }
+    }
+    output_size += replacement && replacement->kind == SEV_STRING ? strlen(replacement->as.string) : (size_t)width;
+    offset += width;
+  }
+  char *result = sev_allocate(output_size + 1);
+  size_t write = 0;
+  for (int64_t offset = 0; offset < bytes;) {
+    int64_t width = sev_utf8_width(text[offset]);
+    sev_value *replacement = NULL;
+    for (int64_t entry = 0; entry < mapping->size; ++entry) {
+      sev_value *key = mapping->keys[entry];
+      if (key && key->kind == SEV_STRING && (int64_t)strlen(key->as.string) == width && memcmp(text + offset, key->as.string, (size_t)width) == 0) {
+        replacement = mapping->values[entry];
+        break;
+      }
+    }
+    const char *source = replacement && replacement->kind == SEV_STRING ? replacement->as.string : (const char *)text + offset;
+    size_t source_size = replacement && replacement->kind == SEV_STRING ? strlen(source) : (size_t)width;
+    memcpy(result + write, source, source_size);
+    write += source_size;
+    offset += width;
+  }
+  result[write] = '\0';
+  return result;
+}
+"#,
         "void *__sev_string_replace(void *raw, void *old_raw, void *new_raw) { const char *text = raw; const char *old = old_raw; const char *replacement = new_raw; size_t old_size = strlen(old); if (old_size == 0) abort(); size_t new_size = strlen(replacement); int64_t count = __sev_string_count(raw, old_raw); size_t result_size = strlen(text) + 1; if (new_size >= old_size) result_size += (size_t)count * (new_size - old_size); else result_size -= (size_t)count * (old_size - new_size); char *result = sev_allocate(result_size); const char *cursor = text; const char *match; while ((match = strstr(cursor, old)) != NULL) { strncat(result, cursor, (size_t)(match - cursor)); strcat(result, replacement); cursor = match + old_size; } strcat(result, cursor); return result; }\n",
+        "void *__sev_string_replace_limit(void *raw, void *old_raw, void *new_raw, int64_t limit) { if (limit < 0) return __sev_string_replace(raw, old_raw, new_raw); const char *text = raw; const char *old = old_raw; const char *replacement = new_raw; size_t old_size = strlen(old); if (old_size == 0) abort(); size_t new_size = strlen(replacement); int64_t matches = 0; const char *scan = text; while (matches < limit && (scan = strstr(scan, old)) != NULL) { matches += 1; scan += old_size; } size_t result_size = strlen(text) + 1; if (new_size >= old_size) result_size += (size_t)matches * (new_size - old_size); else result_size -= (size_t)matches * (old_size - new_size); char *result = sev_allocate(result_size); const char *cursor = text; const char *match = NULL; int64_t replaced = 0; while (replaced < matches && (match = strstr(cursor, old)) != NULL) { strncat(result, cursor, (size_t)(match - cursor)); strcat(result, replacement); cursor = match + old_size; replaced += 1; } strcat(result, cursor); return result; }\n",
+        "void *__sev_string_replace_many(void *raw, void *mapping_raw) { sev_map *mapping = mapping_raw; void *result = raw; for (int64_t index = 0; index < mapping->size; ++index) { sev_value *old = mapping->keys[index]; sev_value *replacement = mapping->values[index]; if (!old || !replacement || old->kind != SEV_STRING || replacement->kind != SEV_STRING) abort(); result = __sev_string_replace(result, (void *)old->as.string, (void *)replacement->as.string); } return result; }\n",
+        r#"void *__sev_string_remove(void *raw, void *characters_raw) {
+  const unsigned char *text = raw;
+  const unsigned char *characters = characters_raw;
+  int64_t text_bytes = __sev_strlen(raw);
+  int64_t character_bytes = __sev_strlen(characters_raw);
+  char *result = sev_allocate((size_t)text_bytes + 1);
+  int64_t write = 0;
+  for (int64_t offset = 0; offset < text_bytes;) {
+    int64_t width = sev_utf8_width(text[offset]);
+    bool removed = false;
+    for (int64_t candidate = 0; candidate < character_bytes;) {
+      int64_t candidate_width = sev_utf8_width(characters[candidate]);
+      if (candidate_width == width && memcmp(text + offset, characters + candidate, (size_t)width) == 0) {
+        removed = true;
+        break;
+      }
+      candidate += candidate_width;
+    }
+    if (!removed) {
+      memcpy(result + write, text + offset, (size_t)width);
+      write += width;
+    }
+    offset += width;
+  }
+  result[write] = '\0';
+  return result;
+}
+"#,
+        r#"void *__sev_string_remove_matches(void *raw, void *matches_raw) {
+  const unsigned char *text = raw;
+  sev_collection *matches = matches_raw;
+  if (!matches) abort();
+  int64_t text_bytes = __sev_strlen(raw);
+  char *result = sev_allocate((size_t)text_bytes + 1);
+  int64_t write = 0;
+  for (int64_t offset = 0; offset < text_bytes;) {
+    int64_t matched_bytes = 0;
+    for (int64_t index = 0; index < matches->size; ++index) {
+      sev_value *candidate = matches->items[index];
+      if (!candidate || candidate->kind != SEV_STRING) abort();
+      int64_t candidate_bytes = __sev_strlen((void *)candidate->as.string);
+      if (candidate_bytes > matched_bytes && candidate_bytes <= text_bytes - offset && memcmp(text + offset, candidate->as.string, (size_t)candidate_bytes) == 0) {
+        matched_bytes = candidate_bytes;
+      }
+    }
+    if (matched_bytes > 0) {
+      offset += matched_bytes;
+      continue;
+    }
+    int64_t width = sev_utf8_width(text[offset]);
+    memcpy(result + write, text + offset, (size_t)width);
+    write += width;
+    offset += width;
+  }
+  result[write] = '\0';
+  return result;
+}
+"#,
+        "void *__sev_string_repeat(void *raw, int64_t count) { if (count < 0) abort(); const char *text = raw; size_t size = strlen(text); char *result = sev_allocate(size * (size_t)count + 1); for (int64_t index = 0; index < count; ++index) memcpy(result + size * (size_t)index, text, size); return result; }\n",
+        "void *__sev_string_pad(void *raw, int64_t width, int64_t alignment) { const char *text = raw; int64_t characters = __sev_string_length(raw); if (width <= characters) return sev_string_range(text, 0, __sev_strlen(raw)); int64_t padding = width - characters; int64_t left = alignment == 0 ? padding : (alignment == 2 ? padding / 2 : 0); int64_t right = padding - left; int64_t bytes = __sev_strlen(raw); char *result = sev_allocate((size_t)(bytes + padding + 1)); memset(result, ' ', (size_t)left); memcpy(result + left, text, (size_t)bytes); memset(result + left + bytes, ' ', (size_t)right); return result; }\n",
+        "void *__sev_string_take(void *raw, int64_t count, int64_t operation) { int64_t length = __sev_string_length(raw); if (count < 0) count = 0; if (count > length) count = length; if (operation == 1) return __sev_string_slice(raw, length - count, length, 1); if (operation == 2) return __sev_string_slice(raw, count, length, 1); return __sev_string_slice(raw, 0, count, 1); }\n",
+        "void *__sev_string_segment(void *raw, void *separator_raw, int64_t operation) { const char *text = raw; const char *separator = separator_raw; int64_t found = operation >= 2 ? __sev_string_rfind(raw, separator_raw) : __sev_string_find(raw, separator_raw); if (found < 0) return operation == 0 || operation == 2 ? sev_string_range(text, 0, __sev_strlen(raw)) : sev_string_range(text, 0, 0); int64_t size = __sev_strlen(separator_raw); if (operation == 0 || operation == 2) return sev_string_range(text, 0, found); return sev_string_range(text, found + size, __sev_strlen(raw) - found - size); }\n",
+        "void *__sev_string_between(void *raw, void *opener_raw, void *closer_raw) { const char *text = raw; int64_t start = __sev_string_find(raw, opener_raw); if (start < 0) return sev_string_range(text, 0, 0); start += __sev_strlen(opener_raw); const char *found = strstr(text + start, closer_raw); if (!found) return sev_string_range(text, 0, 0); return sev_string_range(text, start, (int64_t)(found - text) - start); }\n",
+        "void *__sev_string_partition(void *raw, void *separator_raw, bool reverse) { const char *text = raw; const char *separator = separator_raw; int64_t size = __sev_strlen(separator_raw); if (size == 0) abort(); int64_t found = reverse ? __sev_string_rfind(raw, separator_raw) : __sev_string_find(raw, separator_raw); sev_collection *result = __sev_collection_new(1); if (found < 0) { if (reverse) { __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, 0))); __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, 0))); __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, __sev_strlen(raw)))); } else { __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, __sev_strlen(raw)))); __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, 0))); __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, 0))); } return result; } __sev_collection_push(result, __sev_box_string(sev_string_range(text, 0, found))); __sev_collection_push(result, __sev_box_string(sev_string_range(separator, 0, size))); __sev_collection_push(result, __sev_box_string(sev_string_range(text, found + size, __sev_strlen(raw) - found - size))); return result; }\n",
         "static void sev_print_collection_inline(void *raw);\n",
         "void __sev_print_value_inline(void *raw) { sev_value *value = raw; if (!value) { fputs(\"invalid\", stdout); return; } switch (value->kind) { case SEV_INT: printf(\"%ld\", value->as.i64); break; case SEV_FLOAT: printf(\"%.17g\", value->as.f64); break; case SEV_BOOL: fputs(value->as.boolean ? \"true\" : \"false\", stdout); break; case SEV_STRING: fputs(value->as.string, stdout); break; case SEV_COLLECTION: sev_print_collection_inline(value->as.pointer); break; } }\n",
         "void __sev_print_value(void *raw) { __sev_print_value_inline(raw); fputc('\\n', stdout); }\n",

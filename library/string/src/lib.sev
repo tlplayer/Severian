@@ -10,10 +10,10 @@ def strip(value: string) -> string:
     return value.strip()
 
 def lstrip(value: string) -> string:
-    return platform.string_lstrip(value)
+    return value.lstrip()
 
 def rstrip(value: string) -> string:
-    return platform.string_rstrip(value)
+    return value.rstrip()
 
 def replace(value: string, old: string, replacement: string) -> string:
     return value.replace(old, replacement)
@@ -33,8 +33,63 @@ def lower(value: string) -> string:
 def upper(value: string) -> string:
     return value.upper()
 
+def split_lines(value: string) -> list[string]:
+    return value.split_lines()
+
+def collapse_space(value: string) -> string:
+    return value.collapse_space()
+
+def collapse_horizontal_space(value: string) -> string:
+    return value.collapse_horizontal_space()
+
 def casefold(value: string) -> string:
     return platform.string_casefold(value)
 
 def encode(value: string) -> list[int]:
     return platform.string_encode(value)
+
+test "built-in string methods cover normalization, search, and classification":
+    assert("  one\t two\nthree  ".collapse_space() == "one two three")
+    assert("  one\t two\nthree  ".collapse_horizontal_space() == "one two\nthree")
+    assert("\r\none\r\ntwo\n".split_lines() == ["", "one", "two"])
+    assert("one\ntwo".splitlines() == ["one", "two"])
+    assert("hello HELLO".capitalize() == "Hello hello")
+    assert("hello world".title() == "Hello World")
+    assert("Hello".swapcase() == "hELLO")
+    assert("banana".rfind("an") == 3)
+    assert("banana".contains("nan"))
+    assert("Ada_1".characters().filter(|character| character.is_word()).join("") == "Ada_1")
+    assert("abc123".is_alnum())
+    assert("_".is_word())
+    assert("!".is_punctuation())
+
+test "built-in string methods support affixes, translation, filtering, and separator join":
+    assert("///tmp".trim_prefix("/") == "tmp")
+    assert("archive.tar.tar".remove_suffix(".tar") == "archive.tar")
+    assert("Jaina’s \"Image\"".translate({"’": "'", "\"": "", "'": ""}) == "Jaina's Image")
+    assert("a-b c!".filter(|character| character.is_alnum() or character.is_space()) == "ab c")
+    assert("_".join(["high", "overlord", "saurfang"]) == "high_overlord_saurfang")
+
+test "built-in string conveniences cover layout and extraction":
+    assert("ab".repeat(3) == "ababab")
+    assert("x".pad_left(3) == "  x")
+    assert("x".pad_right(3) == "x  ")
+    assert("x".center(4) == " x  ")
+    assert("severian".first(3) == "sev")
+    assert("severian".last(3) == "ian")
+    assert("severian".drop(3) == "erian")
+    assert("severian".slice(1, 4) == "eve")
+    assert("one/two/three".before("/") == "one")
+    assert("one/two/three".after_last("/") == "three")
+    assert("say [hello] now".between("[", "]") == "hello")
+    assert("a-(b)[c]{d}".remove("()[]{}") == "a-bcd")
+    assert("a-b-c".remove("-c") == "ab")
+    assert("one <pause> two [bell] three".remove(["<pause>", "[bell]"]) == "one  two  three")
+    assert("abc".remove(["a", "ab"]) == "c")
+    assert("a-b-c".remove_all("-c") == "a-b")
+    assert("$N greets $R".replace_many({"$N": "Ada", "$R": "Grace"}) == "Ada greets Grace")
+    assert("a-a-a".replace("a", "x", 2) == "x-x-a")
+    assert("one/two/three".split("/", 1) == ["one", "two/three"])
+    assert("one/two/three".rsplit("/", 1) == ["one/two", "three"])
+    assert("one/two/three".partition("/") == ("one", "/", "two/three"))
+    assert("one/two/three".rpartition("/") == ("one/two", "/", "three"))

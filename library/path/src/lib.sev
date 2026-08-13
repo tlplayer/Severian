@@ -32,3 +32,17 @@ def extension(value: string) -> string:
 
 def absolute(value: string) -> string:
     return platform.path_absolute(value)
+
+def sanitize_name(value: string) -> string:
+    words := []
+    for word in value.strip().lower().words():
+        cleaned := ""
+        for character in word.characters():
+            if character.is_ascii_alnum() or character == "-" or character == "_":
+                cleaned += character
+        if not cleaned.is_empty():
+            words.append(cleaned)
+    return "_".join(words)
+
+test "path names are safe and stable":
+    assert(sanitize_name("High  Overlord Saurfang!") == "high_overlord_saurfang")

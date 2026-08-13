@@ -3615,15 +3615,22 @@ fn resolve_linked_function<'a>(
 
 fn method_return_type(object: ValueType, method: &str) -> ValueType {
     match (object, method) {
-        (ValueType::String, "characters" | "words" | "split")
+        (
+            ValueType::String,
+            "characters" | "words" | "split" | "rsplit" | "splitlines" | "split_lines" | "lines",
+        )
         | (ValueType::List, "reversed" | "sorted" | "map" | "filter")
         | (ValueType::Map, "keys" | "values")
         | (ValueType::Set, "to_list" | "toList") => ValueType::List,
         (ValueType::String | ValueType::List, "frequencies") => ValueType::Map,
         (ValueType::List, "to_set" | "toSet") | (ValueType::Set, "difference") => ValueType::Set,
-        (ValueType::List, "join") => ValueType::String,
+        (ValueType::String | ValueType::List, "join") => ValueType::String,
+        (ValueType::String, "filter") => ValueType::String,
+        (ValueType::String, "partition" | "rpartition") => ValueType::Tuple,
         (ValueType::List, "reduce") => ValueType::Any,
-        (ValueType::String, "length" | "find" | "count") => ValueType::Int,
+        (ValueType::String, "length" | "find" | "rfind" | "index" | "rindex" | "count") => {
+            ValueType::Int
+        }
         (
             ValueType::String
             | ValueType::List
@@ -3634,10 +3641,49 @@ fn method_return_type(object: ValueType, method: &str) -> ValueType {
             | ValueType::TensorAny,
             "len" | "size" | "bytes" | "bits" | "capacity",
         ) => ValueType::Int,
-        (ValueType::String, "starts_with" | "startsWith" | "ends_with" | "endsWith") => {
-            ValueType::Bool
-        }
-        (ValueType::String, "strip" | "lower" | "upper" | "replace") => ValueType::String,
+        (
+            ValueType::String,
+            "starts_with" | "startsWith" | "ends_with" | "endsWith" | "contains" | "is_empty"
+            | "is_space" | "is_alpha" | "is_digit" | "is_alnum" | "is_ascii" | "is_lower"
+            | "is_upper" | "is_ascii_alnum" | "is_word" | "is_punctuation",
+        ) => ValueType::Bool,
+        (
+            ValueType::String,
+            "strip"
+            | "lstrip"
+            | "rstrip"
+            | "lower"
+            | "upper"
+            | "capitalize"
+            | "title"
+            | "swapcase"
+            | "collapse_space"
+            | "collapse_horizontal_space"
+            | "normalize_space"
+            | "trim_prefix"
+            | "trim_suffix"
+            | "remove_prefix"
+            | "remove_suffix"
+            | "translate"
+            | "replace_many"
+            | "remove"
+            | "remove_all"
+            | "repeat"
+            | "pad_left"
+            | "pad_right"
+            | "center"
+            | "first"
+            | "take"
+            | "last"
+            | "drop"
+            | "slice"
+            | "before"
+            | "after"
+            | "before_last"
+            | "after_last"
+            | "between"
+            | "replace",
+        ) => ValueType::String,
         (
             ValueType::List,
             "append" | "append_left" | "appendleft" | "extend" | "insert" | "remove" | "heap_push"
@@ -3706,13 +3752,49 @@ fn validate_builtin_method(
         (ValueType::Map, "keys" | "values") => Some(0..=0),
         (
             ValueType::String,
-            "characters" | "words" | "frequencies" | "strip" | "lower" | "upper" | "length",
+            "characters"
+            | "words"
+            | "splitlines"
+            | "split_lines"
+            | "lines"
+            | "frequencies"
+            | "strip"
+            | "lstrip"
+            | "rstrip"
+            | "lower"
+            | "upper"
+            | "capitalize"
+            | "title"
+            | "swapcase"
+            | "collapse_space"
+            | "collapse_horizontal_space"
+            | "normalize_space"
+            | "is_empty"
+            | "is_space"
+            | "is_alpha"
+            | "is_digit"
+            | "is_alnum"
+            | "is_ascii"
+            | "is_lower"
+            | "is_upper"
+            | "is_ascii_alnum"
+            | "is_word"
+            | "is_punctuation"
+            | "length",
         ) => Some(0..=0),
         (
             ValueType::String,
-            "split" | "starts_with" | "startsWith" | "ends_with" | "endsWith" | "find" | "count",
+            "starts_with" | "startsWith" | "ends_with" | "endsWith" | "contains" | "find" | "rfind"
+            | "index" | "rindex" | "count" | "trim_prefix" | "trim_suffix" | "remove_prefix"
+            | "remove_suffix" | "translate" | "replace_many" | "remove" | "remove_all" | "repeat"
+            | "pad_left" | "pad_right" | "center" | "first" | "take" | "last" | "drop" | "before"
+            | "after" | "before_last" | "after_last" | "join" | "filter",
         ) => Some(1..=1),
-        (ValueType::String, "replace") => Some(2..=2),
+        (ValueType::String, "slice" | "between") => Some(2..=2),
+        (ValueType::String, "split") => Some(0..=2),
+        (ValueType::String, "rsplit") => Some(1..=2),
+        (ValueType::String, "partition" | "rpartition") => Some(1..=1),
+        (ValueType::String, "replace") => Some(2..=3),
         (
             ValueType::String
             | ValueType::List
@@ -3738,6 +3820,19 @@ fn validate_builtin_method(
     if object == ValueType::List && matches!(method, "map" | "filter" | "reduce") {
         if !matches!(args.first(), Some(ValueType::Function | ValueType::Any)) {
             return Err(error(span, format!("method `{method}` expects a callable")));
+        }
+    }
+    if object == ValueType::String && method == "filter" {
+        if !matches!(args.first(), Some(ValueType::Function | ValueType::Any)) {
+            return Err(error(span, "method `filter` expects a callable"));
+        }
+    }
+    if object == ValueType::String && method == "remove" {
+        if !matches!(args.first(), Some(ValueType::String | ValueType::List)) {
+            return Err(error(
+                span,
+                "method `remove` expects a string of characters or a list of exact strings",
+            ));
         }
     }
     if object == ValueType::List && method == "sorted" && !args.is_empty() {

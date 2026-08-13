@@ -11,8 +11,6 @@ unsafe:
     native("__sev_map_clear") def map_clear[key, value](values: map[key, value])
     native("__sev_platform_set_add") def set_add[type](values: set[type], value: type)
     native("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
-    native("__sev_string_lstrip") def string_lstrip(value: string) -> string
-    native("__sev_string_rstrip") def string_rstrip(value: string) -> string
     native("__sev_string_casefold") def string_casefold(value: string) -> string
     native("__sev_string_encode") def string_encode(value: string) -> list[int]
     native("__sev_math_sqrt") def math_sqrt(value: float) -> float
@@ -239,3 +237,9 @@ unsafe:
     native("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
     native("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
     native("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]
+
+def string_lstrip(value: string) -> string:
+    return value.lstrip()
+
+def string_rstrip(value: string) -> string:
+    return value.rstrip()
