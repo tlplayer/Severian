@@ -778,8 +778,27 @@ pub fn attach_module_metadata(
     source: impl Into<String>,
     namespace: Option<&str>,
 ) {
+    attach_module_metadata_with_packages(module, program, path, source, namespace, &[]);
+}
+
+pub fn attach_module_metadata_with_packages(
+    module: &Module,
+    program: &mut Program,
+    path: impl Into<PathBuf>,
+    source: impl Into<String>,
+    namespace: Option<&str>,
+    interfaces: &[PackageInterface],
+) {
     let mut metadata = std::mem::take(&mut program.metadata);
-    attach_module_metadata_to(module, program, &mut metadata, path, source, namespace);
+    attach_module_metadata_to_with_packages(
+        module,
+        program,
+        &mut metadata,
+        path,
+        source,
+        namespace,
+        interfaces,
+    );
     program.metadata = metadata;
 }
 
@@ -791,8 +810,28 @@ pub fn attach_module_metadata_to(
     source: impl Into<String>,
     namespace: Option<&str>,
 ) {
+    attach_module_metadata_to_with_packages(
+        module,
+        program,
+        metadata,
+        path,
+        source,
+        namespace,
+        &[],
+    );
+}
+
+pub fn attach_module_metadata_to_with_packages(
+    module: &Module,
+    program: &mut Program,
+    metadata: &mut ProgramMetadata,
+    path: impl Into<PathBuf>,
+    source: impl Into<String>,
+    namespace: Option<&str>,
+    interfaces: &[PackageInterface],
+) {
     let file = program.attach_source_file_to(metadata, path, source);
-    let known_types = module
+    let mut known_types = module
         .items
         .iter()
         .filter_map(|item| match item {
@@ -811,6 +850,35 @@ pub fn attach_module_metadata_to(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
+    let imports = collect_imports(module);
+    for interface in interfaces {
+        for item in &interface.module.items {
+            let type_name = match item {
+                Item::Class(class) => &class.name.name,
+                Item::Trait(trait_) => &trait_.name.name,
+                Item::Enum(enumeration) => &enumeration.name.name,
+                _ => continue,
+            };
+            let canonical = format!("{}.{}", interface.name, type_name);
+            let id = TypeDefinitionId::from_name(&canonical);
+            known_types.insert(canonical.clone(), id);
+            if let Some(package) = &interface.export_package {
+                known_types.insert(format!("{package}.{type_name}"), id);
+            }
+            for (exposed, target) in &imports {
+                if target == &canonical {
+                    known_types.insert(exposed.clone(), id);
+                } else if target == &interface.name
+                    || interface
+                        .export_package
+                        .as_ref()
+                        .is_some_and(|package| target == package)
+                {
+                    known_types.insert(format!("{exposed}.{type_name}"), id);
+                }
+            }
+        }
+    }
     let mut variant_owners = HashMap::new();
 
     for item in &module.items {

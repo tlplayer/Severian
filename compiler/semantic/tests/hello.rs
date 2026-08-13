@@ -3,8 +3,13 @@ use severian_hir::{
     TensorElementType, TypeDefinitionId, TypeKind, ValueType, VariantId,
 };
 use severian_lexer::lex;
+use severian_package::PackageInterface;
 use severian_parser::parse;
-use severian_semantic::{analyze, analyze_with_interfaces, attach_module_metadata};
+use severian_semantic::{
+    analyze, analyze_with_interfaces, analyze_with_packages, attach_module_metadata,
+    attach_module_metadata_with_packages,
+};
+use std::path::PathBuf;
 
 #[test]
 fn resolves_print_and_lowers_hello_to_hir() {
@@ -559,6 +564,50 @@ fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
         panic!("expected an enum variant")
     };
     assert_eq!(*type_id, Some(outcome_id));
+}
+
+#[test]
+fn imported_function_returns_keep_the_canonical_class_definition() {
+    let data_source = concat!(
+        "class Data:\n",
+        "    def filter() -> Data:\n",
+        "        return Data()\n",
+    );
+    let data_module = parse(&lex(data_source).unwrap()).unwrap();
+    let interface = PackageInterface {
+        name: "data".into(),
+        export_package: None,
+        module: data_module,
+        compiler: Default::default(),
+        source_path: PathBuf::from("/workspace/data.sev"),
+        source: data_source.into(),
+    };
+    let helper_source = concat!(
+        "import data as tabular\n",
+        "\n",
+        "def make() -> tabular.Data:\n",
+        "    return tabular.Data()\n",
+    );
+    let helper = parse(&lex(helper_source).unwrap()).unwrap();
+    let mut hir = analyze_with_packages(&helper, std::slice::from_ref(&interface)).unwrap();
+    attach_module_metadata_with_packages(
+        &helper,
+        &mut hir,
+        "/workspace/helper.sev",
+        helper_source,
+        Some("helper"),
+        &[interface],
+    );
+
+    let signature = &hir.metadata.functions[&FunctionId::from_name("helper.make")];
+    let TypeKind::Named {
+        definition, name, ..
+    } = hir.metadata.types.get(signature.returns).unwrap()
+    else {
+        panic!("expected imported return type to retain its nominal class")
+    };
+    assert_eq!(*definition, TypeDefinitionId::from_name("data.Data"));
+    assert_eq!(name, "tabular.Data");
 }
 
 #[test]

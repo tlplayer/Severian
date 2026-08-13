@@ -87,6 +87,28 @@ def deduplicate_records_by(source_columns: list[string], source_rows: list[list[
             seen[key] = true
     return Data(source_columns, retained)
 
+def index_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: fn[string, Any, Any]) -> map[string, bool]:
+    index := {}
+    for values in source_rows:
+        index[callback_key(Row(source_columns, values), columns, normalize)] = true
+    return index
+
+def group_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> list[Data]:
+    order := []
+    groups := {}
+    for values in source_rows:
+        row = Row(source_columns, values)
+        key = normalized_key(row, columns, [], false)
+        group = groups.get(key, [])
+        if size(group) == 0:
+            order.append(key)
+        group.append(values)
+        groups[key] = group
+    result: list[Data] = []
+    for key in order:
+        result.append(Data(source_columns, groups.get(key, [])))
+    return result
+
 class Data:
     columns_data: list[string]
     rows_data: list[list[Any]]
@@ -226,11 +248,17 @@ class Data:
                 filtered.append(values)
         return Data(columns_data, filtered)
 
-    def sort(column: string, descending: bool = false) -> Data:
+    def sort(column: string) -> Data:
         position = column_position(columns_data, column)
         if position < 0:
             return Data(columns_data, rows_data)
-        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position), descending))
+        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position)))
+
+    def sort_descending(column: string) -> Data:
+        position = column_position(columns_data, column)
+        if position < 0:
+            return Data(columns_data, rows_data)
+        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position), true))
 
     def unique(columns: list[string]) -> Data:
         return deduplicate_records(columns_data, rows_data, columns, [], false)
@@ -241,8 +269,22 @@ class Data:
     def unique_by(columns: list[string], normalize: fn[string, Any, Any]) -> Data:
         return deduplicate_records_by(columns_data, rows_data, columns, normalize)
 
+    def index(columns: list[string]) -> map[string, bool]:
+        return index_records_by(columns_data, rows_data, columns, |column, value| value)
+
+    def index_by(columns: list[string], normalize: fn[string, Any, Any]) -> map[string, bool]:
+        return index_records_by(columns_data, rows_data, columns, normalize)
+
+    def group(columns: list[string]) -> list[Data]:
+        return group_records(columns_data, rows_data, columns)
+
+def example_data() -> Data:
+    return Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
+
 test "Data provides schema projection, filtering, transforms, and uniqueness":
-    table := Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
+    constructed := Data(["name"], [["Ada"], ["Grace"]])
+    assert(constructed.filter(|row| row.get("name") == "Ada").row_count() == 1)
+    table := example_data()
     assert(table.columns() == ["name", "group"])
     assert(table.rows()[0].get("name") == "Ada")
     assert(table.get("name") == ["Ada", "Grace", "Ada"])
@@ -254,3 +296,8 @@ test "Data provides schema projection, filtering, transforms, and uniqueness":
     assert(table.filter(|row| row.get("name") == "Ada").row_count() == 2)
     assert(table.transform("group", |value| value.lower()).get("group") == ["a", "b", "a"])
     assert(table.unique_by(["name", "group"], |column, value| value.lower() if column == "group" else value).row_count() == 2)
+    assert(table.index_by(["name", "group"], |column, value| value.lower()).get("[\"ada\",\"a\"]", false))
+    assert(table.sort("name").get("name") == ["Ada", "Ada", "Grace"])
+    groups = table.group(["name"])
+    assert(size(groups) == 2)
+    assert(groups[0].get("name") == ["Ada", "Ada"])

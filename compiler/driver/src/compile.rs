@@ -114,13 +114,14 @@ fn link_package_hir(
         })?;
         qualify_package_functions(&mut dependency, &interface.name);
         let mut metadata = std::mem::take(&mut program.metadata);
-        severian_semantic::attach_module_metadata_to(
+        severian_semantic::attach_module_metadata_to_with_packages(
             &interface.module,
             &mut dependency,
             &mut metadata,
             interface.source_path.clone(),
             interface.source.clone(),
             Some(&interface.name),
+            interfaces,
         );
         program.metadata = metadata;
 
@@ -166,6 +167,7 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
         function.id = severian_hir::FunctionId::from_name(&function.name);
     }
     for class in &mut program.classes {
+        class.id = severian_hir::TypeDefinitionId::from_name(&format!("{package}.{}", class.name));
         for function in class.methods.iter_mut().chain(&mut class.constructors) {
             function.id = severian_hir::FunctionId::from_name(&format!(
                 "{package}.{}.{}",
@@ -230,12 +232,13 @@ fn check_ast(
             source: source.to_owned(),
         }
     })?;
-    severian_semantic::attach_module_metadata(
+    severian_semantic::attach_module_metadata_with_packages(
         ast,
         &mut hir,
         source_path.to_path_buf(),
         source.to_owned(),
         None,
+        interfaces,
     );
     severian_ownership::check(&hir)
         .map_err(|error| ownership_compile_error(error.message, source_path, source))?;

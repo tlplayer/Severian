@@ -11,9 +11,9 @@ pub mod stablehlo;
 pub mod tensor;
 
 use severian_hir::{
-    AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, FunctionId,
-    Instruction, MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId,
-    TypeKind, UnaryOp, ValueType,
+    AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,
+    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId, TypeKind,
+    UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::cell::{Cell, RefCell};
@@ -442,34 +442,30 @@ fn lower_hir(program: &Program) -> Module {
         .functions
         .iter()
         .filter_map(|function| {
-            let signature = program
-                .metadata
-                .functions
-                .get(&FunctionId::from_name(&function.name))?;
-            let TypeKind::Named { name, .. } = program.metadata.types.get(signature.returns)?
-            else {
-                return None;
+            let signature = program.metadata.functions.get(&function.id)?;
+            let definition = match program.metadata.types.get(signature.returns)? {
+                TypeKind::Named { definition, .. } => definition,
+                _ => return None,
             };
-            Some((
-                function.name.clone(),
-                name.rsplit('.').next().unwrap_or(name).to_owned(),
-            ))
+            Some((function.name.clone(), *definition))
         })
         .collect::<HashMap<_, _>>();
     let method_return_classes = program
         .classes
         .iter()
         .flat_map(|class| {
-            class
-                .methods
-                .iter()
-                .zip(&class.method_return_classes)
-                .filter_map(|(method, return_class)| {
-                    Some((
-                        (class.name.clone(), method.name.clone()),
-                        return_class.clone()?,
-                    ))
-                })
+            class.methods.iter().filter_map(|method| {
+                let definition = program
+                    .metadata
+                    .functions
+                    .get(&method.id)
+                    .and_then(|signature| program.metadata.types.get(signature.returns))
+                    .and_then(|kind| match kind {
+                        TypeKind::Named { definition, .. } => Some(*definition),
+                        _ => None,
+                    })?;
+                Some(((class.id, method.name.clone()), definition))
+            })
         })
         .collect::<HashMap<_, _>>();
     let closure_definitions = Rc::new(RefCell::new(String::new()));
@@ -598,8 +594,8 @@ struct LoweringEnvironment<'a> {
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
-    function_return_classes: &'a HashMap<String, String>,
-    method_return_classes: &'a HashMap<(String, String), String>,
+    function_return_classes: &'a HashMap<String, TypeDefinitionId>,
+    method_return_classes: &'a HashMap<(TypeDefinitionId, String), TypeDefinitionId>,
     closure_definitions: &'a Rc<RefCell<String>>,
     next_closure: &'a Rc<Cell<usize>>,
     function_closures: &'a Rc<RefCell<HashMap<String, String>>>,
@@ -645,6 +641,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         field_types: HashMap::new(),
         field_classes: HashMap::new(),
         object_classes: HashMap::new(),
+        object_class_ids: HashMap::new(),
         receiver_types: HashMap::new(),
         declared_return: function.return_type,
         task_results: HashMap::new(),
@@ -745,6 +742,7 @@ fn lower_class_function(
             .filter_map(|(field, class)| class.map(|class| (field, class)))
             .collect(),
         object_classes: HashMap::from([("%self".into(), class.name.clone())]),
+        object_class_ids: HashMap::from([("%self".into(), class.id)]),
         receiver_types: HashMap::new(),
         task_results: HashMap::new(),
         channel_types: HashMap::new(),
@@ -799,8 +797,8 @@ struct LowerContext<'a> {
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
-    function_return_classes: &'a HashMap<String, String>,
-    method_return_classes: &'a HashMap<(String, String), String>,
+    function_return_classes: &'a HashMap<String, TypeDefinitionId>,
+    method_return_classes: &'a HashMap<(TypeDefinitionId, String), TypeDefinitionId>,
     closure_definitions: Rc<RefCell<String>>,
     next_closure: Rc<Cell<usize>>,
     function_closures: Rc<RefCell<HashMap<String, String>>>,
@@ -811,6 +809,7 @@ struct LowerContext<'a> {
     field_types: HashMap<String, ValueType>,
     field_classes: HashMap<String, String>,
     object_classes: HashMap<String, String>,
+    object_class_ids: HashMap<String, TypeDefinitionId>,
     receiver_types: HashMap<String, severian_hir::ReceiverType>,
     task_results: HashMap<String, ValueType>,
     channel_types: HashMap<String, ValueType>,
@@ -1648,6 +1647,13 @@ impl LowerContext<'_> {
                     }
                 }
                 self.object_classes.insert(result.clone(), class.clone());
+                if let Some(definition) = self
+                    .classes
+                    .iter()
+                    .find(|candidate| candidate.name == *class)
+                {
+                    self.object_class_ids.insert(result.clone(), definition.id);
+                }
                 (result, ValueType::Any)
             }
             Expression::Member { object, member } => {
@@ -2448,9 +2454,14 @@ impl LowerContext<'_> {
                             .map(|definition| (class, definition))
                     })
                     .collect::<Vec<_>>();
-                let class = self.object_classes.get(&object).cloned().or_else(|| {
-                    (inferred_methods.len() == 1).then(|| inferred_methods[0].0.name.clone())
-                });
+                let canonical_class = self.object_class_ids.get(&object).copied();
+                let class = canonical_class
+                    .and_then(|id| self.classes.iter().find(|candidate| candidate.id == id))
+                    .map(|class| class.name.clone())
+                    .or_else(|| self.object_classes.get(&object).cloned())
+                    .or_else(|| {
+                        (inferred_methods.len() == 1).then(|| inferred_methods[0].0.name.clone())
+                    });
                 if let Some(receiver) = self.receiver_types.get(&object) {
                     if !receiver.concrete && receiver.methods.iter().any(|name| name == method) {
                         let first = inferred_methods[0].1;
@@ -2646,12 +2657,24 @@ impl LowerContext<'_> {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> {}", mlir_type(return_type)).unwrap();
                     if return_type == ValueType::Any {
-                        let returned_class = self
-                            .method_return_classes
-                            .get(&(class.clone(), method.clone()))
-                            .cloned()
-                            .unwrap_or(class);
-                        self.object_classes.insert(result.clone(), returned_class);
+                        if let Some(class_id) = canonical_class {
+                            let returned_id = self
+                                .method_return_classes
+                                .get(&(class_id, method.clone()))
+                                .copied()
+                                .unwrap_or(class_id);
+                            self.object_class_ids.insert(result.clone(), returned_id);
+                            if let Some(returned) = self
+                                .classes
+                                .iter()
+                                .find(|candidate| candidate.id == returned_id)
+                            {
+                                self.object_classes
+                                    .insert(result.clone(), returned.name.clone());
+                            }
+                        } else {
+                            self.object_classes.insert(result.clone(), class);
+                        }
                     }
                     (result, return_type)
                 }
@@ -3519,7 +3542,13 @@ impl LowerContext<'_> {
                 )
                 .unwrap();
                 if let Some(class) = self.function_return_classes.get(linked_function) {
-                    self.object_classes.insert(result.clone(), class.clone());
+                    self.object_class_ids.insert(result.clone(), *class);
+                    if let Some(definition) =
+                        self.classes.iter().find(|candidate| candidate.id == *class)
+                    {
+                        self.object_classes
+                            .insert(result.clone(), definition.name.clone());
+                    }
                 }
                 (result, return_type)
             }
@@ -3792,6 +3821,22 @@ impl LowerContext<'_> {
         let Expression::Variable(name) = object.kind() else {
             return false;
         };
+        if let Some(class_id) = self
+            .variables
+            .get(name)
+            .and_then(|(value, _)| self.object_class_ids.get(value))
+        {
+            return self
+                .classes
+                .iter()
+                .find(|class| class.id == *class_id)
+                .is_some_and(|class| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|candidate| candidate.name == method)
+                });
+        }
         let class_name = self
             .variables
             .get(name)
@@ -4098,6 +4143,7 @@ impl LowerContext<'_> {
             field_types: HashMap::new(),
             field_classes: HashMap::new(),
             object_classes: HashMap::new(),
+            object_class_ids: HashMap::new(),
             receiver_types: HashMap::new(),
             declared_return: ValueType::Any,
             task_results: HashMap::new(),
