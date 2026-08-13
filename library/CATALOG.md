@@ -10,7 +10,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Machine learning | `model`, `model.neuralnet`, `autodiff`, `optimization` | `tensor` is the canonical container; `model` owns the public machine-learning hierarchy |
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
 | Data formats | `json`, `csv`, `yaml`, `base64`, `binary` | format packages own codecs and documents; `file.read()` provides extension dispatch |
-| Files and I/O | `io`, `file`, `path` | extensible file readers and format objects experimental |
+| Files and I/O | `io`, `file`, `path`, `os` | typed contents in `file`; namespace operations and metadata in `os` |
 | Time and environment | `time`, `environment`, `process`, `system` | clock, environment, and process APIs experimental; `system` reserved |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
@@ -19,7 +19,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Security | `hash`, `crypto`, `tls` | `hash` native baseline implemented; provider policy required for cryptography |
 | Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and native MariaDB/MySQL clients experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
-| Operating systems | `kernel` | hosted kernel laboratory with memory, process, VFS, syscall, interrupt, and scheduler invariants experimental |
+| Operating systems | `os`, `kernel` | host filesystem metadata plus a hosted kernel laboratory experimental |
 | Orchestration | `orchestrator` | scheduling and reconciliation baseline experimental |
 | Development | `testing`, `benchmark`, `profile` | language design |
 

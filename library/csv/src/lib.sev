@@ -63,9 +63,6 @@ class CSV: data.Source
     def raw() -> list[int]:
         return platform.string_encode(platform.csv_encode(records_data))
 
-    def exists() -> bool:
-        return size(source_path) > 0 and platform.file_exists(source_path)
-
     def text() -> Result[string, IOError]:
         return platform.csv_encode(records_data)
 

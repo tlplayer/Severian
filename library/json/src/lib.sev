@@ -36,9 +36,6 @@ class JSON: Document
     def raw() -> list[int]:
         return platform.string_encode(platform.jsonEncode(document))
 
-    def exists() -> bool:
-        return size(source_path) > 0 and platform.file_exists(source_path)
-
     def text() -> Result[string, IOError]:
         return platform.jsonEncode(document)
 
@@ -156,4 +153,3 @@ test "JSON document supports memory and mutation":
     assert(as_string(value.get("name")) == "Ada")
     value.set("name", "Grace")
     assert(value.encode() == "{\"name\":\"Grace\",\"languages\":2}")
-    assert(not value.exists())

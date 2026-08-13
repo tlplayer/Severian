@@ -8,4 +8,5 @@ description = "Filesystem path operations"
 path = "src/lib.sev"
 
 [dependencies]
+os = { path = "../os", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }

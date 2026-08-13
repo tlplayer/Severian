@@ -32,9 +32,6 @@ class WAV: file_interface.File
     def raw() -> list[int]:
         return data
 
-    def exists() -> bool:
-        return platform.file_exists(source_path)
-
     def text() -> Result[string, file_interface.FormatError]:
         return failure(file_interface.FormatError("WAV files do not have text content"))
 

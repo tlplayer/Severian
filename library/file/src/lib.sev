@@ -18,35 +18,11 @@ def write(path: string, contents: string) -> Result[unit, IOError]:
 def write_text(path: string, contents: string) -> Result[unit, IOError]:
     return write(path, contents)
 
-def exists(path: string) -> bool:
-    return platform.file_exists(path)
-
-def remove(path: string) -> Result[unit, IOError]:
-    return platform.file_remove(path)
-
-def rename(source: string, destination: string) -> Result[unit, IOError]:
-    return platform.file_rename(source, destination)
-
-def copy(source: string, destination: string) -> Result[unit, IOError]:
-    return platform.file_copy(source, destination)
-
 def append_text(path: string, contents: string) -> Result[unit, IOError]:
     return platform.file_append(path, contents)
 
 def write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]:
     return platform.file_write_bytes(path, contents)
-
-def size(path: string) -> Result[int, IOError]:
-    return platform.file_size_path(path)
-
-def modified_seconds(path: string) -> Result[float, IOError]:
-    return platform.file_modified_seconds(path)
-
-def list_directory(path: string) -> Result[list[string], IOError]:
-    return platform.directory_list(path)
-
-def make_directories(path: string) -> Result[unit, IOError]:
-    return platform.directory_make_all(path)
 
 def parse_csv(path: string) -> Result[list[list[string]], IOError | file_interface.FormatError]:
     document ?= read(path)
@@ -148,9 +124,6 @@ def mappedBytes(mapping: Any) -> int:
 
 def littleEndianU64(data: list[int]) -> int:
     return little_endian_u64(data)
-
-def makeDirectories(path: string) -> Result[unit, IOError]:
-    return make_directories(path)
 
 test "native file round trip":
     path = "/tmp/severian-library-file-roundtrip.txt"

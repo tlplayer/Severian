@@ -7,7 +7,6 @@ trait File:
     size() -> int
     bytes() -> int
     raw() -> list[int]
-    exists() -> bool
     text() -> Result[string, FormatError]
     value() -> Any
     write() -> Result[unit, IOError]

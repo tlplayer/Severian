@@ -3,6 +3,7 @@ import http
 import json
 import model
 import models
+import os
 
 
 model_id = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -101,8 +102,9 @@ class Application:
 
 
 def downloadIfMissing(url: string, destination: string) -> Result[unit, exception]:
-    if file.exists(destination):
-        assert(file.size(destination) > 0)
+    if os.exists(destination):
+        information ?= os.stat(destination)
+        assert(information.size > 0)
         return
 
     print("downloading", url)
@@ -111,12 +113,13 @@ def downloadIfMissing(url: string, destination: string) -> Result[unit, exceptio
     response ?= http.download(url, destination)
 
     assert(response.status == 200)
-    assert(file.exists(destination))
-    assert(file.size(destination) > 0)
+    assert(os.exists(destination))
+    information ?= os.stat(destination)
+    assert(information.size > 0)
 
 
 def prepareModelFiles() -> Result[ModelFiles, exception]:
-    created ?= file.makeDirectories(model_root)
+    created ?= os.mkdir(model_root)
 
     config_download ?= downloadIfMissing(config_url, config_path)
     weights_download ?= downloadIfMissing(weights_url, weights_path)

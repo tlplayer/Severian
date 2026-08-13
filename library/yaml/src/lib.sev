@@ -81,9 +81,6 @@ class YAML:
     def raw() -> list[int]:
         return platform.string_encode(encode_mapping(mapping))
 
-    def exists() -> bool:
-        return size(source_path) > 0 and platform.file_exists(source_path)
-
     def text() -> Result[string, IOError]:
         return encode_mapping(mapping)
 

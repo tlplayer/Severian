@@ -23,8 +23,9 @@ Literal paths refine statically: `.csv` is `csv.CSV`, `.json` is `json.JSON`,
 
 The packages do not duplicate one another:
 
-- `file` owns path metadata, the `File` and `Reader` contracts, extension
+- `file` owns content objects, the `File` and `Reader` contracts, extension
   dispatch, and binary/text/audio adapters.
+- `os` owns namespace operations and path metadata through `os.stat()`.
 - `csv` owns `CSV`, `CSVRow`, parsing, quoting, mutation, and encoding.
 - `json` owns `JSON`, typed/in-memory decoding, mutation, and encoding.
 - `yaml` owns `YAML`, mapping access, mutation, and encoding.

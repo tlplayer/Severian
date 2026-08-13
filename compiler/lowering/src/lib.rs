@@ -1459,7 +1459,11 @@ impl LowerContext<'_> {
             Expression::Function(name) => {
                 let adapter = self.ensure_function_closure(name);
                 let kind = self.fresh_value();
-                writeln!(self.output, "    {kind} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+                writeln!(
+                    self.output,
+                    "    {kind} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
                 let environment = self.fresh_value();
                 writeln!(self.output, "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
                 let function = self.fresh_value();
@@ -3546,7 +3550,12 @@ impl LowerContext<'_> {
                 let type_suffix = if values.is_empty() {
                     String::new()
                 } else {
-                    format!(", {}", std::iter::repeat_n("!llvm.ptr", values.split(", ").count()).collect::<Vec<_>>().join(", "))
+                    format!(
+                        ", {}",
+                        std::iter::repeat_n("!llvm.ptr", values.split(", ").count())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 };
                 if *return_type == ValueType::Unit {
                     writeln!(
@@ -3971,13 +3980,22 @@ impl LowerContext<'_> {
             .cloned()
             .unwrap_or_else(|| source_function_symbol(function));
         if return_type == ValueType::Unit {
-            writeln!(context.output, "    llvm.call @{target}({values}) : ({types}) -> ()").unwrap();
+            writeln!(
+                context.output,
+                "    llvm.call @{target}({values}) : ({types}) -> ()"
+            )
+            .unwrap();
             let empty = context.fresh_value();
             writeln!(context.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
             writeln!(context.output, "    llvm.return {empty} : !llvm.ptr").unwrap();
         } else {
             let result = context.fresh_value();
-            writeln!(context.output, "    {result} = llvm.call @{target}({values}) : ({types}) -> {}", mlir_type(return_type)).unwrap();
+            writeln!(
+                context.output,
+                "    {result} = llvm.call @{target}({values}) : ({types}) -> {}",
+                mlir_type(return_type)
+            )
+            .unwrap();
             let boxed = context.box_value((result, return_type));
             writeln!(context.output, "    llvm.return {boxed} : !llvm.ptr").unwrap();
         }
@@ -3996,9 +4014,17 @@ impl LowerContext<'_> {
         captures.sort_by(|left, right| left.0.cmp(&right.0));
 
         let kind = self.fresh_value();
-        writeln!(self.output, "    {kind} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+        writeln!(
+            self.output,
+            "    {kind} = llvm.mlir.constant(0 : i64) : i64"
+        )
+        .unwrap();
         let environment = self.fresh_value();
-        writeln!(self.output, "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
+        writeln!(
+            self.output,
+            "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr"
+        )
+        .unwrap();
         let mut capture_classes = HashMap::new();
         for (name, value) in &captures {
             let boxed = self.box_value(value.clone());
@@ -4017,12 +4043,18 @@ impl LowerContext<'_> {
         let mut context = self.callback_context(&mut definition);
         for (index, (name, (_, ty))) in captures.iter().enumerate() {
             let position = context.fresh_value();
-            writeln!(context.output, "    {position} = llvm.mlir.constant({index} : i64) : i64").unwrap();
+            writeln!(
+                context.output,
+                "    {position} = llvm.mlir.constant({index} : i64) : i64"
+            )
+            .unwrap();
             let raw = context.fresh_value();
             writeln!(context.output, "    {raw} = llvm.call @__sev_collection_get(%environment, {position}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
             let value = context.unbox_value((raw, ValueType::Any), *ty);
             if let Some(class) = capture_classes.get(name) {
-                context.object_classes.insert(value.0.clone(), class.clone());
+                context
+                    .object_classes
+                    .insert(value.0.clone(), class.clone());
             }
             context.variables.insert(name.clone(), value);
         }

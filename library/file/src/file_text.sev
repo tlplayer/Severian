@@ -29,9 +29,6 @@ class Text: file_interface.File
     def raw() -> list[int]:
         return platform.string_encode(content)
 
-    def exists() -> bool:
-        return platform.file_exists(source_path)
-
     def text() -> Result[string, file_interface.FormatError]:
         return content
 

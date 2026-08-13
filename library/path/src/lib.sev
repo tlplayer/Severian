@@ -1,16 +1,25 @@
+import os
 import platform
 
 def join(left: string, right: string) -> string:
     return platform.path_join(left, right)
 
 def exists(value: string) -> bool:
-    return platform.file_exists(value)
+    return os.exists(value)
 
 def is_file(value: string) -> bool:
-    return platform.path_is_file(value)
+    switch os.stat(value):
+        ok information:
+            return information.is_file
+        failure _error:
+            return false
 
 def is_dir(value: string) -> bool:
-    return platform.path_is_dir(value)
+    switch os.stat(value):
+        ok information:
+            return information.is_directory
+        failure _error:
+            return false
 
 def basename(value: string) -> string:
     return platform.path_basename(value)
