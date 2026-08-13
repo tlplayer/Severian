@@ -1,0 +1,26 @@
+version = 1
+
+[[packages]]
+name = "container"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/container"
+
+[[packages]]
+name = "model"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model"
+
+[[packages]]
+name = "model.neuralnet"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model/neuralnet"
+
+[[packages]]
+name = "platform"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/container/../platform"
+
+[[packages]]
+name = "tensor"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../tensor"

@@ -7,6 +7,7 @@ members = [
     "string",
     "agent",
     "container",
+    "csv",
     "database",
     "distributed",
     "file",
@@ -15,6 +16,7 @@ members = [
     "kernel",
     "hypervisor",
     "harness",
+    "hash",
     "log",
     "math",
     "random",
@@ -37,9 +39,11 @@ members = [
     "system",
     "tensor",
     "vm",
+    "yaml",
 ]
 
 [workspace.metadata.library]
 namespace = "flat"
 source-root = "library"
 runtime-root = "runtime"
+    "mysql",

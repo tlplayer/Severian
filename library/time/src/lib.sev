@@ -8,3 +8,10 @@ def sleep(seconds: float):
 
 def monotonic() -> float:
     return platform.time_monotonic()
+
+def parse_date(value: string) -> Result[float, IOError]:
+    return platform.time_parse_date(value)
+
+test "calendar dates convert to an epoch timestamp":
+    timestamp ?= parse_date("2020-01-02")
+    assert(timestamp > 1577836800.0)

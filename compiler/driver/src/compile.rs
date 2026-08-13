@@ -166,7 +166,9 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
         function.id = severian_hir::FunctionId::from_name(&function.name);
     }
     program.visit_expressions_mut(&mut |expression| match expression {
-        severian_hir::Expression::Call { target, .. } if local_names.contains(&target.name) => {
+        severian_hir::Expression::Call { target, .. }
+            if local_names.contains(&target.name) && !is_intrinsic_call(&target.name) =>
+        {
             target.name = format!("{package}.{}", target.name);
             target.id = severian_hir::FunctionId::from_name(&target.name);
         }
@@ -178,6 +180,31 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
         }
         _ => {}
     });
+}
+
+fn is_intrinsic_call(name: &str) -> bool {
+    matches!(
+        name,
+        "print"
+            | "panic"
+            | "float"
+            | "string"
+            | "range"
+            | "indices"
+            | "enumerate"
+            | "zip"
+            | "any"
+            | "all"
+            | "abs"
+            | "min"
+            | "max"
+            | "divmod"
+            | "len"
+            | "size"
+            | "bytes"
+            | "bits"
+            | "capacity"
+    )
 }
 
 fn check_ast(

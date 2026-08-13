@@ -39,6 +39,14 @@ unsafe:
     native("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
     native("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
     native("__sev_file_copy") def file_copy(source: string, destination: string) -> Result[unit, IOError]
+    native("__sev_file_append") def file_append(path: string, contents: string) -> Result[unit, IOError]
+    native("__sev_file_write_bytes") def file_write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]
+    native("__sev_file_size_path") def file_size_path(path: string) -> Result[int, IOError]
+    native("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> Result[float, IOError]
+    native("__sev_directory_list") def directory_list(path: string) -> Result[list[string], IOError]
+    native("__sev_directory_make_all") def directory_make_all(path: string) -> Result[unit, IOError]
+    native("__sev_csv_parse") def csv_parse(contents: string) -> list[list[string]]
+    native("__sev_csv_encode") def csv_encode(rows: list[list[string]]) -> string
     native("__sev_path_join") def path_join(left: string, right: string) -> string
     native("__sev_path_is_file") def path_is_file(path: string) -> bool
     native("__sev_path_is_dir") def path_is_dir(path: string) -> bool
@@ -49,6 +57,7 @@ unsafe:
     native("__sev_time_seconds") def time_seconds() -> float
     native("__sev_time_sleep") def time_sleep(seconds: float)
     native("__sev_time_monotonic") def time_monotonic() -> float
+    native("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
     native("__sev_environment_get") def environment_get(name: string, fallback: string) -> string
     native("__sev_environment_set") def environment_set(name: string, value: string) -> bool
     native("__sev_environment_remove") def environment_remove(name: string) -> bool
@@ -60,6 +69,8 @@ unsafe:
     native("__sev_process_wait") def process_wait(process: int) -> int
     native("__sev_process_kill") def process_kill(process: int) -> bool
     native("__sev_process_exit") def process_exit(status: int)
+    native("__sev_process_arguments") def process_arguments() -> list[string]
+    native("__sev_hash_md5") def hash_md5(value: string) -> string
     native("__sev_network_connect") def network_connect(address: string) -> Result[Any, IOError]
     native("__sev_network_accept") def network_accept(listener: TCPListener) -> Result[Any, IOError]
     native("__sev_network_send") def network_send(socket: Any, message: string) -> Result[int, IOError]
@@ -109,6 +120,9 @@ unsafe:
     native("__sev_file_unmap") def fileUnmap(mapping: Any) -> Result[unit, IOError]
     native("__sev_file_unmap") def file_unmap(mapping: Any) -> Result[unit, IOError]
 
+    native("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
+    native("__sev_file_unlock") def file_unlock(handle: Any) -> Result[unit, IOError]
+
     native("__sev_file_format_register") def file_format_register(extension: string, reader: Any)
 
     native("__sev_file_format_reader") def file_format_reader(extension: string, fallback: Any) -> Any
@@ -142,6 +156,10 @@ unsafe:
 
     native("__sev_json_object_keys") def jsonObjectKeys(value: Any) -> list[string]
 
+    native("__sev_json_object_values") def jsonObjectValues(value: Any) -> list[Any]
+
+    native("__sev_json_object_set") def jsonObjectSet(value: Any, key: string, item: Any)
+
     native("__sev_json_as_string") def jsonAsString(value: Any) -> string
 
     native("__sev_json_as_int") def jsonAsInt(value: Any) -> int
@@ -153,6 +171,8 @@ unsafe:
     native("__sev_json_as_int_list") def jsonAsIntList(value: Any) -> list[int]
 
     native("__sev_json_as_string_list") def jsonAsStringList(value: Any) -> list[string]
+    native("__sev_json_is_null") def jsonIsNull(value: Any) -> bool
+    native("__sev_json_kind") def jsonKind(value: Any) -> string
 
 test "native JSON encode ABI":
     assert(jsonEncode([1, 2, 3]) == "[1,2,3]")
@@ -214,3 +234,8 @@ unsafe:
     native("__sev_database_server_close") def databaseServerClose(connection: DatabaseConnection) -> Result[unit, DatabaseError]
 
     native("__sev_database_server_stop") def databaseServerStop(server: DatabaseServer) -> Result[unit, DatabaseError]
+
+    native("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Result[Database, DatabaseError]
+    native("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+    native("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
+    native("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]

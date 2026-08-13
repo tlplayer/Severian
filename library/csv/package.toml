@@ -1,8 +1,8 @@
 [package]
-name = "json"
+name = "csv"
 version = "0.1.0"
 edition = "2026"
-description = "JSON documents, typed codecs, and file-format integration"
+description = "CSV documents, rows, mutation, and encoding"
 
 [lib]
 path = "src/lib.sev"

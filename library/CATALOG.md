@@ -9,15 +9,15 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Numerics | `math`, `tensor`, `probability`, `statistics`, `random` | `math`, `tensor`, `probability`, and `random` experimental |
 | Machine learning | `model`, `model.neuralnet`, `autodiff`, `optimization` | `tensor` is the canonical container; `model` owns the public machine-learning hierarchy |
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
-| Data formats | `json`, `csv`, `base64`, `binary` | `json` scalar/list baseline implemented |
-| Files and I/O | `io`, `file`, `path` | file and path APIs experimental |
+| Data formats | `json`, `csv`, `yaml`, `base64`, `binary` | format packages own codecs and documents; `file.read()` provides extension dispatch |
+| Files and I/O | `io`, `file`, `path` | extensible file readers and format objects experimental |
 | Time and environment | `time`, `environment`, `process`, `system` | clock, environment, and process APIs experimental; `system` reserved |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
 | Networking | `network`, `http`, `url` | network and HTTP/1 client APIs experimental |
 | Observability | `log`, `logging`, `trace`, `metrics` | logging sinks experimental |
-| Security | `hash`, `crypto`, `tls` | provider policy required |
-| Data and storage | `pql`, `storage`, `database`, `compression`, `archive` | PQL validation, extensible storage plans, and executable database server experimental |
+| Security | `hash`, `crypto`, `tls` | `hash` native baseline implemented; provider policy required for cryptography |
+| Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and native MariaDB/MySQL clients experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
 | Operating systems | `kernel` | hosted kernel laboratory with memory, process, VFS, syscall, interrupt, and scheduler invariants experimental |
 | Orchestration | `orchestrator` | scheduling and reconciliation baseline experimental |

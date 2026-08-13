@@ -1,0 +1,27 @@
+import platform
+
+def connect(
+    host: string,
+    user: string,
+    password: string,
+    database: string,
+    port: int = 3306,
+) -> Result[Database, DatabaseError]:
+    return platform.mysql_connect(host, user, password, database, port)
+
+def query(connection: Database, statement: string) -> Result[list[list[string]], DatabaseError]:
+    return platform.mysql_query(connection, statement)
+
+def execute(connection: Database, statement: string) -> Result[int, DatabaseError]:
+    return platform.mysql_execute(connection, statement)
+
+def close(connection: Database) -> Result[unit, DatabaseError]:
+    return platform.mysql_close(connection)
+
+test "connection errors remain typed failures":
+    switch connect("127.0.0.1", "invalid", "invalid", "invalid", 1):
+        ok connection:
+            _closed = close(connection)
+            assert(false, "unexpected MySQL server on test port")
+        failure _error:
+            assert(true)

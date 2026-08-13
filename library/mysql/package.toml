@@ -1,0 +1,8 @@
+[package]
+name = "mysql"
+version = "0.1.0"
+edition = "2026"
+description = "Native MariaDB and MySQL client access"
+
+[dependencies]
+platform = { path = "../platform", version = "0.1.0" }

@@ -1,12 +1,20 @@
 trait File:
     path() -> string
+    name() -> string
     extension() -> string
     kind() -> string
     media_type() -> string
+    size() -> int
     bytes() -> int
+    raw() -> list[int]
+    exists() -> bool
+    text() -> Result[string, FormatError]
+    value() -> Any
+    write() -> Result[unit, IOError]
 
 class FormatError:
     message: string
 
 trait Reader:
+    extensions() -> list[string]
     read(path: string) -> Result[File, IOError | FormatError]

@@ -31,10 +31,10 @@ class SafeTensorStore:
     loadedDataStarts: list[int]
 
     def keys() -> list[string]:
-        return json.objectKeys(weightMap)
+        return json.object_keys(weightMap)
 
     def get(name: string) -> Result[SafeTensorEntry, IOError]:
-        shard = json.asString(json.objectGet(weightMap, name))
+        shard = json.as_string(json.object_get(weightMap, name))
         shardIndex := -1
         for index in indices(loadedShardNames):
             if loadedShardNames[index] == shard:
@@ -56,10 +56,10 @@ class SafeTensorStore:
             shardIndex = size(loadedShardNames) - 1
         header = loadedHeaders[shardIndex]
         mapping = loadedMappings[shardIndex]
-        metadata = json.objectGet(header, name)
-        dtype = json.asString(json.objectGet(metadata, "dtype"))
-        shape = json.asIntList(json.objectGet(metadata, "shape"))
-        offsets = json.asIntList(json.objectGet(metadata, "data_offsets"))
+        metadata = json.object_get(header, name)
+        dtype = json.as_string(json.object_get(metadata, "dtype"))
+        shape = json.as_int_list(json.object_get(metadata, "shape"))
+        offsets = json.as_int_list(json.object_get(metadata, "data_offsets"))
         assert(size(offsets) == 2)
         dataStart = loadedDataStarts[shardIndex]
         byteStart = dataStart + offsets[0]
@@ -70,9 +70,9 @@ class SafeTensorStore:
         return SafeTensorEntry(name, dtype, shape, byteStart, byteEnd, shard, mapping)
 
 def openSafetensors(modelDirectory: string) -> Result[SafeTensorStore, IOError]:
-    indexText ?= file.read_text(modelDirectory + "/model.safetensors.index.json")
-    index ?= json.decode[Any](indexText)
-    weightMap = json.objectGet(index, "weight_map")
+    indexFile ?= file.read(modelDirectory + "/model.safetensors.index.json")
+    index = indexFile.value()
+    weightMap = json.object_get(index, "weight_map")
     return SafeTensorStore(modelDirectory, weightMap, [], [], [], [])
 
 unsafe:

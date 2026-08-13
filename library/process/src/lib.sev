@@ -14,3 +14,6 @@ def kill(process: int) -> bool:
 
 def exit(status: int = 0):
     platform.process_exit(status)
+
+def arguments() -> list[string]:
+    return platform.process_arguments()

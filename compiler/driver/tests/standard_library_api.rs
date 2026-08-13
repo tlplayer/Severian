@@ -26,6 +26,7 @@ import string
 import math
 import random
 import path
+import file
 import json
 import regex
 import time
@@ -64,6 +65,11 @@ def main():
     assert(environment.set("SEVERIAN_LIBRARY_TEST", "ready"))
     assert(environment.get("SEVERIAN_LIBRARY_TEST") == "ready")
     assert(environment.remove("SEVERIAN_LIBRARY_TEST"))
+    json_path = "/tmp/severian-standard-library-api.json"
+    _written ?= file.write(json_path, "{\"answer\":42}")
+    loaded_json ?= file.read("/tmp/severian-standard-library-api.json")
+    assert(loaded_json.kind() == "json")
+    assert(loaded_json.get("answer") == 42)
     assert(json.dumps([1, 2, 3]) == "[1,2,3]")
     value = tensor.ones([2, 2])
     assert(len(value) == 4)
@@ -124,6 +130,7 @@ fn file_read_dispatches_formats_and_accepts_trait_decoders() {
         &source,
         format!(
             r#"import file
+import platform
 
 class Playlist: file.File
     source_path: string
@@ -131,6 +138,9 @@ class Playlist: file.File
 
     def path() -> string:
         return source_path
+
+    def name() -> string:
+        return platform.path_basename(source_path)
 
     def extension() -> string:
         return ".m3u"
@@ -141,12 +151,33 @@ class Playlist: file.File
     def media_type() -> string:
         return "audio/x-playlist"
 
+    def size() -> int:
+        return size(platform.string_encode(tracks.join("\n")))
+
     def bytes() -> int:
-        return size(tracks.join("\n"))
+        return size(platform.string_encode(tracks.join("\n")))
+
+    def raw() -> list[int]:
+        return platform.string_encode(tracks.join("\n"))
+
+    def exists() -> bool:
+        return platform.file_exists(source_path)
+
+    def text() -> Result[string, file.FormatError]:
+        return tracks.join("\n")
+
+    def value() -> Any:
+        return tracks
+
+    def write() -> Result[unit, IOError]:
+        return platform.file_write(source_path, tracks.join("\n"))
 
 class PlaylistReader: file.Reader
+    def extensions() -> list[string]:
+        return [".m3u"]
+
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
-        content ?= file.read_text(path)
+        content ?= platform.file_read(path)
         return Playlist(path, content.split("\n"))
 
 def main():
@@ -162,7 +193,7 @@ def main():
     switch file.read("{}"):
         ok document:
             assert(document.kind() == "csv")
-            assert(document.rows == [["name", "note"], ["Ada", "compiler, author"]])
+            assert(document.records() == [["Ada", "compiler, author"]])
         failure error:
             assert(false, error)
     switch file.read("{}"):

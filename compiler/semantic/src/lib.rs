@@ -121,6 +121,14 @@ pub fn analyze_with_packages(
     for item in &module.items {
         if let Item::Trait(declaration) = item {
             register_trait_aliases(&mut aliases, declaration);
+            for method in &declaration.methods {
+                register_method_return_alias(
+                    &mut aliases,
+                    &declaration.name.name,
+                    &method.name.name,
+                    method.return_type.as_ref(),
+                )?;
+            }
         }
         if let Item::Enum(enumeration) = item {
             if !is_upper_camel_case(&enumeration.name.name) {
@@ -171,6 +179,14 @@ pub fn analyze_with_packages(
                     .join(","),
             );
             register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
+            for method in &class.methods {
+                register_method_return_alias(
+                    &mut aliases,
+                    &class.name.name,
+                    &method.name.name,
+                    method.return_type.as_ref(),
+                )?;
+            }
         }
     }
     let mut signatures = HashMap::new();
@@ -179,6 +195,14 @@ pub fn analyze_with_packages(
         for item in &interface.module.items {
             if let Item::Trait(declaration) = item {
                 register_trait_aliases(&mut aliases, declaration);
+                for method in &declaration.methods {
+                    register_method_return_alias(
+                        &mut aliases,
+                        &declaration.name.name,
+                        &method.name.name,
+                        method.return_type.as_ref(),
+                    )?;
+                }
                 continue;
             }
             if let Item::Class(class) = item {
@@ -214,6 +238,14 @@ pub fn analyze_with_packages(
                             .join(",")
                     });
                 register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
+                for method in &class.methods {
+                    register_method_return_alias(
+                        &mut aliases,
+                        &class.name.name,
+                        &method.name.name,
+                        method.return_type.as_ref(),
+                    )?;
+                }
                 if imports_entire_module(module, module_name)
                     || interface
                         .export_package
@@ -236,6 +268,14 @@ pub fn analyze_with_packages(
                 _ => continue,
             };
             let key = format!("{module_name}.{}", name.name);
+            if let Some(class) = return_type.and_then(class_type_name) {
+                aliases.insert(format!("__function_return_class.{key}"), class.clone());
+                if imports_entire_module(module, module_name) {
+                    aliases
+                        .entry(format!("__function_return_class.{}", name.name))
+                        .or_insert(class);
+                }
+            }
             let signature = lower_signature(&key, native_symbol, params, return_type)?;
             if signatures.insert(key.clone(), signature.clone()).is_some() {
                 return Err(error(
@@ -258,6 +298,9 @@ pub fn analyze_with_packages(
             ),
             _ => continue,
         };
+        if let Some(class) = return_type.and_then(class_type_name) {
+            aliases.insert(format!("__function_return_class.{}", name.name), class);
+        }
         let signature = lower_signature(&name.name, native_symbol, params, return_type)?;
         if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
@@ -1225,6 +1268,23 @@ fn register_class_field_aliases(
     Ok(())
 }
 
+fn register_method_return_alias(
+    aliases: &mut HashMap<String, String>,
+    class: &str,
+    method: &str,
+    return_type: Option<&Type>,
+) -> Result<(), SemanticError> {
+    let ty = return_type
+        .map(lower_type)
+        .transpose()?
+        .unwrap_or(ValueType::Unit);
+    aliases.insert(
+        format!("__class_method_return.{class}.{method}"),
+        encode_field_type(ty).to_owned(),
+    );
+    Ok(())
+}
+
 fn register_trait_aliases(
     aliases: &mut HashMap<String, String>,
     declaration: &severian_ast::TraitDecl,
@@ -1305,13 +1365,36 @@ fn expression_class(
             Expr::Identifier(identifier) => aliases
                 .get(&identifier.name)
                 .and_then(|value| value.strip_prefix("__class."))
-                .map(str::to_owned),
+                .map(str::to_owned)
+                .or_else(|| {
+                    let function = aliases
+                        .get(&identifier.name)
+                        .map(String::as_str)
+                        .unwrap_or(&identifier.name);
+                    aliases
+                        .get(&format!("__function_return_class.{function}"))
+                        .cloned()
+                }),
             Expr::Member(member) => {
                 let Expr::Identifier(module) = member.object.as_ref() else {
                     return None;
                 };
                 let exported = format!("{}.{}", module.name, member.member.name);
-                aliases.get(&format!("__module_class.{exported}")).cloned()
+                aliases
+                    .get(&format!("__module_class.{exported}"))
+                    .cloned()
+                    .or_else(|| {
+                        let module = aliases
+                            .get(&module.name)
+                            .map(String::as_str)
+                            .unwrap_or(&module.name);
+                        aliases
+                            .get(&format!(
+                                "__function_return_class.{module}.{}",
+                                member.member.name
+                            ))
+                            .cloned()
+                    })
             }
             _ => None,
         },
@@ -1332,15 +1415,18 @@ fn file_read_result_class(expression: &Expr, aliases: &HashMap<String, String>) 
     let Expr::Call(call) = expression else {
         return None;
     };
-    if called_function_name(call.callee.as_ref(), aliases).as_deref() != Some("file.read") {
-        return None;
-    }
+    let called = called_function_name(call.callee.as_ref(), aliases);
     let literal_class = call.args.first().and_then(|argument| {
         let Expr::Literal(Literal::String { value, .. }) = &argument.value else {
             return None;
         };
         file_class_for_literal_path(value)
     });
+    let local_file_read = called.as_deref() == Some("read")
+        && (literal_class.is_some() || aliases.contains_key("__trait.File"));
+    if called.as_deref() != Some("file.read") && !local_file_read {
+        return None;
+    }
     Some(literal_class.unwrap_or("File").to_owned())
 }
 
@@ -1390,10 +1476,14 @@ fn file_class_for_literal_path(path: &str) -> Option<&'static str> {
         Some("WAV")
     } else if extension.eq_ignore_ascii_case("csv") {
         Some("CSV")
+    } else if extension.eq_ignore_ascii_case("json") {
+        Some("JSON")
+    } else if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
+        Some("YAML")
     } else if extension.eq_ignore_ascii_case("mp3") {
         Some("MP3")
     } else if [
-        "txt", "text", "md", "sev", "toml", "json", "xml", "html", "log",
+        "txt", "text", "md", "sev", "toml", "xml", "html", "log", "lua",
     ]
     .iter()
     .any(|known| extension.eq_ignore_ascii_case(known))
@@ -2043,6 +2133,12 @@ fn lower_block(
                 let value = value.map(|(value, _)| value);
                 let value = match (return_type, actual, value) {
                     (ValueType::Result, ValueType::Result, value) => value,
+                    (ValueType::Result, ValueType::Unit, None) => Some(Expression::Variant {
+                        type_id: Some(TypeDefinitionId::from_name("Result")),
+                        variant_id: VariantId::from_name("ok"),
+                        name: "ok".into(),
+                        fields: Vec::new(),
+                    }),
                     (ValueType::Result, _, Some(value)) => Some(Expression::Variant {
                         type_id: Some(TypeDefinitionId::from_name("Result")),
                         variant_id: VariantId::from_name("ok"),
@@ -2458,6 +2554,11 @@ fn lower_expression_kind(
             let (left, left_type) = lower_expression(&binary.left, scope, signatures, aliases)?;
             let (right, right_type) = lower_expression(&binary.right, scope, signatures, aliases)?;
             let (op, result_type) = match binary.op {
+                AstBinaryOp::Add
+                    if left_type == ValueType::List && right_type == ValueType::List =>
+                {
+                    (BinaryOp::Add, ValueType::List)
+                }
                 AstBinaryOp::Add => (
                     BinaryOp::Add,
                     merge_numeric(left_type, right_type, binary.span)?,
@@ -3130,10 +3231,19 @@ fn lower_call(
             }
         }
         let args = lowered_args.into_iter().map(|(arg, _)| arg).collect();
+        let declared_method_return = object_class.as_ref().and_then(|class| {
+            aliases
+                .get(&format!(
+                    "__class_method_return.{class}.{}",
+                    member.member.name
+                ))
+                .and_then(|value| decode_field_type(value))
+        });
         let return_type = if member.member.name == "get" && dynamic_object_access {
             field_type.unwrap_or(ValueType::Any)
         } else {
-            method_return_type(object_type, &member.member.name)
+            declared_method_return
+                .unwrap_or_else(|| method_return_type(object_type, &member.member.name))
         };
         return Ok((
             Expression::MethodCall {
@@ -3163,7 +3273,31 @@ fn lower_call(
             ValueType::Any,
         ));
     };
-    let imported = if signatures.contains_key(&callee.name) {
+    let intrinsic = matches!(
+        callee.name.as_str(),
+        "print"
+            | "panic"
+            | "float"
+            | "string"
+            | "range"
+            | "indices"
+            | "enumerate"
+            | "zip"
+            | "any"
+            | "all"
+            | "abs"
+            | "min"
+            | "max"
+            | "divmod"
+            | "len"
+            | "size"
+            | "bytes"
+            | "bits"
+            | "capacity"
+    );
+    let imported = if intrinsic {
+        callee.name.as_str()
+    } else if signatures.contains_key(&callee.name) {
         callee.name.as_str()
     } else {
         aliases

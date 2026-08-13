@@ -1,11 +1,11 @@
 import "src/file_interface.sev" as file_interface
-import csv
 import platform
+import yaml
 
-class CsvReader: file_interface.Reader
+class YamlReader: file_interface.Reader
     def extensions() -> list[string]:
-        return [".csv"]
+        return [".yaml", ".yml"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
         content ?= platform.file_read(path)
-        return csv.file_document(path, content)
+        return yaml.file_document(path, content)

@@ -11,9 +11,9 @@ pub mod stablehlo;
 pub mod tensor;
 
 use severian_hir::{
-    AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,
-    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId, UnaryOp,
-    ValueType,
+    AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, FunctionId,
+    Instruction, MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId,
+    TypeKind, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::collections::{HashMap, HashSet};
@@ -82,6 +82,7 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_value_float(!llvm.ptr) -> f64\n",
         "  llvm.func @__sev_value_string(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_string_char_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_slice(!llvm.ptr, i64, i64, i64) -> !llvm.ptr\n",
@@ -98,6 +99,9 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_tensor_bytes(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_tensor_capacity(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_value_index(!llvm.ptr, i64) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
+        "  llvm.func @__sev_value_slice(!llvm.ptr, i64, i64, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_new(i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_clone(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_push(!llvm.ptr, !llvm.ptr)\n",
@@ -168,6 +172,7 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_dynamic_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",
         "  llvm.func @__sev_variant_new(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
@@ -428,12 +433,31 @@ fn lower_hir(program: &Program) -> Module {
             );
         }
     }
+    let function_return_classes = program
+        .functions
+        .iter()
+        .filter_map(|function| {
+            let signature = program
+                .metadata
+                .functions
+                .get(&FunctionId::from_name(&function.name))?;
+            let TypeKind::Named { name, .. } = program.metadata.types.get(signature.returns)?
+            else {
+                return None;
+            };
+            Some((
+                function.name.clone(),
+                name.rsplit('.').next().unwrap_or(name).to_owned(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
     let environment = LoweringEnvironment {
         globals: &program.globals,
         classes: &program.classes,
         strings: &strings,
         function_returns: &function_returns,
         function_params: &function_params,
+        function_return_classes: &function_return_classes,
         native_symbols: &native_symbols,
     };
     for class in &program.classes {
@@ -545,6 +569,7 @@ struct LoweringEnvironment<'a> {
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
+    function_return_classes: &'a HashMap<String, String>,
     native_symbols: &'a HashMap<String, String>,
 }
 
@@ -575,6 +600,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         strings: environment.strings,
         function_returns: environment.function_returns,
         function_params: environment.function_params,
+        function_return_classes: environment.function_return_classes,
         native_symbols: environment.native_symbols,
         classes: environment.classes,
         field_object: None,
@@ -660,6 +686,7 @@ fn lower_class_function(
         strings: environment.strings,
         function_returns: environment.function_returns,
         function_params: environment.function_params,
+        function_return_classes: environment.function_return_classes,
         native_symbols: environment.native_symbols,
         classes: environment.classes,
         field_object: Some("%self".into()),
@@ -710,8 +737,12 @@ fn lower_class_function(
         context.variables.insert(global.name.clone(), value);
     }
     context.lower_instructions(&function.instructions);
-    if !context.terminated && function.return_type == ValueType::Unit {
-        context.output.push_str("    llvm.return\n");
+    if !context.terminated {
+        if function.return_type == ValueType::Unit {
+            context.output.push_str("    llvm.return\n");
+        } else {
+            context.output.push_str("    llvm.unreachable\n");
+        }
     }
     context.output.push_str("  }\n");
 }
@@ -729,6 +760,7 @@ struct LowerContext<'a> {
     strings: &'a [String],
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
+    function_return_classes: &'a HashMap<String, String>,
     native_symbols: &'a HashMap<String, String>,
     classes: &'a [Class],
     field_object: Option<String>,
@@ -833,13 +865,26 @@ impl LowerContext<'_> {
                         };
                         self.variables.insert(name.clone(), lowered);
                     } else if let Expression::Index { object, index } = target.kind() {
-                        let (mut object, object_type) = self.lower_expression(object);
-                        if object_type == ValueType::Any {
-                            object = self.unbox_value((object, object_type), ValueType::List).0;
-                        }
+                        let (object, object_type) = self.lower_expression(object);
                         let index = self.lower_expression(index);
                         let right = self.lower_expression(value);
-                        if object_type == ValueType::Map {
+                        if object_type == ValueType::Any {
+                            let key = self.box_value(index);
+                            let boxed = if *op == AssignmentOp::Assign {
+                                self.box_value(right)
+                            } else {
+                                let current = self.fresh_value();
+                                writeln!(self.output, "    {current} = llvm.call @__sev_value_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                                let current = self.unbox_value((current, ValueType::Any), right.1);
+                                let updated = self.lower_binary_values(
+                                    current,
+                                    assignment_binary(*op),
+                                    right,
+                                );
+                                self.box_value(updated)
+                            };
+                            writeln!(self.output, "    llvm.call @__sev_value_set({object}, {key}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                        } else if object_type == ValueType::Map {
                             let key = self.box_value(index);
                             let boxed = if *op == AssignmentOp::Assign {
                                 self.box_value(right)
@@ -1244,6 +1289,28 @@ impl LowerContext<'_> {
     fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
         match expression {
             Expression::Typed { ty, expression, .. } => {
+                if let Expression::Conditional {
+                    condition,
+                    then_expression,
+                    else_expression,
+                } = expression.kind()
+                {
+                    return self.lower_conditional_expression(
+                        condition,
+                        then_expression,
+                        else_expression,
+                        Some(*ty),
+                    );
+                }
+                if let Expression::Slice {
+                    object,
+                    start,
+                    end,
+                    step,
+                } = expression.kind()
+                {
+                    return self.lower_slice_expression(object, start, end, step, Some(*ty));
+                }
                 let (value, lowered_type) = self.lower_expression(expression);
                 if lowered_type == ValueType::Any && *ty != ValueType::Any {
                     let (value, coerced_type) = self.unbox_value((value, lowered_type), *ty);
@@ -1398,29 +1465,12 @@ impl LowerContext<'_> {
                 condition,
                 then_expression,
                 else_expression,
-            } => {
-                let condition = self.lower_expression(condition);
-                let (condition, _) = self.unbox_value(condition, ValueType::Bool);
-                let mut then_value = self.lower_expression(then_expression);
-                let mut else_value = self.lower_expression(else_expression);
-                let result_type = if then_value.1 == else_value.1 {
-                    then_value.1
-                } else {
-                    then_value = (self.box_value(then_value), ValueType::Any);
-                    else_value = (self.box_value(else_value), ValueType::Any);
-                    ValueType::Any
-                };
-                let result = self.fresh_value();
-                writeln!(
-                    self.output,
-                    "    {result} = llvm.select {condition}, {}, {} : i1, {}",
-                    then_value.0,
-                    else_value.0,
-                    mlir_type(result_type)
-                )
-                .unwrap();
-                (result, result_type)
-            }
+            } => self.lower_conditional_expression(
+                condition,
+                then_expression,
+                else_expression,
+                then_expression.ty().or_else(|| else_expression.ty()),
+            ),
             Expression::FusedPipeline {
                 input,
                 runtime_symbol,
@@ -1573,12 +1623,13 @@ impl LowerContext<'_> {
                 args,
             } if method == "get"
                 && args.len() == 1
-                && !self.has_known_class_method(object, method) =>
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
             {
                 let (object, _) = self.lower_expression(object);
                 let (field, _) = self.lower_expression(&args[0]);
                 let result = self.fresh_value();
-                writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                writeln!(self.output, "    {result} = llvm.call @__sev_dynamic_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                 let metadata = match args[0].kind() {
                     Expression::String(name) => self.object_field_metadata(&object, name),
                     _ => None,
@@ -1599,7 +1650,8 @@ impl LowerContext<'_> {
                 args,
             } if method == "set"
                 && args.len() == 2
-                && !self.has_known_class_method(object, method) =>
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
             {
                 let (object, _) = self.lower_expression(object);
                 let (field, _) = self.lower_expression(&args[0]);
@@ -2121,8 +2173,15 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "keys" | "values") && args.is_empty() => {
-                let (object, _) = self.lower_expression(object);
+            } if matches!(method.as_str(), "keys" | "values")
+                && args.is_empty()
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
+            {
+                let (mut object, object_type) = self.lower_expression(object);
+                if object_type == ValueType::Any {
+                    object = self.unbox_value((object, object_type), ValueType::Map).0;
+                }
                 let result = self.fresh_value();
                 let function = if method == "keys" {
                     "__sev_map_keys"
@@ -2140,9 +2199,31 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
+            } if method == "items"
+                && args.is_empty()
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
+            {
+                let (mut object, object_type) = self.lower_expression(object);
+                if object_type == ValueType::Any {
+                    object = self.unbox_value((object, object_type), ValueType::Map).0;
+                }
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_map_items({object}) : (!llvm.ptr) -> !llvm.ptr"
+                )
+                .unwrap();
+                (result, ValueType::List)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
             } if matches!(method.as_str(), "get" | "set_default" | "setDefault")
                 && args.len() == 2
-                && !self.has_known_class_method(object, method) =>
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
             {
                 let (object, _) = self.lower_expression(object);
                 let key = self.lower_expression(&args[0]);
@@ -2797,9 +2878,9 @@ impl LowerContext<'_> {
                 let (object, object_type) = self.lower_expression(object);
                 if object_type == ValueType::Any {
                     let index = self.lower_expression(index);
-                    let index = self.unbox_value(index, ValueType::Int).0;
+                    let key = self.box_value(index);
                     let result = self.fresh_value();
-                    writeln!(self.output, "    {result} = llvm.call @__sev_value_index({object}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                    writeln!(self.output, "    {result} = llvm.call @__sev_value_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 }
                 let index = self.lower_expression(index);
@@ -2822,32 +2903,7 @@ impl LowerContext<'_> {
                 start,
                 end,
                 step,
-            } => {
-                let (object, object_type) = self.lower_expression(object);
-                let mut bounds = Vec::new();
-                for bound in [start, end, step] {
-                    if let Some(bound) = bound {
-                        let lowered = self.lower_expression(bound);
-                        bounds.push(self.unbox_value(lowered, ValueType::Int).0);
-                    } else {
-                        let missing = self.fresh_value();
-                        writeln!(
-                            self.output,
-                            "    {missing} = llvm.mlir.constant(-9223372036854775808 : i64) : i64"
-                        )
-                        .unwrap();
-                        bounds.push(missing);
-                    }
-                }
-                let result = self.fresh_value();
-                let function = if object_type == ValueType::String {
-                    "__sev_string_slice"
-                } else {
-                    "__sev_collection_slice"
-                };
-                writeln!(self.output, "    {result} = llvm.call @{function}({object}, {}, {}, {}) : (!llvm.ptr, i64, i64, i64) -> !llvm.ptr", bounds[0], bounds[1], bounds[2]).unwrap();
-                (result, object_type)
-            }
+            } => self.lower_slice_expression(object, start, end, step, None),
             Expression::Format {
                 template,
                 args,
@@ -3400,6 +3456,9 @@ impl LowerContext<'_> {
                     mlir_type(return_type)
                 )
                 .unwrap();
+                if let Some(class) = self.function_return_classes.get(linked_function) {
+                    self.object_classes.insert(result.clone(), class.clone());
+                }
                 (result, return_type)
             }
             Expression::CallValue {
@@ -3512,6 +3571,117 @@ impl LowerContext<'_> {
             value = (result, ValueType::Bool);
         }
         value
+    }
+
+    fn lower_slice_expression(
+        &mut self,
+        object: &Expression,
+        start: &Option<Box<Expression>>,
+        end: &Option<Box<Expression>>,
+        step: &Option<Box<Expression>>,
+        expected_type: Option<ValueType>,
+    ) -> (String, ValueType) {
+        let (mut object, mut object_type) = self.lower_expression(object);
+        let dynamic = object_type == ValueType::Any
+            && !matches!(expected_type, Some(ValueType::String | ValueType::List));
+        if object_type == ValueType::Any && !dynamic {
+            object_type = expected_type.unwrap();
+            object = self.unbox_value((object, ValueType::Any), object_type).0;
+        }
+        let mut bounds = Vec::new();
+        for bound in [start, end, step] {
+            if let Some(bound) = bound {
+                let lowered = self.lower_expression(bound);
+                bounds.push(self.unbox_value(lowered, ValueType::Int).0);
+            } else {
+                let missing = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {missing} = llvm.mlir.constant(-9223372036854775808 : i64) : i64"
+                )
+                .unwrap();
+                bounds.push(missing);
+            }
+        }
+        let result = self.fresh_value();
+        if dynamic {
+            writeln!(self.output, "    {result} = llvm.call @__sev_value_slice({object}, {}, {}, {}) : (!llvm.ptr, i64, i64, i64) -> !llvm.ptr", bounds[0], bounds[1], bounds[2]).unwrap();
+            return (result, ValueType::Any);
+        }
+        let function = if object_type == ValueType::String {
+            "__sev_string_slice"
+        } else {
+            "__sev_collection_slice"
+        };
+        writeln!(self.output, "    {result} = llvm.call @{function}({object}, {}, {}, {}) : (!llvm.ptr, i64, i64, i64) -> !llvm.ptr", bounds[0], bounds[1], bounds[2]).unwrap();
+        (result, object_type)
+    }
+
+    fn lower_conditional_expression(
+        &mut self,
+        condition: &Expression,
+        then_expression: &Expression,
+        else_expression: &Expression,
+        expected_type: Option<ValueType>,
+    ) -> (String, ValueType) {
+        let condition = self.lower_expression(condition);
+        let (condition, _) = self.unbox_value(condition, ValueType::Bool);
+        let then_block = self.fresh_block();
+        let else_block = self.fresh_block();
+        let continue_block = self.fresh_block();
+        writeln!(
+            self.output,
+            "    llvm.cond_br {condition}, ^bb{then_block}, ^bb{else_block}"
+        )
+        .unwrap();
+
+        writeln!(self.output, "  ^bb{then_block}:").unwrap();
+        let mut then_value = self.lower_expression(then_expression);
+        let result_type = expected_type.unwrap_or(then_value.1);
+        then_value = self.coerce_conditional_value(then_value, result_type);
+        writeln!(
+            self.output,
+            "    llvm.br ^bb{continue_block}({} : {})",
+            then_value.0,
+            mlir_type(result_type)
+        )
+        .unwrap();
+
+        writeln!(self.output, "  ^bb{else_block}:").unwrap();
+        let else_value = self.lower_expression(else_expression);
+        let else_value = self.coerce_conditional_value(else_value, result_type);
+        writeln!(
+            self.output,
+            "    llvm.br ^bb{continue_block}({} : {})",
+            else_value.0,
+            mlir_type(result_type)
+        )
+        .unwrap();
+
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "  ^bb{continue_block}({result}: {}):",
+            mlir_type(result_type)
+        )
+        .unwrap();
+        (result, result_type)
+    }
+
+    fn coerce_conditional_value(
+        &mut self,
+        value: (String, ValueType),
+        expected: ValueType,
+    ) -> (String, ValueType) {
+        if value.1 == expected {
+            value
+        } else if expected == ValueType::Any {
+            (self.box_value(value), ValueType::Any)
+        } else if value.1 == ValueType::Any {
+            self.unbox_value(value, expected)
+        } else {
+            value
+        }
     }
 
     fn lower_collection_literal(
@@ -4167,6 +4337,11 @@ impl LowerContext<'_> {
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
             return (result, ValueType::Bool);
+        }
+        if op == BinaryOp::Add && operand_type == ValueType::List && right_type == ValueType::List {
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_collection_concat({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+            return (result, ValueType::List);
         }
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
             && matches!(
@@ -5188,10 +5363,13 @@ fn collect_strings(instructions: &[Instruction], strings: &mut Vec<String>) {
     for instruction in instructions {
         match instruction {
             Instruction::Let { value, .. }
-            | Instruction::TryLet { value, .. }
             | Instruction::Print(value)
             | Instruction::Assert(value)
             | Instruction::Evaluate(value) => collect_expression_strings(value, strings),
+            Instruction::TryLet { value, .. } => {
+                strings.push("ok".to_owned());
+                collect_expression_strings(value, strings);
+            }
             Instruction::Assign { target, value, .. } => {
                 collect_expression_strings(target, strings);
                 collect_expression_strings(value, strings);
@@ -5767,6 +5945,7 @@ fn native_bridge_source_for_target(
         "#include <arpa/inet.h>\n",
         "#include <fcntl.h>\n",
         "#include <ctype.h>\n",
+        "#include <dirent.h>\n",
         "#include <errno.h>\n",
         "#include <math.h>\n",
         "#include <stdbool.h>\n",
@@ -5778,6 +5957,7 @@ fn native_bridge_source_for_target(
         "#include <time.h>\n",
         "#include <sys/socket.h>\n",
         "#include <sys/ioctl.h>\n",
+        "#include <sys/file.h>\n",
         "#include <sys/mman.h>\n",
         "#include <sys/wait.h>\n",
         "#include <sys/stat.h>\n",
@@ -5786,7 +5966,7 @@ fn native_bridge_source_for_target(
         "#include <signal.h>\n",
         "#include <regex.h>\n",
         "#ifdef __linux__\n#include <linux/kvm.h>\n#endif\n\n",
-        "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION } sev_value_kind;\n",
+        "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION, SEV_NULL } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **keys; sev_value **values; } sev_map;\n\n",
@@ -5809,6 +5989,7 @@ fn native_bridge_source_for_target(
         "void *__sev_box_bool(bool raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_BOOL; value->as.boolean = raw; return value; }\n",
         "void *__sev_box_string(void *raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_STRING; value->as.string = raw; return value; }\n",
         "void *__sev_box_collection(void *raw) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_COLLECTION; value->as.pointer = raw; return value; }\n",
+        "void *__sev_box_null(void) { sev_value *value = sev_allocate(sizeof(*value)); value->kind = SEV_NULL; return value; }\n",
         "int64_t __sev_unbox_i64(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_INT) abort(); return value->as.i64; }\n",
         "double __sev_unbox_f64(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_FLOAT) abort(); return value->as.f64; }\n",
         "bool __sev_unbox_bool(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_BOOL) abort(); return value->as.boolean; }\n",
@@ -5832,7 +6013,7 @@ fn native_bridge_source_for_target(
         "void *__sev_string_slice(void *raw, int64_t start, int64_t end, int64_t step) { const unsigned char *text = raw; int64_t count = __sev_string_length(raw); sev_slice_bounds(count, &start, &end, &step); int64_t *offsets = sev_allocate((size_t)(count + 1) * sizeof(*offsets)); offsets[0] = 0; for (int64_t index = 0; index < count; ++index) offsets[index + 1] = offsets[index] + sev_utf8_width(text[offsets[index]]); char *result = sev_allocate((size_t)__sev_strlen(raw) + 1); int64_t write = 0; for (int64_t index = start; step > 0 ? index < end : index > end; index += step) { int64_t width = offsets[index + 1] - offsets[index]; memcpy(result + write, text + offsets[index], (size_t)width); write += width; } result[write] = '\\0'; free(offsets); return result; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
-        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } }\n",
+        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } case SEV_NULL: return true; }\n",
         "  return false;\n",
         "}\n",
         "bool __sev_value_equal(void *left, void *right) { return sev_value_equal(left, right); }\n",
@@ -5845,6 +6026,7 @@ fn native_bridge_source_for_target(
         "void __sev_collection_insert(void *raw, int64_t index, void *item) { sev_collection *value = raw; if (!value) abort(); if (index < 0) { index += value->size; if (index < 0) index = 0; } if (index > value->size) index = value->size; __sev_collection_push(value, item); memmove(value->items + index + 1, value->items + index, (size_t)(value->size - index - 1) * sizeof(*value->items)); value->items[index] = item; }\n",
         "void __sev_collection_appendleft(void *raw, void *item) { __sev_collection_insert(raw, 0, item); }\n",
         "void __sev_collection_extend(void *raw, void *other_raw) { sev_collection *value = raw; sev_collection *other = other_raw; if (!value || !other) abort(); for (int64_t index = 0; index < other->size; ++index) __sev_collection_push(value, other->items[index]); }\n",
+        "void *__sev_collection_concat(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != 0 || right->kind != 0) abort(); sev_collection *result = __sev_collection_clone(left); __sev_collection_extend(result, right); return result; }\n",
         "void *__sev_collection_pop_at(void *raw, int64_t index) { sev_collection *value = raw; if (!value) abort(); if (index < 0) index += value->size; if (index < 0 || index >= value->size) abort(); sev_value *result = value->items[index]; memmove(value->items + index, value->items + index + 1, (size_t)(value->size - index - 1) * sizeof(*value->items)); value->size -= 1; return result; }\n",
         "void __sev_collection_remove(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->items[index], item)) { (void)__sev_collection_pop_at(value, index); return; } abort(); }\n",
         "void __sev_collection_heap_push(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); __sev_collection_push(value, item); int64_t child = value->size - 1; while (child > 0) { int64_t parent = (child - 1) / 2; if (!__sev_value_less(value->items[child], value->items[parent])) break; sev_value *temporary = value->items[parent]; value->items[parent] = value->items[child]; value->items[child] = temporary; child = parent; } }\n",
@@ -5854,7 +6036,13 @@ fn native_bridge_source_for_target(
         "int64_t __sev_value_size(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size; if (value->kind == SEV_STRING) return __sev_string_length((void *)value->as.string); if (value->kind == SEV_COLLECTION) return __sev_collection_size(value->as.pointer); abort(); }\n",
         "int64_t __sev_value_bytes(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size * 8; switch (value->kind) { case SEV_INT: case SEV_FLOAT: return 8; case SEV_BOOL: return 1; case SEV_STRING: return __sev_strlen((void *)value->as.string); case SEV_COLLECTION: { sev_collection *collection = value->as.pointer; return (int64_t)sizeof(*collection) + collection->capacity * (int64_t)sizeof(*collection->items); } } abort(); }\n",
         "int64_t __sev_value_capacity(void *raw) { sev_value *value = raw; if (!value) abort(); if (*(uint64_t *)raw == SEV_TENSOR_MAGIC) return ((sev_tensor_header *)raw)->size; if (value->kind == SEV_STRING) return __sev_strlen((void *)value->as.string); if (value->kind == SEV_COLLECTION) return ((sev_collection *)value->as.pointer)->capacity; return 1; }\n",
+        "void *__sev_map_get(void *raw, void *key);\n",
+        "void __sev_map_insert(void *raw, void *key, void *item);\n",
+        "void __sev_collection_set(void *raw, int64_t index, void *item);\n",
         "void *__sev_value_index(void *raw, int64_t index) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_collection_get(value->as.pointer, index); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_char_at((void *)value->as.string, index)); abort(); }\n",
+        "void *__sev_value_get(void *raw, void *key_raw) { sev_value *value = raw; sev_value *key = key_raw; if (!value || !key) abort(); if (value->kind == SEV_STRING && key->kind == SEV_INT) return __sev_box_string(__sev_string_char_at((void *)value->as.string, key->as.i64)); if (value->kind != SEV_COLLECTION) abort(); sev_collection *collection = value->as.pointer; if (!collection) abort(); if (collection->kind == 3) return __sev_map_get(collection, key); if (key->kind != SEV_INT) abort(); return __sev_collection_get(collection, key->as.i64); }\n",
+        "void __sev_value_set(void *raw, void *key_raw, void *item) { sev_value *value = raw; sev_value *key = key_raw; if (!value || !key || !item || value->kind != SEV_COLLECTION) abort(); sev_collection *collection = value->as.pointer; if (!collection) abort(); if (collection->kind == 3) { __sev_map_insert(collection, key, item); return; } if (key->kind != SEV_INT) abort(); __sev_collection_set(collection, key->as.i64, item); }\n",
+        "void *__sev_value_slice(void *raw, int64_t start, int64_t end, int64_t step) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_box_collection(__sev_collection_slice(value->as.pointer, start, end, step)); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_slice((void *)value->as.string, start, end, step)); abort(); }\n",
         "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
         "void *__sev_collection_reversed(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t i = value->size; i > 0; --i) __sev_collection_push(result, value->items[i - 1]); return result; }\n",
         "static double sev_fast_sigmoid(double value) { double magnitude = value < 0.0 ? -value : value; return 0.5 + value / (2.0 * (1.0 + magnitude)); }\n",
@@ -5874,6 +6062,88 @@ fn native_bridge_source_for_target(
         "void *__sev_string_characters(void *raw) { const unsigned char *text = raw; int64_t bytes = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); for (int64_t offset = 0; offset < bytes;) { int64_t width = sev_utf8_width(text[offset]); __sev_collection_push(result, __sev_box_string(sev_string_range((const char *)text, offset, width))); offset += width; } return result; }\n",
         "void *__sev_string_words(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); int64_t index = 0; while (index < size) { while (index < size && isspace((unsigned char)text[index])) index += 1; int64_t start = index; while (index < size && !isspace((unsigned char)text[index])) index += 1; if (start < index) __sev_collection_push(result, __sev_box_string(sev_string_range(text, start, index - start))); } return result; }\n",
         "void *__sev_string_split(void *raw, void *separator_raw) { const char *text = raw; const char *separator = separator_raw; int64_t separator_size = __sev_strlen(separator_raw); if (separator_size == 0) abort(); sev_collection *result = __sev_collection_new(0); const char *start = text; const char *match = NULL; while ((match = strstr(start, separator)) != NULL) { __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)(match - start)))); start = match + separator_size; } __sev_collection_push(result, __sev_box_string(sev_string_range(start, 0, (int64_t)strlen(start)))); return result; }\n",
+        r#"void *__sev_csv_parse(void *raw) {
+  const char *text = raw;
+  size_t input_size = strlen(text);
+  char *field = sev_allocate(input_size + 1);
+  size_t field_size = 0;
+  bool quoted = false;
+  sev_collection *rows = __sev_collection_new(0);
+  sev_collection *row = __sev_collection_new(0);
+  for (size_t index = 0; index <= input_size; ++index) {
+    bool at_end = index == input_size;
+    char character = at_end ? '\0' : text[index];
+    if (quoted && !at_end) {
+      if (character == '"') {
+        if (index + 1 < input_size && text[index + 1] == '"') {
+          field[field_size++] = '"';
+          index += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field[field_size++] = character;
+      }
+    } else if (!at_end && character == '"') {
+      quoted = true;
+    } else if (!at_end && character == ',') {
+      __sev_collection_push(row, __sev_box_string(sev_string_range(field, 0, (int64_t)field_size)));
+      field_size = 0;
+    } else if (at_end || character == '\n') {
+      if (!at_end || field_size > 0 || row->size > 0) {
+        __sev_collection_push(row, __sev_box_string(sev_string_range(field, 0, (int64_t)field_size)));
+        __sev_collection_push(rows, __sev_box_collection(row));
+        row = __sev_collection_new(0);
+        field_size = 0;
+      }
+    } else if (character != '\r') {
+      field[field_size++] = character;
+    }
+  }
+  free(field);
+  return rows;
+}
+"#,
+        r#"void *__sev_csv_encode(void *raw) {
+  sev_collection *rows = raw;
+  if (!rows) abort();
+  size_t output_size = 0;
+  for (int64_t row_index = 0; row_index < rows->size; ++row_index) {
+    sev_value *boxed_row = rows->items[row_index];
+    if (!boxed_row || boxed_row->kind != SEV_COLLECTION) abort();
+    sev_collection *row = boxed_row->as.pointer;
+    for (int64_t column = 0; column < row->size; ++column) {
+      sev_value *field = row->items[column];
+      if (!field || field->kind != SEV_STRING) abort();
+      const char *text = field->as.string;
+      bool quoted = strpbrk(text, ",\"\n\r") != NULL;
+      if (column) output_size += 1;
+      if (quoted) output_size += 2;
+      for (const char *cursor = text; *cursor; ++cursor) output_size += *cursor == '"' ? 2 : 1;
+    }
+    output_size += 1;
+  }
+  char *output = sev_allocate(output_size + 1);
+  char *cursor = output;
+  for (int64_t row_index = 0; row_index < rows->size; ++row_index) {
+    sev_collection *row = rows->items[row_index]->as.pointer;
+    for (int64_t column = 0; column < row->size; ++column) {
+      if (column) *cursor++ = ',';
+      const char *text = row->items[column]->as.string;
+      bool quoted = strpbrk(text, ",\"\n\r") != NULL;
+      if (quoted) *cursor++ = '"';
+      for (const char *source = text; *source; ++source) {
+        if (*source == '"') *cursor++ = '"';
+        *cursor++ = *source;
+      }
+      if (quoted) *cursor++ = '"';
+    }
+    *cursor++ = '\n';
+  }
+  *cursor = '\0';
+  return output;
+}
+"#,
         "void *__sev_collection_pop(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); return value->items[--value->size]; }\n",
         "void *__sev_collection_last(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); return value->items[value->size - 1]; }\n",
         "void *__sev_collection_sorted(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t index = 0; index < value->size; ++index) __sev_collection_push(result, value->items[index]); for (int64_t index = 1; index < result->size; ++index) { sev_value *item = result->items[index]; int64_t cursor = index; while (cursor > 0 && __sev_value_less(item, result->items[cursor - 1])) { result->items[cursor] = result->items[cursor - 1]; cursor -= 1; } result->items[cursor] = item; } return result; }\n",
@@ -6119,6 +6389,31 @@ void *__sev_file_unmap(void *mapping_raw) {
   return __sev_variant_new("ok", NULL);
 }
 
+typedef struct { int descriptor; } sev_file_lock;
+
+void *__sev_file_lock(void *path_raw) {
+  const char *path = path_raw;
+  int descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+  if (descriptor < 0) return sev_failure(strerror(errno));
+  if (flock(descriptor, LOCK_EX) != 0) {
+    const char *message = strerror(errno);
+    close(descriptor);
+    return sev_failure(message);
+  }
+  sev_file_lock *handle = sev_allocate(sizeof(*handle));
+  handle->descriptor = descriptor;
+  return __sev_variant_new("ok", handle);
+}
+
+void *__sev_file_unlock(void *handle_raw) {
+  sev_file_lock *handle = handle_raw;
+  if (!handle) return sev_failure("invalid file lock");
+  int failed = flock(handle->descriptor, LOCK_UN);
+  if (close(handle->descriptor) != 0) failed = -1;
+  free(handle);
+  return failed == 0 ? __sev_variant_new("ok", NULL) : sev_failure(strerror(errno));
+}
+
 void *__sev_file_write(void *path_raw, void *text_raw) {
   const char *path = path_raw;
   const char *text = text_raw;
@@ -6166,6 +6461,187 @@ void *__sev_file_copy(void *source_raw, void *destination_raw) {
   if (ferror(source)) success = false;
   if (fclose(source) != 0 || fclose(destination) != 0) success = false;
   return success ? __sev_variant_new("ok", NULL) : sev_failure("could not copy file");
+}
+
+void *__sev_file_append(void *path_raw, void *text_raw) {
+  FILE *file = fopen((const char *)path_raw, "ab");
+  if (!file) return sev_failure("could not open file for appending");
+  const char *text = text_raw;
+  size_t size = strlen(text);
+  bool success = fwrite(text, 1, size, file) == size && fclose(file) == 0;
+  return success ? __sev_variant_new("ok", NULL) : sev_failure("could not append file");
+}
+
+void *__sev_file_write_bytes(void *path_raw, void *contents_raw) {
+  sev_collection *contents = contents_raw;
+  if (!contents) return sev_failure("invalid byte collection");
+  FILE *file = fopen((const char *)path_raw, "wb");
+  if (!file) return sev_failure("could not open binary file for writing");
+  bool success = true;
+  for (int64_t index = 0; index < contents->size; ++index) {
+    int64_t byte = __sev_unbox_i64(contents->items[index]);
+    if (byte < 0 || byte > 255 || fputc((int)byte, file) == EOF) { success = false; break; }
+  }
+  if (fclose(file) != 0) success = false;
+  return success ? __sev_variant_new("ok", NULL) : sev_failure("could not write binary file");
+}
+
+void *__sev_file_size_path(void *path_raw) {
+  struct stat status;
+  if (stat((const char *)path_raw, &status) != 0 || status.st_size < 0)
+    return sev_failure("could not stat file size");
+  return __sev_variant_new("ok", __sev_box_i64((int64_t)status.st_size));
+}
+
+void *__sev_file_modified_seconds(void *path_raw) {
+  struct stat status;
+  if (stat((const char *)path_raw, &status) != 0)
+    return sev_failure("could not stat file modification time");
+#if defined(__APPLE__)
+  double seconds = (double)status.st_mtimespec.tv_sec + (double)status.st_mtimespec.tv_nsec / 1000000000.0;
+#else
+  double seconds = (double)status.st_mtim.tv_sec + (double)status.st_mtim.tv_nsec / 1000000000.0;
+#endif
+  return __sev_variant_new("ok", __sev_box_f64(seconds));
+}
+
+void *__sev_directory_list(void *path_raw) {
+  DIR *directory = opendir((const char *)path_raw);
+  if (!directory) return sev_failure("could not open directory");
+  sev_collection *entries = __sev_collection_new(0);
+  errno = 0;
+  struct dirent *entry;
+  while ((entry = readdir(directory)) != NULL) {
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    __sev_collection_push(entries, __sev_box_string(strdup(entry->d_name)));
+  }
+  int read_error = errno;
+  int close_error = closedir(directory);
+  if (read_error != 0 || close_error != 0) return sev_failure("could not read directory");
+  return __sev_variant_new("ok", __sev_box_collection(entries));
+}
+
+void *__sev_directory_make_all(void *path_raw) {
+  const char *path = path_raw;
+  if (!path || !*path) return sev_failure("directory path is empty");
+  char *copy = strdup(path);
+  if (!copy) abort();
+  size_t size = strlen(copy);
+  while (size > 1 && copy[size - 1] == '/') copy[--size] = '\0';
+  for (char *cursor = copy + (copy[0] == '/'); ; ++cursor) {
+    if (*cursor != '/' && *cursor != '\0') continue;
+    char saved = *cursor;
+    *cursor = '\0';
+    if (*copy && mkdir(copy, 0777) != 0 && errno != EEXIST) {
+      free(copy);
+      return sev_failure("could not create directory");
+    }
+    *cursor = saved;
+    if (saved == '\0') break;
+  }
+  free(copy);
+  return __sev_variant_new("ok", NULL);
+}
+
+void *__sev_process_arguments(void) {
+  FILE *file = fopen("/proc/self/cmdline", "rb");
+  sev_collection *arguments = __sev_collection_new(0);
+  if (!file) return arguments;
+  char *buffer = NULL;
+  size_t capacity = 0;
+  ssize_t count;
+  while ((count = getdelim(&buffer, &capacity, '\0', file)) >= 0) {
+    size_t length = count > 0 && buffer[count - 1] == '\0' ? (size_t)count - 1 : (size_t)count;
+    __sev_collection_push(arguments, __sev_box_string(sev_string_range(buffer, 0, (int64_t)length)));
+  }
+  free(buffer);
+  fclose(file);
+  return arguments;
+}
+
+void *__sev_time_parse_date(void *value_raw) {
+  const char *value = value_raw;
+  int year = 0, month = 0, day = 0;
+  char trailing = '\0';
+  if (sscanf(value, "%d-%d-%d%c", &year, &month, &day, &trailing) != 3 ||
+      year < 1970 || month < 1 || month > 12 || day < 1 || day > 31)
+    return sev_failure("date must use YYYY-MM-DD");
+  struct tm calendar = {0};
+  calendar.tm_year = year - 1900;
+  calendar.tm_mon = month - 1;
+  calendar.tm_mday = day;
+  calendar.tm_isdst = -1;
+  time_t timestamp = mktime(&calendar);
+  if (timestamp == (time_t)-1 || calendar.tm_year != year - 1900 ||
+      calendar.tm_mon != month - 1 || calendar.tm_mday != day)
+    return sev_failure("invalid calendar date");
+  return __sev_variant_new("ok", __sev_box_f64((double)timestamp));
+}
+
+static uint32_t sev_md5_rotate(uint32_t value, uint32_t count) {
+  return (value << count) | (value >> (32 - count));
+}
+
+void *__sev_hash_md5(void *value_raw) {
+  static const uint32_t shifts[64] = {
+    7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+    5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,
+    4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+    6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21
+  };
+  static const uint32_t constants[64] = {
+    0xd76aa478,0xe8c7b756,0x242070db,0xc1bdceee,0xf57c0faf,0x4787c62a,0xa8304613,0xfd469501,
+    0x698098d8,0x8b44f7af,0xffff5bb1,0x895cd7be,0x6b901122,0xfd987193,0xa679438e,0x49b40821,
+    0xf61e2562,0xc040b340,0x265e5a51,0xe9b6c7aa,0xd62f105d,0x02441453,0xd8a1e681,0xe7d3fbc8,
+    0x21e1cde6,0xc33707d6,0xf4d50d87,0x455a14ed,0xa9e3e905,0xfcefa3f8,0x676f02d9,0x8d2a4c8a,
+    0xfffa3942,0x8771f681,0x6d9d6122,0xfde5380c,0xa4beea44,0x4bdecfa9,0xf6bb4b60,0xbebfbc70,
+    0x289b7ec6,0xeaa127fa,0xd4ef3085,0x04881d05,0xd9d4d039,0xe6db99e5,0x1fa27cf8,0xc4ac5665,
+    0xf4292244,0x432aff97,0xab9423a7,0xfc93a039,0x655b59c3,0x8f0ccc92,0xffeff47d,0x85845dd1,
+    0x6fa87e4f,0xfe2ce6e0,0xa3014314,0x4e0811a1,0xf7537e82,0xbd3af235,0x2ad7d2bb,0xeb86d391
+  };
+  const unsigned char *input = value_raw;
+  size_t input_size = strlen((const char *)input);
+  uint64_t bit_size = (uint64_t)input_size * 8;
+  size_t padded_size = input_size + 1;
+  while (padded_size % 64 != 56) padded_size += 1;
+  unsigned char *message = calloc(padded_size + 8, 1);
+  if (!message) abort();
+  memcpy(message, input, input_size);
+  message[input_size] = 0x80;
+  for (int byte = 0; byte < 8; ++byte) message[padded_size + byte] = (unsigned char)(bit_size >> (8 * byte));
+  uint32_t a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (size_t offset = 0; offset < padded_size + 8; offset += 64) {
+    uint32_t words[16];
+    for (int word = 0; word < 16; ++word) {
+      size_t base = offset + (size_t)word * 4;
+      words[word] = (uint32_t)message[base] | ((uint32_t)message[base + 1] << 8) |
+        ((uint32_t)message[base + 2] << 16) | ((uint32_t)message[base + 3] << 24);
+    }
+    uint32_t a = a0, b = b0, c = c0, d = d0;
+    for (uint32_t step = 0; step < 64; ++step) {
+      uint32_t function, word;
+      if (step < 16) { function = (b & c) | ((~b) & d); word = step; }
+      else if (step < 32) { function = (d & b) | ((~d) & c); word = (5 * step + 1) % 16; }
+      else if (step < 48) { function = b ^ c ^ d; word = (3 * step + 5) % 16; }
+      else { function = c ^ (b | (~d)); word = (7 * step) % 16; }
+      uint32_t next = d;
+      d = c;
+      c = b;
+      b += sev_md5_rotate(a + function + constants[step] + words[word], shifts[step]);
+      a = next;
+    }
+    a0 += a; b0 += b; c0 += c; d0 += d;
+  }
+  free(message);
+  uint32_t digest[4] = {a0, b0, c0, d0};
+  char *output = sev_allocate(33);
+  static const char hex[] = "0123456789abcdef";
+  for (int index = 0; index < 16; ++index) {
+    unsigned char byte = (unsigned char)(digest[index / 4] >> (8 * (index % 4)));
+    output[index * 2] = hex[byte >> 4];
+    output[index * 2 + 1] = hex[byte & 15];
+  }
+  return output;
 }
 
 typedef struct { char *data; size_t size; size_t capacity; } sev_json_buffer;
@@ -6239,6 +6715,9 @@ static void sev_json_encode_value(sev_json_buffer *buffer, sev_value *value) {
       sev_json_character(buffer, ']');
       return;
     }
+    case SEV_NULL:
+      sev_json_text(buffer, "null");
+      return;
   }
   abort();
 }
@@ -6255,6 +6734,10 @@ static void sev_json_space(const char **cursor) {
 
 static sev_value *sev_json_parse_value(const char **cursor) {
   sev_json_space(cursor);
+  if (strncmp(*cursor, "null", 4) == 0) {
+    *cursor += 4;
+    return __sev_box_null();
+  }
   if (**cursor == '"') {
     ++*cursor;
     sev_json_buffer buffer = {0};
@@ -6354,6 +6837,24 @@ void *__sev_json_object_keys(void *value_raw) {
   return keys;
 }
 
+void *__sev_json_object_values(void *value_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer) abort();
+  sev_map *map = boxed->as.pointer;
+  if (map->kind != 3) abort();
+  sev_collection *values = __sev_collection_new(0);
+  for (int64_t index = 0; index < map->size; ++index) __sev_collection_push(values, map->values[index]);
+  return values;
+}
+
+void __sev_json_object_set(void *value_raw, void *key_raw, void *item_raw) {
+  sev_value *boxed = value_raw;
+  if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer || !item_raw) abort();
+  sev_map *map = boxed->as.pointer;
+  if (map->kind != 3) abort();
+  __sev_map_insert(map, __sev_box_string(key_raw), item_raw);
+}
+
 void *__sev_json_as_string(void *value_raw) {
   sev_value *value = value_raw;
   if (!value || value->kind != SEV_STRING) abort();
@@ -6378,6 +6879,28 @@ bool __sev_json_as_bool(void *value_raw) {
   sev_value *value = value_raw;
   if (!value || value->kind != SEV_BOOL) abort();
   return value->as.boolean;
+}
+
+bool __sev_json_is_null(void *value_raw) {
+  sev_value *value = value_raw;
+  return value && value->kind == SEV_NULL;
+}
+
+void *__sev_json_kind(void *value_raw) {
+  sev_value *value = value_raw;
+  if (!value) return "invalid";
+  switch (value->kind) {
+    case SEV_INT: return "integer";
+    case SEV_FLOAT: return "float";
+    case SEV_BOOL: return "boolean";
+    case SEV_STRING: return "string";
+    case SEV_NULL: return "null";
+    case SEV_COLLECTION: {
+      sev_collection *collection = value->as.pointer;
+      return collection && collection->kind == 3 ? "object" : "array";
+    }
+  }
+  return "invalid";
 }
 
 void *__sev_json_as_int_list(void *value_raw) {
@@ -6678,6 +7201,14 @@ int64_t __sev_host_page_size(void) {
     }) {
         source.push_str(severian_platform::database_source());
     }
+    if program.functions.iter().any(|function| {
+        function
+            .native_symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
+    }) {
+        source.push_str(severian_platform::mysql_source());
+    }
     let drawable_classes = program
         .classes
         .iter()
@@ -6702,6 +7233,52 @@ int64_t __sev_host_page_size(void) {
         .unwrap();
     }
     source.push_str("  abort();\n}\n\n");
+    let dynamic_getters = program
+        .classes
+        .iter()
+        .filter_map(|class| {
+            class
+                .methods
+                .iter()
+                .find(|method| {
+                    method.name == "get"
+                        && method.params.len() == 1
+                        && method.params[0].ty == ValueType::String
+                        && method.return_type != ValueType::Unit
+                })
+                .map(|method| (class, method))
+        })
+        .collect::<Vec<_>>();
+    for (class, method) in &dynamic_getters {
+        writeln!(
+            source,
+            "extern {} {}(void *, void *);",
+            c_type(method.return_type),
+            class_function_symbol(&class.name, "get")
+        )
+        .unwrap();
+    }
+    source.push_str("void *__sev_dynamic_object_get(void *raw, void *key) { sev_object *value = raw; if (!value || value->magic != SEV_OBJECT_MAGIC) abort();\n");
+    for (class, method) in &dynamic_getters {
+        let call = format!("{}(raw, key)", class_function_symbol(&class.name, "get"));
+        let result = match method.return_type {
+            ValueType::String => format!("__sev_box_string({call})"),
+            ValueType::Int => format!("__sev_box_i64({call})"),
+            ValueType::Float => format!("__sev_box_f64({call})"),
+            ValueType::Bool => format!("__sev_box_bool({call})"),
+            ValueType::List | ValueType::Tuple | ValueType::Map | ValueType::Set => {
+                format!("__sev_box_collection({call})")
+            }
+            _ => call,
+        };
+        writeln!(
+            source,
+            "  if (strcmp(value->class_name, \"{}\") == 0) return {result};",
+            class.name
+        )
+        .unwrap();
+    }
+    source.push_str("  return __sev_object_get(raw, key);\n}\n\n");
     for dispatch in dynamic_method_dispatches(program) {
         for class in &dispatch.classes {
             write!(
@@ -7177,7 +7754,7 @@ fn dynamic_method_dispatch_symbol(
 ) -> String {
     let mut signature = params
         .iter()
-        .map(|ty| task_type_suffix(*ty))
+        .map(|ty| dynamic_type_suffix(*ty))
         .collect::<Vec<_>>()
         .join("_");
     if signature.is_empty() {
@@ -7187,8 +7764,29 @@ fn dynamic_method_dispatch_symbol(
         "__sev_dispatch_{}_{}_{}",
         mangle_symbol_component(method),
         signature,
-        task_type_suffix(returns)
+        dynamic_type_suffix(returns)
     )
+}
+
+fn dynamic_type_suffix(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Int => "i64",
+        ValueType::Float => "f64",
+        ValueType::Bool => "bool",
+        ValueType::Unit => "unit",
+        ValueType::String => "string",
+        ValueType::List => "list",
+        ValueType::Tuple => "tuple",
+        ValueType::Map => "map",
+        ValueType::Set => "set",
+        ValueType::Tensor(_) => "tensor",
+        ValueType::TensorAny => "tensor_any",
+        ValueType::Channel => "channel",
+        ValueType::Function => "function",
+        ValueType::Result => "result",
+        ValueType::Option => "option",
+        ValueType::Any => "any",
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

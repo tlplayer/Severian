@@ -1,0 +1,158 @@
+import platform
+
+class CSVError:
+    message: string
+
+class CSVRow:
+    headers_data: list[string]
+    cells: list[string]
+
+    def get(name: string) -> string:
+        for index in range(size(headers_data)):
+            if headers_data[index] == name:
+                return cells[index] if index < size(cells) else ""
+        return ""
+
+    def values() -> list[string]:
+        return cells
+
+    def as_map() -> map[string, string]:
+        result := {}
+        for index in range(size(headers_data)):
+            result[headers_data[index]] = cells[index] if index < size(cells) else ""
+        return result
+
+def headers_of(records: list[list[string]]) -> list[string]:
+    return records[0] if size(records) > 0 else []
+
+def records_of(records: list[list[string]]) -> list[list[string]]:
+    return records[1:] if size(records) > 1 else []
+
+def column_index_of(records: list[list[string]], name: string) -> int:
+    for index, field in enumerate(headers_of(records)):
+        if field == name:
+            return index
+    return -1
+
+class CSV:
+    source_path: string
+    records_data: list[list[string]]
+
+    def path() -> string:
+        return source_path
+
+    def name() -> string:
+        return platform.path_basename(source_path)
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "csv"
+
+    def media_type() -> string:
+        return "text/csv"
+
+    def size() -> int:
+        return size(platform.string_encode(platform.csv_encode(records_data)))
+
+    def bytes() -> int:
+        return size(platform.string_encode(platform.csv_encode(records_data)))
+
+    def raw() -> list[int]:
+        return platform.string_encode(platform.csv_encode(records_data))
+
+    def exists() -> bool:
+        return size(source_path) > 0 and platform.file_exists(source_path)
+
+    def text() -> Result[string, IOError]:
+        return platform.csv_encode(records_data)
+
+    def value() -> Any:
+        return records_data
+
+    def write() -> Result[unit, IOError]:
+        if size(source_path) == 0:
+            return failure(IOError("in-memory CSV has no path; use encode() or write_to(path)"))
+        return platform.file_write(source_path, platform.csv_encode(records_data))
+
+    def write_to(path: string) -> Result[unit, IOError]:
+        return platform.file_write(path, platform.csv_encode(records_data))
+
+    def encode() -> string:
+        return platform.csv_encode(records_data)
+
+    def headers() -> list[string]:
+        return headers_of(records_data)
+
+    def header() -> list[string]:
+        return headers_of(records_data)
+
+    def rows() -> list[CSVRow]:
+        result: list[CSVRow] = []
+        fields = headers_of(records_data)
+        for cells in records_of(records_data):
+            result.append(CSVRow(fields, cells))
+        return result
+
+    def records() -> list[list[string]]:
+        return records_of(records_data)
+
+    def columns() -> list[string]:
+        return headers_of(records_data)
+
+    def row_count() -> int:
+        return max(0, size(records_data) - 1)
+
+    def column_index(name: string) -> int:
+        return column_index_of(records_data, name)
+
+    def column(name: string) -> list[string]:
+        position = column_index_of(records_data, name)
+        if position < 0:
+            return []
+        values := []
+        for row in records_of(records_data):
+            values.append(row[position] if position < size(row) else "")
+        return values
+
+    def get(row: int, column: string) -> string:
+        position = column_index_of(records_data, column)
+        values = records_of(records_data)
+        if position < 0 or row < 0 or row >= size(values) or position >= size(values[row]):
+            return ""
+        return values[row][position]
+
+    def cell(row: int, column: string) -> Result[string, CSVError]:
+        position = column_index_of(records_data, column)
+        values = records_of(records_data)
+        if position < 0:
+            return failure(CSVError("CSV column does not exist: " + column))
+        if row < 0 or row >= size(values):
+            return failure(CSVError("CSV row is outside the document"))
+        return values[row][position] if position < size(values[row]) else ""
+
+    def set(row: int, column: string, value: string) -> Result[unit, CSVError]:
+        position = column_index_of(records_data, column)
+        record = row + 1
+        if position < 0:
+            return failure(CSVError("CSV column does not exist: " + column))
+        if record < 1 or record >= size(records_data):
+            return failure(CSVError("CSV row is outside the document"))
+        while size(records_data[record]) <= position:
+            records_data[record].append("")
+        records_data[record][position] = value
+        return
+
+def document(text: string) -> CSV:
+    return CSV("", platform.csv_parse(text))
+
+def file_document(path: string, text: string) -> CSV:
+    return CSV(path, platform.csv_parse(text))
+
+test "CSV documents support rows, quoting, and mutation":
+    value := document("name,note\nAda,\"compiler, author\"\n")
+    assert(value.rows()[0].get("name") == "Ada")
+    assert(value.get(0, "note") == "compiler, author")
+    _changed ?= value.set(0, "note", "language designer")
+    assert(value.encode() == "name,note\nAda,language designer\n")

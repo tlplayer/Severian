@@ -1,13 +1,16 @@
 import "src/file_interface.sev" as file_interface
 import "src/file_text.sev" as file_text
 import "src/file_csv.sev" as file_csv
+import "src/file_json.sev" as file_json
+import "src/file_yaml.sev" as file_yaml
 import "src/file_wav.sev" as file_wav
 import "src/file_mp3.sev" as file_mp3
 import "src/file_binary.sev" as file_binary
 import platform
 
-def read_text(path: string) -> Result[string, IOError]:
-    return platform.file_read(path)
+def read_text(path: string) -> Result[string, IOError | file_interface.FormatError]:
+    document ?= read(path)
+    return document.text()
 
 def write(path: string, contents: string) -> Result[unit, IOError]:
     return platform.file_write(path, contents)
@@ -26,6 +29,29 @@ def rename(source: string, destination: string) -> Result[unit, IOError]:
 
 def copy(source: string, destination: string) -> Result[unit, IOError]:
     return platform.file_copy(source, destination)
+
+def append_text(path: string, contents: string) -> Result[unit, IOError]:
+    return platform.file_append(path, contents)
+
+def write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]:
+    return platform.file_write_bytes(path, contents)
+
+def size(path: string) -> Result[int, IOError]:
+    return platform.file_size_path(path)
+
+def modified_seconds(path: string) -> Result[float, IOError]:
+    return platform.file_modified_seconds(path)
+
+def list_directory(path: string) -> Result[list[string], IOError]:
+    return platform.directory_list(path)
+
+def make_directories(path: string) -> Result[unit, IOError]:
+    return platform.directory_make_all(path)
+
+def parse_csv(path: string) -> Result[list[list[string]], IOError | file_interface.FormatError]:
+    document ?= read(path)
+    rows: list[list[string]] = document.value()
+    return rows
 
 def open(path: string, mode: string = "rb") -> Result[Any, IOError]:
     if mode != "rb":
@@ -62,6 +88,12 @@ def mapped_bytes(mapping: Any) -> int:
 def unmap(mapping: Any) -> Result[unit, IOError]:
     return platform.file_unmap(mapping)
 
+def lock(path: string) -> Result[Any, IOError]:
+    return platform.file_lock(path)
+
+def unlock(handle: Any) -> Result[unit, IOError]:
+    return platform.file_unlock(handle)
+
 def little_endian_u64(data: list[int]) -> int:
     assert(size(data) == 8, "u64 requires exactly eight bytes")
     value := 0
@@ -74,11 +106,15 @@ def little_endian_u64(data: list[int]) -> int:
 def default_reader(extension: string) -> file_interface.Reader:
     if extension == ".csv":
         return file_csv.CsvReader()
+    if extension == ".json":
+        return file_json.JsonReader()
+    if extension == ".yaml" or extension == ".yml":
+        return file_yaml.YamlReader()
     if extension == ".wav":
         return file_wav.WavReader()
     if extension == ".mp3":
         return file_mp3.Mp3Reader()
-    if extension in [".txt", ".text", ".md", ".sev", ".toml", ".json", ".xml", ".html", ".log"]:
+    if extension in [".txt", ".text", ".md", ".sev", ".toml", ".xml", ".html", ".log", ".lua"]:
         return file_text.TextReader()
     return file_binary.BinaryReader()
 
@@ -87,6 +123,10 @@ def register(extension: string, reader: file_interface.Reader):
     if not normalized.starts_with("."):
         normalized = "." + normalized
     platform.file_format_register(normalized, reader)
+
+def register_reader(reader: file_interface.Reader):
+    for extension in reader.extensions():
+        register(extension, reader)
 
 def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
     extension = platform.path_extension(path).lower()
@@ -109,6 +149,9 @@ def mappedBytes(mapping: Any) -> int:
 def littleEndianU64(data: list[int]) -> int:
     return little_endian_u64(data)
 
+def makeDirectories(path: string) -> Result[unit, IOError]:
+    return make_directories(path)
+
 test "native file round trip":
     path = "/tmp/severian-library-file-roundtrip.txt"
     _written ?= write(path, "severian file runtime")
@@ -120,12 +163,55 @@ test "read dispatches text and csv formats":
     table_path = "/tmp/severian-library-format.csv"
     _text_written ?= write_text(text_path, "hello")
     _table_written ?= write_text(table_path, "name,note\nAda,\"compiler, author\"\n")
-    text_file ?= read(text_path)
-    table_file ?= read(table_path)
+    text_file ?= read("/tmp/severian-library-format.txt")
+    table_file ?= read("/tmp/severian-library-format.csv")
     assert(text_file.kind() == "text")
-    assert(text_file.get("content") == "hello")
+    text ?= text_file.text()
+    assert(text == "hello")
     assert(table_file.kind() == "csv")
-    assert(table_file.get("rows") == [["name", "note"], ["Ada", "compiler, author"]])
+    assert(table_file.headers() == ["name", "note"])
+    assert(table_file.records() == [["Ada", "compiler, author"]])
+    rows = table_file.rows()
+    assert(size(rows) == 1)
+    assert(rows[0].get("name") == "Ada")
+    assert(table_file.column("name") == ["Ada"])
+    assert(table_file.get(0, "note") == "compiler, author")
+    note ?= table_file.cell(0, "note")
+    assert(note == "compiler, author")
+    _changed ?= table_file.set(0, "note", "language designer")
+    _saved ?= table_file.write()
+    changed ?= read("/tmp/severian-library-format.csv")
+    assert(changed.get(0, "note") == "language designer")
+
+test "native CSV parsing preserves escaped quotes and quoted newlines":
+    path = "/tmp/severian-library-quoted.csv"
+    _written ?= write(path, "name,note\nAda,\"compiler \"\"author\"\"\nsecond line\"\n")
+    rows ?= parse_csv(path)
+    assert(rows == [["name", "note"], ["Ada", "compiler \"author\"\nsecond line"]])
+
+test "read returns parsed JSON and YAML objects":
+    json_path = "/tmp/severian-library-format.json"
+    yaml_path = "/tmp/severian-library-format.yaml"
+    _json_written ?= write(json_path, "{\"name\":\"Ada\",\"languages\":2}")
+    _yaml_written ?= write(yaml_path, "engineers:\n- Ada\n- Grace\nstatus: ready\n")
+    loaded_json ?= read("/tmp/severian-library-format.json")
+    json_file := loaded_json
+    loaded_yaml ?= read("/tmp/severian-library-format.yaml")
+    yaml_file := loaded_yaml
+    assert(json_file.kind() == "json")
+    assert(json_file.keys() == ["name", "languages"])
+    assert(platform.jsonAsString(json_file.get("name")) == "Ada")
+    json_file.set("name", "Grace")
+    _json_saved ?= json_file.write()
+    changed_json ?= read("/tmp/severian-library-format.json")
+    assert(platform.jsonAsString(changed_json.get("name")) == "Grace")
+    assert(yaml_file.kind() == "yaml")
+    assert(yaml_file.values_for("engineers") == ["Ada", "Grace"])
+    assert(yaml_file.scalar("status") == "ready")
+    yaml_file.set("status", "complete")
+    _yaml_saved ?= yaml_file.write()
+    changed_yaml ?= read("/tmp/severian-library-format.yaml")
+    assert(changed_yaml.scalar("status") == "complete")
 
 test "binary extensions use typed audio and fallback objects":
     mp3_path = "/tmp/severian-library-format.mp3"

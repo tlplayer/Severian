@@ -1,7 +1,5 @@
-# json
+# JSON
 
-JSON values, parsing, serialization, and typed decoding. Parsing algorithms can
-live in Severian; optimized byte processing may use reviewed native symbols
-declared by `platform`. `decode[type](text)` and `encode(value)` are ordinary
-package functions with scalar/list native coverage; a complete JSON value model
-remains future work.
+`json` owns JSON documents and codecs for values from memory, HTTP, tools, or
+other streams. File-path dispatch is integrated through `file.read("data.json")`,
+which delegates parsing and document behavior to this package.

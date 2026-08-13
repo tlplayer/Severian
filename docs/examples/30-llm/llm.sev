@@ -137,7 +137,8 @@ def prepareModelFiles() -> Result[ModelFiles, exception]:
 def loadApplication() -> Result[Application, exception]:
     files ?= prepareModelFiles()
 
-    config_text ?= file.read_text(files.config)
+    config_file ?= file.read(files.config)
+    config_text ?= config_file.text()
     config ?= json.decode[QwenConfig](config_text)
 
     # Fail early if a wrong model was downloaded or config decoding is broken.

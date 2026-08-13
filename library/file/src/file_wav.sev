@@ -11,6 +11,9 @@ class WAV: file_interface.File
     def path() -> string:
         return source_path
 
+    def name() -> string:
+        return platform.path_basename(source_path)
+
     def extension() -> string:
         return platform.path_extension(source_path).lower()
 
@@ -20,10 +23,31 @@ class WAV: file_interface.File
     def media_type() -> string:
         return "audio/wav"
 
+    def size() -> int:
+        return size(data)
+
     def bytes() -> int:
         return size(data)
 
+    def raw() -> list[int]:
+        return data
+
+    def exists() -> bool:
+        return platform.file_exists(source_path)
+
+    def text() -> Result[string, file_interface.FormatError]:
+        return failure(file_interface.FormatError("WAV files do not have text content"))
+
+    def value() -> Any:
+        return data
+
+    def write() -> Result[unit, IOError]:
+        return platform.file_write_bytes(source_path, data)
+
 class WavReader: file_interface.Reader
+    def extensions() -> list[string]:
+        return [".wav"]
+
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
         handle ?= platform.file_open_binary(path)
         length ?= platform.file_size(handle)

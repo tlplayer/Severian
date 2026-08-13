@@ -686,6 +686,13 @@ fn to_snake_case(name: &str) -> String {
     }
     let prefix = if name.starts_with('_') { "_" } else { "" };
     let trimmed = name.trim_start_matches('_');
+    if !trimmed.is_empty()
+        && trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    {
+        return name.to_owned();
+    }
     let words = words(trimmed);
     let leading_acronyms = words
         .iter()
@@ -917,6 +924,13 @@ mod tests {
         assert_eq!(to_snake_case("HTTPServer"), "httpserver");
         assert_eq!(to_snake_case("HTTPTPSServer"), "http_tps_server");
         assert_eq!(to_snake_case("XLAGPUClient"), "xla_gpu_client");
+    }
+
+    #[test]
+    fn preserves_existing_snake_case_around_acronym_words() {
+        assert_eq!(to_snake_case("csv_path"), "csv_path");
+        assert_eq!(to_snake_case("gpu_check_interval"), "gpu_check_interval");
+        assert_eq!(to_snake_case("json_string_field"), "json_string_field");
     }
 
     #[test]

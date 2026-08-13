@@ -29,7 +29,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         if args.len() != 1 {
             return Err(usage());
         }
-        return run_targets(Path::new(command));
+        return run_targets(Path::new(command), &[]);
     }
 
     match command {
@@ -60,7 +60,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "lint" => lint_command(&args[1..]),
         "fmt" => fmt_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
-        "run" if args.len() <= 2 => run_targets(args.get(1).map_or(Path::new("."), Path::new)),
+        "run" => run_command(&args[1..]),
         "test" => test_command(&args[1..]),
         "debug" if args.len() <= 2 => debug_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "coverage" if args.len() == 2 => coverage(Path::new(&args[1])),
@@ -1367,7 +1367,25 @@ fn lint_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run_targets(input: &Path) -> Result<(), String> {
+fn run_command(args: &[String]) -> Result<(), String> {
+    let separator = args.iter().position(|argument| argument == "--");
+    let (target_arguments, application_arguments) = match separator {
+        Some(index) => (&args[..index], &args[index + 1..]),
+        None => (args, &[][..]),
+    };
+    if target_arguments.len() > 1 {
+        return Err(format!(
+            "run accepts one project or source path; put application arguments after `--`\n{}",
+            usage()
+        ));
+    }
+    run_targets(
+        target_arguments.first().map_or(Path::new("."), Path::new),
+        application_arguments,
+    )
+}
+
+fn run_targets(input: &Path, application_arguments: &[String]) -> Result<(), String> {
     let targets = resolve_targets(input)?;
     if targets.is_empty() {
         return Err(format!(
@@ -1396,6 +1414,7 @@ fn run_targets(input: &Path) -> Result<(), String> {
             continue;
         }
         let mut command = Command::new(&output);
+        command.args(application_arguments);
         let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
             function
                 .decorators
@@ -2317,7 +2336,7 @@ fn usage() -> String {
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",
         "  build [path] [--emit KIND] [--target native|xla] [--max-errors N] [--message-format text|json]",
-        "  run [path]                     build and run native code",
+        "  run [path] [-- args...]        build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --profile          run only profile tests and enforce profile contracts",
         "  debug [path]                   build with debug symbols and launch lldb or gdb",

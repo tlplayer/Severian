@@ -110,3 +110,82 @@ fn clean_removes_only_the_project_target_directory() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn run_forwards_arguments_after_the_separator() {
+    let root = temporary_project("run-arguments");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let process_package = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library/process");
+    std::fs::write(
+        root.join("package.toml"),
+        format!(
+            "[package]\nname = \"argument-demo\"\nversion = \"0.1.0\"\n\n[dependencies]\nprocess = {{ path = \"{}\", version = \"0.1.0\" }}\n",
+            process_package.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.sev"),
+        "import process\n\ndef main():\n    print(process.arguments().join(\"|\"))\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["run", ".", "--", "alpha", "beta gamma"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).ends_with("|alpha|beta gamma\n"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn dynamic_nested_indexing_distinguishes_lists_from_maps() {
+    let root = temporary_project("dynamic-indexing");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"dynamic-indexing\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.sev"),
+        r#"def update_grid(grid: list[list[string]], row: int, column: int):
+    grid[row][column] = "changed"
+
+def update_map(values: map[string, map[string, int]], outer: string, inner: string):
+    values[outer][inner] = 7
+
+def main():
+    grid = [["old"]]
+    update_grid(grid, 0, 0)
+    assert(grid[0][0] == "changed")
+    values = {"outer": {"inner": 1}}
+    update_map(values, "outer", "inner")
+    assert(values["outer"]["inner"] == 7)
+    print("dynamic indexing passed")
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["run", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "dynamic indexing passed\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

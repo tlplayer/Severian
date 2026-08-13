@@ -21,6 +21,45 @@ fn resolves_print_and_lowers_hello_to_hir() {
 }
 
 #[test]
+fn list_addition_has_list_type() {
+    let ast =
+        parse(&lex("def combined() -> list[int]:\n    return [1, 2] + [3]\n").unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected a return value");
+    };
+    assert_eq!(value.ty(), Some(ValueType::List));
+}
+
+#[test]
+fn bare_return_from_unit_result_produces_ok_variant() {
+    let source = "def save() -> Result[unit, string]:\n    return\n";
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected an ok return value");
+    };
+    let Expression::Variant { name, fields, .. } = value.kind() else {
+        panic!("expected a Result variant");
+    };
+    assert_eq!(name, "ok");
+    assert!(fields.is_empty());
+}
+
+#[test]
+fn intrinsic_size_is_not_shadowed_by_a_linked_package_function() {
+    let source = "def count(values: list[int]) -> int:\n    return size(values)\n";
+    let interface = "def size(path: string) -> Result[int, IOError]:\n    return failure(IOError(\"unused\"))\n";
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let interface_ast = parse(&lex(interface).unwrap()).unwrap();
+    let hir = analyze_with_interfaces(&ast, &[("file".into(), interface_ast)]).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected a return value");
+    };
+    assert_eq!(value.ty(), Some(ValueType::Int));
+}
+
+#[test]
 fn rejects_unknown_functions() {
     let ast = parse(&lex("def main():\n    write(\"hello\")\n").unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();

@@ -1,0 +1,146 @@
+import json
+import platform
+
+def strip_scalar(value: string) -> string:
+    cleaned := value.strip()
+    if cleaned.starts_with("[") and cleaned.ends_with("]"):
+        cleaned = cleaned[1:-1].strip()
+    if size(cleaned) >= 2 and ((cleaned.starts_with("\"") and cleaned.ends_with("\"")) or (cleaned.starts_with("'") and cleaned.ends_with("'"))):
+        cleaned = cleaned[1:-1]
+    return cleaned.strip()
+
+def append_values(destination: list[string], source: string) -> list[string]:
+    for raw in source.split(","):
+        value = strip_scalar(raw)
+        if size(value) > 0:
+            destination.append(value)
+    return destination
+
+def parse_mapping(content: string) -> map[string, list[string]]:
+    values := {}
+    current := [""]
+    for raw_line in content.split("\n"):
+        line = raw_line.strip()
+        if size(line) == 0 or line.starts_with("#"):
+            continue
+        if line.starts_with("- "):
+            existing := values.get(current[0], [])
+            existing = append_values(existing, line[2:])
+            values[current[0]] = existing
+        else:
+            separator = line.find(":")
+            if separator >= 0:
+                current[0] = strip_scalar(line[0:separator])
+                existing := values.get(current[0], [])
+                inline = line[separator + 1:].strip()
+                if size(inline) > 0:
+                    existing = append_values(existing, inline)
+                values[current[0]] = existing
+    return values
+
+def encode_mapping(mapping: map[string, list[string]]) -> string:
+    output := ""
+    for key in mapping.keys():
+        values = mapping[key]
+        if size(values) == 1:
+            output += key + ": " + values[0] + "\n"
+        else:
+            output += key + ":\n"
+            for value in values:
+                output += "- " + value + "\n"
+    return output
+
+def mapping_values(mapping: map[string, list[string]], key: string) -> list[string]:
+    return mapping.get(key, [])
+
+class YAML:
+    source_path: string
+    mapping: map[string, list[string]]
+
+    def path() -> string:
+        return source_path
+
+    def name() -> string:
+        return platform.path_basename(source_path)
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "yaml"
+
+    def media_type() -> string:
+        return "application/yaml"
+
+    def size() -> int:
+        return size(platform.string_encode(encode_mapping(mapping)))
+
+    def bytes() -> int:
+        return size(platform.string_encode(encode_mapping(mapping)))
+
+    def raw() -> list[int]:
+        return platform.string_encode(encode_mapping(mapping))
+
+    def exists() -> bool:
+        return size(source_path) > 0 and platform.file_exists(source_path)
+
+    def text() -> Result[string, IOError]:
+        return encode_mapping(mapping)
+
+    def value() -> Any:
+        return mapping
+
+    def write() -> Result[unit, IOError]:
+        if size(source_path) == 0:
+            return failure(IOError("in-memory YAML has no path; use encode() or write_to(path)"))
+        return platform.file_write(source_path, encode_mapping(mapping))
+
+    def write_to(path: string) -> Result[unit, IOError]:
+        return platform.file_write(path, encode_mapping(mapping))
+
+    def encode() -> string:
+        return encode_mapping(mapping)
+
+    def keys() -> list[string]:
+        return mapping.keys()
+
+    def get(key: string) -> Any:
+        return mapping_values(mapping, key)
+
+    def set(key: string, value: Any):
+        if json.kind(value) == "array":
+            mapping[key] = json.as_string_list(value)
+        elif json.kind(value) == "string":
+            mapping[key] = [json.as_string(value)]
+        else:
+            mapping[key] = [json.encode(value)]
+
+    def values() -> list[Any]:
+        result: list[Any] = []
+        for key in mapping.keys():
+            result.append(mapping[key])
+        return result
+
+    def values_for(key: string) -> list[string]:
+        return mapping_values(mapping, key)
+
+    def scalar(key: string) -> string:
+        values = mapping_values(mapping, key)
+        return values[0] if size(values) > 0 else ""
+
+    def scalar_or(key: string, fallback: string) -> string:
+        values = mapping_values(mapping, key)
+        return values[0] if size(values) > 0 else fallback
+
+def document(text: string) -> YAML:
+    return YAML("", parse_mapping(text))
+
+def file_document(path: string, text: string) -> YAML:
+    return YAML(path, parse_mapping(text))
+
+test "YAML mapping documents support lists and scalars":
+    value := document("engineers:\n- Ada\n- Grace\nstatus: ready\n")
+    assert(value.values_for("engineers") == ["Ada", "Grace"])
+    assert(value.scalar("status") == "ready")
+    value.set("status", "complete")
+    assert(value.scalar("status") == "complete")

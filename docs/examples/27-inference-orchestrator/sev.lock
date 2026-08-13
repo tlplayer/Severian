@@ -1,0 +1,46 @@
+version = 1
+
+[[packages]]
+name = "container"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/orchestrator/../container"
+
+[[packages]]
+name = "database"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/orchestrator/../database"
+
+[[packages]]
+name = "model"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/27-inference-orchestrator/../../../library/model"
+
+[[packages]]
+name = "network"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/27-inference-orchestrator/../../../library/network"
+
+[[packages]]
+name = "orchestrator"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/docs/examples/27-inference-orchestrator/../../../library/orchestrator"
+
+[[packages]]
+name = "platform"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/network/../platform"
+
+[[packages]]
+name = "pql"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/database/../pql"
+
+[[packages]]
+name = "storage"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/database/../storage"
+
+[[packages]]
+name = "tensor"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../tensor"

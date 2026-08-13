@@ -47,3 +47,10 @@ def reverse[type](values: list[type]):
 
 def copy[type](values: list[type]) -> list[type]:
     return values[0:size(values)]
+
+test "list addition returns a new concatenated list":
+    left = [1, 2]
+    right = [3, 4]
+    combined = left + right
+    assert(combined == [1, 2, 3, 4])
+    assert(left == [1, 2])

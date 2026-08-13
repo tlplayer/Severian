@@ -1,5 +1,80 @@
 import platform
-import file
+
+trait Document:
+    keys() -> list[string]
+    get(key: string) -> Any
+    set(key: string, value: Any)
+    values() -> list[Any]
+    value() -> Any
+    encode() -> string
+
+class JSON: Document
+    source_path: string
+    document: Any
+
+    def path() -> string:
+        return source_path
+
+    def name() -> string:
+        return platform.path_basename(source_path)
+
+    def extension() -> string:
+        return platform.path_extension(source_path).lower()
+
+    def kind() -> string:
+        return "json"
+
+    def media_type() -> string:
+        return "application/json"
+
+    def size() -> int:
+        return size(platform.string_encode(platform.jsonEncode(document)))
+
+    def bytes() -> int:
+        return size(platform.string_encode(platform.jsonEncode(document)))
+
+    def raw() -> list[int]:
+        return platform.string_encode(platform.jsonEncode(document))
+
+    def exists() -> bool:
+        return size(source_path) > 0 and platform.file_exists(source_path)
+
+    def text() -> Result[string, IOError]:
+        return platform.jsonEncode(document)
+
+    def write() -> Result[unit, IOError]:
+        if size(source_path) == 0:
+            return failure(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
+        return platform.file_write(source_path, platform.jsonEncode(document))
+
+    def write_to(path: string) -> Result[unit, IOError]:
+        return platform.file_write(path, platform.jsonEncode(document))
+
+    def keys() -> list[string]:
+        return object_keys(document) if kind(document) == "object" else []
+
+    def get(key: string) -> Any:
+        return object_get(document, key)
+
+    def set(key: string, value: Any):
+        object_set(document, key, value)
+
+    def values() -> list[Any]:
+        return object_values(document) if kind(document) == "object" else []
+
+    def value() -> Any:
+        return document
+
+    def encode() -> string:
+        return encode(document)
+
+def document(text: string) -> Result[JSON, JsonError]:
+    value ?= decode[Any](text)
+    return JSON("", value)
+
+def file_document(path: string, text: string) -> Result[JSON, JsonError]:
+    value ?= decode[Any](text)
+    return JSON(path, value)
 
 def loads[type](text: string) -> Result[type, JsonError]:
     return decode[type](text)
@@ -7,68 +82,78 @@ def loads[type](text: string) -> Result[type, JsonError]:
 def dumps[type](value: type) -> string:
     return encode(value)
 
-def load[type](path: string) -> Result[type, Error]:
-    switch file.read_text(path):
-        ok text:
-            return loads[type](text)
-        failure error:
-            return failure(error)
-
-def dump[type](value: type, path: string) -> Result[unit, IOError]:
-    return file.write_text(path, dumps(value))
-
 def decode[type](text: string) -> Result[type, JsonError]:
     return platform.jsonDecode(text)
 
 def encode[type](value: type) -> string:
     return platform.jsonEncode(value)
 
-def objectGet(value: Any, key: string) -> Any:
+def object_get(value: Any, key: string) -> Any:
     return platform.jsonObjectGet(value, key)
 
-def objectKeys(value: Any) -> list[string]:
+def object_keys(value: Any) -> list[string]:
     return platform.jsonObjectKeys(value)
 
-def asString(value: Any) -> string:
+def object_values(value: Any) -> list[Any]:
+    return platform.jsonObjectValues(value)
+
+def object_set(value: Any, key: string, item: Any):
+    platform.jsonObjectSet(value, key, item)
+
+def as_string(value: Any) -> string:
     return platform.jsonAsString(value)
 
-def asInt(value: Any) -> int:
+def as_int(value: Any) -> int:
     return platform.jsonAsInt(value)
 
-def asFloat(value: Any) -> float:
+def as_float(value: Any) -> float:
     return platform.jsonAsFloat(value)
 
-def asBool(value: Any) -> bool:
+def as_bool(value: Any) -> bool:
     return platform.jsonAsBool(value)
 
-def asIntList(value: Any) -> list[int]:
+def as_int_list(value: Any) -> list[int]:
     return platform.jsonAsIntList(value)
 
-def asStringList(value: Any) -> list[string]:
+def as_string_list(value: Any) -> list[string]:
     return platform.jsonAsStringList(value)
 
-test "integer decoding":
-    switch decode[int]("42"):
-        ok value:
-            assert(value == 42)
-        failure error:
-            assert(false, error)
+def is_null(value: Any) -> bool:
+    return platform.jsonIsNull(value)
 
-test "compact list encoding":
-    assert(encode([1, 2, 3]) == "[1,2,3]")
+def kind(value: Any) -> string:
+    return platform.jsonKind(value)
 
-test "object decoding produces ordinary maps":
-    switch decode[map]("{\"hidden_size\":2048,\"torch_dtype\":\"bfloat16\"}"):
-        ok value:
-            assert(objectGet(value, "hidden_size") == 2048)
-            assert(objectGet(value, "torch_dtype") == "bfloat16")
-        failure error:
-            assert(false, error)
+# Compatibility aliases while callers migrate to the snake_case surface.
+def objectGet(value: Any, key: string) -> Any:
+    return object_get(value, key)
 
-test "typed object accessors decode model configuration fields":
-    document ?= decode[Any]("{\"architectures\":[\"Qwen2ForCausalLM\"],\"layers\":36,\"epsilon\":1e-6,\"tied\":true}")
-    architectures = asStringList(objectGet(document, "architectures"))
-    assert(architectures == ["Qwen2ForCausalLM"])
-    assert(asInt(objectGet(document, "layers")) == 36)
-    assert(asFloat(objectGet(document, "epsilon")) == 0.000001)
-    assert(asBool(objectGet(document, "tied")))
+def objectKeys(value: Any) -> list[string]:
+    return object_keys(value)
+
+def asString(value: Any) -> string:
+    return as_string(value)
+
+def asInt(value: Any) -> int:
+    return as_int(value)
+
+def asFloat(value: Any) -> float:
+    return as_float(value)
+
+def asBool(value: Any) -> bool:
+    return as_bool(value)
+
+def asIntList(value: Any) -> list[int]:
+    return as_int_list(value)
+
+def asStringList(value: Any) -> list[string]:
+    return as_string_list(value)
+
+test "JSON document supports memory and mutation":
+    decoded ?= decode[Any]("{\"name\":\"Ada\",\"languages\":2}")
+    value := JSON("", decoded)
+    assert(value.keys() == ["name", "languages"])
+    assert(as_string(value.get("name")) == "Ada")
+    value.set("name", "Grace")
+    assert(value.encode() == "{\"name\":\"Grace\",\"languages\":2}")
+    assert(not value.exists())

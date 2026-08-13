@@ -8,7 +8,10 @@ description = "Trait-backed file format dispatch and file operations"
 path = "src/lib.sev"
 
 [dependencies]
+csv = { path = "../csv", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }
+json = { path = "../json", version = "0.1.0" }
+yaml = { path = "../yaml", version = "0.1.0" }
 
 [package.metadata.library]
 category = "files-io"

@@ -1,0 +1,8 @@
+import platform
+
+def md5(value: string) -> string:
+    return platform.hash_md5(value)
+
+test "MD5 matches the published empty and text vectors":
+    assert(md5("") == "d41d8cd98f00b204e9800998ecf8427e")
+    assert(md5("abc") == "900150983cd24fb0d6963f7d28e17f72")

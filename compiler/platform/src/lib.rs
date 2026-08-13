@@ -2,6 +2,7 @@
 
 mod database;
 mod model_graph;
+mod mysql;
 mod safetensors;
 mod tensor;
 
@@ -16,6 +17,10 @@ pub use target::{Architecture, Backend, OperatingSystem, Target, TargetError, Ta
 /// Existing platform runtime source surface.
 pub fn database_source() -> &'static str {
     database::source()
+}
+
+pub fn mysql_source() -> &'static str {
+    mysql::source()
 }
 
 /// Existing platform runtime source surface.
