@@ -1,0 +1,282 @@
+import graphics
+import network
+
+class Tile:
+    x: int
+    y: int
+    kind: string
+
+class Crew:
+    id: int
+    name: string
+    role: string
+    x: int
+    y: int
+    health: int
+
+class SubsystemJob:
+    id: int
+    name: string
+    current: int
+    delta: int
+    alert: string
+
+class SubsystemResult:
+    id: int
+    name: string
+    value: int
+    alert: string
+
+class StationReport:
+    tick: int
+    width: int
+    height: int
+    tiles: list[Tile]
+    crew: list[Crew]
+    systems: list[SubsystemResult]
+    alerts: list[string]
+
+def station_tiles(width: int, height: int) -> list[Tile]:
+    tiles: list[Tile] = []
+    for y in range(height):
+        for x in range(width):
+            kind := "floor"
+            if x == 0 or y == 0 or x == width - 1 or y == height - 1:
+                kind = "wall"
+            if x == 6 and y > 0 and y < height - 1:
+                kind = "wall"
+            if x == 6 and y == 4:
+                kind = "door"
+            if x == 2 and y == 2:
+                kind = "console"
+            if x == 8 and y == 2:
+                kind = "medical"
+            if x == 9 and y == 5:
+                kind = "fire"
+            if x == 10 and y == 5:
+                kind = "breach"
+            tiles.append(Tile(x, y, kind))
+    return tiles
+
+def initial_crew() -> list[Crew]:
+    return [
+        Crew(1, "Mara", "captain", 3, 3, 100),
+        Crew(2, "Ivo", "engineer", 8, 5, 84),
+        Crew(3, "Sana", "doctor", 8, 2, 96),
+    ]
+
+def subsystem_job(job: SubsystemJob) -> SubsystemResult:
+    return SubsystemResult(job.id, job.name, job.current + job.delta, job.alert)
+
+def subsystem_worker(jobs: Channel[SubsystemJob], replies: Channel[SubsystemResult]):
+    while true:
+        job = await jobs
+        if job.id < 0:
+            return
+        result = subsystem_job(job)
+        delivered = async send result with replies
+        await delivered
+
+def run_subsystems(work: list[SubsystemJob], worker_count: int) -> list[SubsystemResult]:
+    assert(worker_count == 3, "this lab currently starts three subsystem workers")
+    capacity = size(work) + worker_count
+    jobs = Channel[SubsystemJob] with Buffer(capacity)
+    replies = Channel[SubsystemResult] with Buffer(capacity)
+    atmosphere = async subsystem_worker(jobs, replies) with self
+    machinery = async subsystem_worker(jobs, replies) with self
+    hazards = async subsystem_worker(jobs, replies) with self
+
+    for job in work:
+        queued = async send job with jobs
+        await queued
+    for stop_id in range(worker_count):
+        stopped = async send SubsystemJob(-1 - stop_id, "stop", 0, 0, "") with jobs
+        await stopped
+
+    results: list[SubsystemResult] = []
+    for _ in work:
+        results.append(await replies)
+    await atmosphere, machinery, hazards
+    return results.sorted(|result| result.id)
+
+def system_value(systems: list[SubsystemResult], name: string, fallback: int) -> int:
+    for system in systems:
+        if system.name == name:
+            return system.value
+    return fallback
+
+def simulate_tick() -> StationReport:
+    work = [
+        SubsystemJob(1, "pressure", 100, -18, "engineering pressure loss"),
+        SubsystemJob(2, "oxygen", 94, -8, "oxygen mix degraded"),
+        SubsystemJob(3, "power", 100, -12, "reactor bus load high"),
+        SubsystemJob(4, "fire", 3, -1, "engineering fire active"),
+    ]
+    systems = run_subsystems(work, 3)
+    alerts: list[string] = []
+    for system in systems:
+        if size(system.alert) > 0:
+            alerts.append(system.alert)
+    return StationReport(1, 12, 8, station_tiles(12, 8), initial_crew(), systems, alerts)
+
+def tile_color(kind: string) -> graphics.Color:
+    if kind == "wall":
+        return graphics.rgb(55, 65, 81)
+    if kind == "door":
+        return graphics.rgb(234, 179, 8)
+    if kind == "console":
+        return graphics.rgb(8, 145, 178)
+    if kind == "medical":
+        return graphics.rgb(14, 116, 144)
+    if kind == "fire":
+        return graphics.rgb(124, 45, 18)
+    if kind == "breach":
+        return graphics.rgb(17, 24, 39)
+    return graphics.rgb(75, 85, 99)
+
+def crew_color(role: string) -> graphics.Color:
+    if role == "captain":
+        return graphics.rgb(250, 204, 21)
+    if role == "engineer":
+        return graphics.rgb(249, 115, 22)
+    return graphics.rgb(34, 211, 238)
+
+def bounded(value: int, low: int, high: int) -> int:
+    if value < low:
+        return low
+    if value > high:
+        return high
+    return value
+
+def meter(target: graphics.Canvas, x: int, y: int, label: string, value: int, color: graphics.Color):
+    target.text_styled(x, y, label + " " + string(value), graphics.white(), 13, "start")
+    target.rectangle(x, y + 7, 220, 12, graphics.rgb(31, 41, 55))
+    target.rectangle(x, y + 7, bounded(value, 0, 100) * 220 / 100, 12, color)
+    target.rectangle_outline(x, y + 7, 220, 12, graphics.gray(), 1)
+
+def render_station(report: StationReport) -> graphics.Canvas:
+    target = graphics.Canvas(840, 380, graphics.rgb(3, 7, 18))
+    tile_size := 40
+    origin_x := 20
+    origin_y := 20
+
+    for tile in report.tiles:
+        x = origin_x + tile.x * tile_size
+        y = origin_y + tile.y * tile_size
+        target.rectangle(x, y, tile_size, tile_size, tile_color(tile.kind))
+        target.rectangle_outline(x, y, tile_size, tile_size, graphics.rgb(17, 24, 39), 1)
+        if tile.kind == "breach":
+            target.line_width(x + 8, y + 8, x + tile_size - 8, y + tile_size - 8, graphics.red(), 3)
+            target.line_width(x + tile_size - 8, y + 8, x + 8, y + tile_size - 8, graphics.red(), 3)
+        if tile.kind == "fire":
+            target.circle(x + tile_size / 2, y + tile_size / 2, 10, graphics.rgb(249, 115, 22))
+
+    for crew in report.crew:
+        x = origin_x + crew.x * tile_size + tile_size / 2
+        y = origin_y + crew.y * tile_size + tile_size / 2
+        target.circle(x, y, 12, crew_color(crew.role))
+        target.circle_outline(x, y, 12, graphics.black(), 2)
+        target.text_styled(x, y + 4, crew.name[0], graphics.black(), 11, "middle")
+
+    panel_x := 530
+    target.text_styled(panel_x, 30, "ORBITAL STATION", graphics.white(), 20, "start")
+    target.text_styled(panel_x, 51, "tick " + string(report.tick), graphics.gray(), 12, "start")
+    meter(target, panel_x, 80, "pressure", system_value(report.systems, "pressure", 0), graphics.green())
+    meter(target, panel_x, 125, "oxygen", system_value(report.systems, "oxygen", 0), graphics.blue())
+    meter(target, panel_x, 170, "power", system_value(report.systems, "power", 0), graphics.rgb(250, 204, 21))
+    meter(target, panel_x, 215, "fire", system_value(report.systems, "fire", 0) * 25, graphics.red())
+    target.text_styled(panel_x, 270, "alerts", graphics.white(), 14, "start")
+    alert_y := 291
+    for alert in report.alerts:
+        target.text_styled(panel_x, alert_y, "- " + alert, graphics.rgb(248, 113, 113), 11, "start")
+        alert_y += 17
+    return target
+
+def snapshot_packet(report: StationReport) -> string:
+    return (
+        "STATION/1|tick=" + string(report.tick) +
+        "|pressure=" + string(system_value(report.systems, "pressure", 0)) +
+        "|oxygen=" + string(system_value(report.systems, "oxygen", 0)) +
+        "|power=" + string(system_value(report.systems, "power", 0)) +
+        "|fire=" + string(system_value(report.systems, "fire", 0)) +
+        "|crew=" + string(size(report.crew))
+    )
+
+def observer_worker(observer: string, packet: string, snapshots: Channel[string]):
+    switch network.loopback_echo(observer + "|" + packet):
+        ok echoed:
+            delivered = async send echoed with snapshots
+            await delivered
+        failure error:
+            message = observer + "|network-error|" + string(error)
+            delivered = async send message with snapshots
+            await delivered
+
+def network_snapshots(report: StationReport) -> list[string]:
+    packet = snapshot_packet(report)
+    snapshots = Channel[string] with Buffer(2)
+    first_task = async observer_worker("observer-a", packet, snapshots) with self
+    second_task = async observer_worker("observer-b", packet, snapshots) with self
+    received: list[string] = []
+    received.append(await snapshots)
+    received.append(await snapshots)
+    await first_task, second_task
+    return received.sorted()
+
+def count_tiles(tiles: list[Tile], kind: string) -> int:
+    count := 0
+    for tile in tiles:
+        if tile.kind == kind:
+            count += 1
+    return count
+
+test "station layout retains walls hazards and one traversable door":
+    tiles = station_tiles(12, 8)
+    assert(size(tiles) == 96)
+    assert(count_tiles(tiles, "door") == 1)
+    assert(count_tiles(tiles, "fire") == 1)
+    assert(count_tiles(tiles, "breach") == 1)
+
+test "three workers produce deterministic subsystem replay":
+    first = simulate_tick().systems
+    second = simulate_tick().systems
+    assert([system.id for system in first] == [1, 2, 3, 4])
+    assert([system.value for system in first] == [82, 86, 88, 2])
+    assert([system.value for system in first] == [system.value for system in second])
+
+test "graphics frame includes the station hazards crew and telemetry":
+    document = render_station(simulate_tick()).svg()
+    assert(document.contains("ORBITAL STATION"))
+    assert(document.contains("engineering pressure loss"))
+    assert(document.contains("<circle"))
+    assert(document.contains("<line"))
+
+test with integration "two observers receive exact snapshots over real TCP loopback":
+    report = simulate_tick()
+    snapshots = network_snapshots(report)
+    assert(snapshots[0] == "observer-a|" + snapshot_packet(report))
+    assert(snapshots[1] == "observer-b|" + snapshot_packet(report))
+
+def write_frame(target: graphics.Canvas, path: string):
+    switch target.save(path):
+        ok _:
+            print("frame", path)
+        failure error:
+            assert(false, error)
+
+def print_network(report: StationReport):
+    for snapshot in network_snapshots(report):
+        print("network", snapshot)
+
+def main():
+    report = simulate_tick()
+    print("orbital station laboratory")
+    print("tick", report.tick)
+    print("crew", size(report.crew))
+    print("pressure", system_value(report.systems, "pressure", 0))
+    print("oxygen", system_value(report.systems, "oxygen", 0))
+    print("power", system_value(report.systems, "power", 0))
+    print("fire", system_value(report.systems, "fire", 0))
+    print("workers", 3)
+    print_network(report)
+    write_frame(render_station(report), "/tmp/severian-space-station.svg")

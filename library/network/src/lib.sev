@@ -1,7 +1,7 @@
 import platform
 
 def listen(address: string) -> Result[TCPListener, IOError]:
-    return platform.networkListen(address)
+    return platform.network_listen(address)
 
 def connect(address: string) -> Result[Any, IOError]:
     return platform.network_connect(address)
@@ -18,11 +18,15 @@ def receive(socket: Any, count: int = 4096) -> Result[string, IOError]:
 def close(socket: Any) -> Result[unit, IOError]:
     return platform.network_close(socket)
 
+def loopback_echo(message: string) -> Result[string, IOError]:
+    return platform.network_loopback_echo(message)
+
+# Compatibility alias for sources written before the snake-case API.
 def loopbackEcho(message: string) -> Result[string, IOError]:
-    return platform.networkLoopbackEcho(message)
+    return loopback_echo(message)
 
 test with integration "native TCP loopback":
-    switch loopbackEcho("severian network runtime"):
+    switch loopback_echo("severian network runtime"):
         ok echoed:
             assert(echoed == "severian network runtime")
         failure error:

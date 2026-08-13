@@ -186,7 +186,11 @@ unsafe:
 
     native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
 
+    native("__sev_network_listen") def network_listen(address: string) -> Result[TCPListener, IOError]
+
     native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
+
+    native("__sev_network_loopback_echo") def network_loopback_echo(message: string) -> Result[string, IOError]
 
 test with integration "native network ABI":
     switch networkLoopbackEcho("platform loopback"):
