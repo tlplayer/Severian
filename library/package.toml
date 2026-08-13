@@ -44,10 +44,10 @@ members = [
     "tensor",
     "vm",
     "yaml",
+    "mysql",
 ]
 
 [workspace.metadata.library]
 namespace = "flat"
 source-root = "library"
 runtime-root = "runtime"
-    "mysql",

@@ -1,0 +1,66 @@
+[workspace]
+members = ["library"]
+
+[build]
+pipeline = [
+    "compile",
+    "architecture",
+    "test",
+    "profile",
+    "coverage",
+    "memory",
+    "integration",
+]
+
+[coverage]
+minimum = 55
+branches = 60
+
+[memory]
+leaks = "deny"
+
+[architecture.files]
+soft_lines = 500
+hard_lines = 800
+include = [
+    "compiler/**/*.rs",
+    "library/**/*.sev",
+    "docs/**/*.sev",
+    "bench/**/*.sev",
+    "benchmarks/**/*.sev",
+]
+
+[[architecture.files.exception]]
+path = "compiler/lowering/src/core/expression.rs"
+hard_lines = 3000
+reason = "The first lowering split isolated expression lowering; the next pass must split expression families without destabilizing typed lowering."
+expires = "2026-10-15"
+owner = "compiler-lowering"
+
+[[architecture.files.exception]]
+path = "compiler/lowering/src/core/bridge.rs"
+hard_lines = 2100
+reason = "Generated native ABI bridge fragments are isolated from lowering, but still need extraction into reviewed runtime templates."
+expires = "2026-10-15"
+owner = "compiler-runtime"
+
+[[architecture.files.exception]]
+path = "compiler/driver/src/main.rs"
+hard_lines = 2700
+reason = "The build policy is now isolated in driver modules; remaining command dispatch must move into command-specific modules."
+expires = "2026-10-15"
+owner = "compiler-driver"
+
+[[architecture.files.exception]]
+path = "compiler/lowering/src/stablehlo/mod.rs"
+hard_lines = 1200
+reason = "StableHLO textual lowering predates the architecture gate and needs an operation-family split."
+expires = "2026-10-15"
+owner = "compiler-lowering"
+
+[[architecture.files.exception]]
+path = "compiler/diagnostics/src/naming.rs"
+hard_lines = 1100
+reason = "Naming diagnostics remain grouped while their shared traversal state is extracted."
+expires = "2026-10-15"
+owner = "compiler-diagnostics"

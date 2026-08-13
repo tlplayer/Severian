@@ -65,15 +65,18 @@ input/output, propagates a failing exit status, and removes the temporary file.
 If a source has tests but no `main`, the generated native entry point executes
 those tests and prints the real pass count.
 
-`sev build` reads Cargo-compatible `[package]`, `[[bin]]`, `[dependencies]`, and
-`[workspace] members` fields from `package.toml`. Package and workspace binaries
-are emitted under `target/debug`. Path libraries are checked in dependency order
+`sev build` reads Cargo-compatible `[package]`, every `[[bin]]`, `[lib]`,
+`[dependencies]`, and nested `[workspace] members` fields from `package.toml`.
+Package and workspace artifacts are emitted under `target/debug`. Path libraries are checked in dependency order
 and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
 those artifacts. Library-local tests are not linked into downstream application
 test binaries. `sev build source.sev` uses the source stem as the binary name.
-Before emitting artifacts, every build runs the project-owned test coverage gate
-and stops if line coverage is below 75%; standard and path dependencies are not
-charged to the consuming package's percentage.
+Before emitting artifacts, every build runs the complete manifest policy in
+order: compile, architecture budgets, unit tests, profile tests, coverage,
+memory/leak checks, and integration tests. Those gates cannot be removed with a
+CLI skip flag or omitted from a custom pipeline. Standard and path dependencies
+are not charged to the consuming package's coverage percentage. See
+[`docs/BUILD_POLICY.md`](docs/BUILD_POLICY.md) for the manifest schema.
 
 The CLI is also a conventional Cargo binary crate:
 

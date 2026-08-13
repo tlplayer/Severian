@@ -1,0 +1,175 @@
+use super::*;
+
+pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
+    match ty {
+        Type::Union { .. } => Ok(ValueType::Any),
+        Type::Named(path) => {
+            let name = path
+                .segments
+                .first()
+                .map(|segment| segment.name.as_str())
+                .unwrap_or("");
+            match name {
+                "int" | "u8" | "u16" | "u32" | "u64" | "usize" => Ok(ValueType::Int),
+                "float" | "f32" | "f64" => Ok(ValueType::Float),
+                "bool" => Ok(ValueType::Bool),
+                "string" => Ok(ValueType::String),
+                "unit" => Ok(ValueType::Unit),
+                "list" => Ok(ValueType::List),
+                "map" => Ok(ValueType::Map),
+                "set" => Ok(ValueType::Set),
+                "Tensor"
+                    if matches!(
+                        path.args.first().and_then(TypeArg::as_type),
+                        Some(Type::Named(element))
+                            if element.segments.first().is_some_and(|part| part.name == "type")
+                    ) =>
+                {
+                    Ok(ValueType::TensorAny)
+                }
+                "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
+                "Channel" => Ok(ValueType::Channel),
+                "fn" => Ok(ValueType::Function),
+                "Result" => Ok(ValueType::Result),
+                "Option" => Ok(ValueType::Option),
+                _ => Ok(ValueType::Any),
+            }
+        }
+        _ => Err(error(ty.span(), "type is not supported yet")),
+    }
+}
+
+pub(super) fn lower_tensor_type(
+    path: &severian_ast::TypePath,
+) -> Result<TensorType, SemanticError> {
+    let element = match path.args.first().and_then(TypeArg::as_type) {
+        Some(Type::Named(element)) => match element.segments.first().map(|part| part.name.as_str())
+        {
+            Some("bf16" | "bfloat16") => TensorElementType::BF16,
+            Some("f32") => TensorElementType::F32,
+            Some("f64" | "float") => TensorElementType::F64,
+            Some("i32") => TensorElementType::I32,
+            Some("i64" | "int") => TensorElementType::I64,
+            _ => {
+                return Err(error(
+                    path.span,
+                    "tensor elements must be bf16, f32, f64, i32, or i64",
+                ))
+            }
+        },
+        None if path.args.is_empty() => TensorElementType::F64,
+        _ => {
+            return Err(error(
+                path.span,
+                "the first Tensor argument must be an element type",
+            ))
+        }
+    };
+    if path.args.len() <= 1 {
+        return Ok(TensorType::dynamic(element));
+    }
+    let mut dimensions = Vec::with_capacity(path.args.len() - 1);
+    for argument in &path.args[1..] {
+        match argument {
+            TypeArg::Dimension { size, .. } => dimensions.push(TensorDimension::Static(*size)),
+            TypeArg::Type { ty, .. } if matches!(ty.as_ref(), Type::Named(name) if name.segments.first().is_some_and(|part| part.name == "dynamic")) => {
+                dimensions.push(TensorDimension::Dynamic)
+            }
+            _ => {
+                return Err(error(
+                    argument.span(),
+                    "tensor dimensions must be integers or `dynamic`",
+                ))
+            }
+        }
+    }
+    TensorType::ranked(element, &dimensions).map_err(|message| error(path.span, message))
+}
+
+pub(super) fn merge_numeric(
+    left: ValueType,
+    right: ValueType,
+    span: Span,
+) -> Result<ValueType, SemanticError> {
+    if left == ValueType::Any || right == ValueType::Any {
+        return Ok(ValueType::Any);
+    }
+    if left == right && matches!(left, ValueType::Int | ValueType::Float | ValueType::String) {
+        Ok(left)
+    } else {
+        Err(error(span, "operator requires matching numeric values"))
+    }
+}
+
+pub(super) fn power_type(
+    base: ValueType,
+    exponent: ValueType,
+    span: Span,
+) -> Result<ValueType, SemanticError> {
+    if base == ValueType::Any || exponent == ValueType::Any {
+        return Ok(ValueType::Any);
+    }
+    if base == ValueType::Int && exponent == ValueType::Int {
+        return Ok(ValueType::Int);
+    }
+    if matches!(base, ValueType::Int | ValueType::Float)
+        && matches!(exponent, ValueType::Int | ValueType::Float)
+    {
+        return Ok(ValueType::Float);
+    }
+    Err(error(span, "power requires numeric values"))
+}
+
+pub(super) fn compatible(
+    span: Span,
+    actual: ValueType,
+    expected: ValueType,
+) -> Result<(), SemanticError> {
+    if actual == expected
+        || actual == ValueType::Any
+        || expected == ValueType::Any
+        || matches!(
+            (actual, expected),
+            (ValueType::Tensor(_), ValueType::TensorAny)
+        )
+        || matches!((actual, expected), (ValueType::Tensor(actual), ValueType::Tensor(expected)) if actual.is_compatible_with(expected))
+        || (expected == ValueType::Result && actual != ValueType::Unit)
+    {
+        Ok(())
+    } else {
+        Err(error(
+            span,
+            format!("E0202: expected {expected:?}, found {actual:?}"),
+        ))
+    }
+}
+
+pub(super) fn always_returns(instructions: &[Instruction]) -> bool {
+    instructions.iter().any(|instruction| match instruction {
+        Instruction::Return(_) => true,
+        Instruction::If {
+            then_instructions,
+            else_instructions,
+            ..
+        } => always_returns(then_instructions) && always_returns(else_instructions),
+        Instruction::Switch { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|arm| always_returns(&arm.instructions))
+        }
+        Instruction::With { instructions, .. } => always_returns(instructions),
+        Instruction::While { condition, .. }
+            if matches!(condition.kind(), Expression::Boolean(true)) =>
+        {
+            true
+        }
+        _ => false,
+    })
+}
+
+pub(super) fn is_upper_camel_case(name: &str) -> bool {
+    name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+pub(super) fn value_span(value: &Option<Expr>) -> Span {
+    value.as_ref().map_or(Span::dummy(), Expr::span)
+}

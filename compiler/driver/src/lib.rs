@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod architecture;
 mod compile;
 pub mod coverage;
 mod error;
@@ -14,7 +15,9 @@ pub use compile::{
 };
 pub use error::CompileError;
 pub use test::{
-    compile_native_profile_tests, compile_native_tests, native_profile_test_compilation,
-    native_profile_test_count, native_test_compilation, native_test_count,
+    compile_native_integration_tests, compile_native_profile_tests, compile_native_tests,
+    native_integration_test_compilation, native_integration_test_count,
+    native_profile_test_compilation, native_profile_test_count, native_test_compilation,
+    native_test_count,
 };
 pub use xla::{collect_xla_kernels, XlaExecutionContext, XlaKernelArtifact};

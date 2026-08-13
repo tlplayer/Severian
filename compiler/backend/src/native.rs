@@ -63,6 +63,12 @@ pub fn compile_native(
             .as_deref()
             .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
     });
+    let uses_mysql = program.functions.iter().any(|function| {
+        function
+            .native_symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
+    });
     let uses_xla = program.functions.iter().any(|function| {
         function
             .decorators
@@ -97,6 +103,9 @@ pub fn compile_native(
         OsString::from("-lrt"),
         OsString::from("-lutil"),
     ];
+    if uses_mysql {
+        additional_arguments.push(OsString::from("-lmariadb"));
+    }
     if !sanitizer_names.is_empty() {
         additional_arguments.extend([
             format!("-fsanitize={}", sanitizer_names.join(",")).into(),

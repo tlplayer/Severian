@@ -80,7 +80,7 @@ fn build_compiles_a_library_only_package_without_an_entry_point() {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("package.toml"),
-        "[package]\nname = \"function-library\"\nversion = \"0.1.0\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+        "[package]\nname = \"function-library\"\nversion = \"0.1.0\"\n\n[lib]\npath = \"src/lib.sev\"\n\n[memory]\nleaks = \"allow\"\n",
     )
     .unwrap();
     std::fs::write(

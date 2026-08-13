@@ -14,27 +14,34 @@ pub fn compile_native_tests(
     compilation: &Compilation,
     output: &Path,
 ) -> Result<usize, CompileError> {
-    compile_selected_native_tests(compilation, output, false)
+    compile_selected_native_tests(compilation, output, TestSelection::Unit)
 }
 
 pub fn compile_native_profile_tests(
     compilation: &Compilation,
     output: &Path,
 ) -> Result<usize, CompileError> {
-    compile_selected_native_tests(compilation, output, true)
+    compile_selected_native_tests(compilation, output, TestSelection::Profile)
+}
+
+pub fn compile_native_integration_tests(
+    compilation: &Compilation,
+    output: &Path,
+) -> Result<usize, CompileError> {
+    compile_selected_native_tests(compilation, output, TestSelection::Integration)
 }
 
 fn compile_selected_native_tests(
     compilation: &Compilation,
     output: &Path,
-    profile_only: bool,
+    selection: TestSelection,
 ) -> Result<usize, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("severian-test-compiler".into())
             .stack_size(16 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let (native, count) = native_test_compilation_selected(compilation, profile_only)?;
+                let (native, count) = native_test_compilation_selected(compilation, selection)?;
                 compile_native(&native, output)?;
                 Ok(count)
             })
@@ -47,14 +54,18 @@ fn compile_selected_native_tests(
 }
 
 pub fn native_test_count(program: &Program) -> usize {
-    selected_native_test_count(program, false)
+    selected_native_test_count(program, TestSelection::Unit)
 }
 
 pub fn native_profile_test_count(program: &Program) -> usize {
-    selected_native_test_count(program, true)
+    selected_native_test_count(program, TestSelection::Profile)
 }
 
-fn selected_native_test_count(program: &Program, profile_only: bool) -> usize {
+pub fn native_integration_test_count(program: &Program) -> usize {
+    selected_native_test_count(program, TestSelection::Integration)
+}
+
+fn selected_native_test_count(program: &Program, selection: TestSelection) -> usize {
     program
         .functions
         .iter()
@@ -66,31 +77,37 @@ fn selected_native_test_count(program: &Program, profile_only: bool) -> usize {
                 .flat_map(|class| class.methods.iter().chain(&class.constructors))
                 .flat_map(|function| &function.tests),
         )
-        .filter(|test| selected_test(test, profile_only))
+        .filter(|test| selected_test(test, selection))
         .count()
 }
 
 pub fn native_test_compilation(
     compilation: &Compilation,
 ) -> Result<(Compilation, usize), CompileError> {
-    native_test_compilation_selected(compilation, false)
+    native_test_compilation_selected(compilation, TestSelection::Unit)
 }
 
 pub fn native_profile_test_compilation(
     compilation: &Compilation,
 ) -> Result<(Compilation, usize), CompileError> {
-    native_test_compilation_selected(compilation, true)
+    native_test_compilation_selected(compilation, TestSelection::Profile)
+}
+
+pub fn native_integration_test_compilation(
+    compilation: &Compilation,
+) -> Result<(Compilation, usize), CompileError> {
+    native_test_compilation_selected(compilation, TestSelection::Integration)
 }
 
 fn native_test_compilation_selected(
     compilation: &Compilation,
-    profile_only: bool,
+    selection: TestSelection,
 ) -> Result<(Compilation, usize), CompileError> {
     let mut instructions = Vec::new();
     let mut count = 0;
     for function in &compilation.hir.functions {
         for test in &function.tests {
-            if selected_test(test, profile_only) {
+            if selected_test(test, selection) {
                 if test.modes.contains(&TestMode::Chaos) {
                     let inherited = reachable_dependencies(&compilation.hir, function)
                         .into_iter()
@@ -116,7 +133,7 @@ fn native_test_compilation_selected(
     for class in &compilation.hir.classes {
         for function in class.methods.iter().chain(&class.constructors) {
             for test in &function.tests {
-                if selected_test(test, profile_only) {
+                if selected_test(test, selection) {
                     instructions.extend(test_instructions(test));
                     count += 1;
                 }
@@ -173,9 +190,21 @@ fn native_test_compilation_selected(
     Ok((native, count))
 }
 
-fn selected_test(test: &Test, profile_only: bool) -> bool {
-    !test.modes.contains(&TestMode::Integration)
-        && (!profile_only || test.modes.contains(&TestMode::Profile))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestSelection {
+    Unit,
+    Profile,
+    Integration,
+}
+
+fn selected_test(test: &Test, selection: TestSelection) -> bool {
+    match selection {
+        TestSelection::Unit => !test.modes.contains(&TestMode::Integration),
+        TestSelection::Profile => {
+            !test.modes.contains(&TestMode::Integration) && test.modes.contains(&TestMode::Profile)
+        }
+        TestSelection::Integration => test.modes.contains(&TestMode::Integration),
+    }
 }
 
 fn test_instructions(test: &Test) -> Vec<Instruction> {

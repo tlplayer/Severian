@@ -1,11 +1,11 @@
 use severian_backend::{NativeCompileOptions, NativeSanitizer};
 use severian_driver::{
-    check_path, compile_dependency_path, compile_native, compile_native_profile_tests,
-    compile_native_tests, compile_native_with_options, compile_path, inspect_toolchain,
-    native_profile_test_compilation, native_profile_test_count, native_test_compilation,
-    native_test_count, Compilation,
+    check_path, compile_dependency_path, compile_native, compile_native_integration_tests,
+    compile_native_profile_tests, compile_native_tests, compile_native_with_options, compile_path,
+    inspect_toolchain, native_integration_test_count, native_profile_test_compilation,
+    native_profile_test_count, native_test_compilation, native_test_count, Compilation,
 };
-use severian_package::BinaryTarget;
+use severian_package::{BinaryTarget, BuildGate, BuildPolicy};
 use std::{
     collections::HashSet,
     fs,
@@ -648,8 +648,6 @@ struct BuildFinding {
     rendered: String,
 }
 
-const REQUIRED_LINE_COVERAGE: f64 = 75.0;
-
 fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut input = PathBuf::from(".");
     let mut emit = EmitMode::Executable;
@@ -711,7 +709,21 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
         return Err("StableHLO emission requires `--target xla`".into());
     }
 
+    let policy = BuildPolicy::for_input(&input).map_err(|error| error.to_string())?;
     let targets = resolve_targets(&input)?;
+    build_progress(
+        message_format,
+        &format!(
+            "Build policy: {}",
+            policy
+                .pipeline
+                .iter()
+                .map(|gate| gate.name())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        ),
+    );
+    build_progress(message_format, "[compile] RUN");
     let findings = collect_build_findings(&input, max_errors)?;
     render_build_findings(&findings, message_format);
     let error_count = findings
@@ -723,13 +735,23 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             "build stopped after {error_count} independent error(s); no artifacts were emitted"
         ));
     }
+    build_progress(message_format, "[compile] PASS");
 
-    coverage(&input).map_err(|error| {
-        format!(
-            "build blocked by the {:.0}% line coverage requirement: {error}",
-            REQUIRED_LINE_COVERAGE
-        )
-    })?;
+    for gate in policy.pipeline.iter().copied().skip(1) {
+        build_progress(message_format, &format!("[{}] RUN", gate.name()));
+        match gate {
+            BuildGate::Compile => unreachable!("compile is the first and unique gate"),
+            BuildGate::Architecture => enforce_architecture_policy(&policy)?,
+            BuildGate::Test => test_targets(&input, false)?,
+            BuildGate::Profile => test_targets(&input, true)?,
+            BuildGate::Coverage => coverage_with_policy(&input, &policy)?,
+            BuildGate::Memory => {
+                memory_test_targets(&input, false, Vec::new(), policy.memory.leaks)?
+            }
+            BuildGate::Integration => integration_test_targets(&input)?,
+        }
+        build_progress(message_format, &format!("[{}] PASS", gate.name()));
+    }
     let mut libraries = HashSet::new();
     let mut artifacts = Vec::new();
     for target_spec in targets {
@@ -756,12 +778,53 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
             artifacts.push(output);
         }
     }
+    println!("BUILD PASS");
     Ok(artifacts)
+}
+
+fn build_progress(format: MessageFormat, message: &str) {
+    match format {
+        MessageFormat::Text => println!("{message}"),
+        MessageFormat::Json => eprintln!("{message}"),
+    }
+}
+
+fn enforce_architecture_policy(policy: &BuildPolicy) -> Result<(), String> {
+    let findings = severian_driver::architecture::check_file_budgets(policy)?;
+    let mut errors = 0;
+    for finding in findings {
+        println!(
+            "{}[architecture::file_size] {}\n  {}\n  limit: {} lines{}",
+            finding.severity,
+            finding.path.display(),
+            finding.message,
+            finding.limit,
+            finding
+                .exception_reason
+                .as_deref()
+                .map_or(String::new(), |reason| format!("\n  exception: {reason}"))
+        );
+        errors += usize::from(finding.severity == "error");
+    }
+    if errors == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "architecture gate rejected {errors} file(s) above their hard line budget"
+        ))
+    }
 }
 
 fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFinding>, String> {
     let mut sources = if input.is_file() {
         vec![input.to_path_buf()]
+    } else if severian_package::nearest_manifest(input).is_some()
+        || input.join("main.sev").is_file()
+    {
+        resolve_targets(input)?
+            .into_iter()
+            .map(|target| target.source)
+            .collect()
     } else {
         let mut sources = Vec::new();
         collect_sources(input, &mut sources).map_err(|error| error.to_string())?;
@@ -1618,6 +1681,40 @@ fn test_targets(input: &Path, profile_only: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn integration_test_targets(input: &Path) -> Result<(), String> {
+    let targets = resolve_targets(input)?;
+    let mut total = 0;
+    for target in targets {
+        let compilation = compile_path(&target.source).map_err(|error| error.to_string())?;
+        let count = native_integration_test_count(&compilation.hir);
+        if count == 0 {
+            continue;
+        }
+        let output = target
+            .package_root
+            .join("target")
+            .join("debug")
+            .join(format!("{}-integration-tests", target.name));
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        compile_native_integration_tests(&compilation, &output)
+            .map_err(|error| error.to_string())?;
+        let status = Command::new(&output)
+            .status()
+            .map_err(|error| format!("could not run {}: {error}", output.display()))?;
+        if !status.success() {
+            return Err(format!(
+                "integration tests for {} failed with {status}",
+                target.source.display()
+            ));
+        }
+        total += count;
+    }
+    println!("{total} integration test(s) passed");
+    Ok(())
+}
+
 fn test_command(args: &[String]) -> Result<(), String> {
     let mut input = None;
     let mut mutate = false;
@@ -1817,6 +1914,11 @@ fn run_with_timeout(binary: &Path, seconds: u64) -> Result<MutantStatus, String>
 }
 
 fn coverage(input: &Path) -> Result<(), String> {
+    let policy = BuildPolicy::for_input(input).map_err(|error| error.to_string())?;
+    coverage_with_policy(input, &policy)
+}
+
+fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String> {
     let targets = resolve_targets(input)?
         .into_iter()
         .filter(|target| !is_expected_negative_coverage_fixture(&target.source))
@@ -1930,9 +2032,9 @@ fn coverage(input: &Path) -> Result<(), String> {
             functions: report.functions.percent,
         },
         severian_diagnostics::coverage::CoverageThresholds {
-            lines: Some(REQUIRED_LINE_COVERAGE),
+            lines: Some(policy.coverage.minimum),
             regions: None,
-            branches: None,
+            branches: policy.coverage.branches,
             functions: None,
         },
     );
@@ -1950,7 +2052,7 @@ fn coverage(input: &Path) -> Result<(), String> {
         );
         return Err(format!(
             "line coverage is {:.2}%; at least {:.2}% is required",
-            report.lines.percent, REQUIRED_LINE_COVERAGE
+            report.lines.percent, policy.coverage.minimum
         ));
     }
     Ok(())
