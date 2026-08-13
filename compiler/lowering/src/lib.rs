@@ -16,8 +16,10 @@ use severian_hir::{
     TypeKind, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::rc::Rc;
 
 pub fn lower(mir: &severian_mir::Program) -> Module {
     lower_hir(mir.lowering_hir())
@@ -75,6 +77,9 @@ fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_unbox_bool(!llvm.ptr) -> i1\n",
         "  llvm.func @__sev_unbox_string(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_unbox_ptr(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_closure_new(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_closure_function(!llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_closure_environment(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_add(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_sub(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_value_mul(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
@@ -451,6 +456,25 @@ fn lower_hir(program: &Program) -> Module {
             ))
         })
         .collect::<HashMap<_, _>>();
+    let method_return_classes = program
+        .classes
+        .iter()
+        .flat_map(|class| {
+            class
+                .methods
+                .iter()
+                .zip(&class.method_return_classes)
+                .filter_map(|(method, return_class)| {
+                    Some((
+                        (class.name.clone(), method.name.clone()),
+                        return_class.clone()?,
+                    ))
+                })
+        })
+        .collect::<HashMap<_, _>>();
+    let closure_definitions = Rc::new(RefCell::new(String::new()));
+    let next_closure = Rc::new(Cell::new(0));
+    let function_closures = Rc::new(RefCell::new(HashMap::new()));
     let environment = LoweringEnvironment {
         globals: &program.globals,
         classes: &program.classes,
@@ -458,6 +482,10 @@ fn lower_hir(program: &Program) -> Module {
         function_returns: &function_returns,
         function_params: &function_params,
         function_return_classes: &function_return_classes,
+        method_return_classes: &method_return_classes,
+        closure_definitions: &closure_definitions,
+        next_closure: &next_closure,
+        function_closures: &function_closures,
         native_symbols: &native_symbols,
     };
     for class in &program.classes {
@@ -491,6 +519,7 @@ fn lower_hir(program: &Program) -> Module {
         }
         lower_function(function, &environment, &mut output);
     }
+    output.push_str(&closure_definitions.borrow());
     output.push_str("}\n");
     Module::new(output)
 }
@@ -570,6 +599,10 @@ struct LoweringEnvironment<'a> {
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
     function_return_classes: &'a HashMap<String, String>,
+    method_return_classes: &'a HashMap<(String, String), String>,
+    closure_definitions: &'a Rc<RefCell<String>>,
+    next_closure: &'a Rc<Cell<usize>>,
+    function_closures: &'a Rc<RefCell<HashMap<String, String>>>,
     native_symbols: &'a HashMap<String, String>,
 }
 
@@ -601,6 +634,10 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         function_returns: environment.function_returns,
         function_params: environment.function_params,
         function_return_classes: environment.function_return_classes,
+        method_return_classes: environment.method_return_classes,
+        closure_definitions: Rc::clone(environment.closure_definitions),
+        next_closure: Rc::clone(environment.next_closure),
+        function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
         classes: environment.classes,
         field_object: None,
@@ -622,7 +659,6 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         next_block: 0,
         terminated: false,
         loop_targets: Vec::new(),
-        lambdas: HashMap::new(),
         is_main,
         placement: TaskPlacement::Default,
     };
@@ -687,6 +723,10 @@ fn lower_class_function(
         function_returns: environment.function_returns,
         function_params: environment.function_params,
         function_return_classes: environment.function_return_classes,
+        method_return_classes: environment.method_return_classes,
+        closure_definitions: Rc::clone(environment.closure_definitions),
+        next_closure: Rc::clone(environment.next_closure),
+        function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
         classes: environment.classes,
         field_object: Some("%self".into()),
@@ -718,7 +758,6 @@ fn lower_class_function(
         next_block: 0,
         terminated: false,
         loop_targets: Vec::new(),
-        lambdas: HashMap::new(),
         is_main: false,
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
@@ -761,6 +800,10 @@ struct LowerContext<'a> {
     function_returns: &'a HashMap<String, ValueType>,
     function_params: &'a HashMap<String, Vec<ValueType>>,
     function_return_classes: &'a HashMap<String, String>,
+    method_return_classes: &'a HashMap<(String, String), String>,
+    closure_definitions: Rc<RefCell<String>>,
+    next_closure: Rc<Cell<usize>>,
+    function_closures: Rc<RefCell<HashMap<String, String>>>,
     native_symbols: &'a HashMap<String, String>,
     classes: &'a [Class],
     field_object: Option<String>,
@@ -779,7 +822,6 @@ struct LowerContext<'a> {
     declared_return: ValueType,
     placement: TaskPlacement,
     loop_targets: Vec<LoopTarget>,
-    lambdas: HashMap<String, (Vec<String>, Expression)>,
 }
 
 impl LowerContext<'_> {
@@ -1415,20 +1457,23 @@ impl LowerContext<'_> {
             }
             Expression::Ownership { value, .. } => self.lower_expression(value),
             Expression::Function(name) => {
-                let result = self.fresh_value();
-                let symbol = source_function_symbol(name);
+                let adapter = self.ensure_function_closure(name);
+                let kind = self.fresh_value();
+                writeln!(self.output, "    {kind} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+                let environment = self.fresh_value();
+                writeln!(self.output, "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
+                let function = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.mlir.addressof @{symbol} : !llvm.ptr"
+                    "    {function} = llvm.mlir.addressof @{adapter} : !llvm.ptr"
                 )
                 .unwrap();
+                let result = self.fresh_value();
+                writeln!(self.output, "    {result} = llvm.call @__sev_closure_new({function}, {environment}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                 (result, ValueType::Function)
             }
             Expression::Lambda { params, body } => {
-                let name = format!("%lambda_{}", self.next_value);
-                self.next_value += 1;
-                self.lambdas
-                    .insert(name.clone(), (params.clone(), (**body).clone()));
+                let name = self.emit_lambda_closure(params, body);
                 (name, ValueType::Function)
             }
             Expression::List(values) => self.lower_collection_literal(values, ValueType::List, 0),
@@ -1839,14 +1884,22 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "map" | "filter") && args.len() == 1 => {
+            } if matches!(method.as_str(), "map" | "filter")
+                && args.len() == 1
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
+            {
                 self.lower_collection_transform(object, &args[0], method == "filter")
             }
             Expression::MethodCall {
                 object,
                 method,
                 args,
-            } if method == "reduce" && (1..=2).contains(&args.len()) => {
+            } if method == "reduce"
+                && (1..=2).contains(&args.len())
+                && !self.has_known_class_method(object, method)
+                && !self.has_abstract_class_method(object, method) =>
+            {
                 self.lower_collection_reduce(object, &args[0], args.get(1))
             }
             Expression::MethodCall {
@@ -2589,7 +2642,12 @@ impl LowerContext<'_> {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> {}", mlir_type(return_type)).unwrap();
                     if return_type == ValueType::Any {
-                        self.object_classes.insert(result.clone(), class);
+                        let returned_class = self
+                            .method_return_classes
+                            .get(&(class.clone(), method.clone()))
+                            .cloned()
+                            .unwrap_or(class);
+                        self.object_classes.insert(result.clone(), returned_class);
                     }
                     (result, return_type)
                 }
@@ -3471,56 +3529,46 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                if let Some((params, body)) = self.lambdas.get(&callee).cloned() {
-                    let previous = params
-                        .iter()
-                        .zip(&args)
-                        .map(|(param, value)| {
-                            (
-                                param.clone(),
-                                self.variables.insert(param.clone(), value.clone()),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let mut result = self.lower_expression(&body);
-                    for (param, value) in previous {
-                        if let Some(value) = value {
-                            self.variables.insert(param, value);
-                        } else {
-                            self.variables.remove(&param);
-                        }
-                    }
-                    if *return_type == ValueType::Any && result.1 != ValueType::Any {
-                        result = (self.box_value(result), ValueType::Any);
-                    }
-                    return result;
-                }
                 let values = args
-                    .iter()
-                    .map(|(value, _)| value.as_str())
+                    .into_iter()
+                    .map(|value| self.box_value(value))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let types = args
-                    .iter()
-                    .map(|(_, ty)| mlir_type(*ty))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let function = self.fresh_value();
+                writeln!(self.output, "    {function} = llvm.call @__sev_closure_function({callee}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                let environment = self.fresh_value();
+                writeln!(self.output, "    {environment} = llvm.call @__sev_closure_environment({callee}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                let value_suffix = if values.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {values}")
+                };
+                let type_suffix = if values.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", std::iter::repeat_n("!llvm.ptr", values.split(", ").count()).collect::<Vec<_>>().join(", "))
+                };
                 if *return_type == ValueType::Unit {
                     writeln!(
                         self.output,
-                        "    llvm.call {callee}({values}) : !llvm.ptr, ({types}) -> ()"
+                        "    %ignored_closure_result_{} = llvm.call {function}({environment}{value_suffix}) : !llvm.ptr, (!llvm.ptr{type_suffix}) -> !llvm.ptr",
+                        self.next_value
                     )
                     .unwrap();
+                    self.next_value += 1;
                     return (String::new(), ValueType::Unit);
                 }
                 let result = self.fresh_value();
                 writeln!(
                     self.output,
-                    "    {result} = llvm.call {callee}({values}) : !llvm.ptr, ({types}) -> {}",
-                    mlir_type(*return_type)
+                    "    {result} = llvm.call {function}({environment}{value_suffix}) : !llvm.ptr, (!llvm.ptr{type_suffix}) -> !llvm.ptr"
                 )
                 .unwrap();
-                (result, *return_type)
+                if *return_type == ValueType::Any {
+                    (result, ValueType::Any)
+                } else {
+                    self.unbox_value((result, ValueType::Any), *return_type)
+                }
             }
             Expression::Binary { left, op, right } => {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
@@ -3811,32 +3859,6 @@ impl LowerContext<'_> {
         result
     }
 
-    fn coerce_call_arguments(
-        &mut self,
-        function: &str,
-        arguments: Vec<(String, ValueType)>,
-    ) -> Vec<(String, ValueType)> {
-        let Some(parameters) = self.function_params.get(function).cloned() else {
-            return arguments;
-        };
-        arguments
-            .into_iter()
-            .enumerate()
-            .map(|(index, argument)| {
-                let Some(expected) = parameters.get(index).copied() else {
-                    return argument;
-                };
-                if argument.1 == ValueType::Any && expected != ValueType::Any {
-                    self.unbox_value(argument, expected)
-                } else if expected == ValueType::Any && argument.1 != ValueType::Any {
-                    (self.box_value(argument), ValueType::Any)
-                } else {
-                    argument
-                }
-            })
-            .collect()
-    }
-
     fn coerce_resolved_call_arguments(
         &mut self,
         target: &severian_hir::CallTarget,
@@ -3897,6 +3919,167 @@ impl LowerContext<'_> {
         (result, expected)
     }
 
+    fn next_closure_symbol(&self, prefix: &str) -> String {
+        let index = self.next_closure.get();
+        self.next_closure.set(index + 1);
+        format!("__sev_{prefix}_{index}")
+    }
+
+    fn ensure_function_closure(&mut self, function: &str) -> String {
+        if let Some(symbol) = self.function_closures.borrow().get(function).cloned() {
+            return symbol;
+        }
+        let symbol = self.next_closure_symbol("function_closure");
+        self.function_closures
+            .borrow_mut()
+            .insert(function.to_owned(), symbol.clone());
+        let params = self
+            .function_params
+            .get(function)
+            .cloned()
+            .unwrap_or_default();
+        let return_type = self
+            .function_returns
+            .get(function)
+            .copied()
+            .unwrap_or(ValueType::Any);
+        let mut definition = String::new();
+        write!(definition, "  llvm.func @{symbol}(%environment: !llvm.ptr").unwrap();
+        for index in 0..params.len() {
+            write!(definition, ", %arg_{index}: !llvm.ptr").unwrap();
+        }
+        definition.push_str(") -> !llvm.ptr {\n");
+        let mut context = self.callback_context(&mut definition);
+        let arguments = params
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| {
+                context
+                    .unbox_value((format!("%arg_{index}"), ValueType::Any), *ty)
+                    .0
+            })
+            .collect::<Vec<_>>();
+        let values = arguments.join(", ");
+        let types = params
+            .iter()
+            .map(|ty| mlir_type(*ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let target = self
+            .native_symbols
+            .get(function)
+            .cloned()
+            .unwrap_or_else(|| source_function_symbol(function));
+        if return_type == ValueType::Unit {
+            writeln!(context.output, "    llvm.call @{target}({values}) : ({types}) -> ()").unwrap();
+            let empty = context.fresh_value();
+            writeln!(context.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
+            writeln!(context.output, "    llvm.return {empty} : !llvm.ptr").unwrap();
+        } else {
+            let result = context.fresh_value();
+            writeln!(context.output, "    {result} = llvm.call @{target}({values}) : ({types}) -> {}", mlir_type(return_type)).unwrap();
+            let boxed = context.box_value((result, return_type));
+            writeln!(context.output, "    llvm.return {boxed} : !llvm.ptr").unwrap();
+        }
+        definition.push_str("  }\n");
+        self.closure_definitions.borrow_mut().push_str(&definition);
+        symbol
+    }
+
+    fn emit_lambda_closure(&mut self, params: &[String], body: &Expression) -> String {
+        let symbol = self.next_closure_symbol("lambda");
+        let mut captures = self
+            .variables
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        captures.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let kind = self.fresh_value();
+        writeln!(self.output, "    {kind} = llvm.mlir.constant(0 : i64) : i64").unwrap();
+        let environment = self.fresh_value();
+        writeln!(self.output, "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr").unwrap();
+        let mut capture_classes = HashMap::new();
+        for (name, value) in &captures {
+            let boxed = self.box_value(value.clone());
+            writeln!(self.output, "    llvm.call @__sev_collection_push({environment}, {boxed}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+            if let Some(class) = self.object_classes.get(&value.0) {
+                capture_classes.insert(name.clone(), class.clone());
+            }
+        }
+
+        let mut definition = String::new();
+        write!(definition, "  llvm.func @{symbol}(%environment: !llvm.ptr").unwrap();
+        for index in 0..params.len() {
+            write!(definition, ", %arg_{index}: !llvm.ptr").unwrap();
+        }
+        definition.push_str(") -> !llvm.ptr {\n");
+        let mut context = self.callback_context(&mut definition);
+        for (index, (name, (_, ty))) in captures.iter().enumerate() {
+            let position = context.fresh_value();
+            writeln!(context.output, "    {position} = llvm.mlir.constant({index} : i64) : i64").unwrap();
+            let raw = context.fresh_value();
+            writeln!(context.output, "    {raw} = llvm.call @__sev_collection_get(%environment, {position}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+            let value = context.unbox_value((raw, ValueType::Any), *ty);
+            if let Some(class) = capture_classes.get(name) {
+                context.object_classes.insert(value.0.clone(), class.clone());
+            }
+            context.variables.insert(name.clone(), value);
+        }
+        for (index, param) in params.iter().enumerate() {
+            context
+                .variables
+                .insert(param.clone(), (format!("%arg_{index}"), ValueType::Any));
+        }
+        let result = context.lower_expression(body);
+        let boxed = context.box_value(result);
+        writeln!(context.output, "    llvm.return {boxed} : !llvm.ptr").unwrap();
+        definition.push_str("  }\n");
+        self.closure_definitions.borrow_mut().push_str(&definition);
+
+        let function = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {function} = llvm.mlir.addressof @{symbol} : !llvm.ptr"
+        )
+        .unwrap();
+        let closure = self.fresh_value();
+        writeln!(self.output, "    {closure} = llvm.call @__sev_closure_new({function}, {environment}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+        closure
+    }
+
+    fn callback_context<'b>(&'b self, output: &'b mut String) -> LowerContext<'b> {
+        LowerContext {
+            output,
+            strings: self.strings,
+            function_returns: self.function_returns,
+            function_params: self.function_params,
+            function_return_classes: self.function_return_classes,
+            method_return_classes: self.method_return_classes,
+            closure_definitions: Rc::clone(&self.closure_definitions),
+            next_closure: Rc::clone(&self.next_closure),
+            function_closures: Rc::clone(&self.function_closures),
+            native_symbols: self.native_symbols,
+            classes: self.classes,
+            field_object: None,
+            field_names: HashSet::new(),
+            field_types: HashMap::new(),
+            field_classes: HashMap::new(),
+            object_classes: HashMap::new(),
+            receiver_types: HashMap::new(),
+            declared_return: ValueType::Any,
+            task_results: HashMap::new(),
+            channel_types: HashMap::new(),
+            variables: HashMap::new(),
+            next_value: 0,
+            next_block: 0,
+            terminated: false,
+            loop_targets: Vec::new(),
+            is_main: false,
+            placement: TaskPlacement::Default,
+        }
+    }
+
     fn lower_comprehension(
         &mut self,
         element: Option<&Expression>,
@@ -3936,66 +4119,32 @@ impl LowerContext<'_> {
         args: Vec<(String, ValueType)>,
     ) -> (String, ValueType) {
         let (callee, _) = self.lower_expression(callable);
-        if let Some((params, body)) = self.lambdas.get(&callee).cloned() {
-            let previous = params
-                .iter()
-                .zip(&args)
-                .map(|(param, value)| {
-                    (
-                        param.clone(),
-                        self.variables.insert(param.clone(), value.clone()),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let result = self.lower_expression(&body);
-            for (param, value) in previous {
-                if let Some(value) = value {
-                    self.variables.insert(param, value);
-                } else {
-                    self.variables.remove(&param);
-                }
-            }
-            return result;
-        }
-        if let Expression::Function(function) = callable.kind() {
-            let return_type = self
-                .function_returns
-                .get(function)
-                .copied()
-                .unwrap_or(ValueType::Any);
-            let args = self.coerce_call_arguments(function, args);
-            let values = args
-                .iter()
-                .map(|(value, _)| value.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let types = args
-                .iter()
-                .map(|(_, ty)| mlir_type(*ty))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let result = self.fresh_value();
-            let symbol = source_function_symbol(function);
-            writeln!(
-                self.output,
-                "    {result} = llvm.call @{symbol}({values}) : ({types}) -> {}",
-                mlir_type(return_type)
-            )
-            .unwrap();
-            return (result, return_type);
-        }
         let boxed = args
             .into_iter()
             .map(|value| self.box_value(value))
             .collect::<Vec<_>>();
         let values = boxed.join(", ");
-        let types = std::iter::repeat_n("!llvm.ptr", boxed.len())
+        let type_suffix = std::iter::repeat_n("!llvm.ptr", boxed.len())
             .collect::<Vec<_>>()
             .join(", ");
+        let function = self.fresh_value();
+        writeln!(self.output, "    {function} = llvm.call @__sev_closure_function({callee}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+        let environment = self.fresh_value();
+        writeln!(self.output, "    {environment} = llvm.call @__sev_closure_environment({callee}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+        let value_suffix = if values.is_empty() {
+            String::new()
+        } else {
+            format!(", {values}")
+        };
+        let type_suffix = if type_suffix.is_empty() {
+            String::new()
+        } else {
+            format!(", {type_suffix}")
+        };
         let result = self.fresh_value();
         writeln!(
             self.output,
-            "    {result} = llvm.call {callee}({values}) : !llvm.ptr, ({types}) -> !llvm.ptr"
+            "    {result} = llvm.call {function}({environment}{value_suffix}) : !llvm.ptr, (!llvm.ptr{type_suffix}) -> !llvm.ptr"
         )
         .unwrap();
         (result, ValueType::Any)
@@ -5976,6 +6125,7 @@ fn native_bridge_source_for_target(
         "typedef struct { uint64_t magic; const char *class_name; int64_t size; int64_t capacity; const char **names; sev_value **values; pthread_mutex_t mutex; } sev_object;\n\n",
         "typedef struct { uint64_t magic; const char *tag; sev_value *field; } sev_variant;\n\n",
         "typedef struct { uint64_t magic; int64_t rank; int64_t *shape; int64_t *strides; int64_t size; } sev_tensor_header;\n\n",
+        "typedef struct { void *function; void *environment; } sev_closure;\n\n",
         "static uint64_t sev_allocated_bytes = 0;\n",
         "static uint64_t sev_allocation_count = 0;\n",
         "static void *sev_allocate(size_t size) { void *value = calloc(1, size); if (!value) abort(); __atomic_fetch_add(&sev_allocated_bytes, size, __ATOMIC_RELAXED); __atomic_fetch_add(&sev_allocation_count, 1, __ATOMIC_RELAXED); return value; }\n",
@@ -5995,6 +6145,9 @@ fn native_bridge_source_for_target(
         "bool __sev_unbox_bool(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_BOOL) abort(); return value->as.boolean; }\n",
         "void *__sev_unbox_string(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_STRING) abort(); return (void *)value->as.string; }\n",
         "void *__sev_unbox_ptr(void *raw) { sev_value *value = raw; if (!value || value->kind != SEV_COLLECTION) abort(); return value->as.pointer; }\n",
+        "void *__sev_closure_new(void *function, void *environment) { sev_closure *closure = sev_allocate(sizeof(*closure)); closure->function = function; closure->environment = environment; return closure; }\n",
+        "void *__sev_closure_function(void *raw) { sev_closure *closure = raw; if (!closure || !closure->function) abort(); return closure->function; }\n",
+        "void *__sev_closure_environment(void *raw) { sev_closure *closure = raw; if (!closure) abort(); return closure->environment; }\n",
         "static double sev_number(sev_value *value) { if (!value) abort(); if (value->kind == SEV_FLOAT) return value->as.f64; if (value->kind == SEV_INT) return (double)value->as.i64; abort(); }\n",
         "void *__sev_value_add(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) return __sev_box_i64(left->as.i64 + right->as.i64); return __sev_box_f64(sev_number(left) + sev_number(right)); }\n",
         "void *__sev_value_sub(void *left_raw, void *right_raw) { sev_value *left = left_raw; sev_value *right = right_raw; if (left && right && left->kind == SEV_INT && right->kind == SEV_INT) return __sev_box_i64(left->as.i64 - right->as.i64); return __sev_box_f64(sev_number(left) - sev_number(right)); }\n",

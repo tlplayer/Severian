@@ -165,6 +165,14 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
         function.name = format!("{package}.{}", function.name);
         function.id = severian_hir::FunctionId::from_name(&function.name);
     }
+    for class in &mut program.classes {
+        for function in class.methods.iter_mut().chain(&mut class.constructors) {
+            function.id = severian_hir::FunctionId::from_name(&format!(
+                "{package}.{}.{}",
+                class.name, function.name
+            ));
+        }
+    }
     program.visit_expressions_mut(&mut |expression| match expression {
         severian_hir::Expression::Call { target, .. }
             if local_names.contains(&target.name) && !is_intrinsic_call(&target.name) =>

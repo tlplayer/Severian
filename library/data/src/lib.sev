@@ -1,0 +1,256 @@
+import platform
+
+trait Source:
+    data() -> Data
+
+def column_position(columns: list[string], name: string) -> int:
+    for index, column in enumerate(columns):
+        if column == name:
+            return index
+    return -1
+
+def cell_at(values: list[Any], position: int) -> Any:
+    return values[position] if position >= 0 and position < size(values) else ""
+
+class Row:
+    columns_data: list[string]
+    values_data: list[Any]
+
+    def get(column: string) -> Any:
+        return cell_at(values_data, column_position(columns_data, column))
+
+    def values() -> list[Any]:
+        return values_data
+
+    def as_map() -> map[string, Any]:
+        result := {}
+        for index in range(size(columns_data)):
+            column = columns_data[index]
+            result[column] = cell_at(values_data, index)
+        return result
+
+    def select(columns: list[string]) -> Row:
+        selected := []
+        for column in columns:
+            selected.append(cell_at(values_data, column_position(columns_data, column)))
+        return Row(columns, selected)
+
+def values_for(columns: list[string], row: Row) -> list[Any]:
+    values := []
+    for column in columns:
+        values.append(row.get(column))
+    return values
+
+def normalized_key(row: Row, columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> string:
+    values := []
+    for column in columns:
+        value := row.get(column)
+        if trim_strings:
+            value = value.strip()
+        if column in lowercase_columns:
+            value = value.lower()
+        values.append(value)
+    return platform.jsonEncode(values)
+
+def callback_key(row: Row, columns: list[string], normalize: fn[string, Any, Any]) -> string:
+    values := []
+    for column in columns:
+        values.append(normalize(column, row.get(column)))
+    return platform.jsonEncode(values)
+
+def project_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> Data:
+    selected := []
+    for values in source_rows:
+        row = Row(source_columns, values)
+        selected.append(values_for(columns, row))
+    return Data(columns, selected)
+
+def deduplicate_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Data:
+    seen := {}
+    retained := []
+    for values in source_rows:
+        row = Row(source_columns, values)
+        key = normalized_key(row, columns, lowercase_columns, trim_strings)
+        if not seen.get(key, false):
+            retained.append(values)
+            seen[key] = true
+    return Data(source_columns, retained)
+
+def deduplicate_records_by(source_columns: list[string], source_rows: list[list[Any]], columns: list[string], normalize: fn[string, Any, Any]) -> Data:
+    seen := {}
+    retained := []
+    for values in source_rows:
+        row = Row(source_columns, values)
+        key = callback_key(row, columns, normalize)
+        if not seen.get(key, false):
+            retained.append(values)
+            seen[key] = true
+    return Data(source_columns, retained)
+
+class Data:
+    columns_data: list[string]
+    rows_data: list[list[Any]]
+
+    def data() -> Data:
+        return Data(columns_data, rows_data)
+
+    def columns() -> list[string]:
+        return columns_data
+
+    def rows() -> list[Row]:
+        result: list[Row] = []
+        for values in rows_data:
+            result.append(Row(columns_data, values))
+        return result
+
+    def values() -> list[list[Any]]:
+        return rows_data
+
+    def records() -> list[list[Any]]:
+        records := [columns_data]
+        for values in rows_data:
+            records.append(values)
+        return records
+
+    def row_count() -> int:
+        return size(rows_data)
+
+    def has_column(column: string) -> bool:
+        return column_position(columns_data, column) >= 0
+
+    def get(column: string) -> list[Any]:
+        position = column_position(columns_data, column)
+        if position < 0:
+            return []
+        result := []
+        for values in rows_data:
+            result.append(cell_at(values, position))
+        return result
+
+    def column(column: string) -> list[Any]:
+        position = column_position(columns_data, column)
+        if position < 0:
+            return []
+        result := []
+        for values in rows_data:
+            result.append(cell_at(values, position))
+        return result
+
+    def select(columns: list[string]) -> Data:
+        return project_records(columns_data, rows_data, columns)
+
+    def drop(columns: list[string]) -> Data:
+        retained := []
+        for column in columns_data:
+            if not (column in columns):
+                retained.append(column)
+        return project_records(columns_data, rows_data, retained)
+
+    def rename(source: string, destination: string) -> Data:
+        columns := []
+        for column in columns_data:
+            columns.append(destination if column == source else column)
+        copied := []
+        for values in rows_data:
+            copied.append(values)
+        return Data(columns, copied)
+
+    def require_columns(required: list[string]) -> Data:
+        columns := []
+        for column in required:
+            if not (column in columns):
+                columns.append(column)
+        for column in columns_data:
+            if not (column in columns):
+                columns.append(column)
+        return project_records(columns_data, rows_data, columns)
+
+    def append(row: map[string, Any]):
+        values := []
+        for column in columns_data:
+            values.append(row.get(column, ""))
+        rows_data.append(values)
+
+    def append_row(row: Row):
+        rows_data.append(values_for(columns_data, row))
+
+    def extend(other: Data):
+        for row in other.rows():
+            rows_data.append(values_for(columns_data, row))
+
+    def lower(column: string) -> Data:
+        position = column_position(columns_data, column)
+        transformed := []
+        for original in rows_data:
+            values := []
+            for index in range(size(original)):
+                value = original[index]
+                values.append(value.lower() if index == position else value)
+            transformed.append(values)
+        return Data(columns_data, transformed)
+
+    def transform(column: string, operation: fn[Any, Any]) -> Data:
+        position = column_position(columns_data, column)
+        transformed := []
+        for original in rows_data:
+            values := []
+            for index in range(size(original)):
+                value = original[index]
+                values.append(operation(value) if index == position else value)
+            transformed.append(values)
+        return Data(columns_data, transformed)
+
+    def strip(columns: list[string]) -> Data:
+        transformed := []
+        for original in rows_data:
+            values := []
+            for index in range(size(original)):
+                value = original[index]
+                values.append(value.strip() if columns_data[index] in columns else value)
+            transformed.append(values)
+        return Data(columns_data, transformed)
+
+    def where_not_empty(column: string) -> Data:
+        filtered := []
+        position = column_position(columns_data, column)
+        for values in rows_data:
+            if position >= 0 and size(cell_at(values, position).strip()) > 0:
+                filtered.append(values)
+        return Data(columns_data, filtered)
+
+    def filter(predicate: fn[Row, bool]) -> Data:
+        filtered := []
+        for values in rows_data:
+            row = Row(columns_data, values)
+            if predicate(row):
+                filtered.append(values)
+        return Data(columns_data, filtered)
+
+    def sort(column: string, descending: bool = false) -> Data:
+        position = column_position(columns_data, column)
+        if position < 0:
+            return Data(columns_data, rows_data)
+        return Data(columns_data, rows_data.sorted(|values| cell_at(values, position), descending))
+
+    def unique(columns: list[string]) -> Data:
+        return deduplicate_records(columns_data, rows_data, columns, [], false)
+
+    def unique_normalized(columns: list[string], lowercase_columns: list[string], trim_strings: bool) -> Data:
+        return deduplicate_records(columns_data, rows_data, columns, lowercase_columns, trim_strings)
+
+    def unique_by(columns: list[string], normalize: fn[string, Any, Any]) -> Data:
+        return deduplicate_records_by(columns_data, rows_data, columns, normalize)
+
+test "Data provides schema projection, filtering, transforms, and uniqueness":
+    table := Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
+    assert(table.columns() == ["name", "group"])
+    assert(table.rows()[0].get("name") == "Ada")
+    assert(table.get("name") == ["Ada", "Grace", "Ada"])
+    assert(table.select(["group"]).records() == [["group"], ["A"], ["B"], ["a"]])
+    assert(table.require_columns(["id", "name"]).columns() == ["id", "name", "group"])
+    assert(table.where_not_empty("name").row_count() == 3)
+    assert(table.lower("group").get("group") == ["a", "b", "a"])
+    assert(table.unique_normalized(["name", "group"], ["group"], false).row_count() == 2)
+    assert(table.filter(|row| row.get("name") == "Ada").row_count() == 2)
+    assert(table.transform("group", |value| value.lower()).get("group") == ["a", "b", "a"])
+    assert(table.unique_by(["name", "group"], |column, value| value.lower() if column == "group" else value).row_count() == 2)

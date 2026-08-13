@@ -418,6 +418,7 @@ pub struct Class {
     pub field_defaults: Vec<Option<Expression>>,
     pub constructors: Vec<Function>,
     pub methods: Vec<Function>,
+    pub method_return_classes: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

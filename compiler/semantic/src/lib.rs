@@ -545,6 +545,11 @@ pub fn analyze_with_packages(
             field_defaults,
             constructors,
             methods,
+            method_return_classes: class
+                .methods
+                .iter()
+                .map(|method| method.return_type.as_ref().and_then(class_type_name))
+                .collect(),
         });
     }
     Ok(Program {
@@ -1282,6 +1287,12 @@ fn register_method_return_alias(
         format!("__class_method_return.{class}.{method}"),
         encode_field_type(ty).to_owned(),
     );
+    if let Some(return_class) = return_type.and_then(class_type_name) {
+        aliases.insert(
+            format!("__class_method_return_class.{class}.{method}"),
+            return_class,
+        );
+    }
     Ok(())
 }
 
@@ -1376,25 +1387,34 @@ fn expression_class(
                         .cloned()
                 }),
             Expr::Member(member) => {
-                let Expr::Identifier(module) = member.object.as_ref() else {
-                    return None;
-                };
-                let exported = format!("{}.{}", module.name, member.member.name);
+                if let Expr::Identifier(module) = member.object.as_ref() {
+                    let exported = format!("{}.{}", module.name, member.member.name);
+                    if let Some(class) = aliases
+                        .get(&format!("__module_class.{exported}"))
+                        .cloned()
+                        .or_else(|| {
+                            let module = aliases
+                                .get(&module.name)
+                                .map(String::as_str)
+                                .unwrap_or(&module.name);
+                            aliases
+                                .get(&format!(
+                                    "__function_return_class.{module}.{}",
+                                    member.member.name
+                                ))
+                                .cloned()
+                        })
+                    {
+                        return Some(class);
+                    }
+                }
+                let class = expression_class(&member.object, scope, aliases)?;
                 aliases
-                    .get(&format!("__module_class.{exported}"))
+                    .get(&format!(
+                        "__class_method_return_class.{class}.{}",
+                        member.member.name
+                    ))
                     .cloned()
-                    .or_else(|| {
-                        let module = aliases
-                            .get(&module.name)
-                            .map(String::as_str)
-                            .unwrap_or(&module.name);
-                        aliases
-                            .get(&format!(
-                                "__function_return_class.{module}.{}",
-                                member.member.name
-                            ))
-                            .cloned()
-                    })
             }
             _ => None,
         },

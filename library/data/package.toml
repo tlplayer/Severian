@@ -1,17 +1,16 @@
 [package]
-name = "csv"
+name = "data"
 version = "0.1.0"
 edition = "2026"
-description = "CSV documents, rows, mutation, and encoding"
+description = "Format-independent tabular data and relational operations"
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-data = { path = "../data", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }
 
 [package.metadata.library]
-category = "data-formats"
+category = "data"
 implementation = "source"
 status = "experimental"

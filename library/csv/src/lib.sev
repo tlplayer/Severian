@@ -1,3 +1,4 @@
+import data
 import platform
 
 class CSVError:
@@ -34,7 +35,7 @@ def column_index_of(records: list[list[string]], name: string) -> int:
             return index
     return -1
 
-class CSV:
+class CSV: data.Source
     source_path: string
     records_data: list[list[string]]
 
@@ -70,6 +71,12 @@ class CSV:
 
     def value() -> Any:
         return records_data
+
+    def data() -> data.Data:
+        return data.Data(headers_of(records_data), records_of(records_data))
+
+    def set_data(value: data.Data):
+        records_data = value.records()
 
     def write() -> Result[unit, IOError]:
         if size(source_path) == 0:
@@ -156,3 +163,5 @@ test "CSV documents support rows, quoting, and mutation":
     assert(value.get(0, "note") == "compiler, author")
     _changed ?= value.set(0, "note", "language designer")
     assert(value.encode() == "name,note\nAda,language designer\n")
+    table = value.data().require_columns(["id", "name"])
+    assert(table.columns() == ["id", "name", "note"])
