@@ -1,6 +1,6 @@
 use severian_hir::{
-    Expression, Function, FunctionId, Instruction, Program, TensorDimension, TensorElementType,
-    TensorType, ValueType,
+    BindingRef, Expression, Function, FunctionId, Instruction, Parameter, Program, TensorDimension,
+    TensorElementType, TensorType, ValueType,
 };
 
 #[test]
@@ -23,6 +23,60 @@ fn finds_the_main_function() {
     };
 
     assert_eq!(program.main().unwrap().name, "main");
+}
+
+#[test]
+fn namespaces_binding_definitions_and_uses_together() {
+    let parameter = BindingRef::source("value", 4, 9);
+    let local = BindingRef::source("copy", 20, 24);
+    let mut program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("copy"),
+            name: "copy".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![Parameter {
+                name: parameter.clone(),
+                ty: ValueType::Int,
+                default: None,
+                receiver: None,
+            }],
+            return_type: ValueType::Int,
+            instructions: vec![
+                Instruction::Let {
+                    name: local.clone(),
+                    value: Expression::Variable(parameter.clone()),
+                },
+                Instruction::Return(Some(Expression::Variable(local.clone()))),
+            ],
+            tests: vec![],
+        }],
+    };
+
+    program.namespace_bindings("dependency");
+    let function = &program.functions[0];
+    let Instruction::Let { name, value } = &function.instructions[0] else {
+        unreachable!()
+    };
+    let Expression::Variable(parameter_use) = value else {
+        unreachable!()
+    };
+    let Instruction::Return(Some(Expression::Variable(local_use))) = &function.instructions[1]
+    else {
+        unreachable!()
+    };
+
+    assert_eq!(
+        function.params[0].name.id,
+        parameter.id.in_namespace("dependency")
+    );
+    assert_eq!(parameter_use.id, function.params[0].name.id);
+    assert_eq!(name.id, local.id.in_namespace("dependency"));
+    assert_eq!(local_use.id, name.id);
 }
 
 #[test]

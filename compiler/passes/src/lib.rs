@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use severian_hir::{Expression, Instruction, Program};
+use severian_hir::{BindingId, BindingRef, Expression, Instruction, Program};
 use severian_package::{FusionAlias, FusionRule, GraphOperation, GraphRule};
 use std::collections::HashMap;
 use std::fmt;
@@ -38,10 +38,26 @@ impl PassManager {
     }
 
     pub fn run(&self, program: &mut Program) -> Result<(), PassError> {
+        self.run_verified(program, |_, _| Ok(()))
+    }
+
+    /// Run transformations and verify the IR immediately after each one.
+    ///
+    /// The verifier is supplied by the pipeline owner so this pass crate does
+    /// not depend on a particular diagnostics representation.
+    pub fn run_verified(
+        &self,
+        program: &mut Program,
+        mut verify: impl FnMut(&Program, &'static str) -> Result<(), String>,
+    ) -> Result<(), PassError> {
         for pass in &self.passes {
             pass.run(program).map_err(|mut error| {
                 error.pass = pass.name();
                 error
+            })?;
+            verify(program, pass.name()).map_err(|message| PassError {
+                pass: pass.name(),
+                message: format!("IR verification failed after transformation: {message}"),
             })?;
         }
         Ok(())
@@ -109,11 +125,11 @@ impl ModelGraphOptimization {
     fn signature(
         &self,
         expression: &Expression,
-        definitions: &HashMap<String, String>,
+        definitions: &HashMap<BindingId, String>,
     ) -> Option<String> {
         match expression {
             Expression::Typed { expression, .. } => self.signature(expression, definitions),
-            Expression::Variable(name) => definitions.get(name).cloned(),
+            Expression::Variable(binding) => definitions.get(&binding.id).cloned(),
             Expression::Call { target, args } => {
                 let operation = self.rules.get(&target.name)?;
                 if *operation == GraphOperation::Run {
@@ -138,8 +154,8 @@ impl ModelGraphOptimization {
     }
 
     fn optimize_block(&self, instructions: &mut [Instruction]) {
-        let mut definitions = HashMap::<String, String>::new();
-        let mut common_nodes = HashMap::<String, String>::new();
+        let mut definitions = HashMap::<BindingId, String>::new();
+        let mut common_nodes = HashMap::<String, BindingRef>::new();
 
         for instruction in instructions {
             match instruction {
@@ -150,7 +166,7 @@ impl ModelGraphOptimization {
                         } else {
                             common_nodes.insert(signature.clone(), name.clone());
                         }
-                        definitions.insert(name.clone(), signature);
+                        definitions.insert(name.id, signature);
                     } else {
                         // A new eager value can shadow an input used by an older graph node.
                         // Starting a fresh CSE region keeps the transform conservative.
@@ -340,6 +356,34 @@ impl Pass for ElementwiseFusion {
 mod tests {
     use super::*;
     use severian_hir::{CallTarget, Function, FunctionId, ValueType};
+
+    struct InvalidatingPass;
+
+    impl Pass for InvalidatingPass {
+        fn name(&self) -> &'static str {
+            "invalidating-test-pass"
+        }
+
+        fn run(&self, _program: &mut Program) -> Result<(), PassError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn verified_pipeline_attributes_an_invalid_ir_to_the_transform_that_created_it() {
+        let mut manager = PassManager::default();
+        manager.add(InvalidatingPass);
+        let mut program = Program::default();
+
+        let error = manager
+            .run_verified(&mut program, |_, pass| {
+                Err(format!("{pass} broke a test invariant"))
+            })
+            .unwrap_err();
+
+        assert_eq!(error.pass, "invalidating-test-pass");
+        assert!(error.message.contains("IR verification failed"));
+    }
 
     #[test]
     fn fusion_is_driven_by_package_rules_not_function_names() {

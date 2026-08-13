@@ -11,6 +11,10 @@ macro_rules! stable_id {
             pub fn from_name(name: &str) -> Self {
                 Self(stable_name_hash(name))
             }
+
+            pub fn in_namespace(self, namespace: &str) -> Self {
+                Self::from_name(&format!("{namespace}#{}", self.0))
+            }
         }
     };
 }
@@ -18,6 +22,68 @@ macro_rules! stable_id {
 stable_id!(FunctionId);
 stable_id!(TypeDefinitionId);
 stable_id!(VariantId);
+stable_id!(BindingId);
+stable_id!(FieldId);
+stable_id!(MethodId);
+stable_id!(ModuleId);
+stable_id!(PackageId);
+stable_id!(SymbolId);
+stable_id!(IntrinsicId);
+
+/// Resolved identity for a local declaration and all of its uses.
+///
+/// `name` exists for diagnostics and emitted debug names. Compiler state after
+/// resolution must key correctness decisions by `id`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BindingRef {
+    pub id: BindingId,
+    pub name: String,
+}
+
+impl BindingRef {
+    pub fn new(id: BindingId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+        }
+    }
+
+    pub fn source(name: impl Into<String>, start: usize, end: usize) -> Self {
+        let name = name.into();
+        let id = BindingId::from_name(&format!("{name}@{start}:{end}"));
+        Self { id, name }
+    }
+
+    pub fn synthetic(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let id = BindingId::from_name(&name);
+        Self { id, name }
+    }
+}
+
+impl From<String> for BindingRef {
+    fn from(name: String) -> Self {
+        Self::synthetic(name)
+    }
+}
+
+impl From<&str> for BindingRef {
+    fn from(name: &str) -> Self {
+        Self::synthetic(name)
+    }
+}
+
+impl std::fmt::Display for BindingRef {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(formatter)
+    }
+}
+
+impl AsRef<str> for BindingRef {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HirId(pub u64);
@@ -405,6 +471,143 @@ impl Program {
             }
         }
     }
+
+    /// Qualifies every resolved binding identity while preserving its source
+    /// name for diagnostics. Package linking uses this before combining HIR so
+    /// equal source spans in different modules cannot alias the same binding.
+    pub fn namespace_bindings(&mut self, namespace: &str) {
+        for global in &mut self.globals {
+            namespace_binding(&mut global.name, namespace);
+        }
+        for function in &mut self.functions {
+            namespace_function_bindings(function, namespace);
+        }
+        for class in &mut self.classes {
+            for function in class.methods.iter_mut().chain(&mut class.constructors) {
+                namespace_function_bindings(function, namespace);
+            }
+        }
+        self.visit_expressions_mut(&mut |expression| match expression {
+            Expression::Variable(binding) => namespace_binding(binding, namespace),
+            Expression::Lambda { params, .. } => {
+                for parameter in params {
+                    namespace_binding(parameter, namespace);
+                }
+            }
+            Expression::ListComprehension { clauses, .. }
+            | Expression::SetComprehension { clauses, .. }
+            | Expression::MapComprehension { clauses, .. } => {
+                for clause in clauses {
+                    namespace_pattern(&mut clause.pattern, namespace);
+                }
+            }
+            _ => {}
+        });
+    }
+}
+
+fn namespace_binding(binding: &mut BindingRef, namespace: &str) {
+    binding.id = binding.id.in_namespace(namespace);
+}
+
+fn namespace_function_bindings(function: &mut Function, namespace: &str) {
+    for parameter in &mut function.params {
+        namespace_binding(&mut parameter.name, namespace);
+    }
+    if let Some(contract) = &mut function.contract {
+        namespace_contract_bindings(contract, namespace);
+    }
+    namespace_instruction_bindings(&mut function.instructions, namespace);
+    for test in &mut function.tests {
+        if let Some(contract) = &mut test.contract {
+            namespace_contract_bindings(contract, namespace);
+        }
+        namespace_instruction_bindings(&mut test.instructions, namespace);
+    }
+}
+
+fn namespace_contract_bindings(contract: &mut FunctionContract, namespace: &str) {
+    for clause in &mut contract.clauses {
+        for dependency in &mut clause.dependencies {
+            namespace_binding(dependency, namespace);
+        }
+    }
+}
+
+fn namespace_instruction_bindings(instructions: &mut [Instruction], namespace: &str) {
+    for instruction in instructions {
+        match instruction {
+            Instruction::Let { name, .. } | Instruction::TryLet { name, .. } => {
+                namespace_binding(name, namespace);
+            }
+            Instruction::If {
+                then_instructions,
+                else_instructions,
+                ..
+            } => {
+                namespace_instruction_bindings(then_instructions, namespace);
+                namespace_instruction_bindings(else_instructions, namespace);
+            }
+            Instruction::While {
+                setup,
+                instructions,
+                ..
+            } => {
+                if let Some(setup) = setup {
+                    namespace_instruction_bindings(std::slice::from_mut(setup), namespace);
+                }
+                namespace_instruction_bindings(instructions, namespace);
+            }
+            Instruction::For {
+                setup,
+                pattern,
+                instructions,
+                ..
+            } => {
+                if let Some(setup) = setup {
+                    namespace_instruction_bindings(std::slice::from_mut(setup), namespace);
+                }
+                namespace_pattern(pattern, namespace);
+                namespace_instruction_bindings(instructions, namespace);
+            }
+            Instruction::Switch { arms, .. } | Instruction::ChannelSwitch { arms, .. } => {
+                for arm in arms {
+                    namespace_pattern(&mut arm.pattern, namespace);
+                    arm.receivers = std::mem::take(&mut arm.receivers)
+                        .into_iter()
+                        .map(|(binding, receiver)| (binding.in_namespace(namespace), receiver))
+                        .collect();
+                    namespace_instruction_bindings(&mut arm.instructions, namespace);
+                }
+            }
+            Instruction::With { instructions, .. } => {
+                namespace_instruction_bindings(instructions, namespace);
+            }
+            Instruction::Assign { .. }
+            | Instruction::Print(_)
+            | Instruction::Assert(_)
+            | Instruction::Return(_)
+            | Instruction::Break
+            | Instruction::Continue
+            | Instruction::Evaluate(_) => {}
+        }
+    }
+}
+
+fn namespace_pattern(pattern: &mut MatchPattern, namespace: &str) {
+    match pattern {
+        MatchPattern::Bind(binding) => namespace_binding(binding, namespace),
+        MatchPattern::Constructor { fields, .. } => {
+            for field in fields {
+                namespace_pattern(field, namespace);
+            }
+        }
+        MatchPattern::Wildcard
+        | MatchPattern::Integer(_)
+        | MatchPattern::Float(_)
+        | MatchPattern::Boolean(_)
+        | MatchPattern::String(_) => {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -423,7 +626,7 @@ pub struct Class {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Global {
-    pub name: String,
+    pub name: BindingRef,
     pub value: Expression,
 }
 
@@ -453,7 +656,7 @@ pub struct ContractClause {
     pub message: Option<String>,
     pub location: bool,
     pub vars: bool,
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<BindingRef>,
     pub dependency_types: Vec<ValueType>,
 }
 
@@ -465,7 +668,7 @@ pub struct Decorator {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
-    pub name: String,
+    pub name: BindingRef,
     pub ty: ValueType,
     pub default: Option<Expression>,
     pub receiver: Option<ReceiverType>,
@@ -611,11 +814,11 @@ pub enum TaskPlacement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     Let {
-        name: String,
+        name: BindingRef,
         value: Expression,
     },
     TryLet {
-        name: String,
+        name: BindingRef,
         value: Expression,
         receiver: Option<ReceiverType>,
     },
@@ -670,7 +873,7 @@ pub struct SwitchArm {
     pub pattern: MatchPattern,
     pub guard: Option<Expression>,
     pub instructions: Vec<Instruction>,
-    pub receivers: BTreeMap<String, ReceiverType>,
+    pub receivers: BTreeMap<BindingId, ReceiverType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -683,7 +886,7 @@ pub struct ReceiverType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchPattern {
     Wildcard,
-    Bind(String),
+    Bind(BindingRef),
     Integer(i64),
     Float(u64),
     Boolean(bool),
@@ -705,10 +908,10 @@ pub enum Expression {
     Float(u64),
     Boolean(bool),
     String(String),
-    Variable(String),
-    Function(String),
+    Variable(BindingRef),
+    Function(CallTarget),
     Lambda {
-        params: Vec<String>,
+        params: Vec<BindingRef>,
         body: Box<Expression>,
     },
     Ownership {
@@ -766,7 +969,7 @@ pub enum Expression {
         channel: Box<Expression>,
     },
     ChaosRule {
-        function: String,
+        function: CallTarget,
         action: ChaosAction,
         value: Box<Expression>,
     },
@@ -909,6 +1112,11 @@ fn visit_function_expressions_mut(
     function: &mut Function,
     visitor: &mut impl FnMut(&mut Expression),
 ) {
+    for parameter in &mut function.params {
+        if let Some(default) = &mut parameter.default {
+            visit_expression_mut(default, visitor);
+        }
+    }
     if let Some(contract) = &mut function.contract {
         for clause in &mut contract.clauses {
             visit_expression_mut(&mut clause.condition, visitor);

@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use severian_hir::{
-    Expression, Function, Instruction, MatchPattern, OwnershipOp, Program, SwitchArm,
+    BindingId, BindingRef, CallTarget, Expression, Function, FunctionId, Instruction, MatchPattern,
+    OwnershipOp, Program, SwitchArm,
 };
 use std::collections::HashMap;
 
@@ -21,14 +22,14 @@ pub fn check(program: &Program) -> Result<(), OwnershipError> {
     }
 
     for function in &program.functions {
-        check_function(function, &globals, &[])?;
+        check_function(function, &globals, None, &[])?;
     }
     for class in &program.classes {
         for default in class.field_defaults.iter().flatten() {
             globals.check_expression(default, Access::Read)?;
         }
         for function in class.methods.iter().chain(&class.constructors) {
-            check_function(function, &globals, &class.fields)?;
+            check_function(function, &globals, Some(&class.name), &class.fields)?;
         }
     }
 
@@ -38,12 +39,19 @@ pub fn check(program: &Program) -> Result<(), OwnershipError> {
 fn check_function(
     function: &Function,
     globals: &Checker,
+    class: Option<&str>,
     fields: &[String],
 ) -> Result<(), OwnershipError> {
     let mut checker = globals.clone();
     checker.remaining = count_instruction_uses(&function.instructions);
     for field in fields {
-        checker.define(field.clone(), None);
+        checker.define(
+            BindingRef::new(
+                BindingId::from_name(&format!("{}.{field}", class.unwrap_or("<field>"))),
+                field,
+            ),
+            None,
+        );
     }
     for parameter in &function.params {
         if let Some(default) = &parameter.default {
@@ -67,7 +75,13 @@ fn check_function(
         let mut test_checker = globals.clone();
         test_checker.remaining = count_instruction_uses(&test.instructions);
         for field in fields {
-            test_checker.define(field.clone(), None);
+            test_checker.define(
+                BindingRef::new(
+                    BindingId::from_name(&format!("{}.{field}", class.unwrap_or("<field>"))),
+                    field,
+                ),
+                None,
+            );
         }
         if let Some(contract) = &test.contract {
             for expression in contract
@@ -105,28 +119,35 @@ enum ParameterEffect {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Loan {
-    owner: String,
+    owner: BindingId,
     kind: LoanKind,
 }
 
 #[derive(Debug, Clone, Default)]
 struct BindingState {
+    name: String,
     moved: bool,
     loan: Option<Loan>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct Checker {
-    bindings: HashMap<String, BindingState>,
-    remaining: HashMap<String, usize>,
+    bindings: HashMap<BindingId, BindingState>,
+    remaining: HashMap<BindingId, usize>,
     temporary_loans: Vec<Loan>,
-    effects: HashMap<String, Vec<ParameterEffect>>,
+    effects: HashMap<FunctionId, Vec<ParameterEffect>>,
 }
 
 impl Checker {
-    fn define(&mut self, name: String, loan: Option<Loan>) {
-        self.bindings
-            .insert(name, BindingState { moved: false, loan });
+    fn define(&mut self, binding: BindingRef, loan: Option<Loan>) {
+        self.bindings.insert(
+            binding.id,
+            BindingState {
+                name: binding.name,
+                moved: false,
+                loan,
+            },
+        );
     }
 
     fn check_instructions(&mut self, instructions: &[Instruction]) -> Result<(), OwnershipError> {
@@ -278,7 +299,7 @@ impl Checker {
 
     fn check_initializer(
         &mut self,
-        destination: &str,
+        destination: &BindingRef,
         expression: &Expression,
     ) -> Result<Option<Loan>, OwnershipError> {
         let Expression::Ownership { op, value } = expression.kind() else {
@@ -315,7 +336,7 @@ impl Checker {
                 self.ensure_unborrowed(&owner, "move")?;
                 let state = self
                     .bindings
-                    .get_mut(source)
+                    .get_mut(&source.id)
                     .ok_or_else(|| unknown(source))?;
                 state.moved = true;
                 None
@@ -324,7 +345,8 @@ impl Checker {
         self.consume(source);
 
         // An unused loan has no live range and therefore cannot block its owner.
-        if matches!(loan, Some(_)) && self.remaining.get(destination).copied().unwrap_or(0) == 0 {
+        if matches!(loan, Some(_)) && self.remaining.get(&destination.id).copied().unwrap_or(0) == 0
+        {
             return Ok(None);
         }
         Ok(loan)
@@ -346,7 +368,7 @@ impl Checker {
                     let owner = self.root_owner(name);
                     self.ensure_unborrowed(&owner, "move")?;
                     self.bindings
-                        .get_mut(name)
+                        .get_mut(&name.id)
                         .ok_or_else(|| unknown(name))?
                         .moved = true;
                     self.consume(name);
@@ -369,7 +391,7 @@ impl Checker {
             Expression::Lambda { params, body } => {
                 let previous = params
                     .iter()
-                    .map(|param| (param.clone(), self.bindings.remove(param)))
+                    .map(|param| (param.clone(), self.bindings.remove(&param.id)))
                     .collect::<Vec<_>>();
                 for param in params {
                     self.define(param.clone(), None);
@@ -377,9 +399,9 @@ impl Checker {
                 self.check_expression(body, Access::Read)?;
                 for (param, state) in previous {
                     if let Some(state) = state {
-                        self.bindings.insert(param, state);
+                        self.bindings.insert(param.id, state);
                     } else {
-                        self.bindings.remove(&param);
+                        self.bindings.remove(&param.id);
                     }
                 }
             }
@@ -419,7 +441,7 @@ impl Checker {
                     self.check_expression(arg, Access::Read)?;
                 }
             }
-            Expression::Call { target, args } => self.check_call(&target.name, args)?,
+            Expression::Call { target, args } => self.check_call(target, args)?,
             Expression::Typed { expression, .. } => self.check_expression(expression, access)?,
             Expression::MethodCall {
                 object,
@@ -513,62 +535,75 @@ impl Checker {
         Ok(())
     }
 
-    fn check_variable(&mut self, name: &str, access: Access) -> Result<(), OwnershipError> {
+    fn check_variable(
+        &mut self,
+        binding: &BindingRef,
+        access: Access,
+    ) -> Result<(), OwnershipError> {
         // HIR may contain compiler-provided capabilities (for example
         // `stdout` and `chaos`) which are intentionally absent from the local
         // binding table. Name resolution has already validated ordinary reads;
         // only explicit ownership operations require a tracked local owner.
-        if !self.bindings.contains_key(name) {
-            self.consume(name);
+        if !self.bindings.contains_key(&binding.id) {
+            self.consume(binding);
             return Ok(());
         }
-        self.ensure_alive(name)?;
-        let state = self.bindings.get(name).ok_or_else(|| unknown(name))?;
+        self.ensure_alive(binding)?;
+        let state = self
+            .bindings
+            .get(&binding.id)
+            .ok_or_else(|| unknown(binding))?;
         if let Some(loan) = &state.loan {
             if access == Access::Mutate && loan.kind != LoanKind::Mutable {
                 return Err(ownership_error(
                     "E0302",
-                    format!("shared view `{name}` cannot be mutated"),
+                    format!("shared view `{binding}` cannot be mutated"),
                 ));
             }
         } else {
-            let owner = self.root_owner(name);
+            let owner = self.root_owner(binding);
+            let owner_name = self.binding_name(owner);
             match access {
                 Access::Read if self.has_live_loan(&owner, Some(LoanKind::Mutable)) => {
                     return Err(ownership_error(
                         "E0303",
-                        format!("owner `{owner}` cannot be read while an exclusive borrow is live"),
+                        format!(
+                            "owner `{owner_name}` cannot be read while an exclusive borrow is live"
+                        ),
                     ));
                 }
                 Access::Mutate if self.has_live_loan(&owner, None) => {
                     return Err(ownership_error(
                         "E0302",
                         format!(
-                            "owner `{owner}` cannot be mutated while a borrow is live. An owner cannot be structurally mutated while an immutable borrow is live."
+                            "owner `{owner_name}` cannot be mutated while a borrow is live. An owner cannot be structurally mutated while an immutable borrow is live."
                         ),
                     ));
                 }
                 _ => {}
             }
         }
-        self.consume(name);
+        self.consume(binding);
         Ok(())
     }
 
-    fn ensure_alive(&self, name: &str) -> Result<(), OwnershipError> {
-        let state = self.bindings.get(name).ok_or_else(|| unknown(name))?;
+    fn ensure_alive(&self, binding: &BindingRef) -> Result<(), OwnershipError> {
+        let state = self
+            .bindings
+            .get(&binding.id)
+            .ok_or_else(|| unknown(binding))?;
         if state.moved {
             return Err(ownership_error(
                 "E0301",
                 format!(
-                    "binding `{name}` cannot be used after its ownership was moved. A binding cannot be read after ownership has moved to another binding."
+                    "binding `{binding}` cannot be used after its ownership was moved. A binding cannot be read after ownership has moved to another binding."
                 ),
             ));
         }
         Ok(())
     }
 
-    fn ensure_can_borrow(&self, owner: &str, kind: LoanKind) -> Result<(), OwnershipError> {
+    fn ensure_can_borrow(&self, owner: &BindingId, kind: LoanKind) -> Result<(), OwnershipError> {
         let conflict = match kind {
             LoanKind::Shared => self.has_live_loan(owner, Some(LoanKind::Mutable)),
             LoanKind::Mutable => self.has_live_loan(owner, None),
@@ -576,55 +611,71 @@ impl Checker {
         if conflict {
             return Err(ownership_error(
                 "E0303",
-                format!("conflicting borrow of `{owner}` while another borrow is live"),
+                format!(
+                    "conflicting borrow of `{}` while another borrow is live",
+                    self.binding_name(*owner)
+                ),
             ));
         }
         Ok(())
     }
 
-    fn ensure_unborrowed(&self, owner: &str, operation: &str) -> Result<(), OwnershipError> {
+    fn ensure_unborrowed(&self, owner: &BindingId, operation: &str) -> Result<(), OwnershipError> {
         if self.has_live_loan(owner, None) {
             return Err(ownership_error(
                 "E0304",
-                format!("cannot {operation} `{owner}` while it is borrowed"),
+                format!(
+                    "cannot {operation} `{}` while it is borrowed",
+                    self.binding_name(*owner)
+                ),
             ));
         }
         Ok(())
     }
 
-    fn root_owner(&self, name: &str) -> String {
+    fn root_owner(&self, binding: &BindingRef) -> BindingId {
         self.bindings
-            .get(name)
+            .get(&binding.id)
             .and_then(|state| state.loan.as_ref())
-            .map_or_else(|| name.to_owned(), |loan| loan.owner.clone())
+            .map_or(binding.id, |loan| loan.owner)
     }
 
-    fn has_live_loan(&self, owner: &str, kind: Option<LoanKind>) -> bool {
+    fn has_live_loan(&self, owner: &BindingId, kind: Option<LoanKind>) -> bool {
         self.temporary_loans
             .iter()
-            .any(|loan| loan.owner == owner && kind.is_none_or(|kind| loan.kind == kind))
+            .any(|loan| loan.owner == *owner && kind.is_none_or(|kind| loan.kind == kind))
             || self.bindings.iter().any(|(name, state)| {
                 state.loan.as_ref().is_some_and(|loan| {
-                    loan.owner == owner
+                    loan.owner == *owner
                         && kind.is_none_or(|kind| loan.kind == kind)
                         && self.remaining.get(name).copied().unwrap_or(0) > 0
                 })
             })
     }
 
-    fn consume(&mut self, name: &str) {
-        if let Some(remaining) = self.remaining.get_mut(name) {
+    fn consume(&mut self, binding: &BindingRef) {
+        if let Some(remaining) = self.remaining.get_mut(&binding.id) {
             *remaining = remaining.saturating_sub(1);
         }
     }
 
-    fn check_call(&mut self, function: &str, args: &[Expression]) -> Result<(), OwnershipError> {
-        let effects = self.effects.get(function).cloned().unwrap_or_default();
+    fn binding_name(&self, id: BindingId) -> &str {
+        self.bindings
+            .get(&id)
+            .map_or("<unknown binding>", |state| state.name.as_str())
+    }
+
+    fn check_call(
+        &mut self,
+        function: &CallTarget,
+        args: &[Expression],
+    ) -> Result<(), OwnershipError> {
+        let effects = self.effects.get(&function.id).cloned().unwrap_or_default();
         let loan_boundary = self.temporary_loans.len();
 
         for (index, argument) in args.iter().enumerate() {
             let effect = effects.get(index).copied().unwrap_or(ParameterEffect::View);
-            self.check_call_argument(function, index, argument, effect)?;
+            self.check_call_argument(&function.name, index, argument, effect)?;
         }
 
         self.temporary_loans.truncate(loan_boundary);
@@ -692,7 +743,7 @@ impl Checker {
             ParameterEffect::Move => {
                 self.ensure_unborrowed(&owner, "move")?;
                 self.bindings
-                    .get_mut(source)
+                    .get_mut(&source.id)
                     .ok_or_else(|| unknown(source))?
                     .moved = true;
                 self.consume(source);
@@ -708,14 +759,14 @@ impl Checker {
         let borrowed = match expression.kind() {
             Expression::Variable(name) => self
                 .bindings
-                .get(name)
+                .get(&name.id)
                 .and_then(|state| state.loan.as_ref())
-                .map(|_| name.as_str()),
+                .map(|_| name.name.as_str()),
             Expression::Ownership {
                 op: OwnershipOp::View | OwnershipOp::Borrow | OwnershipOp::AddressOf,
                 value,
             } => match value.kind() {
-                Expression::Variable(name) => Some(name.as_str()),
+                Expression::Variable(name) => Some(name.name.as_str()),
                 _ => None,
             },
             _ => None,
@@ -738,15 +789,15 @@ fn effect_name(effect: ParameterEffect) -> &'static str {
     }
 }
 
-fn infer_function_effects(program: &Program) -> HashMap<String, Vec<ParameterEffect>> {
+fn infer_function_effects(program: &Program) -> HashMap<FunctionId, Vec<ParameterEffect>> {
     let mut effects = HashMap::new();
     for function in &program.functions {
-        effects.insert(function.name.clone(), infer_parameter_effects(function));
+        effects.insert(function.id, infer_parameter_effects(function));
     }
     for class in &program.classes {
         for function in class.methods.iter().chain(&class.constructors) {
             effects
-                .entry(function.name.clone())
+                .entry(function.id)
                 .or_insert_with(|| infer_parameter_effects(function));
         }
     }
@@ -758,7 +809,7 @@ fn infer_parameter_effects(function: &Function) -> Vec<ParameterEffect> {
         .params
         .iter()
         .enumerate()
-        .map(|(index, parameter)| (parameter.name.as_str(), index))
+        .map(|(index, parameter)| (parameter.name.id, index))
         .collect::<HashMap<_, _>>();
     let mut effects = vec![ParameterEffect::View; function.params.len()];
     infer_instruction_effects(&function.instructions, &parameters, &mut effects);
@@ -767,7 +818,7 @@ fn infer_parameter_effects(function: &Function) -> Vec<ParameterEffect> {
 
 fn infer_instruction_effects(
     instructions: &[Instruction],
-    parameters: &HashMap<&str, usize>,
+    parameters: &HashMap<BindingId, usize>,
     effects: &mut [ParameterEffect],
 ) {
     for instruction in instructions {
@@ -862,7 +913,7 @@ fn infer_instruction_effects(
 
 fn infer_arm_effects(
     arms: &[SwitchArm],
-    parameters: &HashMap<&str, usize>,
+    parameters: &HashMap<BindingId, usize>,
     effects: &mut [ParameterEffect],
 ) {
     for arm in arms {
@@ -879,7 +930,7 @@ fn infer_arm_effects(
 fn infer_expression_effect(
     expression: &Expression,
     access: Access,
-    parameters: &HashMap<&str, usize>,
+    parameters: &HashMap<BindingId, usize>,
     effects: &mut [ParameterEffect],
 ) {
     match expression {
@@ -1037,12 +1088,12 @@ fn infer_expression_effect(
 }
 
 fn mark_parameter_effect(
-    name: &str,
+    binding: &BindingRef,
     effect: ParameterEffect,
-    parameters: &HashMap<&str, usize>,
+    parameters: &HashMap<BindingId, usize>,
     effects: &mut [ParameterEffect],
 ) {
-    if let Some(index) = parameters.get(name) {
+    if let Some(index) = parameters.get(&binding.id) {
         effects[*index] = effects[*index].max(effect);
     }
 }
@@ -1085,13 +1136,13 @@ fn mutating_method(method: &str) -> bool {
     )
 }
 
-fn count_instruction_uses(instructions: &[Instruction]) -> HashMap<String, usize> {
+fn count_instruction_uses(instructions: &[Instruction]) -> HashMap<BindingId, usize> {
     let mut counts = HashMap::new();
     count_instructions(instructions, &mut counts);
     counts
 }
 
-fn count_instructions(instructions: &[Instruction], counts: &mut HashMap<String, usize>) {
+fn count_instructions(instructions: &[Instruction], counts: &mut HashMap<BindingId, usize>) {
     for instruction in instructions {
         match instruction {
             Instruction::Let { value, .. }
@@ -1180,7 +1231,7 @@ fn count_instructions(instructions: &[Instruction], counts: &mut HashMap<String,
     }
 }
 
-fn count_arms(arms: &[SwitchArm], counts: &mut HashMap<String, usize>) {
+fn count_arms(arms: &[SwitchArm], counts: &mut HashMap<BindingId, usize>) {
     for arm in arms {
         if let Some(source) = &arm.source {
             count_expression(source, counts);
@@ -1192,10 +1243,10 @@ fn count_arms(arms: &[SwitchArm], counts: &mut HashMap<String, usize>) {
     }
 }
 
-fn count_expression(expression: &Expression, counts: &mut HashMap<String, usize>) {
+fn count_expression(expression: &Expression, counts: &mut HashMap<BindingId, usize>) {
     match expression {
         Expression::Typed { expression, .. } => count_expression(expression, counts),
-        Expression::Variable(name) => *counts.entry(name.clone()).or_default() += 1,
+        Expression::Variable(binding) => *counts.entry(binding.id).or_default() += 1,
         Expression::Ownership { value, .. }
         | Expression::Member { object: value, .. }
         | Expression::Await(value)
@@ -1319,10 +1370,10 @@ fn ownership_error(code: &str, message: String) -> OwnershipError {
     }
 }
 
-fn unknown(name: &str) -> OwnershipError {
+fn unknown(binding: &BindingRef) -> OwnershipError {
     ownership_error(
         "E0300",
-        format!("ownership operation references unknown binding `{name}`"),
+        format!("ownership operation references unknown binding `{binding}`"),
     )
 }
 

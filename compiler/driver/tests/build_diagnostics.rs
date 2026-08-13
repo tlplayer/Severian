@@ -91,6 +91,7 @@ fn build_compiles_a_library_only_package_without_an_entry_point() {
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("build")
         .arg(&root)
+        .arg("--verify-each")
         .output()
         .unwrap();
     assert!(
@@ -99,5 +100,7 @@ fn build_compiles_a_library_only_package_without_an_entry_point() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(root.join("target/debug/lib.ll").is_file());
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("resolved HIR, linked HIR, every HIR transformation, and MIR"));
     let _ = std::fs::remove_dir_all(root);
 }

@@ -76,10 +76,14 @@ fn compile_ast(
     let graph_rules = interfaces
         .iter()
         .flat_map(|interface| interface.compiler.graph_rules.iter().cloned());
+    verify_hir(&optimized_hir, "linked HIR")?;
     severian_passes::standard_pipeline_with_graph(fusion_rules, fusion_aliases, graph_rules)
-        .run(&mut optimized_hir)
+        .run_verified(&mut optimized_hir, |program, pass| {
+            verify_hir(program, &format!("HIR after `{pass}`")).map_err(|error| error.to_string())
+        })
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
     let mir = severian_mir::lower(&optimized_hir);
+    verify_mir(&mir)?;
     let mlir = severian_lowering::lower(&mir);
 
     Ok(Compilation {
@@ -129,7 +133,7 @@ fn link_package_hir(
             if !program
                 .globals
                 .iter()
-                .any(|existing| existing.name == global.name)
+                .any(|existing| existing.name.id == global.name.id)
             {
                 program.globals.push(global);
             }
@@ -157,6 +161,7 @@ fn link_package_hir(
 }
 
 fn qualify_package_functions(program: &mut Program, package: &str) {
+    program.namespace_bindings(package);
     let local_names = program
         .functions
         .iter()
@@ -168,7 +173,10 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
     }
     for class in &mut program.classes {
         class.id = severian_hir::TypeDefinitionId::from_name(&format!("{package}.{}", class.name));
-        for function in class.methods.iter_mut().chain(&mut class.constructors) {
+        for function in &mut class.constructors {
+            function.id = function.id.in_namespace(package);
+        }
+        for function in &mut class.methods {
             function.id = severian_hir::FunctionId::from_name(&format!(
                 "{package}.{}.{}",
                 class.name, function.name
@@ -182,11 +190,15 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
             target.name = format!("{package}.{}", target.name);
             target.id = severian_hir::FunctionId::from_name(&target.name);
         }
-        severian_hir::Expression::Function(name) if local_names.contains(name) => {
-            *name = format!("{package}.{name}");
+        severian_hir::Expression::Function(target) if local_names.contains(&target.name) => {
+            target.name = format!("{package}.{}", target.name);
+            target.id = severian_hir::FunctionId::from_name(&target.name);
         }
-        severian_hir::Expression::ChaosRule { function, .. } if local_names.contains(function) => {
-            *function = format!("{package}.{function}");
+        severian_hir::Expression::ChaosRule { function, .. }
+            if local_names.contains(&function.name) =>
+        {
+            function.name = format!("{package}.{}", function.name);
+            function.id = severian_hir::FunctionId::from_name(&function.name);
         }
         _ => {}
     });
@@ -240,9 +252,41 @@ fn check_ast(
         None,
         interfaces,
     );
+    verify_hir(&hir, "resolved HIR")?;
     severian_ownership::check(&hir)
         .map_err(|error| ownership_compile_error(error.message, source_path, source))?;
     Ok(hir)
+}
+
+fn verify_hir(program: &Program, boundary: &str) -> Result<(), CompileError> {
+    let diagnostics = severian_diagnostics::verify::verify(program);
+    let errors = diagnostics
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity >= severian_diagnostics::Severity::Error)
+        .map(|diagnostic| format!("{}: {}", diagnostic.code.0, diagnostic.message))
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CompileError::Verification(format!(
+            "{boundary}: {}",
+            errors.join("; ")
+        )))
+    }
+}
+
+fn verify_mir(program: &severian_mir::Program) -> Result<(), CompileError> {
+    severian_mir::verify(program).map_err(|errors| {
+        CompileError::Verification(format!(
+            "MIR: {}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ))
+    })
 }
 
 fn ownership_compile_error(message: String, source_path: &Path, source: &str) -> CompileError {

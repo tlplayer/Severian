@@ -1,5 +1,5 @@
 use crate::{Diagnostic, DiagnosticBag, Severity, SourceRange};
-use severian_hir::{Expression, Function, Instruction, OwnershipOp, Program};
+use severian_hir::{BindingId, Expression, Function, Instruction, OwnershipOp, Program};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -93,16 +93,19 @@ fn line_column(source: &str, byte: usize) -> (u32, u32) {
 }
 
 fn lint_function(function: &Function, config: &LintConfig, bag: &mut DiagnosticBag) {
-    let mut defined = BTreeSet::new();
+    let mut defined = BTreeMap::new();
     let mut used = BTreeSet::new();
 
     for parameter in &function.params {
-        defined.insert(parameter.name.clone());
+        defined.insert(parameter.name.id, parameter.name.name.clone());
     }
 
     collect_bindings_and_uses(&function.instructions, &mut defined, &mut used, config, bag);
 
-    for name in defined.difference(&used) {
+    for (id, name) in &defined {
+        if used.contains(id) {
+            continue;
+        }
         if !name.starts_with('_') {
             emit(
                 bag,
@@ -117,15 +120,15 @@ fn lint_function(function: &Function, config: &LintConfig, bag: &mut DiagnosticB
 
 fn collect_bindings_and_uses(
     instructions: &[Instruction],
-    defined: &mut BTreeSet<String>,
-    used: &mut BTreeSet<String>,
+    defined: &mut BTreeMap<BindingId, String>,
+    used: &mut BTreeSet<BindingId>,
     config: &LintConfig,
     bag: &mut DiagnosticBag,
 ) {
     for instruction in instructions {
         match instruction {
             Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
-                defined.insert(name.clone());
+                defined.insert(name.id, name.name.clone());
                 inspect_expression(value, used, config, bag, false);
             }
 
@@ -256,7 +259,7 @@ fn collect_bindings_and_uses(
 
 fn inspect_expression(
     expression: &Expression,
-    used: &mut BTreeSet<String>,
+    used: &mut BTreeSet<BindingId>,
     config: &LintConfig,
     bag: &mut DiagnosticBag,
     discarded: bool,
@@ -265,8 +268,8 @@ fn inspect_expression(
         Expression::Typed { expression, .. } => {
             inspect_expression(expression, used, config, bag, discarded)
         }
-        Expression::Variable(name) => {
-            used.insert(name.clone());
+        Expression::Variable(binding) => {
+            used.insert(binding.id);
         }
 
         Expression::Task { value, .. } if discarded => {

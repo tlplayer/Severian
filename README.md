@@ -137,6 +137,13 @@ emits artifacts. Use `--max-errors N` to bound the batch and
 direct function-only `.sev` file compiles as a linkable module rather than
 requiring an artificial `main` function.
 
+Compiler IR invariants are checked after resolved HIR, package linking, every
+HIR transformation, and MIR construction. `sev build --verify-each` prints the
+verified boundaries for compiler-development and pass-bisection logs; verifier
+failures name the transformation that first produced invalid IR.
+The staged refactor and its strong-ID migration order are documented in
+[compiler architecture](docs/COMPILER_ARCHITECTURE.md).
+
 ### Naming lint
 
 `sev lint [path]` enforces naming by semantic role: variables, functions,

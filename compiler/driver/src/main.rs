@@ -656,6 +656,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut target = BuildTarget::Native;
     let mut max_errors = 50usize;
     let mut message_format = MessageFormat::Text;
+    let mut verify_each = false;
     let mut index = 0;
     if args.first().is_some_and(|value| !value.starts_with('-')) {
         input = PathBuf::from(&args[0]);
@@ -699,6 +700,10 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 };
                 index += 2;
             }
+            "--verify-each" => {
+                verify_each = true;
+                index += 1;
+            }
             value => return Err(format!("unknown build option `{value}`\n{}", usage())),
         }
     }
@@ -730,6 +735,12 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     for target_spec in targets {
         build_libraries(&target_spec.source, &mut libraries)?;
         let compilation = compile_path(&target_spec.source).map_err(|error| error.to_string())?;
+        if verify_each {
+            println!(
+                "Verified {}: resolved HIR, linked HIR, every HIR transformation, and MIR",
+                target_spec.source.display()
+            );
+        }
         let output = artifact_path(&target_spec, emit);
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -2393,7 +2404,7 @@ fn usage() -> String {
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",
-        "  build [path] [--emit KIND] [--target native|xla] [--max-errors N] [--message-format text|json]",
+        "  build [path] [--emit KIND] [--target native|xla] [--verify-each] [--max-errors N] [--message-format text|json]",
         "  run [path] [-- args...]        build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --profile          run only profile tests and enforce profile contracts",

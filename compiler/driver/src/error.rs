@@ -14,6 +14,7 @@ pub enum CompileError {
     },
     Ownership(String),
     Optimization(String),
+    Verification(String),
     Package(String),
     Execution(String),
 }
@@ -39,6 +40,9 @@ impl fmt::Display for CompileError {
             CompileError::Ownership(message) => write!(formatter, "ownership error: {message}"),
             CompileError::Optimization(message) => {
                 write!(formatter, "optimization error: {message}")
+            }
+            CompileError::Verification(message) => {
+                write!(formatter, "compiler IR verification error: {message}")
             }
             CompileError::Package(message) => write!(formatter, "package error: {message}"),
             CompileError::Execution(message) => write!(formatter, "execution error: {message}"),

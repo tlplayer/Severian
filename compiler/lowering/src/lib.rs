@@ -11,9 +11,9 @@ pub mod stablehlo;
 pub mod tensor;
 
 use severian_hir::{
-    AssignmentOp, BinaryOp, Class, ComprehensionClause, Expression, Function, Instruction,
-    MatchPattern, OwnershipOp, Program, SwitchArm, TaskPlacement, TypeDefinitionId, TypeKind,
-    UnaryOp, ValueType,
+    AssignmentOp, BinaryOp, BindingId, BindingRef, Class, ComprehensionClause, Expression,
+    Function, FunctionId, Instruction, MatchPattern, OwnershipOp, Program, SwitchArm,
+    TaskPlacement, TypeDefinitionId, TypeKind, UnaryOp, ValueType,
 };
 use severian_mlir::Module;
 use std::cell::{Cell, RefCell};
@@ -250,11 +250,11 @@ fn lower_hir(program: &Program) -> Module {
             function
                 .native_symbol
                 .as_ref()
-                .map(|symbol| (function.name.clone(), symbol.clone()))
+                .map(|symbol| (function.id, symbol.clone()))
         })
         .collect::<HashMap<_, _>>();
     for signature in native_call_signatures.values() {
-        native_symbols.insert(signature.name.clone(), signature.symbol.clone());
+        native_symbols.insert(signature.id, signature.symbol.clone());
     }
     let mut declared_native_symbols = HashSet::new();
     for function in program
@@ -433,14 +433,14 @@ fn lower_hir(program: &Program) -> Module {
     let mut function_returns = program
         .functions
         .iter()
-        .map(|function| (function.name.clone(), function.return_type))
+        .map(|function| (function.id, function.return_type))
         .collect::<HashMap<_, _>>();
     let mut function_params = program
         .functions
         .iter()
         .map(|function| {
             (
-                function.name.clone(),
+                function.id,
                 function
                     .params
                     .iter()
@@ -451,12 +451,9 @@ fn lower_hir(program: &Program) -> Module {
         .collect::<HashMap<_, Vec<_>>>();
     for class in &program.classes {
         for method in &class.methods {
-            function_returns.insert(
-                format!("{}_{}", class.name, method.name),
-                method.return_type,
-            );
+            function_returns.insert(method.id, method.return_type);
             function_params.insert(
-                format!("{}_{}", class.name, method.name),
+                method.id,
                 method.params.iter().map(|parameter| parameter.ty).collect(),
             );
         }
@@ -470,7 +467,7 @@ fn lower_hir(program: &Program) -> Module {
                 TypeKind::Named { definition, .. } => definition,
                 _ => return None,
             };
-            Some((function.name.clone(), *definition))
+            Some((function.id, *definition))
         })
         .collect::<HashMap<_, _>>();
     let method_return_classes = program
@@ -615,14 +612,14 @@ struct LoweringEnvironment<'a> {
     globals: &'a [severian_hir::Global],
     classes: &'a [Class],
     strings: &'a [String],
-    function_returns: &'a HashMap<String, ValueType>,
-    function_params: &'a HashMap<String, Vec<ValueType>>,
-    function_return_classes: &'a HashMap<String, TypeDefinitionId>,
+    function_returns: &'a HashMap<FunctionId, ValueType>,
+    function_params: &'a HashMap<FunctionId, Vec<ValueType>>,
+    function_return_classes: &'a HashMap<FunctionId, TypeDefinitionId>,
     method_return_classes: &'a HashMap<(TypeDefinitionId, String), TypeDefinitionId>,
     closure_definitions: &'a Rc<RefCell<String>>,
     next_closure: &'a Rc<Cell<usize>>,
-    function_closures: &'a Rc<RefCell<HashMap<String, String>>>,
-    native_symbols: &'a HashMap<String, String>,
+    function_closures: &'a Rc<RefCell<HashMap<FunctionId, String>>>,
+    native_symbols: &'a HashMap<FunctionId, String>,
 }
 
 fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, output: &mut String) {
@@ -673,7 +670,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
             .params
             .iter()
             .enumerate()
-            .map(|(index, param)| (param.name.clone(), (format!("%arg_{index}"), param.ty)))
+            .map(|(index, param)| (param.name.id, (format!("%arg_{index}"), param.ty)))
             .collect(),
         next_value: 0,
         next_block: 0,
@@ -693,7 +690,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
     }
     for global in environment.globals {
         let value = context.lower_expression(&global.value);
-        context.variables.insert(global.name.clone(), value);
+        context.variables.insert(global.name.id, value);
     }
     context.lower_instructions(&function.instructions);
     if !context.terminated {
@@ -773,7 +770,7 @@ fn lower_class_function(
             .params
             .iter()
             .enumerate()
-            .map(|(index, param)| (param.name.clone(), (format!("%arg_{index}"), param.ty)))
+            .map(|(index, param)| (param.name.id, (format!("%arg_{index}"), param.ty)))
             .collect(),
         next_value: 0,
         next_block: 0,
@@ -794,7 +791,7 @@ fn lower_class_function(
     }
     for global in environment.globals {
         let value = context.lower_expression(&global.value);
-        context.variables.insert(global.name.clone(), value);
+        context.variables.insert(global.name.id, value);
     }
     context.lower_instructions(&function.instructions);
     if !context.terminated {
@@ -811,21 +808,21 @@ fn lower_class_function(
 struct LoopTarget {
     break_block: usize,
     continue_block: usize,
-    carried: Vec<(String, ValueType)>,
+    carried: Vec<(BindingId, ValueType)>,
     index: Option<String>,
 }
 
 struct LowerContext<'a> {
     output: &'a mut String,
     strings: &'a [String],
-    function_returns: &'a HashMap<String, ValueType>,
-    function_params: &'a HashMap<String, Vec<ValueType>>,
-    function_return_classes: &'a HashMap<String, TypeDefinitionId>,
+    function_returns: &'a HashMap<FunctionId, ValueType>,
+    function_params: &'a HashMap<FunctionId, Vec<ValueType>>,
+    function_return_classes: &'a HashMap<FunctionId, TypeDefinitionId>,
     method_return_classes: &'a HashMap<(TypeDefinitionId, String), TypeDefinitionId>,
     closure_definitions: Rc<RefCell<String>>,
     next_closure: Rc<Cell<usize>>,
-    function_closures: Rc<RefCell<HashMap<String, String>>>,
-    native_symbols: &'a HashMap<String, String>,
+    function_closures: Rc<RefCell<HashMap<FunctionId, String>>>,
+    native_symbols: &'a HashMap<FunctionId, String>,
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,
@@ -836,7 +833,7 @@ struct LowerContext<'a> {
     receiver_types: HashMap<String, severian_hir::ReceiverType>,
     task_results: HashMap<String, ValueType>,
     channel_types: HashMap<String, ValueType>,
-    variables: HashMap<String, (String, ValueType)>,
+    variables: HashMap<BindingId, (String, ValueType)>,
     next_value: usize,
     next_block: usize,
     terminated: bool,
@@ -855,7 +852,7 @@ impl LowerContext<'_> {
             match instruction {
                 Instruction::Let { name, value } => {
                     let lowered = self.lower_expression(value);
-                    self.variables.insert(name.clone(), lowered);
+                    self.variables.insert(name.id, lowered);
                 }
                 Instruction::TryLet {
                     name,
@@ -889,16 +886,17 @@ impl LowerContext<'_> {
                         self.receiver_types
                             .insert(payload.clone(), receiver.clone());
                     }
-                    self.variables
-                        .insert(name.clone(), (payload, ValueType::Any));
+                    self.variables.insert(name.id, (payload, ValueType::Any));
                     self.terminated = false;
                 }
                 Instruction::Assign { target, op, value } => {
                     if let Expression::Variable(name) = target.kind() {
                         let right = self.lower_expression(value);
-                        if self.field_names.contains(name) && !self.variables.contains_key(name) {
+                        if self.field_names.contains(&name.name)
+                            && !self.variables.contains_key(&name.id)
+                        {
                             let object = self.field_object.clone().unwrap();
-                            let field = self.string_address(name);
+                            let field = self.string_address(&name.name);
                             let value = if *op == AssignmentOp::Assign {
                                 right
                             } else {
@@ -912,7 +910,7 @@ impl LowerContext<'_> {
                             continue;
                         }
                         let lowered = if *op == AssignmentOp::Assign {
-                            match self.variables.get(name).map(|(_, ty)| *ty) {
+                            match self.variables.get(&name.id).map(|(_, ty)| *ty) {
                                 Some(expected)
                                     if expected != ValueType::Any && right.1 == ValueType::Any =>
                                 {
@@ -924,10 +922,14 @@ impl LowerContext<'_> {
                                 _ => right,
                             }
                         } else {
-                            let left = self.variables.get(name).cloned().unwrap_or(right.clone());
+                            let left = self
+                                .variables
+                                .get(&name.id)
+                                .cloned()
+                                .unwrap_or(right.clone());
                             self.lower_binary_values(left, assignment_binary(*op), right)
                         };
-                        self.variables.insert(name.clone(), lowered);
+                        self.variables.insert(name.id, lowered);
                     } else if let Expression::Index { object, index } = target.kind() {
                         let (object, object_type) = self.lower_expression(object);
                         let index = self.lower_expression(index);
@@ -1434,19 +1436,19 @@ impl LowerContext<'_> {
                 (result, ValueType::String)
             }
             Expression::Variable(name) => {
-                if let Some(value) = self.variables.get(name).cloned() {
+                if let Some(value) = self.variables.get(&name.id).cloned() {
                     value
-                } else if self.field_names.contains(name) {
+                } else if self.field_names.contains(&name.name) {
                     let object = self.field_object.clone().unwrap();
-                    let field = self.string_address(name);
+                    let field = self.string_address(&name.name);
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                    if let Some(class) = self.field_classes.get(name).cloned() {
+                    if let Some(class) = self.field_classes.get(&name.name).cloned() {
                         self.object_classes.insert(result.clone(), class);
                     }
                     let ty = self
                         .field_types
-                        .get(name)
+                        .get(&name.name)
                         .copied()
                         .unwrap_or(ValueType::Any);
                     if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
@@ -1478,8 +1480,8 @@ impl LowerContext<'_> {
                 }
             }
             Expression::Ownership { value, .. } => self.lower_expression(value),
-            Expression::Function(name) => {
-                let adapter = self.ensure_function_closure(name);
+            Expression::Function(target) => {
+                let adapter = self.ensure_function_closure(target);
                 let kind = self.fresh_value();
                 writeln!(
                     self.output,
@@ -3241,12 +3243,12 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.mlir.zero : !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 };
-                let linked_function = linked_source_function(&target.name, self.function_returns);
+                let linked_function = &target.name;
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let args = self.coerce_resolved_call_arguments(target, linked_function, args);
+                let args = self.coerce_resolved_call_arguments(target, args);
                 let values = args
                     .iter()
                     .map(|(value, _)| value.as_str())
@@ -3261,7 +3263,7 @@ impl LowerContext<'_> {
                     .signature
                     .as_ref()
                     .map(|signature| signature.returns)
-                    .or_else(|| self.function_returns.get(linked_function).copied())
+                    .or_else(|| self.function_returns.get(&target.id).copied())
                     .unwrap_or(ValueType::Any);
                 let result = self.fresh_value();
                 let mut attributes = Vec::new();
@@ -3576,7 +3578,7 @@ impl LowerContext<'_> {
             }
             Expression::Call { target, args } => {
                 let function = &target.name;
-                let linked_function = linked_source_function(function, self.function_returns);
+                let linked_function = function.as_str();
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expression(argument))
@@ -3603,7 +3605,7 @@ impl LowerContext<'_> {
                 let args = if compiler_intrinsic {
                     args
                 } else {
-                    self.coerce_resolved_call_arguments(target, linked_function, args)
+                    self.coerce_resolved_call_arguments(target, args)
                 };
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
@@ -3899,7 +3901,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_regex_matches({}, {}) : (!llvm.ptr, !llvm.ptr) -> i1", args[0].0, args[1].0).unwrap();
                     return (result, ValueType::Bool);
                 }
-                if !self.function_returns.contains_key(linked_function) {
+                if !self.function_returns.contains_key(&target.id) {
                     let builtin = match function.as_str() {
                         "read" => Some(("__sev_builtin_read", ValueType::Result)),
                         "http.get" => Some(("__sev_builtin_http_get", ValueType::Result)),
@@ -3944,7 +3946,7 @@ impl LowerContext<'_> {
                         .signature
                         .as_ref()
                         .map(|signature| signature.returns)
-                        .or_else(|| self.function_returns.get(linked_function).copied())
+                        .or_else(|| self.function_returns.get(&target.id).copied())
                         .unwrap_or(ValueType::Any),
                 };
                 let symbol = if let Some(symbol) = &target.native_symbol {
@@ -3953,10 +3955,10 @@ impl LowerContext<'_> {
                     "llvm.sqrt.f64".to_owned()
                 } else {
                     self.native_symbols
-                        .get(linked_function)
+                        .get(&target.id)
                         .cloned()
                         .unwrap_or_else(|| {
-                            if self.function_returns.contains_key(linked_function) {
+                            if self.function_returns.contains_key(&target.id) {
                                 source_function_symbol(linked_function)
                             } else {
                                 linked_function.to_owned()
@@ -3987,7 +3989,7 @@ impl LowerContext<'_> {
                     mlir_type(return_type)
                 )
                 .unwrap();
-                if let Some(class) = self.function_return_classes.get(linked_function) {
+                if let Some(class) = self.function_return_classes.get(&target.id) {
                     self.object_class_ids.insert(result.clone(), *class);
                     if let Some(definition) =
                         self.classes.iter().find(|candidate| candidate.id == *class)
@@ -4269,7 +4271,7 @@ impl LowerContext<'_> {
         };
         if let Some(class_id) = self
             .variables
-            .get(name)
+            .get(&name.id)
             .and_then(|(value, _)| self.object_class_ids.get(value))
         {
             return self
@@ -4285,9 +4287,9 @@ impl LowerContext<'_> {
         }
         let class_name = self
             .variables
-            .get(name)
+            .get(&name.id)
             .and_then(|(value, _)| self.object_classes.get(value))
-            .or_else(|| self.field_classes.get(name));
+            .or_else(|| self.field_classes.get(&name.name));
         let Some(class_name) = class_name else {
             return false;
         };
@@ -4308,7 +4310,7 @@ impl LowerContext<'_> {
         };
         let Some(receiver) = self
             .variables
-            .get(name)
+            .get(&name.id)
             .and_then(|(value, _)| self.receiver_types.get(value))
         else {
             return false;
@@ -4362,14 +4364,13 @@ impl LowerContext<'_> {
     fn coerce_resolved_call_arguments(
         &mut self,
         target: &severian_hir::CallTarget,
-        linked_function: &str,
         arguments: Vec<(String, ValueType)>,
     ) -> Vec<(String, ValueType)> {
         let parameters = target
             .signature
             .as_ref()
             .map(|signature| signature.parameters.clone())
-            .or_else(|| self.function_params.get(linked_function).cloned());
+            .or_else(|| self.function_params.get(&target.id).cloned());
         let Some(parameters) = parameters else {
             return arguments;
         };
@@ -4425,22 +4426,22 @@ impl LowerContext<'_> {
         format!("__sev_{prefix}_{index}")
     }
 
-    fn ensure_function_closure(&mut self, function: &str) -> String {
-        if let Some(symbol) = self.function_closures.borrow().get(function).cloned() {
+    fn ensure_function_closure(&mut self, function: &severian_hir::CallTarget) -> String {
+        if let Some(symbol) = self.function_closures.borrow().get(&function.id).cloned() {
             return symbol;
         }
         let symbol = self.next_closure_symbol("function_closure");
         self.function_closures
             .borrow_mut()
-            .insert(function.to_owned(), symbol.clone());
+            .insert(function.id, symbol.clone());
         let params = self
             .function_params
-            .get(function)
+            .get(&function.id)
             .cloned()
             .unwrap_or_default();
         let return_type = self
             .function_returns
-            .get(function)
+            .get(&function.id)
             .copied()
             .unwrap_or(ValueType::Any);
         let mut definition = String::new();
@@ -4467,9 +4468,9 @@ impl LowerContext<'_> {
             .join(", ");
         let target = self
             .native_symbols
-            .get(function)
+            .get(&function.id)
             .cloned()
-            .unwrap_or_else(|| source_function_symbol(function));
+            .unwrap_or_else(|| source_function_symbol(&function.name));
         if return_type == ValueType::Unit {
             writeln!(
                 context.output,
@@ -4495,7 +4496,7 @@ impl LowerContext<'_> {
         symbol
     }
 
-    fn emit_lambda_closure(&mut self, params: &[String], body: &Expression) -> String {
+    fn emit_lambda_closure(&mut self, params: &[BindingRef], body: &Expression) -> String {
         let symbol = self.next_closure_symbol("lambda");
         let mut captures = self
             .variables
@@ -4552,7 +4553,7 @@ impl LowerContext<'_> {
         for (index, param) in params.iter().enumerate() {
             context
                 .variables
-                .insert(param.clone(), (format!("%arg_{index}"), ValueType::Any));
+                .insert(param.id, (format!("%arg_{index}"), ValueType::Any));
         }
         let result = context.lower_expression(body);
         let boxed = context.box_value(result);
@@ -4962,12 +4963,12 @@ impl LowerContext<'_> {
         &mut self,
         pattern: &MatchPattern,
         item: &str,
-    ) -> Vec<(String, Option<(String, ValueType)>)> {
+    ) -> Vec<(BindingId, Option<(String, ValueType)>)> {
         match pattern {
             MatchPattern::Bind(name) => vec![(
-                name.clone(),
+                name.id,
                 self.variables
-                    .insert(name.clone(), (item.to_owned(), ValueType::Any)),
+                    .insert(name.id, (item.to_owned(), ValueType::Any)),
             )],
             MatchPattern::Constructor { name, fields } if name == "tuple" => {
                 let tuple = self
@@ -4985,9 +4986,9 @@ impl LowerContext<'_> {
                         let value = self.fresh_value();
                         writeln!(self.output, "    {value} = llvm.call @__sev_collection_get({tuple}, {position_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
                         Some((
-                            name.clone(),
+                            name.id,
                             self.variables
-                                .insert(name.clone(), (value, ValueType::Any)),
+                                .insert(name.id, (value, ValueType::Any)),
                         ))
                     })
                     .collect()
@@ -5368,8 +5369,8 @@ impl LowerContext<'_> {
                         writeln!(self.output, "    {field} = llvm.call @__sev_object_get({value}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                         match pattern {
                             MatchPattern::Bind(name) => bound.push((
-                                name.clone(),
-                                self.variables.insert(name.clone(), (field, ValueType::Any)),
+                                name.id,
+                                self.variables.insert(name.id, (field, ValueType::Any)),
                             )),
                             MatchPattern::Integer(expected) => {
                                 let actual = self.fresh_value();
@@ -5419,15 +5420,15 @@ impl LowerContext<'_> {
                                 field
                             };
                             if successful_result {
-                                if let Some(receiver) = arm.receivers.get(name) {
+                                if let Some(receiver) = arm.receivers.get(&name.id) {
                                     self.object_classes
                                         .insert(field.clone(), receiver.name.clone());
                                     self.receiver_types.insert(field.clone(), receiver.clone());
                                 }
                             }
                             bound.push((
-                                name.clone(),
-                                self.variables.insert(name.clone(), (field, ValueType::Any)),
+                                name.id,
+                                self.variables.insert(name.id, (field, ValueType::Any)),
                             ));
                         }
                     }
@@ -5559,7 +5560,7 @@ impl LowerContext<'_> {
             let result = self.unbox_value((result, ValueType::Any), channel_type);
             let mut bound = None;
             if let MatchPattern::Bind(name) = &arm.pattern {
-                bound = Some((name.clone(), self.variables.insert(name.clone(), result)));
+                bound = Some((name.id, self.variables.insert(name.id, result)));
             }
             self.lower_instructions(&arm.instructions);
             if let Some((name, previous)) = bound {
@@ -5697,10 +5698,10 @@ impl LowerContext<'_> {
         }
         let carried_names = carried
             .iter()
-            .map(|(name, _, _)| name.as_str())
+            .map(|(name, _, _)| *name)
             .collect::<HashSet<_>>();
         self.variables
-            .retain(|name, _| carried_names.contains(name.as_str()));
+            .retain(|name, _| carried_names.contains(name));
         self.terminated = false;
     }
 
@@ -5805,7 +5806,7 @@ impl LowerContext<'_> {
 
         let previous_bindings = binding_names
             .iter()
-            .map(|name| (name.clone(), self.variables.remove(name)))
+            .map(|name| (name.id, self.variables.remove(&name.id)))
             .collect::<Vec<_>>();
         let mut carried = self
             .variables
@@ -5899,7 +5900,7 @@ impl LowerContext<'_> {
                                 "__sev_map_value_at"
                             };
                             writeln!(self.output, "    {item} = llvm.call @{function}({collection}, {index}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
-                            self.variables.insert(name.clone(), (item, ValueType::Any));
+                            self.variables.insert(name.id, (item, ValueType::Any));
                         }
                     }
                 }
@@ -5923,7 +5924,7 @@ impl LowerContext<'_> {
                                 let field_value = self.fresh_value();
                                 writeln!(self.output, "    {field_value} = llvm.call @__sev_collection_get({tuple}, {position_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
                                 self.variables
-                                    .insert(name.clone(), (field_value, ValueType::Any));
+                                    .insert(name.id, (field_value, ValueType::Any));
                             }
                         }
                     }
@@ -5934,7 +5935,7 @@ impl LowerContext<'_> {
             (index.clone(), ValueType::Int)
         };
         if let MatchPattern::Bind(name) = pattern {
-            self.variables.insert(name.clone(), binding);
+            self.variables.insert(name.id, binding);
         }
         self.loop_targets.push(LoopTarget {
             break_block: exit,
@@ -6011,10 +6012,10 @@ impl LowerContext<'_> {
         }
         let carried_names = carried
             .iter()
-            .map(|(name, _, _)| name.as_str())
+            .map(|(name, _, _)| *name)
             .collect::<HashSet<_>>();
         self.variables
-            .retain(|name, _| carried_names.contains(name.as_str()));
+            .retain(|name, _| carried_names.contains(name));
         for (name, previous_binding) in previous_bindings {
             if let Some(previous_binding) = previous_binding {
                 self.variables.insert(name, previous_binding);
@@ -8627,7 +8628,7 @@ fn dynamic_type_suffix(ty: ValueType) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NativeCallSignature {
-    name: String,
+    id: FunctionId,
     symbol: String,
     params: Vec<ValueType>,
     returns: ValueType,
@@ -8654,7 +8655,7 @@ fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignat
         signatures
             .entry(symbol.clone())
             .or_insert_with(|| NativeCallSignature {
-                name: target.name.clone(),
+                id: target.id,
                 symbol: symbol.clone(),
                 params: args
                     .iter()
@@ -8730,17 +8731,6 @@ fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Result
         | ValueType::Option => "!llvm.ptr",
     }
-}
-
-fn linked_source_function<'function>(
-    function: &'function str,
-    function_returns: &HashMap<String, ValueType>,
-) -> &'function str {
-    function
-        .rsplit_once('.')
-        .map(|(_, name)| name)
-        .filter(|name| function_returns.contains_key(*name))
-        .unwrap_or(function)
 }
 
 fn assignment_binary(op: AssignmentOp) -> BinaryOp {

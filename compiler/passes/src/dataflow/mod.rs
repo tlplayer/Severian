@@ -1,5 +1,5 @@
 use crate::{Pass, PassError};
-use severian_hir::{Expression, Function, Instruction, MatchPattern, Program};
+use severian_hir::{BindingId, Expression, Function, Instruction, MatchPattern, Program};
 use std::collections::{HashMap, HashSet};
 
 /// Straight-line local data-flow simplification.
@@ -32,23 +32,24 @@ impl Pass for LocalDataflow {
 
 #[derive(Debug, Clone, Default)]
 struct Facts {
-    values: HashMap<String, Expression>,
+    values: HashMap<BindingId, Expression>,
 }
 
 impl Facts {
-    fn invalidate(&mut self, name: &str) {
-        self.values.remove(name);
+    fn invalidate(&mut self, binding: BindingId) {
+        self.values.remove(&binding);
 
         // A copy fact whose value references `name` is now stale.
-        self.values
-            .retain(|_, value| !matches!(value, Expression::Variable(source) if source == name));
+        self.values.retain(
+            |_, value| !matches!(value, Expression::Variable(source) if source.id == binding),
+        );
     }
 
-    fn bind(&mut self, name: String, value: &Expression) {
-        self.invalidate(&name);
+    fn bind(&mut self, binding: BindingId, value: &Expression) {
+        self.invalidate(binding);
 
         if is_propagatable(value) {
-            self.values.insert(name, value.clone());
+            self.values.insert(binding, value.clone());
         }
     }
 
@@ -61,7 +62,7 @@ pub fn optimize_function(function: &mut Function) {
     let mut facts = Facts::default();
 
     for parameter in &function.params {
-        facts.invalidate(&parameter.name);
+        facts.invalidate(parameter.name.id);
     }
 
     optimize_block(&mut function.instructions, &mut facts);
@@ -76,13 +77,13 @@ fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
         match instruction {
             Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 substitute_expression(value, facts, &mut HashSet::new());
-                facts.bind(name.clone(), value);
+                facts.bind(name.id, value);
             }
             Instruction::Assign { target, value, .. } => {
                 substitute_expression(value, facts, &mut HashSet::new());
 
                 if let Expression::Variable(name) = target.kind() {
-                    facts.invalidate(name);
+                    facts.invalidate(name.id);
                 } else {
                     substitute_expression(target, facts, &mut HashSet::new());
                     facts.clear();
@@ -132,7 +133,7 @@ fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
 
                 let mutated = assigned_names(instructions);
                 for name in mutated {
-                    facts.invalidate(&name);
+                    facts.invalidate(name);
                 }
             }
             Instruction::For {
@@ -148,15 +149,15 @@ fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
 
                 let mut loop_facts = facts.clone();
                 for name in pattern_names(pattern) {
-                    loop_facts.invalidate(&name);
+                    loop_facts.invalidate(name);
                 }
                 optimize_block(instructions, &mut loop_facts);
 
                 for name in assigned_names(instructions) {
-                    facts.invalidate(&name);
+                    facts.invalidate(name);
                 }
                 for name in pattern_names(pattern) {
-                    facts.invalidate(&name);
+                    facts.invalidate(name);
                 }
             }
             Instruction::Switch { value, arms } => {
@@ -193,7 +194,7 @@ fn optimize_block(instructions: &mut [Instruction], facts: &mut Facts) {
                 optimize_block(instructions, &mut nested);
 
                 for name in assigned_names(instructions) {
-                    facts.invalidate(&name);
+                    facts.invalidate(name);
                 }
             }
             Instruction::Break | Instruction::Continue => {}
@@ -221,7 +222,7 @@ fn optimize_arms(arms: &mut [severian_hir::SwitchArm], facts: &mut Facts) {
         }
 
         for name in pattern_names(&arm.pattern) {
-            branch.invalidate(&name);
+            branch.invalidate(name);
         }
 
         if let Some(guard) = &mut arm.guard {
@@ -254,28 +255,28 @@ fn intersect_facts(left: &Facts, right: &Facts) -> Facts {
 fn substitute_expression(
     expression: &mut Expression,
     facts: &Facts,
-    visiting: &mut HashSet<String>,
+    visiting: &mut HashSet<BindingId>,
 ) {
     match expression {
         Expression::Typed { expression, .. } => substitute_expression(expression, facts, visiting),
         Expression::Variable(name) => {
-            if !visiting.insert(name.clone()) {
+            if !visiting.insert(name.id) {
                 return;
             }
 
-            if let Some(replacement) = facts.values.get(name).cloned() {
-                let original = name.clone();
+            if let Some(replacement) = facts.values.get(&name.id).cloned() {
+                let original = name.id;
                 *expression = replacement;
                 substitute_expression(expression, facts, visiting);
                 visiting.remove(&original);
             } else {
-                visiting.remove(name);
+                visiting.remove(&name.id);
             }
         }
         Expression::Lambda { params, body } => {
             let mut local = facts.clone();
             for param in params {
-                local.invalidate(param);
+                local.invalidate(param.id);
             }
             substitute_expression(body, &local, visiting);
         }
@@ -341,7 +342,7 @@ fn substitute_expression(
             for clause in clauses {
                 substitute_expression(&mut clause.iterable, &local, visiting);
                 for name in pattern_names(&clause.pattern) {
-                    local.invalidate(&name);
+                    local.invalidate(name);
                 }
                 if let Some(condition) = &mut clause.condition {
                     substitute_expression(condition, &local, visiting);
@@ -358,7 +359,7 @@ fn substitute_expression(
             for clause in clauses {
                 substitute_expression(&mut clause.iterable, &local, visiting);
                 for name in pattern_names(&clause.pattern) {
-                    local.invalidate(&name);
+                    local.invalidate(name);
                 }
                 if let Some(condition) = &mut clause.condition {
                     substitute_expression(condition, &local, visiting);
@@ -406,15 +407,15 @@ fn is_propagatable(expression: &Expression) -> bool {
     )
 }
 
-fn pattern_names(pattern: &MatchPattern) -> Vec<String> {
+fn pattern_names(pattern: &MatchPattern) -> Vec<BindingId> {
     let mut names = Vec::new();
     collect_pattern_names(pattern, &mut names);
     names
 }
 
-fn collect_pattern_names(pattern: &MatchPattern, names: &mut Vec<String>) {
+fn collect_pattern_names(pattern: &MatchPattern, names: &mut Vec<BindingId>) {
     match pattern {
-        MatchPattern::Bind(name) => names.push(name.clone()),
+        MatchPattern::Bind(name) => names.push(name.id),
         MatchPattern::Constructor { fields, .. } => {
             for field in fields {
                 collect_pattern_names(field, names);
@@ -428,19 +429,19 @@ fn collect_pattern_names(pattern: &MatchPattern, names: &mut Vec<String>) {
     }
 }
 
-fn assigned_names(instructions: &[Instruction]) -> HashSet<String> {
+fn assigned_names(instructions: &[Instruction]) -> HashSet<BindingId> {
     let mut names = HashSet::new();
 
     for instruction in instructions {
         match instruction {
             Instruction::Let { name, .. } | Instruction::TryLet { name, .. } => {
-                names.insert(name.clone());
+                names.insert(name.id);
             }
             Instruction::Assign {
                 target: Expression::Variable(name),
                 ..
             } => {
-                names.insert(name.clone());
+                names.insert(name.id);
             }
             Instruction::If {
                 then_instructions,

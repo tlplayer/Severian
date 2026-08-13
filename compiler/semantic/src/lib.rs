@@ -6,15 +6,15 @@ use severian_ast::{
     UnaryOp as AstUnaryOp,
 };
 use severian_hir::{
-    AssignmentOp, BinaryOp, CallTarget, ChaosAction as HirChaosAction, Class, ClassDefinition,
-    ComprehensionClause as HirComprehensionClause, ContractClause as HirContractClause,
-    Decorator as HirDecorator, DefinitionId, DetailedFunctionType, EnumDefinition, Expression,
-    FieldDefinition, Function, FunctionContract as HirFunctionContract, FunctionId, FunctionType,
-    Global, HirId, Instruction, MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata,
-    ReceiverType, SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement,
-    TensorDimension, TensorElementType, TensorType, Test, TestMode as HirTestMode,
-    TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType, VariantDefinition,
-    VariantId,
+    AssignmentOp, BinaryOp, BindingId, BindingRef, CallTarget, ChaosAction as HirChaosAction,
+    Class, ClassDefinition, ComprehensionClause as HirComprehensionClause,
+    ContractClause as HirContractClause, Decorator as HirDecorator, DefinitionId,
+    DetailedFunctionType, EnumDefinition, Expression, FieldDefinition, Function,
+    FunctionContract as HirFunctionContract, FunctionId, FunctionType, Global, HirId, Instruction,
+    MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType, SourceRange,
+    SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension, TensorElementType,
+    TensorType, Test, TestMode as HirTestMode, TypeDefinitionId, TypeId, TypeKind, TypeTable,
+    UnaryOp, ValueType, VariantDefinition, VariantId,
 };
 use severian_package::{local_import_exposed_name, local_import_module_name, PackageInterface};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -56,6 +56,7 @@ struct SignatureParameter {
 
 #[derive(Clone)]
 struct Binding {
+    reference: BindingRef,
     ty: ValueType,
     class: Option<String>,
     function_return: Option<ValueType>,
@@ -64,6 +65,18 @@ struct Binding {
     field: bool,
     integer_max: Option<i64>,
     known_integer: Option<i64>,
+}
+
+fn source_binding(identifier: &severian_ast::Ident) -> BindingRef {
+    BindingRef::source(
+        identifier.name.clone(),
+        identifier.span.start,
+        identifier.span.end,
+    )
+}
+
+fn named_binding(name: impl Into<String>, identity: impl AsRef<str>) -> BindingRef {
+    BindingRef::new(BindingId::from_name(identity.as_ref()), name)
 }
 
 pub fn analyze(module: &Module) -> Result<Program, SemanticError> {
@@ -327,6 +340,7 @@ pub fn analyze_with_packages(
             global_scope.insert(
                 binding.name.name.clone(),
                 Binding {
+                    reference: source_binding(&binding.name),
                     ty,
                     class: expression_class(source, &global_scope, &aliases),
                     function_return: None,
@@ -338,7 +352,7 @@ pub fn analyze_with_packages(
                 },
             );
             globals.push(Global {
-                name: binding.name.name.clone(),
+                name: global_scope[&binding.name.name].reference.clone(),
                 value,
             });
         }
@@ -368,6 +382,7 @@ pub fn analyze_with_packages(
             scope.insert(
                 parameter.name.clone(),
                 Binding {
+                    reference: source_binding(&function.params[index].name),
                     ty: parameter.ty,
                     class: function
                         .params
@@ -383,7 +398,7 @@ pub fn analyze_with_packages(
                 },
             );
             params.push(Parameter {
-                name: parameter.name.clone(),
+                name: scope[&parameter.name].reference.clone(),
                 ty: parameter.ty,
                 default,
                 receiver: function
@@ -486,6 +501,7 @@ pub fn analyze_with_packages(
         for constructor in &class.constructors {
             lower_decorators(&constructor.decorators, &imported_modules)?;
             constructors.push(lower_class_function(
+                constructor_id(&class.name.name, &constructor.name.name, constructor.span),
                 &class.name.name,
                 &fields,
                 &constructor.name.name,
@@ -510,6 +526,7 @@ pub fn analyze_with_packages(
                 .transpose()?
                 .unwrap_or(ValueType::Unit);
             methods.push(lower_class_function(
+                FunctionId::from_name(&format!("{}.{}", class.name.name, method.name.name)),
                 &class.name.name,
                 &fields,
                 &method.name.name,
@@ -1019,8 +1036,8 @@ fn register_constructor_metadata(
     known_types: &HashMap<String, TypeDefinitionId>,
     metadata: &mut ProgramMetadata,
 ) {
-    let class = qualified_name(namespace, class);
-    let id = FunctionId::from_name(&format!("{class}.{}", constructor.name.name));
+    let id = constructor_id(class, &constructor.name.name, constructor.span);
+    let id = namespace.map_or(id, |namespace| id.in_namespace(namespace));
     metadata.sources.record_definition(
         DefinitionId::Function(id),
         source_span(file, constructor.name.span),
@@ -1606,7 +1623,7 @@ fn refine_success_pattern_bindings(
     }
     for field in fields {
         if let MatchPattern::Bind(name) = field {
-            if let Some(binding) = scope.get_mut(name) {
+            if let Some(binding) = scope.get_mut(&name.name) {
                 binding.class = Some(class.to_owned());
             }
         }
@@ -1616,7 +1633,7 @@ fn refine_success_pattern_bindings(
 fn success_pattern_receivers(
     pattern: &MatchPattern,
     receiver: &ReceiverType,
-) -> BTreeMap<String, ReceiverType> {
+) -> BTreeMap<BindingId, ReceiverType> {
     let MatchPattern::Constructor { name, fields } = pattern else {
         return BTreeMap::new();
     };
@@ -1629,7 +1646,7 @@ fn success_pattern_receivers(
             let MatchPattern::Bind(name) = field else {
                 return None;
             };
-            Some((name.clone(), receiver.clone()))
+            Some((name.id, receiver.clone()))
         })
         .collect()
 }
@@ -1657,6 +1674,7 @@ fn imports_entire_module(module: &Module, module_name: &str) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn lower_class_function(
+    id: FunctionId,
     class_name: &str,
     fields: &[String],
     name: &str,
@@ -1675,6 +1693,7 @@ fn lower_class_function(
         scope.insert(
             field.clone(),
             Binding {
+                reference: named_binding(field, format!("{class_name}.{field}")),
                 ty: ValueType::Any,
                 class: aliases
                     .get(&format!("__class_field_class.{class_name}.{field}"))
@@ -1706,6 +1725,7 @@ fn lower_class_function(
         scope.insert(
             param.name.name.clone(),
             Binding {
+                reference: source_binding(&param.name),
                 ty,
                 class: param.ty.as_ref().and_then(class_type_name),
                 function_return: function_return_type(param.ty.as_ref()),
@@ -1717,7 +1737,7 @@ fn lower_class_function(
             },
         );
         params.push(Parameter {
-            name: param.name.name.clone(),
+            name: scope[&param.name.name].reference.clone(),
             ty,
             default,
             receiver: param
@@ -1760,7 +1780,7 @@ fn lower_class_function(
     let contract = lower_function_contract(source_contract, &scope, signatures, aliases)?;
     enforce_function_contract(&mut instructions, contract.as_ref());
     Ok(Function {
-        id: FunctionId::from_name(&format!("{class_name}.{name}")),
+        id,
         name: name.into(),
         native_symbol: None,
         decorators: decorator_metadata(source_decorators),
@@ -1770,6 +1790,10 @@ fn lower_class_function(
         instructions,
         tests,
     })
+}
+
+fn constructor_id(class: &str, name: &str, span: severian_ast::Span) -> FunctionId {
+    FunctionId::from_name(&format!("{class}.{name}@{}:{}", span.start, span.end))
 }
 
 fn lower_function_contract(
@@ -1793,7 +1817,11 @@ fn lower_function_contract(
                     dependencies.dedup();
                     let dependency_types = dependencies
                         .iter()
-                        .map(|name| scope.get(name).map_or(ValueType::Any, |binding| binding.ty))
+                        .map(|name| {
+                            scope
+                                .get(&name.name)
+                                .map_or(ValueType::Any, |binding| binding.ty)
+                        })
                         .collect();
                     Ok(HirContractClause {
                         condition,
@@ -2060,15 +2088,16 @@ fn lower_block(
                     .get(&binding.name.name)
                     .is_some_and(|existing| existing.field || existing.mutable)
                 {
+                    let existing = scope[&binding.name.name].reference.clone();
                     if propagates {
                         instructions.push(Instruction::TryLet {
-                            name: binding.name.name.clone(),
+                            name: existing,
                             value,
                             receiver,
                         });
                     } else {
                         instructions.push(Instruction::Assign {
-                            target: Expression::Variable(binding.name.name.clone()),
+                            target: Expression::Variable(existing),
                             op: AssignmentOp::Assign,
                             value,
                         });
@@ -2079,6 +2108,7 @@ fn lower_block(
                     .insert(
                         binding.name.name.clone(),
                         Binding {
+                            reference: source_binding(&binding.name),
                             ty,
                             class,
                             function_return: None,
@@ -2098,13 +2128,13 @@ fn lower_block(
                 }
                 if propagates {
                     instructions.push(Instruction::TryLet {
-                        name: binding.name.name.clone(),
+                        name: scope[&binding.name.name].reference.clone(),
                         value,
                         receiver,
                     });
                 } else {
                     instructions.push(Instruction::Let {
-                        name: binding.name.name.clone(),
+                        name: scope[&binding.name.name].reference.clone(),
                         value,
                     });
                 }
@@ -2113,6 +2143,7 @@ fn lower_block(
                 let (value, value_type) =
                     lower_expression(&binding.value, scope, signatures, aliases)?;
                 let temporary = format!("__destructure_{}", binding.span.start);
+                let temporary = BindingRef::synthetic(temporary);
                 if value_type == ValueType::Result {
                     instructions.push(Instruction::TryLet {
                         name: temporary.clone(),
@@ -2126,9 +2157,11 @@ fn lower_block(
                     });
                 }
                 for (index, name) in binding.names.iter().enumerate() {
+                    let reference = source_binding(name);
                     scope.insert(
                         name.name.clone(),
                         Binding {
+                            reference: reference.clone(),
                             ty: ValueType::Any,
                             class: None,
                             function_return: None,
@@ -2140,7 +2173,7 @@ fn lower_block(
                         },
                     );
                     instructions.push(Instruction::Let {
-                        name: name.name.clone(),
+                        name: reference,
                         value: Expression::Index {
                             object: Box::new(Expression::Variable(temporary.clone())),
                             index: Box::new(Expression::Integer(index as i64)),
@@ -2183,6 +2216,7 @@ fn lower_block(
                     lower_expression(&assignment.value, scope, signatures, aliases)?;
                 if value_type == ValueType::Result {
                     let temporary = format!("__assignment_{}", assignment.span.start);
+                    let temporary = BindingRef::synthetic(temporary);
                     instructions.push(Instruction::TryLet {
                         name: temporary.clone(),
                         value,
@@ -2220,6 +2254,7 @@ fn lower_block(
                     .insert(
                         binding.name.name.clone(),
                         Binding {
+                            reference: source_binding(&binding.name),
                             ty: ValueType::Result,
                             class: None,
                             function_return: None,
@@ -2238,7 +2273,7 @@ fn lower_block(
                     ));
                 }
                 instructions.push(Instruction::Let {
-                    name: binding.name.name.clone(),
+                    name: scope[&binding.name.name].reference.clone(),
                     value,
                 });
             }
@@ -2248,7 +2283,7 @@ fn lower_block(
                 if let Expression::MethodCall { object, method, .. } = expression.kind() {
                     if collection_shape_mutating_method(method) {
                         if let Expression::Variable(name) = object.kind() {
-                            if let Some(binding) = scope.get_mut(name) {
+                            if let Some(binding) = scope.get_mut(&name.name) {
                                 binding.collection_len = None;
                             }
                         }
@@ -2640,10 +2675,10 @@ fn lower_expression_kind(
         }
         Expr::Identifier(identifier) => {
             if let Some(binding) = scope.get(&identifier.name) {
-                Ok((Expression::Variable(identifier.name.clone()), binding.ty))
+                Ok((Expression::Variable(binding.reference.clone()), binding.ty))
             } else if signatures.contains_key(&identifier.name) {
                 Ok((
-                    Expression::Function(identifier.name.clone()),
+                    Expression::Function(signatures[&identifier.name].target.clone()),
                     ValueType::Function,
                 ))
             } else if identifier.name == "invalid" {
@@ -3109,6 +3144,7 @@ fn lower_expression_kind(
                 lambda_scope.insert(
                     parameter.name.name.clone(),
                     Binding {
+                        reference: source_binding(&parameter.name),
                         ty: ValueType::Any,
                         class: None,
                         function_return: None,
@@ -3119,7 +3155,7 @@ fn lower_expression_kind(
                         known_integer: None,
                     },
                 );
-                params.push(parameter.name.name.clone());
+                params.push(lambda_scope[&parameter.name.name].reference.clone());
             }
             let body = lower_expression(body, &lambda_scope, signatures, aliases)?.0;
             Ok((
@@ -3142,7 +3178,7 @@ fn lower_expression_kind(
             let (value, value_type) = lower_expression(&rule.value, scope, signatures, aliases)?;
             if rule.action == severian_ast::ChaosAction::Return {
                 let declared_return = signatures
-                    .get(&function)
+                    .get(&function.name)
                     .map_or(return_type, |signature| signature.returns);
                 compatible(rule.value.span(), value_type, declared_return)?;
             }
@@ -3169,6 +3205,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
     scope.insert(
         "chaos".into(),
         Binding {
+            reference: BindingRef::synthetic("chaos"),
             ty: ValueType::List,
             class: None,
             function_return: None,
@@ -3184,6 +3221,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
             scope.insert(
                 name.into(),
                 Binding {
+                    reference: BindingRef::synthetic(name),
                     ty: ValueType::String,
                     class: None,
                     function_return: None,
@@ -3201,6 +3239,7 @@ fn add_test_bindings(scope: &mut HashMap<String, Binding>, modes: &[severian_ast
             scope.insert(
                 name.into(),
                 Binding {
+                    reference: BindingRef::synthetic(name),
                     ty: ValueType::Int,
                     class: None,
                     function_return: None,
@@ -3644,7 +3683,7 @@ fn lower_call(
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((
             Expression::CallValue {
-                callee: Box::new(Expression::Variable(callee.name.clone())),
+                callee: Box::new(Expression::Variable(scope[&callee.name].reference.clone())),
                 args,
                 return_type,
             },
@@ -4503,12 +4542,12 @@ fn insert_deferred_contract_checks(
     }
 }
 
-fn changed_contract_binding(instruction: &Instruction) -> Option<String> {
+fn changed_contract_binding(instruction: &Instruction) -> Option<BindingRef> {
     match instruction {
-        Instruction::Assign { target, .. } => root_variable(target).map(str::to_owned),
+        Instruction::Assign { target, .. } => root_variable(target).cloned(),
         Instruction::Evaluate(expression) => match expression.kind() {
             Expression::MethodCall { object, method, .. } if contract_mutating_method(method) => {
-                root_variable(object).map(str::to_owned)
+                root_variable(object).cloned()
             }
             _ => None,
         },
@@ -4541,7 +4580,7 @@ fn contract_mutating_method(method: &str) -> bool {
     )
 }
 
-fn root_variable(expression: &Expression) -> Option<&str> {
+fn root_variable(expression: &Expression) -> Option<&BindingRef> {
     match expression.kind() {
         Expression::Variable(name) => Some(name),
         Expression::Member { object, .. } | Expression::Index { object, .. } => {
@@ -4633,7 +4672,7 @@ fn synthetic_string(id: u64, value: String) -> Expression {
     }
 }
 
-fn collect_contract_dependencies(expression: &Expression, dependencies: &mut Vec<String>) {
+fn collect_contract_dependencies(expression: &Expression, dependencies: &mut Vec<BindingRef>) {
     match expression.kind() {
         Expression::Variable(name) => dependencies.push(name.clone()),
         Expression::Binary { left, right, .. } => {
@@ -4724,9 +4763,11 @@ fn lower_pattern(
     match pattern {
         Pattern::Wildcard(_) => Ok(MatchPattern::Wildcard),
         Pattern::Identifier(name) => {
+            let reference = source_binding(name);
             scope.insert(
                 name.name.clone(),
                 Binding {
+                    reference: reference.clone(),
                     ty: ValueType::Any,
                     class: None,
                     function_return: None,
@@ -4737,13 +4778,13 @@ fn lower_pattern(
                     known_integer: None,
                 },
             );
-            Ok(MatchPattern::Bind(name.name.clone()))
+            Ok(MatchPattern::Bind(reference))
         }
         Pattern::Literal(Literal::Integer { value, .. }) => Ok(MatchPattern::Integer(*value)),
         Pattern::Literal(Literal::Float { value, .. }) => Ok(MatchPattern::Float(value.to_bits())),
         Pattern::Literal(Literal::Boolean { value, .. }) => Ok(MatchPattern::Boolean(*value)),
         Pattern::Literal(Literal::String { value, .. }) => Ok(MatchPattern::String(value.clone())),
-        Pattern::Constructor { name, fields, .. } => {
+        Pattern::Constructor { span, name, fields } => {
             let Type::Named(path) = name else {
                 return Err(error(name.span(), "invalid constructor pattern"));
             };
@@ -4758,10 +4799,14 @@ fn lower_pattern(
                     } else {
                         field_names
                             .split(',')
-                            .map(|field| {
+                            .enumerate()
+                            .map(|(index, field)| {
+                                let reference =
+                                    BindingRef::source(field, span.start + index, span.end);
                                 scope.insert(
                                     field.into(),
                                     Binding {
+                                        reference: reference.clone(),
                                         ty: ValueType::Any,
                                         class: None,
                                         function_return: None,
@@ -4772,7 +4817,7 @@ fn lower_pattern(
                                         known_integer: None,
                                     },
                                 );
-                                MatchPattern::Bind(field.into())
+                                MatchPattern::Bind(reference)
                             })
                             .collect()
                     };
@@ -4783,9 +4828,11 @@ fn lower_pattern(
                 && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
                 && !matches!(name.as_str(), "absent" | "ok" | "failure" | "present")
             {
+                let reference = BindingRef::source(&name, span.start, span.end);
                 scope.insert(
                     name.clone(),
                     Binding {
+                        reference: reference.clone(),
                         ty: ValueType::Any,
                         class: None,
                         function_return: None,
@@ -4796,7 +4843,7 @@ fn lower_pattern(
                         known_integer: None,
                     },
                 );
-                return Ok(MatchPattern::Bind(name));
+                return Ok(MatchPattern::Bind(reference));
             }
             let fields = fields
                 .iter()

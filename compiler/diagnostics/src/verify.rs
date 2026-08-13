@@ -58,6 +58,7 @@ pub fn verify(program: &Program) -> DiagnosticBag {
 
 fn verify_unique_names(program: &Program, bag: &mut DiagnosticBag) {
     let mut functions = BTreeSet::new();
+    let mut function_ids = BTreeSet::new();
     for function in &program.functions {
         if !functions.insert(&function.name) {
             bag.push(Diagnostic::error(
@@ -65,14 +66,33 @@ fn verify_unique_names(program: &Program, bag: &mut DiagnosticBag) {
                 format!("duplicate top-level function `{}`", function.name),
             ));
         }
+        if !function_ids.insert(function.id) {
+            bag.push(Diagnostic::error(
+                "verify::duplicate-function-id",
+                format!(
+                    "function `{}` reuses stable function identity {:?}",
+                    function.name, function.id
+                ),
+            ));
+        }
     }
 
     let mut classes = BTreeSet::new();
+    let mut class_ids = BTreeSet::new();
     for class in &program.classes {
         if !classes.insert(&class.name) {
             bag.push(Diagnostic::error(
                 "verify::duplicate-class",
                 format!("duplicate class `{}`", class.name),
+            ));
+        }
+        if !class_ids.insert(class.id) {
+            bag.push(Diagnostic::error(
+                "verify::duplicate-class-id",
+                format!(
+                    "class `{}` reuses stable type identity {:?}",
+                    class.name, class.id
+                ),
             ));
         }
     }
@@ -392,5 +412,42 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
         | Expression::String(_)
         | Expression::Variable(_)
         | Expression::Function(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use severian_hir::FunctionId;
+
+    fn function(id: FunctionId, name: &str) -> Function {
+        Function {
+            id,
+            name: name.into(),
+            native_symbol: None,
+            decorators: Vec::new(),
+            contract: None,
+            params: Vec::new(),
+            return_type: ValueType::Unit,
+            instructions: Vec::new(),
+            tests: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rejects_distinct_names_that_reuse_a_stable_function_id() {
+        let id = FunctionId::from_name("first");
+        let program = Program {
+            metadata: Default::default(),
+            globals: Vec::new(),
+            classes: Vec::new(),
+            functions: vec![function(id, "first"), function(id, "renamed")],
+        };
+
+        let diagnostics = verify(&program);
+        assert!(diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code.0 == "verify::duplicate-function-id" }));
     }
 }

@@ -16,7 +16,9 @@ pub mod reduction;
 pub use ops::{MlirValue, StableHloEmitter};
 pub use reduction::StableHloReduction;
 
-use severian_hir::{CallTarget, Expression, Function, FunctionId, Instruction, Program, ValueType};
+use severian_hir::{
+    BindingId, CallTarget, Expression, Function, FunctionId, Instruction, Program, ValueType,
+};
 use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_mlir::Module;
 use std::collections::HashMap;
@@ -165,7 +167,7 @@ fn lower_function(
         };
         let value = argument(format!("%arg{index}"), tensor);
         arguments.push(value.clone());
-        values.insert(parameter.name.clone(), value);
+        values.insert(parameter.name.id, value);
     }
     let mut emitter = StableHloEmitter::new();
     let result = lower_straight_line(
@@ -205,14 +207,14 @@ fn lower_straight_line(
     function: &str,
     return_type: TensorType,
     instructions: &[Instruction],
-    values: &mut HashMap<String, MlirValue>,
+    values: &mut HashMap<BindingId, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<Option<MlirValue>, StableHloLoweringError> {
     for instruction in instructions {
         match instruction {
             Instruction::Let { name, value } | Instruction::TryLet { name, value, .. } => {
                 let value = lower_expression(context, function, value, None, values, emitter)?;
-                values.insert(name.clone(), value);
+                values.insert(name.id, value);
             }
             Instruction::Assign { target, op, value } => {
                 if !matches!(op, severian_hir::AssignmentOp::Assign) {
@@ -229,7 +231,7 @@ fn lower_straight_line(
                     });
                 };
                 let value = lower_expression(context, function, value, None, values, emitter)?;
-                values.insert(name.clone(), value);
+                values.insert(name.id, value);
             }
             Instruction::Return(Some(value)) => {
                 return lower_expression(
@@ -271,19 +273,16 @@ fn lower_expression(
     function: &str,
     expression: &Expression,
     expected_type: Option<TensorType>,
-    values: &HashMap<String, MlirValue>,
+    values: &HashMap<BindingId, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
     match expression.kind() {
-        Expression::Variable(name) => {
-            values
-                .get(name)
-                .cloned()
-                .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
-                    function: function.into(),
-                    reason: format!("unknown tensor SSA value `{name}`"),
-                })
-        }
+        Expression::Variable(name) => values.get(&name.id).cloned().ok_or_else(|| {
+            StableHloLoweringError::UnsupportedFunction {
+                function: function.into(),
+                reason: format!("unknown tensor SSA value `{name}`"),
+            }
+        }),
         Expression::Call { target, args } => {
             let result_type = match expected_type.or_else(|| match expression.ty() {
                 Some(ValueType::Tensor(tensor)) if tensor.rank.is_some() => Some(tensor),
@@ -323,7 +322,7 @@ fn lower_call(
     target: &CallTarget,
     arguments: &[Expression],
     result_type: TensorType,
-    values: &HashMap<String, MlirValue>,
+    values: &HashMap<BindingId, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
     if let Some(function) = context.functions.get(&target.id).copied() {
@@ -346,7 +345,7 @@ fn lower_source_call(
     context: &LoweringContext<'_>,
     function: &Function,
     arguments: &[Expression],
-    caller_values: &HashMap<String, MlirValue>,
+    caller_values: &HashMap<BindingId, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
     if function.params.len() != arguments.len() {
@@ -378,7 +377,7 @@ fn lower_source_call(
             caller_values,
             emitter,
         )?;
-        callee_values.insert(parameter.name.clone(), value);
+        callee_values.insert(parameter.name.id, value);
     }
     lower_straight_line(
         context,
@@ -400,7 +399,7 @@ fn lower_intrinsic_call(
     target: &CallTarget,
     arguments: &[Expression],
     result_type: TensorType,
-    values: &HashMap<String, MlirValue>,
+    values: &HashMap<BindingId, MlirValue>,
     emitter: &mut StableHloEmitter,
 ) -> Result<MlirValue, StableHloLoweringError> {
     let mut operands = Vec::new();
