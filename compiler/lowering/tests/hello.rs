@@ -58,6 +58,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_value_sub(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_value_mul(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_value_div(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_value_int(!llvm.ptr) -> i64\n",
             "  llvm.func @__sev_value_float(!llvm.ptr) -> f64\n",
             "  llvm.func @__sev_value_string(!llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",

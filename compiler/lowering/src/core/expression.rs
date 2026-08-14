@@ -2291,7 +2291,8 @@ impl LowerContext<'_> {
                     .collect::<Vec<_>>();
                 let compiler_intrinsic = matches!(
                     function.as_str(),
-                    "float"
+                    "int"
+                        | "float"
                         | "string"
                         | "len"
                         | "size"
@@ -2313,6 +2314,21 @@ impl LowerContext<'_> {
                 } else {
                     self.coerce_resolved_call_arguments(target, args)
                 };
+                if function == "int" {
+                    let argument = args.first().cloned().unwrap();
+                    if argument.1 == ValueType::Int {
+                        return argument;
+                    }
+                    self.emit_runtime_site();
+                    let value = self.box_value(argument);
+                    let result = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @__sev_value_int({value}) : (!llvm.ptr) -> i64"
+                    )
+                    .unwrap();
+                    return (result, ValueType::Int);
+                }
                 if function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
@@ -2327,35 +2343,34 @@ impl LowerContext<'_> {
                             (result, ValueType::Float)
                         }
                         ValueType::String => {
-                            let end = self.fresh_value();
-                            writeln!(self.output, "    {end} = llvm.mlir.zero : !llvm.ptr")
-                                .unwrap();
+                            self.emit_runtime_site();
+                            let value = self.box_value((value, ty));
                             let result = self.fresh_value();
-                            writeln!(
-                                self.output,
-                                "    {result} = llvm.call @strtod({value}, {end}) : (!llvm.ptr, !llvm.ptr) -> f64"
-                            )
-                            .unwrap();
+                            writeln!(self.output, "    {result} = llvm.call @__sev_value_float({value}) : (!llvm.ptr) -> f64").unwrap();
                             (result, ValueType::Float)
                         }
                         ValueType::Any => {
+                            self.emit_runtime_site();
                             let result = self.fresh_value();
                             writeln!(self.output, "    {result} = llvm.call @__sev_value_float({value}) : (!llvm.ptr) -> f64").unwrap();
                             (result, ValueType::Float)
                         }
                         _ => {
+                            self.emit_runtime_site();
+                            let value = self.box_value((value, ty));
                             let result = self.fresh_value();
-                            writeln!(
-                                self.output,
-                                "    {result} = llvm.mlir.constant(0.0 : f64) : f64"
-                            )
-                            .unwrap();
+                            writeln!(self.output, "    {result} = llvm.call @__sev_value_float({value}) : (!llvm.ptr) -> f64").unwrap();
                             (result, ValueType::Float)
                         }
                     };
                 }
                 if function == "string" {
-                    let value = self.box_value(args.first().cloned().unwrap());
+                    let argument = args.first().cloned().unwrap();
+                    if argument.1 == ValueType::String {
+                        return argument;
+                    }
+                    self.emit_runtime_site();
+                    let value = self.box_value(argument);
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_string({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::String);
@@ -2648,7 +2663,7 @@ impl LowerContext<'_> {
                     .join(", ");
                 let return_type = match function.as_str() {
                     "sqrt" | "float" => ValueType::Float,
-                    "len" | "size" | "bytes" | "bits" | "capacity" => ValueType::Int,
+                    "int" | "len" | "size" | "bytes" | "bits" | "capacity" => ValueType::Int,
                     _ => target
                         .signature
                         .as_ref()

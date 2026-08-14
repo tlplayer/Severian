@@ -407,6 +407,7 @@ pub(super) fn lower_call(
         callee.name.as_str(),
         "print"
             | "panic"
+            | "int"
             | "float"
             | "string"
             | "range"
@@ -449,6 +450,7 @@ pub(super) fn lower_call(
     let builtin = match canonical {
         "print" | "io.print" => Some(("print", ValueType::Unit)),
         "panic" => Some(("panic", ValueType::Unit)),
+        "int" => Some(("int", ValueType::Int)),
         "float" => Some(("float", ValueType::Float)),
         "string" => Some(("string", ValueType::String)),
         "range" => Some(("range", ValueType::List)),
