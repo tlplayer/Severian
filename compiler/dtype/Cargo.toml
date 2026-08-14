@@ -1,9 +1,6 @@
 [package]
-name = "severian-hir"
+name = "severian-dtype"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
-
-[dependencies]
-severian-dtype = { version = "0.1.0", path = "../dtype" }

@@ -1,0 +1,18 @@
+import audio
+
+# OmniVoice composition belongs here rather than in neuralnet. Its language
+# model, masked generation strategy, and codec are independent components.
+class OmniVoiceRequest:
+    text: string
+    reference_audio: audio.Audio
+    iterative_steps: int = 16
+    guidance_scale: float = 1.0
+
+class OmniVoiceTokens:
+    codebooks: Tensor[i32]
+    duration_frames: int
+
+class OmniVoiceOutput:
+    speech: audio.Audio
+    tokens: OmniVoiceTokens
+

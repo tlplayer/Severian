@@ -1,0 +1,102 @@
+import "src/capabilities.sev" as capability_api
+
+class Dimension:
+    value: int
+    symbol: string = ""
+
+    def dynamic() -> bool:
+        return value < 0
+
+class TensorSpec:
+    dtype: string
+    dimensions: list[Dimension]
+
+    def rank() -> int:
+        return size(dimensions)
+
+class ComputePolicy:
+    compute_dtype: string
+    accumulation_dtype: string
+    output_dtype: string
+
+class WeightSpec:
+    id: string
+    artifact_name: string
+    tensor: TensorSpec
+    policy: ComputePolicy
+    transform: string = "none"
+    tied_to: string = ""
+
+class StateSpec:
+    id: string
+    tensor: TensorSpec
+    per_layer: bool = false
+
+class Port:
+    name: string
+    role: string
+    tensor: TensorSpec
+    state: string = ""
+
+class Program:
+    id: string
+    role: string
+    entry_point: string
+    ports: list[Port]
+    weights: list[string]
+
+class ComponentPlan:
+    id: string
+    architecture: string
+    programs: list[string]
+    weights: list[string]
+    children: list[ComponentPlan]
+
+class ModelPlan:
+    architecture: string
+    revision: string
+    programs: list[Program]
+    weights: list[WeightSpec]
+    state: list[StateSpec]
+    capabilities: capability_api.CapabilitySet
+    components: list[ComponentPlan]
+
+    def program(id: string) -> Result[Program, PlanError]:
+        for candidate in programs:
+            if candidate.id == id:
+                return candidate
+        return failure(PlanError("model plan has no program `" + id + "`"))
+
+    def program_for(role: string) -> Result[Program, PlanError]:
+        for candidate in programs:
+            if candidate.role == role:
+                return candidate
+        return failure(PlanError("model plan has no `" + role + "` program"))
+
+    def validate() -> Result[unit, PlanError]:
+        program_ids := []
+        weight_ids := []
+        state_ids := []
+        for weight in weights:
+            if weight.id in weight_ids:
+                return failure(PlanError("duplicate weight id `" + weight.id + "`"))
+            weight_ids.append(weight.id)
+        for state_value in state:
+            if state_value.id in state_ids:
+                return failure(PlanError("duplicate state id `" + state_value.id + "`"))
+            state_ids.append(state_value.id)
+        for executable in programs:
+            if executable.id in program_ids:
+                return failure(PlanError("duplicate program id `" + executable.id + "`"))
+            program_ids.append(executable.id)
+            for weight in executable.weights:
+                if weight not in weight_ids:
+                    return failure(PlanError("program `" + executable.id + "` references unknown weight `" + weight + "`"))
+            for port in executable.ports:
+                if port.role in ["state_input", "state_output"] and port.state not in state_ids:
+                    return failure(PlanError("program `" + executable.id + "` references unknown state `" + port.state + "`"))
+        return
+
+class PlanError:
+    message: string
+

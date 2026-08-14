@@ -3,38 +3,7 @@ use super::host_buffer::RawBuffer;
 use crate::{Result, XlaError};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ElementType {
-    Pred,
-    S8,
-    S16,
-    S32,
-    S64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F8E4M3FN,
-    F8E5M2,
-    F16,
-    BF16,
-    F32,
-    F64,
-    C64,
-    C128,
-}
-
-impl ElementType {
-    pub fn byte_width(self) -> usize {
-        match self {
-            Self::Pred | Self::S8 | Self::U8 | Self::F8E4M3FN | Self::F8E5M2 => 1,
-            Self::S16 | Self::U16 | Self::F16 | Self::BF16 => 2,
-            Self::S32 | Self::U32 | Self::F32 => 4,
-            Self::S64 | Self::U64 | Self::F64 | Self::C64 => 8,
-            Self::C128 => 16,
-        }
-    }
-}
+pub use severian_dtype::DType as ElementType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shape {
@@ -99,7 +68,7 @@ impl HostBuffer {
     }
 
     pub fn from_i64(dimensions: impl Into<Vec<i64>>, values: &[i64]) -> Result<Self> {
-        let shape = Shape::new(ElementType::S64, dimensions);
+        let shape = Shape::new(ElementType::I64, dimensions);
         let mut bytes = Vec::with_capacity(values.len() * 8);
         for value in values {
             bytes.extend_from_slice(&value.to_ne_bytes());

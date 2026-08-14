@@ -1,0 +1,28 @@
+class ArtifactFile:
+    role: string
+    path: string
+    sha256: string
+    bytes: int
+
+class Artifact:
+    source: string
+    repository: string
+    revision: string
+    local_directory: string
+    content_sha256: string
+    config_path: string
+    tokenizer_path: string
+    files: list[ArtifactFile]
+
+    def files_for(role: string) -> list[ArtifactFile]:
+        return files.filter(|file| file.role == role)
+
+    def weight_files() -> list[ArtifactFile]:
+        return files_for("weights")
+
+class ArtifactRequest:
+    source: string
+    revision: string = "main"
+    sha256: string = ""
+    offline: bool = false
+

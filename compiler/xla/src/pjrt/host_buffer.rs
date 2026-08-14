@@ -181,11 +181,11 @@ impl Drop for RawBuffer {
 
 pub fn element_type_to_raw(element: ElementType) -> api::PJRT_Buffer_Type {
     match element {
-        ElementType::Pred => api::PJRT_BUFFER_TYPE_PRED,
-        ElementType::S8 => api::PJRT_BUFFER_TYPE_S8,
-        ElementType::S16 => api::PJRT_BUFFER_TYPE_S16,
-        ElementType::S32 => api::PJRT_BUFFER_TYPE_S32,
-        ElementType::S64 => api::PJRT_BUFFER_TYPE_S64,
+        ElementType::Bool => api::PJRT_BUFFER_TYPE_PRED,
+        ElementType::I8 => api::PJRT_BUFFER_TYPE_S8,
+        ElementType::I16 => api::PJRT_BUFFER_TYPE_S16,
+        ElementType::I32 => api::PJRT_BUFFER_TYPE_S32,
+        ElementType::I64 => api::PJRT_BUFFER_TYPE_S64,
         ElementType::U8 => api::PJRT_BUFFER_TYPE_U8,
         ElementType::U16 => api::PJRT_BUFFER_TYPE_U16,
         ElementType::U32 => api::PJRT_BUFFER_TYPE_U32,
@@ -203,11 +203,11 @@ pub fn element_type_to_raw(element: ElementType) -> api::PJRT_Buffer_Type {
 
 fn element_type_from_raw(element: api::PJRT_Buffer_Type) -> Result<ElementType> {
     match element {
-        api::PJRT_BUFFER_TYPE_PRED => Ok(ElementType::Pred),
-        api::PJRT_BUFFER_TYPE_S8 => Ok(ElementType::S8),
-        api::PJRT_BUFFER_TYPE_S16 => Ok(ElementType::S16),
-        api::PJRT_BUFFER_TYPE_S32 => Ok(ElementType::S32),
-        api::PJRT_BUFFER_TYPE_S64 => Ok(ElementType::S64),
+        api::PJRT_BUFFER_TYPE_PRED => Ok(ElementType::Bool),
+        api::PJRT_BUFFER_TYPE_S8 => Ok(ElementType::I8),
+        api::PJRT_BUFFER_TYPE_S16 => Ok(ElementType::I16),
+        api::PJRT_BUFFER_TYPE_S32 => Ok(ElementType::I32),
+        api::PJRT_BUFFER_TYPE_S64 => Ok(ElementType::I64),
         api::PJRT_BUFFER_TYPE_U8 => Ok(ElementType::U8),
         api::PJRT_BUFFER_TYPE_U16 => Ok(ElementType::U16),
         api::PJRT_BUFFER_TYPE_U32 => Ok(ElementType::U32),

@@ -301,6 +301,25 @@ pub unsafe extern "C" fn __sev_qwen_decode_token(
         .into_raw()
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn __sev_qwen_decode_tokens(
+    model_path: *const c_char,
+    tokens: *mut c_void,
+) -> *mut c_char {
+    let model_path = input_string(model_path, "model path");
+    if tokens.is_null() {
+        fail("null tokenizer token list");
+    }
+    let count = __sev_collection_size(tokens);
+    let ids = (0..count)
+        .map(|index| __sev_unbox_i64(__sev_collection_get(tokens, index)))
+        .collect::<Vec<_>>();
+    let decoded = with_tokenizer(model_path, |tokenizer| tokenizer.decode(&ids));
+    CString::new(decoded)
+        .unwrap_or_else(|error| fail(format!("decoded tokens contain NUL: {error}")))
+        .into_raw()
+}
+
 #[cfg(test)]
 mod tests {
     use super::ByteBpe;

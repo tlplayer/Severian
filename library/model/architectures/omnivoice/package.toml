@@ -1,16 +1,17 @@
 [package]
-name = "model.neuralnet"
+name = "model.architectures.omnivoice"
 version = "0.1.0"
 edition = "2026"
-description = "Neural-network layers in the Severian model namespace"
+description = "Composed OmniVoice model plan"
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-tensor = { path = "../../tensor", version = "0.1.0" }
+audio = { path = "../../../audio", version = "0.1.0" }
 
 [package.metadata.library]
 category = "machine-learning"
 implementation = "source"
-status = "experimental"
+status = "scaffold"
+

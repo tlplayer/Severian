@@ -1,0 +1,19 @@
+[package]
+name = "model.architectures.qwen"
+version = "0.1.0"
+edition = "2026"
+description = "Qwen model plans, checkpoint binding, and generation kernels"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+json = { path = "../../../json", version = "0.1.0" }
+neuralnet = { package = "model.neuralnet", path = "../../neuralnet", version = "0.1.0" }
+tensor = { path = "../../../tensor", version = "0.1.0" }
+
+[package.metadata.library]
+category = "machine-learning"
+implementation = "source-and-compiler-contracts"
+status = "experimental"
+

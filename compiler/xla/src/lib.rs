@@ -10,6 +10,7 @@
 //! Raw PJRT C ABI details remain isolated inside crate-private `pjrt` modules.
 
 pub mod client;
+pub mod executable_cache;
 pub mod pipeline;
 pub mod pjrt;
 mod runtime;
@@ -18,6 +19,7 @@ pub mod stablehlo;
 mod tokenizer;
 
 pub use client::XlaClient;
+pub use executable_cache::ExecutableCache;
 pub use pipeline::{CompileOptions, XlaPipeline};
 pub use pjrt::{Buffer, Device, HostBuffer, LoadedExecutable, PjrtClient, PjrtPlugin};
 pub use safetensors::{SafeTensorDType, SafeTensorEntry, SafeTensorStore, SafeTensorValidation};

@@ -2,37 +2,87 @@ import path
 import tensor
 import "src/types.sev" as types
 
-# Typed weight binding is intentionally separate from graph construction. A
-# checkpoint entry can only become Tensor[T] through a dtype-checking method;
-# model code cannot accidentally reinterpret F32 bytes as BF16.
-class ModelWeights:
+# A WeightRef is metadata plus a lazy memory-mapped slice. It is deliberately
+# untyped until an architecture binds it through one of the checked methods.
+class WeightRef:
+    entry: tensor.SafeTensorEntry
+
+    def name() -> string:
+        return entry.name
+
+    def dtype() -> string:
+        return entry.dtype
+
+    def shape() -> list[int]:
+        return entry.shape
+
+    def bytes() -> int:
+        return entry.bytes()
+
+    def require(expected_dtype: string) -> Result[unit, types.ModelLoadError]:
+        if entry.dtype != expected_dtype:
+            return failure(types.ModelLoadError(
+                "weight `" + entry.name + "` has dtype " + entry.dtype + ", expected " + expected_dtype,
+            ))
+        return
+
+    def f8e4m3fn() -> Result[Tensor[f8e4m3fn], types.ModelLoadError]:
+        if entry.dtype not in ["F8_E4M3", "F8_E4M3FN"]:
+            return failure(types.ModelLoadError("weight `" + entry.name + "` is not F8_E4M3FN"))
+        return entry.f8e4m3fn()
+
+    def f8e5m2() -> Result[Tensor[f8e5m2], types.ModelLoadError]:
+        _dtype = require("F8_E5M2")
+        return entry.f8e5m2()
+
+    def f16() -> Result[Tensor[f16], types.ModelLoadError]:
+        _dtype = require("F16")
+        return entry.f16()
+
+    def bf16() -> Result[Tensor[bf16], types.ModelLoadError]:
+        _dtype = require("BF16")
+        return entry.bf16()
+
+    def f32() -> Result[Tensor[f32], types.ModelLoadError]:
+        _dtype = require("F32")
+        return entry.f32()
+
+class WeightStore:
     model_directory: string
 
-    def entry(name: string) -> Result[tensor.SafeTensorEntry, types.ModelLoadError | IOError | JsonError]:
+    def tensor_store() -> Result[tensor.SafeTensorStore, types.ModelLoadError | IOError | JsonError]:
         if model_directory.is_empty():
             return failure(types.ModelLoadError("this model has no mapped checkpoint"))
-        store = tensor.open_safetensors(model_directory)
-        return store.get(name)
+        return tensor.open_safetensors(model_directory)
+
+    def keys() -> Result[list[string], types.ModelLoadError | IOError | JsonError]:
+        store = tensor_store()
+        return store.keys()
+
+    def contains(name: string) -> Result[bool, types.ModelLoadError | IOError | JsonError]:
+        names = keys()
+        return name in names
+
+    def get(name: string) -> Result[WeightRef, types.ModelLoadError | IOError | JsonError]:
+        store = tensor_store()
+        if name not in store.keys():
+            return failure(types.ModelLoadError("checkpoint has no weight `" + name + "`"))
+        return WeightRef(store.get(name))
 
     def f8e4m3fn(name: string) -> Result[Tensor[f8e4m3fn], types.ModelLoadError | IOError | JsonError]:
-        value = entry(name)
-        return value.f8e4m3fn()
+        return get(name).f8e4m3fn()
 
     def f8e5m2(name: string) -> Result[Tensor[f8e5m2], types.ModelLoadError | IOError | JsonError]:
-        value = entry(name)
-        return value.f8e5m2()
+        return get(name).f8e5m2()
 
     def f16(name: string) -> Result[Tensor[f16], types.ModelLoadError | IOError | JsonError]:
-        value = entry(name)
-        return value.f16()
+        return get(name).f16()
 
     def bf16(name: string) -> Result[Tensor[bf16], types.ModelLoadError | IOError | JsonError]:
-        value = entry(name)
-        return value.bf16()
+        return get(name).bf16()
 
     def f32(name: string) -> Result[Tensor[f32], types.ModelLoadError | IOError | JsonError]:
-        value = entry(name)
-        return value.f32()
+        return get(name).f32()
 
-def open(source: string) -> ModelWeights:
-    return ModelWeights(source if path.is_dir(source) else path.dirname(source))
+def open(source: string) -> WeightStore:
+    return WeightStore(source if path.is_dir(source) else path.dirname(source))

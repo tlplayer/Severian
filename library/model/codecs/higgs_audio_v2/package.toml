@@ -1,16 +1,17 @@
 [package]
-name = "model.neuralnet"
+name = "model.codecs.higgs_audio_v2"
 version = "0.1.0"
 edition = "2026"
-description = "Neural-network layers in the Severian model namespace"
+description = "Higgs Audio V2 neural audio codec"
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-tensor = { path = "../../tensor", version = "0.1.0" }
+audio = { path = "../../../audio", version = "0.1.0" }
 
 [package.metadata.library]
 category = "machine-learning"
 implementation = "source"
-status = "experimental"
+status = "scaffold"
+

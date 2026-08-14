@@ -96,11 +96,11 @@ unsafe fn upload_mapped_tensor(runtime: &mut RuntimeState, pointer: *mut c_void)
         fail("invalid mapped tensor passed to XLA");
     }
     let element = match tensor.dtype {
-        0 => ElementType::Pred,
-        1 => ElementType::S8,
-        2 => ElementType::S16,
-        3 => ElementType::S32,
-        4 => ElementType::S64,
+        0 => ElementType::Bool,
+        1 => ElementType::I8,
+        2 => ElementType::I16,
+        3 => ElementType::I32,
+        4 => ElementType::I64,
         5 => ElementType::U8,
         6 => ElementType::U16,
         7 => ElementType::U32,
@@ -178,14 +178,15 @@ pub unsafe extern "C" fn __sev_xla_qwen_serving_prefill_tokens(values: *mut c_vo
         fail("null serving token list");
     }
     let count = __sev_collection_size(values);
-    if count != QWEN_SERVING_PREFILL_TOKENS as i64 {
+    if count <= 0 || count > QWEN_SERVING_PREFILL_TOKENS as i64 {
         fail(format!(
-            "serving prompt has {count} tokens; expected exactly {QWEN_SERVING_PREFILL_TOKENS}"
+            "serving prompt has {count} tokens; expected 1..={QWEN_SERVING_PREFILL_TOKENS}"
         ));
     }
-    let tokens = (0..count)
+    let mut tokens = (0..count)
         .map(|index| __sev_unbox_i64(__sev_collection_get(values, index)))
         .collect::<Vec<_>>();
+    tokens.resize(QWEN_SERVING_PREFILL_TOKENS, 0);
     let host = HostBuffer::from_i64([1, QWEN_SERVING_PREFILL_TOKENS as i64], &tokens)
         .unwrap_or_else(|error| fail(error));
     let mut guard = state();
@@ -340,7 +341,7 @@ pub unsafe extern "C" fn __sev_xla_qwen_serving_prefill_causal_mask() -> *mut c_
 
 #[no_mangle]
 pub unsafe extern "C" fn __sev_xla_qwen_serving_decode_rope_cos(position: i64) -> *mut c_void {
-    if !(QWEN_SERVING_PREFILL_TOKENS as i64..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
+    if !(0..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
         fail(format!(
             "decode position {position} is outside the serving cache"
         ));
@@ -350,7 +351,7 @@ pub unsafe extern "C" fn __sev_xla_qwen_serving_decode_rope_cos(position: i64) -
 
 #[no_mangle]
 pub unsafe extern "C" fn __sev_xla_qwen_serving_decode_rope_sin(position: i64) -> *mut c_void {
-    if !(QWEN_SERVING_PREFILL_TOKENS as i64..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
+    if !(0..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
         fail(format!(
             "decode position {position} is outside the serving cache"
         ));
@@ -360,7 +361,7 @@ pub unsafe extern "C" fn __sev_xla_qwen_serving_decode_rope_sin(position: i64) -
 
 #[no_mangle]
 pub unsafe extern "C" fn __sev_xla_qwen_serving_decode_mask(position: i64) -> *mut c_void {
-    if !(QWEN_SERVING_PREFILL_TOKENS as i64..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
+    if !(0..QWEN_SERVING_CACHE_TOKENS as i64).contains(&position) {
         fail(format!(
             "decode position {position} is outside the serving cache"
         ));

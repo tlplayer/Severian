@@ -5,6 +5,8 @@ unsafe:
 
     native("__sev_qwen_decode_token") def qwen_decode_token(model_path: string, token: int) -> string
 
+    native("__sev_qwen_decode_tokens") def qwen_decode_tokens(model_path: string, tokens: list[int]) -> string
+
     native("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
     native("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
     native("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value

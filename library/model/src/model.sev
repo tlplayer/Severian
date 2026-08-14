@@ -1,0 +1,130 @@
+import "src/artifact.sev" as artifact_api
+import "src/capabilities.sev" as capability_api
+import "src/executable.sev" as executable_api
+import "src/plan.sev" as plan_api
+import "src/session.sev" as session_api
+import "src/weights.sev" as weight_api
+import qwen
+
+class LoadOptions:
+    revision: string = "main"
+    device: string = "auto"
+    backend: string = "xla"
+    dtype: string = "auto"
+    sha256: string = ""
+    offline: bool = false
+    compile_cache: string = ""
+
+# LoadedModel is immutable model state: artifact identity, lazy typed weights,
+# and compiled programs. Generation state never lives here.
+class LoadedModel:
+    artifact: artifact_api.Artifact
+    weights: weight_api.WeightStore
+    executables: executable_api.ExecutableBundle
+    capabilities: capability_api.CapabilitySet
+
+    def supports(name: string, minimum_version: int = 1) -> bool:
+        return capabilities.supports(name, minimum_version)
+
+    def new_session(input_tokens: list[int]) -> session_api.GenerationSession:
+        return session_api.GenerationSession(
+            executables,
+            session_api.SessionState([], 0),
+            input_tokens,
+            [],
+            false,
+        )
+
+def static_dimension(value: int) -> plan_api.Dimension:
+    return plan_api.Dimension(value, "")
+
+def dynamic_dimension(symbol: string) -> plan_api.Dimension:
+    return plan_api.Dimension(-1, symbol)
+
+def tensor_spec(dtype: string, dimensions: list[plan_api.Dimension]) -> plan_api.TensorSpec:
+    return plan_api.TensorSpec(dtype, dimensions)
+
+def qwen_weight(
+    id: string,
+    artifact_name: string,
+    dimensions: list[plan_api.Dimension],
+) -> plan_api.WeightSpec:
+    return plan_api.WeightSpec(
+        id,
+        artifact_name,
+        tensor_spec("bf16", dimensions),
+        plan_api.ComputePolicy("bf16", "f32", "bf16"),
+        "none",
+        "",
+    )
+
+def qwen_2_plan(config: qwen.Qwen2Config, revision: string = "main") -> plan_api.ModelPlan:
+    hidden = static_dimension(config.hidden_size)
+    head_dimension = static_dimension(config.head_dimension())
+    kv_heads = static_dimension(config.num_key_value_heads)
+    cache_capacity = static_dimension(288)
+    weights := [qwen_weight(
+        "token_embedding", "model.embed_tokens.weight",
+        [static_dimension(config.vocab_size), hidden],
+    )]
+    program_weights := ["token_embedding"]
+    for layer in range(0, config.num_hidden_layers):
+        logical = "layer." + string(layer)
+        artifact = "model.layers." + string(layer)
+        entries = [
+            qwen_weight(logical + ".input_norm", artifact + ".input_layernorm.weight", [hidden]),
+            qwen_weight(logical + ".query", artifact + ".self_attn.q_proj.weight", [hidden, hidden]),
+            qwen_weight(logical + ".query_bias", artifact + ".self_attn.q_proj.bias", [hidden]),
+            qwen_weight(logical + ".key", artifact + ".self_attn.k_proj.weight", [static_dimension(config.num_key_value_heads * config.head_dimension()), hidden]),
+            qwen_weight(logical + ".key_bias", artifact + ".self_attn.k_proj.bias", [static_dimension(config.num_key_value_heads * config.head_dimension())]),
+            qwen_weight(logical + ".value", artifact + ".self_attn.v_proj.weight", [static_dimension(config.num_key_value_heads * config.head_dimension()), hidden]),
+            qwen_weight(logical + ".value_bias", artifact + ".self_attn.v_proj.bias", [static_dimension(config.num_key_value_heads * config.head_dimension())]),
+            qwen_weight(logical + ".output", artifact + ".self_attn.o_proj.weight", [hidden, hidden]),
+            qwen_weight(logical + ".post_attention_norm", artifact + ".post_attention_layernorm.weight", [hidden]),
+            qwen_weight(logical + ".gate", artifact + ".mlp.gate_proj.weight", [static_dimension(config.intermediate_size), hidden]),
+            qwen_weight(logical + ".up", artifact + ".mlp.up_proj.weight", [static_dimension(config.intermediate_size), hidden]),
+            qwen_weight(logical + ".down", artifact + ".mlp.down_proj.weight", [hidden, static_dimension(config.intermediate_size)]),
+        ]
+        for entry in entries:
+            weights.append(entry)
+            program_weights.append(entry.id)
+    weights.append(qwen_weight("final_norm", "model.norm.weight", [hidden]))
+    program_weights.append("final_norm")
+
+    token_input = plan_api.Port(
+        "input_ids", "input", tensor_spec("i64", [static_dimension(1), dynamic_dimension("sequence")]), "",
+    )
+    logits_output = plan_api.Port(
+        "logits", "output", tensor_spec("bf16", [static_dimension(1), dynamic_dimension("sequence"), static_dimension(config.vocab_size)]), "",
+    )
+    key_input = plan_api.Port(
+        "key_cache", "state_input", tensor_spec("bf16", [static_dimension(1), kv_heads, cache_capacity, head_dimension]), "key_cache",
+    )
+    key_output = plan_api.Port(
+        "key_cache", "state_output", key_input.tensor, "key_cache",
+    )
+    value_input = plan_api.Port(
+        "value_cache", "state_input", tensor_spec("bf16", [static_dimension(1), kv_heads, cache_capacity, head_dimension]), "value_cache",
+    )
+    value_output = plan_api.Port(
+        "value_cache", "state_output", value_input.tensor, "value_cache",
+    )
+    programs = [
+        plan_api.Program("forward", "forward", "qwen2_forward", [token_input, logits_output], program_weights),
+        plan_api.Program("prefill_256", "prefill", "qwen2_5_3b_prefill_256", [token_input, logits_output, key_output, value_output], program_weights),
+        plan_api.Program("decode", "decode", "qwen2_5_3b_decode", [token_input, key_input, value_input, logits_output, key_output, value_output], program_weights),
+        plan_api.Program("greedy_sample", "sample", "argmax_bf16", [logits_output], []),
+    ]
+    state = [
+        plan_api.StateSpec("key_cache", key_input.tensor, true),
+        plan_api.StateSpec("value_cache", value_input.tensor, true),
+    ]
+    capabilities = capability_api.CapabilitySet([
+        capability_api.forward(), capability_api.text_generation(),
+    ])
+    component = plan_api.ComponentPlan(
+        "language_model", "qwen2", programs.map(|program| program.id), program_weights, [],
+    )
+    plan = plan_api.ModelPlan("qwen2", revision, programs, weights, state, capabilities, [component])
+    _valid = plan.validate()
+    return plan

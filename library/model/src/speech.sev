@@ -196,6 +196,51 @@ def token_matrix(tokens: list[int], codebooks: int, frames: int) -> list[list[in
         output.append(tokens[codebook * frames:(codebook + 1) * frames])
     return output
 
+def masked_iterative_generate(
+    conditional_model: MaskedAudioModel,
+    unconditional_model: MaskedAudioModel,
+    codebooks: int,
+    frames: int,
+    vocabulary: int,
+    mask_token: int,
+    config: SpeechGenerationConfig = SpeechGenerationConfig(),
+) -> list[list[int]]:
+    assert(codebooks > 0 and frames > 0 and vocabulary > 1)
+    assert(mask_token >= 0 and mask_token < vocabulary)
+    flat_tokens := []
+    for _index in range(0, codebooks * frames):
+        flat_tokens.append(mask_token)
+    reveal = unmask_schedule(size(flat_tokens), config.num_step, config.time_shift)
+    for step in range(0, config.num_step):
+        matrix = token_matrix(flat_tokens, codebooks, frames)
+        conditional = conditional_model.predict(matrix)
+        unconditional = unconditional_model.predict(matrix)
+        assert(conditional.codebooks == codebooks)
+        assert(conditional.frames == frames)
+        assert(conditional.vocabulary == vocabulary)
+        prediction = predict_tokens(
+            conditional,
+            unconditional,
+            config.guidance_scale,
+            mask_token,
+            config.class_temperature,
+        )
+        positions = select_positions(
+            prediction.confidence,
+            flat_tokens,
+            reveal[step],
+            codebooks,
+            frames,
+            mask_token,
+            config.layer_penalty,
+            config.position_temperature,
+        )
+        for position in positions:
+            flat_tokens[position] = prediction.tokens[position]
+    for token in flat_tokens:
+        assert(token != mask_token, "masked generation ended with unresolved audio tokens")
+    return token_matrix(flat_tokens, codebooks, frames)
+
 test "OmniVoice time shift and unmask schedule reveal every token exactly once":
     steps = time_steps(4, 0.1)
     assert(steps[0] == 0.0)
@@ -216,3 +261,16 @@ test "layer penalty prefers early codebooks when confidence ties":
 
 test "speech duration estimate follows reference rate and speed":
     assert(estimate_audio_tokens("abcdefghij", "abcde", 20, 2.0) == 20)
+
+test "masked iterative generation resolves every position":
+    logits = AudioLogits([0.0, 3.0, -10.0, 2.0, 1.0, -10.0], 1, 2, 3)
+    generated = masked_iterative_generate(
+        FixedAudioModel(logits),
+        FixedAudioModel(AudioLogits([0.0, 0.0, -10.0, 0.0, 0.0, -10.0], 1, 2, 3)),
+        1,
+        2,
+        3,
+        2,
+        SpeechGenerationConfig(2, 0.0, 0.1, 5.0, 0.0, 0.0),
+    )
+    assert(generated == [[1, 0]])
