@@ -19,7 +19,10 @@ pub fn count(compilation: &Compilation) -> usize {
     count
 }
 
-pub fn apply(compilation: &Compilation, wanted: usize) -> Option<(Compilation, Mutation)> {
+pub fn apply(
+    compilation: &Compilation,
+    wanted: usize,
+) -> Result<Option<(Compilation, Mutation)>, crate::CompileError> {
     let mut hir = production_program(compilation);
     let sources = hir.metadata.sources.clone();
     let mut current = 0;
@@ -41,10 +44,12 @@ pub fn apply(compilation: &Compilation, wanted: usize) -> Option<(Compilation, M
         });
         current += candidates.len();
     });
-    let mutation = selected?;
-    let mir = severian_mir::lower(&hir);
+    let Some(mutation) = selected else {
+        return Ok(None);
+    };
+    let mir = severian_mir::lower(&hir)?;
     let mlir = severian_lowering::lower(&mir);
-    Some((
+    Ok(Some((
         Compilation {
             hir: compilation.hir.clone(),
             optimized_hir: hir,
@@ -52,7 +57,7 @@ pub fn apply(compilation: &Compilation, wanted: usize) -> Option<(Compilation, M
             mlir,
         },
         mutation,
-    ))
+    )))
 }
 
 fn production_program(compilation: &Compilation) -> severian_hir::Program {

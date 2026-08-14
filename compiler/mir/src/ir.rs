@@ -69,6 +69,7 @@ pub struct Function {
     pub parameters: Vec<LocalId>,
     pub locals: Vec<Local>,
     pub return_type: ValueType,
+    pub(crate) source_tensor_intrinsics: usize,
     pub tensor_operations: Vec<TensorOp>,
     pub blocks: Vec<BasicBlock>,
 }

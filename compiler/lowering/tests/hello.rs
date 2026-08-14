@@ -22,7 +22,7 @@ fn lowers_hello_to_mlir_text() {
     };
 
     assert_eq!(
-        severian_lowering::lower(&severian_mir::lower(&program)).as_str(),
+        severian_lowering::lower(&severian_mir::lower(&program).unwrap()).as_str(),
         concat!(
             "module {\n",
             "  llvm.mlir.global internal constant @__sev_str_0(\"hello, severian\\00\")\n",

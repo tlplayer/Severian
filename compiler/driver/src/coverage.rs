@@ -7,7 +7,9 @@ use severian_hir::{
     CallTarget, DefinitionId, Expression, Function, HirId, Instruction, SourceFile, ValueType,
 };
 
-pub fn instrument(compilation: &Compilation) -> (Compilation, CoverageSourceMap) {
+pub fn instrument(
+    compilation: &Compilation,
+) -> Result<(Compilation, CoverageSourceMap), crate::CompileError> {
     let mut hir = compilation.optimized_hir.clone();
     let mut instrumenter = Instrumenter {
         sources: &hir.metadata.sources,
@@ -24,9 +26,9 @@ pub fn instrument(compilation: &Compilation) -> (Compilation, CoverageSourceMap)
         }
     }
     let map = instrumenter.map;
-    let mir = severian_mir::lower(&hir);
+    let mir = severian_mir::lower(&hir)?;
     let mlir = severian_lowering::lower(&mir);
-    (
+    Ok((
         Compilation {
             hir: compilation.hir.clone(),
             optimized_hir: hir,
@@ -34,7 +36,7 @@ pub fn instrument(compilation: &Compilation) -> (Compilation, CoverageSourceMap)
             mlir,
         },
         map,
-    )
+    ))
 }
 
 struct Instrumenter<'a> {
@@ -288,7 +290,7 @@ mod tests {
             "unsafe:\n    native(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
         )
         .unwrap();
-        let (_, regions) = instrument(&compilation);
+        let (_, regions) = instrument(&compilation).unwrap();
         let functions = regions
             .regions()
             .filter(|region| region.kind == CoverageRegionKind::Function)

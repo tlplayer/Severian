@@ -1957,6 +1957,7 @@ fn mutation_test_targets(input: &Path, limit: Option<usize>) -> Result<(), Strin
         for mutation_index in 0..selected {
             let Some((mutated, mutation)) =
                 severian_driver::mutation::apply(&compilation, mutation_index)
+                    .map_err(|error| format!("{}: {error}", target.source.display()))?
             else {
                 continue;
             };
@@ -2093,7 +2094,13 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
             }
         };
         let declared_count = native_test_count(&compilation.hir);
-        let (_, source_regions) = severian_driver::coverage::instrument(&compilation);
+        let (_, source_regions) = match severian_driver::coverage::instrument(&compilation) {
+            Ok(instrumented) => instrumented,
+            Err(error) => {
+                failures.push(format!("{}: {error}", target.source.display()));
+                continue;
+            }
+        };
         all_regions.extend(source_regions);
         let (runnable, count) = if declared_count > 0 {
             match native_test_compilation(&compilation) {
@@ -2106,7 +2113,13 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
         } else {
             (compilation, 0)
         };
-        let (instrumented, _) = severian_driver::coverage::instrument(&runnable);
+        let (instrumented, _) = match severian_driver::coverage::instrument(&runnable) {
+            Ok(instrumented) => instrumented,
+            Err(error) => {
+                failures.push(format!("{}: {error}", target.source.display()));
+                continue;
+            }
+        };
         if count == 0 {
             continue;
         }

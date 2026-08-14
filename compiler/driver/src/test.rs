@@ -180,7 +180,7 @@ fn native_test_compilation_selected(
             }
         }
     });
-    let mir = severian_mir::lower(&hir);
+    let mir = severian_mir::lower(&hir)?;
     let native = Compilation {
         mlir: severian_lowering::lower(&mir),
         optimized_hir: hir.clone(),

@@ -64,6 +64,17 @@ fn verify_function(function: &Function, errors: &mut Vec<VerificationError>) {
     let block_count = function.blocks.len();
     let local_count = function.locals.len();
     let tensor_operation_count = function.tensor_operations.len();
+    if function.source_tensor_intrinsics != tensor_operation_count {
+        errors.push(VerificationError {
+            function: function.name.clone(),
+            block: None,
+            invariant: "complete-tensor-lowering",
+            message: format!(
+                "{} recognized tensor intrinsic(s) produced {tensor_operation_count} tensor operation(s)",
+                function.source_tensor_intrinsics
+            ),
+        });
+    }
     let mut binding_ids = BTreeSet::new();
     for (index, local) in function.locals.iter().enumerate() {
         if local.id.0 as usize != index {

@@ -282,17 +282,9 @@ unsafe:
     native("__sev_tensor_min") def min(value: Tensor[f64]) -> float
     native("__sev_tensor_softmax_rows") def softmax[type: Float](value: Tensor[type]) -> Tensor[type]
 
-def compute_as_f32[type: Numeric](value: Tensor[type]) -> Tensor[f32]:
-    return to_f_32(value)
-
-def store_as_f8e4m3fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]:
-    return to_f8_e4_m3_fn(value)
-
-def store_as_f8e5m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]:
-    return to_f8_e5_m2(value)
-
-def matmul_accumulate_f32[input: Float, weight: Float](left: Tensor[input], right: Tensor[weight]) -> Tensor[f32]:
-    return ranked_matmul(to_f_32(left), to_f_32(right))
+    native("__sev_tensor_to_f32") def compute_as_f32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
+    native("__sev_tensor_to_f8e4m3fn") def store_as_f8e4m3fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]
+    native("__sev_tensor_to_f8e5m2") def store_as_f8e5m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

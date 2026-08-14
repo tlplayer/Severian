@@ -1,4 +1,5 @@
 use super::*;
+use crate::MirLoweringError;
 use severian_hir::TensorIntrinsic;
 
 pub(crate) fn resolve_tensor_op(
@@ -6,17 +7,16 @@ pub(crate) fn resolve_tensor_op(
     source_arguments: &[severian_hir::Expression],
     inputs: Vec<TensorOperand>,
     result: TensorType,
-) -> Option<TensorOp> {
+) -> Result<TensorOp, MirLoweringError> {
     use ElementwiseKind as Elementwise;
     use TensorIntrinsic as Intrinsic;
     let elementwise = |kind, arity| {
-        (inputs.len() == arity).then(|| {
-            TensorOp::Elementwise(ElementwiseOp {
-                kind,
-                inputs: inputs.clone(),
-                result,
-            })
-        })
+        expect_input_count(intrinsic, &inputs, arity)?;
+        Ok(TensorOp::Elementwise(ElementwiseOp {
+            kind,
+            inputs: inputs.clone(),
+            result,
+        }))
     };
     match intrinsic {
         Intrinsic::Add => elementwise(Elementwise::Add, 2),
@@ -33,65 +33,97 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::Cosine => elementwise(Elementwise::Cosine, 1),
         Intrinsic::Sine => elementwise(Elementwise::Sine, 1),
         Intrinsic::Where => elementwise(Elementwise::Where, 3),
-        Intrinsic::Matmul => Some(TensorOp::Matmul(MatmulOp {
-            left: *inputs.first()?,
-            right: *inputs.get(1)?,
-            result,
-            accumulation: result.element,
-        })),
-        Intrinsic::Reshape => Some(TensorOp::Reshape(ReshapeOp {
-            input: *inputs.first()?,
-            result,
-        })),
+        Intrinsic::Matmul => {
+            expect_input_count(intrinsic, &inputs, 2)?;
+            Ok(TensorOp::Matmul(MatmulOp {
+                left: inputs[0],
+                right: inputs[1],
+                result,
+                accumulation: result.element,
+            }))
+        }
+        Intrinsic::Reshape => {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            Ok(TensorOp::Reshape(ReshapeOp {
+                input: inputs[0],
+                result,
+            }))
+        }
         Intrinsic::Transpose => {
-            let input = *inputs.first()?;
-            let permutation = source_arguments.get(1).and_then(integer_list).or_else(|| {
-                input
-                    .ty
-                    .rank
-                    .map(|rank| (0..u64::from(rank)).rev().collect())
-            })?;
-            Some(TensorOp::Transpose(TransposeOp {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            let input = inputs[0];
+            let permutation = match source_arguments.get(1) {
+                Some(argument) => integer_list(argument).ok_or_else(|| {
+                    failure(
+                        intrinsic,
+                        "permutation argument must be a list of non-negative integers",
+                    )
+                })?,
+                None => {
+                    let rank = input.ty.rank.ok_or_else(|| {
+                        failure(
+                            intrinsic,
+                            "cannot infer a default permutation for an unranked tensor",
+                        )
+                    })?;
+                    (0..u64::from(rank)).rev().collect()
+                }
+            };
+            Ok(TensorOp::Transpose(TransposeOp {
                 input,
                 permutation,
                 result,
             }))
         }
         Intrinsic::Broadcast | Intrinsic::BroadcastLike => {
-            let input = *inputs.first()?;
-            Some(TensorOp::Broadcast(BroadcastOp {
+            let expected = usize::from(intrinsic == Intrinsic::BroadcastLike) + 1;
+            expect_input_count(intrinsic, &inputs, expected)?;
+            let input = inputs[0];
+            let dimensions = broadcast_dimensions(input.ty, result).ok_or_else(|| {
+                failure(
+                    intrinsic,
+                    "input and result ranks cannot define broadcast dimensions",
+                )
+            })?;
+            Ok(TensorOp::Broadcast(BroadcastOp {
                 input,
-                dimensions: broadcast_dimensions(input.ty, result)?,
+                dimensions,
                 result,
             }))
         }
         Intrinsic::Scale | Intrinsic::AddScalar => {
+            expect_input_count(intrinsic, &inputs, 1)?;
             let kind = if intrinsic == Intrinsic::Scale {
                 ScalarKind::Multiply
             } else {
                 ScalarKind::Add
             };
-            Some(TensorOp::Scalar(ScalarOp {
+            let value = source_arguments
+                .get(1)
+                .and_then(scalar_bits)
+                .ok_or_else(|| failure(intrinsic, "scalar argument must be a numeric literal"))?;
+            Ok(TensorOp::Scalar(ScalarOp {
                 kind,
-                input: *inputs.first()?,
-                value: scalar_bits(source_arguments.get(1)?)?,
+                input: inputs[0],
+                value,
                 result,
             }))
         }
         Intrinsic::Sum | Intrinsic::SumLast | Intrinsic::MeanLast | Intrinsic::MaxLast => {
-            let input = *inputs.first()?;
-            let rank = input.ty.rank?;
+            expect_input_count(intrinsic, &inputs, 1)?;
+            let input = inputs[0];
+            let rank = input
+                .ty
+                .rank
+                .ok_or_else(|| failure(intrinsic, "reduction input must have a resolved rank"))?;
             let (kind, axes) = match intrinsic {
                 Intrinsic::Sum => (ReductionKind::Sum, (0..u64::from(rank)).collect()),
-                Intrinsic::SumLast => (ReductionKind::Sum, vec![u64::from(rank.checked_sub(1)?)]),
-                Intrinsic::MeanLast => (ReductionKind::Mean, vec![u64::from(rank.checked_sub(1)?)]),
-                Intrinsic::MaxLast => (
-                    ReductionKind::Maximum,
-                    vec![u64::from(rank.checked_sub(1)?)],
-                ),
+                Intrinsic::SumLast => (ReductionKind::Sum, vec![last_axis(intrinsic, rank)?]),
+                Intrinsic::MeanLast => (ReductionKind::Mean, vec![last_axis(intrinsic, rank)?]),
+                Intrinsic::MaxLast => (ReductionKind::Maximum, vec![last_axis(intrinsic, rank)?]),
                 _ => unreachable!(),
             };
-            Some(TensorOp::Reduction(ReductionOp {
+            Ok(TensorOp::Reduction(ReductionOp {
                 kind,
                 input,
                 axes,
@@ -99,14 +131,28 @@ pub(crate) fn resolve_tensor_op(
             }))
         }
         Intrinsic::Softmax | Intrinsic::SoftmaxAxis => {
-            let input = *inputs.first()?;
-            let rank = input.ty.rank?;
+            expect_input_count(intrinsic, &inputs, 1)?;
+            let input = inputs[0];
+            let rank = input.ty.rank.ok_or_else(|| {
+                failure(intrinsic, "normalization input must have a resolved rank")
+            })?;
             let axis = if intrinsic == Intrinsic::Softmax {
-                u64::from(rank.checked_sub(1)?)
+                last_axis(intrinsic, rank)?
             } else {
-                normalize_axis(signed_integer(source_arguments.get(1)?)?, rank)?
+                let axis = source_arguments
+                    .get(1)
+                    .and_then(signed_integer)
+                    .ok_or_else(|| {
+                        failure(intrinsic, "axis argument must be an integer literal")
+                    })?;
+                normalize_axis(axis, rank).ok_or_else(|| {
+                    failure(
+                        intrinsic,
+                        format!("axis {axis} is outside tensor rank {rank}"),
+                    )
+                })?
             };
-            Some(TensorOp::Normalization(NormalizationOp {
+            Ok(TensorOp::Normalization(NormalizationOp {
                 kind: NormalizationKind::Softmax,
                 input,
                 axis,
@@ -114,59 +160,175 @@ pub(crate) fn resolve_tensor_op(
                 result,
             }))
         }
-        Intrinsic::LayerNorm => Some(TensorOp::Normalization(NormalizationOp {
-            kind: NormalizationKind::LayerNorm,
-            input: *inputs.first()?,
-            axis: u64::from(inputs.first()?.ty.rank?.checked_sub(1)?),
-            epsilon: source_arguments.get(1).and_then(scalar_bits),
-            result,
-        })),
-        Intrinsic::Gather => Some(TensorOp::Gather(GatherOp {
-            table: *inputs.first()?,
-            indices: *inputs.get(1)?,
-            result,
-        })),
-        Intrinsic::Convert => Some(TensorOp::Convert(ConvertOp {
-            input: *inputs.first()?,
-            result,
-        })),
-        Intrinsic::Slice => Some(TensorOp::Slice(SliceOp {
-            input: *inputs.first()?,
-            starts: integer_list(source_arguments.get(1)?)?,
-            limits: integer_list(source_arguments.get(2)?)?,
-            strides: integer_list(source_arguments.get(3)?)?,
-            result,
-        })),
-        Intrinsic::DynamicSlice => Some(TensorOp::DynamicSlice(DynamicSliceOp {
-            input: *inputs.first()?,
-            starts: integer_list(source_arguments.get(1)?)?,
-            sizes: integer_list(source_arguments.get(2)?)?,
-            result,
-        })),
-        Intrinsic::DynamicUpdateSlice => Some(TensorOp::DynamicUpdateSlice(DynamicUpdateSliceOp {
-            input: *inputs.first()?,
-            update: *inputs.get(1)?,
-            starts: integer_list(source_arguments.get(2)?)?,
-            dynamic_index: None,
-            axis: None,
-            result,
-        })),
-        Intrinsic::DynamicUpdateSliceAxis => {
-            Some(TensorOp::DynamicUpdateSlice(DynamicUpdateSliceOp {
-                input: *inputs.first()?,
-                update: *inputs.get(1)?,
-                starts: Vec::new(),
-                dynamic_index: Some(*inputs.get(2)?),
-                axis: unsigned_integer(source_arguments.get(3)?),
+        Intrinsic::LayerNorm => {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            let input = inputs[0];
+            let rank = input.ty.rank.ok_or_else(|| {
+                failure(intrinsic, "normalization input must have a resolved rank")
+            })?;
+            let epsilon = source_arguments
+                .get(1)
+                .map(|argument| {
+                    scalar_bits(argument).ok_or_else(|| {
+                        failure(intrinsic, "epsilon argument must be a numeric literal")
+                    })
+                })
+                .transpose()?;
+            Ok(TensorOp::Normalization(NormalizationOp {
+                kind: NormalizationKind::LayerNorm,
+                input,
+                axis: last_axis(intrinsic, rank)?,
+                epsilon,
                 result,
             }))
         }
-        Intrinsic::Concatenate => Some(TensorOp::Concatenate(ConcatenateOp {
-            inputs,
-            axis: unsigned_integer(source_arguments.get(1)?)?,
-            result,
-        })),
+        Intrinsic::Gather => {
+            expect_input_count(intrinsic, &inputs, 2)?;
+            Ok(TensorOp::Gather(GatherOp {
+                table: inputs[0],
+                indices: inputs[1],
+                result,
+            }))
+        }
+        Intrinsic::Convert => {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            Ok(TensorOp::Convert(ConvertOp {
+                input: inputs[0],
+                result,
+            }))
+        }
+        Intrinsic::Slice => {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            Ok(TensorOp::Slice(SliceOp {
+                input: inputs[0],
+                starts: integer_list_argument(intrinsic, source_arguments, 1, "starts")?,
+                limits: integer_list_argument(intrinsic, source_arguments, 2, "limits")?,
+                strides: integer_list_argument(intrinsic, source_arguments, 3, "strides")?,
+                result,
+            }))
+        }
+        Intrinsic::DynamicSlice => {
+            expect_input_count(intrinsic, &inputs, 1)?;
+            Ok(TensorOp::DynamicSlice(DynamicSliceOp {
+                input: inputs[0],
+                starts: integer_list_argument(intrinsic, source_arguments, 1, "starts")?,
+                sizes: integer_list_argument(intrinsic, source_arguments, 2, "sizes")?,
+                result,
+            }))
+        }
+        Intrinsic::DynamicUpdateSlice => {
+            expect_input_count(intrinsic, &inputs, 2)?;
+            Ok(TensorOp::DynamicUpdateSlice(DynamicUpdateSliceOp {
+                input: inputs[0],
+                update: inputs[1],
+                starts: integer_list_argument(intrinsic, source_arguments, 2, "starts")?,
+                dynamic_index: None,
+                axis: None,
+                result,
+            }))
+        }
+        Intrinsic::DynamicUpdateSliceAxis => {
+            expect_input_count(intrinsic, &inputs, 3)?;
+            let axis = source_arguments
+                .get(3)
+                .and_then(unsigned_integer)
+                .ok_or_else(|| {
+                    failure(
+                        intrinsic,
+                        "axis argument must be a non-negative integer literal",
+                    )
+                })?;
+            Ok(TensorOp::DynamicUpdateSlice(DynamicUpdateSliceOp {
+                input: inputs[0],
+                update: inputs[1],
+                starts: Vec::new(),
+                dynamic_index: Some(inputs[2]),
+                axis: Some(axis),
+                result,
+            }))
+        }
+        Intrinsic::Concatenate => {
+            let values = source_arguments
+                .first()
+                .and_then(|argument| match argument.kind() {
+                    severian_hir::Expression::List(values) => Some(values),
+                    _ => None,
+                })
+                .ok_or_else(|| failure(intrinsic, "values argument must be a list of tensors"))?;
+            if values.is_empty() {
+                return Err(failure(intrinsic, "requires at least one tensor input"));
+            }
+            if inputs.len() != values.len() {
+                return Err(failure(
+                    intrinsic,
+                    format!(
+                        "values list contains {} item(s), but only {} have resolved tensor types",
+                        values.len(),
+                        inputs.len()
+                    ),
+                ));
+            }
+            let axis = source_arguments
+                .get(1)
+                .and_then(unsigned_integer)
+                .ok_or_else(|| {
+                    failure(
+                        intrinsic,
+                        "axis argument must be a non-negative integer literal",
+                    )
+                })?;
+            Ok(TensorOp::Concatenate(ConcatenateOp {
+                inputs,
+                axis,
+                result,
+            }))
+        }
     }
+}
+
+fn failure(intrinsic: TensorIntrinsic, message: impl Into<String>) -> MirLoweringError {
+    MirLoweringError::tensor(intrinsic, message)
+}
+
+fn expect_input_count(
+    intrinsic: TensorIntrinsic,
+    inputs: &[TensorOperand],
+    expected: usize,
+) -> Result<(), MirLoweringError> {
+    if inputs.len() == expected {
+        Ok(())
+    } else {
+        Err(failure(
+            intrinsic,
+            format!(
+                "expected {expected} tensor operand(s), but resolved {}",
+                inputs.len()
+            ),
+        ))
+    }
+}
+
+fn integer_list_argument(
+    intrinsic: TensorIntrinsic,
+    arguments: &[severian_hir::Expression],
+    index: usize,
+    name: &str,
+) -> Result<Vec<u64>, MirLoweringError> {
+    arguments.get(index).and_then(integer_list).ok_or_else(|| {
+        failure(
+            intrinsic,
+            format!("`{name}` argument must be a list of non-negative integers"),
+        )
+    })
+}
+
+fn last_axis(intrinsic: TensorIntrinsic, rank: u8) -> Result<u64, MirLoweringError> {
+    rank.checked_sub(1).map(u64::from).ok_or_else(|| {
+        failure(
+            intrinsic,
+            "operation requires a tensor with rank at least one",
+        )
+    })
 }
 
 fn tensor_operand(value: ValueRef) -> Option<TensorOperand> {
@@ -178,11 +340,11 @@ fn tensor_operand(value: ValueRef) -> Option<TensorOperand> {
 
 pub(crate) fn tensor_operands(
     arguments: &[severian_hir::Expression],
-    mut lower: impl FnMut(&severian_hir::Expression) -> ValueRef,
-) -> Vec<TensorOperand> {
+    mut lower: impl FnMut(&severian_hir::Expression) -> Result<ValueRef, MirLoweringError>,
+) -> Result<Vec<TensorOperand>, MirLoweringError> {
     let mut inputs = Vec::new();
     for argument in arguments {
-        if let Some(input) = tensor_operand(lower(argument)) {
+        if let Some(input) = tensor_operand(lower(argument)?) {
             inputs.push(input);
             continue;
         }
@@ -190,11 +352,14 @@ pub(crate) fn tensor_operands(
             inputs.extend(
                 values
                     .iter()
-                    .filter_map(|value| tensor_operand(lower(value))),
+                    .map(|value| lower(value).map(tensor_operand))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten(),
             );
         }
     }
-    inputs
+    Ok(inputs)
 }
 
 fn integer_list(expression: &severian_hir::Expression) -> Option<Vec<u64>> {

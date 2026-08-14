@@ -145,6 +145,7 @@ mod tests {
             }],
             ..HirProgram::default()
         })
+        .unwrap()
     }
 
     #[test]
