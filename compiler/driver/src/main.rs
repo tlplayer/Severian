@@ -1,3 +1,4 @@
+mod architecture_command;
 mod build_options;
 mod error_catalog;
 mod runtime_diagnostics;
@@ -69,6 +70,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             verify_command(args.get(1).map_or(Path::new("."), Path::new))
         }
         "check" if args.len() <= 2 => check_targets(args.get(1).map_or(Path::new("."), Path::new)),
+        "architecture" => architecture_command::run(&args[1..]),
         "lint" => lint_command(&args[1..]),
         "fmt" => fmt_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
@@ -774,7 +776,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
         build_progress(message_format, &format!("[{}] RUN", gate.name()));
         match gate {
             BuildGate::Compile => unreachable!("compile is the first and unique gate"),
-            BuildGate::Architecture => enforce_architecture_policy(&policy)?,
+            BuildGate::Architecture => architecture_command::enforce(&policy)?,
             BuildGate::Test => test_targets(&input, false)?,
             BuildGate::Profile => test_targets(&input, true)?,
             BuildGate::Coverage => coverage_with_policy(&input, &policy)?,
@@ -820,32 +822,6 @@ fn build_progress(format: MessageFormat, message: &str) {
     match format {
         MessageFormat::Text => println!("{message}"),
         MessageFormat::Json => eprintln!("{message}"),
-    }
-}
-
-fn enforce_architecture_policy(policy: &BuildPolicy) -> Result<(), String> {
-    let findings = severian_driver::architecture::check_file_budgets(policy)?;
-    let mut errors = 0;
-    for finding in findings {
-        println!(
-            "{}[architecture::file_size] {}\n  {}\n  limit: {} lines{}",
-            finding.severity,
-            finding.path.display(),
-            finding.message,
-            finding.limit,
-            finding
-                .exception_reason
-                .as_deref()
-                .map_or(String::new(), |reason| format!("\n  exception: {reason}"))
-        );
-        errors += usize::from(finding.severity == "error");
-    }
-    if errors == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "architecture gate rejected {errors} file(s) above their hard line budget"
-        ))
     }
 }
 
@@ -1464,6 +1440,8 @@ fn check_targets(input: &Path) -> Result<(), String> {
         checked += 1;
         println!("Checked {}", target.source.display());
     }
+    let policy = BuildPolicy::for_input(input).map_err(|error| error.to_string())?;
+    architecture_command::enforce(&policy)?;
     println!("{checked} checked");
     Ok(())
 }
@@ -2673,6 +2651,7 @@ fn usage() -> String {
         "  trust list|show <publisher>    inspect the compiler-owned publisher trust registry",
         "  verify [path]                  verify locked packages, trust, signatures, and installed artifacts",
         "  check [path]                   parse, resolve, typecheck, and check ownership",
+        "  architecture [path] [--graph] analyze package dependency and layer boundaries",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",
         "  build [path] [--emit KIND] [--target native|xla] [--diagnostics user|internal] [--verify-each] [--max-errors N] [--message-format text|json]",

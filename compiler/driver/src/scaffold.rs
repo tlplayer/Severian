@@ -65,6 +65,24 @@ branches = 0
 # Change to `deny` once the project is ready to make leaks build-blocking.
 leaks = "allow"
 
+[architecture]
+# Dependency cycles are rejected for local Cargo and Severian packages. Layer
+# enforcement becomes active when an order is declared below.
+enforce = true
+deny_cycles = true
+deny_unknown_layers = false
+deny_layer_violations = true
+
+# [architecture.layers]
+# include = ["compiler/*"]
+# order = ["syntax", "semantic", "ir", "backend"]
+
+# Explicit allow lists and denials are evaluated against resolved package edges.
+# [[architecture.rule]]
+# from = "compiler/backend/**"
+# allow = ["compiler/ir/**"]
+# deny = ["compiler/syntax/**"]
+
 [architecture.files]
 # These broad limits make growth visible without constraining early exploration.
 # Lower them toward 500/800 as module boundaries stabilize.
@@ -169,6 +187,11 @@ mod tests {
         assert_eq!(manifest["build"]["diagnostics"].as_str(), Some("user"));
         assert_eq!(manifest["coverage"]["minimum"].as_integer(), Some(0));
         assert_eq!(manifest["memory"]["leaks"].as_str(), Some("allow"));
+        assert_eq!(manifest["architecture"]["enforce"].as_bool(), Some(true));
+        assert_eq!(
+            manifest["architecture"]["deny_cycles"].as_bool(),
+            Some(true)
+        );
         assert_eq!(manifest["build"]["max_errors"].as_integer(), Some(50));
         assert_eq!(manifest["features"]["default"].as_array().unwrap().len(), 0);
         assert!(source.contains("# [package.unsafe]"));

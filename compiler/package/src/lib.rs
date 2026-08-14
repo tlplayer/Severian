@@ -21,7 +21,8 @@ pub use install::{perform_installation, plan_installation, verify_installation, 
 pub use lockfile::{LockedExternal, LockedPackage, Lockfile};
 pub use manifest::{InstallRequirement, InstallationManifest, SystemRequirement};
 pub use policy::{
-    BuildGate, BuildPolicy, CoveragePolicy, FileLimitException, FileLimitPolicy, MemoryPolicy,
+    architecture_path_matches, ArchitecturePolicy, ArchitectureRule, BuildGate, BuildPolicy,
+    CoveragePolicy, FileLimitException, FileLimitPolicy, LayerPolicy, MemoryPolicy,
     TypeResolutionPolicy,
 };
 pub use resolution::{

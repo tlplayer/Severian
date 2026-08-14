@@ -50,6 +50,57 @@ owner = "compiler"
 }
 
 #[test]
+fn architecture_graph_policy_is_typed_and_scoped() {
+    let root = temporary_directory("architecture-graph-policy");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        r#"
+[workspace]
+members = []
+
+[architecture]
+enforce = true
+deny_cycles = true
+deny_unknown_layers = true
+deny_layer_violations = true
+
+[architecture.layers]
+include = ["compiler/*"]
+order = ["hir", "mir", "backend"]
+
+[[architecture.rule]]
+from = "compiler/mir/**"
+allow = ["compiler/hir/**"]
+deny = ["compiler/backend/**"]
+"#,
+    )
+    .unwrap();
+
+    let policy = BuildPolicy::for_input(&root).unwrap();
+    assert_eq!(policy.architecture.layers.order, ["hir", "mir", "backend"]);
+    assert_eq!(policy.architecture.layers.include, ["compiler/*"]);
+    assert_eq!(policy.architecture.rules.len(), 1);
+    assert_eq!(policy.architecture.rules[0].allow, ["compiler/hir/**"]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn architecture_policy_rejects_unknown_settings() {
+    let root = temporary_directory("architecture-policy-typo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        "[architecture]\ndeny_cylces = true\n",
+    )
+    .unwrap();
+
+    let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
+    assert!(error.contains("unknown `architecture` setting `deny_cylces`"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn type_resolution_policy_loads_every_independent_guard() {
     let root = temporary_directory("type-resolution-policy");
     std::fs::create_dir_all(&root).unwrap();

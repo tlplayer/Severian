@@ -3,6 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod dependency;
+
+pub use dependency::{
+    analyze_dependencies, ArchitectureDependency, ArchitectureFinding, ArchitectureNode,
+    DependencyAnalysis, DependencyStat,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileBudgetFinding {
     pub severity: &'static str,

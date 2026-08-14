@@ -1,6 +1,10 @@
 use crate::{nearest_manifest, PackageError, MANIFEST_FILE};
 use std::path::{Path, PathBuf};
 
+mod architecture;
+
+pub use architecture::{ArchitecturePolicy, ArchitectureRule, LayerPolicy};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildGate {
     Compile,
@@ -136,7 +140,7 @@ impl FileLimitPolicy {
         let exception = self
             .exceptions
             .iter()
-            .find(|exception| path_pattern_matches(&exception.path, relative_path));
+            .find(|exception| architecture_path_matches(&exception.path, relative_path));
         exception.map_or((self.soft_lines, self.hard_lines, None), |exception| {
             (
                 exception.soft_lines.unwrap_or(self.soft_lines),
@@ -149,7 +153,7 @@ impl FileLimitPolicy {
     pub fn includes(&self, relative_path: &str) -> bool {
         self.include
             .iter()
-            .any(|pattern| path_pattern_matches(pattern, relative_path))
+            .any(|pattern| architecture_path_matches(pattern, relative_path))
     }
 }
 
@@ -160,6 +164,7 @@ pub struct BuildPolicy {
     pub pipeline: Vec<BuildGate>,
     pub coverage: CoveragePolicy,
     pub memory: MemoryPolicy,
+    pub architecture: ArchitecturePolicy,
     pub files: FileLimitPolicy,
 }
 
@@ -182,6 +187,7 @@ impl BuildPolicy {
             pipeline: default_pipeline(),
             coverage: CoveragePolicy::default(),
             memory: MemoryPolicy::default(),
+            architecture: ArchitecturePolicy::default(),
             files: FileLimitPolicy::default(),
         };
         let Some(manifest) = manifest else {
@@ -194,6 +200,7 @@ impl BuildPolicy {
         policy.pipeline = parse_pipeline(&value, &manifest)?;
         policy.coverage = parse_coverage(&value, &manifest)?;
         policy.memory = parse_memory(&value, &manifest)?;
+        policy.architecture = architecture::parse(&value, &manifest)?;
         policy.files = parse_file_limits(&value, &manifest)?;
         Ok(policy)
     }
@@ -523,7 +530,7 @@ fn string_array(
     let Some(value) = value else { return Ok(None) };
     value
         .as_array()
-        .ok_or_else(|| policy_error(manifest, format!("`{name}` must be an array of paths")))?
+        .ok_or_else(|| policy_error(manifest, format!("`{name}` must be an array of strings")))?
         .iter()
         .map(|entry| {
             entry.as_str().map(str::to_owned).ok_or_else(|| {
@@ -534,29 +541,40 @@ fn string_array(
         .map(Some)
 }
 
-fn path_pattern_matches(pattern: &str, path: &str) -> bool {
+pub fn architecture_path_matches(pattern: &str, path: &str) -> bool {
     let pattern = pattern.trim_start_matches("./");
     let path = path.trim_start_matches("./");
-    if pattern == path || pattern == "**" {
-        return true;
+    let pattern = pattern.split('/').collect::<Vec<_>>();
+    let path = path.split('/').collect::<Vec<_>>();
+    match_path_components(&pattern, &path)
+}
+
+fn match_path_components(pattern: &[&str], path: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => {
+            match_path_components(rest, path)
+                || (!path.is_empty() && match_path_components(pattern, &path[1..]))
+        }
+        Some((component, rest)) => {
+            !path.is_empty()
+                && match_component(component.as_bytes(), path[0].as_bytes())
+                && match_path_components(rest, &path[1..])
+        }
     }
-    if let Some((prefix, suffix)) = pattern.split_once("/**/") {
-        return path.starts_with(prefix)
-            && path
-                .strip_prefix(prefix)
-                .is_some_and(|rest| rest.starts_with('/'))
-            && path.ends_with(suffix.trim_start_matches('*'));
+}
+
+fn match_component(pattern: &[u8], value: &[u8]) -> bool {
+    match pattern.split_first() {
+        None => value.is_empty(),
+        Some((&b'*', rest)) => {
+            match_component(rest, value)
+                || (!value.is_empty() && match_component(pattern, &value[1..]))
+        }
+        Some((&expected, rest)) => value
+            .split_first()
+            .is_some_and(|(&actual, tail)| expected == actual && match_component(rest, tail)),
     }
-    if let Some(prefix) = pattern.strip_suffix("/**") {
-        return path == prefix || path.starts_with(&format!("{prefix}/"));
-    }
-    if let Some(suffix) = pattern.strip_prefix("**/") {
-        return path.ends_with(suffix.trim_start_matches('*'));
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return path.ends_with(suffix);
-    }
-    false
 }
 
 fn policy_error(manifest: &Path, message: impl std::fmt::Display) -> PackageError {
@@ -570,12 +588,15 @@ mod tests {
 
     #[test]
     fn recursive_patterns_cover_source_files() {
-        assert!(path_pattern_matches(
+        assert!(architecture_path_matches(
             "compiler/**/*.rs",
             "compiler/hir/src/lib.rs"
         ));
-        assert!(path_pattern_matches("src/**/*.sev", "src/model/main.sev"));
-        assert!(!path_pattern_matches("src/**/*.sev", "tests/main.sev"));
+        assert!(architecture_path_matches(
+            "src/**/*.sev",
+            "src/model/main.sev"
+        ));
+        assert!(!architecture_path_matches("src/**/*.sev", "tests/main.sev"));
     }
 
     #[test]

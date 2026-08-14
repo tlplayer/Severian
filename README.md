@@ -80,7 +80,7 @@ and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile fro
 those artifacts. Library-local tests are not linked into downstream application
 test binaries. `sev build source.sev` uses the source stem as the binary name.
 Before emitting artifacts, every build runs the complete manifest policy in
-order: compile, architecture budgets, unit tests, profile tests, coverage,
+order: compile, architecture dependency/layer rules and file budgets, unit tests, profile tests, coverage,
 memory/leak checks, and integration tests. Those gates cannot be removed with a
 CLI skip flag or omitted from a custom pipeline. Standard and path dependencies
 are not charged to the consuming package's coverage percentage. See
@@ -105,6 +105,8 @@ sev test
 sev test --profile
 sev test --profile --memory
 sev test --profile --memory --leaks
+sev architecture
+sev architecture --graph
 sev debug main.sev
 sev clean
 ```

@@ -199,6 +199,8 @@ fn init_exposes_the_complete_lenient_manifest_contract() {
     assert!(manifest.contains("diagnostics = \"user\""));
     assert!(manifest.contains("pipeline = ["));
     assert!(manifest.contains("[profile.dev]"));
+    assert!(manifest.contains("[architecture]"));
+    assert!(manifest.contains("deny_cycles = true"));
     assert!(manifest.contains("[architecture.files]"));
     assert!(manifest.contains("# [workspace]"));
     std::fs::remove_dir_all(root).unwrap();

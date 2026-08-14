@@ -46,11 +46,40 @@ branches = 60
 [memory]
 leaks = "deny"
 
+[architecture]
+enforce = true
+deny_cycles = true
+deny_unknown_layers = true
+deny_layer_violations = true
+
+[architecture.layers]
+include = ["compiler/*"]
+order = ["syntax", "semantic", "hir", "mir", "backend"]
+
+[[architecture.rule]]
+from = "compiler/backend/**"
+allow = ["compiler/mir/**"]
+deny = ["compiler/syntax/**", "compiler/semantic/**"]
+
 [architecture.files]
 soft_lines = 500
 hard_lines = 800
 include = ["src/**/*.sev", "tests/**/*.sev"]
 ```
+
+The architecture pass builds dependency graphs from local `Cargo.toml`
+production/build dependencies and `package.toml` dependencies. Tarjan strongly
+connected components identify cycles and diagnostics include the concrete
+dependency path and declaration line. Layer order is dependency order: a later
+layer may depend on an earlier one, while the reverse edge fails even when it
+does not form a cycle. The optional `include` patterns scope layer names when a
+repository contains more than one package family. Matching
+`[[architecture.rule]]` tables then apply deny lists and allow-list boundaries
+to the resolved edges.
+
+`sev check` and `sev build` enforce the same pass. `sev architecture` prints a
+package/edge summary and high fan-out packages; `sev architecture --graph`
+emits the resolved graph as standalone DOT on standard output.
 
 A soft limit is visible debt; a hard limit fails the build. A temporary hard
 limit exception must name the exact path and give a reviewable reason. Owners

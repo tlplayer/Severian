@@ -26,6 +26,74 @@ deny_unresolved = true
 deny_inferred_fallback = true
 deny_lost_type_information = true
 
+[architecture]
+enforce = true
+deny_cycles = true
+deny_unknown_layers = true
+deny_layer_violations = true
+
+[architecture.layers]
+include = ["compiler/*"]
+order = [
+    "ast",
+    "build",
+    "coverage",
+    "dtype",
+    "mlir",
+    "platform",
+    "runtime",
+    "lexer",
+    "hir",
+    "model-ir",
+    "parser",
+    "source",
+    "package",
+    "diagnostics",
+    "semantic",
+    "mir",
+    "ownership",
+    "passes",
+    "xla",
+    "lowering",
+    "backend",
+    "driver",
+]
+
+[[architecture.rule]]
+from = "compiler/hir/**"
+allow = ["compiler/dtype/**"]
+
+[[architecture.rule]]
+from = "compiler/semantic/**"
+allow = [
+    "compiler/ast/**",
+    "compiler/hir/**",
+    "compiler/package/**",
+]
+
+[[architecture.rule]]
+from = "compiler/mir/**"
+allow = ["compiler/hir/**"]
+
+[[architecture.rule]]
+from = "compiler/lowering/**"
+allow = [
+    "compiler/coverage/**",
+    "compiler/hir/**",
+    "compiler/mir/**",
+    "compiler/mlir/**",
+    "compiler/platform/**",
+    "compiler/source/**",
+]
+
+[[architecture.rule]]
+from = "compiler/backend/**"
+allow = [
+    "compiler/hir/**",
+    "compiler/lowering/**",
+    "compiler/mlir/**",
+]
+
 [architecture.files]
 soft_lines = 500
 hard_lines = 800
