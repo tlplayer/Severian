@@ -44,6 +44,7 @@ pub(super) fn collect_strings(instructions: &[Instruction], strings: &mut Vec<St
                 instructions,
                 ..
             } => {
+                strings.push("ok".to_owned());
                 if let Some(setup) = setup {
                     collect_strings(std::slice::from_ref(setup), strings);
                 }

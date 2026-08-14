@@ -1,8 +1,88 @@
 use super::*;
 
 impl LowerContext<'_> {
+    fn lower_switch_literal_match(
+        &mut self,
+        value: &str,
+        value_type: ValueType,
+        pattern: &MatchPattern,
+    ) -> Option<String> {
+        let expected = match pattern {
+            MatchPattern::Integer(expected) => {
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant({expected} : i64) : i64"
+                )
+                .unwrap();
+                (result, ValueType::Int)
+            }
+            MatchPattern::Float(bits) => {
+                let result = self.fresh_value();
+                let expected = f64::from_bits(*bits);
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant({expected:.17e} : f64) : f64"
+                )
+                .unwrap();
+                (result, ValueType::Float)
+            }
+            MatchPattern::Boolean(expected) => {
+                let result = self.fresh_value();
+                let expected = i32::from(*expected);
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.mlir.constant({expected} : i1) : i1"
+                )
+                .unwrap();
+                (result, ValueType::Bool)
+            }
+            MatchPattern::String(expected) => (self.string_address(expected), ValueType::String),
+            _ => return None,
+        };
+
+        let matches = self.fresh_value();
+        if value_type == ValueType::Any {
+            let expected = self.box_value(expected);
+            writeln!(
+                self.output,
+                "    {matches} = llvm.call @__sev_value_equal({value}, {expected}) : (!llvm.ptr, !llvm.ptr) -> i1"
+            )
+            .unwrap();
+        } else if value_type != expected.1 {
+            writeln!(
+                self.output,
+                "    {matches} = llvm.mlir.constant(0 : i1) : i1"
+            )
+            .unwrap();
+        } else if value_type == ValueType::String {
+            writeln!(
+                self.output,
+                "    {matches} = llvm.call @__sev_string_equal({value}, {}) : (!llvm.ptr, !llvm.ptr) -> i1",
+                expected.0
+            )
+            .unwrap();
+        } else if value_type == ValueType::Float {
+            writeln!(
+                self.output,
+                "    {matches} = llvm.fcmp \"oeq\" {value}, {} : f64",
+                expected.0
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                self.output,
+                "    {matches} = llvm.icmp \"eq\" {value}, {} : {}",
+                expected.0,
+                mlir_type(value_type)
+            )
+            .unwrap();
+        }
+        Some(matches)
+    }
+
     pub(super) fn lower_switch(&mut self, value: &Expression, arms: &[SwitchArm]) {
-        let (value, _) = self.lower_expression(value);
+        let (value, value_type) = self.lower_expression(value);
         let incoming = self.variables.clone();
         let mut carried = incoming.keys().cloned().collect::<Vec<_>>();
         carried.sort();
@@ -11,89 +91,109 @@ impl LowerContext<'_> {
             let body = self.fresh_block();
             let next = self.fresh_block();
             let mut bound = Vec::new();
-            if let MatchPattern::Constructor { name, fields } = &arm.pattern {
-                let tag = self.string_address(name);
-                let matches = self.fresh_value();
-                if let Some(class) = self.classes.iter().find(|class| class.name == *name) {
-                    writeln!(self.output, "    {matches} = llvm.call @__sev_object_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
-                    let mut combined = matches;
-                    for (pattern, field_name) in fields.iter().zip(&class.fields) {
-                        let field_name = self.string_address(field_name);
-                        let field = self.fresh_value();
-                        writeln!(self.output, "    {field} = llvm.call @__sev_object_get({value}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                        match pattern {
-                            MatchPattern::Bind(name) => bound.push((
-                                name.id,
-                                self.variables.insert(name.id, (field, ValueType::Any)),
-                            )),
-                            MatchPattern::Integer(expected) => {
-                                let actual = self.fresh_value();
-                                writeln!(self.output, "    {actual} = llvm.call @__sev_unbox_i64({field}) : (!llvm.ptr) -> i64").unwrap();
-                                let expected_value = self.fresh_value();
-                                writeln!(self.output, "    {expected_value} = llvm.mlir.constant({expected} : i64) : i64").unwrap();
-                                let field_matches = self.fresh_value();
-                                writeln!(self.output, "    {field_matches} = llvm.icmp \"eq\" {actual}, {expected_value} : i64").unwrap();
-                                let both = self.fresh_value();
-                                writeln!(
-                                    self.output,
-                                    "    {both} = llvm.and {combined}, {field_matches} : i1"
-                                )
-                                .unwrap();
-                                combined = both;
-                            }
-                            MatchPattern::Wildcard => {}
-                            _ => {}
-                        }
-                    }
-                    writeln!(
-                        self.output,
-                        "    llvm.cond_br {combined}, ^bb{body}, ^bb{next}"
-                    )
-                    .unwrap();
-                } else {
-                    writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
-                    let successful_result = name == "ok";
-                    if !fields.is_empty() {
-                        let payload = self.fresh_value();
-                        writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
-                        for (index, pattern) in fields.iter().enumerate() {
-                            let MatchPattern::Bind(name) = pattern else {
-                                continue;
-                            };
-                            let field = if fields.len() == 1 {
-                                payload.clone()
-                            } else {
-                                let index_value = self.fresh_value();
-                                writeln!(
-                                    self.output,
-                                    "    {index_value} = llvm.mlir.constant({index} : i64) : i64"
-                                )
-                                .unwrap();
-                                let field = self.fresh_value();
-                                writeln!(self.output, "    {field} = llvm.call @__sev_collection_get({payload}, {index_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
-                                field
-                            };
-                            if successful_result {
-                                if let Some(receiver) = arm.receivers.get(&name.id) {
-                                    self.object_classes
-                                        .insert(field.clone(), receiver.name.clone());
-                                    self.receiver_types.insert(field.clone(), receiver.clone());
+            match &arm.pattern {
+                MatchPattern::Constructor { name, fields } => {
+                    let tag = self.string_address(name);
+                    let matches = self.fresh_value();
+                    if let Some(class) = self.classes.iter().find(|class| class.name == *name) {
+                        writeln!(self.output, "    {matches} = llvm.call @__sev_object_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                        let mut combined = matches;
+                        for (pattern, field_name) in fields.iter().zip(&class.fields) {
+                            let field_name = self.string_address(field_name);
+                            let field = self.fresh_value();
+                            writeln!(self.output, "    {field} = llvm.call @__sev_object_get({value}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                            match pattern {
+                                MatchPattern::Bind(name) => bound.push((
+                                    name.id,
+                                    self.variables.insert(name.id, (field, ValueType::Any)),
+                                )),
+                                MatchPattern::Integer(expected) => {
+                                    let actual = self.fresh_value();
+                                    writeln!(self.output, "    {actual} = llvm.call @__sev_unbox_i64({field}) : (!llvm.ptr) -> i64").unwrap();
+                                    let expected_value = self.fresh_value();
+                                    writeln!(self.output, "    {expected_value} = llvm.mlir.constant({expected} : i64) : i64").unwrap();
+                                    let field_matches = self.fresh_value();
+                                    writeln!(self.output, "    {field_matches} = llvm.icmp \"eq\" {actual}, {expected_value} : i64").unwrap();
+                                    let both = self.fresh_value();
+                                    writeln!(
+                                        self.output,
+                                        "    {both} = llvm.and {combined}, {field_matches} : i1"
+                                    )
+                                    .unwrap();
+                                    combined = both;
                                 }
+                                MatchPattern::Wildcard => {}
+                                _ => {}
                             }
-                            bound.push((
-                                name.id,
-                                self.variables.insert(name.id, (field, ValueType::Any)),
-                            ));
                         }
+                        writeln!(
+                            self.output,
+                            "    llvm.cond_br {combined}, ^bb{body}, ^bb{next}"
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(self.output, "    {matches} = llvm.call @__sev_variant_is({value}, {tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                        let successful_result = name == "ok";
+                        if !fields.is_empty() {
+                            let payload = self.fresh_value();
+                            writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                            for (index, pattern) in fields.iter().enumerate() {
+                                let MatchPattern::Bind(name) = pattern else {
+                                    continue;
+                                };
+                                let field = if fields.len() == 1 {
+                                    payload.clone()
+                                } else {
+                                    let index_value = self.fresh_value();
+                                    writeln!(
+                                        self.output,
+                                        "    {index_value} = llvm.mlir.constant({index} : i64) : i64"
+                                    )
+                                    .unwrap();
+                                    let field = self.fresh_value();
+                                    writeln!(self.output, "    {field} = llvm.call @__sev_collection_get({payload}, {index_value}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+                                    field
+                                };
+                                if successful_result {
+                                    if let Some(receiver) = arm.receivers.get(&name.id) {
+                                        self.object_classes
+                                            .insert(field.clone(), receiver.name.clone());
+                                        self.receiver_types.insert(field.clone(), receiver.clone());
+                                    }
+                                }
+                                bound.push((
+                                    name.id,
+                                    self.variables.insert(name.id, (field, ValueType::Any)),
+                                ));
+                            }
+                        }
+                        writeln!(
+                            self.output,
+                            "    llvm.cond_br {matches}, ^bb{body}, ^bb{next}"
+                        )
+                        .unwrap();
                     }
+                }
+                MatchPattern::Bind(name) => {
+                    bound.push((
+                        name.id,
+                        self.variables.insert(name.id, (value.clone(), value_type)),
+                    ));
+                    writeln!(self.output, "    llvm.br ^bb{body}").unwrap();
+                }
+                MatchPattern::Wildcard => {
+                    writeln!(self.output, "    llvm.br ^bb{body}").unwrap();
+                }
+                pattern => {
+                    let matches = self
+                        .lower_switch_literal_match(&value, value_type, pattern)
+                        .expect("literal switch pattern must lower to a comparison");
                     writeln!(
                         self.output,
                         "    llvm.cond_br {matches}, ^bb{body}, ^bb{next}"
                     )
                     .unwrap();
                 }
-            } else {
-                writeln!(self.output, "    llvm.br ^bb{body}").unwrap();
             }
             writeln!(self.output, "  ^bb{body}:").unwrap();
             if let Some(guard) = &arm.guard {
@@ -432,7 +532,39 @@ impl LowerContext<'_> {
                 (start, end)
             }
             _ => {
-                let (mut value, iterable_type) = self.lower_expression(iterable);
+                let (mut value, mut iterable_type) = self.lower_expression(iterable);
+                if iterable_type == ValueType::Result {
+                    let result = value;
+                    let ok_tag = self.string_address("ok");
+                    let succeeded = self.fresh_value();
+                    writeln!(self.output, "    {succeeded} = llvm.call @__sev_variant_is({result}, {ok_tag}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+                    let success_block = self.fresh_block();
+                    let failure_block = self.fresh_block();
+                    writeln!(
+                        self.output,
+                        "    llvm.cond_br {succeeded}, ^bb{success_block}, ^bb{failure_block}"
+                    )
+                    .unwrap();
+                    writeln!(self.output, "  ^bb{failure_block}:").unwrap();
+                    if self.is_main {
+                        let failure = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {failure} = llvm.mlir.constant(1 : i32) : i32"
+                        )
+                        .unwrap();
+                        writeln!(self.output, "    llvm.return {failure} : i32").unwrap();
+                    } else if self.declared_return == ValueType::Result {
+                        writeln!(self.output, "    llvm.return {result} : !llvm.ptr").unwrap();
+                    } else {
+                        writeln!(self.output, "    llvm.call @abort() : () -> ()").unwrap();
+                        writeln!(self.output, "    llvm.unreachable").unwrap();
+                    }
+                    writeln!(self.output, "  ^bb{success_block}:").unwrap();
+                    value = self.fresh_value();
+                    writeln!(self.output, "    {value} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    iterable_type = ValueType::Any;
+                }
                 if iterable_type == ValueType::Any {
                     value = self.unbox_value((value, iterable_type), ValueType::List).0;
                 }

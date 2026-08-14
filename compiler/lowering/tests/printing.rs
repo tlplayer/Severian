@@ -122,6 +122,56 @@ fn carries_reassigned_values_out_of_switch_arms() {
 }
 
 #[test]
+fn lowers_string_switch_arms_to_value_comparisons() {
+    let arm = |pattern, value: &str| SwitchArm {
+        source: None,
+        pattern,
+        guard: None,
+        instructions: vec![Instruction::Print(Expression::String(value.into()))],
+        receivers: Default::default(),
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![
+                Instruction::Let {
+                    name: "extension".into(),
+                    value: Expression::String(".json".into()),
+                },
+                Instruction::Switch {
+                    value: Expression::Variable("extension".into()),
+                    arms: vec![
+                        arm(MatchPattern::String(".csv".into()), "csv"),
+                        arm(MatchPattern::String(".json".into()), "json"),
+                        arm(MatchPattern::Wildcard, "binary"),
+                    ],
+                },
+            ],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
+    assert_eq!(
+        lowered
+            .as_str()
+            .lines()
+            .filter(|line| line.contains("= llvm.call @__sev_string_equal"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn lowers_boolean_and_with_short_circuit_control_flow() {
     let program = Program {
         metadata: Default::default(),
