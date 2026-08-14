@@ -157,7 +157,10 @@ pub(super) fn lower_block(
                 }
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
                 let propagates = inferred == ValueType::Result;
-                let declared = binding.ty.as_ref().map(lower_type).transpose()?;
+                let declared = binding
+                    .ty
+                    .as_ref()
+                    .map(|ty| declared_value_type(ty, aliases));
                 if let Some(declared) = declared.filter(|_| !propagates) {
                     compatible(binding.span, inferred, declared)?;
                 }
@@ -166,7 +169,9 @@ pub(super) fn lower_block(
                 // therefore describes that payload rather than the Result
                 // carrier itself.
                 let ty = if propagates {
-                    declared.unwrap_or(ValueType::Any)
+                    declared
+                        .or_else(|| result_payload_type(source, signatures, aliases))
+                        .unwrap_or(ValueType::Any)
                 } else {
                     declared.unwrap_or(inferred)
                 };
@@ -183,7 +188,10 @@ pub(super) fn lower_block(
                     .map(|_| u8::MAX as i64);
                 let known_integer = constant_integer(source);
                 let receiver = propagates
-                    .then(|| file_read_receiver_type(source, aliases))
+                    .then(|| {
+                        file_read_receiver_type(source, aliases)
+                            .or_else(|| result_payload_receiver(source, signatures, aliases))
+                    })
                     .flatten();
                 let class = binding
                     .ty
@@ -200,6 +208,7 @@ pub(super) fn lower_block(
                         instructions.push(Instruction::TryLet {
                             name: existing,
                             value,
+                            payload_type: ty,
                             receiver,
                         });
                     } else {
@@ -238,6 +247,7 @@ pub(super) fn lower_block(
                     instructions.push(Instruction::TryLet {
                         name: scope[&binding.name.name].reference.clone(),
                         value,
+                        payload_type: ty,
                         receiver,
                     });
                 } else {
@@ -256,6 +266,7 @@ pub(super) fn lower_block(
                     instructions.push(Instruction::TryLet {
                         name: temporary.clone(),
                         value,
+                        payload_type: ValueType::Any,
                         receiver: None,
                     });
                 } else {
@@ -329,6 +340,7 @@ pub(super) fn lower_block(
                     instructions.push(Instruction::TryLet {
                         name: temporary.clone(),
                         value,
+                        payload_type: target_type,
                         receiver: None,
                     });
                     value = Expression::Variable(temporary);

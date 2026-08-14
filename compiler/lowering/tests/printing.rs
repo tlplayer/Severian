@@ -336,7 +336,7 @@ fn preserves_abstract_receiver_dispatch_through_for_loop() {
             contract: None,
             params: vec![Parameter {
                 name: "model".into(),
-                ty: ValueType::Any,
+                ty: ValueType::Interface(TypeDefinitionId::from_name("MaskedModel")),
                 default: None,
                 receiver: Some(ReceiverType {
                     name: "MaskedModel".into(),
@@ -390,6 +390,7 @@ fn lowers_propagated_main_failures_to_a_nonzero_exit_status() {
                     name: "failure".into(),
                     fields: vec![Expression::String("unavailable".into())],
                 },
+                payload_type: ValueType::Any,
                 receiver: None,
             }],
             tests: vec![],

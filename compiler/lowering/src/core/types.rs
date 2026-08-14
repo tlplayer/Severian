@@ -17,6 +17,7 @@ pub(super) fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
+        | ValueType::Interface(_)
         | ValueType::Any => "ptr",
     }
 }
@@ -124,6 +125,7 @@ pub(super) fn dynamic_type_suffix(ty: ValueType) -> &'static str {
         ValueType::Function => "function",
         ValueType::Result => "result",
         ValueType::Option => "option",
+        ValueType::Interface(_) => "interface",
         ValueType::Any => "any",
     }
 }
@@ -190,6 +192,7 @@ pub(super) fn c_type(ty: ValueType) -> &'static str {
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
+        | ValueType::Interface(_)
         | ValueType::Any => "void *",
     }
 }
@@ -228,6 +231,7 @@ pub(super) fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Any
         | ValueType::Result
         | ValueType::Option => "!llvm.ptr",
+        ValueType::Interface(_) => "!llvm.ptr",
     }
 }
 

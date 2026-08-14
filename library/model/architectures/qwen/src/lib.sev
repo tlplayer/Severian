@@ -135,12 +135,12 @@ def parse_qwen_3_config(text: string) -> Result[Qwen3Config, JsonError | QwenCon
     _valid = config.validate()
     return config
 
-class Qwen3AttentionOutput:
-    hidden: Tensor[bf16]
+class AttentionOutput[T: TensorDType]:
+    hidden: Tensor[T]
     cache: neuralnet.KvCache
 
-class Qwen3DecoderLayerOutput:
-    hidden: Tensor[bf16]
+class DecoderLayerOutput[T: TensorDType]:
+    hidden: Tensor[T]
     cache: neuralnet.KvCache
 
 class Qwen3Attention:
@@ -161,7 +161,7 @@ class Qwen3Attention:
         mask: Tensor[f32],
         cache: neuralnet.KvCache,
         cache_position: int,
-    ) -> Qwen3AttentionOutput:
+    ) -> AttentionOutput[bf16]:
         input_shape = tensor.shape_bf_16(hidden_states)
         projected_query = query.forward(hidden_states)
         projected_key = key.forward(hidden_states)
@@ -196,7 +196,7 @@ class Qwen3Attention:
             context,
             [input_shape[0], input_shape[1], num_heads * head_dimension],
         )
-        return Qwen3AttentionOutput(output.forward(context), updated_cache)
+        return AttentionOutput[bf16](output.forward(context), updated_cache)
 
 class Qwen3MLP[T: TensorDType + Float]:
     gate_proj: model_layers.Linear[T]
@@ -220,13 +220,13 @@ class Qwen3DecoderLayer:
         mask: Tensor[f32],
         cache: neuralnet.KvCache,
         cache_position: int,
-    ) -> Qwen3DecoderLayerOutput:
+    ) -> DecoderLayerOutput[bf16]:
         attended = attention.attend(
             input_norm.forward(hidden_states), position_ids, mask, cache, cache_position,
         )
         attention_residual = tensor.ranked_add(hidden_states, attended.hidden)
         feed_forward = mlp.forward(post_attention_norm.forward(attention_residual))
-        return Qwen3DecoderLayerOutput(
+        return DecoderLayerOutput[bf16](
             tensor.ranked_add(attention_residual, feed_forward),
             attended.cache,
         )
@@ -295,6 +295,162 @@ def load_qwen_3_decoder_layer(
         model_layers.Linear[bf16](down.bf16()),
     )
     return Qwen3DecoderLayer(
+        model_layers.RMSNorm[bf16](input_norm.bf16(), config.rms_norm_epsilon),
+        attention,
+        model_layers.RMSNorm[bf16](post_norm.bf16(), config.rms_norm_epsilon),
+        mlp,
+    )
+
+class Qwen2Attention:
+    query: model_layers.LinearWithBias[bf16]
+    key: model_layers.LinearWithBias[bf16]
+    value: model_layers.LinearWithBias[bf16]
+    output: model_layers.Linear[bf16]
+    num_heads: int
+    num_key_value_heads: int
+    head_dimension: int
+    rope: neuralnet.RotaryEmbedding
+
+    def attend(
+        hidden_states: Tensor[bf16],
+        position_ids: Tensor[i64],
+        mask: Tensor[f32],
+        cache: neuralnet.KvCache,
+        cache_position: int,
+    ) -> AttentionOutput[bf16]:
+        input_shape = tensor.shape_bf_16(hidden_states)
+        query_heads := tensor.reshape(
+            query.forward(hidden_states),
+            [input_shape[0], input_shape[1], num_heads, head_dimension],
+        )
+        key_heads := tensor.reshape(
+            key.forward(hidden_states),
+            [input_shape[0], input_shape[1], num_key_value_heads, head_dimension],
+        )
+        value_heads := tensor.reshape(
+            value.forward(hidden_states),
+            [input_shape[0], input_shape[1], num_key_value_heads, head_dimension],
+        )
+        query_heads = tensor.transpose_bf_16(query_heads, [0, 2, 1, 3])
+        key_heads = tensor.transpose_bf_16(key_heads, [0, 2, 1, 3])
+        value_heads = tensor.transpose_bf_16(value_heads, [0, 2, 1, 3])
+        rotated = rope.apply(query_heads, key_heads, position_ids)
+        updated_cache = neuralnet.append_cache(cache, rotated.key, value_heads, cache_position)
+        context := neuralnet.grouped_query_attention(
+            rotated.query,
+            updated_cache.keys,
+            updated_cache.values,
+            mask,
+            num_heads / num_key_value_heads,
+            head_dimension,
+        )
+        context = tensor.transpose_bf_16(context, [0, 2, 1, 3])
+        context = tensor.reshape(
+            context,
+            [input_shape[0], input_shape[1], num_heads * head_dimension],
+        )
+        return AttentionOutput[bf16](output.forward(context), updated_cache)
+
+class Qwen2MLP[T: TensorDType + Float]:
+    gate_proj: model_layers.Linear[T]
+    up_proj: model_layers.Linear[T]
+    down_proj: model_layers.Linear[T]
+
+    def forward(self, hidden_states: Tensor[T]) -> Tensor[T]:
+        gate = tensor.ranked_silu(gate_proj.forward(hidden_states))
+        up = up_proj.forward(hidden_states)
+        return down_proj.forward(tensor.ranked_multiply(gate, up))
+
+class Qwen2DecoderLayer:
+    input_norm: model_layers.RMSNorm[bf16]
+    attention: Qwen2Attention
+    post_attention_norm: model_layers.RMSNorm[bf16]
+    mlp: Qwen2MLP[bf16]
+
+    def forward(
+        hidden_states: Tensor[bf16],
+        position_ids: Tensor[i64],
+        mask: Tensor[f32],
+        cache: neuralnet.KvCache,
+        cache_position: int,
+    ) -> DecoderLayerOutput[bf16]:
+        attended = attention.attend(
+            input_norm.forward(hidden_states), position_ids, mask, cache, cache_position,
+        )
+        attention_residual = tensor.ranked_add(hidden_states, attended.hidden)
+        feed_forward = mlp.forward(post_attention_norm.forward(attention_residual))
+        return DecoderLayerOutput[bf16](
+            tensor.ranked_add(attention_residual, feed_forward),
+            attended.cache,
+        )
+
+def require_qwen_2_shape(
+    value: tensor.SafeTensorEntry,
+    expected: list[int],
+) -> Result[unit, QwenConfigError]:
+    if value.dtype != "BF16":
+        return failure(QwenConfigError(
+            "Qwen2 tensor `" + value.name + "` uses unsupported dtype `" + value.dtype + "`; expected BF16",
+        ))
+    if value.shape != expected:
+        return failure(QwenConfigError(
+            "Qwen2 tensor `" + value.name + "` has shape " + string(value.shape) +
+            "; expected " + string(expected),
+        ))
+    return
+
+def load_qwen_2_decoder_layer(
+    store: tensor.SafeTensorStore,
+    config: Qwen2Config,
+    layer: int,
+    rope: neuralnet.RotaryEmbedding,
+) -> Result[Qwen2DecoderLayer, IOError | QwenConfigError]:
+    if layer < 0 or layer >= config.num_hidden_layers:
+        return failure(QwenConfigError("Qwen2 decoder layer index is outside the configured model"))
+    prefix = "model.layers." + string(layer)
+    input_norm = store.get(prefix + ".input_layernorm.weight")
+    query = store.get(prefix + ".self_attn.q_proj.weight")
+    query_bias = store.get(prefix + ".self_attn.q_proj.bias")
+    key = store.get(prefix + ".self_attn.k_proj.weight")
+    key_bias = store.get(prefix + ".self_attn.k_proj.bias")
+    value = store.get(prefix + ".self_attn.v_proj.weight")
+    value_bias = store.get(prefix + ".self_attn.v_proj.bias")
+    output = store.get(prefix + ".self_attn.o_proj.weight")
+    post_norm = store.get(prefix + ".post_attention_layernorm.weight")
+    gate = store.get(prefix + ".mlp.gate_proj.weight")
+    up = store.get(prefix + ".mlp.up_proj.weight")
+    down = store.get(prefix + ".mlp.down_proj.weight")
+    hidden = config.hidden_size
+    query_width = config.num_attention_heads * config.head_dimension()
+    kv_width = config.num_key_value_heads * config.head_dimension()
+    _input_shape = require_qwen_2_shape(input_norm, [hidden])
+    _query_shape = require_qwen_2_shape(query, [query_width, hidden])
+    _query_bias_shape = require_qwen_2_shape(query_bias, [query_width])
+    _key_shape = require_qwen_2_shape(key, [kv_width, hidden])
+    _key_bias_shape = require_qwen_2_shape(key_bias, [kv_width])
+    _value_shape = require_qwen_2_shape(value, [kv_width, hidden])
+    _value_bias_shape = require_qwen_2_shape(value_bias, [kv_width])
+    _output_shape = require_qwen_2_shape(output, [hidden, query_width])
+    _post_shape = require_qwen_2_shape(post_norm, [hidden])
+    _gate_shape = require_qwen_2_shape(gate, [config.intermediate_size, hidden])
+    _up_shape = require_qwen_2_shape(up, [config.intermediate_size, hidden])
+    _down_shape = require_qwen_2_shape(down, [hidden, config.intermediate_size])
+    attention = Qwen2Attention(
+        model_layers.LinearWithBias[bf16](query.bf16(), query_bias.bf16()),
+        model_layers.LinearWithBias[bf16](key.bf16(), key_bias.bf16()),
+        model_layers.LinearWithBias[bf16](value.bf16(), value_bias.bf16()),
+        model_layers.Linear[bf16](output.bf16()),
+        config.num_attention_heads,
+        config.num_key_value_heads,
+        config.head_dimension(),
+        rope,
+    )
+    mlp = Qwen2MLP[bf16](
+        model_layers.Linear[bf16](gate.bf16()),
+        model_layers.Linear[bf16](up.bf16()),
+        model_layers.Linear[bf16](down.bf16()),
+    )
+    return Qwen2DecoderLayer(
         model_layers.RMSNorm[bf16](input_norm.bf16(), config.rms_norm_epsilon),
         attention,
         model_layers.RMSNorm[bf16](post_norm.bf16(), config.rms_norm_epsilon),

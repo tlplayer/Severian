@@ -12,6 +12,18 @@ class Linear[T: TensorDType + Float]:
         projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
         return tensor.convert_like(projected, input)
 
+class LinearWithBias[T: TensorDType + Float]:
+    weight: Tensor[T, dynamic, dynamic]
+    bias: Tensor[T]
+
+    def forward(self, input: Tensor[T]) -> Tensor[T]:
+        compute_input = tensor.compute_as_f32(input)
+        compute_weight = tensor.compute_as_f32(weight)
+        projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
+        compute_bias = tensor.compute_as_f32(bias)
+        biased = tensor.ranked_add(projected, tensor.broadcast_like(compute_bias, projected))
+        return tensor.convert_like(biased, input)
+
 class RMSNorm[T: TensorDType + Float]:
     weight: Tensor[T]
     epsilon: f32

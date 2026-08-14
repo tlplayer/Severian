@@ -41,6 +41,52 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
     }
 }
 
+pub(super) fn declared_value_type(
+    ty: &Type,
+    aliases: &HashMap<String, String>,
+) -> ValueType {
+    let Some(name) = class_type_name(ty) else {
+        return lower_type(ty).unwrap_or(ValueType::Any);
+    };
+    if aliases.contains_key(&format!("__trait.{name}")) {
+        ValueType::Interface(TypeDefinitionId::from_name(&canonical_type_identity(
+            ty, aliases,
+        )))
+    } else {
+        lower_type(ty).unwrap_or(ValueType::Any)
+    }
+}
+
+fn canonical_type_identity(ty: &Type, aliases: &HashMap<String, String>) -> String {
+    match ty {
+        Type::Named(path) => {
+            let raw = path
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            let mut identity = canonical_declared_type_name(&raw, aliases);
+            if !path.args.is_empty() {
+                let arguments = path
+                    .args
+                    .iter()
+                    .map(|argument| match argument {
+                        TypeArg::Type { ty, .. } => canonical_type_identity(ty, aliases),
+                        TypeArg::Dimension { size, .. } => size.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                identity.push('[');
+                identity.push_str(&arguments);
+                identity.push(']');
+            }
+            identity
+        }
+        _ => declaration_type_key(ty),
+    }
+}
+
 fn is_conventional_type_variable(name: &str) -> bool {
     matches!(name, "type" | "T" | "K" | "V")
 }
@@ -163,6 +209,7 @@ pub(super) fn value_type_name(ty: ValueType) -> String {
         ValueType::Set => "set".into(),
         ValueType::Result => "Result".into(),
         ValueType::Option => "Option".into(),
+        ValueType::Interface(definition) => format!("interface#{}", definition.0),
         ValueType::TensorAny => "Tensor".into(),
         ValueType::Tensor(tensor) => {
             let mut parts = vec![tensor.element.name().to_owned()];

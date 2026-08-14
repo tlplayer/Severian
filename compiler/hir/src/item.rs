@@ -364,6 +364,11 @@ pub enum ValueType {
     Function,
     Result,
     Option,
+    /// A statically resolved structural trait specialization. The stable
+    /// definition identity includes concrete generic arguments, so
+    /// `Module[f32]` and `Module[bf16]` remain distinct through HIR and MIR.
+    /// Runtime lowering uses the ordinary object-pointer ABI.
+    Interface(TypeDefinitionId),
     Any,
     Unit,
 }
@@ -470,6 +475,8 @@ pub enum Instruction {
     TryLet {
         name: BindingRef,
         value: Expression,
+        /// Static type of the successful Result payload.
+        payload_type: ValueType,
         receiver: Option<ReceiverType>,
     },
     Assign {

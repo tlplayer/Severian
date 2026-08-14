@@ -35,6 +35,24 @@ def project_bf16(
     return projection.forward(x)
 
 @tensor
+def project_with_bias_f32(
+    x: Tensor[f32, 4, 16],
+    weight: Tensor[f32, 8, 16],
+    bias: Tensor[f32, 8],
+) -> Tensor[f32, 4, 8]:
+    projection = layers.LinearWithBias[f32](weight, bias)
+    return projection.forward(x)
+
+@tensor
+def project_with_bias_bf16(
+    x: Tensor[bf16, 4, 16],
+    weight: Tensor[bf16, 8, 16],
+    bias: Tensor[bf16, 8],
+) -> Tensor[bf16, 4, 8]:
+    projection = layers.LinearWithBias[bf16](weight, bias)
+    return projection.forward(x)
+
+@tensor
 def rms_norm_f32(
     x: Tensor[f32, 2, 4, 8],
     weight: Tensor[f32, 8],

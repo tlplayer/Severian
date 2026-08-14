@@ -308,6 +308,11 @@ impl TypeTable {
                 }
             }
             ValueType::Option => TypeKind::Option(self.intern(TypeKind::Any)),
+            ValueType::Interface(definition) => TypeKind::Named {
+                definition,
+                name: format!("interface#{}", definition.0),
+                arguments: Vec::new(),
+            },
             ValueType::Any => TypeKind::Any,
             ValueType::Unit => TypeKind::Unit,
         };

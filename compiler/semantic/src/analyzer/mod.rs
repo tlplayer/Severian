@@ -45,6 +45,7 @@ struct Signature {
     target: CallTarget,
     params: Vec<SignatureParameter>,
     returns: SignatureType,
+    result_ok: Option<SignatureType>,
 }
 
 #[derive(Clone)]
@@ -72,11 +73,11 @@ struct GenericTensorType {
 }
 
 impl SignatureType {
-    fn erased(&self) -> ValueType {
+    fn resolved(&self, aliases: &HashMap<String, String>) -> ValueType {
         match self {
             Self::Concrete(ty) => *ty,
             Self::TensorGeneric(_) => ValueType::TensorAny,
-            Self::Declared(_) => ValueType::Any,
+            Self::Declared(ty) => declared_value_type(ty, aliases),
         }
     }
 }

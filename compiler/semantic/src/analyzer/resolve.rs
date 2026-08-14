@@ -289,8 +289,7 @@ pub(super) fn lower_class_function(
         let ty = param
             .ty
             .as_ref()
-            .map(lower_type)
-            .transpose()?
+            .map(|ty| declared_value_type(ty, aliases))
             .unwrap_or(ValueType::Any);
         let default = param
             .default

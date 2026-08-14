@@ -81,7 +81,7 @@ pub(super) fn lower_declared_call(
                     format!(
                         "E000203: missing argument `{}`; expected `{}`",
                         param.name,
-                        value_type_name(param.ty.erased())
+                        value_type_name(param.ty.resolved(aliases))
                     ),
                 ))
             }
@@ -103,7 +103,7 @@ pub(super) fn lower_declared_call(
         "math.sqrt" => "sqrt",
         _ => linked_function,
     };
-    let return_type = instantiate_signature_type(&signature.returns, &tensor_types);
+    let return_type = instantiate_signature_type(&signature.returns, &tensor_types, aliases);
     let return_type = tensor::infer_call_result(&signature.target, &args, return_type, call.span)?;
     Ok((
         Expression::Call {
@@ -220,6 +220,7 @@ fn compatible_signature(
 fn instantiate_signature_type(
     ty: &SignatureType,
     bindings: &HashMap<String, TensorElementType>,
+    aliases: &HashMap<String, String>,
 ) -> ValueType {
     match ty {
         SignatureType::Concrete(ty) => *ty,
@@ -233,7 +234,7 @@ fn instantiate_signature_type(
                 dimensions: generic.dimensions,
             })
         }
-        SignatureType::Declared(_) => ValueType::Any,
+        SignatureType::Declared(ty) => declared_value_type(ty, aliases),
     }
 }
 
@@ -406,6 +407,7 @@ pub(super) fn lower_signature(
     generic_params: &[severian_ast::GenericParameter],
     params: &[severian_ast::Parameter],
     return_type: Option<&Type>,
+    aliases: &HashMap<String, String>,
 ) -> Result<Signature, SemanticError> {
     let generic_params = generic_params
         .iter()
@@ -438,6 +440,9 @@ pub(super) fn lower_signature(
         || Ok(SignatureType::Concrete(ValueType::Unit)),
         |ty| lower_signature_type(ty, &generic_params),
     )?;
+    let result_ok = result_ok_type(return_type)
+        .map(|ty| lower_signature_type(ty, &generic_params))
+        .transpose()?;
     let return_any_origin = signature_any_origin(
         &returns,
         return_type.is_some(),
@@ -448,8 +453,8 @@ pub(super) fn lower_signature(
         None => CallTarget::source(name),
     }
     .with_signature(
-        params.iter().map(|param| param.ty.erased()),
-        returns.erased(),
+        params.iter().map(|param| param.ty.resolved(aliases)),
+        returns.resolved(aliases),
     )
     .with_signature_origins(
         params.iter().map(|param| param.any_origin).collect(),
@@ -459,7 +464,57 @@ pub(super) fn lower_signature(
         target,
         params,
         returns,
+        result_ok,
     })
+}
+
+fn result_ok_type(ty: Option<&Type>) -> Option<&Type> {
+    match ty? {
+        Type::Result { ok, .. } => Some(ok),
+        Type::Named(path)
+            if path.segments.first().is_some_and(|segment| segment.name == "Result") =>
+        {
+            path.args.first().and_then(TypeArg::as_type)
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn result_payload_type(
+    expression: &Expr,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Option<ValueType> {
+    let Expr::Call(call) = expression else {
+        return None;
+    };
+    let function = called_function_name(call.callee.as_ref(), aliases)?;
+    signatures
+        .get(&function)
+        .or_else(|| signatures.get(function.rsplit('.').next()?))?
+        .result_ok
+        .as_ref()
+        .map(|ty| ty.resolved(aliases))
+}
+
+pub(super) fn result_payload_receiver(
+    expression: &Expr,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Option<ReceiverType> {
+    let Expr::Call(call) = expression else {
+        return None;
+    };
+    let function = called_function_name(call.callee.as_ref(), aliases)?;
+    let payload = signatures
+        .get(&function)
+        .or_else(|| signatures.get(function.rsplit('.').next()?))?
+        .result_ok
+        .as_ref()?;
+    let SignatureType::Declared(ty) = payload else {
+        return None;
+    };
+    declared_receiver_type(ty, aliases)
 }
 
 fn signature_any_origin(

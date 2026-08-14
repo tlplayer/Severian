@@ -1,4 +1,4 @@
-use severian_hir::{TensorElementType, ValueType};
+use severian_hir::{Instruction, TensorElementType, TypeDefinitionId, ValueType};
 use severian_lexer::lex;
 use severian_parser::parse;
 use severian_semantic::{analyze, analyze_with_interfaces};
@@ -71,7 +71,72 @@ fn accepts_structural_generic_trait_conformance() {
         )
     );
 
-    analyze_source(&source).unwrap();
+    let program = analyze_source(&source).unwrap();
+    let consume = program
+        .functions
+        .iter()
+        .find(|function| function.name == "consume")
+        .unwrap();
+    let interface = ValueType::Interface(TypeDefinitionId::from_name("Module[f32]"));
+    assert_eq!(consume.params[0].ty, interface);
+    assert_ne!(consume.params[0].ty, ValueType::Any);
+}
+
+#[test]
+fn preserves_generic_interface_identity_through_result_propagation() {
+    let source = format!(
+        "{}{}",
+        PRELUDE,
+        concat!(
+            "def load(weight: Tensor[f32]) -> Result[Module[f32], string]:\n",
+            "    return Linear[f32](weight)\n",
+            "\n",
+            "def apply(weight: Tensor[f32], x: Tensor[f32]) -> Tensor[f32]:\n",
+            "    module = load(weight)\n",
+            "    return module.forward(x)\n",
+        )
+    );
+    let program = analyze_source(&source).unwrap();
+    let apply = program
+        .functions
+        .iter()
+        .find(|function| function.name == "apply")
+        .unwrap();
+    let Instruction::TryLet {
+        payload_type,
+        receiver: Some(receiver),
+        ..
+    } = &apply.instructions[0]
+    else {
+        panic!("expected a typed propagated Result payload");
+    };
+    assert_eq!(
+        *payload_type,
+        ValueType::Interface(TypeDefinitionId::from_name("Module[f32]"))
+    );
+    assert_eq!(receiver.name, "Module[f32]");
+    assert!(!receiver.concrete);
+}
+
+#[test]
+fn keeps_generic_interface_specializations_distinct() {
+    let source = format!(
+        "{}{}",
+        PRELUDE,
+        concat!(
+            "def use_f32(module: Module[f32], x: Tensor[f32]) -> Tensor[f32]:\n",
+            "    return module.forward(x)\n",
+            "\n",
+            "def use_bf16(module: Module[bf16], x: Tensor[bf16]) -> Tensor[bf16]:\n",
+            "    return module.forward(x)\n",
+        )
+    );
+    let program = analyze_source(&source).unwrap();
+    let f32_interface = program.functions[0].params[0].ty;
+    let bf16_interface = program.functions[1].params[0].ty;
+    assert_ne!(f32_interface, bf16_interface);
+    assert!(matches!(f32_interface, ValueType::Interface(_)));
+    assert!(matches!(bf16_interface, ValueType::Interface(_)));
 }
 
 #[test]
@@ -168,7 +233,16 @@ fn imported_generic_traits_retain_their_concrete_method_contract() {
     );
     let module = parse(&lex(source).unwrap()).unwrap();
 
-    analyze_with_interfaces(&module, &[("contracts".into(), contracts)]).unwrap();
+    let program = analyze_with_interfaces(&module, &[("contracts".into(), contracts)]).unwrap();
+    let consume = program
+        .functions
+        .iter()
+        .find(|function| function.name == "consume")
+        .unwrap();
+    assert_eq!(
+        consume.params[0].ty,
+        ValueType::Interface(TypeDefinitionId::from_name("contracts.Module[f32]"))
+    );
 }
 
 #[test]

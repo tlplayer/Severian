@@ -133,6 +133,7 @@ pub fn mlir_type(ty: ValueType) -> &'static str {
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
+        | ValueType::Interface(_)
         | ValueType::Any => "!llvm.ptr",
     }
 }
@@ -154,6 +155,7 @@ pub fn task_type_suffix(ty: ValueType) -> &'static str {
         | ValueType::Function
         | ValueType::Result
         | ValueType::Option
+        | ValueType::Interface(_)
         | ValueType::Any => "ptr",
     }
 }

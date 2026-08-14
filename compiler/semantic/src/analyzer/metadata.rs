@@ -599,7 +599,7 @@ pub(super) fn register_class_field_aliases(
         if let Some(ty) = &field.ty {
             aliases.insert(
                 format!("__class_field_type.{class}.{}", field.name.name),
-                encode_field_type(lower_type(ty)?).to_owned(),
+                encode_field_type(declared_value_type(ty, aliases)).to_owned(),
             );
             if let Some(field_class) = class_type_name(ty) {
                 aliases.insert(
@@ -619,8 +619,7 @@ pub(super) fn register_method_return_alias(
     return_type: Option<&Type>,
 ) -> Result<(), SemanticError> {
     let ty = return_type
-        .map(lower_type)
-        .transpose()?
+        .map(|ty| declared_value_type(ty, aliases))
         .unwrap_or(ValueType::Unit);
     aliases.insert(
         format!("__class_method_return.{class}.{method}"),
@@ -726,6 +725,7 @@ pub(super) fn encode_field_type(ty: ValueType) -> String {
         ValueType::Function => "function".into(),
         ValueType::Result => "result".into(),
         ValueType::Option => "option".into(),
+        ValueType::Interface(definition) => format!("interface:{}", definition.0),
         ValueType::Any => "any".into(),
         ValueType::Unit => "unit".into(),
     }
@@ -750,6 +750,13 @@ fn encode_tensor_type(tensor: TensorType) -> String {
 pub(super) fn decode_field_type(value: &str) -> Option<ValueType> {
     if value.starts_with("tensor:") {
         return decode_tensor_type(value).map(ValueType::Tensor);
+    }
+    if let Some(identity) = value.strip_prefix("interface:") {
+        return identity
+            .parse::<u64>()
+            .ok()
+            .map(TypeDefinitionId)
+            .map(ValueType::Interface);
     }
     Some(match value {
         "int" => ValueType::Int,

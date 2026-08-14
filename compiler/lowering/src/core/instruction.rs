@@ -14,6 +14,7 @@ impl LowerContext<'_> {
                 Instruction::TryLet {
                     name,
                     value,
+                    payload_type,
                     receiver,
                 } => {
                     let (result, _) = self.lower_expression(value);
@@ -51,7 +52,7 @@ impl LowerContext<'_> {
                         self.receiver_types
                             .insert(payload.clone(), receiver.clone());
                     }
-                    self.variables.insert(name.id, (payload, ValueType::Any));
+                    self.variables.insert(name.id, (payload, *payload_type));
                     self.terminated = false;
                 }
                 Instruction::Assign { target, op, value } => {

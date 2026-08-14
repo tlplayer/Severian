@@ -660,7 +660,7 @@ pub(super) fn lower_expression_kind(
             if rule.action == severian_ast::ChaosAction::Return {
                 let declared_return = signatures
                     .get(&function.name)
-                    .map_or(return_type, |signature| signature.returns.erased());
+                    .map_or(return_type, |signature| signature.returns.resolved(aliases));
                 compatible(rule.value.span(), value_type, declared_return)?;
             }
             Ok((

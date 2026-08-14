@@ -269,7 +269,7 @@ fn analyze_specialized(
                 }
             }
             let signature =
-                lower_signature(&key, native_symbol, generic_params, params, return_type)?;
+                lower_signature(&key, native_symbol, generic_params, params, return_type, &aliases)?;
             if signatures.insert(key.clone(), signature.clone()).is_some() {
                 return Err(error(
                     name.span,
@@ -302,6 +302,7 @@ fn analyze_specialized(
             generic_params,
             params,
             return_type,
+            &aliases,
         )?;
         if signatures.insert(name.name.clone(), signature).is_some() {
             return Err(error(
@@ -315,7 +316,10 @@ fn analyze_specialized(
     let mut globals = Vec::new();
     for item in &module.items {
         if let Item::Statement(Stmt::Let(binding)) = item {
-            let declared = binding.ty.as_ref().map(lower_type).transpose()?;
+            let declared = binding
+                .ty
+                .as_ref()
+                .map(|ty| declared_value_type(ty, &aliases));
             let source = binding
                 .value
                 .as_ref()
@@ -360,7 +364,7 @@ fn analyze_specialized(
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
         for (index, parameter) in signature.params.iter().enumerate() {
-            let parameter_type = parameter.ty.erased();
+            let parameter_type = parameter.ty.resolved(&function_aliases);
             let default = parameter
                 .default
                 .as_ref()
@@ -404,12 +408,12 @@ fn analyze_specialized(
         let mut instructions = lower_block(
             &function.body,
             &mut scope,
-            signature.returns.erased(),
+            signature.returns.resolved(&function_aliases),
             &signatures,
             &function_aliases,
         )?;
         if function.native_symbol.is_none()
-            && signature.returns.erased() != ValueType::Unit
+            && signature.returns.resolved(&function_aliases) != ValueType::Unit
             && !always_returns(&instructions)
         {
             return Err(error(
@@ -459,7 +463,7 @@ fn analyze_specialized(
             decorators,
             contract,
             params,
-            return_type: signature.returns.erased(),
+            return_type: signature.returns.resolved(&function_aliases),
             instructions,
             tests,
         });
@@ -495,8 +499,7 @@ fn analyze_specialized(
             let ty = field
                 .ty
                 .as_ref()
-                .map(lower_type)
-                .transpose()?
+                .map(|ty| declared_value_type(ty, &aliases))
                 .unwrap_or(ValueType::Any);
             constraint_scope.insert(
                 field.name.name.clone(),
@@ -553,8 +556,7 @@ fn analyze_specialized(
             let returns = method
                 .return_type
                 .as_ref()
-                .map(lower_type)
-                .transpose()?
+                .map(|ty| declared_value_type(ty, &aliases))
                 .unwrap_or(ValueType::Unit);
             methods.push(lower_class_function(
                 FunctionId::from_name(&format!("{}.{}", class.name.name, method.name.name)),
@@ -580,8 +582,8 @@ fn analyze_specialized(
             field_types: class
                 .fields
                 .iter()
-                .map(|field| field.ty.as_ref().map(lower_type).transpose())
-                .collect::<Result<Vec<_>, _>>()?
+                .map(|field| field.ty.as_ref().map(|ty| declared_value_type(ty, &aliases)))
+                .collect::<Vec<_>>()
                 .into_iter()
                 .map(|ty| ty.unwrap_or(ValueType::Any))
                 .collect(),

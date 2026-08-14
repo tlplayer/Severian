@@ -96,6 +96,39 @@ fn generic_linear_classes_specialize_into_typed_mir() {
             }
 
             for (class_name, storage) in [
+                ("layers_LinearWithBias__f32", TensorElementType::F32),
+                ("layers_LinearWithBias__bf16", TensorElementType::BF16),
+            ] {
+                let forward = compilation
+                    .mir
+                    .functions
+                    .iter()
+                    .find(|function| function.name == format!("{class_name}.forward"))
+                    .unwrap_or_else(|| panic!("missing MIR function {class_name}.forward"));
+                assert!(forward.tensor_operations.iter().any(|operation| matches!(
+                    operation,
+                    TensorOp::Matmul(matmul)
+                        if matmul.accumulation == TensorElementType::F32
+                            && matmul.result.element == TensorElementType::F32
+                )));
+                assert!(forward.tensor_operations.iter().any(|operation| matches!(
+                    operation,
+                    TensorOp::Broadcast(broadcast)
+                        if broadcast.result.element == TensorElementType::F32
+                )));
+                assert!(forward.tensor_operations.iter().any(|operation| matches!(
+                    operation,
+                    TensorOp::Elementwise(elementwise)
+                        if elementwise.kind == ElementwiseKind::Add
+                            && elementwise.result.element == TensorElementType::F32
+                )));
+                assert_eq!(
+                    forward.tensor_operations.last().unwrap().result().element,
+                    storage
+                );
+            }
+
+            for (class_name, storage) in [
                 ("layers_Linear__f32", TensorElementType::F32),
                 ("layers_Linear__bf16", TensorElementType::BF16),
             ] {
