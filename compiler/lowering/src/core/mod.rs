@@ -22,6 +22,7 @@ struct LoweringEnvironment<'a> {
     next_closure: &'a Rc<Cell<usize>>,
     function_closures: &'a Rc<RefCell<HashMap<FunctionId, String>>>,
     native_symbols: &'a HashMap<FunctionId, String>,
+    sources: &'a severian_hir::SourceMap,
 }
 
 fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, output: &mut String) {
@@ -57,6 +58,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         next_closure: Rc::clone(environment.next_closure),
         function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
+        sources: environment.sources,
         classes: environment.classes,
         field_object: None,
         field_names: HashSet::new(),
@@ -81,6 +83,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         is_main,
         closure_callback: false,
         placement: TaskPlacement::Default,
+        active_hir_id: None,
     };
     for (index, parameter) in function.params.iter().enumerate() {
         if let Some(receiver) = &parameter.receiver {
@@ -148,6 +151,7 @@ fn lower_class_function(
         next_closure: Rc::clone(environment.next_closure),
         function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
+        sources: environment.sources,
         classes: environment.classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
@@ -183,6 +187,7 @@ fn lower_class_function(
         closure_callback: false,
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
+        active_hir_id: None,
     };
     for (index, parameter) in function.params.iter().enumerate() {
         if let Some(receiver) = &parameter.receiver {
@@ -227,6 +232,7 @@ struct LowerContext<'a> {
     next_closure: Rc<Cell<usize>>,
     function_closures: Rc<RefCell<HashMap<FunctionId, String>>>,
     native_symbols: &'a HashMap<FunctionId, String>,
+    sources: &'a severian_hir::SourceMap,
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,
@@ -246,6 +252,7 @@ struct LowerContext<'a> {
     declared_return: ValueType,
     placement: TaskPlacement,
     loop_targets: Vec<LoopTarget>,
+    active_hir_id: Option<severian_hir::HirId>,
 }
 
 mod bridge;

@@ -1,4 +1,5 @@
 mod build_options;
+mod runtime_diagnostics;
 mod scaffold;
 
 use severian_backend::{NativeCompileOptions, NativeSanitizer};
@@ -21,7 +22,11 @@ use std::{
 
 fn main() {
     if let Err(error) = execute(std::env::args().skip(1).collect()) {
-        eprintln!("error: {error}");
+        if error.starts_with("error[E09") {
+            eprintln!("{error}");
+        } else {
+            eprintln!("error: {error}");
+        }
         std::process::exit(1);
     }
 }
@@ -35,7 +40,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         if args.len() != 1 {
             return Err(usage());
         }
-        return run_targets(Path::new(command), &[]);
+        return run_targets(Path::new(command), &[], None);
     }
 
     match command {
@@ -1583,24 +1588,17 @@ fn lint_command(args: &[String]) -> Result<(), String> {
 }
 
 fn run_command(args: &[String]) -> Result<(), String> {
-    let separator = args.iter().position(|argument| argument == "--");
-    let (target_arguments, application_arguments) = match separator {
-        Some(index) => (&args[..index], &args[index + 1..]),
-        None => (args, &[][..]),
-    };
-    if target_arguments.len() > 1 {
-        return Err(format!(
-            "run accepts one project or source path; put application arguments after `--`\n{}",
-            usage()
-        ));
-    }
-    run_targets(
-        target_arguments.first().map_or(Path::new("."), Path::new),
-        application_arguments,
-    )
+    let (input, application_arguments, diagnostics) = runtime_diagnostics::parse_run_args(args)
+        .map_err(|error| format!("{error}\n{}", usage()))?;
+    run_targets(&input, &application_arguments, diagnostics)
 }
 
-fn run_targets(input: &Path, application_arguments: &[String]) -> Result<(), String> {
+fn run_targets(
+    input: &Path,
+    application_arguments: &[String],
+    diagnostics_override: Option<build_options::DiagnosticsMode>,
+) -> Result<(), String> {
+    let diagnostics = diagnostics_override.unwrap_or(build_options::load(input)?.diagnostics);
     let targets = resolve_targets(input)?;
     if targets.is_empty() {
         return Err(format!(
@@ -1641,12 +1639,23 @@ fn run_targets(input: &Path, application_arguments: &[String]) -> Result<(), Str
                 command.env("SEVERIAN_ROCM_PJRT_PLUGIN", plugin);
             }
         }
+        let report = runtime_diagnostics::report_path(&output);
+        command.env(runtime_diagnostics::REPORT_ENV, &report);
         let status = command
             .status()
             .map_err(|error| format!("could not run {}: {error}", output.display()))?;
         if !status.success() {
-            return Err(format!("{} exited with {status}", output.display()));
+            if let Some(rendered) = runtime_diagnostics::take_report(&report, diagnostics, &output)?
+            {
+                return Err(rendered);
+            }
+            return Err(runtime_diagnostics::signal_fallback(
+                status,
+                &output,
+                diagnostics,
+            ));
         }
+        let _ = fs::remove_file(report);
     }
     Ok(())
 }
@@ -2651,7 +2660,7 @@ fn usage() -> String {
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",
         "  build [path] [--emit KIND] [--target native|xla] [--diagnostics user|internal] [--verify-each] [--max-errors N] [--message-format text|json]",
-        "  run [path] [-- args...]        build and run native code with application arguments",
+        "  run [path] [--diagnostics user|internal] [-- args...] build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --profile          run only profile tests and enforce profile contracts",
         "  test [path] --memory [--leaks] run tests with native memory diagnostics",

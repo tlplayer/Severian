@@ -3,43 +3,46 @@ use super::*;
 impl LowerContext<'_> {
     pub(super) fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
         match expression {
-            Expression::Typed { ty, expression, .. } => {
-                if let Expression::Conditional {
+            Expression::Typed { id, ty, expression } => {
+                let previous = self.active_hir_id.replace(*id);
+                let result = if let Expression::Conditional {
                     condition,
                     then_expression,
                     else_expression,
                 } = expression.kind()
                 {
-                    return self.lower_conditional_expression(
+                    self.lower_conditional_expression(
                         condition,
                         then_expression,
                         else_expression,
                         Some(*ty),
-                    );
-                }
-                if let Expression::Slice {
+                    )
+                } else if let Expression::Slice {
                     object,
                     start,
                     end,
                     step,
                 } = expression.kind()
                 {
-                    return self.lower_slice_expression(object, start, end, step, Some(*ty));
-                }
-                let (value, lowered_type) = self.lower_expression(expression);
-                if lowered_type == ValueType::Any && *ty != ValueType::Any {
-                    let (value, coerced_type) = self.unbox_value((value, lowered_type), *ty);
-                    (
-                        value,
-                        if coerced_type == ValueType::Any {
-                            *ty
-                        } else {
-                            coerced_type
-                        },
-                    )
+                    self.lower_slice_expression(object, start, end, step, Some(*ty))
                 } else {
-                    (value, lowered_type)
-                }
+                    let (value, lowered_type) = self.lower_expression(expression);
+                    if lowered_type == ValueType::Any && *ty != ValueType::Any {
+                        let (value, coerced_type) = self.unbox_value((value, lowered_type), *ty);
+                        (
+                            value,
+                            if coerced_type == ValueType::Any {
+                                *ty
+                            } else {
+                                coerced_type
+                            },
+                        )
+                    } else {
+                        (value, lowered_type)
+                    }
+                };
+                self.active_hir_id = previous;
+                result
             }
             Expression::Integer(value) => {
                 let result = self.fresh_value();
@@ -2113,12 +2116,14 @@ impl LowerContext<'_> {
                 if object_type == ValueType::Any {
                     let index = self.lower_expression(index);
                     let key = self.box_value(index);
+                    self.emit_runtime_site();
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
                 }
                 let index = self.lower_expression(index);
                 let result = self.fresh_value();
+                self.emit_runtime_site();
                 if object_type == ValueType::Map {
                     let key = self.box_value(index);
                     writeln!(self.output, "    {result} = llvm.call @__sev_map_get({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
@@ -2764,6 +2769,9 @@ impl LowerContext<'_> {
                 }
                 let left = self.lower_expression(left);
                 let right = self.lower_expression(right);
+                if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+                    self.emit_runtime_site();
+                }
                 if *op == BinaryOp::Power {
                     return self.lower_power_values(left, right);
                 }

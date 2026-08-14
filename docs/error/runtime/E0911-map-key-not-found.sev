@@ -1,0 +1,7 @@
+# E0911: a dynamic map key is not present.
+def select(key: string) -> int:
+    values = {"known": 10}
+    return values[key]
+
+def main():
+    print(select("missing"))

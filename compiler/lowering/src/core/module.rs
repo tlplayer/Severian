@@ -26,6 +26,12 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     for function in &program.functions {
         collect_strings(&function.instructions, &mut strings);
     }
+    for file in program.metadata.sources.files() {
+        let path = file.path.to_string_lossy().into_owned();
+        if !strings.contains(&path) {
+            strings.push(path);
+        }
+    }
 
     let mut output = String::from("module {\n");
     for (index, value) in strings.iter().enumerate() {
@@ -46,6 +52,9 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         "  llvm.func @snprintf(!llvm.ptr, i64, !llvm.ptr, ...) -> i32\n",
         "  llvm.func @malloc(i64) -> !llvm.ptr\n",
         "  llvm.func @abort()\n",
+        "  llvm.func @__sev_runtime_set_site(!llvm.ptr, i64, i64)\n",
+        "  llvm.func @__sev_runtime_fail_assertion()\n",
+        "  llvm.func @__sev_runtime_fail_division_zero()\n",
         "  llvm.func @strtod(!llvm.ptr, !llvm.ptr) -> f64\n\n",
         "  llvm.func @__sev_strlen(!llvm.ptr) -> i64\n",
         "  llvm.func @__sev_string_length(!llvm.ptr) -> i64\n\n",
@@ -487,6 +496,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         next_closure: &next_closure,
         function_closures: &function_closures,
         native_symbols: &native_symbols,
+        sources: &program.metadata.sources,
     };
     for class in &program.classes {
         for constructor in &class.constructors {

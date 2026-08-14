@@ -119,6 +119,46 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "A recoverable Result must be propagated, handled, or explicitly discarded with a reviewable reason.",
         },
         Explanation {
+            code: "E0902",
+            title: "Runtime assertion failed",
+            text: "An `assert` condition evaluated to false while the native program was running. Inspect the labeled condition and the values that produced it; assertions should describe invariants rather than replace normal Result handling.",
+        },
+        Explanation {
+            code: "E0910",
+            title: "Runtime index out of bounds",
+            text: "A dynamic index was outside the valid range of a collection or string. The diagnostic reports both the requested index and the runtime length; validate external indices or check the length before indexing.",
+        },
+        Explanation {
+            code: "E0911",
+            title: "Runtime map key not found",
+            text: "A map lookup requested a key that was not present. Check membership first, use a default-returning lookup, or handle the missing-key case explicitly.",
+        },
+        Explanation {
+            code: "E0912",
+            title: "Runtime slice step is zero",
+            text: "A dynamic slice step evaluated to zero. A slice cannot advance with a zero step; use a positive step for forward traversal or a negative step for reverse traversal.",
+        },
+        Explanation {
+            code: "E0920",
+            title: "Runtime division by zero",
+            text: "A divisor evaluated to zero at runtime. Validate the divisor, define an explicit zero case, or return a recoverable Result before performing the operation.",
+        },
+        Explanation {
+            code: "E0921",
+            title: "Invalid runtime conversion",
+            text: "A dynamically typed value could not be converted to the concrete type required at this operation or call boundary. Validate the value or use a parsing API that returns Result.",
+        },
+        Explanation {
+            code: "E0980",
+            title: "Runtime invariant failure",
+            text: "The generated runtime encountered an internal state that valid compiled Severian code should not produce. Rerun with internal diagnostics and report the compiler version, source location, and internal detail.",
+        },
+        Explanation {
+            code: "E0990",
+            title: "Unclassified native process failure",
+            text: "The native program terminated without producing Severian's structured runtime diagnostic record. Internal diagnostics include the signal or exit status and artifact path needed to investigate a compiler, runtime, foreign-library, or hardware failure.",
+        },
+        Explanation {
             code: "dead-code::function",
             title: "Unreachable function",
             text: "The function cannot be reached from main, exported functions, tests, native ABI roots, or another reachable function. Remove it or make the intended entry path explicit.",

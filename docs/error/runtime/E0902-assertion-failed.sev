@@ -1,0 +1,6 @@
+# E0902: an assertion that depends on runtime data evaluates to false.
+def require_answer(value: int):
+    assert(value == 42)
+
+def main():
+    require_answer(41)

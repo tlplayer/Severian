@@ -159,6 +159,50 @@ impl LowerContext<'_> {
                 return (result, ValueType::Bool);
             }
         }
+        if matches!(op, BinaryOp::Div | BinaryOp::Mod)
+            && matches!(operand_type, ValueType::Int | ValueType::Float)
+        {
+            let zero = self.fresh_value();
+            let nonzero = self.fresh_value();
+            if operand_type == ValueType::Float {
+                writeln!(
+                    self.output,
+                    "    {zero} = llvm.mlir.constant(0.0 : f64) : f64"
+                )
+                .unwrap();
+                writeln!(
+                    self.output,
+                    "    {nonzero} = llvm.fcmp \"une\" {right}, {zero} : f64"
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    self.output,
+                    "    {zero} = llvm.mlir.constant(0 : i64) : i64"
+                )
+                .unwrap();
+                writeln!(
+                    self.output,
+                    "    {nonzero} = llvm.icmp \"ne\" {right}, {zero} : i64"
+                )
+                .unwrap();
+            }
+            let valid = self.fresh_block();
+            let failed = self.fresh_block();
+            writeln!(
+                self.output,
+                "    llvm.cond_br {nonzero}, ^bb{valid}, ^bb{failed}"
+            )
+            .unwrap();
+            writeln!(self.output, "  ^bb{failed}:").unwrap();
+            writeln!(
+                self.output,
+                "    llvm.call @__sev_runtime_fail_division_zero() : () -> ()"
+            )
+            .unwrap();
+            writeln!(self.output, "    llvm.unreachable").unwrap();
+            writeln!(self.output, "  ^bb{valid}:").unwrap();
+        }
         let result = self.fresh_value();
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
             let operation = if op == BinaryOp::And {

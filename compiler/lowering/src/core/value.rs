@@ -1,6 +1,55 @@
 use super::*;
 
 impl LowerContext<'_> {
+    pub(super) fn emit_runtime_site(&mut self) {
+        self.emit_runtime_site_for(self.active_hir_id);
+    }
+
+    pub(super) fn emit_runtime_site_for(&mut self, id: Option<severian_hir::HirId>) {
+        let Some(id) = id else {
+            return;
+        };
+        let Some(span) = self.sources.expression_span(id) else {
+            return;
+        };
+        let Some(file) = self.sources.file(span.file) else {
+            return;
+        };
+        let Some(before) = file.source.get(..span.range.start) else {
+            return;
+        };
+        let line = before.bytes().filter(|byte| *byte == b'\n').count() + 1;
+        let column = before
+            .rsplit_once('\n')
+            .map_or(before, |(_, tail)| tail)
+            .chars()
+            .count()
+            + 1;
+        let path = file.path.to_string_lossy();
+        let Some(index) = self.strings.iter().position(|value| value == path.as_ref()) else {
+            return;
+        };
+        let path_value = self.fresh_value();
+        let line_value = self.fresh_value();
+        let column_value = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {path_value} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
+        )
+        .unwrap();
+        writeln!(
+            self.output,
+            "    {line_value} = llvm.mlir.constant({line} : i64) : i64"
+        )
+        .unwrap();
+        writeln!(
+            self.output,
+            "    {column_value} = llvm.mlir.constant({column} : i64) : i64"
+        )
+        .unwrap();
+        writeln!(self.output, "    llvm.call @__sev_runtime_set_site({path_value}, {line_value}, {column_value}) : (!llvm.ptr, i64, i64) -> ()").unwrap();
+    }
+
     pub(super) fn carry_value_metadata(&mut self, source: &str, target: &str) {
         if let Some(class) = self.object_classes.get(source).cloned() {
             self.object_classes.insert(target.to_owned(), class);
@@ -87,6 +136,7 @@ impl LowerContext<'_> {
             }
         }
         let result = self.fresh_value();
+        self.emit_runtime_site();
         if dynamic {
             writeln!(self.output, "    {result} = llvm.call @__sev_value_slice({object}, {}, {}, {}) : (!llvm.ptr, i64, i64, i64) -> !llvm.ptr", bounds[0], bounds[1], bounds[2]).unwrap();
             return (result, ValueType::Any);
@@ -363,6 +413,7 @@ impl LowerContext<'_> {
             }
             _ => return (value, ty),
         };
+        self.emit_runtime_site();
         let result = self.fresh_value();
         writeln!(
             self.output,
@@ -635,6 +686,7 @@ impl LowerContext<'_> {
             next_closure: Rc::clone(&self.next_closure),
             function_closures: Rc::clone(&self.function_closures),
             native_symbols: self.native_symbols,
+            sources: self.sources,
             classes: self.classes,
             field_object: None,
             field_names: HashSet::new(),
@@ -654,6 +706,7 @@ impl LowerContext<'_> {
             is_main: false,
             closure_callback: false,
             placement: TaskPlacement::Default,
+            active_hir_id: self.active_hir_id,
         }
     }
 }

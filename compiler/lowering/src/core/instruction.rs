@@ -255,6 +255,7 @@ impl LowerContext<'_> {
                     }
                 }
                 Instruction::Assert(expression) => {
+                    let runtime_site = expression.hir_id();
                     let lowered = self.lower_expression(expression);
                     let (condition, _) = self.unbox_value(lowered, ValueType::Bool);
                     let passed = self.fresh_block();
@@ -265,7 +266,12 @@ impl LowerContext<'_> {
                     )
                     .unwrap();
                     writeln!(self.output, "  ^bb{failed}:").unwrap();
-                    writeln!(self.output, "    llvm.call @abort() : () -> ()").unwrap();
+                    self.emit_runtime_site_for(runtime_site);
+                    writeln!(
+                        self.output,
+                        "    llvm.call @__sev_runtime_fail_assertion() : () -> ()"
+                    )
+                    .unwrap();
                     writeln!(self.output, "    llvm.unreachable").unwrap();
                     writeln!(self.output, "  ^bb{passed}:").unwrap();
                     self.terminated = false;

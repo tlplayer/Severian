@@ -1,0 +1,6 @@
+# E0920: a dynamic divisor evaluates to zero.
+def divide(value: int, divisor: int) -> int:
+    return value / divisor
+
+def main():
+    print(divide(10, 0))

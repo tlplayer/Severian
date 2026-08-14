@@ -9,6 +9,19 @@ the smallest normal repair.
 These files intentionally demonstrate rejected or warned-about programs. They
 are documentation fixtures, not runnable examples.
 
+The `runtime` category contains programs that compile successfully and then
+produce a structured `E09xx` diagnostic during native execution. Severian uses
+one `E####` namespace across compilation and execution so engineers, agents,
+editors, and `sev explain` do not need separate code conventions.
+
+Runtime diagnostics use the source-focused `user` view by default. Set
+`diagnostics = "internal"` in `package.toml`, or pass
+`sev run --diagnostics=internal`, to include the native artifact, protocol
+version, and canonical source path. Native failures that have not yet been
+classified are reported as E0990 instead of leaking a bare signal or core-dump
+message; each migrated runtime failure replaces that fallback with its stable,
+specific E09xx code.
+
 The driver test suite discovers every catalog file and requires its filename's
 diagnostic to be the first reported code. Each result must include a source
 file, line, column, snippet, and a registered `sev explain` entry. Diagnostics

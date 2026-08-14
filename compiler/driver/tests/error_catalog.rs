@@ -49,6 +49,10 @@ fn run_fixture(path: &Path, code: &str) -> Output {
     match code {
         "E0103" => run_invalid_dependency(path),
         "E0201" => run_type_safe_package(path),
+        code if code.starts_with("E09") => Command::new(env!("CARGO_BIN_EXE_sev"))
+            .arg(path)
+            .output()
+            .unwrap(),
         code if code.starts_with('W') => Command::new(env!("CARGO_BIN_EXE_sev"))
             .arg("lint")
             .arg(path)
