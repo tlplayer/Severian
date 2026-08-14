@@ -472,7 +472,10 @@ fn result_ok_type(ty: Option<&Type>) -> Option<&Type> {
     match ty? {
         Type::Result { ok, .. } => Some(ok),
         Type::Named(path)
-            if path.segments.first().is_some_and(|segment| segment.name == "Result") =>
+            if path
+                .segments
+                .first()
+                .is_some_and(|segment| segment.name == "Result") =>
         {
             path.args.first().and_then(TypeArg::as_type)
         }

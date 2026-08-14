@@ -41,10 +41,7 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
     }
 }
 
-pub(super) fn declared_value_type(
-    ty: &Type,
-    aliases: &HashMap<String, String>,
-) -> ValueType {
+pub(super) fn declared_value_type(ty: &Type, aliases: &HashMap<String, String>) -> ValueType {
     let Some(name) = class_type_name(ty) else {
         return lower_type(ty).unwrap_or(ValueType::Any);
     };

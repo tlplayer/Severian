@@ -268,8 +268,14 @@ fn analyze_specialized(
                         .or_insert(class);
                 }
             }
-            let signature =
-                lower_signature(&key, native_symbol, generic_params, params, return_type, &aliases)?;
+            let signature = lower_signature(
+                &key,
+                native_symbol,
+                generic_params,
+                params,
+                return_type,
+                &aliases,
+            )?;
             if signatures.insert(key.clone(), signature.clone()).is_some() {
                 return Err(error(
                     name.span,
@@ -582,7 +588,12 @@ fn analyze_specialized(
             field_types: class
                 .fields
                 .iter()
-                .map(|field| field.ty.as_ref().map(|ty| declared_value_type(ty, &aliases)))
+                .map(|field| {
+                    field
+                        .ty
+                        .as_ref()
+                        .map(|ty| declared_value_type(ty, &aliases))
+                })
                 .collect::<Vec<_>>()
                 .into_iter()
                 .map(|ty| ty.unwrap_or(ValueType::Any))

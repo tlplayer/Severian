@@ -48,9 +48,105 @@ def reverse[type](values: list[type]):
 def copy[type](values: list[type]) -> list[type]:
     return values[0:size(values)]
 
+def bisect_left[type](values: list[type], expected: type) -> int:
+    left := 0
+    right := size(values)
+    while left < right:
+        middle = left + (right - left) / 2
+        if values[middle] < expected:
+            left = middle + 1
+        else:
+            right = middle
+    return left
+
+def bisect_right[type](values: list[type], expected: type) -> int:
+    left := 0
+    right := size(values)
+    while left < right:
+        middle = left + (right - left) / 2
+        if expected < values[middle]:
+            right = middle
+        else:
+            left = middle + 1
+    return left
+
+def binary_search[type](values: list[type], expected: type) -> int:
+    position = bisect_left(values, expected)
+    if position < size(values) and values[position] == expected:
+        return position
+    return -1
+
+def deduplicate[type](values: list[type]) -> list[type]:
+    unique := []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    return unique
+
+def chunked[type](values: list[type], chunk_size: int) -> list[list[type]]:
+    assert(chunk_size > 0, "chunk size must be positive")
+    chunks := []
+    start := 0
+    while start < size(values):
+        end := start + chunk_size
+        if end > size(values):
+            end = size(values)
+        chunks.append(values[start:end])
+        start = end
+    return chunks
+
+def windowed[type](values: list[type], window_size: int) -> list[list[type]]:
+    assert(window_size > 0, "window size must be positive")
+    windows := []
+    if window_size > size(values):
+        return windows
+    for start in range(0, size(values) - window_size + 1):
+        windows.append(values[start:start + window_size])
+    return windows
+
+def flatten[type](values: list[list[type]]) -> list[type]:
+    flattened := []
+    for group in values:
+        flattened.extend(group)
+    return flattened
+
+def take[type](values: list[type], count: int) -> list[type]:
+    if count <= 0:
+        return []
+    end := count
+    if end > size(values):
+        end = size(values)
+    return values[0:end]
+
+def skip[type](values: list[type], count: int) -> list[type]:
+    start := count
+    if start < 0:
+        start = 0
+    if start > size(values):
+        start = size(values)
+    return values[start:size(values)]
+
 test "list addition returns a new concatenated list":
     left = [1, 2]
     right = [3, 4]
     combined = left + right
     assert(combined == [1, 2, 3, 4])
     assert(left == [1, 2])
+
+test "ordered list algorithms define duplicate insertion boundaries":
+    values = [1, 2, 2, 2, 4, 7]
+    assert(bisect_left(values, 2) == 1)
+    assert(bisect_right(values, 2) == 4)
+    assert(binary_search(values, 4) == 4)
+    assert(binary_search(values, 3) == -1)
+
+test "list sequence adapters preserve order and handle partial tails":
+    values = [1, 2, 2, 3, 1]
+    assert(deduplicate(values) == [1, 2, 3])
+    assert(chunked(values, 2) == [[1, 2], [2, 3], [1]])
+    assert(windowed(values, 3) == [[1, 2, 2], [2, 2, 3], [2, 3, 1]])
+    assert(flatten([[1, 2], [], [3]]) == [1, 2, 3])
+    assert(take(values, 3) == [1, 2, 2])
+    assert(take(values, 20) == values)
+    assert(skip(values, 3) == [3, 1])
+    assert(skip(values, 20) == [])

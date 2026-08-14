@@ -1,7 +1,7 @@
 use severian_hir::{
-    AssignmentOp, BinaryOp, CallTarget, Class, Decorator, Expression, Function, FunctionId, HirId,
-    Instruction, MatchPattern, Parameter, Program, ReceiverType, SwitchArm, TaskPlacement,
-    TensorElementType, TensorType, TypeDefinitionId, ValueType, VariantId,
+    AssignmentOp, BinaryOp, BindingRef, CallTarget, Class, Decorator, Expression, Function,
+    FunctionId, HirId, Instruction, MatchPattern, Parameter, Program, ReceiverType, SwitchArm,
+    TaskPlacement, TensorElementType, TensorType, TypeDefinitionId, ValueType, VariantId,
 };
 
 #[test]
@@ -404,6 +404,46 @@ fn lowers_propagated_main_failures_to_a_nonzero_exit_status() {
         .lines()
         .filter(|line| line.trim_start().starts_with("llvm.return"))
         .all(|line| line.ends_with(": i32")));
+}
+
+#[test]
+fn unboxes_statically_typed_result_payloads_at_the_variant_boundary() {
+    let value = BindingRef::synthetic("value");
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Result,
+            instructions: vec![
+                Instruction::TryLet {
+                    name: value.clone(),
+                    value: Expression::Variant {
+                        type_id: Some(TypeDefinitionId::from_name("Result")),
+                        variant_id: VariantId::from_name("ok"),
+                        name: "ok".into(),
+                        fields: vec![Expression::Integer(7)],
+                    },
+                    payload_type: ValueType::Int,
+                    receiver: None,
+                },
+                Instruction::Print(Expression::Variable(value)),
+            ],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program).unwrap());
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.call @__sev_variant_field"));
+    assert!(text.contains("llvm.call @__sev_unbox_i64"));
+    assert!(text.contains("llvm.call @printf"));
 }
 
 #[test]

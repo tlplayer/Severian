@@ -38,6 +38,10 @@ def main():
     numbers := [3, 1, 2]
     list.sort(numbers)
     assert(numbers == [1, 2, 3])
+    assert(list.binary_search(numbers, 2) == 1)
+    assert(list.chunked(numbers, 2) == [[1, 2], [3]])
+    assert(list.windowed(numbers, 2) == [[1, 2], [2, 3]])
+    assert(list.flatten([[1], [2, 3]]) == numbers)
     assert(len(numbers) == 3)
     assert(size(numbers) == 3)
     assert(numbers.len() == 3)

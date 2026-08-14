@@ -44,15 +44,25 @@ impl LowerContext<'_> {
                         writeln!(self.output, "    llvm.unreachable").unwrap();
                     }
                     writeln!(self.output, "  ^bb{success_block}:").unwrap();
-                    let payload = self.fresh_value();
-                    writeln!(self.output, "    {payload} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    let raw_payload = self.fresh_value();
+                    writeln!(self.output, "    {raw_payload} = llvm.call @__sev_variant_field({result}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    let mut payload = if *payload_type == ValueType::Unit {
+                        (raw_payload, ValueType::Any)
+                    } else {
+                        self.unbox_value((raw_payload, ValueType::Any), *payload_type)
+                    };
+                    if payload.1 == ValueType::Any
+                        && !matches!(*payload_type, ValueType::Any | ValueType::Unit)
+                    {
+                        payload.1 = *payload_type;
+                    }
                     if let Some(receiver) = receiver {
                         self.object_classes
-                            .insert(payload.clone(), receiver.name.clone());
+                            .insert(payload.0.clone(), receiver.name.clone());
                         self.receiver_types
-                            .insert(payload.clone(), receiver.clone());
+                            .insert(payload.0.clone(), receiver.clone());
                     }
-                    self.variables.insert(name.id, (payload, *payload_type));
+                    self.variables.insert(name.id, payload);
                     self.terminated = false;
                 }
                 Instruction::Assign { target, op, value } => {
