@@ -203,6 +203,7 @@ impl Parser<'_> {
                     None
                 };
                 let constraints = if self.take_simple(&TokenKind::With).is_some() {
+                    self.take_simple(&TokenKind::Newline);
                     self.expect_simple(TokenKind::LeftBrace, "`{` after field `with`")?;
                     self.skip_parenthesized_layout();
                     let mut constraints = Vec::new();

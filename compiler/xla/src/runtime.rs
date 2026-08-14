@@ -17,6 +17,7 @@ use std::{
 unsafe extern "C" {
     fn __sev_collection_size(collection: *mut c_void) -> i64;
     fn __sev_collection_get(collection: *mut c_void, index: i64) -> *mut c_void;
+    fn __sev_unbox_bool(value: *mut c_void) -> bool;
     fn __sev_unbox_i64(value: *mut c_void) -> i64;
 }
 
@@ -337,6 +338,72 @@ pub unsafe extern "C" fn __sev_xla_qwen_serving_prefill_causal_mask() -> *mut c_
             QWEN_SERVING_PREFILL_TOKENS as i64,
         ],
     )
+}
+
+fn qwen_serving_attention_values(active: &[bool]) -> Vec<f32> {
+    debug_assert_eq!(active.len(), QWEN_SERVING_PREFILL_TOKENS);
+    (0..QWEN_SERVING_PREFILL_TOKENS)
+        .flat_map(|query| {
+            (0..QWEN_SERVING_PREFILL_TOKENS).map(move |key| {
+                if active[query] && active[key] && key <= query {
+                    0.0
+                } else {
+                    -1.0e30
+                }
+            })
+        })
+        .collect()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __sev_xla_qwen_serving_attention_mask(
+    attention_mask: *mut c_void,
+) -> *mut c_void {
+    if attention_mask.is_null() {
+        fail("null serving attention mask");
+    }
+    let count = __sev_collection_size(attention_mask);
+    if count <= 0 || count > QWEN_SERVING_PREFILL_TOKENS as i64 {
+        fail(format!(
+            "serving attention mask has {count} entries; expected 1..={QWEN_SERVING_PREFILL_TOKENS}"
+        ));
+    }
+    let mut active = (0..count)
+        .map(|index| __sev_unbox_bool(__sev_collection_get(attention_mask, index)))
+        .collect::<Vec<_>>();
+    active.resize(QWEN_SERVING_PREFILL_TOKENS, false);
+    let values = qwen_serving_attention_values(&active);
+    upload_f32(
+        &values,
+        [
+            1,
+            1,
+            QWEN_SERVING_PREFILL_TOKENS as i64,
+            QWEN_SERVING_PREFILL_TOKENS as i64,
+        ],
+    )
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+
+    #[test]
+    fn serving_attention_combines_padding_and_causal_masks() {
+        let mut active = vec![false; QWEN_SERVING_PREFILL_TOKENS];
+        active[1] = true;
+        active[2] = true;
+        let values = qwen_serving_attention_values(&active);
+        let at = |query: usize, key: usize| values[query * QWEN_SERVING_PREFILL_TOKENS + key];
+
+        assert_eq!(at(0, 0), -1.0e30);
+        assert_eq!(at(1, 0), -1.0e30);
+        assert_eq!(at(1, 1), 0.0);
+        assert_eq!(at(1, 2), -1.0e30);
+        assert_eq!(at(2, 1), 0.0);
+        assert_eq!(at(2, 2), 0.0);
+        assert_eq!(at(3, 2), -1.0e30);
+    }
 }
 
 #[no_mangle]

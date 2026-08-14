@@ -37,10 +37,20 @@ fn parses_function_and_profile_test_contracts() {
 }
 
 #[test]
-fn requires_a_trailing_comma_on_every_contract_clause() {
-    let source = "def invalid(x: int) -> int with\n{\n    x >= 0\n}:\n    return x\n";
+fn allows_an_inline_contract_without_a_trailing_comma() {
+    let source = "def bounded(x: int) -> int with { x >= 0 }:\n    return x\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    assert_eq!(function.contract.as_ref().unwrap().clauses.len(), 1);
+}
+
+#[test]
+fn requires_commas_between_contract_clauses() {
+    let source = "def invalid(x: int) -> int with { x >= 0 defer x < 10 }:\n    return x\n";
     let error = parse(&lex(source).unwrap()).unwrap_err();
-    assert!(error.message.contains("`,` after every contract clause"));
+    assert!(error.message.contains("`,` between contract clauses"));
 }
 
 #[test]

@@ -118,3 +118,57 @@ fn camel_case_compatibility_remains_callable_but_is_linted() {
 
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[test]
+fn lint_reports_and_fixes_contract_layout() {
+    let directory = temporary_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("main.sev");
+    std::fs::write(
+        &source,
+        concat!(
+            "class Range:\n",
+            "    low: int with { low >= 0, }\n",
+            "    high: int with { high > low, high < 100 }\n",
+            "\n",
+            "def positive(value: int) -> int with\n",
+            "{\n",
+            "    value > 0,\n",
+            "}:\n",
+            "    return value\n",
+        ),
+    )
+    .unwrap();
+
+    let report = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(report.status.success());
+    assert!(String::from_utf8_lossy(&report.stderr).contains("lint::contract-layout"));
+
+    let fix = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .args(["lint", "--fix"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(fix.status.success());
+    assert_eq!(
+        std::fs::read_to_string(&source).unwrap(),
+        concat!(
+            "class Range:\n",
+            "    low: int with { low >= 0 }\n",
+            "    high: int with\n",
+            "    {\n",
+            "        high > low,\n",
+            "        high < 100,\n",
+            "    }\n",
+            "\n",
+            "def positive(value: int) -> int with { value > 0 }:\n",
+            "    return value\n",
+        )
+    );
+
+    let _ = std::fs::remove_dir_all(directory);
+}

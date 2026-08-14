@@ -229,8 +229,11 @@ impl Parser<'_> {
                     failure,
                 });
             }
-            self.expect_simple(TokenKind::Comma, "`,` after every contract clause")?;
-            self.skip_parenthesized_layout();
+            if self.take_simple(&TokenKind::Comma).is_some() {
+                self.skip_parenthesized_layout();
+            } else if !self.at(&TokenKind::RightBrace) {
+                return Err(self.error("expected `,` between contract clauses"));
+            }
         }
         let end = self
             .expect_simple(TokenKind::RightBrace, "`}` after function contract")?

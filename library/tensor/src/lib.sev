@@ -139,6 +139,7 @@ unsafe:
     native("__sev_xla_qwen_serving_prefill_rope_cos") def rope_cosine_256() -> Tensor[f32, 1, 1, 256, 128]
     native("__sev_xla_qwen_serving_prefill_rope_sin") def rope_sine_256() -> Tensor[f32, 1, 1, 256, 128]
     native("__sev_xla_qwen_serving_prefill_causal_mask") def causal_mask_256() -> Tensor[f32, 1, 1, 256, 256]
+    native("__sev_xla_qwen_serving_attention_mask") def attention_mask_256(values: list[bool]) -> Tensor[f32, 1, 1, 256, 256]
     native("__sev_xla_qwen_serving_decode_rope_cos") def rope_cosine_at(position: int) -> Tensor[f32, 1, 1, 1, 128]
     native("__sev_xla_qwen_serving_decode_rope_sin") def rope_sine_at(position: int) -> Tensor[f32, 1, 1, 1, 128]
     native("__sev_xla_qwen_serving_decode_mask") def causal_mask_at(position: int) -> Tensor[f32, 1, 1, 1, 288]

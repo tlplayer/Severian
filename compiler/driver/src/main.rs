@@ -1162,6 +1162,19 @@ fn fmt_command(args: &[String]) -> Result<(), String> {
 }
 
 fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
+    fn format_with_conditions(conditions: &[String], indent: &str, leading_space: bool) -> String {
+        let prefix = if leading_space { " with" } else { "with" };
+        if conditions.len() == 1 {
+            return format!("{prefix} {{ {} }}", conditions[0]);
+        }
+        let mut formatted = format!("{prefix}\n{indent}{{\n");
+        for condition in conditions {
+            formatted.push_str(&format!("{indent}    {condition},\n"));
+        }
+        formatted.push_str(&format!("{indent}}}"));
+        formatted
+    }
+
     fn function_contracts<'a>(
         function: &'a severian_ast::FunctionDecl,
         output: &mut Vec<&'a severian_ast::FunctionContract>,
@@ -1177,10 +1190,17 @@ fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
     }
 
     let mut contracts = Vec::new();
+    let mut constrained_fields = Vec::new();
     for item in &module.items {
         match item {
             severian_ast::Item::Function(function) => function_contracts(function, &mut contracts),
             severian_ast::Item::Class(class) => {
+                constrained_fields.extend(
+                    class
+                        .fields
+                        .iter()
+                        .filter(|field| !field.constraints.is_empty()),
+                );
                 for constructor in &class.constructors {
                     if let Some(contract) = &constructor.contract {
                         contracts.push(contract);
@@ -1198,9 +1218,8 @@ fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
             _ => {}
         }
     }
-    contracts.sort_by_key(|contract| contract.span.start);
-    let mut formatted = source.to_owned();
-    for contract in contracts.into_iter().rev() {
+    let mut replacements = Vec::new();
+    for contract in contracts {
         let mut replace_start = contract.span.start;
         while replace_start > 0 && source.as_bytes()[replace_start - 1].is_ascii_whitespace() {
             replace_start -= 1;
@@ -1219,15 +1238,15 @@ fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
             .chars()
             .take_while(|character| character.is_whitespace())
             .collect::<String>();
-        let mut replacement = format!(" with\n{indent}{{\n");
+        let mut conditions = Vec::new();
         for clause in &contract.clauses {
             let text = normalize_contract_clause(&source[clause.span.start..clause.span.end]);
-            replacement.push_str(&format!("{indent}    {text},\n"));
+            conditions.push(text);
         }
         for capability in &contract.capabilities {
-            replacement.push_str(&format!("{indent}    with {},\n", capability.name));
+            conditions.push(format!("with {}", capability.name));
         }
-        replacement.push_str(&format!("{indent}}}"));
+        let mut replacement = format_with_conditions(&conditions, &indent, true);
         let mut replace_end = contract.span.end;
         while matches!(source.as_bytes().get(replace_end), Some(b' ' | b'\t')) {
             replace_end += 1;
@@ -1239,7 +1258,60 @@ fn format_contracts(source: &str, module: &severian_ast::Module) -> String {
                 replace_end += 1;
             }
         }
-        formatted.replace_range(replace_start..replace_end, &replacement);
+        replacements.push((replace_start, replace_end, replacement));
+    }
+    for field in constrained_fields {
+        let first = field.constraints.first().unwrap().span();
+        let last = field.constraints.last().unwrap().span();
+        let prefix = &source[field.span.start..first.start];
+        let with_offset = prefix
+            .rfind("with")
+            .expect("constrained field source contains `with`");
+        let replace_start = field.span.start + with_offset;
+        let mut replace_end = last.end;
+        while matches!(
+            source.as_bytes().get(replace_end),
+            Some(b' ' | b'\t' | b'\n' | b'\r')
+        ) {
+            replace_end += 1;
+        }
+        if source.as_bytes().get(replace_end) == Some(&b',') {
+            replace_end += 1;
+            while matches!(
+                source.as_bytes().get(replace_end),
+                Some(b' ' | b'\t' | b'\n' | b'\r')
+            ) {
+                replace_end += 1;
+            }
+        }
+        if source.as_bytes().get(replace_end) == Some(&b'}') {
+            replace_end += 1;
+        }
+        let field_line = source[..field.span.start]
+            .rsplit_once('\n')
+            .map_or(&source[..field.span.start], |(_, line)| line);
+        let indent = field_line
+            .chars()
+            .take_while(|character| character.is_whitespace())
+            .collect::<String>();
+        let conditions = field
+            .constraints
+            .iter()
+            .map(|constraint| {
+                let span = constraint.span();
+                normalize_contract_clause(&source[span.start..span.end])
+            })
+            .collect::<Vec<_>>();
+        replacements.push((
+            replace_start,
+            replace_end,
+            format_with_conditions(&conditions, &indent, false),
+        ));
+    }
+    replacements.sort_by_key(|(start, _, _)| *start);
+    let mut formatted = source.to_owned();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        formatted.replace_range(start..end, &replacement);
     }
     formatted
 }
@@ -1373,9 +1445,16 @@ fn lint_command(args: &[String]) -> Result<(), String> {
         let module = severian_parser::parse(&tokens)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         let report = severian_diagnostics::naming::check(&module, &tokens, &original, &path);
+        let contract_layout_is_canonical = format_contracts(&original, &module) == original;
 
         let (source, report) = if fix {
-            let fixed = severian_diagnostics::naming::apply_safe_fixes(&original, &tokens, &report);
+            let naming_fixed =
+                severian_diagnostics::naming::apply_safe_fixes(&original, &tokens, &report);
+            let naming_tokens = severian_lexer::lex(&naming_fixed)
+                .map_err(|error| format!("{} after naming fixes: {error}", path.display()))?;
+            let naming_module = severian_parser::parse(&naming_tokens)
+                .map_err(|error| format!("{} after naming fixes: {error}", path.display()))?;
+            let fixed = format_contracts(&naming_fixed, &naming_module);
             if fixed != original {
                 fs::write(&path, &fixed).map_err(|error| error.to_string())?;
                 fixed_count += 1;
@@ -1390,6 +1469,14 @@ fn lint_command(args: &[String]) -> Result<(), String> {
         } else {
             (original, report)
         };
+
+        if !fix && !contract_layout_is_canonical {
+            eprintln!(
+                "warning[lint::contract-layout]: contract conditions do not use canonical layout\n --> {}\n help: use one inline condition or vertically aligned braces for multiple conditions; run `sev lint --fix`",
+                path.display(),
+            );
+            warning_count += 1;
+        }
 
         if !report.diagnostics.diagnostics().is_empty() {
             let mut source_map = severian_source::SourceMap::new();

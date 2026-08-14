@@ -15,13 +15,25 @@ linear = nn.Linear(model.tensor([1.0, 0.0, 0.0, 1.0], [2, 2]), model.tensor([0.0
 Y = linear.forward(X)
 ```
 
-Callable model objects delegate to `forward`, so inference can use the compact
-form once the graph has been converted:
+Checkpoint models own the matching tokenizer. Encoding produces a typed
+`TokenBatch`; `forward` returns owned logits and the predicted next token, while
+`generate` provides the ordinary high-level text path:
 
 ```sev
-net = model.load("./models/qwen")
-output = net(input)
+net = model.load("hf://Qwen/Qwen2.5-3B")
+tokens = net.tokenizer.encode("Hello")
+output = net.forward(tokens)
+print(output.next_token)
+output.close()
+
+text = net.generate("Hello", maximum_new_tokens=32)
 ```
+
+Token batches remain host-side until execution. The current checkpoint-backed
+Qwen2.5 program materializes a `[1, 256]` token tensor and matching causal
+attention mask at `forward`/`session` time. `forward_kernel` remains available
+for architecture work that supplies KV caches, rotary values, and masks
+directly.
 
 The loader implements native importers for Hugging Face/safetensors, ONNX
 `ModelProto`, Keras `.keras` archives, restricted PyTorch state dictionaries,

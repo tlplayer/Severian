@@ -42,6 +42,9 @@ class Qwen2Config:
             return failure(QwenConfigError("Qwen layer and vocabulary counts must be positive"))
         return
 
+    def supports_qwen2_5_3b_serving() -> bool:
+        return vocab_size == 151936 and hidden_size == 2048 and intermediate_size == 11008 and num_hidden_layers == 36 and num_attention_heads == 16 and num_key_value_heads == 2 and head_dimension() == 128 and max_position_embeddings >= 288
+
 def parse_qwen_2_config(text: string) -> Result[Qwen2Config, JsonError | QwenConfigError]:
     document = json.decode[Any](text)
     architectures = json.as_string_list(json.object_get(document, "architectures"))
@@ -265,16 +268,30 @@ class Qwen2_5_3BSession:
             closed = true
         return
 
-def prefill_qwen2_5_3b_256(
+# The static Qwen serving program has two useful ownership modes. A forward
+# call keeps the logits and discards the freshly-created KV cache, while a
+# generation session keeps the KV cache and only needs the selected token.
+# This internal result lets both modes share the exact same prefill execution.
+class Qwen2_5_3BPrefillExecution:
+    logits: Tensor[bf16]
+    key_caches: list[Tensor[bf16]]
+    value_caches: list[Tensor[bf16]]
+    first_token: int
+
+class Qwen2_5_3BForwardOutput:
+    logits: Tensor[bf16]
+    next_token: int
+
+def execute_qwen2_5_3b_256(
     weights: Qwen2Weights,
+    input_ids: Tensor[i64, 1, 256],
     prompt_tokens: list[int],
-) -> Qwen2_5_3BSession:
+    mask: Tensor[f32, 1, 1, 256, 256],
+) -> Qwen2_5_3BPrefillExecution:
     assert(size(prompt_tokens) > 0 and size(prompt_tokens) <= 256)
     assert(size(weights.layers) == 36)
-    input_ids = tensor.from_i64_tokens_256(prompt_tokens)
     cosine = tensor.rope_cosine_256()
     sine = tensor.rope_sine_256()
-    mask = tensor.causal_mask_256()
     cache_index = tensor.from_i64_position(0)
     key_caches := []
     value_caches := []
@@ -317,16 +334,42 @@ def prefill_qwen2_5_3b_256(
         value_caches.append(value_cache)
     logits = qwen2_5_prefill_256.logits_kernel(hidden, weights.final_norm, weights.embedding)
     first_token = tensor.argmax_at_active_position(logits, prompt_tokens)
-    tensor.release(logits)
     tensor.release(hidden)
-    tensor.release(input_ids)
     tensor.release(cosine)
     tensor.release(sine)
-    tensor.release(mask)
     tensor.release(cache_index)
+    return Qwen2_5_3BPrefillExecution(logits, key_caches, value_caches, first_token)
+
+def forward_qwen2_5_3b_256(
+    weights: Qwen2Weights,
+    input_ids: Tensor[i64, 1, 256],
+    prompt_tokens: list[int],
+    mask: Tensor[f32, 1, 1, 256, 256],
+) -> Qwen2_5_3BForwardOutput:
+    execution = execute_qwen2_5_3b_256(weights, input_ids, prompt_tokens, mask)
+    for layer_index in range(0, size(execution.key_caches)):
+        tensor.release(execution.key_caches[layer_index])
+        tensor.release(execution.value_caches[layer_index])
+    return Qwen2_5_3BForwardOutput(execution.logits, execution.first_token)
+
+def prefill_qwen2_5_3b_256(
+    weights: Qwen2Weights,
+    prompt_tokens: list[int],
+) -> Qwen2_5_3BSession:
+    assert(size(prompt_tokens) > 0 and size(prompt_tokens) <= 256)
+    assert(size(weights.layers) == 36)
+    input_ids = tensor.from_i64_tokens_256(prompt_tokens)
+    active_tokens := []
+    for _token in prompt_tokens:
+        active_tokens.append(true)
+    mask = tensor.attention_mask_256(active_tokens)
+    execution = execute_qwen2_5_3b_256(weights, input_ids, prompt_tokens, mask)
+    tensor.release(input_ids)
+    tensor.release(mask)
+    tensor.release(execution.logits)
     return Qwen2_5_3BSession(
-        weights, key_caches, value_caches, first_token,
-        prompt_tokens, [first_token], size(prompt_tokens), false,
+        weights, execution.key_caches, execution.value_caches, execution.first_token,
+        prompt_tokens, [execution.first_token], size(prompt_tokens), false,
     )
 
 test "Qwen2.5 configuration derives grouped-query dimensions":

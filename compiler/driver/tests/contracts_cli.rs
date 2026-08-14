@@ -165,6 +165,42 @@ fn formatter_canonicalizes_contract_layout() {
 }
 
 #[test]
+fn formatter_keeps_one_condition_inline_and_aligns_multi_condition_braces() {
+    let path = source(
+        "format-layout",
+        concat!(
+            "class Range:\n",
+            "    low: int with { low >= 0, }\n",
+            "    high: int with { high > low, high < 100 }\n",
+            "\n",
+            "    def contains(value: int) -> bool with { value >= low, value <= high }:\n",
+            "        return true\n",
+            "\n",
+            "def positive(value: int) -> int with { value > 0, }:\n",
+            "    return value\n",
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("fmt")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let formatted = std::fs::read_to_string(path).unwrap();
+    assert!(formatted.contains("    low: int with { low >= 0 }\n"));
+    assert!(formatted
+        .contains("    high: int with\n    {\n        high > low,\n        high < 100,\n    }\n"));
+    assert!(formatted.contains(
+        "    def contains(value: int) -> bool with\n    {\n        value >= low,\n        value <= high,\n    }:\n"
+    ));
+    assert!(formatted.contains("def positive(value: int) -> int with { value > 0 }:\n"));
+}
+
+#[test]
 fn profile_flag_runs_only_profile_tests() {
     let path = source(
         "profile-selection",
