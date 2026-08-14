@@ -11,6 +11,10 @@ pub fn explain(code: &str) -> Option<Explanation> {
     explanations().remove(code)
 }
 
+pub fn all() -> Vec<Explanation> {
+    explanations().into_values().collect()
+}
+
 fn explanations() -> BTreeMap<&'static str, Explanation> {
     [
         Explanation {
@@ -104,6 +108,21 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "A function or method call omitted a parameter that has no default value. The primary label identifies the incomplete call and a secondary label identifies the parameter declaration when it is in the current source.\n\nThe suggested named argument preserves call syntax, but its placeholder value is marked maybe-incorrect because only the developer can choose the value with the right meaning. Editors may preview the edit but should not apply it silently.",
         },
         Explanation {
+            code: "E000204",
+            title: "Unknown named argument",
+            text: "A call supplies a named argument that is not present in the selected function or method signature. Check the spelling or update the call for the current API. When one parameter name is a close, unambiguous match, Severian provides a machine-applicable rename.",
+        },
+        Explanation {
+            code: "E000205",
+            title: "Binding requires initialization",
+            text: "Every Severian binding has a value from the moment it enters scope. Add an initializer at the declaration instead of relying on control flow to assign the binding later. This stronger rule prevents possibly-uninitialized reads and keeps all paths deterministic.",
+        },
+        Explanation {
+            code: "E000206",
+            title: "Non-exhaustive enum switch",
+            text: "A switch over an enum must handle every declared variant, or contain an unguarded wildcard arm. The diagnostic lists variants that are not covered. Exhaustive switches make adding an enum variant a reviewable source change instead of an implicit runtime fallthrough.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",
@@ -127,6 +146,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             code: "E000501",
             title: "Checked integer overflow",
             text: "Safe arithmetic cannot fit the result in its destination integer type. Choose an explicit wrapping, saturating, or overflow-reporting operation when required.",
+        },
+        Explanation {
+            code: "E000502",
+            title: "Compile-time division by zero",
+            text: "The divisor is provably zero during semantic analysis, so the expression can never produce a valid result. Remove the operation or define an explicit zero case. E000920 is reserved for divisors that become zero only during execution.",
         },
         Explanation {
             code: "E000601",
@@ -176,12 +200,12 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
         Explanation {
             code: "E000980",
             title: "Runtime invariant failure",
-            text: "The generated runtime encountered an internal state that valid compiled Severian code should not produce. Rerun with internal diagnostics and report the compiler version, source location, and internal detail.",
+            text: "The generated runtime encountered an internal state that valid compiled Severian code should not produce. The first diagnostic includes the available source location and failure detail; report that output with the compiler version.",
         },
         Explanation {
             code: "E000990",
             title: "Unclassified native process failure",
-            text: "The native program terminated without producing Severian's structured runtime diagnostic record. Internal diagnostics include the signal or exit status and artifact path needed to investigate a compiler, runtime, foreign-library, or hardware failure.",
+            text: "The native program received a fatal signal before a narrower Severian runtime diagnostic could be produced. Normal execution automatically captures and prints a symbolic call stack; no diagnostics flag or second run is required. Start with the first Severian or `__sev_` frame. Internal mode only adds protocol and artifact metadata for compiler development.",
         },
         Explanation {
             code: "E002401",

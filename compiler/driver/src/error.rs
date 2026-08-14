@@ -120,8 +120,13 @@ fn frontend_diagnostic(
     let tensor_dimensions = (code == "E002401")
         .then(|| tensor_dimension_details(&raw_message))
         .flatten();
+    let unknown_argument = (code == "E000204")
+        .then(|| unknown_argument_details(&raw_message))
+        .flatten();
     let message = if let Some((name, _)) = &missing_argument {
         format!("missing argument `{name}`")
+    } else if let Some((name, _)) = &unknown_argument {
+        format!("unknown argument `{name}`")
     } else if tensor_dimensions.is_some() {
         "incompatible tensor dimensions".into()
     } else {
@@ -179,6 +184,25 @@ fn frontend_diagnostic(
                 });
             }
         }
+    } else if code == "E000204" {
+        if let Some((_, suggestion)) = unknown_argument {
+            if let Some(suggestion) = suggestion {
+                diagnostic = diagnostic.with_suggestion(DiagnosticSuggestion::machine_applicable(
+                    format!("did you mean `{suggestion}`?"),
+                    range.clone(),
+                    suggestion,
+                ));
+            }
+        }
+    } else if code == "E000205" {
+        diagnostic = diagnostic.with_help("initialize the binding where it is declared");
+    } else if code == "E000206" {
+        diagnostic = diagnostic.with_help(
+            "add an arm for every missing variant, or an unguarded `_` arm when a fallback is intentional",
+        );
+    } else if code == "E000502" {
+        diagnostic =
+            diagnostic.with_help("remove the operation or handle the zero case explicitly");
     } else if code == "E002401" {
         if let Some((left, right, requirement)) = tensor_dimensions {
             diagnostic = diagnostic
@@ -210,6 +234,14 @@ fn missing_argument_details(message: &str) -> Option<(String, String)> {
     let (name, rest) = rest.split_once("`; expected `")?;
     let expected = rest.strip_suffix('`')?;
     Some((name.to_owned(), expected.to_owned()))
+}
+
+fn unknown_argument_details(message: &str) -> Option<(String, Option<String>)> {
+    let rest = message.strip_prefix("unknown argument `")?;
+    if let Some((name, suggestion)) = rest.split_once("`; did you mean `") {
+        return Some((name.into(), Some(suggestion.strip_suffix("`?")?.into())));
+    }
+    Some((rest.strip_suffix('`')?.into(), None))
 }
 
 fn tensor_dimension_details(message: &str) -> Option<(String, String, String)> {
@@ -290,6 +322,10 @@ fn primary_label<'a>(code: &str, message: &'a str) -> &'a str {
     match code {
         "E000202" => "incompatible value",
         "E000203" => "required argument is absent",
+        "E000204" => "this name is not in the selected signature",
+        "E000205" => "this binding has no initial value",
+        "E000206" => "not every enum variant is handled",
+        "E000502" => "this divisor is always zero",
         "E002401" => "contracting dimensions do not match",
         "E000104" => "syntax needs another token here",
         _ => message,

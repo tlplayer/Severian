@@ -1,4 +1,5 @@
 mod build_options;
+mod error_catalog;
 mod runtime_diagnostics;
 mod scaffold;
 
@@ -81,6 +82,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "tree" if args.len() == 2 => tree(Path::new(&args[1])),
         "metadata" if args.len() == 2 => metadata(Path::new(&args[1])),
         "explain" if args.len() == 2 => explain(&args[1]),
+        "errors" if args.len() == 1 => error_catalog::print(),
         "emit-mlir" if args.len() == 2 => emit_stdout(Path::new(&args[1]), EmitMode::Mlir),
         "compile" if args.len() == 2 || args.len() == 4 => legacy_compile(&args),
         "compile-tests" if args.len() == 4 && args[2] == "-o" => {
@@ -1628,7 +1630,7 @@ fn run_targets(
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         if compilation.hir.main().is_some() {
-            compile_native(&compilation, &output).map_err(|error| error.to_string())?;
+            runtime_diagnostics::compile_executable(&compilation, &output, diagnostics)?;
         } else if native_test_count(&compilation.hir) > 0 {
             compile_native_tests(&compilation, &output).map_err(|error| error.to_string())?;
         } else {
@@ -2690,6 +2692,7 @@ fn usage() -> String {
         "  tree <path>                    print the Severian package dependency graph",
         "  metadata <path>                print Severian project metadata as JSON",
         "  explain <diagnostic-code>      explain a registered diagnostic",
+        "  errors                         list every registered compiler error",
         "  emit kinds: hir, mir, mlir, stablehlo, llvm, asm",
     ]
     .join("\n")

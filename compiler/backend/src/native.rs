@@ -99,6 +99,10 @@ pub fn compile_native(
         OsString::from("-ffunction-sections"),
         OsString::from("-fdata-sections"),
         OsString::from("-Wl,--gc-sections"),
+        OsString::from("-Wl,--export-dynamic"),
+        OsString::from("-g"),
+        OsString::from("-fno-omit-frame-pointer"),
+        OsString::from("-fno-optimize-sibling-calls"),
         OsString::from("-ldl"),
         OsString::from("-lrt"),
         OsString::from("-lutil"),
@@ -113,13 +117,6 @@ pub fn compile_native(
             OsString::from("-g"),
         ]);
     }
-    if options.debug && sanitizer_names.is_empty() {
-        additional_arguments.extend([
-            OsString::from("-g"),
-            OsString::from("-fno-omit-frame-pointer"),
-        ]);
-    }
-
     link_native_executable(
         &llvm_ir,
         bridge_path,

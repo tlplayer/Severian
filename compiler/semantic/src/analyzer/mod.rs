@@ -111,6 +111,7 @@ mod pattern;
 mod pipeline;
 mod resolve;
 mod statement;
+mod switch;
 mod traits;
 mod types;
 
@@ -123,5 +124,6 @@ use pattern::*;
 pub use pipeline::*;
 use resolve::*;
 use statement::*;
+use switch::*;
 use traits::*;
 use types::*;

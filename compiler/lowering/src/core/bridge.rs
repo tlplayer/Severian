@@ -48,7 +48,7 @@ pub(super) fn native_bridge_source_for_target(
         "#include <unistd.h>\n",
         "#include <signal.h>\n",
         "#include <regex.h>\n",
-        "#ifdef __linux__\n#include <linux/kvm.h>\n#endif\n\n",
+        "#ifdef __linux__\n#include <execinfo.h>\n#include <linux/kvm.h>\n#endif\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION, SEV_NULL } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
         "typedef struct { int64_t kind; int64_t size; int64_t capacity; sev_value **items; } sev_collection;\n",

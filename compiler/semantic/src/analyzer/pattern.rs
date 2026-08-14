@@ -8,6 +8,12 @@ pub(super) fn lower_pattern(
     match pattern {
         Pattern::Wildcard(_) => Ok(MatchPattern::Wildcard),
         Pattern::Identifier(name) => {
+            if aliases.contains_key(&format!("__variant_fields.{}", name.name)) {
+                return Ok(MatchPattern::Constructor {
+                    name: name.name.clone(),
+                    fields: Vec::new(),
+                });
+            }
             let reference = source_binding(name);
             scope.insert(
                 name.name.clone(),

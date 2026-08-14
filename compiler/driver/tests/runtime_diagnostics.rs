@@ -53,7 +53,10 @@ fn internal_runtime_diagnostics_include_protocol_and_artifact_context() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("error[E000920]: division by zero"));
-    assert!(stderr.contains("runtime-protocol=v2"));
+    assert!(
+        stderr.contains("runtime-protocol=v2"),
+        "unexpected diagnostic:\n{stderr}"
+    );
     assert!(stderr.contains("artifact="));
     assert!(stderr.contains("source="));
     std::fs::remove_dir_all(root).unwrap();
@@ -71,7 +74,9 @@ fn an_unmigrated_native_abort_is_reported_as_e000990() {
     assert!(stderr.contains(
         "error[E000990]: native program terminated without a Severian runtime diagnostic"
     ));
-    assert!(stderr.contains("--diagnostics=internal"));
+    assert!(stderr.contains("stack trace:"));
+    assert!(stderr.contains("__sev_collection_remove"));
+    assert!(!stderr.contains("rerun with `--diagnostics=internal`"));
     assert!(!stderr.contains("target/debug/fallback exited with signal"));
     std::fs::remove_dir_all(root).unwrap();
 }

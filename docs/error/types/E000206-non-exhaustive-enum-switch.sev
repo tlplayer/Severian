@@ -1,0 +1,13 @@
+# E000206: the switch handles Ready and Failed, but not Waiting.
+# Add a Waiting arm or use `_` when a deliberate fallback is appropriate.
+enum Status:
+    Ready
+    Failed
+    Waiting
+
+def run(status: Status):
+    switch status:
+        Ready:
+            print("ready")
+        Failed:
+            print("failed")

@@ -85,6 +85,9 @@ backend message.
 `sev explain` pages describe the invariant, common causes, valid repairs, and a
 small example. They do not merely repeat the one-line error.
 
+`sev errors` enumerates the complete six-digit E-code catalog, turning the
+compiler's safety surface into a reviewable checklist.
+
 Each stable error has a source fixture under `docs/error/`. Catalog tests require
 the filename's code to be the first emitted code, a precise location and source
 snippet, and a registered explanation. Representative diagnostics additionally
@@ -95,7 +98,9 @@ fields.
 
 The initial implementation covers the shared structured model and renderer,
 six-digit E codes, parser token insertion, type-boundary explanations, missing
-argument causal labels, runtime source ranges, structured JSON edits, and richer
-explanations. The next diagnostic families should add structural object diffs,
-option-flow proofs, trait requirement origins, ownership history, and complete
-tensor/backend translation without changing this protocol.
+and misspelled argument fixes, mandatory initialization, enum exhaustiveness,
+compile-time zero-divisor checks, runtime source ranges, automatic native crash
+stacks, structured JSON edits, `sev errors`, and richer explanations. The next
+diagnostic families should add structural object diffs, option-flow proofs,
+trait requirement origins, ownership history, and complete tensor/backend
+translation without changing this protocol.

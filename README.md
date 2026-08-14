@@ -72,7 +72,9 @@ supported project/build control. Fresh projects explicitly use permissive
 coverage, memory, architecture, and type-safety values so teams can tighten the
 ratchets as the codebase matures. `[build].diagnostics = "user"` is the clean
 source-oriented default; set it to `"internal"` (or pass
-`--diagnostics=internal`) when investigating compiler/backend internals.
+`--diagnostics=internal`) when investigating compiler/backend internals. This
+mode only adds implementation metadata: source errors, runtime details, and
+automatic native crash stacks are complete on the first normal invocation.
 Package and workspace artifacts are emitted under `target/debug`. Path libraries are checked in dependency order
 and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
 those artifacts. Library-local tests are not linked into downstream application

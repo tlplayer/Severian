@@ -32,7 +32,19 @@ pub(super) fn lower_declared_call(
                 .params
                 .iter()
                 .position(|param| param.name == name.name)
-                .ok_or_else(|| error(name.span, format!("unknown argument `{}`", name.name)))?
+                .ok_or_else(|| {
+                    let suggestion = closest_parameter(&name.name, &signature.params);
+                    let message = suggestion.map_or_else(
+                        || format!("E000204: unknown argument `{}`", name.name),
+                        |suggestion| {
+                            format!(
+                                "E000204: unknown argument `{}`; did you mean `{suggestion}`?",
+                                name.name
+                            )
+                        },
+                    );
+                    error(name.span, message)
+                })?
         } else {
             let index = positional;
             positional += 1;
@@ -100,6 +112,43 @@ pub(super) fn lower_declared_call(
         },
         instantiate_signature_type(&signature.returns, &tensor_types),
     ))
+}
+
+fn closest_parameter<'a>(name: &str, params: &'a [SignatureParameter]) -> Option<&'a str> {
+    let mut candidates = params
+        .iter()
+        .map(|parameter| {
+            (
+                edit_distance(name, &parameter.name),
+                parameter.name.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_unstable();
+    let (distance, candidate) = *candidates.first()?;
+    let threshold = 2.max(name.chars().count() / 3);
+    (distance <= threshold
+        && candidates
+            .get(1)
+            .is_none_or(|(next_distance, _)| *next_distance > distance))
+    .then_some(candidate)
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_character) in left.chars().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_character) in right.iter().enumerate() {
+            current.push(
+                (previous[right_index + 1] + 1)
+                    .min(current[right_index] + 1)
+                    .min(previous[right_index] + usize::from(left_character != *right_character)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
 }
 
 fn compatible_signature(

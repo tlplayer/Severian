@@ -133,6 +133,14 @@ pub(super) fn lower_expression_kind(
                     BinaryOp::Mul,
                     merge_numeric(left_type, right_type, binary.span)?,
                 ),
+                AstBinaryOp::Div | AstBinaryOp::Mod
+                    if constant_integer(&binary.right) == Some(0) =>
+                {
+                    return Err(error(
+                        binary.right.span(),
+                        "E000502: division by zero is known at compile time",
+                    ));
+                }
                 AstBinaryOp::Div => (
                     BinaryOp::Div,
                     merge_numeric(left_type, right_type, binary.span)?,

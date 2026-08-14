@@ -1,0 +1,5 @@
+# E000205: Severian bindings must be initialized when they enter scope.
+# Give `value` an initial value instead of assigning it on only some paths.
+def main():
+    value: int
+    print(value)

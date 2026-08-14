@@ -189,3 +189,19 @@ def main():
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn errors_lists_the_six_digit_compiler_catalog() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("errors")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("Severian compiler errors ("));
+    assert!(stdout.contains("E000204  Unknown named argument"));
+    assert!(stdout.contains("E000206  Non-exhaustive enum switch"));
+    assert!(stdout.contains("E002401  Incompatible tensor dimensions"));
+    assert!(!stdout.contains("N001"));
+    assert!(!stdout.contains("R000"));
+}

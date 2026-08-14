@@ -128,10 +128,15 @@ pub(super) fn lower_block(
                 });
             }
             Stmt::Let(binding) => {
-                let source = binding
-                    .value
-                    .as_ref()
-                    .ok_or_else(|| error(binding.span, "binding requires a value"))?;
+                let source = binding.value.as_ref().ok_or_else(|| {
+                    error(
+                        binding.span,
+                        format!(
+                            "E000205: binding `{}` requires an initializer",
+                            binding.name.name
+                        ),
+                    )
+                })?;
                 if binding.ty.as_ref().is_some_and(|ty| {
                     matches!(ty, Type::Named(path) if path.segments.first().is_some_and(|segment| segment.name == "u8"))
                 }) && constant_integer(source).is_some_and(|value| !(0..=u8::MAX as i64).contains(&value))
@@ -571,6 +576,7 @@ pub(super) fn lower_block(
                 });
             }
             Stmt::Switch(statement) => {
+                validate_exhaustive_enum_switch(statement, scope, aliases)?;
                 let file_receiver = (statement.values.len() == 1)
                     .then(|| file_read_receiver_type(&statement.values[0], aliases))
                     .flatten();

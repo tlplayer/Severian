@@ -1,0 +1,4 @@
+# E000502: the compiler can prove that this divisor is zero.
+# Handle zero explicitly; E000920 covers divisors known only during execution.
+def main():
+    print(100 / 0)

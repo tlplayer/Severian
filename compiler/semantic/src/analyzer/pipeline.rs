@@ -88,6 +88,15 @@ pub fn analyze_with_packages(
                         .join(","),
                 );
             }
+            aliases.insert(
+                format!("__enum_variants.{}", enumeration.name.name),
+                enumeration
+                    .variants
+                    .iter()
+                    .map(|variant| variant.name.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
         }
         if let Item::Class(class) = item {
             aliases.insert(

@@ -1,0 +1,8 @@
+# E000204: `devcie` is a typo for the declared `device` parameter.
+# Rename it to `device`; the compiler can apply this edit safely.
+def load(name: string, device: string):
+    print(name)
+    print(device)
+
+def main():
+    load("Qwen", devcie = "cuda")

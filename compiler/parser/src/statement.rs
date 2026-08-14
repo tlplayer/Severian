@@ -203,6 +203,12 @@ impl Parser<'_> {
             let start = name.span.start;
             self.expect_simple(TokenKind::Colon, "`:` after binding name")?;
             let ty = self.parse_type()?;
+            if self.at(&TokenKind::Newline) {
+                return Err(ParseError {
+                    span: name.span,
+                    message: format!("E000205: binding `{}` requires an initializer", name.name),
+                });
+            }
             self.expect_simple(TokenKind::Equal, "`=` after binding type")?;
             let value = self.parse_expression()?;
             let end = self

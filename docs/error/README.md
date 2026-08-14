@@ -22,8 +22,13 @@ Runtime diagnostics use the source-focused `user` view by default. Set
 `sev run --diagnostics=internal`, to include the native artifact, protocol
 version, and canonical source path. Native failures that have not yet been
 classified are reported as E000990 instead of leaking a bare signal or core-dump
-message; each migrated runtime failure replaces that fallback with its stable,
-specific E0009xx code.
+message. E000990 automatically includes a symbolic stack trace in the default
+view, so developers do not rerun the command with a diagnostics flag merely to
+obtain crash evidence. Each migrated runtime failure replaces that fallback
+with its stable, specific E0009xx code.
+
+`sev errors` prints the complete registered E-code index. `sev explain EXXXXXX`
+opens the longer causes-and-fixes entry for one code.
 
 The driver test suite discovers every catalog file and requires its filename's
 diagnostic to be the first reported code. Each result must include a source
