@@ -6,6 +6,198 @@ pub(super) fn lower_call(
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
 ) -> Result<(Expression, ValueType), SemanticError> {
+    if let Some((class, assignments)) = completed_builder(call, scope, aliases)? {
+        let fields =
+            lower_construction_fields(call.span, &class, assignments, scope, signatures, aliases)?;
+        return Ok((
+            Expression::ConstructFields {
+                type_id: TypeDefinitionId::from_name(&class),
+                class,
+                fields,
+                validate: true,
+            },
+            ValueType::Any,
+        ));
+    }
+
+    if let Expr::Member(member) = call.callee.as_ref() {
+        if member.member.name == "from" {
+            if let Some(target_class) = static_class_name(&member.object, aliases) {
+                if call.args.len() != 1 || call.args[0].name.is_some() {
+                    return Err(error(call.span, "`from` expects exactly one source value"));
+                }
+                let source_class = expression_class(&call.args[0].value, scope, aliases)
+                    .ok_or_else(|| {
+                        error(
+                            call.args[0].span,
+                            "structural conversion requires a statically known source class",
+                        )
+                    })?;
+                if class_methods(&target_class, aliases).contains(&"from") {
+                    let source =
+                        lower_expression(&call.args[0].value, scope, signatures, aliases)?.0;
+                    return Ok((
+                        Expression::MethodCall {
+                            object: Box::new(Expression::ConstructFields {
+                                type_id: TypeDefinitionId::from_name(&target_class),
+                                class: target_class.clone(),
+                                fields: Vec::new(),
+                                validate: false,
+                            }),
+                            method: "from".into(),
+                            args: vec![source],
+                        },
+                        ValueType::Any,
+                    ));
+                }
+                if class_implements_trait(&source_class, "Document", aliases) {
+                    let source =
+                        lower_expression(&call.args[0].value, scope, signatures, aliases)?.0;
+                    return Ok((
+                        Expression::ObjectUpdate {
+                            object: Box::new(Expression::MethodCall {
+                                object: Box::new(source),
+                                method: "value".into(),
+                                args: Vec::new(),
+                            }),
+                            type_id: TypeDefinitionId::from_name(&target_class),
+                            class: target_class,
+                            fields: Vec::new(),
+                            json_document: true,
+                        },
+                        ValueType::Any,
+                    ));
+                }
+                validate_structural_conversion(call.span, &source_class, &target_class, aliases)?;
+                let source = lower_expression(&call.args[0].value, scope, signatures, aliases)?.0;
+                return Ok((
+                    Expression::ObjectUpdate {
+                        object: Box::new(source),
+                        type_id: TypeDefinitionId::from_name(&target_class),
+                        class: target_class,
+                        fields: Vec::new(),
+                        json_document: false,
+                    },
+                    ValueType::Any,
+                ));
+            }
+        }
+
+        if member.member.name == "into" {
+            if call.args.len() != 1 || call.args[0].name.is_some() {
+                return Err(error(call.span, "`into` expects exactly one target type"));
+            }
+            let target_class = static_class_name(&call.args[0].value, aliases)
+                .ok_or_else(|| error(call.args[0].span, "`into` requires a class name"))?;
+            let source_class =
+                expression_class(&member.object, scope, aliases).ok_or_else(|| {
+                    error(
+                        member.object.span(),
+                        "structural conversion requires a statically known source class",
+                    )
+                })?;
+            if class_methods(&target_class, aliases).contains(&"from") {
+                let source = lower_expression(&member.object, scope, signatures, aliases)?.0;
+                return Ok((
+                    Expression::MethodCall {
+                        object: Box::new(Expression::ConstructFields {
+                            type_id: TypeDefinitionId::from_name(&target_class),
+                            class: target_class.clone(),
+                            fields: Vec::new(),
+                            validate: false,
+                        }),
+                        method: "from".into(),
+                        args: vec![source],
+                    },
+                    ValueType::Any,
+                ));
+            }
+            if class_implements_trait(&target_class, "Document", aliases) {
+                let source = lower_expression(&member.object, scope, signatures, aliases)?.0;
+                let document = Expression::ObjectDocument {
+                    object: Box::new(source),
+                    fields: class_fields(&source_class, aliases)
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                };
+                let declared_fields = class_fields(&target_class, aliases);
+                let payload = declared_fields
+                    .iter()
+                    .copied()
+                    .find(|field| *field != "source_path")
+                    .ok_or_else(|| {
+                        error(
+                            call.span,
+                            format!("document adapter `{target_class}` needs a payload field"),
+                        )
+                    })?;
+                let mut fields = vec![(payload.to_owned(), document)];
+                if declared_fields.contains(&"source_path") {
+                    fields.push(("source_path".into(), Expression::String(String::new())));
+                }
+                return Ok((
+                    Expression::ConstructFields {
+                        type_id: TypeDefinitionId::from_name(&target_class),
+                        class: target_class,
+                        fields,
+                        validate: true,
+                    },
+                    ValueType::Any,
+                ));
+            }
+            validate_structural_conversion(call.span, &source_class, &target_class, aliases)?;
+            let source = lower_expression(&member.object, scope, signatures, aliases)?.0;
+            return Ok((
+                Expression::ObjectUpdate {
+                    object: Box::new(source),
+                    type_id: TypeDefinitionId::from_name(&target_class),
+                    class: target_class,
+                    fields: Vec::new(),
+                    json_document: false,
+                },
+                ValueType::Any,
+            ));
+        }
+
+        if member.member.name == "with" {
+            if let Some(class) = expression_class(&member.object, scope, aliases) {
+                if call.args.iter().any(|argument| argument.name.is_none()) {
+                    return Err(error(call.span, "`with` accepts only named field updates"));
+                }
+                let assignments = call
+                    .args
+                    .iter()
+                    .map(|argument| {
+                        (
+                            argument.name.as_ref().unwrap().name.clone(),
+                            &argument.value,
+                        )
+                    })
+                    .collect();
+                let fields = lower_update_fields(
+                    call.span,
+                    &class,
+                    assignments,
+                    scope,
+                    signatures,
+                    aliases,
+                )?;
+                let source = lower_expression(&member.object, scope, signatures, aliases)?.0;
+                return Ok((
+                    Expression::ObjectUpdate {
+                        object: Box::new(source),
+                        type_id: TypeDefinitionId::from_name(&class),
+                        class,
+                        fields,
+                        json_document: false,
+                    },
+                    ValueType::Any,
+                ));
+            }
+        }
+    }
+
     if let Expr::Index(index) = call.callee.as_ref() {
         if let Expr::Identifier(callee) = index.object.as_ref() {
             let imported = aliases
@@ -84,22 +276,7 @@ pub(super) fn lower_call(
                     );
                 }
                 if let Some(class) = aliases.get(&format!("__module_class.{function}")) {
-                    let args = call
-                        .args
-                        .iter()
-                        .map(|arg| {
-                            lower_expression(&arg.value, scope, signatures, aliases)
-                                .map(|(arg, _)| arg)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    return Ok((
-                        Expression::Construct {
-                            type_id: TypeDefinitionId::from_name(class),
-                            class: class.clone(),
-                            args,
-                        },
-                        ValueType::Any,
-                    ));
+                    return lower_class_invocation(call, class, scope, signatures, aliases);
                 }
                 return Err(error(
                     call.span,
@@ -264,34 +441,10 @@ pub(super) fn lower_call(
     // one exists, then fall back to the linked source implementation.
     let canonical = resolve_linked_function(imported, signatures);
     if let Some(class) = aliases.get(&format!("__module_class.{imported}")) {
-        let args = call
-            .args
-            .iter()
-            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok((
-            Expression::Construct {
-                type_id: TypeDefinitionId::from_name(class),
-                class: class.clone(),
-                args,
-            },
-            ValueType::Any,
-        ));
+        return lower_class_invocation(call, class, scope, signatures, aliases);
     }
     if let Some(class) = canonical.strip_prefix("__class.") {
-        let args = call
-            .args
-            .iter()
-            .map(|arg| lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg))
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok((
-            Expression::Construct {
-                type_id: TypeDefinitionId::from_name(class),
-                class: class.into(),
-                args,
-            },
-            ValueType::Any,
-        ));
+        return lower_class_invocation(call, class, scope, signatures, aliases);
     }
     let builtin = match canonical {
         "print" | "io.print" => Some(("print", ValueType::Unit)),
@@ -494,6 +647,437 @@ pub(super) fn lower_call(
         callee.span,
         format!("unknown function `{}`", callee.name),
     ))
+}
+
+pub(super) fn static_class_name(
+    expression: &Expr,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    match expression {
+        Expr::Identifier(identifier) => aliases
+            .get(&identifier.name)
+            .and_then(|value| value.strip_prefix("__class."))
+            .map(str::to_owned),
+        Expr::Member(member) => {
+            let Expr::Identifier(module) = member.object.as_ref() else {
+                return None;
+            };
+            let direct = format!("{}.{}", module.name, member.member.name);
+            aliases
+                .get(&format!("__module_class.{direct}"))
+                .cloned()
+                .or_else(|| {
+                    let module = aliases
+                        .get(&module.name)
+                        .map(String::as_str)
+                        .unwrap_or(&module.name);
+                    aliases
+                        .get(&format!("__module_class.{module}.{}", member.member.name))
+                        .cloned()
+                })
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn generated_object_call_class(
+    call: &severian_ast::CallExpr,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let Expr::Member(member) = call.callee.as_ref() else {
+        return None;
+    };
+    match member.member.name.as_str() {
+        "build" => builder_plan(&member.object, scope, aliases)
+            .ok()
+            .flatten()
+            .map(|(class, _)| class),
+        "from" => static_class_name(&member.object, aliases),
+        "with" => expression_class(&member.object, scope, aliases),
+        "into" => call
+            .args
+            .first()
+            .and_then(|argument| static_class_name(&argument.value, aliases)),
+        _ => None,
+    }
+}
+
+fn class_fields<'a>(class: &str, aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
+    aliases
+        .get(&format!("__class_fields.{class}"))
+        .map(|fields| {
+            fields
+                .split(',')
+                .filter(|field| !field.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn class_methods<'a>(class: &str, aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
+    aliases
+        .get(&format!("__class_methods.{class}"))
+        .map(|methods| {
+            methods
+                .split(',')
+                .filter(|method| !method.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn class_implements_trait(class: &str, expected: &str, aliases: &HashMap<String, String>) -> bool {
+    aliases
+        .get(&format!("__class_traits.{class}"))
+        .is_some_and(|traits| {
+            traits.split(',').any(|implemented| {
+                implemented
+                    .rsplit('.')
+                    .next()
+                    .is_some_and(|name| name == expected)
+            })
+        })
+}
+
+fn class_default_fields<'a>(class: &str, aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
+    aliases
+        .get(&format!("__class_default_fields.{class}"))
+        .map(|fields| {
+            fields
+                .split(',')
+                .filter(|field| !field.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn lower_class_invocation(
+    call: &severian_ast::CallExpr,
+    class: &str,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<(Expression, ValueType), SemanticError> {
+    let arity = call.args.len().to_string();
+    let constructor_matches = aliases
+        .get(&format!("__class_constructor_arities.{class}"))
+        .is_some_and(|arities| arities.split(',').any(|candidate| candidate == arity));
+    if constructor_matches && call.args.iter().all(|argument| argument.name.is_none()) {
+        let args = call
+            .args
+            .iter()
+            .map(|argument| {
+                lower_expression(&argument.value, scope, signatures, aliases)
+                    .map(|(argument, _)| argument)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok((
+            Expression::Construct {
+                type_id: TypeDefinitionId::from_name(class),
+                class: class.to_owned(),
+                args,
+            },
+            ValueType::Any,
+        ));
+    }
+
+    if let [argument] = call.args.as_slice() {
+        if argument.name.is_none() {
+            if let Expr::Map(map) = &argument.value {
+                let mut assignments = Vec::new();
+                for entry in &map.entries {
+                    let field = match &entry.key {
+                        Expr::Identifier(identifier) => identifier.name.clone(),
+                        Expr::Literal(Literal::String { value, .. }) => value.clone(),
+                        _ => {
+                            return Err(error(
+                                entry.key.span(),
+                                "class object-literal keys must be field names",
+                            ))
+                        }
+                    };
+                    assignments.push((field, &entry.value));
+                }
+                let fields = lower_construction_fields(
+                    call.span,
+                    class,
+                    assignments,
+                    scope,
+                    signatures,
+                    aliases,
+                )?;
+                return Ok((
+                    Expression::ConstructFields {
+                        type_id: TypeDefinitionId::from_name(class),
+                        class: class.to_owned(),
+                        fields,
+                        validate: true,
+                    },
+                    ValueType::Any,
+                ));
+            }
+        }
+    }
+
+    let declared_fields = class_fields(class, aliases);
+    let mut named_started = false;
+    let mut assignments = Vec::new();
+    for (index, argument) in call.args.iter().enumerate() {
+        let field = if let Some(name) = &argument.name {
+            named_started = true;
+            name.name.clone()
+        } else {
+            if named_started {
+                return Err(error(
+                    argument.span,
+                    "positional class fields may not follow named fields",
+                ));
+            }
+            declared_fields
+                .get(index)
+                .ok_or_else(|| {
+                    error(
+                        argument.span,
+                        format!("class `{class}` received too many positional fields"),
+                    )
+                })?
+                .to_string()
+        };
+        assignments.push((field, &argument.value));
+    }
+    let fields =
+        lower_construction_fields(call.span, class, assignments, scope, signatures, aliases)?;
+    Ok((
+        Expression::ConstructFields {
+            type_id: TypeDefinitionId::from_name(class),
+            class: class.to_owned(),
+            fields,
+            validate: true,
+        },
+        ValueType::Any,
+    ))
+}
+
+fn completed_builder<'a>(
+    call: &'a severian_ast::CallExpr,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Result<Option<(String, Vec<(String, &'a Expr)>)>, SemanticError> {
+    let Expr::Member(member) = call.callee.as_ref() else {
+        return Ok(None);
+    };
+    if member.member.name != "build" {
+        return Ok(None);
+    }
+    if !call.args.is_empty() {
+        return Err(error(
+            call.span,
+            "builder `build` does not accept arguments",
+        ));
+    }
+    let Some(plan) = builder_plan(&member.object, scope, aliases)? else {
+        return Ok(None);
+    };
+    Ok(Some(plan))
+}
+
+fn builder_plan<'a>(
+    expression: &'a Expr,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Result<Option<(String, Vec<(String, &'a Expr)>)>, SemanticError> {
+    let Expr::Call(call) = expression else {
+        return Ok(None);
+    };
+    let Expr::Member(member) = call.callee.as_ref() else {
+        return Ok(None);
+    };
+    if member.member.name == "builder" {
+        let Some(class) = static_class_name(&member.object, aliases) else {
+            return Ok(None);
+        };
+        if !call.args.is_empty() {
+            return Err(error(call.span, "`builder` does not accept arguments"));
+        }
+        return Ok(Some((class, Vec::new())));
+    }
+
+    let Some((class, mut fields)) = builder_plan(&member.object, scope, aliases)? else {
+        return Ok(None);
+    };
+    let (field, value) = if member.member.name == "set" {
+        if call.args.len() != 2 || call.args.iter().any(|argument| argument.name.is_some()) {
+            return Err(error(
+                call.span,
+                "dynamic builder `set` expects a field name and value",
+            ));
+        }
+        let Expr::Literal(Literal::String { value: field, .. }) = &call.args[0].value else {
+            return Err(error(
+                call.args[0].span,
+                "dynamic builder field name must be a string literal",
+            ));
+        };
+        (field.clone(), &call.args[1].value)
+    } else {
+        if call.args.len() != 1 || call.args[0].name.is_some() {
+            return Err(error(
+                call.span,
+                "typed builder setters expect exactly one value",
+            ));
+        }
+        (member.member.name.clone(), &call.args[0].value)
+    };
+    fields.push((field, value));
+    Ok(Some((class, fields)))
+}
+
+fn lower_construction_fields(
+    span: severian_ast::Span,
+    class: &str,
+    assignments: Vec<(String, &Expr)>,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<Vec<(String, Expression)>, SemanticError> {
+    let fields = class_fields(class, aliases);
+    let defaults = class_default_fields(class, aliases);
+    let lowered = lower_update_fields(span, class, assignments, scope, signatures, aliases)?;
+    let assigned = lowered
+        .iter()
+        .map(|(field, _)| field.as_str())
+        .collect::<HashSet<_>>();
+    let missing = fields
+        .iter()
+        .copied()
+        .filter(|field| !assigned.contains(field) && !defaults.contains(field))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(error(
+            span,
+            format!(
+                "builder for `{class}` is missing required field(s): {}",
+                missing.join(", ")
+            ),
+        ));
+    }
+    Ok(lowered)
+}
+
+fn lower_update_fields(
+    span: severian_ast::Span,
+    class: &str,
+    assignments: Vec<(String, &Expr)>,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<Vec<(String, Expression)>, SemanticError> {
+    let fields = class_fields(class, aliases);
+    let mut seen = HashSet::new();
+    let mut lowered = Vec::new();
+    for (field, value) in assignments {
+        if field.is_empty() {
+            return Err(error(
+                span,
+                "positional arguments may not follow named class fields",
+            ));
+        }
+        if !fields.contains(&field.as_str()) {
+            return Err(error(
+                value.span(),
+                format!("class `{class}` has no field `{field}`"),
+            ));
+        }
+        if !seen.insert(field.clone()) {
+            return Err(error(
+                value.span(),
+                format!("field `{field}` is assigned more than once"),
+            ));
+        }
+        let (value, actual) = lower_expression(value, scope, signatures, aliases)?;
+        if let Some(expected) = aliases
+            .get(&format!("__class_field_type.{class}.{field}"))
+            .and_then(|encoded| decode_field_type(encoded))
+        {
+            compatible(span, actual, expected)?;
+        }
+        lowered.push((field, value));
+    }
+    Ok(lowered)
+}
+
+fn validate_structural_conversion(
+    span: severian_ast::Span,
+    source: &str,
+    target: &str,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    let mut visited = HashSet::new();
+    validate_structural_conversion_inner(span, source, target, aliases, &mut visited)
+}
+
+fn validate_structural_conversion_inner(
+    span: severian_ast::Span,
+    source: &str,
+    target: &str,
+    aliases: &HashMap<String, String>,
+    visited: &mut HashSet<(String, String)>,
+) -> Result<(), SemanticError> {
+    if !visited.insert((source.to_owned(), target.to_owned())) {
+        return Err(error(
+            span,
+            format!(
+                "recursive structural conversion `{source}` -> `{target}` requires an explicit `From` implementation"
+            ),
+        ));
+    }
+    let source_fields = class_fields(source, aliases);
+    let target_fields = class_fields(target, aliases);
+    let defaults = class_default_fields(target, aliases);
+    for field in target_fields {
+        if !source_fields.contains(&field) {
+            if defaults.contains(&field) {
+                continue;
+            }
+            return Err(error(
+                span,
+                format!(
+                    "cannot convert `{source}` to `{target}`: required field `{field}` is missing"
+                ),
+            ));
+        }
+        let source_type = aliases
+            .get(&format!("__class_field_type.{source}.{field}"))
+            .and_then(|encoded| decode_field_type(encoded));
+        let target_type = aliases
+            .get(&format!("__class_field_type.{target}.{field}"))
+            .and_then(|encoded| decode_field_type(encoded));
+        if let (Some(actual), Some(expected)) = (source_type, target_type) {
+            compatible(span, actual, expected)?;
+        }
+        let source_class = aliases.get(&format!("__class_field_class.{source}.{field}"));
+        let target_class = aliases.get(&format!("__class_field_class.{target}.{field}"));
+        match (source_class, target_class) {
+            (Some(source_class), Some(target_class)) if source_class != target_class => {
+                validate_structural_conversion_inner(
+                    span,
+                    source_class,
+                    target_class,
+                    aliases,
+                    visited,
+                )?;
+            }
+            (None, Some(target_class)) => {
+                return Err(error(
+                    span,
+                    format!("cannot convert `{source}.{field}` to nominal field `{target_class}`"),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn resolve_linked_function<'a>(

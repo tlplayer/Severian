@@ -202,6 +202,22 @@ impl Parser<'_> {
                 } else {
                     None
                 };
+                let constraints = if self.take_simple(&TokenKind::With).is_some() {
+                    self.expect_simple(TokenKind::LeftBrace, "`{` after field `with`")?;
+                    self.skip_parenthesized_layout();
+                    let mut constraints = Vec::new();
+                    while !self.at(&TokenKind::RightBrace) {
+                        constraints.push(self.parse_expression()?);
+                        if self.take_simple(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        self.skip_parenthesized_layout();
+                    }
+                    self.expect_simple(TokenKind::RightBrace, "`}` after field constraints")?;
+                    constraints
+                } else {
+                    Vec::new()
+                };
                 if ty.is_none() && default.is_none() {
                     return Err(ParseError {
                         span: field_name.span,
@@ -217,6 +233,7 @@ impl Parser<'_> {
                     name: field_name,
                     ty,
                     default,
+                    constraints,
                 });
             }
         }

@@ -13,6 +13,9 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     for class in &program.classes {
         strings.push(class.name.clone());
         strings.extend(class.fields.iter().cloned());
+        for constraint in &class.field_constraints {
+            collect_expression_strings(constraint, &mut strings);
+        }
         for function in class.methods.iter().chain(&class.constructors) {
             collect_strings(&function.instructions, &mut strings);
         }
@@ -179,6 +182,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_json_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_dynamic_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",

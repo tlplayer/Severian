@@ -246,6 +246,30 @@ pub(super) fn collect_expression_strings(expression: &Expression, strings: &mut 
                 collect_expression_strings(value, strings);
             }
         }
+        Expression::ConstructFields { class, fields, .. } => {
+            strings.push(class.clone());
+            for (field, value) in fields {
+                strings.push(field.clone());
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::ObjectUpdate {
+            object,
+            class,
+            fields,
+            ..
+        } => {
+            strings.push(class.clone());
+            collect_expression_strings(object, strings);
+            for (field, value) in fields {
+                strings.push(field.clone());
+                collect_expression_strings(value, strings);
+            }
+        }
+        Expression::ObjectDocument { object, fields } => {
+            strings.extend(fields.iter().cloned());
+            collect_expression_strings(object, strings);
+        }
         Expression::Member { object, member } => {
             strings.push(member.clone());
             collect_expression_strings(object, strings);
@@ -450,6 +474,20 @@ pub(super) fn collect_task_names_expression(expression: &Expression, names: &mut
             for value in values {
                 collect_task_names_expression(value, names);
             }
+        }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                collect_task_names_expression(value, names);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            collect_task_names_expression(object, names);
+            for (_, value) in fields {
+                collect_task_names_expression(value, names);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => {
+            collect_task_names_expression(object, names);
         }
         Expression::Map(entries) => {
             for (key, value) in entries {

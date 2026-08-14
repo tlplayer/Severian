@@ -39,11 +39,33 @@ impl Parser<'_> {
                 span: token.span,
                 name: "view".into(),
             }),
+            // `from` is contextual after `def` and `.`, where it names the
+            // language conversion hook rather than beginning an import.
+            TokenKind::From => Ok(Ident {
+                span: token.span,
+                name: "from".into(),
+            }),
             _ => Err(ParseError {
                 span: token.span,
                 message: format!("expected {expected}"),
             }),
         }
+    }
+
+    pub(super) fn expect_member_name(&mut self) -> Result<Ident, ParseError> {
+        if self.at(&TokenKind::From) || self.at(&TokenKind::With) {
+            let token = self.advance().clone();
+            let name = match token.kind {
+                TokenKind::From => "from",
+                TokenKind::With => "with",
+                _ => unreachable!(),
+            };
+            return Ok(Ident {
+                span: token.span,
+                name: name.into(),
+            });
+        }
+        self.expect_identifier("member name")
     }
 
     pub(super) fn expect_simple(

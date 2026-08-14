@@ -311,6 +311,18 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
                 walk_expression(value, visitor);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                walk_expression(value, visitor);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            walk_expression(object, visitor);
+            for (_, value) in fields {
+                walk_expression(value, visitor);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => walk_expression(object, visitor),
         Expression::Map(entries) => {
             for (key, value) in entries {
                 walk_expression(key, visitor);

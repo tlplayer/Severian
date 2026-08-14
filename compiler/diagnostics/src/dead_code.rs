@@ -241,6 +241,18 @@ fn collect_expression_calls(expression: &Expression, calls: &mut BTreeSet<String
                 collect_expression_calls(value, calls);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                collect_expression_calls(value, calls);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            collect_expression_calls(object, calls);
+            for (_, value) in fields {
+                collect_expression_calls(value, calls);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => collect_expression_calls(object, calls),
 
         Expression::Map(entries) => {
             for (key, value) in entries {

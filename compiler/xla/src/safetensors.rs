@@ -248,9 +248,7 @@ impl SafeTensorStore {
                     .and_then(Value::as_str)
                     .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has no dtype")))?,
             )
-            .ok_or_else(|| {
-                XlaError::Pjrt(format!("tensor `{name}` has an unsupported dtype"))
-            })?;
+            .ok_or_else(|| XlaError::Pjrt(format!("tensor `{name}` has an unsupported dtype")))?;
             let shape = metadata
                 .get("shape")
                 .and_then(Value::as_array)
@@ -339,7 +337,12 @@ mod tests {
             SafeTensorDType::parse_safetensors("F32").unwrap(),
             crate::pjrt::ElementType::F32
         );
-        assert_eq!(SafeTensorDType::parse_safetensors("C128").unwrap().byte_width(), 16);
+        assert_eq!(
+            SafeTensorDType::parse_safetensors("C128")
+                .unwrap()
+                .byte_width(),
+            16
+        );
     }
 
     #[test]

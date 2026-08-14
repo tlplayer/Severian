@@ -877,16 +877,8 @@ pub fn lower_tensor_call(
             ))
         }
 
-        "bf16to"
-        | "f32to"
-        | "tof8e4m3fn"
-        | "tof8e5m2"
-        | "tof16"
-        | "tobf16"
-        | "tof32"
-        | "tof64"
-        | "to"
-        | "convert" => {
+        "bf16to" | "f32to" | "tof8e4m3fn" | "tof8e5m2" | "tof16" | "tobf16" | "tof32" | "tof64"
+        | "to" | "convert" => {
             require_arity(&op, args, 1)?;
             Ok(emitter.convert(&args[0], result_type))
         }

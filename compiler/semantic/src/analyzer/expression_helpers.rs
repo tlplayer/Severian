@@ -389,7 +389,10 @@ pub(super) fn lower_signature(
 
 fn tensor_constraint(ty: &Type) -> Result<severian_hir::TensorElementConstraint, SemanticError> {
     let Type::Named(path) = ty else {
-        return Err(error(ty.span(), "tensor dtype constraint must be a named capability"));
+        return Err(error(
+            ty.span(),
+            "tensor dtype constraint must be a named capability",
+        ));
     };
     let name = path
         .segments
@@ -429,7 +432,11 @@ fn lower_signature_type(
     let Some(Type::Named(element)) = path.args.first().and_then(TypeArg::as_type) else {
         return lower_type(ty).map(SignatureType::Concrete);
     };
-    let Some(variable) = element.segments.first().map(|segment| segment.name.as_str()) else {
+    let Some(variable) = element
+        .segments
+        .first()
+        .map(|segment| segment.name.as_str())
+    else {
         return lower_type(ty).map(SignatureType::Concrete);
     };
     let Some(constraints) = generics.get(variable) else {
@@ -437,14 +444,15 @@ fn lower_signature_type(
     };
     let mut dimensions = [TensorDimension::Dynamic; 8];
     if path.args.len().saturating_sub(1) > dimensions.len() {
-        return Err(error(path.span, "tensor rank exceeds the supported maximum of 8"));
+        return Err(error(
+            path.span,
+            "tensor rank exceeds the supported maximum of 8",
+        ));
     }
     for (axis, argument) in path.args[1..].iter().enumerate() {
         dimensions[axis] = match argument {
             TypeArg::Dimension { size, .. } => TensorDimension::Static(*size),
-            TypeArg::Type { ty, .. }
-                if matches!(ty.as_ref(), Type::Named(name) if name.segments.first().is_some_and(|part| part.name == "dynamic")) =>
-            {
+            TypeArg::Type { ty, .. } if matches!(ty.as_ref(), Type::Named(name) if name.segments.first().is_some_and(|part| part.name == "dynamic")) => {
                 TensorDimension::Dynamic
             }
             _ => {

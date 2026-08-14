@@ -20,9 +20,10 @@ impl ExecutableCache {
     }
 
     pub fn get(&self, key: &CompileKey) -> Result<Option<Arc<LoadedExecutable>>> {
-        let entries = self.entries.lock().map_err(|_| {
-            XlaError::Compilation("executable cache lock was poisoned".to_owned())
-        })?;
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| XlaError::Compilation("executable cache lock was poisoned".to_owned()))?;
         Ok(entries.get(key).cloned())
     }
 
@@ -31,9 +32,10 @@ impl ExecutableCache {
         key: CompileKey,
         compile: impl FnOnce() -> Result<LoadedExecutable>,
     ) -> Result<Arc<LoadedExecutable>> {
-        let mut entries = self.entries.lock().map_err(|_| {
-            XlaError::Compilation("executable cache lock was poisoned".to_owned())
-        })?;
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| XlaError::Compilation("executable cache lock was poisoned".to_owned()))?;
         if let Some(executable) = entries.get(&key) {
             return Ok(Arc::clone(executable));
         }
@@ -44,9 +46,10 @@ impl ExecutableCache {
     }
 
     pub fn len(&self) -> Result<usize> {
-        let entries = self.entries.lock().map_err(|_| {
-            XlaError::Compilation("executable cache lock was poisoned".to_owned())
-        })?;
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| XlaError::Compilation("executable cache lock was poisoned".to_owned()))?;
         Ok(entries.len())
     }
 
@@ -55,11 +58,11 @@ impl ExecutableCache {
     }
 
     pub fn clear(&self) -> Result<()> {
-        let mut entries = self.entries.lock().map_err(|_| {
-            XlaError::Compilation("executable cache lock was poisoned".to_owned())
-        })?;
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| XlaError::Compilation("executable cache lock was poisoned".to_owned()))?;
         entries.clear();
         Ok(())
     }
 }
-

@@ -388,7 +388,7 @@ impl Parser<'_> {
                 }
             } else if self.take_simple(&TokenKind::Dot).is_some() {
                 let start = expression.span().start;
-                let member = self.expect_identifier("member name")?;
+                let member = self.expect_member_name()?;
                 expression = Expr::Member(MemberExpr {
                     span: Span::new(start, member.span.end),
                     object: Box::new(expression),

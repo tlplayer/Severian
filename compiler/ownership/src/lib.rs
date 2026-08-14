@@ -415,6 +415,20 @@ impl Checker {
                     self.check_expression(value, Access::Read)?;
                 }
             }
+            Expression::ConstructFields { fields, .. } => {
+                for (_, value) in fields {
+                    self.check_expression(value, Access::Read)?;
+                }
+            }
+            Expression::ObjectUpdate { object, fields, .. } => {
+                self.check_expression(object, Access::Read)?;
+                for (_, value) in fields {
+                    self.check_expression(value, Access::Read)?;
+                }
+            }
+            Expression::ObjectDocument { object, .. } => {
+                self.check_expression(object, Access::Read)?;
+            }
             Expression::Map(entries) => {
                 for (key, value) in entries {
                     self.check_expression(key, Access::Read)?;

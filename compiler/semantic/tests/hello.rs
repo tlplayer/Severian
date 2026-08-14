@@ -37,6 +37,96 @@ fn list_addition_has_list_type() {
 }
 
 #[test]
+fn generated_builders_updates_and_structural_from_share_field_construction() {
+    let source = concat!(
+        "class Range:\n",
+        "    low: int with { low >= 0 }\n",
+        "    high: int = 10 with { high > low }\n",
+        "\n",
+        "class Bounds:\n",
+        "    low: int\n",
+        "    high: int\n",
+        "\n",
+        "def main():\n",
+        "    range = Range.builder().low(2).build()\n",
+        "    wider = range.with(high = 20)\n",
+        "    bounds = Bounds.from(wider)\n",
+        "    literal = Range({low: 3})\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    assert_eq!(hir.classes[0].field_constraints.len(), 2);
+    let main = hir.main().unwrap();
+    assert!(matches!(
+        main.instructions[0],
+        Instruction::Let {
+            value: Expression::Typed { ref expression, .. },
+            ..
+        } if matches!(expression.kind(), Expression::ConstructFields { .. })
+    ));
+    assert!(matches!(
+        main.instructions[1],
+        Instruction::Let {
+            value: Expression::Typed { ref expression, .. },
+            ..
+        } if matches!(expression.kind(), Expression::ObjectUpdate { .. })
+    ));
+    assert!(matches!(
+        main.instructions[2],
+        Instruction::Let {
+            value: Expression::Typed { ref expression, .. },
+            ..
+        } if matches!(expression.kind(), Expression::ObjectUpdate { .. })
+    ));
+    assert!(matches!(
+        main.instructions[3],
+        Instruction::Let {
+            value: Expression::Typed { ref expression, .. },
+            ..
+        } if matches!(expression.kind(), Expression::ConstructFields { .. })
+    ));
+}
+
+#[test]
+fn builder_reports_missing_required_fields() {
+    let source = concat!(
+        "class Pair:\n",
+        "    left: int\n",
+        "    right: int\n",
+        "\n",
+        "def main():\n",
+        "    pair = Pair.builder().left(1).build()\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("missing required field(s): right"));
+}
+
+#[test]
+fn from_trait_selects_an_explicit_typed_conversion() {
+    let source = concat!(
+        "class Source:\n",
+        "    value: int\n",
+        "\n",
+        "class Target: From[Source]\n",
+        "    value: int\n",
+        "\n",
+        "    def from(source: Source) -> Target:\n",
+        "        return Target(value = source.value)\n",
+        "\n",
+        "def main():\n",
+        "    source = Source(value = 7)\n",
+        "    target = Target.from(source)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Let { value, .. } = &hir.main().unwrap().instructions[1] else {
+        panic!("expected converted binding");
+    };
+    assert!(matches!(value.kind(), Expression::MethodCall { method, .. } if method == "from"));
+}
+
+#[test]
 fn bare_return_from_unit_result_produces_ok_variant() {
     let source = "def save() -> Result[unit, string]:\n    return\n";
     let ast = parse(&lex(source).unwrap()).unwrap();
@@ -223,7 +313,9 @@ fn tensor_wildcard_parameters_reject_non_tensor_values() {
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
-    assert!(error.message.contains("generic tensor parameter requires a tensor"));
+    assert!(error
+        .message
+        .contains("generic tensor parameter requires a tensor"));
 }
 
 #[test]
@@ -273,7 +365,9 @@ fn repeated_tensor_type_variables_require_one_dtype() {
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
-    assert!(error.message.contains("was bound to `f16`, then used with `f32`"));
+    assert!(error
+        .message
+        .contains("was bound to `f16`, then used with `f32`"));
 }
 
 #[test]
@@ -537,7 +631,12 @@ fn retains_formatted_block_string_operands_for_native_lowering() {
     let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
         panic!("expected a formatted block return value")
     };
-    let Expression::Format { template, args, arg_types } = value.kind() else {
+    let Expression::Format {
+        template,
+        args,
+        arg_types,
+    } = value.kind()
+    else {
         panic!("expected a formatted block return value")
     };
     assert_eq!(template, "model {name}\nversion {version}\n");

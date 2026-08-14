@@ -257,7 +257,10 @@ impl ModelPlan {
     }
 }
 
-fn ensure_unique<'a>(kind: &'static str, values: impl Iterator<Item = &'a str>) -> Result<(), PlanError> {
+fn ensure_unique<'a>(
+    kind: &'static str,
+    values: impl Iterator<Item = &'a str>,
+) -> Result<(), PlanError> {
     let mut seen = HashSet::new();
     for value in values {
         if !seen.insert(value) {
@@ -311,7 +314,10 @@ impl fmt::Display for PlanError {
         match self {
             Self::DuplicateId { kind, id } => write!(formatter, "duplicate {kind} id `{id}`"),
             Self::UnknownProgram { owner, program } => {
-                write!(formatter, "`{owner}` references unknown program `{program}`")
+                write!(
+                    formatter,
+                    "`{owner}` references unknown program `{program}`"
+                )
             }
             Self::UnknownWeight { owner, weight } => {
                 write!(formatter, "`{owner}` references unknown weight `{weight}`")
@@ -320,7 +326,10 @@ impl fmt::Display for PlanError {
                 write!(formatter, "`{owner}` references unknown state `{state}`")
             }
             Self::InvalidTiedWeight { weight, tied_to } => {
-                write!(formatter, "weight `{weight}` has invalid tie target `{tied_to}`")
+                write!(
+                    formatter,
+                    "weight `{weight}` has invalid tie target `{tied_to}`"
+                )
             }
         }
     }
@@ -409,7 +418,9 @@ mod tests {
             capabilities: vec![],
             components: vec![],
         };
-        assert!(matches!(plan.validate(), Err(PlanError::UnknownWeight { .. })));
+        assert!(matches!(
+            plan.validate(),
+            Err(PlanError::UnknownWeight { .. })
+        ));
     }
 }
-

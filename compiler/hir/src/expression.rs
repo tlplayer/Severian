@@ -46,6 +46,34 @@ pub enum Expression {
         class: String,
         args: Vec<Expression>,
     },
+    /// Field-oriented construction used by generated builders and structural
+    /// conversion. Unlike constructor calls, values are named and may be sparse;
+    /// class defaults are applied only after the complete construction plan is
+    /// known.
+    ConstructFields {
+        type_id: TypeDefinitionId,
+        class: String,
+        fields: Vec<(String, Expression)>,
+        /// False only for the hidden receiver used to invoke an explicit static
+        /// conversion hook such as `Target.from(source)`.
+        validate: bool,
+    },
+    /// A transactional copy/conversion. Fields not present in `fields` are read
+    /// from `object` by name, then the resulting target object is validated once.
+    ObjectUpdate {
+        object: Box<Expression>,
+        type_id: TypeDefinitionId,
+        class: String,
+        fields: Vec<(String, Expression)>,
+        /// Read inherited fields from a canonical JSON document instead of a
+        /// Severian class object.
+        json_document: bool,
+    },
+    /// Materialize the public fields of an object as a canonical JSON map.
+    ObjectDocument {
+        object: Box<Expression>,
+        fields: Vec<String>,
+    },
     Member {
         object: Box<Expression>,
         member: String,

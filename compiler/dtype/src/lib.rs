@@ -171,7 +171,9 @@ impl DType {
             Self::Bool => DTypeClass::Boolean,
             Self::I8 | Self::I16 | Self::I32 | Self::I64 => DTypeClass::SignedInteger,
             Self::U8 | Self::U16 | Self::U32 | Self::U64 => DTypeClass::UnsignedInteger,
-            Self::F8E4M3FN | Self::F8E5M2 | Self::F16 | Self::BF16 | Self::F32 | Self::F64 => DTypeClass::Float,
+            Self::F8E4M3FN | Self::F8E5M2 | Self::F16 | Self::BF16 | Self::F32 | Self::F64 => {
+                DTypeClass::Float
+            }
             Self::C64 | Self::C128 => DTypeClass::Complex,
         }
     }
@@ -182,9 +184,13 @@ impl DType {
         matches!(constraint, Constraint::Any)
             || matches!(
                 (self.class(), constraint),
-                (Class::SignedInteger | Class::UnsignedInteger | Class::Float | Class::Complex, Constraint::Numeric)
-                    | (Class::SignedInteger | Class::UnsignedInteger, Constraint::Integer)
-                    | (Class::SignedInteger, Constraint::SignedInteger)
+                (
+                    Class::SignedInteger | Class::UnsignedInteger | Class::Float | Class::Complex,
+                    Constraint::Numeric
+                ) | (
+                    Class::SignedInteger | Class::UnsignedInteger,
+                    Constraint::Integer
+                ) | (Class::SignedInteger, Constraint::SignedInteger)
                     | (Class::UnsignedInteger, Constraint::UnsignedInteger)
                     | (Class::Float, Constraint::Float)
                     | (Class::Complex, Constraint::Complex)
@@ -237,7 +243,11 @@ impl DType {
         else {
             return None;
         };
-        let width = if left_width > right_width { left_width } else { right_width };
+        let width = if left_width > right_width {
+            left_width
+        } else {
+            right_width
+        };
         if left_signed == right_signed {
             return match (width, left_signed) {
                 (8, true) => Some(Self::I8),

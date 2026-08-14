@@ -107,7 +107,9 @@ fn lexes_formatted_triple_quoted_strings_with_preserved_newlines() {
 #[test]
 fn rejects_an_unterminated_formatted_triple_quoted_string() {
     let error = lex("value = f\"\"\"never closed\n").unwrap_err();
-    assert!(error.message.contains("unterminated formatted triple-quoted"));
+    assert!(error
+        .message
+        .contains("unterminated formatted triple-quoted"));
 }
 
 #[test]

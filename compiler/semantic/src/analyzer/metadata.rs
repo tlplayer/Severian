@@ -559,6 +559,15 @@ pub(super) fn register_class_field_aliases(
     class: &str,
     fields: &[severian_ast::Field],
 ) -> Result<(), SemanticError> {
+    aliases.insert(
+        format!("__class_default_fields.{class}"),
+        fields
+            .iter()
+            .filter(|field| field.default.is_some())
+            .map(|field| field.name.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
     for field in fields {
         if let Some(ty) = &field.ty {
             aliases.insert(

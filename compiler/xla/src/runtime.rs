@@ -123,8 +123,8 @@ unsafe fn upload_mapped_tensor(runtime: &mut RuntimeState, pointer: *mut c_void)
         .checked_mul(element.byte_width())
         .unwrap_or_else(|| fail("mapped tensor byte size overflow"));
     let bytes = slice::from_raw_parts(tensor.data.cast::<u8>(), byte_len).to_vec();
-    let host = HostBuffer::new(Shape::new(element, dimensions), bytes)
-        .unwrap_or_else(|error| fail(error));
+    let host =
+        HostBuffer::new(Shape::new(element, dimensions), bytes).unwrap_or_else(|error| fail(error));
     let buffer = runtime
         .client
         .upload_to(host, &runtime.device)

@@ -100,6 +100,9 @@ impl Program {
             for default in class.field_defaults.iter_mut().flatten() {
                 visit_expression_mut(default, visitor);
             }
+            for constraint in &mut class.field_constraints {
+                visit_expression_mut(constraint, visitor);
+            }
             for function in class.methods.iter_mut().chain(&mut class.constructors) {
                 visit_function_expressions_mut(function, visitor);
             }
@@ -253,6 +256,8 @@ pub struct Class {
     pub field_types: Vec<ValueType>,
     pub field_classes: Vec<Option<String>>,
     pub field_defaults: Vec<Option<Expression>>,
+    /// Cross-field invariants evaluated against the completely assembled object.
+    pub field_constraints: Vec<Expression>,
     pub constructors: Vec<Function>,
     pub methods: Vec<Function>,
     pub method_return_classes: Vec<Option<String>>,

@@ -34,6 +34,10 @@ pub(super) fn validate_trait_implementations(
                     "trait implementation requires a named trait",
                 )
             })?;
+            if raw.rsplit('.').next() == Some("From") {
+                validate_from_implementation(class, implemented)?;
+                continue;
+            }
             let canonical = canonical_declared_type_name(&raw, aliases);
             let declaration = traits
                 .get(&canonical)
@@ -86,6 +90,58 @@ pub(super) fn validate_trait_implementations(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_from_implementation(
+    class: &severian_ast::ClassDecl,
+    implemented: &Type,
+) -> Result<(), SemanticError> {
+    let method = class
+        .methods
+        .iter()
+        .find(|method| method.name.name == "from")
+        .ok_or_else(|| {
+            error(
+                implemented.span(),
+                format!(
+                    "class `{}` implements `From` but does not define `from(value)`",
+                    class.name.name
+                ),
+            )
+        })?;
+    if method.params.len() != 1 {
+        return Err(error(
+            method.name.span,
+            "a `From` implementation must accept exactly one source value",
+        ));
+    }
+    let Type::Named(path) = implemented else {
+        unreachable!()
+    };
+    if let Some(expected) = path.args.first().and_then(TypeArg::as_type) {
+        if !optional_declaration_types_match(method.params[0].ty.as_ref(), Some(expected)) {
+            return Err(error(
+                method.params[0].span,
+                "the `from` parameter must match the source type in `From[Source]`",
+            ));
+        }
+    }
+    if method
+        .return_type
+        .as_ref()
+        .and_then(class_type_name)
+        .as_deref()
+        != Some(class.name.name.as_str())
+    {
+        return Err(error(
+            method.name.span,
+            format!(
+                "`{}.from` must return `{}`",
+                class.name.name, class.name.name
+            ),
+        ));
     }
     Ok(())
 }

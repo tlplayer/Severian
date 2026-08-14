@@ -328,7 +328,52 @@ impl LowerContext<'_> {
                 {
                     self.object_class_ids.insert(result.clone(), definition.id);
                 }
+                self.validate_object(&result, class);
                 (result, ValueType::Any)
+            }
+            Expression::ConstructFields {
+                class,
+                fields,
+                validate,
+                ..
+            } => {
+                let explicit = fields
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value))
+                    .collect::<HashMap<_, _>>();
+                self.lower_field_construction(class, None, &explicit, false, *validate)
+            }
+            Expression::ObjectUpdate {
+                object,
+                class,
+                fields,
+                json_document,
+                ..
+            } => {
+                let source = self.lower_expression(object).0;
+                let explicit = fields
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value))
+                    .collect::<HashMap<_, _>>();
+                self.lower_field_construction(class, Some(&source), &explicit, *json_document, true)
+            }
+            Expression::ObjectDocument { object, fields } => {
+                let source = self.lower_expression(object).0;
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @__sev_map_new() : () -> !llvm.ptr"
+                )
+                .unwrap();
+                for field in fields {
+                    let field_name = self.string_address(field);
+                    let value = self.fresh_value();
+                    writeln!(self.output, "    {value} = llvm.call @__sev_object_get({source}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                    let key = self.fresh_value();
+                    writeln!(self.output, "    {key} = llvm.call @__sev_box_string({field_name}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
+                    writeln!(self.output, "    llvm.call @__sev_map_insert({result}, {key}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                }
+                (result, ValueType::Map)
             }
             Expression::Member { object, member } => {
                 let (object, _) = self.lower_expression(object);
@@ -387,6 +432,9 @@ impl LowerContext<'_> {
                 let value = self.lower_expression(&args[1]);
                 let value = self.box_value(value);
                 writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                if let Some(class) = self.object_classes.get(&object).cloned() {
+                    self.validate_object(&object, &class);
+                }
                 (String::new(), ValueType::Unit)
             }
             Expression::ChaosRule { .. } => {
@@ -2718,5 +2766,177 @@ impl LowerContext<'_> {
                 self.lower_binary_values(left, *op, right)
             }
         }
+    }
+
+    fn lower_field_construction(
+        &mut self,
+        class: &str,
+        source: Option<&str>,
+        explicit: &HashMap<&str, &Expression>,
+        json_document: bool,
+        validate: bool,
+    ) -> (String, ValueType) {
+        let class_name = self.string_address(class);
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @__sev_object_new({class_name}) : (!llvm.ptr) -> !llvm.ptr"
+        )
+        .unwrap();
+        let definition = self
+            .classes
+            .iter()
+            .find(|candidate| candidate.name == class)
+            .cloned();
+        let source_definition = source
+            .and_then(|value| self.object_classes.get(value))
+            .and_then(|source_class| {
+                self.classes
+                    .iter()
+                    .find(|candidate| candidate.name == *source_class)
+            })
+            .cloned();
+        let source_fields = source_definition
+            .as_ref()
+            .map(|definition| definition.fields.iter().cloned().collect::<HashSet<_>>());
+
+        if let Some(definition) = &definition {
+            for field in &definition.fields {
+                let field_name = self.string_address(field);
+                writeln!(self.output, "    llvm.call @__sev_object_declare({result}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+            }
+            for (index, field) in definition.fields.iter().enumerate() {
+                let value = if let Some(value) = explicit.get(field.as_str()) {
+                    let lowered = self.lower_expression(value);
+                    Some(self.box_value(lowered))
+                } else if let Some(source) = source.filter(|_| {
+                    json_document
+                        || source_fields
+                            .as_ref()
+                            .map_or(true, |fields| fields.contains(field))
+                }) {
+                    let field_name = self.string_address(field);
+                    let mut copied = self.fresh_value();
+                    let getter = if json_document {
+                        "__sev_json_object_get"
+                    } else {
+                        "__sev_object_get"
+                    };
+                    writeln!(self.output, "    {copied} = llvm.call @{getter}({source}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                    if !json_document {
+                        let source_field_class = source_definition.as_ref().and_then(|source| {
+                            source
+                                .fields
+                                .iter()
+                                .position(|candidate| candidate == field)
+                                .and_then(|index| source.field_classes[index].as_ref())
+                        });
+                        let target_field_class = definition.field_classes[index].as_ref();
+                        if let (Some(source_class), Some(target_class)) =
+                            (source_field_class, target_field_class)
+                        {
+                            if source_class != target_class {
+                                self.object_classes
+                                    .insert(copied.clone(), source_class.clone());
+                                if let Some(source_definition) = self
+                                    .classes
+                                    .iter()
+                                    .find(|candidate| candidate.name == *source_class)
+                                {
+                                    self.object_class_ids
+                                        .insert(copied.clone(), source_definition.id);
+                                }
+                                let nested = HashMap::new();
+                                copied = self
+                                    .lower_field_construction(
+                                        target_class,
+                                        Some(&copied),
+                                        &nested,
+                                        false,
+                                        true,
+                                    )
+                                    .0;
+                            }
+                        }
+                    }
+                    Some(copied)
+                } else {
+                    definition.field_defaults[index].as_ref().map(|default| {
+                        let lowered = self.lower_expression(default);
+                        self.box_value(lowered)
+                    })
+                };
+                let Some(value) = value else { continue };
+                let field_name = self.string_address(field);
+                writeln!(self.output, "    llvm.call @__sev_object_set({result}, {field_name}, {value}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+            }
+        }
+        self.object_classes.insert(result.clone(), class.to_owned());
+        if let Some(definition) = &definition {
+            self.object_class_ids.insert(result.clone(), definition.id);
+        }
+        if validate {
+            self.validate_object(&result, class);
+        }
+        (result, ValueType::Any)
+    }
+
+    pub(super) fn validate_object(&mut self, object: &str, class: &str) {
+        let Some(definition) = self
+            .classes
+            .iter()
+            .find(|candidate| candidate.name == class)
+            .cloned()
+        else {
+            return;
+        };
+        if definition.field_constraints.is_empty() {
+            return;
+        }
+
+        let previous_object = self.field_object.replace(object.to_owned());
+        let previous_names = std::mem::replace(
+            &mut self.field_names,
+            definition.fields.iter().cloned().collect(),
+        );
+        let previous_types = std::mem::replace(
+            &mut self.field_types,
+            definition
+                .fields
+                .iter()
+                .cloned()
+                .zip(definition.field_types.iter().copied())
+                .collect(),
+        );
+        let previous_classes = std::mem::replace(
+            &mut self.field_classes,
+            definition
+                .fields
+                .iter()
+                .cloned()
+                .zip(definition.field_classes.iter().cloned())
+                .filter_map(|(field, class)| class.map(|class| (field, class)))
+                .collect(),
+        );
+        for constraint in &definition.field_constraints {
+            let lowered = self.lower_expression(constraint);
+            let (condition, _) = self.unbox_value(lowered, ValueType::Bool);
+            let passed = self.fresh_block();
+            let failed = self.fresh_block();
+            writeln!(
+                self.output,
+                "    llvm.cond_br {condition}, ^bb{passed}, ^bb{failed}"
+            )
+            .unwrap();
+            writeln!(self.output, "  ^bb{failed}:").unwrap();
+            writeln!(self.output, "    llvm.call @abort() : () -> ()").unwrap();
+            writeln!(self.output, "    llvm.unreachable").unwrap();
+            writeln!(self.output, "  ^bb{passed}:").unwrap();
+            self.terminated = false;
+        }
+        self.field_object = previous_object;
+        self.field_names = previous_names;
+        self.field_types = previous_types;
+        self.field_classes = previous_classes;
     }
 }

@@ -39,6 +39,21 @@ fn preserves_generic_parameters_and_capability_constraints() {
 }
 
 #[test]
+fn parses_cross_field_class_invariants() {
+    let source = concat!(
+        "class Range:\n",
+        "    low: int with { low >= 0 }\n",
+        "    high: int = 10 with { high > low, high < 100 }\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Class(class) = &module.items[0] else {
+        panic!("expected class");
+    };
+    assert_eq!(class.fields[0].constraints.len(), 1);
+    assert_eq!(class.fields[1].constraints.len(), 2);
+}
+
+#[test]
 fn rejects_a_missing_function_body() {
     let tokens = lex("def main():\n").unwrap();
     let error = parse(&tokens).unwrap_err();

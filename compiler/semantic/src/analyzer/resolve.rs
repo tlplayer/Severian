@@ -51,16 +51,18 @@ pub(super) fn expression_class(
                         return Some(class);
                     }
                 }
-                let class = expression_class(&member.object, scope, aliases)?;
-                aliases
-                    .get(&format!(
-                        "__class_method_return_class.{class}.{}",
-                        member.member.name
-                    ))
-                    .cloned()
+                expression_class(&member.object, scope, aliases).and_then(|class| {
+                    aliases
+                        .get(&format!(
+                            "__class_method_return_class.{class}.{}",
+                            member.member.name
+                        ))
+                        .cloned()
+                })
             }
             _ => None,
-        },
+        }
+        .or_else(|| generated_object_call_class(call, scope, aliases)),
         Expr::Member(member) => {
             let class = expression_class(&member.object, scope, aliases)?;
             aliases

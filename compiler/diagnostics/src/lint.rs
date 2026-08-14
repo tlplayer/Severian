@@ -324,6 +324,20 @@ fn inspect_expression(
                 inspect_expression(value, used, config, bag, false);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                inspect_expression(value, used, config, bag, false);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            inspect_expression(object, used, config, bag, false);
+            for (_, value) in fields {
+                inspect_expression(value, used, config, bag, false);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => {
+            inspect_expression(object, used, config, bag, false);
+        }
 
         Expression::Map(entries) => {
             for (key, value) in entries {

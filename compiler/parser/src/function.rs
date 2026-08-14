@@ -110,9 +110,7 @@ impl Parser<'_> {
         })
     }
 
-    pub(super) fn parse_generic_parameters(
-        &mut self,
-    ) -> Result<Vec<GenericParameter>, ParseError> {
+    pub(super) fn parse_generic_parameters(&mut self) -> Result<Vec<GenericParameter>, ParseError> {
         if self.take_simple(&TokenKind::LeftBracket).is_none() {
             return Ok(Vec::new());
         }

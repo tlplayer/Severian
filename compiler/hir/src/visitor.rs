@@ -151,6 +151,18 @@ pub(crate) fn visit_expression_mut(
                 visit_expression_mut(value, visitor);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                visit_expression_mut(value, visitor);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            visit_expression_mut(object, visitor);
+            for (_, value) in fields {
+                visit_expression_mut(value, visitor);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => visit_expression_mut(object, visitor),
         Expression::Map(entries) => {
             for (key, value) in entries {
                 visit_expression_mut(key, visitor);

@@ -112,6 +112,24 @@ pub fn analyze_with_packages(
                     .collect::<Vec<_>>()
                     .join(","),
             );
+            aliases.insert(
+                format!("__class_constructor_arities.{}", class.name.name),
+                class
+                    .constructors
+                    .iter()
+                    .map(|constructor| constructor.params.len().to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            aliases.insert(
+                format!("__class_traits.{}", class.name.name),
+                class
+                    .traits
+                    .iter()
+                    .filter_map(declaration_type_name)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
             register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
             for method in &class.methods {
                 register_method_return_alias(
@@ -168,6 +186,26 @@ pub fn analyze_with_packages(
                             .methods
                             .iter()
                             .map(|method| method.name.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    });
+                aliases
+                    .entry(format!("__class_constructor_arities.{}", class.name.name))
+                    .or_insert_with(|| {
+                        class
+                            .constructors
+                            .iter()
+                            .map(|constructor| constructor.params.len().to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    });
+                aliases
+                    .entry(format!("__class_traits.{}", class.name.name))
+                    .or_insert_with(|| {
+                        class
+                            .traits
+                            .iter()
+                            .filter_map(declaration_type_name)
                             .collect::<Vec<_>>()
                             .join(",")
                     });
@@ -428,6 +466,43 @@ pub fn analyze_with_packages(
                 Ok(default)
             })
             .collect::<Result<Vec<_>, SemanticError>>()?;
+        let mut constraint_scope = global_scope.clone();
+        for field in &class.fields {
+            let ty = field
+                .ty
+                .as_ref()
+                .map(lower_type)
+                .transpose()?
+                .unwrap_or(ValueType::Any);
+            constraint_scope.insert(
+                field.name.name.clone(),
+                Binding {
+                    reference: named_binding(
+                        &field.name.name,
+                        format!("{}.{}", class.name.name, field.name.name),
+                    ),
+                    ty,
+                    class: field.ty.as_ref().and_then(class_type_name),
+                    function_return: None,
+                    collection_len: None,
+                    mutable: false,
+                    field: true,
+                    integer_max: None,
+                    known_integer: None,
+                },
+            );
+        }
+        let field_constraints = class
+            .fields
+            .iter()
+            .flat_map(|field| field.constraints.iter())
+            .map(|constraint| {
+                let (condition, ty) =
+                    lower_expression(constraint, &constraint_scope, &signatures, &aliases)?;
+                compatible(constraint.span(), ty, ValueType::Bool)?;
+                Ok(condition)
+            })
+            .collect::<Result<Vec<_>, SemanticError>>()?;
         let mut constructors = Vec::new();
         for constructor in &class.constructors {
             lower_decorators(&constructor.decorators, &imported_modules)?;
@@ -491,6 +566,7 @@ pub fn analyze_with_packages(
                 .map(|field| field.ty.as_ref().and_then(class_type_name))
                 .collect(),
             field_defaults,
+            field_constraints,
             constructors,
             methods,
             method_return_classes: class

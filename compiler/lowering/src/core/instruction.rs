@@ -64,6 +64,9 @@ impl LowerContext<'_> {
                             };
                             let boxed = self.box_value(value);
                             writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                            if let Some(class) = self.object_classes.get(&object).cloned() {
+                                self.validate_object(&object, &class);
+                            }
                             continue;
                         }
                         let lowered = if *op == AssignmentOp::Assign {
@@ -162,6 +165,9 @@ impl LowerContext<'_> {
                         };
                         let boxed = self.box_value(value);
                         writeln!(self.output, "    llvm.call @__sev_object_set({object}, {field}, {boxed}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                        if let Some(class) = self.object_classes.get(&object).cloned() {
+                            self.validate_object(&object, &class);
+                        }
                     }
                 }
                 Instruction::Print(value) => {

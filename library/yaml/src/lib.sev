@@ -53,7 +53,7 @@ def encode_mapping(mapping: map[string, list[string]]) -> string:
 def mapping_values(mapping: map[string, list[string]], key: string) -> list[string]:
     return mapping.get(key, [])
 
-class Yaml:
+class Yaml: json.Document
     source_path: string
     mapping: map[string, list[string]]
 

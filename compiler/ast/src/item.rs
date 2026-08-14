@@ -176,6 +176,13 @@ pub struct Field {
     pub name: Ident,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
+    /// Invariants checked after a complete object value has been assembled.
+    ///
+    /// A field invariant may refer to any field in the enclosing class.  It is
+    /// therefore deliberately not treated as a setter-local predicate: builders,
+    /// structural conversions, and transactional updates all validate the same
+    /// final object state.
+    pub constraints: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

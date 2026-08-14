@@ -204,6 +204,20 @@ pub(super) fn infer_expression_effect(
                 infer_expression_effect(value, Access::Read, parameters, effects);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            infer_expression_effect(object, Access::Read, parameters, effects);
+            for (_, value) in fields {
+                infer_expression_effect(value, Access::Read, parameters, effects);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => {
+            infer_expression_effect(object, Access::Read, parameters, effects);
+        }
         Expression::Map(entries) => {
             for (key, value) in entries {
                 infer_expression_effect(key, Access::Read, parameters, effects);
@@ -492,6 +506,18 @@ pub(super) fn count_expression(expression: &Expression, counts: &mut HashMap<Bin
                 count_expression(value, counts);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                count_expression(value, counts);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            count_expression(object, counts);
+            for (_, value) in fields {
+                count_expression(value, counts);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => count_expression(object, counts),
         Expression::Map(entries) => {
             for (key, value) in entries {
                 count_expression(key, counts);

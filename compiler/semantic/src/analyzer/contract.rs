@@ -273,6 +273,20 @@ pub(super) fn collect_contract_dependencies(
                 collect_contract_dependencies(value, dependencies);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                collect_contract_dependencies(value, dependencies);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            collect_contract_dependencies(object, dependencies);
+            for (_, value) in fields {
+                collect_contract_dependencies(value, dependencies);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => {
+            collect_contract_dependencies(object, dependencies);
+        }
         Expression::Map(entries) => {
             for (key, value) in entries {
                 collect_contract_dependencies(key, dependencies);

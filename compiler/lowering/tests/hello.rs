@@ -171,6 +171,7 @@ fn lowers_hello_to_mlir_text() {
             "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
             "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
             "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+            "  llvm.func @__sev_json_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_dynamic_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
             "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
             "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",

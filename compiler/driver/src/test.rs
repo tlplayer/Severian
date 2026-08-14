@@ -535,6 +535,18 @@ fn walk_expression<'expression>(
                 walk_expression(value, visit);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                walk_expression(value, visit);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            walk_expression(object, visit);
+            for (_, value) in fields {
+                walk_expression(value, visit);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => walk_expression(object, visit),
         Expression::Map(entries) => {
             for (key, value) in entries {
                 walk_expression(key, visit);

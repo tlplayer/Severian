@@ -56,12 +56,7 @@ pub(super) fn lower_tensor_type(
                 .and_then(|part| TensorElementType::parse(&part.name))
             {
                 Some(element) => element,
-                None => {
-                return Err(error(
-                    path.span,
-                    "unsupported tensor element type",
-                ))
-                }
+                None => return Err(error(path.span, "unsupported tensor element type")),
             }
         }
         None if path.args.is_empty() => TensorElementType::F64,

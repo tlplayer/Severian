@@ -300,6 +300,20 @@ fn substitute_expression(
                 substitute_expression(value, facts, visiting);
             }
         }
+        Expression::ConstructFields { fields, .. } => {
+            for (_, value) in fields {
+                substitute_expression(value, facts, visiting);
+            }
+        }
+        Expression::ObjectUpdate { object, fields, .. } => {
+            substitute_expression(object, facts, visiting);
+            for (_, value) in fields {
+                substitute_expression(value, facts, visiting);
+            }
+        }
+        Expression::ObjectDocument { object, .. } => {
+            substitute_expression(object, facts, visiting);
+        }
         Expression::Map(entries) => {
             for (key, value) in entries {
                 substitute_expression(key, facts, visiting);
