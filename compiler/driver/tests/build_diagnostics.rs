@@ -75,6 +75,50 @@ fn build_json_is_bounded_and_machine_readable() {
 }
 
 #[test]
+fn manifest_selects_internal_diagnostics_and_cli_can_override_it() {
+    let root = temporary_directory();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        concat!(
+            "[package]\n",
+            "name = \"diagnostics-example\"\n",
+            "version = \"0.1.0\"\n",
+            "\n[[bin]]\n",
+            "name = \"diagnostics-example\"\n",
+            "path = \"src/main.sev\"\n",
+            "\n[build]\n",
+            "diagnostics = \"internal\"\n",
+            "max_errors = 1\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.sev"),
+        "def main():\n    print(missing_name)\n",
+    )
+    .unwrap();
+
+    let configured = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!configured.status.success());
+    assert!(String::from_utf8_lossy(&configured.stderr).contains("internal:"));
+
+    let overridden = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .arg(&root)
+        .arg("--diagnostics=user")
+        .output()
+        .unwrap();
+    assert!(!overridden.status.success());
+    assert!(!String::from_utf8_lossy(&overridden.stderr).contains("internal:"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn build_compiles_a_library_only_package_without_an_entry_point() {
     let root = temporary_directory();
     std::fs::create_dir_all(root.join("src")).unwrap();

@@ -81,11 +81,23 @@ pub struct WorkspaceSection {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct BuildSection {
     #[serde(default)]
+    pub diagnostics: Option<String>,
+    #[serde(default)]
+    pub emit: Option<String>,
+    #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
     pub target_directory: Option<PathBuf>,
     #[serde(default)]
     pub jobs: Option<usize>,
+    #[serde(default)]
+    pub max_errors: Option<usize>,
+    #[serde(default)]
+    pub message_format: Option<String>,
+    #[serde(default)]
+    pub verify_each: Option<bool>,
+    #[serde(default)]
+    pub pipeline: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

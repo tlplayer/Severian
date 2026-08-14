@@ -1,3 +1,6 @@
+mod build_options;
+mod scaffold;
+
 use severian_backend::{NativeCompileOptions, NativeSanitizer};
 use severian_driver::build_cache::BuildGateCache;
 use severian_driver::{
@@ -562,11 +565,8 @@ fn init_project(path: &Path) -> Result<(), String> {
             }
         })
         .collect::<String>();
-    fs::write(
-        path.join("package.toml"),
-        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n"),
-    )
-    .map_err(|error| error.to_string())?;
+    fs::write(path.join("package.toml"), scaffold::package_manifest(&name))
+        .map_err(|error| error.to_string())?;
     fs::write(path.join("sev.lock"), "version = 1\npackages = []\n")
         .map_err(|error| error.to_string())?;
     let source_directory = path.join("src");
@@ -597,6 +597,7 @@ enum EmitMode {
 impl EmitMode {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "executable" | "binary" => Ok(Self::Executable),
             "hir" => Ok(Self::Hir),
             "mir" => Ok(Self::Mir),
             "mlir" => Ok(Self::Mlir),
@@ -637,6 +638,26 @@ enum MessageFormat {
     Json,
 }
 
+fn parse_build_target(value: &str) -> Result<BuildTarget, String> {
+    match value {
+        "native" | "cpu" => Ok(BuildTarget::Native),
+        value if value == "xla" || value.starts_with("xla:") => Ok(BuildTarget::Xla),
+        _ => Err(format!(
+            "unsupported build target `{value}`; use native or xla"
+        )),
+    }
+}
+
+fn parse_message_format(value: &str) -> Result<MessageFormat, String> {
+    match value {
+        "text" => Ok(MessageFormat::Text),
+        "json" => Ok(MessageFormat::Json),
+        _ => Err(format!(
+            "unknown message format `{value}`; use text or json"
+        )),
+    }
+}
+
 #[derive(Debug)]
 struct BuildFinding {
     severity: &'static str,
@@ -647,16 +668,18 @@ struct BuildFinding {
 
 fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut input = PathBuf::from(".");
-    let mut emit = EmitMode::Executable;
-    let mut target = BuildTarget::Native;
-    let mut max_errors = 50usize;
-    let mut message_format = MessageFormat::Text;
-    let mut verify_each = false;
     let mut index = 0;
     if args.first().is_some_and(|value| !value.starts_with('-')) {
         input = PathBuf::from(&args[0]);
         index = 1;
     }
+    let configured = build_options::load(&input)?;
+    let mut emit = EmitMode::parse(&configured.emit)?;
+    let mut target = parse_build_target(&configured.target)?;
+    let mut max_errors = configured.max_errors;
+    let mut message_format = parse_message_format(&configured.message_format)?;
+    let mut verify_each = configured.verify_each;
+    let mut diagnostics = configured.diagnostics;
     while index < args.len() {
         match args[index].as_str() {
             "--emit" if index + 1 < args.len() => {
@@ -664,15 +687,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 index += 2;
             }
             "--target" if index + 1 < args.len() => {
-                target = match args[index + 1].as_str() {
-                    "native" | "cpu" => BuildTarget::Native,
-                    value if value == "xla" || value.starts_with("xla:") => BuildTarget::Xla,
-                    value => {
-                        return Err(format!(
-                            "unsupported build target `{value}`; use native or xla"
-                        ))
-                    }
-                };
+                target = parse_build_target(&args[index + 1])?;
                 index += 2;
             }
             "--max-errors" if index + 1 < args.len() => {
@@ -684,16 +699,18 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 index += 2;
             }
             "--message-format" if index + 1 < args.len() => {
-                message_format = match args[index + 1].as_str() {
-                    "text" => MessageFormat::Text,
-                    "json" => MessageFormat::Json,
-                    value => {
-                        return Err(format!(
-                            "unknown message format `{value}`; use text or json"
-                        ))
-                    }
-                };
+                message_format = parse_message_format(&args[index + 1])?;
                 index += 2;
+            }
+            "--diagnostics" if index + 1 < args.len() => {
+                diagnostics = build_options::DiagnosticsMode::parse(&args[index + 1])?;
+                index += 2;
+            }
+            value if value.starts_with("--diagnostics=") => {
+                diagnostics = build_options::DiagnosticsMode::parse(
+                    value.trim_start_matches("--diagnostics="),
+                )?;
+                index += 1;
             }
             "--verify-each" => {
                 verify_each = true;
@@ -726,7 +743,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
     } else {
         gate_cache.invalidate_from(BuildGate::Compile, &policy.pipeline)?;
         build_progress(message_format, "[compile] RUN");
-        let findings = collect_build_findings(&input, max_errors)?;
+        let findings = collect_build_findings(&input, max_errors, diagnostics)?;
         render_build_findings(&findings, message_format);
         let error_count = findings
             .iter()
@@ -783,7 +800,7 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 artifacts.push(output);
             }
         } else {
-            emit_artifact(&compilation, emit, target, &output)?;
+            emit_artifact(&compilation, emit, target, &output, diagnostics)?;
             println!("Built {} -> {}", target_spec.name, output.display());
             artifacts.push(output);
         }
@@ -825,7 +842,11 @@ fn enforce_architecture_policy(policy: &BuildPolicy) -> Result<(), String> {
     }
 }
 
-fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFinding>, String> {
+fn collect_build_findings(
+    input: &Path,
+    max_errors: usize,
+    diagnostics_mode: build_options::DiagnosticsMode,
+) -> Result<Vec<BuildFinding>, String> {
     let mut sources = if input.is_file() {
         vec![input.to_path_buf()]
     } else if severian_package::nearest_manifest(input).is_some()
@@ -863,7 +884,7 @@ fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFi
                     let mut source_map = severian_source::SourceMap::new();
                     source_map.add(source_path.clone(), source);
                     for diagnostic in diagnostics.diagnostics() {
-                        let rendered = severian_diagnostics::render::render(
+                        let mut rendered = severian_diagnostics::render::render(
                             diagnostic,
                             Some(&source_map),
                             &severian_diagnostics::render::RenderOptions {
@@ -871,6 +892,9 @@ fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFi
                                 ..Default::default()
                             },
                         );
+                        if diagnostics_mode.is_internal() {
+                            rendered.push_str(&format!("\n internal: {diagnostic:#?}"));
+                        }
                         let key = format!("{}:{rendered}", source_path.display());
                         if seen.insert(key) {
                             findings.push(BuildFinding {
@@ -890,7 +914,10 @@ fn collect_build_findings(input: &Path, max_errors: usize) -> Result<Vec<BuildFi
                 }
             }
             Err(error) => {
-                let rendered = error.to_string();
+                let mut rendered = error.to_string();
+                if diagnostics_mode.is_internal() {
+                    rendered.push_str(&format!("\n internal: {error:#?}"));
+                }
                 let key = format!("{}:{rendered}", source_path.display());
                 if seen.insert(key) {
                     findings.push(BuildFinding {
@@ -969,10 +996,11 @@ fn emit_artifact(
     emit: EmitMode,
     target: BuildTarget,
     output: &Path,
+    diagnostics: build_options::DiagnosticsMode,
 ) -> Result<(), String> {
     match emit {
         EmitMode::Executable => {
-            compile_native(compilation, output).map_err(|error| error.to_string())
+            compile_native(compilation, output).map_err(|error| build_error(error, diagnostics))
         }
         EmitMode::Hir => fs::write(output, format!("{:#?}", compilation.optimized_hir))
             .map_err(|error| error.to_string()),
@@ -987,10 +1015,23 @@ fn emit_artifact(
                 return Err("StableHLO requires the XLA target".into());
             }
             let module = severian_lowering::stablehlo::lower_program(&compilation.optimized_hir)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| build_error(error, diagnostics))?;
             fs::write(output, module.as_str()).map_err(|error| error.to_string())
         }
-        EmitMode::Llvm | EmitMode::Asm => emit_backend_artifact(compilation, emit, output),
+        EmitMode::Llvm | EmitMode::Asm => {
+            emit_backend_artifact(compilation, emit, output, diagnostics)
+        }
+    }
+}
+
+fn build_error(
+    error: impl std::fmt::Display + std::fmt::Debug,
+    diagnostics: build_options::DiagnosticsMode,
+) -> String {
+    if diagnostics.is_internal() {
+        format!("{error}\n internal: {error:#?}")
+    } else {
+        error.to_string()
     }
 }
 
@@ -998,6 +1039,7 @@ fn emit_backend_artifact(
     compilation: &Compilation,
     emit: EmitMode,
     output: &Path,
+    diagnostics: build_options::DiagnosticsMode,
 ) -> Result<(), String> {
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     let stem = output
@@ -1016,24 +1058,24 @@ fn emit_backend_artifact(
         &llvm_ir,
         &severian_backend::llvm::LlvmLoweringOptions::native(),
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| build_error(error, diagnostics))
     .and_then(|_| {
         if emit == EmitMode::Llvm {
             fs::copy(&llvm_ir, output)
                 .map(|_| ())
-                .map_err(|error| error.to_string())
+                .map_err(|error| build_error(error, diagnostics))
         } else {
             let clang = severian_backend::toolchain::find_required_tool(
                 severian_backend::toolchain::Tool::Clang,
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| build_error(error, diagnostics))?;
             let status = Command::new(clang)
                 .args(["-S", "-x", "ir"])
                 .arg(&llvm_ir)
                 .arg("-o")
                 .arg(output)
                 .status()
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| build_error(error, diagnostics))?;
             if status.success() {
                 Ok(())
             } else {
@@ -1710,7 +1752,12 @@ fn emit_non_executable_module(
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    emit_backend_artifact(compilation, EmitMode::Llvm, &output)?;
+    emit_backend_artifact(
+        compilation,
+        EmitMode::Llvm,
+        &output,
+        build_options::DiagnosticsMode::User,
+    )?;
     Ok(vec![output])
 }
 
@@ -2603,7 +2650,7 @@ fn usage() -> String {
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
         "  fmt [path] [--check]           format contracts and verify canonical layout",
-        "  build [path] [--emit KIND] [--target native|xla] [--verify-each] [--max-errors N] [--message-format text|json]",
+        "  build [path] [--emit KIND] [--target native|xla] [--diagnostics user|internal] [--verify-each] [--max-errors N] [--message-format text|json]",
         "  run [path] [-- args...]        build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",
         "  test [path] --profile          run only profile tests and enforce profile contracts",

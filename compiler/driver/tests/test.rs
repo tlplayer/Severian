@@ -182,6 +182,29 @@ fn build_is_blocked_below_seventy_five_percent_line_coverage() {
 }
 
 #[test]
+fn init_exposes_the_complete_lenient_manifest_contract() {
+    let root = std::env::temp_dir().join(format!("severian-init-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let initialized = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("init")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    let manifest = std::fs::read_to_string(root.join("package.toml")).unwrap();
+    assert!(manifest.contains("diagnostics = \"user\""));
+    assert!(manifest.contains("pipeline = ["));
+    assert!(manifest.contains("[profile.dev]"));
+    assert!(manifest.contains("[architecture.files]"));
+    assert!(manifest.contains("# [workspace]"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn new_creates_and_runs_a_native_severian_project() {
     let _lock = native_cli_lock();
     let root = std::env::temp_dir().join(format!("severian-new-test-{}", std::process::id()));
@@ -197,9 +220,13 @@ fn new_creates_and_runs_a_native_severian_project() {
     );
     assert!(root.join("package.toml").is_file());
     assert!(root.join("sev.lock").is_file());
-    assert!(!std::fs::read_to_string(root.join("package.toml"))
-        .unwrap()
-        .contains("license"));
+    let manifest = std::fs::read_to_string(root.join("package.toml")).unwrap();
+    assert!(manifest.contains("diagnostics = \"user\""));
+    assert!(manifest.contains("type-safe = false"));
+    assert!(manifest.contains("minimum = 0"));
+    assert!(manifest.contains("leaks = \"allow\""));
+    assert!(manifest.contains("[profile.release]"));
+    assert!(manifest.contains("# license = \"MIT\""));
 
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("run")
@@ -214,6 +241,17 @@ fn new_creates_and_runs_a_native_severian_project() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "hello, severian\n"
+    );
+
+    let build = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("build")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
     );
     std::fs::remove_dir_all(root).unwrap();
 }

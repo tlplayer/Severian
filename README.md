@@ -67,6 +67,12 @@ those tests and prints the real pass count.
 
 `sev build` reads Cargo-compatible `[package]`, every `[[bin]]`, `[lib]`,
 `[dependencies]`, and nested `[workspace] members` fields from `package.toml`.
+`sev init` and `sev new` generate a self-documenting manifest containing every
+supported project/build control. Fresh projects explicitly use permissive
+coverage, memory, architecture, and type-safety values so teams can tighten the
+ratchets as the codebase matures. `[build].diagnostics = "user"` is the clean
+source-oriented default; set it to `"internal"` (or pass
+`--diagnostics=internal`) when investigating compiler/backend internals.
 Package and workspace artifacts are emitted under `target/debug`. Path libraries are checked in dependency order
 and emitted as `target/debug/deps/lib<package>.sevi`; consumers then compile from
 those artifacts. Library-local tests are not linked into downstream application

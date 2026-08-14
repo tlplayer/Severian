@@ -26,6 +26,9 @@ The complete policy is declarative in `package.toml`:
 
 ```toml
 [build]
+# Source-oriented diagnostics are the default. Use `internal` when debugging a
+# compiler or backend failure; `--diagnostics` overrides this per invocation.
+diagnostics = "user"
 pipeline = [
     "compile",
     "architecture",
@@ -66,6 +69,9 @@ An expired exception fails the architecture gate even when the file remains
 below its exceptional hard limit.
 
 The compiler repository currently pins its own line floor to 55%, just below
-the measured 57.50% baseline, while new packages inherit the 75% default. This
-is progressive pressure: the existing workspace cannot regress, and the floor
-can rise as coverage is added without weakening or skipping the gate.
+the measured 57.50% baseline. When a manifest omits coverage policy, the parser
+still uses a 75% fallback. `sev init` and `sev new` now write every available
+control and explicitly start new applications at 0% with permissive memory and
+file-size policy. This keeps a fresh project usable while making the intended
+ratchets visible in `package.toml`; teams can raise them over the project's
+lifetime without researching hidden keys.
