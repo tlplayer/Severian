@@ -1,0 +1,20 @@
+import tensor
+
+def softmax_middle(value: Tensor[f32, 2, 3, 4]) -> Tensor[f32, 2, 3, 4]:
+    return tensor.softmax_axis_f_32(value, -2)
+
+def select_values(
+    condition: Tensor[bool, 2, 3, 4],
+    on_true: Tensor[f32, 2, 3, 4],
+    on_false: Tensor[f32, 2, 3, 4],
+) -> Tensor[f32, 2, 3, 4]:
+    return tensor.where_f_32(condition, on_true, on_false)
+
+@tensor
+def generic_tensor_ops(
+    value: Tensor[f32, 2, 3, 4],
+    condition: Tensor[bool, 2, 3, 4],
+    fallback: Tensor[f32, 2, 3, 4],
+) -> Tensor[f32, 2, 3, 4]:
+    probabilities = softmax_middle(value)
+    return select_values(condition, probabilities, fallback)

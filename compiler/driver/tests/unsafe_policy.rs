@@ -2,6 +2,17 @@ use severian_driver::compile_path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn source_files_below(root: &std::path::Path, output: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            source_files_below(&path, output);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            output.push(path);
+        }
+    }
+}
+
 fn temporary_directory() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -115,6 +126,10 @@ fn qwen_packages_use_safe_tensor_and_platform_apis() {
         "benchmarks/inference/severian/qwen_prefill_kernels.sev",
         "benchmarks/inference/severian/qwen_decode_kernels.sev",
         "benchmarks/inference/severian/qwen_tokenizer.sev",
+        "library/model/architectures/qwen/src/lib.sev",
+        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_decode.sev",
+        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_prefill_32.sev",
+        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_prefill_256.sev",
     ];
     let qwen_manifests = [
         "benchmarks/inference/severian/modules/qwen_kernels/package.toml",
@@ -137,5 +152,34 @@ fn qwen_packages_use_safe_tensor_and_platform_apis() {
             !manifest.contains("[package.unsafe]"),
             "{relative} must not receive an unsafe capability"
         );
+    }
+}
+
+#[test]
+fn omnivoice_has_no_architecture_specific_native_abi() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut sources = Vec::new();
+    for relative in [
+        "compiler/backend/src",
+        "compiler/lowering/src",
+        "compiler/platform/src",
+        "compiler/runtime/src",
+    ] {
+        source_files_below(&workspace.join(relative), &mut sources);
+    }
+    let forbidden = [
+        "__sev_omnivoice_audio_embedding_single",
+        "__sev_omnivoice_qwen3_layer_single",
+        "__sev_omnivoice_audio_logits_single",
+    ];
+    for path in sources {
+        let source = std::fs::read_to_string(&path).unwrap();
+        for symbol in forbidden {
+            assert!(
+                !source.contains(symbol),
+                "{} must not provide architecture-specific native symbol {symbol}",
+                path.display(),
+            );
+        }
     }
 }

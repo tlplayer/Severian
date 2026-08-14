@@ -21,8 +21,35 @@ pub fn last_axis_reduced_type(
             actual: Some(0),
         });
     }
-    let mut dimensions = input_type.dimensions;
-    dimensions[usize::from(rank - 1)] = TensorDimension::Dynamic;
+    reduced_axis_type(input_type, rank - 1)
+}
+
+pub fn reduced_axis_type(
+    input_type: TensorType,
+    axis: u8,
+) -> Result<TensorType, StableHloLoweringError> {
+    let rank = input_type
+        .rank
+        .ok_or_else(|| StableHloLoweringError::InvalidRank {
+            operation: "axis reduction".into(),
+            expected: 1,
+            actual: None,
+        })?;
+    if rank == 0 || axis >= rank {
+        return Err(StableHloLoweringError::InvalidRank {
+            operation: "axis reduction".into(),
+            expected: usize::from(rank),
+            actual: Some(axis),
+        });
+    }
+    let mut dimensions = [TensorDimension::Dynamic; 8];
+    let mut output_axis = 0_u8;
+    for input_axis in 0..rank {
+        if input_axis != axis {
+            dimensions[usize::from(output_axis)] = input_type.dimensions[usize::from(input_axis)];
+            output_axis += 1;
+        }
+    }
     Ok(TensorType {
         element: input_type.element,
         rank: Some(rank - 1),
@@ -38,7 +65,21 @@ pub fn softmax_last_axis(
 ) -> MlirValue {
     let rank = u64::from(input_type.rank.expect("softmax requires a ranked tensor"));
     assert!(rank > 0, "softmax requires rank greater than zero");
-    let axis = rank - 1;
+    softmax_axis(emitter, input, input_type, reduced_type, rank - 1)
+}
+
+pub fn softmax_axis(
+    emitter: &mut StableHloEmitter,
+    input: &MlirValue,
+    input_type: TensorType,
+    reduced_type: TensorType,
+    axis: u64,
+) -> MlirValue {
+    let rank = u64::from(input_type.rank.expect("softmax requires a ranked tensor"));
+    assert!(
+        rank > 0 && axis < rank,
+        "softmax axis must be within the tensor rank"
+    );
     let negative_infinity = emitter.scalar("-inf", input_type.element);
     let maximum = emitter.reduce(
         input,
@@ -47,7 +88,9 @@ pub fn softmax_last_axis(
         StableHloReduction::Maximum,
         reduced_type,
     );
-    let broadcast_dimensions = (0..axis).collect::<Vec<_>>();
+    let broadcast_dimensions = (0..rank)
+        .filter(|dimension| *dimension != axis)
+        .collect::<Vec<_>>();
     let maximum = emitter.broadcast_in_dim(&maximum, &broadcast_dimensions, input_type);
     let shifted = emitter.subtract(input, &maximum, input_type);
     let exponentials = emitter.exponential(&shifted, input_type);

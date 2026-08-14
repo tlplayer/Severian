@@ -17,7 +17,8 @@ pub use ops::{MlirValue, StableHloEmitter};
 pub use reduction::StableHloReduction;
 
 use severian_hir::{
-    BindingId, CallTarget, Expression, Function, FunctionId, Instruction, Program, ValueType,
+    BindingId, CallTarget, Expression, Function, FunctionId, Instruction, Program, UnaryOp,
+    ValueType,
 };
 use severian_hir::{TensorDimension, TensorElementType, TensorType};
 use severian_mlir::Module;
@@ -582,6 +583,36 @@ fn lower_tensor_intrinsic(
             let axis = integer_argument(source_args.get(1), &target.name)?;
             Ok(emitter.concatenate(args, axis, result_type))
         }
+        "softmaxaxis" => {
+            require_arity(&op, args, 1)?;
+            let rank = result_type
+                .rank
+                .ok_or_else(|| StableHloLoweringError::UnsupportedOperation(op.clone()))?;
+            let requested = signed_integer_argument(source_args.get(1), &target.name)?;
+            let axis = if requested < 0 {
+                i64::from(rank) + requested
+            } else {
+                requested
+            };
+            if axis < 0 || axis >= i64::from(rank) {
+                return Err(StableHloLoweringError::UnsupportedFunction {
+                    function: target.name.clone(),
+                    reason: format!("axis {requested} is outside rank {rank}"),
+                });
+            }
+            let reduced_type = normalization::reduced_axis_type(result_type, axis as u8)?;
+            Ok(normalization::softmax_axis(
+                emitter,
+                &args[0],
+                result_type,
+                reduced_type,
+                axis as u64,
+            ))
+        }
+        "where" => {
+            require_arity(&op, args, 3)?;
+            Ok(emitter.select(&args[0], &args[1], &args[2], result_type))
+        }
         _ => lower_tensor_call(&target.name, args, result_type, emitter),
     }
 }
@@ -650,6 +681,36 @@ fn integer_argument(
         _ => Err(StableHloLoweringError::UnsupportedFunction {
             function: operation.into(),
             reason: "expected a non-negative compile-time integer".into(),
+        }),
+    }
+}
+
+fn signed_integer_argument(
+    expression: Option<&Expression>,
+    operation: &str,
+) -> Result<i64, StableHloLoweringError> {
+    match expression.map(Expression::kind) {
+        Some(Expression::Integer(value)) => Ok(*value),
+        Some(Expression::Unary {
+            op: UnaryOp::Negate,
+            expression,
+        }) => match expression.kind() {
+            Expression::Integer(value) => {
+                value
+                    .checked_neg()
+                    .ok_or_else(|| StableHloLoweringError::UnsupportedFunction {
+                        function: operation.into(),
+                        reason: "integer axis is outside the supported range".into(),
+                    })
+            }
+            _ => Err(StableHloLoweringError::UnsupportedFunction {
+                function: operation.into(),
+                reason: "expected a compile-time integer".into(),
+            }),
+        },
+        _ => Err(StableHloLoweringError::UnsupportedFunction {
+            function: operation.into(),
+            reason: "expected a compile-time integer".into(),
         }),
     }
 }
@@ -995,7 +1056,9 @@ mod tests {
     use super::*;
     use crate::stablehlo::{
         attention::{llama_transformer_block, AttentionTypes, TransformerBlockTypes},
-        normalization::{last_axis_reduced_type, softmax_last_axis},
+        normalization::{
+            last_axis_reduced_type, reduced_axis_type, softmax_axis, softmax_last_axis,
+        },
     };
 
     fn tensor(rank: u8) -> TensorType {
@@ -1018,6 +1081,19 @@ mod tests {
         assert!(text.contains("stablehlo.maximum"));
         assert!(text.contains("stablehlo.exponential"));
         assert!(text.contains("stablehlo.divide"));
+        assert!(!text.contains("custom_call"));
+    }
+
+    #[test]
+    fn softmax_axis_preserves_every_non_reduced_dimension() {
+        let input_type = tensor(3);
+        let reduced_type = reduced_axis_type(input_type, 1).unwrap();
+        let input = argument("%input", input_type);
+        let mut emitter = StableHloEmitter::new();
+        softmax_axis(&mut emitter, &input, input_type, reduced_type, 1);
+        let text = emitter.as_str();
+        assert!(text.contains("dimensions = array<i64: 1>"));
+        assert!(text.contains("dims = [0, 2]"));
         assert!(!text.contains("custom_call"));
     }
 

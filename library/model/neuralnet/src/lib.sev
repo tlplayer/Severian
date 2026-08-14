@@ -16,6 +16,12 @@ class LayerNorm: Module
     def forward(input: Tensor[f64]) -> Tensor[f64]:
         return tensor.ranked_layer_norm(input, epsilon)
 
+class LinearBf16:
+    weight: Tensor[bf16]
+
+    def project(input: Tensor[bf16]) -> Tensor[bf16]:
+        return tensor.matmul_bf_16(input, tensor.transpose_bf_16(weight, [1, 0]))
+
 class MultiheadAttention: Module
     query_weight: Tensor[f64]
     key_weight: Tensor[f64]
@@ -55,6 +61,28 @@ class RopeValues:
     cosine: Tensor[f32]
     sine: Tensor[f32]
 
+class RotaryOutput:
+    query: Tensor[bf16]
+    key: Tensor[bf16]
+
+# RoPE owns the inverse frequencies while position selection remains an
+# ordinary tensor calculation. The duplicated frequency layout matches Qwen's
+# rotate-half convention and keeps trigonometry in f32.
+class RotaryEmbedding:
+    inverse_frequency: Tensor[f32]
+    theta: float
+    head_dimension: int
+
+    def rope_values_at(position_ids: Tensor[i64], query: Tensor[bf16]) -> RopeValues:
+        return rotary_values_at(inverse_frequency, head_dimension, position_ids, query)
+
+    def apply(query: Tensor[bf16], key: Tensor[bf16], position_ids: Tensor[i64]) -> RotaryOutput:
+        rope = rotary_values_at(inverse_frequency, head_dimension, position_ids, query)
+        return RotaryOutput(
+            apply_rotary(query, rope, head_dimension / 2),
+            apply_rotary(key, rope, head_dimension / 2),
+        )
+
 class AttentionProjectionWeights:
     query: Tensor[bf16]
     query_bias: Tensor[bf16]
@@ -87,11 +115,36 @@ class DecoderResult:
     hidden: Tensor[bf16]
     cache: KvCache
 
+class RMSNorm:
+    weight: Tensor[bf16]
+    epsilon: float
+
+    def normalize(input: Tensor[bf16]) -> Tensor[bf16]:
+        return rms_norm_bf_16(input, weight, epsilon)
+
 def rotary_values(position_frequencies: Tensor[f32]) -> RopeValues:
     return RopeValues(
         tensor.cosine_f_32(position_frequencies),
         tensor.sine_f_32(position_frequencies),
     )
+
+def rotary_values_at(
+    inverse_frequency: Tensor[f32],
+    head_dimension: int,
+    position_ids: Tensor[i64],
+    query: Tensor[bf16],
+) -> RopeValues:
+    query_shape = tensor.shape_bf_16(query)
+    positions = tensor.to_f_32(position_ids)
+    position_column = tensor.reshape_f_32(positions, [query_shape[0], query_shape[2], 1])
+    frequency_row = tensor.reshape_f_32(inverse_frequency, [1, head_dimension / 2])
+    half = tensor.matmul_f_32(position_column, frequency_row)
+    frequencies = tensor.concatenate_f_32([half, half], 2)
+    expanded = tensor.reshape_f_32(
+        frequencies,
+        [query_shape[0], 1, query_shape[2], head_dimension],
+    )
+    return rotary_values(expanded)
 
 def rotate_half(value: Tensor[f32], half_dimension: int) -> Tensor[f32]:
     first = tensor.slice_f_32(value, [0, 0, 0, 0], [-1, -1, -1, half_dimension], [1, 1, 1, 1])
