@@ -341,6 +341,18 @@ impl<'source> Lexer<'source> {
                     }
                 }
                 b'"' => index = self.lex_string(line, base, index)?,
+                b'f' if bytes.get(index + 1) == Some(&b'"')
+                    && bytes.get(index + 2) == Some(&b'"')
+                    && bytes.get(index + 3) == Some(&b'"') =>
+                {
+                    let absolute_start = base + index;
+                    let absolute_end = self.lex_formatted_triple_string(absolute_start)?;
+                    if absolute_end <= base + line.len() {
+                        index = absolute_end - base;
+                    } else {
+                        return Ok(Some(absolute_end));
+                    }
+                }
                 b'f' if bytes.get(index + 1) == Some(&b'"') => {
                     index = self.lex_formatted_string(line, base, index)?
                 }
@@ -472,6 +484,23 @@ impl<'source> Lexer<'source> {
         Ok(end)
     }
 
+    fn lex_formatted_triple_string(&mut self, start: usize) -> Result<usize, LexError> {
+        let content_start = start + 4;
+        let Some(relative_end) = self.source[content_start..].find("\"\"\"") else {
+            return Err(LexError {
+                span: Span::new(start, self.source.len()),
+                message: "E0101: unterminated formatted triple-quoted block string literal".into(),
+            });
+        };
+        let content_end = content_start + relative_end;
+        let end = content_end + 3;
+        self.tokens.push(Token {
+            kind: TokenKind::FormattedString(self.source[content_start..content_end].into()),
+            span: Span::new(start, end),
+        });
+        Ok(end)
+    }
+
     fn push_simple(&mut self, kind: TokenKind, base: usize, index: &mut usize) {
         self.tokens.push(Token {
             kind,
@@ -544,19 +573,52 @@ impl<'source> Lexer<'source> {
         base: usize,
         start: usize,
     ) -> Result<usize, LexError> {
+        let bytes = line.as_bytes();
         let content_start = start + 2;
-        let Some(relative_end) = line[content_start..].find('"') else {
-            return Err(LexError {
-                span: Span::new(base + start, base + line.len()),
-                message: "unterminated formatted string literal".into(),
-            });
-        };
-        let end = content_start + relative_end + 1;
-        self.tokens.push(Token {
-            kind: TokenKind::FormattedString(line[content_start..end - 1].into()),
-            span: Span::new(base + start, base + end),
-        });
-        Ok(end)
+        let mut index = content_start;
+        let mut value = String::new();
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' => {
+                    index += 1;
+                    self.tokens.push(Token {
+                        kind: TokenKind::FormattedString(value),
+                        span: Span::new(base + start, base + index),
+                    });
+                    return Ok(index);
+                }
+                b'\\' => {
+                    index += 1;
+                    if index == bytes.len() {
+                        break;
+                    }
+                    let escaped = match bytes[index] {
+                        b'n' => '\n',
+                        b'r' => '\r',
+                        b't' => '\t',
+                        b'"' => '"',
+                        b'\\' => '\\',
+                        other => {
+                            return Err(LexError {
+                                span: Span::new(base + index - 1, base + index + 1),
+                                message: format!("unsupported escape `\\{}`", other as char),
+                            });
+                        }
+                    };
+                    value.push(escaped);
+                    index += 1;
+                }
+                _ => {
+                    let character = line[index..].chars().next().unwrap();
+                    value.push(character);
+                    index += character.len_utf8();
+                }
+            }
+        }
+        Err(LexError {
+            span: Span::new(base + start, base + line.len()),
+            message: "unterminated formatted string literal".into(),
+        })
     }
 }
 

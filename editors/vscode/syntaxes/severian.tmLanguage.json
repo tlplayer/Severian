@@ -42,6 +42,38 @@
     "formatted-strings": {
       "patterns": [
         {
+          "name": "string.quoted.triple.double.interpolated.severian",
+          "begin": "(?<![A-Za-z0-9_])f\"\"\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.severian" }
+          },
+          "end": "\"\"\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.severian" }
+          },
+          "patterns": [
+            {
+              "name": "meta.interpolation.severian",
+              "begin": "\\{",
+              "beginCaptures": {
+                "0": { "name": "punctuation.section.interpolation.begin.severian" }
+              },
+              "end": "\\}",
+              "endCaptures": {
+                "0": { "name": "punctuation.section.interpolation.end.severian" }
+              },
+              "patterns": [
+                { "include": "#numbers" },
+                { "include": "#constants" },
+                { "include": "#member-access" },
+                { "include": "#function-calls" },
+                { "include": "#operators" },
+                { "include": "#punctuation" }
+              ]
+            }
+          ]
+        },
+        {
           "name": "string.quoted.double.interpolated.severian",
           "begin": "(?<![A-Za-z0-9_])f\"",
           "beginCaptures": {

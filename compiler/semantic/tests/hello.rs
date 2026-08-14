@@ -527,6 +527,31 @@ fn retains_formatted_string_operands_for_native_lowering() {
 }
 
 #[test]
+fn retains_formatted_block_string_operands_for_native_lowering() {
+    let source = concat!(
+        "def describe(name: string, version: int) -> string:\n",
+        "    return f\"\"\"model {name}\nversion {version}\n\"\"\"\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Return(Some(value)) = &hir.functions[0].instructions[0] else {
+        panic!("expected a formatted block return value")
+    };
+    let Expression::Format { template, args, arg_types } = value.kind() else {
+        panic!("expected a formatted block return value")
+    };
+    assert_eq!(template, "model {name}\nversion {version}\n");
+    assert_eq!(
+        args,
+        &[
+            Expression::Variable("name".into()),
+            Expression::Variable("version".into()),
+        ]
+    );
+    assert_eq!(arg_types, &[ValueType::String, ValueType::Int]);
+}
+
+#[test]
 fn retains_first_class_function_return_types() {
     let source = concat!(
         "def apply(op: Function[int, int, int], left: int, right: int) -> int:\n",

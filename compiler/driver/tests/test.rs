@@ -419,6 +419,44 @@ fn triple_quoted_block_strings_compile_and_preserve_newlines() {
 }
 
 #[test]
+fn formatted_triple_quoted_block_strings_compile_and_interpolate() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!(
+        "severian-formatted-block-string-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("main.sev");
+    std::fs::write(
+        &source,
+        concat!(
+            "def describe(name: string, version: int) -> string:\n",
+            "    return f\"\"\"model {name}\nversion {version}\n\"\"\"\n",
+            "\n",
+            "def main():\n",
+            "    print(describe(\"Qwen\", 3))\n",
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "model Qwen\nversion 3\n\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
     let root = std::env::temp_dir().join(format!("severian-type-safe-test-{}", std::process::id()));
     std::fs::create_dir_all(root.join("src")).unwrap();

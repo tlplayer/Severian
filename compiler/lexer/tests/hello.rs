@@ -93,6 +93,24 @@ fn lexes_an_empty_triple_quoted_string() {
 }
 
 #[test]
+fn lexes_formatted_triple_quoted_strings_with_preserved_newlines() {
+    let source = "value = f\"\"\"model {name}\nversion {version}\n\"\"\"\n";
+    let tokens = lex(source).unwrap();
+    assert!(matches!(
+        &tokens[2].kind,
+        TokenKind::FormattedString(value)
+            if value == "model {name}\nversion {version}\n"
+    ));
+    assert_eq!(tokens[3].kind, TokenKind::Newline);
+}
+
+#[test]
+fn rejects_an_unterminated_formatted_triple_quoted_string() {
+    let error = lex("value = f\"\"\"never closed\n").unwrap_err();
+    assert!(error.message.contains("unterminated formatted triple-quoted"));
+}
+
+#[test]
 fn rejects_an_unterminated_triple_quoted_string() {
     let error = lex("value = \"\"\"never closed\n").unwrap_err();
     assert!(error.message.contains("unterminated triple-quoted"));

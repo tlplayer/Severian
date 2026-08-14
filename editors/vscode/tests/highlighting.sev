@@ -21,6 +21,9 @@ class HttpServer:
         copied = clone copy_source
         owned = move copied
         worker = async print(f"port={port}") with runtime
+        summary = f"""server port={port}
+status=ready
+"""
         await worker
         score = 3.0 ** 2.0
         return size(values_view)

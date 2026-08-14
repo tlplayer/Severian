@@ -14,7 +14,7 @@ class CapabilitySet:
     def require(name: string, minimum_version: int = 1) -> Result[unit, CapabilityError]:
         if not supports(name, minimum_version):
             return failure(CapabilityError(
-                "model does not provide capability `" + name + "` version " + string(minimum_version),
+                f"model does not provide capability `{name}` version {minimum_version}",
             ))
         return
 
@@ -40,4 +40,3 @@ def audio_decode() -> Capability:
 
 def masked_generation() -> Capability:
     return Capability("generation.masked_iterative")
-
