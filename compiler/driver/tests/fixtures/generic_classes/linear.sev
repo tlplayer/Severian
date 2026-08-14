@@ -1,0 +1,81 @@
+import layers
+import tensor
+
+class Linear[T: Float]:
+    weight: Tensor[T, 8, 16]
+
+    def forward(x: Tensor[T, 4, 16]) -> Tensor[T, 4, 8]:
+        transposed = tensor.ranked_transpose(weight)
+        return tensor.ranked_matmul(x, transposed)
+
+class Qwen3MLP[T: TensorDType + Float]:
+    gate_proj: layers.Linear[T]
+    up_proj: layers.Linear[T]
+    down_proj: layers.Linear[T]
+
+    def forward( x: Tensor[T]) -> Tensor[T]:
+        gate = tensor.ranked_silu(gate_proj.forward(x))
+        up = up_proj.forward(x)
+        return down_proj.forward(tensor.ranked_multiply(gate, up))
+
+@tensor
+def project_f32(
+    x: Tensor[f32, 4, 16],
+    weight: Tensor[f32, 8, 16],
+) -> Tensor[f32, 4, 8]:
+    projection = Linear[f32](weight)
+    return projection.forward(x)
+
+@tensor
+def project_bf16(
+    x: Tensor[bf16, 4, 16],
+    weight: Tensor[bf16, 8, 16],
+) -> Tensor[bf16, 4, 8]:
+    projection = Linear[bf16](weight)
+    return projection.forward(x)
+
+@tensor
+def rms_norm_f32(
+    x: Tensor[f32, 2, 4, 8],
+    weight: Tensor[f32, 8],
+    epsilon: f32,
+) -> Tensor[f32, 2, 4, 8]:
+    normalization = layers.RMSNorm[f32](weight, epsilon)
+    return normalization.forward(x)
+
+@tensor
+def rms_norm_bf16(
+    x: Tensor[bf16, 2, 4, 8],
+    weight: Tensor[bf16, 8],
+    epsilon: f32,
+) -> Tensor[bf16, 2, 4, 8]:
+    normalization = layers.RMSNorm[bf16](weight, epsilon)
+    return normalization.forward(x)
+
+@tensor
+def run_mlp_f32(
+    x: Tensor[f32, 4, 16],
+    gate_weight: Tensor[f32, 32, 16],
+    up_weight: Tensor[f32, 32, 16],
+    down_weight: Tensor[f32, 16, 32],
+) -> Tensor[f32, 4, 16]:
+    mlp = Qwen3MLP[f32](
+        layers.Linear[f32](gate_weight),
+        layers.Linear[f32](up_weight),
+        layers.Linear[f32](down_weight),
+    )
+    return mlp.forward(x)
+
+@tensor
+def run_mlp_bf16(
+    x: Tensor[bf16, 4, 16],
+    gate_weight: Tensor[bf16, 32, 16],
+    up_weight: Tensor[bf16, 32, 16],
+    down_weight: Tensor[bf16, 16, 32],
+) -> Tensor[bf16, 4, 16]:
+    mlp = Qwen3MLP[bf16](
+        layers.Linear[bf16](gate_weight),
+        layers.Linear[bf16](up_weight),
+        layers.Linear[bf16](down_weight),
+    )
+    return mlp.forward(x)

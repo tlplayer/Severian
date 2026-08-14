@@ -44,6 +44,53 @@ pub(super) fn require_broadcast_to(
     }
 }
 
+/// Validate the contiguous `broadcast_in_dim` used by `broadcast_like`.
+///
+/// Unlike ordinary elementwise broadcasting, the input dimensions may align
+/// with any contiguous window in the target. This represents both a reduced
+/// prefix such as `[batch, sequence] -> [batch, sequence, hidden]` and a
+/// feature weight such as `[hidden] -> [batch, sequence, hidden]` without
+/// encoding model-specific axes in the compiler.
+pub(super) fn require_broadcast_like_to(
+    left: TensorType,
+    right: TensorType,
+    operation: severian_hir::TensorIntrinsic,
+    span: Span,
+) -> Result<(), SemanticError> {
+    let (Some(left_rank), Some(right_rank)) = (left.rank, right.rank) else {
+        return Ok(());
+    };
+    let left_rank = usize::from(left_rank);
+    let right_rank = usize::from(right_rank);
+    if left_rank > right_rank {
+        return Err(tensor_error(
+            span,
+            operation,
+            "input rank exceeds broadcast target rank",
+        ));
+    }
+    let compatible = |left: TensorDimension, right: TensorDimension| {
+        !dimensions_conflict(left, right)
+            || matches!(left, TensorDimension::Static(1) | TensorDimension::Dynamic)
+    };
+    let has_mapping = (0..=right_rank - left_rank).any(|start| {
+        (0..left_rank).all(|axis| compatible(left.dimensions[axis], right.dimensions[start + axis]))
+    });
+    if has_mapping {
+        Ok(())
+    } else {
+        Err(tensor_error(
+            span,
+            operation,
+            format!(
+                "input `{}` has no contiguous broadcast mapping to `{}`",
+                value_type_name(ValueType::Tensor(left)),
+                value_type_name(ValueType::Tensor(right))
+            ),
+        ))
+    }
+}
+
 pub(crate) fn infer_matmul_operator(
     left: ValueType,
     right: ValueType,

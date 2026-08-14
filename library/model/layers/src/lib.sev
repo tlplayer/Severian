@@ -1,0 +1,29 @@
+import tensor
+
+trait Module[T: TensorDType]:
+    def forward(self, input: Tensor[T]) -> Tensor[T]
+
+class Linear[T: TensorDType + Float]:
+    weight: Tensor[T, dynamic, dynamic]
+
+    def forward(self, input: Tensor[T]) -> Tensor[T]:
+        compute_input = tensor.compute_as_f32(input)
+        compute_weight = tensor.compute_as_f32(weight)
+        projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
+        return tensor.convert_like(projected, input)
+
+class RMSNorm[T: TensorDType + Float]:
+    weight: Tensor[T]
+    epsilon: f32
+
+    def forward(self, input: Tensor[T]) -> Tensor[T]:
+        input_f_32 = tensor.compute_as_f32(input)
+        square = tensor.ranked_multiply(input_f_32, input_f_32)
+        variance = tensor.mean_last(square)
+        stabilized = tensor.add_scalar(variance, epsilon)
+        inverse_rms = tensor.ranked_rsqrt(stabilized)
+        scale = tensor.broadcast_like(inverse_rms, input_f_32)
+        normalized_f_32 = tensor.ranked_multiply(input_f_32, scale)
+        normalized = tensor.convert_like(normalized_f_32, input)
+        weighted = tensor.broadcast_like(weight, normalized)
+        return tensor.ranked_multiply(normalized, weighted)

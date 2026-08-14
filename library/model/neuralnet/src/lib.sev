@@ -16,12 +16,6 @@ class LayerNorm: Module
     def forward(input: Tensor[f64]) -> Tensor[f64]:
         return tensor.ranked_layer_norm(input, epsilon)
 
-class LinearBf16:
-    weight: Tensor[bf16]
-
-    def project(input: Tensor[bf16]) -> Tensor[bf16]:
-        return tensor.matmul_bf_16(input, tensor.transpose_bf_16(weight, [1, 0]))
-
 class MultiheadAttention: Module
     query_weight: Tensor[f64]
     key_weight: Tensor[f64]
@@ -114,13 +108,6 @@ class AttentionResult:
 class DecoderResult:
     hidden: Tensor[bf16]
     cache: KvCache
-
-class RMSNorm:
-    weight: Tensor[bf16]
-    epsilon: float
-
-    def normalize(input: Tensor[bf16]) -> Tensor[bf16]:
-        return rms_norm_bf_16(input, weight, epsilon)
 
 def rotary_values(position_frequencies: Tensor[f32]) -> RopeValues:
     return RopeValues(

@@ -11,6 +11,80 @@ def select_values(
     return tensor.where_f_32(condition, on_true, on_false)
 
 @tensor
+def rms_norm_f32_stablehlo(
+    value: Tensor[f32, 2, 4, 8],
+    weight: Tensor[f32, 8],
+) -> Tensor[f32, 2, 4, 8]:
+    compute = tensor.compute_as_f32(value)
+    square = tensor.ranked_multiply(compute, compute)
+    variance = tensor.mean_last(square)
+    stabilized = tensor.add_scalar(variance, 0.000001)
+    inverse_rms = tensor.ranked_rsqrt(stabilized)
+    scale = tensor.broadcast_like(inverse_rms, compute)
+    normalized = tensor.ranked_multiply(compute, scale)
+    stored = tensor.convert_like(normalized, value)
+    broadcast_weight = tensor.broadcast_like(weight, stored)
+    return tensor.ranked_multiply(stored, broadcast_weight)
+
+@tensor
+def rms_norm_bf16_stablehlo(
+    value: Tensor[bf16, 2, 4, 8],
+    weight: Tensor[bf16, 8],
+) -> Tensor[bf16, 2, 4, 8]:
+    compute = tensor.compute_as_f32(value)
+    square = tensor.ranked_multiply(compute, compute)
+    variance = tensor.mean_last(square)
+    stabilized = tensor.add_scalar(variance, 0.000001)
+    inverse_rms = tensor.ranked_rsqrt(stabilized)
+    scale = tensor.broadcast_like(inverse_rms, compute)
+    normalized = tensor.ranked_multiply(compute, scale)
+    stored = tensor.convert_like(normalized, value)
+    broadcast_weight = tensor.broadcast_like(weight, stored)
+    return tensor.ranked_multiply(stored, broadcast_weight)
+
+@tensor
+def mlp_f32_stablehlo(
+    value: Tensor[f32, 4, 16],
+    gate_weight: Tensor[f32, 32, 16],
+    up_weight: Tensor[f32, 32, 16],
+    down_weight: Tensor[f32, 16, 32],
+) -> Tensor[f32, 4, 16]:
+    compute = tensor.compute_as_f32(value)
+    gate_compute = tensor.compute_as_f32(gate_weight)
+    up_compute = tensor.compute_as_f32(up_weight)
+    down_compute = tensor.compute_as_f32(down_weight)
+    gate_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(gate_compute))
+    gate = tensor.convert_like(gate_projection, value)
+    activated = tensor.ranked_silu(gate)
+    up_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(up_compute))
+    up = tensor.convert_like(up_projection, value)
+    hidden = tensor.ranked_multiply(activated, up)
+    hidden_compute = tensor.compute_as_f32(hidden)
+    output = tensor.ranked_matmul(hidden_compute, tensor.ranked_transpose(down_compute))
+    return tensor.convert_like(output, value)
+
+@tensor
+def mlp_bf16_stablehlo(
+    value: Tensor[bf16, 4, 16],
+    gate_weight: Tensor[bf16, 32, 16],
+    up_weight: Tensor[bf16, 32, 16],
+    down_weight: Tensor[bf16, 16, 32],
+) -> Tensor[bf16, 4, 16]:
+    compute = tensor.compute_as_f32(value)
+    gate_compute = tensor.compute_as_f32(gate_weight)
+    up_compute = tensor.compute_as_f32(up_weight)
+    down_compute = tensor.compute_as_f32(down_weight)
+    gate_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(gate_compute))
+    gate = tensor.convert_like(gate_projection, value)
+    activated = tensor.ranked_silu(gate)
+    up_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(up_compute))
+    up = tensor.convert_like(up_projection, value)
+    hidden = tensor.ranked_multiply(activated, up)
+    hidden_compute = tensor.compute_as_f32(hidden)
+    output = tensor.ranked_matmul(hidden_compute, tensor.ranked_transpose(down_compute))
+    return tensor.convert_like(output, value)
+
+@tensor
 def generic_tensor_ops(
     value: Tensor[f32, 2, 3, 4],
     condition: Tensor[bool, 2, 3, 4],

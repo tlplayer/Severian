@@ -46,6 +46,12 @@ pub enum ScalarKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarValue {
+    Literal(u64),
+    Operand(ValueRef),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationKind {
     Softmax,
     LayerNorm,
@@ -71,7 +77,9 @@ pub struct ReductionOp {
     pub kind: ReductionKind,
     pub input: TensorOperand,
     pub axes: Vec<u64>,
+    pub last_axis: bool,
     pub result: TensorType,
+    pub accumulation: TensorElementType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +99,7 @@ pub struct TransposeOp {
 pub struct BroadcastOp {
     pub input: TensorOperand,
     pub dimensions: Vec<u64>,
+    pub dimensions_known: bool,
     pub result: TensorType,
 }
 
@@ -98,7 +107,7 @@ pub struct BroadcastOp {
 pub struct ScalarOp {
     pub kind: ScalarKind,
     pub input: TensorOperand,
-    pub value: u64,
+    pub value: ScalarValue,
     pub result: TensorType,
 }
 

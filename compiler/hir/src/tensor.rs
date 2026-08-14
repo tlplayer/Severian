@@ -32,6 +32,7 @@ pub enum TensorIntrinsic {
     SoftmaxAxis,
     Gather,
     Convert,
+    ConvertLike,
     LayerNorm,
     DynamicSlice,
     DynamicUpdateSlice,
@@ -63,11 +64,11 @@ impl TensorIntrinsic {
             | "__sev_tensor_bf16_transpose"
             | "__sev_tensor_f32_transpose" => Self::Transpose,
             "__sev_tensor_bf16_broadcast" | "__sev_tensor_f32_broadcast" => Self::Broadcast,
-            "__sev_tensor_bf16_broadcast_like" | "__sev_tensor_f32_broadcast_like" => {
-                Self::BroadcastLike
-            }
+            "__sev_tensor_broadcast_like"
+            | "__sev_tensor_bf16_broadcast_like"
+            | "__sev_tensor_f32_broadcast_like" => Self::BroadcastLike,
             "__sev_tensor_scale" | "__sev_tensor_f32_scale" => Self::Scale,
-            "__sev_tensor_f32_add_scalar" => Self::AddScalar,
+            "__sev_tensor_add_scalar" | "__sev_tensor_f32_add_scalar" => Self::AddScalar,
             "__sev_tensor_relu" => Self::Relu,
             "__sev_tensor_silu" => Self::Silu,
             "__sev_tensor_exp" | "__sev_tensor_f32_exp" => Self::Exp,
@@ -77,7 +78,7 @@ impl TensorIntrinsic {
             "__sev_tensor_gelu" => Self::Gelu,
             "__sev_tensor_sum" => Self::Sum,
             "__sev_tensor_f32_sum_last" => Self::SumLast,
-            "__sev_tensor_f32_mean_last" => Self::MeanLast,
+            "__sev_tensor_mean_last" | "__sev_tensor_f32_mean_last" => Self::MeanLast,
             "__sev_tensor_f32_max_last" => Self::MaxLast,
             "__sev_tensor_softmax_rows" => Self::Softmax,
             "__sev_tensor_f32_softmax_axis" => Self::SoftmaxAxis,
@@ -90,6 +91,7 @@ impl TensorIntrinsic {
             | "__sev_tensor_to_f64"
             | "__sev_tensor_bf16_to_f32"
             | "__sev_tensor_f32_to_bf16" => Self::Convert,
+            "__sev_tensor_convert_like" => Self::ConvertLike,
             "__sev_tensor_layer_norm" => Self::LayerNorm,
             "__sev_tensor_bf16_dynamic_slice" => Self::DynamicSlice,
             "__sev_tensor_bf16_dynamic_update_slice" => Self::DynamicUpdateSlice,
@@ -131,6 +133,7 @@ impl TensorIntrinsic {
             Self::SoftmaxAxis => "softmax_axis",
             Self::Gather => "gather",
             Self::Convert => "convert",
+            Self::ConvertLike => "convert_like",
             Self::LayerNorm => "layer_norm",
             Self::DynamicSlice => "dynamic_slice",
             Self::DynamicUpdateSlice => "dynamic_update_slice",

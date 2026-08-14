@@ -27,7 +27,12 @@ pub fn emit_stablehlo(kernel: &KernelIr) -> Result<Module, KernelError> {
     let mut emitter = StableHloEmitter::new();
     let value = match &kernel.operation {
         TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum => {
-            reduction::reduce_sum(&mut emitter, &argument, &operation.axes, kernel.result)
+            let axes = if operation.last_axis {
+                vec![u64::from(input.rank.unwrap_or(1).saturating_sub(1))]
+            } else {
+                operation.axes.clone()
+            };
+            reduction::reduce_sum(&mut emitter, &argument, &axes, kernel.result)
         }
         TensorOp::Elementwise(operation) if operation.kind == ElementwiseKind::Relu => {
             activation::relu(&mut emitter, &argument, kernel.result)

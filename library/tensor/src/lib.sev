@@ -189,6 +189,12 @@ unsafe:
 
     native("__sev_tensor_rsqrt") def ranked_rsqrt[type: Float](value: Tensor[type]) -> Tensor[type]
 
+    native("__sev_tensor_mean_last") def mean_last[type: Float](value: Tensor[type]) -> Tensor[type]
+
+    native("__sev_tensor_add_scalar") def add_scalar[type: Float](value: Tensor[type], scalar: f32) -> Tensor[type]
+
+    native("__sev_tensor_broadcast_like") def broadcast_like[type](value: Tensor[type], target: Tensor[type]) -> Tensor[type]
+
     native("__sev_tensor_sigmoid") def ranked_sigmoid[type: Float](value: Tensor[type]) -> Tensor[type]
 
     native("__sev_tensor_gelu") def ranked_gelu[type: Float](value: Tensor[type]) -> Tensor[type]
@@ -207,6 +213,8 @@ unsafe:
     native("__sev_tensor_to_bf16") def to_bf_16[type: Numeric](value: Tensor[type]) -> Tensor[bf16]
     native("__sev_tensor_to_f32") def to_f_32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
     native("__sev_tensor_to_f64") def to_f_64[type: Numeric](value: Tensor[type]) -> Tensor[f64]
+
+    native("__sev_tensor_convert_like") def convert_like[source: Numeric, target: Numeric](value: Tensor[source], target_value: Tensor[target]) -> Tensor[target]
 
     native("__sev_tensor_layer_norm") def ranked_layer_norm[type: Float](value: Tensor[type], epsilon: float = 0.00001) -> Tensor[type]
 

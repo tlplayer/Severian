@@ -62,6 +62,28 @@ pub fn attach_module_metadata_to_with_packages(
     namespace: Option<&str>,
     interfaces: &[PackageInterface],
 ) {
+    let specialized = specialize_generic_classes_with_interfaces(module, interfaces)
+        .expect("semantic analysis already validated generic class specializations");
+    attach_specialized_module_metadata_to_with_packages(
+        &specialized,
+        program,
+        metadata,
+        path,
+        source,
+        namespace,
+        interfaces,
+    );
+}
+
+fn attach_specialized_module_metadata_to_with_packages(
+    module: &Module,
+    program: &mut Program,
+    metadata: &mut ProgramMetadata,
+    path: impl Into<PathBuf>,
+    source: impl Into<String>,
+    namespace: Option<&str>,
+    interfaces: &[PackageInterface],
+) {
     let file = program.attach_source_file_to(metadata, path, source);
     let mut known_types = module
         .items
@@ -533,7 +555,11 @@ pub(super) fn class_type_name(ty: &Type) -> Option<String> {
     ) {
         None
     } else {
-        Some(name.to_owned())
+        Some(if path.args.is_empty() {
+            name.to_owned()
+        } else {
+            declaration_type_key(ty)
+        })
     }
 }
 
@@ -609,11 +635,31 @@ pub(super) fn register_method_return_alias(
     Ok(())
 }
 
+pub(super) fn register_class_method_signature_alias(
+    aliases: &mut HashMap<String, String>,
+    class: &str,
+    method: &severian_ast::FunctionDecl,
+) {
+    aliases.insert(
+        format!("__class_method_signature.{class}.{}", method.name.name),
+        callable_signature(&method.params, method.return_type.as_ref()),
+    );
+}
+
 pub(super) fn register_trait_aliases(
     aliases: &mut HashMap<String, String>,
     declaration: &severian_ast::TraitDecl,
 ) {
     aliases.insert(format!("__trait.{}", declaration.name.name), String::new());
+    aliases.insert(
+        format!("__trait_generic_params.{}", declaration.name.name),
+        declaration
+            .generic_params
+            .iter()
+            .map(|parameter| parameter.name.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
     aliases
         .entry(format!("__class_fields.{}", declaration.name.name))
         .or_default();
@@ -627,6 +673,41 @@ pub(super) fn register_trait_aliases(
                 .collect::<Vec<_>>()
                 .join(",")
         });
+    for method in &declaration.methods {
+        aliases.insert(
+            format!(
+                "__trait_method_signature.{}.{}",
+                declaration.name.name, method.name.name
+            ),
+            callable_signature(&method.params, method.return_type.as_ref()),
+        );
+    }
+}
+
+pub(super) fn callable_signature(
+    parameters: &[severian_ast::Parameter],
+    returns: Option<&Type>,
+) -> String {
+    let parameters = parameters
+        .iter()
+        .skip(usize::from(
+            parameters
+                .first()
+                .is_some_and(|parameter| parameter.name.name == "self"),
+        ))
+        .map(|parameter| {
+            parameter
+                .ty
+                .as_ref()
+                .map(declaration_type_key)
+                .unwrap_or_else(|| "Any".into())
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    let returns = returns
+        .map(declaration_type_key)
+        .unwrap_or_else(|| "unit".into());
+    format!("{parameters}->{returns}")
 }
 
 pub(super) fn encode_field_type(ty: ValueType) -> String {

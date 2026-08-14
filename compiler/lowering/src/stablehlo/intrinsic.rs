@@ -439,8 +439,9 @@ fn lower_tensor_call(
             ))
         }
 
-        TensorIntrinsic::Convert => {
-            require_arity(&op, args, 1)?;
+        TensorIntrinsic::Convert | TensorIntrinsic::ConvertLike => {
+            let expected = usize::from(operation == TensorIntrinsic::ConvertLike) + 1;
+            require_arity(&op, args, expected)?;
             Ok(emitter.convert(&args[0], result_type))
         }
 

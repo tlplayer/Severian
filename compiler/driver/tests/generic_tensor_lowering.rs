@@ -17,13 +17,7 @@ fn axis_softmax_and_where_lower_as_generic_stablehlo() {
                 .optimized_hir
                 .functions
                 .iter()
-                .find(|function| {
-                    function.native_symbol.is_none()
-                        && function
-                            .decorators
-                            .iter()
-                            .any(|decorator| decorator.package == "tensor")
-                })
+                .find(|function| function.name == "generic_tensor_ops")
                 .expect("missing generic tensor lowering fixture")
                 .id;
             let module = lower_entry(&compilation.optimized_hir, entry).unwrap();
@@ -35,6 +29,83 @@ fn axis_softmax_and_where_lower_as_generic_stablehlo() {
             assert!(stablehlo.contains("stablehlo.reshape"));
             assert!(stablehlo.contains("stablehlo.add"));
             assert!(!stablehlo.contains("custom_call"));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn rms_norm_storage_specializations_share_f32_stablehlo_compute() {
+    std::thread::Builder::new()
+        .name("generic-rms-norm-lowering".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let fixture = workspace.join("compiler/driver/tests/fixtures/generic_tensor_ops");
+            let compilation =
+                compile_dependency_path(&fixture.join("ops.sev"), &fixture.join("package.toml"))
+                    .unwrap();
+
+            for (name, storage) in [
+                ("rms_norm_f32_stablehlo", "f32"),
+                ("rms_norm_bf16_stablehlo", "bf16"),
+            ] {
+                let entry = compilation
+                    .optimized_hir
+                    .functions
+                    .iter()
+                    .find(|function| function.name == name)
+                    .unwrap_or_else(|| panic!("missing {name}"))
+                    .id;
+                let module = lower_entry(&compilation.optimized_hir, entry).unwrap();
+                let stablehlo = module.as_str();
+
+                assert!(stablehlo.contains("stablehlo.reduce"));
+                assert!(stablehlo.contains("dimensions = array<i64: 2>"));
+                assert!(stablehlo.contains("stablehlo.rsqrt"));
+                assert!(stablehlo.contains("stablehlo.broadcast_in_dim"));
+                assert!(stablehlo.contains("stablehlo.convert"));
+                assert!(stablehlo.contains("tensor<2x4x8xf32>"));
+                assert!(stablehlo.contains(&format!("tensor<2x4x8x{storage}>")));
+                assert!(!stablehlo.contains("custom_call"));
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn mlp_storage_specializations_lower_three_f32_matmuls_and_silu() {
+    std::thread::Builder::new()
+        .name("generic-mlp-lowering".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let fixture = workspace.join("compiler/driver/tests/fixtures/generic_tensor_ops");
+            let compilation =
+                compile_dependency_path(&fixture.join("ops.sev"), &fixture.join("package.toml"))
+                    .unwrap();
+
+            for (name, storage) in [("mlp_f32_stablehlo", "f32"), ("mlp_bf16_stablehlo", "bf16")] {
+                let entry = compilation
+                    .optimized_hir
+                    .functions
+                    .iter()
+                    .find(|function| function.name == name)
+                    .unwrap_or_else(|| panic!("missing {name}"))
+                    .id;
+                let module = lower_entry(&compilation.optimized_hir, entry).unwrap();
+                let stablehlo = module.as_str();
+
+                assert_eq!(stablehlo.matches("stablehlo.dot_general").count(), 3);
+                assert_eq!(stablehlo.matches("stablehlo.logistic").count(), 1);
+                assert!(stablehlo.matches("stablehlo.multiply").count() >= 2);
+                assert!(stablehlo.contains("tensor<4x16xf32>"));
+                assert!(stablehlo.contains(&format!("tensor<4x16x{storage}>")));
+                assert!(!stablehlo.contains("custom_call"));
+            }
         })
         .unwrap()
         .join()

@@ -164,6 +164,7 @@ pub struct ClassDecl {
     pub span: Span,
     pub decorators: Vec<Decorator>,
     pub name: Ident,
+    pub generic_params: Vec<GenericParameter>,
     pub traits: Vec<Type>,
     pub fields: Vec<Field>,
     pub constructors: Vec<ConstructorDecl>,
@@ -189,6 +190,7 @@ pub struct Field {
 pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
+    pub generic_params: Vec<GenericParameter>,
     pub methods: Vec<TraitMethod>,
 }
 

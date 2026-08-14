@@ -169,7 +169,9 @@ mod tests {
                     ty: input,
                 },
                 axes: vec![0],
+                last_axis: false,
                 result: TensorType::ranked(TensorElementType::F32, &[]).unwrap(),
+                accumulation: TensorElementType::F32,
             }),
             policy: KernelBackend::Auto,
         }

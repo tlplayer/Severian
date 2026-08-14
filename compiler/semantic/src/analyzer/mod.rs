@@ -60,6 +60,7 @@ struct SignatureParameter {
 enum SignatureType {
     Concrete(ValueType),
     TensorGeneric(GenericTensorType),
+    Declared(Type),
 }
 
 #[derive(Clone)]
@@ -75,6 +76,7 @@ impl SignatureType {
         match self {
             Self::Concrete(ty) => *ty,
             Self::TensorGeneric(_) => ValueType::TensorAny,
+            Self::Declared(_) => ValueType::Any,
         }
     }
 }
@@ -117,11 +119,13 @@ mod call;
 mod contract;
 mod expression;
 mod expression_helpers;
+mod generics;
 mod metadata;
 mod pattern;
 mod pipeline;
 mod resolve;
 mod statement;
+mod structural;
 mod switch;
 mod tensor;
 mod traits;
@@ -132,11 +136,13 @@ use call::*;
 use contract::*;
 use expression::*;
 use expression_helpers::*;
+use generics::*;
 pub use metadata::*;
 use pattern::*;
 pub use pipeline::*;
 use resolve::*;
 use statement::*;
+use structural::*;
 use switch::*;
 use traits::*;
 pub use type_resolution::enforce_type_resolution_policy;

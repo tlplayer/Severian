@@ -7,7 +7,7 @@ use metadata::{tensor_from_shape, validate_axis};
 pub(super) use shape::infer_matmul_operator;
 use shape::{
     broadcast, infer_concatenate, infer_gather, infer_matmul, infer_slice, infer_transpose,
-    reduce_last, require_broadcast_to, tensor_error, validate_reshape,
+    reduce_last, require_broadcast_like_to, require_broadcast_to, tensor_error, validate_reshape,
 };
 
 /// Resolve tensor result facts while source spans and compile-time metadata are
@@ -52,10 +52,10 @@ pub(super) fn infer_call_result(
         Op::BroadcastLike => {
             let input = tensor_argument(arguments, 0, intrinsic, span)?;
             let result = tensor_argument(arguments, 1, intrinsic, span)?;
-            require_broadcast_to(input, result, intrinsic, span)?;
+            require_broadcast_like_to(input, result, intrinsic, span)?;
             result
         }
-        Op::Convert => {
+        Op::Convert | Op::ConvertLike => {
             let input = tensor_argument(arguments, 0, intrinsic, span)?;
             let ValueType::Tensor(declared) = declared else {
                 return Err(tensor_error(

@@ -1,11 +1,12 @@
 use super::*;
 use crate::MirLoweringError;
-use severian_hir::TensorIntrinsic;
+use severian_hir::{TensorDimension, TensorIntrinsic};
 
 pub(crate) fn resolve_tensor_op(
     intrinsic: TensorIntrinsic,
     source_arguments: &[severian_hir::Expression],
     inputs: Vec<TensorOperand>,
+    scalar: Option<ValueRef>,
     result: TensorType,
 ) -> Result<TensorOp, MirLoweringError> {
     use ElementwiseKind as Elementwise;
@@ -39,7 +40,7 @@ pub(crate) fn resolve_tensor_op(
                 left: inputs[0],
                 right: inputs[1],
                 result,
-                accumulation: result.element,
+                accumulation: accumulation_type(result.element),
             }))
         }
         Intrinsic::Reshape => {
@@ -79,15 +80,17 @@ pub(crate) fn resolve_tensor_op(
             let expected = usize::from(intrinsic == Intrinsic::BroadcastLike) + 1;
             expect_input_count(intrinsic, &inputs, expected)?;
             let input = inputs[0];
-            let dimensions = broadcast_dimensions(input.ty, result).ok_or_else(|| {
-                failure(
+            let dimensions = broadcast_dimensions(input.ty, result);
+            if dimensions.is_none() && input.ty.rank.is_some() && result.rank.is_some() {
+                return Err(failure(
                     intrinsic,
                     "input and result ranks cannot define broadcast dimensions",
-                )
-            })?;
+                ));
+            }
             Ok(TensorOp::Broadcast(BroadcastOp {
                 input,
-                dimensions,
+                dimensions: dimensions.clone().unwrap_or_default(),
+                dimensions_known: dimensions.is_some(),
                 result,
             }))
         }
@@ -101,7 +104,9 @@ pub(crate) fn resolve_tensor_op(
             let value = source_arguments
                 .get(1)
                 .and_then(scalar_bits)
-                .ok_or_else(|| failure(intrinsic, "scalar argument must be a numeric literal"))?;
+                .map(ScalarValue::Literal)
+                .or_else(|| scalar.map(ScalarValue::Operand))
+                .ok_or_else(|| failure(intrinsic, "scalar argument must be numeric"))?;
             Ok(TensorOp::Scalar(ScalarOp {
                 kind,
                 input: inputs[0],
@@ -112,22 +117,37 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::Sum | Intrinsic::SumLast | Intrinsic::MeanLast | Intrinsic::MaxLast => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let rank = input
-                .ty
-                .rank
-                .ok_or_else(|| failure(intrinsic, "reduction input must have a resolved rank"))?;
-            let (kind, axes) = match intrinsic {
-                Intrinsic::Sum => (ReductionKind::Sum, (0..u64::from(rank)).collect()),
-                Intrinsic::SumLast => (ReductionKind::Sum, vec![last_axis(intrinsic, rank)?]),
-                Intrinsic::MeanLast => (ReductionKind::Mean, vec![last_axis(intrinsic, rank)?]),
-                Intrinsic::MaxLast => (ReductionKind::Maximum, vec![last_axis(intrinsic, rank)?]),
+            let (kind, axes, reduce_last_axis) = match intrinsic {
+                Intrinsic::Sum => {
+                    let rank = input.ty.rank.ok_or_else(|| {
+                        failure(intrinsic, "full reduction input must have a resolved rank")
+                    })?;
+                    (ReductionKind::Sum, (0..u64::from(rank)).collect(), false)
+                }
+                Intrinsic::SumLast | Intrinsic::MeanLast | Intrinsic::MaxLast => {
+                    let kind = match intrinsic {
+                        Intrinsic::SumLast => ReductionKind::Sum,
+                        Intrinsic::MeanLast => ReductionKind::Mean,
+                        Intrinsic::MaxLast => ReductionKind::Maximum,
+                        _ => unreachable!(),
+                    };
+                    let axes = input
+                        .ty
+                        .rank
+                        .map(|rank| last_axis(intrinsic, rank).map(|axis| vec![axis]))
+                        .transpose()?
+                        .unwrap_or_default();
+                    (kind, axes, true)
+                }
                 _ => unreachable!(),
             };
             Ok(TensorOp::Reduction(ReductionOp {
                 kind,
                 input,
                 axes,
+                last_axis: reduce_last_axis,
                 result,
+                accumulation: accumulation_type(result.element),
             }))
         }
         Intrinsic::Softmax | Intrinsic::SoftmaxAxis => {
@@ -192,6 +212,13 @@ pub(crate) fn resolve_tensor_op(
         }
         Intrinsic::Convert => {
             expect_input_count(intrinsic, &inputs, 1)?;
+            Ok(TensorOp::Convert(ConvertOp {
+                input: inputs[0],
+                result,
+            }))
+        }
+        Intrinsic::ConvertLike => {
+            expect_input_count(intrinsic, &inputs, 2)?;
             Ok(TensorOp::Convert(ConvertOp {
                 input: inputs[0],
                 result,
@@ -283,6 +310,16 @@ pub(crate) fn resolve_tensor_op(
                 result,
             }))
         }
+    }
+}
+
+fn accumulation_type(element: TensorElementType) -> TensorElementType {
+    match element {
+        TensorElementType::F8E4M3FN
+        | TensorElementType::F8E5M2
+        | TensorElementType::F16
+        | TensorElementType::BF16 => TensorElementType::F32,
+        element => element,
     }
 }
 
@@ -420,13 +457,21 @@ fn broadcast_dimensions(input: TensorType, result: TensorType) -> Option<Vec<u64
     if input_rank > result_rank {
         return None;
     }
+    let compatible = |input: TensorDimension, target: TensorDimension| {
+        input == target
+            || matches!(input, TensorDimension::Static(1) | TensorDimension::Dynamic)
+            || matches!(target, TensorDimension::Dynamic)
+    };
     let first = (0..=result_rank - input_rank)
+        .filter(|&start| {
+            (0..input_rank)
+                .all(|axis| compatible(input.dimensions[axis], result.dimensions[start + axis]))
+        })
         .max_by_key(|&start| {
             (0..input_rank)
                 .filter(|&axis| input.dimensions[axis] == result.dimensions[start + axis])
                 .count()
-        })
-        .unwrap_or(result_rank - input_rank);
+        })?;
     Some(
         (first..first + input_rank)
             .map(|axis| axis as u64)

@@ -157,7 +157,9 @@ mod tests {
             kind: ReductionKind::Sum,
             input: operand(input),
             axes: vec![0],
+            last_axis: false,
             result,
+            accumulation: TensorElementType::F32,
         })))
         .unwrap();
         assert!(source.contains("tt.func public @special"));

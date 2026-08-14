@@ -9,6 +9,15 @@ pub fn enforce_type_resolution_policy(
     program: &Program,
     policy: TypeResolutionPolicy,
 ) -> Result<(), SemanticError> {
+    let specialized = specialize_generic_classes(module)?;
+    enforce_specialized_type_resolution_policy(&specialized, program, policy)
+}
+
+fn enforce_specialized_type_resolution_policy(
+    module: &Module,
+    program: &Program,
+    policy: TypeResolutionPolicy,
+) -> Result<(), SemanticError> {
     if policy.is_permissive() {
         return Ok(());
     }

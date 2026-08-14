@@ -278,9 +278,13 @@ impl FunctionBuilder {
             tensor_op: None,
         };
         let Expression::Call { target, args } = expression.kind() else {
+            self.lower_nested_tensor_ops(expression)?;
             return Ok(value);
         };
         let Some(intrinsic) = target.tensor_intrinsic() else {
+            for argument in args {
+                self.value_ref(argument)?;
+            }
             return Ok(value);
         };
         self.source_tensor_intrinsics += 1;
@@ -294,12 +298,167 @@ impl FunctionBuilder {
                 .at_expression(expression.hir_id()))
             }
         };
+        let scalar = matches!(
+            intrinsic,
+            severian_hir::TensorIntrinsic::Scale | severian_hir::TensorIntrinsic::AddScalar
+        )
+        .then(|| {
+            args.get(1)
+                .map(|argument| self.value_ref(argument))
+                .transpose()
+        })
+        .transpose()?
+        .flatten();
         let inputs = tensor_operands(args, |argument| self.value_ref(argument))?;
-        let operation = resolve_tensor_op(intrinsic, args, inputs, result)
+        let operation = resolve_tensor_op(intrinsic, args, inputs, scalar, result)
             .map_err(|error| error.at_expression(expression.hir_id()))?;
         let id = TensorOpId(self.tensor_operations.len() as u32);
         self.tensor_operations.push(operation);
         value.tensor_op = Some(id);
         Ok(value)
+    }
+
+    /// Record tensor intrinsics wherever an expression evaluates its children.
+    ///
+    /// Tensor operations are attached to intrinsic calls themselves, but an
+    /// intrinsic can be nested under any ordinary expression (most notably a
+    /// method-call argument). Walking those children here keeps MIR discovery
+    /// independent of how model code chooses to parenthesize an expression.
+    fn lower_nested_tensor_ops(&mut self, expression: &Expression) -> Result<(), MirLoweringError> {
+        let mut lower = |expression: &Expression| self.value_ref(expression).map(|_| ());
+        match expression.kind() {
+            Expression::Typed { expression, .. } => lower(expression),
+            Expression::Ownership { value, .. }
+            | Expression::Member { object: value, .. }
+            | Expression::ObjectDocument { object: value, .. }
+            | Expression::Task { value, .. }
+            | Expression::Await(value)
+            | Expression::Channel(value)
+            | Expression::ChaosRule { value, .. }
+            | Expression::FusedPipeline { input: value, .. }
+            | Expression::Unary {
+                expression: value, ..
+            } => lower(value),
+            Expression::List(values)
+            | Expression::Tuple(values)
+            | Expression::Set(values)
+            | Expression::PrintArgs(values)
+            | Expression::Construct { args: values, .. }
+            | Expression::Variant { fields: values, .. }
+            | Expression::Format { args: values, .. } => {
+                for value in values {
+                    lower(value)?;
+                }
+                Ok(())
+            }
+            Expression::Map(entries) => {
+                for (key, value) in entries {
+                    lower(key)?;
+                    lower(value)?;
+                }
+                Ok(())
+            }
+            Expression::Index { object, index } => {
+                lower(object)?;
+                lower(index)
+            }
+            Expression::Slice {
+                object,
+                start,
+                end,
+                step,
+            } => {
+                lower(object)?;
+                for bound in [start, end, step].into_iter().flatten() {
+                    lower(bound)?;
+                }
+                Ok(())
+            }
+            Expression::ConstructFields { fields, .. } => {
+                for (_, value) in fields {
+                    lower(value)?;
+                }
+                Ok(())
+            }
+            Expression::ObjectUpdate { object, fields, .. } => {
+                lower(object)?;
+                for (_, value) in fields {
+                    lower(value)?;
+                }
+                Ok(())
+            }
+            Expression::MethodCall { object, args, .. } => {
+                lower(object)?;
+                for argument in args {
+                    lower(argument)?;
+                }
+                Ok(())
+            }
+            Expression::Send { value, channel } => {
+                lower(value)?;
+                lower(channel)
+            }
+            Expression::ListComprehension { element, clauses }
+            | Expression::SetComprehension { element, clauses } => {
+                lower(element)?;
+                for clause in clauses {
+                    lower(&clause.iterable)?;
+                    if let Some(condition) = &clause.condition {
+                        lower(condition)?;
+                    }
+                }
+                Ok(())
+            }
+            Expression::MapComprehension {
+                key,
+                value,
+                clauses,
+            } => {
+                lower(key)?;
+                lower(value)?;
+                for clause in clauses {
+                    lower(&clause.iterable)?;
+                    if let Some(condition) = &clause.condition {
+                        lower(condition)?;
+                    }
+                }
+                Ok(())
+            }
+            Expression::Conditional {
+                condition,
+                then_expression,
+                else_expression,
+            } => {
+                lower(condition)?;
+                lower(then_expression)?;
+                lower(else_expression)
+            }
+            Expression::Binary { left, right, .. } => {
+                lower(left)?;
+                lower(right)
+            }
+            Expression::Call { args, .. } => {
+                for argument in args {
+                    lower(argument)?;
+                }
+                Ok(())
+            }
+            Expression::CallValue { callee, args, .. } => {
+                lower(callee)?;
+                for argument in args {
+                    lower(argument)?;
+                }
+                Ok(())
+            }
+            // Lambda and closure bodies execute in their own function scope.
+            Expression::Lambda { .. }
+            | Expression::Closure { .. }
+            | Expression::Integer(_)
+            | Expression::Float(_)
+            | Expression::Boolean(_)
+            | Expression::String(_)
+            | Expression::Variable(_)
+            | Expression::Function(_) => Ok(()),
+        }
     }
 }

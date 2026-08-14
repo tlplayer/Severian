@@ -106,11 +106,13 @@ impl Parser<'_> {
     pub(super) fn parse_trait(&mut self) -> Result<TraitDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Trait, "`trait`")?.span.start;
         let name = self.expect_identifier("trait name")?;
+        let generic_params = self.parse_generic_parameters()?;
         self.expect_simple(TokenKind::Colon, "`:` after trait name")?;
         self.expect_simple(TokenKind::Newline, "newline after trait header")?;
         self.expect_simple(TokenKind::Indent, "indented trait body")?;
         let mut methods = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            self.take_simple(&TokenKind::Def);
             let method_start = self.peek().span.start;
             let method_name = self.expect_identifier("trait method name")?;
             let params = self.parse_parameters()?;
@@ -137,6 +139,7 @@ impl Parser<'_> {
         Ok(TraitDecl {
             span: Span::new(start, end),
             name,
+            generic_params,
             methods,
         })
     }
@@ -151,6 +154,7 @@ impl Parser<'_> {
     ) -> Result<ClassDecl, ParseError> {
         let start = self.expect_simple(TokenKind::Class, "`class`")?.span.start;
         let name = self.expect_identifier("class name")?;
+        let generic_params = self.parse_generic_parameters()?;
         let mut traits = Vec::new();
         if self.take_simple(&TokenKind::Colon).is_some() && !self.at(&TokenKind::Newline) {
             loop {
@@ -257,6 +261,7 @@ impl Parser<'_> {
             span: Span::new(start, end),
             decorators,
             name,
+            generic_params,
             traits,
             fields,
             constructors,

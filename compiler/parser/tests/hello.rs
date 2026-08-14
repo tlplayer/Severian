@@ -39,6 +39,37 @@ fn preserves_generic_parameters_and_capability_constraints() {
 }
 
 #[test]
+fn preserves_bounded_generic_classes_and_traits() {
+    let source = concat!(
+        "trait Module[T: TensorDType]:\n",
+        "    def forward(self, x: Tensor[T]) -> Tensor[T]\n",
+        "\n",
+        "class Linear[T: TensorDType + Serializable]:\n",
+        "    weight: Tensor[T]\n",
+        "\n",
+        "    def forward(self, x: Tensor[T]) -> Tensor[T]:\n",
+        "        return x\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+
+    let Item::Trait(module_trait) = &module.items[0] else {
+        panic!("expected generic trait");
+    };
+    assert_eq!(module_trait.generic_params.len(), 1);
+    assert_eq!(module_trait.generic_params[0].name.name, "T");
+    assert_eq!(module_trait.generic_params[0].constraints.len(), 1);
+    assert_eq!(module_trait.methods[0].params[0].name.name, "self");
+
+    let Item::Class(linear) = &module.items[1] else {
+        panic!("expected generic class");
+    };
+    assert_eq!(linear.generic_params.len(), 1);
+    assert_eq!(linear.generic_params[0].name.name, "T");
+    assert_eq!(linear.generic_params[0].constraints.len(), 2);
+    assert_eq!(linear.methods[0].params[0].name.name, "self");
+}
+
+#[test]
 fn parses_cross_field_class_invariants() {
     let source = concat!(
         "class Range:\n",

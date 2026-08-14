@@ -61,6 +61,8 @@ pub(super) fn lower_declared_call(
             argument.span,
             ty,
             &signature.params[index].ty,
+            expression_class(&argument.value, scope, aliases).as_deref(),
+            aliases,
             &mut tensor_types,
         )?;
         supplied[index] = Some(value);
@@ -157,10 +159,16 @@ fn compatible_signature(
     span: Span,
     actual: ValueType,
     expected: &SignatureType,
+    actual_class: Option<&str>,
+    aliases: &HashMap<String, String>,
     bindings: &mut HashMap<String, TensorElementType>,
 ) -> Result<(), SemanticError> {
-    let SignatureType::TensorGeneric(generic) = expected else {
-        return compatible(span, actual, expected.erased());
+    let generic = match expected {
+        SignatureType::Concrete(expected) => return compatible(span, actual, *expected),
+        SignatureType::Declared(expected) => {
+            return compatible_declared_type(span, actual_class, expected, aliases)
+        }
+        SignatureType::TensorGeneric(generic) => generic,
     };
     if actual == ValueType::Any || actual == ValueType::TensorAny {
         return Ok(());
@@ -225,6 +233,7 @@ fn instantiate_signature_type(
                 dimensions: generic.dimensions,
             })
         }
+        SignatureType::Declared(_) => ValueType::Any,
     }
 }
 
@@ -460,6 +469,7 @@ fn signature_any_origin(
 ) -> Option<AnyOrigin> {
     match ty {
         SignatureType::TensorGeneric(_) => Some(generic_origin),
+        SignatureType::Declared(_) => None,
         SignatureType::Concrete(ValueType::Any | ValueType::TensorAny) => {
             Some(if explicitly_declared {
                 AnyOrigin::Explicit
@@ -511,7 +521,18 @@ fn lower_signature_type(
         .first()
         .is_some_and(|segment| segment.name == "Tensor")
     {
-        return lower_type(ty).map(SignatureType::Concrete);
+        let lowered = lower_type(ty)?;
+        let generic_variable =
+            path.segments.len() == 1 && generics.contains_key(path.segments[0].name.as_str());
+        let explicitly_dynamic =
+            path.segments.len() == 1 && matches!(path.segments[0].name.as_str(), "Any" | "any");
+        return Ok(
+            if lowered == ValueType::Any && !explicitly_dynamic && !generic_variable {
+                SignatureType::Declared(ty.clone())
+            } else {
+                SignatureType::Concrete(lowered)
+            },
+        );
     }
     let Some(Type::Named(element)) = path.args.first().and_then(TypeArg::as_type) else {
         return lower_type(ty).map(SignatureType::Concrete);
@@ -553,6 +574,149 @@ fn lower_signature_type(
         rank: (path.args.len() > 1).then_some((path.args.len() - 1) as u8),
         dimensions,
     }))
+}
+
+fn compatible_declared_type(
+    span: Span,
+    actual_class: Option<&str>,
+    expected: &Type,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    let expected_name = declaration_type_name(expected).unwrap_or_default();
+    let short_name = expected_name.rsplit('.').next().unwrap_or(&expected_name);
+    if aliases.contains_key(&format!("__trait.{short_name}")) {
+        let Some(actual_class) = actual_class else {
+            return Err(error(
+                span,
+                format!(
+                    "expected `{}`, found a non-class value",
+                    declaration_type_key(expected)
+                ),
+            ));
+        };
+        let actual_name = actual_class
+            .split_once('[')
+            .map_or(actual_class, |(name, _)| name)
+            .rsplit('.')
+            .next()
+            .unwrap_or(actual_class);
+        if actual_name == short_name {
+            return Ok(());
+        }
+        if structurally_conforms(actual_class, expected, short_name, aliases) {
+            return Ok(());
+        }
+        return Err(error(
+            span,
+            format!(
+                "class `{actual_class}` does not structurally satisfy `{}`",
+                declaration_type_key(expected)
+            ),
+        ));
+    }
+    let Some(actual_class) = actual_class else {
+        // Ordinary class values still use the legacy erased runtime carrier.
+        // Structural traits are the boundary where a concrete method set must
+        // be statically proven, so incomplete class-flow inference remains
+        // permissive here until object types have a first-class HIR carrier.
+        return Ok(());
+    };
+    if actual_class == short_name || actual_class == expected_name {
+        Ok(())
+    } else {
+        Err(error(
+            span,
+            format!("expected class `{short_name}`, found `{actual_class}`"),
+        ))
+    }
+}
+
+fn structurally_conforms(
+    actual_class: &str,
+    expected: &Type,
+    trait_name: &str,
+    aliases: &HashMap<String, String>,
+) -> bool {
+    let Type::Named(path) = expected else {
+        return false;
+    };
+    let parameters = aliases
+        .get(&format!("__trait_generic_params.{trait_name}"))
+        .map(|parameters| {
+            parameters
+                .split(',')
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let arguments = path
+        .args
+        .iter()
+        .map(|argument| argument.as_type().map(declaration_type_key))
+        .collect::<Option<Vec<_>>>();
+    let Some(arguments) = arguments else {
+        return false;
+    };
+    if parameters.len() != arguments.len() {
+        return false;
+    }
+    let substitutions = parameters
+        .into_iter()
+        .zip(arguments)
+        .collect::<HashMap<_, _>>();
+    let required_methods = aliases
+        .get(&format!("__class_methods.{trait_name}"))
+        .map(|methods| {
+            methods
+                .split(',')
+                .filter(|method| !method.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let actual_methods = aliases
+        .get(&format!("__class_methods.{actual_class}"))
+        .map(|methods| methods.split(',').collect::<HashSet<_>>())
+        .unwrap_or_default();
+    required_methods.into_iter().all(|method| {
+        if !actual_methods.contains(method) {
+            return false;
+        }
+        let Some(required) =
+            aliases.get(&format!("__trait_method_signature.{trait_name}.{method}"))
+        else {
+            return false;
+        };
+        let required = substitutions
+            .iter()
+            .fold(required.clone(), |signature, (name, value)| {
+                replace_type_name(&signature, name, value)
+            });
+        aliases
+            .get(&format!("__class_method_signature.{actual_class}.{method}"))
+            .is_some_and(|actual| actual == &required)
+    })
+}
+
+fn replace_type_name(source: &str, name: &str, replacement: &str) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(index) = rest.find(name) {
+        let before = rest[..index].chars().next_back();
+        let after = rest[index + name.len()..].chars().next();
+        let identifier = |character: Option<char>| {
+            character.is_some_and(|character| character == '_' || character.is_alphanumeric())
+        };
+        if !identifier(before) && !identifier(after) {
+            result.push_str(&rest[..index]);
+            result.push_str(replacement);
+            rest = &rest[index + name.len()..];
+        } else {
+            result.push_str(&rest[..index + name.len()]);
+            rest = &rest[index + name.len()..];
+        }
+    }
+    result.push_str(rest);
+    result
 }
 
 pub(super) fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {

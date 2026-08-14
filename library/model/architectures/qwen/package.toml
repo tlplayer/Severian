@@ -9,6 +9,7 @@ path = "src/lib.sev"
 
 [dependencies]
 json = { path = "../../../json", version = "0.1.0" }
+layers = { package = "model.layers", path = "../../layers", version = "0.1.0" }
 neuralnet = { package = "model.neuralnet", path = "../../neuralnet", version = "0.1.0" }
 tensor = { path = "../../../tensor", version = "0.1.0" }
 
@@ -16,4 +17,3 @@ tensor = { path = "../../../tensor", version = "0.1.0" }
 category = "machine-learning"
 implementation = "source-and-compiler-contracts"
 status = "experimental"
-

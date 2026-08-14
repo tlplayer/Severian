@@ -48,6 +48,7 @@ pub(super) fn validate_trait_implementations(
                         format!("unknown trait `{raw}` implemented by `{}`", class.name.name),
                     )
                 })?;
+            let substitutions = trait_substitutions(declaration, implemented, class)?;
             for required in &declaration.methods {
                 let Some(method) = class
                     .methods
@@ -68,14 +69,19 @@ pub(super) fn validate_trait_implementations(
                         .iter()
                         .zip(&required.params)
                         .all(|(actual, expected)| {
-                            optional_declaration_types_match(
-                                actual.ty.as_ref(),
-                                expected.ty.as_ref(),
-                            )
+                            let expected = expected
+                                .ty
+                                .as_ref()
+                                .map(|ty| substitute_declared_type(ty, &substitutions));
+                            optional_declaration_types_match(actual.ty.as_ref(), expected.as_ref())
                         });
+                let expected_return = required
+                    .return_type
+                    .as_ref()
+                    .map(|ty| substitute_declared_type(ty, &substitutions));
                 let return_matches = optional_declaration_types_match(
                     method.return_type.as_ref(),
-                    required.return_type.as_ref(),
+                    expected_return.as_ref(),
                 );
                 if !parameters_match || !return_matches {
                     return Err(error(
@@ -92,6 +98,49 @@ pub(super) fn validate_trait_implementations(
         }
     }
     Ok(())
+}
+
+fn trait_substitutions(
+    declaration: &severian_ast::TraitDecl,
+    implemented: &Type,
+    class: &severian_ast::ClassDecl,
+) -> Result<HashMap<String, Type>, SemanticError> {
+    let Type::Named(path) = implemented else {
+        unreachable!()
+    };
+    if path.args.len() != declaration.generic_params.len() {
+        return Err(error(
+            implemented.span(),
+            format!(
+                "trait `{}` expects {} type argument(s), received {}",
+                declaration.name.name,
+                declaration.generic_params.len(),
+                path.args.len()
+            ),
+        ));
+    }
+    declaration
+        .generic_params
+        .iter()
+        .zip(&path.args)
+        .map(|(parameter, argument)| {
+            let TypeArg::Type { ty, .. } = argument else {
+                return Err(error(
+                    argument.span(),
+                    format!("trait `{}` requires type arguments", declaration.name.name),
+                ));
+            };
+            Ok((parameter.name.name.clone(), ty.as_ref().clone()))
+        })
+        .chain(std::iter::once(Ok((
+            "Self".into(),
+            Type::Named(severian_ast::TypePath {
+                span: class.name.span,
+                segments: vec![class.name.clone()],
+                args: Vec::new(),
+            }),
+        ))))
+        .collect()
 }
 
 fn validate_from_implementation(

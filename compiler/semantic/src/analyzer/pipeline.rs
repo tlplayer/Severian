@@ -26,6 +26,14 @@ pub fn analyze_with_packages(
     module: &Module,
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
+    let module = specialize_generic_classes_with_interfaces(module, interfaces)?;
+    analyze_specialized(&module, interfaces)
+}
+
+fn analyze_specialized(
+    module: &Module,
+    interfaces: &[PackageInterface],
+) -> Result<Program, SemanticError> {
     let mut aliases = collect_imports(module);
     let imported_modules = collect_imported_modules(module);
     for interface in interfaces {
@@ -147,6 +155,7 @@ pub fn analyze_with_packages(
                     &method.name.name,
                     method.return_type.as_ref(),
                 )?;
+                register_class_method_signature_alias(&mut aliases, &class.name.name, method);
             }
         }
     }
@@ -226,6 +235,7 @@ pub fn analyze_with_packages(
                         &method.name.name,
                         method.return_type.as_ref(),
                     )?;
+                    register_class_method_signature_alias(&mut aliases, &class.name.name, method);
                 }
                 if imports_entire_module(module, module_name)
                     || interface
@@ -271,6 +281,7 @@ pub fn analyze_with_packages(
             }
         }
     }
+    register_concrete_trait_aliases(&mut aliases, module, interfaces)?;
     for item in &module.items {
         let (name, native_symbol, generic_params, params, return_type) = match item {
             Item::Function(function) => (
