@@ -7,6 +7,7 @@ members = [
     "string",
     "agent",
     "audio",
+    "cli",
     "container",
     "csv",
     "data",

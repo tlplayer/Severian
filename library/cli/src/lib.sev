@@ -1,0 +1,536 @@
+import process
+
+# CLI declarations are immutable data. Parsing produces a separate Matches
+# value, so a Command can be shared by tests, help generation, completion, and
+# the real process entry point without accumulating runtime state.
+class OptionSpec:
+    name: string
+    short: string
+    help: string
+    value_name: string
+    kind: string
+    required: bool
+    multiple: bool
+    default_value: string
+    choices: list[string]
+    conflicts: list[string]
+    requires: list[string]
+    hidden: bool
+
+class ArgumentSpec:
+    name: string
+    help: string
+    required: bool
+    multiple: bool
+
+class Command:
+    name: string
+    about: string
+    version: string
+    options: list[OptionSpec]
+    arguments: list[ArgumentSpec]
+    commands: list[Command]
+    after_help: string
+
+class Matches:
+    command: string
+    command_path: list[string]
+    options: map[string, list[string]]
+    arguments: map[string, list[string]]
+    action: string
+
+class CliError:
+    code: string
+    message: string
+    usage: string
+    help: string
+    exit_code: int = 2
+
+class Diagnostic:
+    level: string
+    code: string
+    message: string
+    help: string
+
+class CheckReport:
+    diagnostics: list[Diagnostic]
+    errors: int
+    warnings: int
+
+def option(
+    name: string,
+    short: string = "",
+    help: string = "",
+    value_name: string = "VALUE",
+    kind: string = "string",
+    required: bool = false,
+    multiple: bool = false,
+    default_value: string = "",
+    choices: list[string] = [],
+    conflicts: list[string] = [],
+    requires: list[string] = [],
+    hidden: bool = false,
+) -> OptionSpec:
+    return OptionSpec(
+        name, short, help, value_name, kind, required, multiple,
+        default_value, choices, conflicts, requires, hidden,
+    )
+
+def flag(
+    name: string,
+    short: string = "",
+    help: string = "",
+    multiple: bool = false,
+    conflicts: list[string] = [],
+    requires: list[string] = [],
+    hidden: bool = false,
+) -> OptionSpec:
+    return OptionSpec(
+        name, short, help, "", "bool", false, multiple,
+        "false", [], conflicts, requires, hidden,
+    )
+
+def argument(
+    name: string,
+    help: string = "",
+    required: bool = true,
+    multiple: bool = false,
+) -> ArgumentSpec:
+    return ArgumentSpec(name, help, required, multiple)
+
+def command(
+    name: string,
+    about: string = "",
+    version: string = "",
+    options: list[OptionSpec] = [],
+    arguments: list[ArgumentSpec] = [],
+    commands: list[Command] = [],
+    after_help: string = "",
+) -> Command:
+    return Command(name, about, version, options, arguments, commands, after_help)
+
+def usage(specification: Command) -> string:
+    text := "Usage: " + specification.name
+    if size(specification.commands) > 0:
+        text += " <COMMAND>"
+    if size(specification.options) > 0:
+        text += " [OPTIONS]"
+    for item in specification.arguments:
+        label = "<" + item.name.upper() + ">" if item.required else "[" + item.name.upper() + "]"
+        text += " " + label
+        if item.multiple:
+            text += "..."
+    return text
+
+def option_label(item: OptionSpec) -> string:
+    label := ""
+    if item.short != "":
+        label = "-" + item.short + ", "
+    label += "--" + item.name
+    if item.kind != "bool":
+        label += " <" + item.value_name + ">"
+    return label
+
+def help(specification: Command) -> string:
+    output := specification.name
+    if specification.version != "":
+        output += " " + specification.version
+    if specification.about != "":
+        output += "\n" + specification.about
+    output += "\n\n" + usage(specification)
+
+    if size(specification.commands) > 0:
+        width := 0
+        for nested in specification.commands:
+            width = max(width, size(nested.name))
+        output += "\n\nCommands:"
+        for nested in specification.commands:
+            output += "\n  " + nested.name.pad_right(width) + "  " + nested.about
+
+    visible_options = specification.options.filter(|item| not item.hidden)
+    if size(visible_options) > 0:
+        width := 0
+        for item in visible_options:
+            width = max(width, size(option_label(item)))
+        output += "\n\nOptions:"
+        for item in visible_options:
+            detail := item.help
+            if item.default_value != "" and item.kind != "bool":
+                detail += " [default: " + item.default_value + "]"
+            if size(item.choices) > 0:
+                detail += " [possible values: " + item.choices.join(", ") + "]"
+            output += "\n  " + option_label(item).pad_right(width) + "  " + detail
+    output += "\n  -h, --help".pad_right(20) + "Show help"
+    if specification.version != "":
+        output += "\n  -V, --version".pad_right(20) + "Show version"
+
+    if size(specification.arguments) > 0:
+        output += "\n\nArguments:"
+        for item in specification.arguments:
+            output += "\n  " + item.name.upper().pad_right(16) + "  " + item.help
+    if specification.after_help != "":
+        output += "\n\n" + specification.after_help
+    return output
+
+def render_error(error: CliError) -> string:
+    output := "error[" + error.code + "]: " + error.message
+    if error.usage != "":
+        output += "\n\n" + error.usage
+    if error.help != "":
+        output += "\n\nhelp: " + error.help
+    return output
+
+def selected_command(specification: Command, path: list[string]) -> Command:
+    selected := specification
+    for depth in range(1, size(path)):
+        index = command_index(selected, path[depth])
+        assert(index >= 0, "parsed command path is not present in its CLI declaration")
+        selected = selected.commands[index]
+    return selected
+
+def response(specification: Command, matches: Matches) -> string:
+    selected = selected_command(specification, matches.command_path)
+    if matches.action == "help":
+        return help(selected)
+    if matches.action == "version":
+        return selected.name + " " + selected.version
+    return ""
+
+def option_index(specification: Command, token: string) -> int:
+    for index, item in enumerate(specification.options):
+        if token == "--" + item.name or (item.short != "" and token == "-" + item.short):
+            return index
+    return -1
+
+def command_index(specification: Command, name: string) -> int:
+    for index, nested in enumerate(specification.commands):
+        if nested.name == name:
+            return index
+    return -1
+
+def edit_distance(left: string, right: string) -> int:
+    previous: list[int] = []
+    for column in range(0, size(right) + 1):
+        previous.append(column)
+    left_characters = left.characters()
+    right_characters = right.characters()
+    for row in range(0, size(left_characters)):
+        current: list[int] = [row + 1]
+        for column in range(0, size(right_characters)):
+            substitution = 0 if left_characters[row] == right_characters[column] else 1
+            current.append(min(
+                current[column] + 1,
+                min(previous[column + 1] + 1, previous[column] + substitution),
+            ))
+        previous = current
+    return previous[size(previous) - 1]
+
+def suggestion(specification: Command, token: string) -> string:
+    wanted = token.trim_prefix("--").trim_prefix("-")
+    candidate := ""
+    distance := 999999
+    for item in specification.options:
+        current = edit_distance(wanted, item.name)
+        if current < distance:
+            distance = current
+            candidate = "--" + item.name
+    for nested in specification.commands:
+        current = edit_distance(wanted, nested.name)
+        if current < distance:
+            distance = current
+            candidate = nested.name
+    return candidate if distance <= 3 else ""
+
+def parse_error(specification: Command, code: string, message: string, hint: string = "") -> CliError:
+    return CliError(code, message, usage(specification), hint)
+
+def append_option(
+    collected: map[string, list[string]],
+    item: OptionSpec,
+    value: string,
+) -> Result[unit, CliError]:
+    if item.name in collected and not item.multiple:
+        return failure(CliError(
+            "CLI004", "option `--" + item.name + "` may only be used once", "",
+            "remove the duplicate option",
+        ))
+    if item.name not in collected:
+        collected[item.name] = []
+    collected[item.name].append(value)
+    return
+
+def validate_value(specification: Command, item: OptionSpec, value: string) -> Result[unit, CliError]:
+    if size(item.choices) > 0 and value not in item.choices:
+        return failure(parse_error(
+            specification, "CLI005",
+            "invalid value `" + value + "` for `--" + item.name + "`",
+            "choose one of: " + item.choices.join(", "),
+        ))
+    if item.kind == "int":
+        switch int.parse(value):
+            ok _integer:
+                return
+            failure _error:
+                return failure(parse_error(
+                    specification, "CLI012", "invalid integer `" + value + "` for `--" + item.name + "`",
+                    "provide a whole number",
+                ))
+    else if item.kind == "float":
+        switch float.parse(value):
+            ok _decimal:
+                return
+            failure _error:
+                return failure(parse_error(
+                    specification, "CLI012", "invalid decimal `" + value + "` for `--" + item.name + "`",
+                    "provide a decimal number",
+                ))
+    return
+
+def parse(specification: Command, input: list[string]) -> Result[Matches, CliError]:
+    selected := specification
+    command_path := [specification.name]
+    cursor := 0
+    while cursor < size(input) and not input[cursor].starts_with("-"):
+        nested_index = command_index(selected, input[cursor])
+        if nested_index < 0:
+            if size(selected.commands) > 0:
+                proposed = suggestion(selected, input[cursor])
+                hint = "did you mean `" + proposed + "`?" if proposed != "" else "use `--help` to list available commands"
+                return failure(parse_error(selected, "CLI013", "unexpected command `" + input[cursor] + "`", hint))
+            break
+        selected = selected.commands[nested_index]
+        command_path.append(selected.name)
+        cursor += 1
+
+    collected_options: map[string, list[string]] = {}
+    raw_arguments: list[string] = []
+    trailing := false
+    action := "run"
+    while cursor < size(input):
+        token = input[cursor]
+        if trailing:
+            raw_arguments.append(token)
+            cursor += 1
+            continue
+        if token == "--":
+            trailing = true
+            cursor += 1
+            continue
+        if token in ["--help", "-h"]:
+            action = "help"
+            cursor += 1
+            continue
+        if token in ["--version", "-V"]:
+            if selected.version == "":
+                return failure(parse_error(selected, "CLI006", "this command has no version information"))
+            action = "version"
+            cursor += 1
+            continue
+        if not token.starts_with("-"):
+            raw_arguments.append(token)
+            cursor += 1
+            continue
+
+        option_token := token
+        inline_value := ""
+        has_inline := false
+        if token.starts_with("--") and "=" in token:
+            parts = token.split("=", 1)
+            option_token = parts[0]
+            inline_value = parts[1]
+            has_inline = true
+        selected_index = option_index(selected, option_token)
+        if selected_index < 0:
+            proposed = suggestion(selected, option_token)
+            hint = "did you mean `" + proposed + "`?" if proposed != "" else "use `--help` to list available options"
+            return failure(parse_error(selected, "CLI001", "unexpected option `" + option_token + "`", hint))
+        item = selected.options[selected_index]
+        if item.kind == "bool":
+            if has_inline:
+                return failure(parse_error(selected, "CLI007", "flag `--" + item.name + "` does not accept a value"))
+            _added = append_option(collected_options, item, "true")
+        else:
+            value := inline_value
+            if not has_inline:
+                cursor += 1
+                if cursor >= size(input):
+                    return failure(parse_error(
+                        selected, "CLI002", "option `--" + item.name + "` requires a value",
+                        "provide `--" + item.name + " <" + item.value_name + ">`",
+                    ))
+                value = input[cursor]
+            _valid = validate_value(selected, item, value)
+            _added = append_option(collected_options, item, value)
+        cursor += 1
+
+    collected_arguments: map[string, list[string]] = {}
+    argument_cursor := 0
+    for index, item in enumerate(selected.arguments):
+        collected_arguments[item.name] = []
+        if item.multiple:
+            collected_arguments[item.name].extend(raw_arguments[argument_cursor:size(raw_arguments)])
+            argument_cursor = size(raw_arguments)
+        else if argument_cursor < size(raw_arguments):
+            collected_arguments[item.name].append(raw_arguments[argument_cursor])
+            argument_cursor += 1
+        else if item.required and action == "run":
+            return failure(parse_error(selected, "CLI003", "missing required argument `<" + item.name.upper() + ">`"))
+    if argument_cursor < size(raw_arguments):
+        return failure(parse_error(selected, "CLI008", "unexpected argument `" + raw_arguments[argument_cursor] + "`"))
+
+    if action == "run":
+        if size(selected.commands) > 0:
+            return failure(parse_error(selected, "CLI003", "a command is required", "use `--help` to list available commands"))
+        for item in selected.options:
+            if item.kind != "bool" and item.name not in collected_options and item.default_value != "":
+                collected_options[item.name] = [item.default_value]
+            if item.required and item.name not in collected_options:
+                return failure(parse_error(selected, "CLI003", "missing required option `--" + item.name + "`"))
+        for item in selected.options:
+            if item.name in collected_options:
+                for conflicting in item.conflicts:
+                    if conflicting in collected_options:
+                        return failure(parse_error(
+                            selected, "CLI009", "option `--" + item.name + "` conflicts with `--" + conflicting + "`",
+                        ))
+                for dependency in item.requires:
+                    if dependency not in collected_options:
+                        return failure(parse_error(
+                            selected, "CLI010", "option `--" + item.name + "` requires `--" + dependency + "`",
+                        ))
+    return Matches(selected.name, command_path, collected_options, collected_arguments, action)
+
+def parse_process(specification: Command) -> Result[Matches, CliError]:
+    input = process.arguments()
+    return parse(specification, input[1:size(input)] if size(input) > 0 else [])
+
+def present(matches: Matches, name: string) -> bool:
+    return name in matches.options or (name in matches.arguments and size(matches.arguments[name]) > 0)
+
+def values(matches: Matches, name: string) -> list[string]:
+    if name in matches.options:
+        return matches.options[name]
+    if name in matches.arguments:
+        return matches.arguments[name]
+    return []
+
+def text(matches: Matches, name: string) -> Result[string, CliError]:
+    items = values(matches, name)
+    if size(items) == 0:
+        return failure(CliError("CLI011", "no parsed value named `" + name + "`", "", "declare the option or argument before reading it"))
+    return items[0]
+
+def integer(matches: Matches, name: string) -> Result[int, CliError]:
+    raw = text(matches, name)
+    switch int.parse(raw):
+        ok value:
+            return value
+        failure _error:
+            return failure(CliError("CLI012", "parsed value `" + name + "` is not an integer", "", "declare it with kind=\"int\" to validate during parsing"))
+
+def decimal(matches: Matches, name: string) -> Result[float, CliError]:
+    raw = text(matches, name)
+    switch float.parse(raw):
+        ok value:
+            return value
+        failure _error:
+            return failure(CliError("CLI012", "parsed value `" + name + "` is not a decimal", "", "declare it with kind=\"float\" to validate during parsing"))
+
+def boolean(matches: Matches, name: string) -> bool:
+    items = values(matches, name)
+    return size(items) > 0 and items[size(items) - 1] == "true"
+
+def lint_name(value: string) -> bool:
+    if value == "" or value.starts_with("-") or value.ends_with("-"):
+        return false
+    for character in value.characters():
+        if not character.is_ascii_alnum() and character != "-":
+            return false
+    return value == value.lower()
+
+def check(specification: Command) -> CheckReport:
+    diagnostics: list[Diagnostic] = []
+    if not lint_name(specification.name):
+        diagnostics.append(Diagnostic("error", "CLI100", "command name `" + specification.name + "` is not kebab-case", "use lowercase letters, digits, and hyphens"))
+    if specification.about == "":
+        diagnostics.append(Diagnostic("warning", "CLI101", "command `" + specification.name + "` has no description", "add a concise `about` value for generated help"))
+    names: list[string] = []
+    shorts: list[string] = []
+    for item in specification.options:
+        if item.name in names:
+            diagnostics.append(Diagnostic("error", "CLI102", "duplicate option `--" + item.name + "`", "option names must be unique within a command"))
+        names.append(item.name)
+        if not lint_name(item.name):
+            diagnostics.append(Diagnostic("error", "CLI103", "option name `" + item.name + "` is not kebab-case", "remove leading dashes and use kebab-case"))
+        if item.short != "":
+            if size(item.short) != 1:
+                diagnostics.append(Diagnostic("error", "CLI104", "short option `" + item.short + "` is not one character", "choose one alphanumeric character"))
+            if item.short in shorts:
+                diagnostics.append(Diagnostic("error", "CLI105", "duplicate short option `-" + item.short + "`", "short options must be unique within a command"))
+            shorts.append(item.short)
+        if item.help == "" and not item.hidden:
+            diagnostics.append(Diagnostic("warning", "CLI106", "option `--" + item.name + "` has no help text", "describe its effect, not only its value type"))
+        if item.required and item.default_value != "":
+            diagnostics.append(Diagnostic("error", "CLI107", "required option `--" + item.name + "` also has a default", "make it required or give it a default, but not both"))
+        if item.kind not in ["bool", "string", "int", "float", "path"]:
+            diagnostics.append(Diagnostic("error", "CLI108", "option `--" + item.name + "` has unknown kind `" + item.kind + "`", "use bool, string, int, float, or path"))
+    optional_seen := false
+    multiple_seen := false
+    for item in specification.arguments:
+        if optional_seen and item.required:
+            diagnostics.append(Diagnostic("error", "CLI109", "required argument `" + item.name + "` follows an optional argument", "put required positional arguments first"))
+        if multiple_seen:
+            diagnostics.append(Diagnostic("error", "CLI110", "argument `" + item.name + "` follows a variadic argument", "a variadic positional argument must be last"))
+        optional_seen = optional_seen or not item.required
+        multiple_seen = multiple_seen or item.multiple
+    for nested in specification.commands:
+        nested_report = check(nested)
+        diagnostics.extend(nested_report.diagnostics)
+    errors := 0
+    warnings := 0
+    for diagnostic in diagnostics:
+        if diagnostic.level == "error":
+            errors += 1
+        else if diagnostic.level == "warning":
+            warnings += 1
+    return CheckReport(diagnostics, errors, warnings)
+
+def render_check(report: CheckReport) -> string:
+    output := ""
+    for diagnostic in report.diagnostics:
+        if output != "":
+            output += "\n"
+        output += diagnostic.level + "[" + diagnostic.code + "]: " + diagnostic.message
+        if diagnostic.help != "":
+            output += "\n  help: " + diagnostic.help
+    output += "\n" + string(report.errors) + " error(s), " + string(report.warnings) + " warning(s)"
+    return output
+
+def complete(specification: Command, prefix: string) -> list[string]:
+    candidates: list[string] = ["--help"]
+    if specification.version != "":
+        candidates.append("--version")
+    for item in specification.options:
+        if not item.hidden:
+            candidates.append("--" + item.name)
+    for nested in specification.commands:
+        candidates.append(nested.name)
+    return candidates.filter(|candidate| candidate.starts_with(prefix)).sorted()
+
+test "declarative parsing and generated diagnostics":
+    generate = command(
+        "generate", "Generate speech", "1.0.0",
+        [
+            option("text", "t", "Text to synthesize", "TEXT", "string", true),
+            option("output", "o", "Output WAV", "PATH", "path", false, false, "speech.wav"),
+            flag("verbose", "v", "Show model-loading progress"),
+        ],
+    )
+    application = command("betterquest", "Local speech generation", "1.0.0", [], [], [generate])
+    parsed = parse(application, ["generate", "--text", "For the Alliance", "-v"])
+    assert(parsed.command == "generate")
+    assert(text(parsed, "text") == "For the Alliance")
+    assert(text(parsed, "output") == "speech.wav")
+    assert(boolean(parsed, "verbose"))
+    assert(check(application).errors == 0)
+    assert("--text" in complete(generate, "--t"))

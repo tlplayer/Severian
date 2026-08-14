@@ -1,0 +1,40 @@
+import cli
+
+def interface() -> cli.Command:
+    generate = cli.command(
+        "generate",
+        "Generate speech from text and an optional reference voice",
+        options=[
+            cli.option("model", "m", "Model identifier or checkpoint directory", "MODEL", default_value="k2-fsa/OmniVoice"),
+            cli.option("text", "t", "Text to synthesize", "TEXT", required=true),
+            cli.option("reference", "r", "Reference voice WAV", "WAV", kind="path"),
+            cli.option("output", "o", "Destination WAV", "WAV", kind="path", default_value="speech.wav"),
+            cli.option("device", "d", "Inference device", "DEVICE", choices=["auto", "cpu", "gpu"], default_value="auto"),
+            cli.flag("verbose", "v", "Show model-loading and generation progress"),
+        ],
+        after_help="Example: betterquest generate --text \"Lok'tar ogar\" --reference voice.wav",
+    )
+    inspect = cli.command(
+        "inspect",
+        "Inspect a model and report its capabilities",
+        options=[cli.option("model", "m", "Model identifier or checkpoint directory", "MODEL", required=true)],
+    )
+    return cli.command(
+        "betterquest",
+        "Local, typed speech generation",
+        "0.1.0",
+        commands=[generate, inspect],
+    )
+
+def main():
+    application = interface()
+    switch cli.parse_process(application):
+        ok matches:
+            if matches.action != "run":
+                print(cli.response(application, matches))
+            else if matches.command == "generate":
+                print("generate", cli.values(matches, "model")[0], cli.values(matches, "output")[0])
+            else if matches.command == "inspect":
+                print("inspect", cli.values(matches, "model")[0])
+        failure error:
+            print(cli.render_error(error))

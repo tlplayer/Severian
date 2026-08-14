@@ -1,0 +1,16 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2026"
+description = "Declarative command-line parsing, help, completion, and interface checks"
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+process = { path = "../process", version = "0.1.0" }
+
+[package.metadata.library]
+category = "application"
+implementation = "source"
+status = "experimental"
