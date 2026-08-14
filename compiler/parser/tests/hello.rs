@@ -70,6 +70,35 @@ fn preserves_bounded_generic_classes_and_traits() {
 }
 
 #[test]
+fn parses_multiple_generic_class_arguments_as_a_type_tuple() {
+    let source = concat!(
+        "class Pair[Left, Right]:\n",
+        "    left: Left\n",
+        "    right: Right\n",
+        "\n",
+        "def pair() -> Pair[int, string]:\n",
+        "    return Pair[int, string](1, \"one\")\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[1] else {
+        panic!("expected function");
+    };
+    let Stmt::Return(return_) = &function.body.statements[0] else {
+        panic!("expected return");
+    };
+    let Some(Expr::Call(call)) = &return_.value else {
+        panic!("expected constructor call");
+    };
+    let Expr::Index(index) = call.callee.as_ref() else {
+        panic!("expected generic class application");
+    };
+    let Expr::Tuple(arguments) = index.index.as_ref() else {
+        panic!("expected multiple type arguments");
+    };
+    assert_eq!(arguments.elements.len(), 2);
+}
+
+#[test]
 fn parses_cross_field_class_invariants() {
     let source = concat!(
         "class Range:\n",

@@ -375,11 +375,26 @@ impl Parser<'_> {
                         step,
                     });
                 } else {
-                    let index = first.ok_or_else(|| ParseError {
+                    let first = first.ok_or_else(|| ParseError {
                         span: self.peek().span,
                         message: "an index expression cannot be empty".into(),
                     })?;
+                    let mut indices = vec![first];
+                    while self.take_simple(&TokenKind::Comma).is_some() {
+                        if self.at(&TokenKind::RightBracket) {
+                            break;
+                        }
+                        indices.push(self.parse_expression()?);
+                    }
                     let end = self.expect_simple(TokenKind::RightBracket, "`]`")?.span.end;
+                    let index = if indices.len() == 1 {
+                        indices.pop().unwrap()
+                    } else {
+                        Expr::Tuple(CollectionExpr {
+                            span: Span::new(indices[0].span().start, end),
+                            elements: indices,
+                        })
+                    };
                     expression = Expr::Index(IndexExpr {
                         span: Span::new(start, end),
                         object: Box::new(expression),

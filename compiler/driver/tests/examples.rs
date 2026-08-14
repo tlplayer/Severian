@@ -130,6 +130,72 @@ fn chained_class_filter_calls_the_method_instead_of_the_list_intrinsic() {
 }
 
 #[test]
+fn class_methods_take_precedence_over_collection_intrinsic_names() {
+    let compilation = compile_source(concat!(
+        "class Buffer:\n",
+        "    values: list[int]\n",
+        "\n",
+        "    def append(value: int):\n",
+        "        values.append(value)\n",
+        "\n",
+        "    def pop() -> int:\n",
+        "        return values.pop()\n",
+        "\n",
+        "    def to_list() -> list[int]:\n",
+        "        return values\n",
+        "\n",
+        "def main():\n",
+        "    buffer = Buffer([])\n",
+        "    buffer.append(4)\n",
+        "    values = buffer.to_list()\n",
+        "    print(buffer.pop())\n",
+        "    print(size(values))\n",
+    ))
+    .unwrap();
+
+    let main = compilation
+        .mlir
+        .as_str()
+        .split("llvm.func @main(")
+        .nth(1)
+        .unwrap();
+    for method in ["append", "pop", "to_list"] {
+        assert!(
+            main.contains(&format!("llvm.call @__sev_method_Buffer_{method}")),
+            "missing class dispatch for {method}: {main}"
+        );
+    }
+}
+
+#[test]
+fn typed_map_membership_lowers_to_a_runtime_lookup() {
+    let compilation = compile_source(concat!(
+        "def contains(values: map[string, int], key: string) -> bool:\n",
+        "    return key in values\n",
+        "\n",
+        "def missing(values: map[string, int], key: string) -> bool:\n",
+        "    return key not in values\n",
+        "\n",
+        "def remove(values: map[string, int], key: string) -> int:\n",
+        "    return values.pop(key, -1)\n",
+    ))
+    .unwrap();
+
+    assert_eq!(
+        compilation
+            .mlir
+            .as_str()
+            .matches("llvm.call @__sev_map_contains")
+            .count(),
+        2
+    );
+    assert!(compilation
+        .mlir
+        .as_str()
+        .contains("llvm.call @__sev_map_pop"));
+}
+
+#[test]
 fn compiles_server_syntax_and_propagated_file_errors() {
     let root = examples_root();
     for fixture in [

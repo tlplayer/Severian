@@ -1,0 +1,13 @@
+[package]
+name = "collections"
+version = "0.1.0"
+edition = "2026"
+description = "Generic queues, heaps, counters, and bounded caches"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "data-structures"
+implementation = "source"
+status = "experimental"

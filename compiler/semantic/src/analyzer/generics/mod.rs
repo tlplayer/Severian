@@ -27,6 +27,7 @@ struct RewriteContext {
     substitutions: BTreeMap<String, Type>,
     generic_names: HashSet<String>,
     self_fields: HashSet<String>,
+    namespace: Option<String>,
 }
 
 pub(super) fn specialize_generic_classes(module: &Module) -> Result<Module, SemanticError> {
@@ -84,6 +85,10 @@ impl Specializer {
                     .iter()
                     .map(|field| field.name.name.clone())
                     .collect(),
+                namespace: template
+                    .identity
+                    .rsplit_once('.')
+                    .map(|(namespace, _)| namespace.to_owned()),
             };
             self.rewrite_class(&mut class, &context)?;
             output.items.push(Item::Class(class));
@@ -100,9 +105,18 @@ impl Specializer {
         Ok(output)
     }
 
-    fn resolve_template(&self, name: &str) -> Option<String> {
+    fn resolve_template(&self, name: &str, namespace: Option<&str>) -> Option<String> {
         if self.templates.contains_key(name) {
             return Some(name.to_owned());
+        }
+        if !name.contains('.') {
+            if let Some(namespace) = namespace {
+                let relative = format!("{namespace}.{name}");
+                if self.templates.contains_key(&relative) {
+                    return Some(relative);
+                }
+            }
+            return None;
         }
         let (first, rest) = name.split_once('.')?;
         let canonical = self.aliases.get(first)?;
@@ -313,7 +327,7 @@ impl Specializer {
         context: &RewriteContext,
     ) -> Result<(), SemanticError> {
         if let Some((declared, arguments, span)) = generic_class_expression(expression) {
-            let template = self.resolve_template(&declared);
+            let template = self.resolve_template(&declared, context.namespace.as_deref());
             if !arguments
                 .iter()
                 .any(|argument| contains_generic(argument, &context.generic_names))

@@ -57,6 +57,25 @@ fn specializes_generic_classes_for_each_concrete_type() {
 }
 
 #[test]
+fn specializes_classes_with_multiple_type_arguments() {
+    let source = concat!(
+        "class Pair[Left, Right]:\n",
+        "    left: Left\n",
+        "    right: Right\n",
+        "\n",
+        "def pair() -> Pair[int, string]:\n",
+        "    return Pair[int, string](1, \"one\")\n",
+    );
+    let program = analyze_source(source).unwrap();
+    let pair = program
+        .classes
+        .iter()
+        .find(|class| class.name == "Pair__int__string")
+        .expect("missing two-argument specialization");
+    assert_eq!(pair.field_types, [ValueType::Int, ValueType::String]);
+}
+
+#[test]
 fn accepts_structural_generic_trait_conformance() {
     let source = format!(
         "{}{}",
@@ -280,4 +299,40 @@ fn imported_generic_classes_specialize_in_the_consuming_module() {
             .map(|class| &class.name)
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn imported_generic_classes_specialize_nested_sibling_fields() {
+    let collections = parse(
+        &lex(concat!(
+            "class Deque[T]:\n",
+            "    values: list[T]\n",
+            "\n",
+            "class Queue[T]:\n",
+            "    deque: Deque[T]\n",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let source = concat!(
+        "import collections\n",
+        "\n",
+        "def queue() -> collections.Queue[int]:\n",
+        "    return collections.Queue[int](collections.Deque[int]([]))\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let program = analyze_with_interfaces(&module, &[("collections".into(), collections)]).unwrap();
+    let queue = program
+        .classes
+        .iter()
+        .find(|class| class.name == "collections_Queue__int")
+        .expect("missing imported queue specialization");
+    assert_eq!(
+        queue.field_classes[0].as_deref(),
+        Some("collections_Deque__int")
+    );
+    assert!(program
+        .classes
+        .iter()
+        .any(|class| class.name == "collections_Deque__int"));
 }

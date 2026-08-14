@@ -29,7 +29,8 @@ impl Specializer {
                     .map(|part| part.name.as_str())
                     .collect::<Vec<_>>()
                     .join(".");
-                let Some(template) = self.resolve_template(&declared) else {
+                let Some(template) = self.resolve_template(&declared, context.namespace.as_deref())
+                else {
                     return Ok(());
                 };
                 if path.args.is_empty() {

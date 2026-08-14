@@ -379,6 +379,44 @@ fn assurance_commands_produce_coverage_mutation_and_memory_results() {
 }
 
 #[test]
+fn coverage_does_not_enforce_profile_timing_contracts() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!(
+        "severian-coverage-profile-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("profile.sev");
+    std::fs::write(
+        &source,
+        concat!(
+            "def answer() -> int:\n",
+            "    return 42\n",
+            "\n",
+            "test with profile \"instrumented work\" -> TestResult with\n",
+            "{\n",
+            "    defer time < 1ns,\n",
+            "}:\n",
+            "    assert(answer() == 42)\n",
+        ),
+    )
+    .unwrap();
+
+    let coverage = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("coverage")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        coverage.status.success(),
+        "{}",
+        String::from_utf8_lossy(&coverage.stderr)
+    );
+    assert!(String::from_utf8_lossy(&coverage.stdout).contains("1 test(s) across 1 target(s)"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn repository_coverage_ignores_generated_work_and_expected_negative_fixtures() {
     let _lock = native_cli_lock();
     let root = std::env::temp_dir().join(format!(

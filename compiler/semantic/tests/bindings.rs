@@ -1,7 +1,7 @@
 use severian_hir::{Expression, Instruction, ValueType};
 use severian_lexer::lex;
 use severian_parser::parse;
-use severian_semantic::{analyze, attach_module_metadata};
+use severian_semantic::{analyze, analyze_with_interfaces, attach_module_metadata};
 use std::path::PathBuf;
 
 #[test]
@@ -10,6 +10,34 @@ fn ordinary_unannotated_parameters_default_to_any() {
     let hir = analyze(&ast).unwrap();
     assert_eq!(hir.functions[0].params[0].ty, ValueType::Any);
     assert_eq!(hir.functions[0].return_type, ValueType::Any);
+}
+
+#[test]
+fn lexical_fields_shadow_unqualified_package_exports_in_method_calls() {
+    let map_module = parse(
+        &lex("def values[Key, Value](items: map[Key, Value]) -> list[Value]:\n    return []\n")
+            .unwrap(),
+    )
+    .unwrap();
+    let source = concat!(
+        "import map\n",
+        "\n",
+        "class Bucket:\n",
+        "    values: list[int]\n",
+        "\n",
+        "    def append(value: int):\n",
+        "        values.append(value)\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze_with_interfaces(&module, &[("map".into(), map_module)]).unwrap();
+    let Instruction::Evaluate(expression) = &hir.classes[0].methods[0].instructions[0] else {
+        panic!("expected field method call");
+    };
+    let Expression::MethodCall { object, method, .. } = expression.kind() else {
+        panic!("expected field method call, found {expression:?}");
+    };
+    assert_eq!(method, "append");
+    assert!(matches!(object.kind(), Expression::Variable(name) if name.name == "values"));
 }
 
 #[test]

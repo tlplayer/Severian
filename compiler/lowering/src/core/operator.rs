@@ -16,6 +16,12 @@ impl LowerContext<'_> {
             writeln!(self.output, "    {result} = llvm.call @__sev_set_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
             return (result, ValueType::Bool);
         }
+        if op == BinaryOp::In && right_type == ValueType::Map {
+            let left = self.box_value((left, operand_type));
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_map_contains({right}, {left}) : (!llvm.ptr, !llvm.ptr) -> i1").unwrap();
+            return (result, ValueType::Bool);
+        }
         if op == BinaryOp::Add && operand_type == ValueType::List && right_type == ValueType::List {
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_collection_concat({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();

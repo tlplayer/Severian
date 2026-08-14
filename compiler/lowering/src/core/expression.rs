@@ -404,6 +404,13 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
+            } if self.has_known_class_method(object, method) => {
+                self.lower_known_class_method_call(object, method, args)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
             } if method == "get"
                 && args.len() == 1
                 && !self.has_known_class_method(object, method)
@@ -591,6 +598,27 @@ impl LowerContext<'_> {
                 let value = self.box_value(value);
                 writeln!(self.output, "    llvm.call @__sev_collection_insert({object}, {index}, {value}) : (!llvm.ptr, i64, !llvm.ptr) -> ()").unwrap();
                 (String::new(), ValueType::Unit)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "pop"
+                && (1..=2).contains(&args.len())
+                && object.ty() == Some(ValueType::Map) =>
+            {
+                let (object, _) = self.lower_expression(object);
+                let key = self.lower_expression(&args[0]);
+                let key = self.box_value(key);
+                let result = self.fresh_value();
+                if let Some(fallback) = args.get(1) {
+                    let fallback = self.lower_expression(fallback);
+                    let fallback = self.box_value(fallback);
+                    writeln!(self.output, "    {result} = llvm.call @__sev_map_pop({object}, {key}, {fallback}) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                } else {
+                    writeln!(self.output, "    {result} = llvm.call @__sev_map_pop_required({object}, {key}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+                }
+                (result, ValueType::Any)
             }
             Expression::MethodCall {
                 object,
@@ -2909,6 +2937,116 @@ impl LowerContext<'_> {
             self.validate_object(&result, class);
         }
         (result, ValueType::Any)
+    }
+
+    fn lower_known_class_method_call(
+        &mut self,
+        object: &Expression,
+        method: &str,
+        args: &[Expression],
+    ) -> (String, ValueType) {
+        let (object, _) = self.lower_expression(object);
+        let canonical_class = self.object_class_ids.get(&object).copied();
+        let class = canonical_class
+            .and_then(|id| self.classes.iter().find(|candidate| candidate.id == id))
+            .map(|class| class.name.clone())
+            .or_else(|| self.object_classes.get(&object).cloned())
+            .expect("known class method receiver retains its class identity");
+        let definition = self
+            .classes
+            .iter()
+            .find(|candidate| candidate.name == class)
+            .and_then(|class| {
+                class
+                    .methods
+                    .iter()
+                    .find(|candidate| candidate.name == method)
+            })
+            .cloned()
+            .expect("known class method retains its definition");
+        let mut lowered_args = args
+            .iter()
+            .map(|argument| self.lower_expression(argument))
+            .collect::<Vec<_>>();
+        lowered_args.extend(definition.params.iter().skip(args.len()).map(|parameter| {
+            self.lower_expression(
+                parameter
+                    .default
+                    .as_ref()
+                    .expect("omitted class method arguments have defaults"),
+            )
+        }));
+        let lowered_args = lowered_args
+            .into_iter()
+            .enumerate()
+            .map(|(index, argument)| {
+                let expected = definition.params[index].ty;
+                if argument.1 == ValueType::Any && expected != ValueType::Any {
+                    self.unbox_value(argument, expected)
+                } else if expected == ValueType::Any && argument.1 != ValueType::Any {
+                    (self.box_value(argument), ValueType::Any)
+                } else {
+                    argument
+                }
+            })
+            .collect::<Vec<_>>();
+        let values = lowered_args
+            .iter()
+            .map(|(value, _)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let types = lowered_args
+            .iter()
+            .map(|(_, ty)| mlir_type(*ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let value_suffix = if values.is_empty() {
+            String::new()
+        } else {
+            format!(", {values}")
+        };
+        let type_suffix = if types.is_empty() {
+            String::new()
+        } else {
+            format!(", {types}")
+        };
+        let symbol = class_function_symbol(&class, method);
+        if definition.return_type == ValueType::Unit {
+            writeln!(
+                self.output,
+                "    llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> ()"
+            )
+            .unwrap();
+            return (String::new(), ValueType::Unit);
+        }
+        let result = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {result} = llvm.call @{symbol}({object}{value_suffix}) : (!llvm.ptr{type_suffix}) -> {}",
+            mlir_type(definition.return_type)
+        )
+        .unwrap();
+        if definition.return_type == ValueType::Any {
+            if let Some(class_id) = canonical_class {
+                let returned_id = self
+                    .method_return_classes
+                    .get(&(class_id, method.to_owned()))
+                    .copied()
+                    .unwrap_or(class_id);
+                self.object_class_ids.insert(result.clone(), returned_id);
+                if let Some(returned) = self
+                    .classes
+                    .iter()
+                    .find(|candidate| candidate.id == returned_id)
+                {
+                    self.object_classes
+                        .insert(result.clone(), returned.name.clone());
+                }
+            } else {
+                self.object_classes.insert(result.clone(), class);
+            }
+        }
+        (result, definition.return_type)
     }
 
     pub(super) fn validate_object(&mut self, object: &str, class: &str) {

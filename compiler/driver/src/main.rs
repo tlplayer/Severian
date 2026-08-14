@@ -9,8 +9,9 @@ use severian_driver::build_cache::BuildGateCache;
 use severian_driver::{
     check_path, compile_dependency_path, compile_native, compile_native_integration_tests,
     compile_native_profile_tests, compile_native_tests, compile_native_with_options, compile_path,
-    inspect_toolchain, native_integration_test_count, native_profile_test_compilation,
-    native_profile_test_count, native_test_compilation, native_test_count, Compilation,
+    inspect_toolchain, native_coverage_test_compilation, native_integration_test_count,
+    native_profile_test_compilation, native_profile_test_count, native_test_compilation,
+    native_test_count, Compilation,
 };
 use severian_package::{BinaryTarget, BuildGate, BuildPolicy};
 use std::{
@@ -2103,7 +2104,7 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
         };
         all_regions.extend(source_regions);
         let (runnable, count) = if declared_count > 0 {
-            match native_test_compilation(&compilation) {
+            match native_coverage_test_compilation(&compilation) {
                 Ok(runnable) => runnable,
                 Err(error) => {
                     failures.push(format!("{}: {error}", target.source.display()));

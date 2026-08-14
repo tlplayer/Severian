@@ -172,7 +172,10 @@ pub(super) fn native_call_signatures(program: &Program) -> HashMap<String, Nativ
 }
 
 pub(super) fn is_predeclared_native_symbol(symbol: &str) -> bool {
-    matches!(symbol, "__sev_regex_matches" | "__sev_json_object_get")
+    matches!(
+        symbol,
+        "__sev_regex_matches" | "__sev_json_object_get" | "__sev_map_pop"
+    )
 }
 
 pub(super) fn c_type(ty: ValueType) -> &'static str {

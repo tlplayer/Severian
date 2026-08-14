@@ -267,21 +267,23 @@ pub(super) fn lower_call(
                     ValueType::Any,
                 ));
             }
-            if let Some(module) = aliases.get(&object.name) {
-                let function = format!("{module}.{}", member.member.name);
-                let canonical = resolve_linked_function(&function, signatures);
-                if let Some(signature) = signatures.get(canonical) {
-                    return lower_declared_call(
-                        call, canonical, signature, scope, signatures, aliases,
-                    );
+            if !scope.contains_key(&object.name) {
+                if let Some(module) = aliases.get(&object.name) {
+                    let function = format!("{module}.{}", member.member.name);
+                    let canonical = resolve_linked_function(&function, signatures);
+                    if let Some(signature) = signatures.get(canonical) {
+                        return lower_declared_call(
+                            call, canonical, signature, scope, signatures, aliases,
+                        );
+                    }
+                    if let Some(class) = aliases.get(&format!("__module_class.{function}")) {
+                        return lower_class_invocation(call, class, scope, signatures, aliases);
+                    }
+                    return Err(error(
+                        call.span,
+                        format!("unknown exported function or class `{function}`"),
+                    ));
                 }
-                if let Some(class) = aliases.get(&format!("__module_class.{function}")) {
-                    return lower_class_invocation(call, class, scope, signatures, aliases);
-                }
-                return Err(error(
-                    call.span,
-                    format!("unknown exported function or class `{function}`"),
-                ));
             }
         }
         let object_class = expression_class(&member.object, scope, aliases);
@@ -1233,6 +1235,7 @@ pub(super) fn validate_builtin_method(
         ) => Some(1..=1),
         (ValueType::Set, "to_list" | "toList") => Some(0..=0),
         (ValueType::Map, "get" | "set_default" | "setDefault") => Some(2..=2),
+        (ValueType::Map, "pop") => Some(1..=2),
         (ValueType::Map, "keys" | "values") => Some(0..=0),
         (
             ValueType::String,

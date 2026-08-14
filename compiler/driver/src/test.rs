@@ -87,6 +87,15 @@ pub fn native_test_compilation(
     native_test_compilation_selected(compilation, TestSelection::Unit)
 }
 
+/// Build the ordinary test harness without profile measurement or contracts.
+/// Coverage instrumentation is intentionally expensive and would otherwise
+/// turn a performance assertion into a measurement of the coverage recorder.
+pub fn native_coverage_test_compilation(
+    compilation: &Compilation,
+) -> Result<(Compilation, usize), CompileError> {
+    native_test_compilation_selected(compilation, TestSelection::Coverage)
+}
+
 pub fn native_profile_test_compilation(
     compilation: &Compilation,
 ) -> Result<(Compilation, usize), CompileError> {
@@ -125,7 +134,7 @@ fn native_test_compilation_selected(
                         ),
                     });
                 }
-                instructions.extend(test_instructions(test));
+                instructions.extend(test_instructions(test, selection));
                 count += 1;
             }
         }
@@ -134,7 +143,7 @@ fn native_test_compilation_selected(
         for function in class.methods.iter().chain(&class.constructors) {
             for test in &function.tests {
                 if selected_test(test, selection) {
-                    instructions.extend(test_instructions(test));
+                    instructions.extend(test_instructions(test, selection));
                     count += 1;
                 }
             }
@@ -195,6 +204,7 @@ enum TestSelection {
     Unit,
     Profile,
     Integration,
+    Coverage,
 }
 
 fn selected_test(test: &Test, selection: TestSelection) -> bool {
@@ -204,11 +214,12 @@ fn selected_test(test: &Test, selection: TestSelection) -> bool {
             !test.modes.contains(&TestMode::Integration) && test.modes.contains(&TestMode::Profile)
         }
         TestSelection::Integration => test.modes.contains(&TestMode::Integration),
+        TestSelection::Coverage => !test.modes.contains(&TestMode::Integration),
     }
 }
 
-fn test_instructions(test: &Test) -> Vec<Instruction> {
-    if !test.modes.contains(&TestMode::Profile) {
+fn test_instructions(test: &Test, selection: TestSelection) -> Vec<Instruction> {
+    if selection == TestSelection::Coverage || !test.modes.contains(&TestMode::Profile) {
         return test.instructions.clone();
     }
 

@@ -20,6 +20,7 @@ fn requested_standard_library_surface_executes_natively() {
         &source,
         r#"import core
 import list
+import collections
 import map
 import set
 import string
@@ -42,6 +43,20 @@ def main():
     assert(list.chunked(numbers, 2) == [[1, 2], [3]])
     assert(list.windowed(numbers, 2) == [[1, 2], [2, 3]])
     assert(list.flatten([[1], [2, 3]]) == numbers)
+    heap = collections.MinHeap[int]([])
+    heap.push(3)
+    heap.push(1)
+    minimum = heap.pop()
+    assert(minimum == 1)
+    queue = collections.Queue[int](collections.Deque[int]([]))
+    queue.push(7)
+    queued = queue.pop()
+    assert(queued == 7)
+    cache_values: map[string, int] = {}
+    cache = collections.LruCache[string, int](1, cache_values, [])
+    cache.put("answer", 42)
+    cached = cache.get("answer")
+    assert(cached == 42)
     assert(len(numbers) == 3)
     assert(size(numbers) == 3)
     assert(numbers.len() == 3)
@@ -254,6 +269,7 @@ fn all_requested_packages_are_workspace_members() {
     for package in [
         "core",
         "list",
+        "collections",
         "map",
         "set",
         "string",
