@@ -532,6 +532,97 @@ impl LowerContext<'_> {
         closure
     }
 
+    pub(super) fn emit_block_closure(
+        &mut self,
+        params: &[severian_hir::Parameter],
+        body: &[Instruction],
+    ) -> String {
+        let symbol = self.next_closure_symbol("nested_function");
+        let mut captures = self
+            .variables
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        captures.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let kind = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {kind} = llvm.mlir.constant(0 : i64) : i64"
+        )
+        .unwrap();
+        let environment = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {environment} = llvm.call @__sev_collection_new({kind}) : (i64) -> !llvm.ptr"
+        )
+        .unwrap();
+        let mut capture_classes = HashMap::new();
+        for (name, value) in &captures {
+            let boxed = self.box_value(value.clone());
+            writeln!(self.output, "    llvm.call @__sev_collection_push({environment}, {boxed}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+            if let Some(class) = self.object_classes.get(&value.0) {
+                capture_classes.insert(name.clone(), class.clone());
+            }
+        }
+
+        let mut definition = String::new();
+        write!(definition, "  llvm.func @{symbol}(%environment: !llvm.ptr").unwrap();
+        for index in 0..params.len() {
+            write!(definition, ", %arg_{index}: !llvm.ptr").unwrap();
+        }
+        definition.push_str(") -> !llvm.ptr {\n");
+        let mut context = self.callback_context(&mut definition);
+        context.closure_callback = true;
+        for (index, (name, (_, ty))) in captures.iter().enumerate() {
+            let position = context.fresh_value();
+            writeln!(
+                context.output,
+                "    {position} = llvm.mlir.constant({index} : i64) : i64"
+            )
+            .unwrap();
+            let raw = context.fresh_value();
+            writeln!(context.output, "    {raw} = llvm.call @__sev_collection_get(%environment, {position}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+            let value = context.unbox_value((raw, ValueType::Any), *ty);
+            if let Some(class) = capture_classes.get(name) {
+                context
+                    .object_classes
+                    .insert(value.0.clone(), class.clone());
+            }
+            context.variables.insert(name.clone(), value);
+        }
+        for (index, param) in params.iter().enumerate() {
+            let value = context.unbox_value((format!("%arg_{index}"), ValueType::Any), param.ty);
+            if let Some(receiver) = &param.receiver {
+                context
+                    .object_classes
+                    .insert(value.0.clone(), receiver.name.clone());
+                context
+                    .receiver_types
+                    .insert(value.0.clone(), receiver.clone());
+            }
+            context.variables.insert(param.name.id, value);
+        }
+        context.lower_instructions(body);
+        if !context.terminated {
+            let empty = context.fresh_value();
+            writeln!(context.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
+            writeln!(context.output, "    llvm.return {empty} : !llvm.ptr").unwrap();
+        }
+        definition.push_str("  }\n");
+        self.closure_definitions.borrow_mut().push_str(&definition);
+
+        let function = self.fresh_value();
+        writeln!(
+            self.output,
+            "    {function} = llvm.mlir.addressof @{symbol} : !llvm.ptr"
+        )
+        .unwrap();
+        let closure = self.fresh_value();
+        writeln!(self.output, "    {closure} = llvm.call @__sev_closure_new({function}, {environment}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
+        closure
+    }
+
     pub(super) fn callback_context<'b>(&'b self, output: &'b mut String) -> LowerContext<'b> {
         LowerContext {
             output,
@@ -561,6 +652,7 @@ impl LowerContext<'_> {
             terminated: false,
             loop_targets: Vec::new(),
             is_main: false,
+            closure_callback: false,
             placement: TaskPlacement::Default,
         }
     }

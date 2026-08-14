@@ -499,6 +499,16 @@ test:
     assert(add(1, 2) == 3)
 ```
 
+Functions may be declared inside another function. The inner function is a
+closure and can read bindings from the enclosing function.
+
+```sev
+def shifted(value: int, offset: int) -> int:
+    def add_offset(current: int) -> int:
+        return current + offset
+    return add_offset(value)
+```
+
 Use `|` for accepted type alternatives.
 
 ```sev
@@ -860,8 +870,17 @@ Inside a function returning `Result[type, exception]`, returning a value of
 the exact declared `Result` type forwards it unchanged. A bare `return` produces
 a successful `unit` result when the declared success type is `unit`.
 
-Severian uses `switch` for structural branching. The word `match` is reserved
-for domain syntax, such as regex helpers imported by a decorator.
+Severian accepts both its compact `switch` spelling and Python-compatible
+`match`/`case` spelling for structural branching. Alternatives use `|` in
+either form.
+
+```sev
+match extension:
+    case ".yaml" | ".yml":
+        print("yaml")
+    case _:
+        print("other")
+```
 
 ## Function Contracts
 

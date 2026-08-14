@@ -262,6 +262,18 @@ fn verify_expression(expression: &Expression, bag: &mut DiagnosticBag) {
 
         Expression::CallValue { return_type, .. } => verify_type(*return_type, bag),
 
+        Expression::Closure {
+            params,
+            body,
+            return_type,
+        } => {
+            for parameter in params {
+                verify_type(parameter.ty, bag);
+            }
+            verify_type(*return_type, bag);
+            verify_instructions(body, bag, 0);
+        }
+
         _ => {}
     }
 
@@ -301,6 +313,7 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
     visitor(expression);
     match expression {
         Expression::Typed { expression, .. } => walk_expression(expression, visitor),
+        Expression::Closure { .. } => {}
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

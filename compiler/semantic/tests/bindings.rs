@@ -135,3 +135,33 @@ fn dynamic_object_set_obeys_mutability_and_known_field_types() {
         .message
         .contains("has no field `z`"));
 }
+
+#[test]
+fn nested_functions_lower_to_closures_with_lexical_captures() {
+    let source = concat!(
+        "def outer(value: int) -> int:\n",
+        "    def inner(offset: int) -> int:\n",
+        "        return value + offset\n",
+        "    return inner(2)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Let { value, .. } = &hir.functions[0].instructions[0] else {
+        panic!("expected nested function binding");
+    };
+    let Expression::Closure {
+        params,
+        body,
+        return_type,
+    } = value.kind()
+    else {
+        panic!("expected closure-backed nested function");
+    };
+    assert_eq!(params.len(), 1);
+    assert_eq!(*return_type, ValueType::Int);
+    assert!(matches!(body[0], Instruction::Return(Some(_))));
+    assert!(matches!(
+        hir.functions[0].instructions[1],
+        Instruction::Return(Some(_))
+    ));
+}

@@ -231,6 +231,8 @@ fn collect_expression_calls(expression: &Expression, calls: &mut BTreeSet<String
             calls.insert(function.name.clone());
         }
 
+        Expression::Closure { body, .. } => collect_instruction_calls(body, calls),
+
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

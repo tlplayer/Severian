@@ -131,6 +131,11 @@ impl Program {
                     namespace_binding(parameter, namespace);
                 }
             }
+            Expression::Closure { params, .. } => {
+                for parameter in params {
+                    namespace_binding(&mut parameter.name, namespace);
+                }
+            }
             Expression::ListComprehension { clauses, .. }
             | Expression::SetComprehension { clauses, .. }
             | Expression::MapComprehension { clauses, .. } => {

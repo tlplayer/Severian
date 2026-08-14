@@ -272,6 +272,11 @@ fn inspect_expression(
             used.insert(binding.id);
         }
 
+        Expression::Closure { body, .. } => {
+            let mut nested_defined = BTreeMap::new();
+            collect_bindings_and_uses(body, &mut nested_defined, used, config, bag);
+        }
+
         Expression::Task { value, .. } if discarded => {
             emit(
                 bag,

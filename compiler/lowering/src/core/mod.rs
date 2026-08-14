@@ -79,6 +79,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         terminated: false,
         loop_targets: Vec::new(),
         is_main,
+        closure_callback: false,
         placement: TaskPlacement::Default,
     };
     for (index, parameter) in function.params.iter().enumerate() {
@@ -179,6 +180,7 @@ fn lower_class_function(
         terminated: false,
         loop_targets: Vec::new(),
         is_main: false,
+        closure_callback: false,
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
     };
@@ -240,6 +242,7 @@ struct LowerContext<'a> {
     next_block: usize,
     terminated: bool,
     is_main: bool,
+    closure_callback: bool,
     declared_return: ValueType,
     placement: TaskPlacement,
     loop_targets: Vec<LoopTarget>,

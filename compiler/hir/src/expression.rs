@@ -17,6 +17,11 @@ pub enum Expression {
         params: Vec<BindingRef>,
         body: Box<Expression>,
     },
+    Closure {
+        params: Vec<Parameter>,
+        body: Vec<Instruction>,
+        return_type: ValueType,
+    },
     Ownership {
         op: OwnershipOp,
         value: Box<Expression>,

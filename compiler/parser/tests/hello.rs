@@ -529,3 +529,57 @@ fn rejects_unsafe_blocks_inside_tests() {
     let error = parse(&lex(source).unwrap()).unwrap_err();
     assert_eq!(error.message, "tests may not contain `unsafe` blocks");
 }
+
+#[test]
+fn parses_switch_alternatives_and_python_match_cases() {
+    let source = concat!(
+        "def classify(extension: string) -> int:\n",
+        "    match extension:\n",
+        "        case \".yaml\" | \".yml\":\n",
+        "            return 1\n",
+        "        case _:\n",
+        "            return 0\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::Switch(statement) = &function.body.statements[0] else {
+        panic!("expected match to lower to a switch statement");
+    };
+    assert_eq!(statement.arms.len(), 3);
+}
+
+#[test]
+fn keeps_match_available_as_a_function_name() {
+    let source = concat!(
+        "def match(pattern: string, text: string) -> bool:\n",
+        "    return pattern == text\n",
+        "\n",
+        "def main():\n",
+        "    match(\"same\", \"same\")\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[1] else {
+        panic!("expected main function");
+    };
+    assert!(matches!(
+        function.body.statements[0],
+        Stmt::Expr(Expr::Call(_))
+    ));
+}
+
+#[test]
+fn parses_function_declarations_inside_function_bodies() {
+    let source = concat!(
+        "def outer(value: int) -> int:\n",
+        "    def inner(offset: int) -> int:\n",
+        "        return value + offset\n",
+        "    return inner(2)\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected outer function");
+    };
+    assert!(matches!(function.body.statements[0], Stmt::Function(_)));
+}

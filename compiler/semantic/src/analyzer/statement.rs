@@ -10,6 +10,123 @@ pub(super) fn lower_block(
     let mut instructions = Vec::new();
     for statement in &block.statements {
         match statement {
+            Stmt::Function(function) => {
+                if !function.generic_params.is_empty() {
+                    return Err(error(
+                        function.span,
+                        "nested functions do not support generic parameters",
+                    ));
+                }
+                if function
+                    .params
+                    .iter()
+                    .any(|parameter| parameter.default.is_some())
+                {
+                    return Err(error(
+                        function.span,
+                        "nested function parameters do not support default values",
+                    ));
+                }
+                if !function.decorators.is_empty() || !function.tests.is_empty() {
+                    return Err(error(
+                        function.span,
+                        "nested functions do not support decorators or attached tests",
+                    ));
+                }
+
+                let mut function_scope = scope.clone();
+                let mut params = Vec::new();
+                for parameter in &function.params {
+                    let ty = parameter
+                        .ty
+                        .as_ref()
+                        .map(lower_type)
+                        .transpose()?
+                        .unwrap_or(ValueType::Any);
+                    function_scope.insert(
+                        parameter.name.name.clone(),
+                        Binding {
+                            reference: source_binding(&parameter.name),
+                            ty,
+                            class: parameter.ty.as_ref().and_then(class_type_name),
+                            function_return: function_return_type(parameter.ty.as_ref()),
+                            collection_len: None,
+                            mutable: false,
+                            field: false,
+                            integer_max: None,
+                            known_integer: None,
+                        },
+                    );
+                    params.push(Parameter {
+                        name: function_scope[&parameter.name.name].reference.clone(),
+                        ty,
+                        default: None,
+                        receiver: parameter
+                            .ty
+                            .as_ref()
+                            .and_then(|ty| declared_receiver_type(ty, aliases)),
+                    });
+                }
+                let return_type = function
+                    .return_type
+                    .as_ref()
+                    .map(lower_type)
+                    .transpose()?
+                    .unwrap_or(ValueType::Unit);
+                let mut body = lower_block(
+                    &function.body,
+                    &mut function_scope,
+                    return_type,
+                    signatures,
+                    aliases,
+                )?;
+                if return_type != ValueType::Unit && !always_returns(&body) {
+                    return Err(error(
+                        function.span,
+                        format!("function `{}` must return a value", function.name.name),
+                    ));
+                }
+                let contract = lower_function_contract(
+                    function.contract.as_ref(),
+                    &function_scope,
+                    signatures,
+                    aliases,
+                )?;
+                enforce_function_contract(&mut body, contract.as_ref());
+
+                let binding = Binding {
+                    reference: source_binding(&function.name),
+                    ty: ValueType::Function,
+                    class: None,
+                    function_return: Some(return_type),
+                    collection_len: None,
+                    mutable: false,
+                    field: false,
+                    integer_max: None,
+                    known_integer: None,
+                };
+                if scope
+                    .insert(function.name.name.clone(), binding.clone())
+                    .is_some()
+                {
+                    return Err(error(
+                        function.name.span,
+                        format!("duplicate binding `{}`", function.name.name),
+                    ));
+                }
+                instructions.push(Instruction::Let {
+                    name: binding.reference,
+                    value: Expression::Typed {
+                        id: HirId::from_source_range(function.span.start, function.span.end),
+                        ty: ValueType::Function,
+                        expression: Box::new(Expression::Closure {
+                            params,
+                            body,
+                            return_type,
+                        }),
+                    },
+                });
+            }
             Stmt::Let(binding) => {
                 let source = binding
                     .value

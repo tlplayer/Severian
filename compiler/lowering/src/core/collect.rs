@@ -142,6 +142,7 @@ pub(super) fn collect_expression_strings(expression: &Expression, strings: &mut 
         Expression::Typed { expression, .. } => collect_expression_strings(expression, strings),
         Expression::String(value) => strings.push(value.clone()),
         Expression::Lambda { body, .. } => collect_expression_strings(body, strings),
+        Expression::Closure { body, .. } => collect_strings(body, strings),
         Expression::Binary { left, right, .. } => {
             collect_expression_strings(left, strings);
             collect_expression_strings(right, strings);
@@ -465,6 +466,7 @@ pub(super) fn collect_task_names_expression(expression: &Expression, names: &mut
             collect_task_names_expression(value, names);
         }
         Expression::Lambda { body, .. } => collect_task_names_expression(body, names),
+        Expression::Closure { body, .. } => collect_task_names(body, names),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

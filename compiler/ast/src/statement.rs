@@ -8,6 +8,7 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
+    Function(FunctionDecl),
     Let(LetStmt),
     DestructureLet(DestructureLetStmt),
     Assign(AssignStmt),
@@ -28,6 +29,7 @@ pub enum Stmt {
 impl Stmt {
     pub fn span(&self) -> Span {
         match self {
+            Stmt::Function(node) => node.span,
             Stmt::Let(node) => node.span,
             Stmt::DestructureLet(node) => node.span,
             Stmt::Assign(node) => node.span,

@@ -254,6 +254,7 @@ impl Checker<'_> {
 
     fn statement(&mut self, statement: &Stmt) {
         match statement {
+            Stmt::Function(function) => self.function(function, false),
             Stmt::Let(binding) => {
                 self.name(&binding.name, Role::Variable);
                 if let Some(value) = &binding.value {

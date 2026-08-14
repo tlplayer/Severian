@@ -194,6 +194,7 @@ pub(super) fn infer_expression_effect(
         Expression::Lambda { body, .. } => {
             infer_expression_effect(body, Access::Read, parameters, effects)
         }
+        Expression::Closure { body, .. } => infer_instruction_effects(body, parameters, effects),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)
@@ -496,6 +497,7 @@ pub(super) fn count_expression(expression: &Expression, counts: &mut HashMap<Bin
             expression: value, ..
         } => count_expression(value, counts),
         Expression::Lambda { body, .. } => count_expression(body, counts),
+        Expression::Closure { body, .. } => count_instructions(body, counts),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

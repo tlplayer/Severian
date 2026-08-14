@@ -19,6 +19,9 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        if self.at(&TokenKind::Def) {
+            return self.parse_function().map(Stmt::Function);
+        }
         if self.at(&TokenKind::Break) || self.at(&TokenKind::Continue) {
             let token = self.advance().clone();
             if self.loop_depth == 0 {
@@ -47,7 +50,10 @@ impl Parser<'_> {
         if self.at(&TokenKind::For) {
             return self.parse_for();
         }
-        if self.at(&TokenKind::Switch) {
+        if self.at(&TokenKind::Switch)
+            || (matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "match")
+                && !self.peek_kind(1, &TokenKind::LeftParen))
+        {
             return self.parse_switch().map(Stmt::Switch);
         }
         if self.at(&TokenKind::With) {
@@ -448,10 +454,14 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_switch(&mut self) -> Result<SwitchStmt, ParseError> {
-        let start = self
-            .expect_simple(TokenKind::Switch, "`switch`")?
-            .span
-            .start;
+        let python_match =
+            matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "match");
+        let start = if python_match {
+            self.expect_identifier("`match`")?.span
+        } else {
+            self.expect_simple(TokenKind::Switch, "`switch`")?.span
+        }
+        .start;
         let mut values = vec![self.parse_equality()?];
         while self.take_simple(&TokenKind::And).is_some() {
             values.push(self.parse_equality()?);
@@ -482,7 +492,19 @@ impl Parser<'_> {
         let mut arms = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let arm_start = self.peek().span.start;
-            let pattern = self.parse_pattern()?;
+            if python_match {
+                let case = self.expect_identifier("`case` before match pattern")?;
+                if case.name != "case" {
+                    return Err(ParseError {
+                        span: case.span,
+                        message: "expected `case` before match pattern".into(),
+                    });
+                }
+            }
+            let mut patterns = vec![self.parse_pattern()?];
+            while self.take_simple(&TokenKind::Pipe).is_some() {
+                patterns.push(self.parse_pattern()?);
+            }
             let source = if self.take_simple(&TokenKind::From).is_some() {
                 Some(self.parse_expression()?)
             } else {
@@ -493,15 +515,21 @@ impl Parser<'_> {
             } else {
                 None
             };
-            self.expect_simple(TokenKind::Colon, "`:` after switch pattern")?;
-            let body = self.parse_suite("switch arm")?;
-            arms.push(SwitchArm {
-                span: Span::new(arm_start, body.span.end),
-                source,
-                pattern,
-                guard,
-                body,
-            });
+            self.expect_simple(TokenKind::Colon, "`:` after match pattern")?;
+            let body = self.parse_suite(if python_match {
+                "match case"
+            } else {
+                "switch arm"
+            })?;
+            for pattern in patterns {
+                arms.push(SwitchArm {
+                    span: Span::new(arm_start, body.span.end),
+                    source: source.clone(),
+                    pattern,
+                    guard: guard.clone(),
+                    body: body.clone(),
+                });
+            }
         }
         let end = self
             .expect_simple(TokenKind::Dedent, "end of switch")?

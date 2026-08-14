@@ -525,6 +525,7 @@ fn walk_expression<'expression>(
     visit(expression);
     match expression {
         Expression::Typed { expression, .. } => walk_expression(expression, visit),
+        Expression::Closure { body, .. } => walk_instructions(body, visit),
         Expression::List(values)
         | Expression::Tuple(values)
         | Expression::Set(values)

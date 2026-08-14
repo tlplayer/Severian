@@ -193,6 +193,7 @@ pub(crate) fn visit_expression_mut(
         }
         Expression::Ownership { value, .. } => visit_expression_mut(value, visitor),
         Expression::Lambda { body, .. } => visit_expression_mut(body, visitor),
+        Expression::Closure { body, .. } => visit_instructions_mut(body, visitor),
         Expression::MethodCall { object, args, .. } => {
             visit_expression_mut(object, visitor);
             for arg in args {

@@ -388,23 +388,8 @@ impl Checker {
             } => {
                 self.check_expression(value, access)?;
             }
-            Expression::Lambda { params, body } => {
-                let previous = params
-                    .iter()
-                    .map(|param| (param.clone(), self.bindings.remove(&param.id)))
-                    .collect::<Vec<_>>();
-                for param in params {
-                    self.define(param.clone(), None);
-                }
-                self.check_expression(body, Access::Read)?;
-                for (param, state) in previous {
-                    if let Some(state) = state {
-                        self.bindings.insert(param.id, state);
-                    } else {
-                        self.bindings.remove(&param.id);
-                    }
-                }
-            }
+            Expression::Lambda { params, body } => self.check_lambda(params, body)?,
+            Expression::Closure { params, body, .. } => self.check_closure(params, body)?,
             Expression::List(values)
             | Expression::Tuple(values)
             | Expression::Set(values)
@@ -795,5 +780,6 @@ impl Checker {
     }
 }
 
+mod closure;
 mod effects;
 use effects::*;

@@ -280,6 +280,13 @@ fn substitute_expression(
             }
             substitute_expression(body, &local, visiting);
         }
+        Expression::Closure { params, body, .. } => {
+            let mut local = facts.clone();
+            for param in params {
+                local.invalidate(param.name.id);
+            }
+            optimize_block(body, &mut local);
+        }
         Expression::Ownership { value, .. }
         | Expression::Member { object: value, .. }
         | Expression::Await(value)

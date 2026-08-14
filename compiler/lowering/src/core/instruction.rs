@@ -293,6 +293,10 @@ impl LowerContext<'_> {
                         let (value, ty) = self.unbox_value(lowered, self.declared_return);
                         writeln!(self.output, "    llvm.return {value} : {}", mlir_type(ty))
                             .unwrap();
+                    } else if self.closure_callback {
+                        let empty = self.fresh_value();
+                        writeln!(self.output, "    {empty} = llvm.mlir.zero : !llvm.ptr").unwrap();
+                        writeln!(self.output, "    llvm.return {empty} : !llvm.ptr").unwrap();
                     } else {
                         self.output.push_str("    llvm.return\n");
                     }

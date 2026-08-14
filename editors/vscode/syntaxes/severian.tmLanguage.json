@@ -236,7 +236,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|elif|else|while|for|in|switch|when|return|throw|break|continue|unsafe|defer)\\b",
+          "match": "\\b(if|elif|else|while|for|in|switch|match|case|when|return|throw|break|continue|unsafe|defer)\\b",
           "name": "keyword.control.severian"
         },
         {

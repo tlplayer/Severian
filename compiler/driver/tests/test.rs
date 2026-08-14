@@ -519,3 +519,54 @@ fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
     assert!(error.contains("E0201: parameter `value` defaults to `Any`"));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn runs_nested_functions_and_python_style_match() {
+    let _lock = native_cli_lock();
+    let source_path = std::env::temp_dir().join(format!(
+        "severian-nested-match-test-{}.sev",
+        std::process::id()
+    ));
+    std::fs::write(
+        &source_path,
+        concat!(
+            "def outer(value: int) -> int:\n",
+            "    def inner(offset: int) -> int:\n",
+            "        return value + offset\n",
+            "    return inner(2)\n",
+            "\n",
+            "def nested_message() -> string:\n",
+            "    def inner() -> string:\n",
+            "        return \"nested\"\n",
+            "    return inner()\n",
+            "\n",
+            "def classify(extension: string) -> string:\n",
+            "    match extension:\n",
+            "        case \".yaml\" | \".yml\":\n",
+            "            return \"yaml\"\n",
+            "        case _:\n",
+            "            return \"other\"\n",
+            "\n",
+            "def main():\n",
+            "    print(outer(40))\n",
+            "    print(nested_message())\n",
+            "    print(classify(\".yml\"))\n",
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(source_path).unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "42\nnested\nyaml\n"
+    );
+}

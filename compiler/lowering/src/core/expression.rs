@@ -153,6 +153,10 @@ impl LowerContext<'_> {
                 let name = self.emit_lambda_closure(params, body);
                 (name, ValueType::Function)
             }
+            Expression::Closure { params, body, .. } => {
+                let name = self.emit_block_closure(params, body);
+                (name, ValueType::Function)
+            }
             Expression::List(values) => self.lower_collection_literal(values, ValueType::List, 0),
             Expression::Tuple(values) => self.lower_collection_literal(values, ValueType::Tuple, 1),
             Expression::Set(values) => self.lower_collection_literal(values, ValueType::Set, 2),
