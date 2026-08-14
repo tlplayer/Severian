@@ -1,5 +1,6 @@
 import os
 import platform
+import regex
 
 def join(left: string, right: string) -> string:
     return platform.path_join(left, right)
@@ -36,10 +37,7 @@ def absolute(value: string) -> string:
 def sanitize_name(value: string) -> string:
     words := []
     for word in value.strip().lower().words():
-        cleaned := ""
-        for character in word.characters():
-            if character.is_ascii_alnum() or character == "-" or character == "_":
-                cleaned += character
+        cleaned = regex.sub("[^[:alnum:]_-]", "", word)
         if not cleaned.is_empty():
             words.append(cleaned)
     return "_".join(words)
