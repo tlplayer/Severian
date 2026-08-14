@@ -14,10 +14,16 @@ class ByteReader:
         return value
 
     def u16() -> int:
-        return u8() + 256 * u8()
+        assert(position + 2 <= size(data), "unexpected end of binary data")
+        value = data[position] + 256 * data[position + 1]
+        position += 2
+        return value
 
     def u32() -> int:
-        return u16() + 65536 * u16()
+        assert(position + 4 <= size(data), "unexpected end of binary data")
+        value = data[position] + 256 * data[position + 1] + 65536 * data[position + 2] + 16777216 * data[position + 3]
+        position += 4
+        return value
 
     def take(count: int) -> list[int]:
         assert(count >= 0 and position + count <= size(data), "binary field exceeds input")
@@ -26,7 +32,8 @@ class ByteReader:
         return result
 
     def skip(count: int):
-        _discarded = take(count)
+        assert(count >= 0 and position + count <= size(data), "binary field exceeds input")
+        position += count
 
 class BitReader:
     data: list[int]
@@ -46,7 +53,13 @@ class BitReader:
         value := 0
         multiplier := 1
         for _index in range(0, count):
-            value += bit() * multiplier
+            assert(byte_position < size(data), "unexpected end of deflate stream")
+            next_bit = (data[byte_position] / power_of_two(bit_position)) % 2
+            bit_position += 1
+            if bit_position == 8:
+                bit_position = 0
+                byte_position += 1
+            value += next_bit * multiplier
             multiplier *= 2
         return value
 
@@ -74,13 +87,21 @@ class HuffmanCode:
     bits: int
     length: int
 
+def repeated_int(value: int, count: int) -> list[int]:
+    output: list[int] = []
+    for _index in range(0, count):
+        output.append(value)
+    return output
+
 def huffman(lengths: list[int]) -> list[HuffmanCode]:
-    maximum = max(lengths)
-    counts = [0] * (maximum + 1)
+    maximum := 0
+    for length in lengths:
+        maximum = max(maximum, length)
+    counts = repeated_int(0, maximum + 1)
     for length in lengths:
         if length > 0:
             counts[length] += 1
-    next_code = [0] * (maximum + 1)
+    next_code = repeated_int(0, maximum + 1)
     code := 0
     for length in range(1, maximum + 1):
         code = (code + counts[length - 1]) * 2
@@ -115,14 +136,14 @@ def fixed_codes() -> tuple[list[HuffmanCode], list[HuffmanCode]]:
             literal_lengths.append(7)
         else:
             literal_lengths.append(8)
-    return (huffman(literal_lengths), huffman([5] * 32))
+    return (huffman(literal_lengths), huffman(repeated_int(5, 32)))
 
 def dynamic_codes(reader: BitReader) -> tuple[list[HuffmanCode], list[HuffmanCode]]:
     literal_count = reader.bits(5) + 257
     distance_count = reader.bits(5) + 1
     code_count = reader.bits(4) + 4
     order = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
-    code_lengths = [0] * 19
+    code_lengths = repeated_int(0, 19)
     for index in range(0, code_count):
         code_lengths[order[index]] = reader.bits(3)
     code_codes = huffman(code_lengths)
@@ -147,7 +168,7 @@ def dynamic_codes(reader: BitReader) -> tuple[list[HuffmanCode], list[HuffmanCod
     return (huffman(lengths[0:literal_count]), huffman(lengths[literal_count:literal_count + distance_count]))
 
 def inflate(data: list[int], expected_size: int = 0) -> list[int]:
-    reader = BitReader(data)
+    reader := BitReader(data)
     output := []
     final := false
     length_bases = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
@@ -197,7 +218,7 @@ def zip_entries(path: string) -> Result[list[ZipEntry], IOError]:
     length = file.byte_length(handle)
     bytes = file.read_exact(handle, length)
     _closed = file.close(handle)
-    reader = ByteReader(bytes)
+    reader := ByteReader(bytes)
     entries := []
     while reader.remaining() >= 4:
         signature = reader.u32()
@@ -216,13 +237,13 @@ def zip_entries(path: string) -> Result[list[ZipEntry], IOError]:
         reader.skip(extra_length)
         assert(flags % 16 < 8, "ZIP data descriptors require central-directory resolution")
         compressed = reader.take(compressed_size)
+        content := compressed[0:0]
         if method == 0:
             content = compressed
         else if method == 8:
             content = inflate(compressed, uncompressed_size)
         else:
             assert(false, "unsupported ZIP compression method")
-            content = []
         entries.append(ZipEntry(name, content))
     return entries
 

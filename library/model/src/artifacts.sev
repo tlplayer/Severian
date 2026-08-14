@@ -68,7 +68,8 @@ def read_bytes(path_name: string) -> Result[list[int], IOError]:
 def sha256_file(path_name: string) -> Result[string, IOError]:
     # The platform hash consumes the exact byte collection; unlike Python
     # pickle loading this never evaluates artifact content.
-    return platform.hash_sha256_bytes(read_bytes(path_name))
+    contents = read_bytes(path_name)
+    return platform.hash_sha256_bytes(contents)
 
 def verify(path_name: string, expected_sha256: string) -> Result[string, types.ModelLoadError | IOError]:
     actual = sha256_file(path_name)
@@ -148,10 +149,13 @@ def resolve(source: string, expected_sha256: string = "") -> Result[ResolvedArti
         extension = path.extension(source)
         destination = path.join(cache_root(), expected_sha256 + extension)
         digest = download_verified(source, destination, expected_sha256)
-        return ResolvedArtifact(source, destination, identify_format(destination), digest)
+        destination_format = identify_format(destination)
+        return ResolvedArtifact(source, destination, destination_format, digest)
     if not path.exists(source):
         return failure(types.ModelLoadError("model source does not exist: " + source))
-    digest = "" if path.is_dir(source) else sha256_file(source)
+    digest := ""
+    if not path.is_dir(source):
+        digest = sha256_file(source)
     if not expected_sha256.is_empty():
         digest = verify(source, expected_sha256)
     return ResolvedArtifact(source, path.absolute(source), format, digest)

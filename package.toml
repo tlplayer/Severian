@@ -64,3 +64,11 @@ hard_lines = 1100
 reason = "Naming diagnostics remain grouped while their shared traversal state is extracted."
 expires = "2026-10-15"
 owner = "compiler-diagnostics"
+
+[[architecture.files.exception]]
+path = "library/model/src/lib.sev"
+soft_lines = 800
+hard_lines = 1000
+reason = "The compatibility model facade must keep its exported declarations in the package root until public module re-exports land; implementation is already split into focused source modules."
+expires = "2026-09-30"
+owner = "model-runtime"

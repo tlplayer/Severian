@@ -2,6 +2,13 @@ import file
 import json
 import path
 
+def element_count(shape: list[int]) -> int:
+    count := 1
+    for dimension in shape:
+        assert(dimension >= 0)
+        count *= dimension
+    return count
+
 class SafeTensorEntry:
     name: string
     dtype: string
@@ -31,25 +38,21 @@ class SafeTensorEntry:
 
     def f16() -> Tensor[f16]:
         assert(dtype == "F16")
-        assert(byte_end - byte_start == elements() * 2)
+        assert(byte_end - byte_start == element_count(shape) * 2)
         return mapped_f_16(mapping, byte_start, shape)
 
     def f8e4m3fn() -> Tensor[f8e4m3fn]:
         assert(dtype in ["F8_E4M3", "F8_E4M3FN"])
-        assert(byte_end - byte_start == elements())
+        assert(byte_end - byte_start == element_count(shape))
         return mapped_f8_e4_m3_fn(mapping, byte_start, shape)
 
     def f8e5m2() -> Tensor[f8e5m2]:
         assert(dtype == "F8_E5M2")
-        assert(byte_end - byte_start == elements())
+        assert(byte_end - byte_start == element_count(shape))
         return mapped_f8_e5_m2(mapping, byte_start, shape)
 
     def elements() -> int:
-        count := 1
-        for dimension in shape:
-            assert(dimension >= 0)
-            count *= dimension
-        return count
+        return element_count(shape)
 
     def bytes() -> int:
         return byte_end - byte_start

@@ -1,14 +1,49 @@
 version = 1
 
 [[packages]]
+name = "audio"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../audio"
+
+[[packages]]
 name = "container"
 version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/container"
 
 [[packages]]
+name = "csv"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/file/../csv"
+
+[[packages]]
+name = "data"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/csv/../data"
+
+[[packages]]
+name = "file"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/audio/../file"
+
+[[packages]]
+name = "hash"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../hash"
+
+[[packages]]
+name = "http"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../http"
+
+[[packages]]
 name = "json"
 version = "0.1.0"
-source = "path+/home/tplayer/Documents/Severian/library/model/../json"
+source = "path+/home/tplayer/Documents/Severian/library/file/../json"
+
+[[packages]]
+name = "math"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/audio/../math"
 
 [[packages]]
 name = "model"
@@ -16,9 +51,19 @@ version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model"
 
 [[packages]]
+name = "model.architectures.qwen"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/architectures/qwen"
+
+[[packages]]
 name = "model.neuralnet"
 version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/docs/examples/28-transformer-container/../../../library/model/neuralnet"
+
+[[packages]]
+name = "model.neuralnet"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/neuralnet"
 
 [[packages]]
 name = "os"
@@ -36,6 +81,16 @@ version = "0.1.0"
 source = "path+/home/tplayer/Documents/Severian/library/container/../platform"
 
 [[packages]]
+name = "random"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/model/../random"
+
+[[packages]]
 name = "tensor"
 version = "0.1.0"
-source = "path+/home/tplayer/Documents/Severian/library/model/../tensor"
+source = "path+/home/tplayer/Documents/Severian/library/audio/../tensor"
+
+[[packages]]
+name = "yaml"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/file/../yaml"

@@ -1,4 +1,11 @@
+import math
 import random
+
+trait DatasetMap:
+    forward(input: Any) -> Any
+
+trait DatasetFilter:
+    forward(input: Any, target: Any) -> bool
 
 class Dataset:
     features: list[Any]
@@ -7,17 +14,17 @@ class Dataset:
     def size() -> int:
         return size(features)
 
-    def map(operation: Any) -> Dataset:
+    def map(operation: DatasetMap) -> Dataset:
         mapped := []
         for feature in features:
-            mapped.append(operation(feature))
+            mapped.append(operation.forward(feature))
         return Dataset(mapped, targets[0:size(targets)])
 
-    def filter(predicate: Any) -> Dataset:
+    def filter(predicate: DatasetFilter) -> Dataset:
         selected_features := []
         selected_targets := []
         for index in indices(features):
-            if predicate(features[index], targets[index]):
+            if predicate.forward(features[index], targets[index]):
                 selected_features.append(features[index])
                 selected_targets.append(targets[index])
         return Dataset(selected_features, selected_targets)
@@ -37,7 +44,7 @@ class Dataset:
         batches := []
         start := 0
         while start < size(features):
-            stop = min([start + batch_size, size(features)])
+            stop = min(start + batch_size, size(features))
             if not drop_last or stop - start == batch_size:
                 batches.append(Dataset(features[start:stop], targets[start:stop]))
             start = stop
@@ -48,7 +55,7 @@ class Dataset:
 
     def prefetch(count: int = 1) -> Dataset:
         assert(count > 0)
-        return self
+        return Dataset(features, targets)
 
 class DataLoader:
     source: Dataset
@@ -80,7 +87,7 @@ def train_test_split(
     if shuffle:
         random.seed(seed)
         random.shuffle(order)
-    test_count = max([1, int(size(order) * test_size)])
+    test_count = max(1, math.floor(float(size(order)) * test_size))
     train_features := []
     test_features := []
     train_targets := []
@@ -161,4 +168,12 @@ def cross_validate(estimator: Any, features: list[Any], targets: list[Any], fold
     return scores
 
 def cross_val_score(estimator: Any, features: list[Any], targets: list[Any], folds: int = 5) -> list[float]:
-    return cross_validate(estimator, features, targets, folds)
+    scores := []
+    for training, validation in KFold(folds, true, 0).split(size(features)):
+        train_x = training.map(|index| features[index])
+        train_y = training.map(|index| targets[index])
+        valid_x = validation.map(|index| features[index])
+        valid_y = validation.map(|index| targets[index])
+        fitted = estimator.fit(train_x, train_y)
+        scores.append(fitted.score(valid_x, valid_y))
+    return scores

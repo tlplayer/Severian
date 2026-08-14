@@ -484,8 +484,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-dtype"
+version = "0.1.0"
+
+[[package]]
 name = "severian-hir"
 version = "0.1.0"
+dependencies = [
+ "severian-dtype",
+]
 
 [[package]]
 name = "severian-lexer"
@@ -516,6 +523,13 @@ dependencies = [
 [[package]]
 name = "severian-mlir"
 version = "0.1.0"
+
+[[package]]
+name = "severian-model-ir"
+version = "0.1.0"
+dependencies = [
+ "severian-dtype",
+]
 
 [[package]]
 name = "severian-ownership"
@@ -585,6 +599,8 @@ version = "0.1.0"
 dependencies = [
  "memmap2",
  "serde_json",
+ "severian-dtype",
+ "severian-model-ir",
 ]
 
 [[package]]

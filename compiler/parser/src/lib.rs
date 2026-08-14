@@ -5,7 +5,7 @@ use severian_ast::{
     CallExpr, ChaosAction, ChaosRuleExpr, ClassDecl, CollectionExpr, ComprehensionClause,
     ConstructorDecl, ContractClause, ContractFailure, Decorator, DecoratorSymbol,
     DestructureLetStmt, ElseBranch, EnumDecl, EnumVariant, Expr, Field, ForStmt, FunctionContract,
-    FunctionDecl, Ident, IfExpr, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item,
+    FunctionDecl, GenericParameter, Ident, IfExpr, IfStmt, ImportDecl, ImportKind, ImportName, IndexExpr, Item,
     LambdaBody, LetKind, LetStmt, ListComprehensionExpr, Literal, MapComprehensionExpr, MapEntry,
     MapExpr, MemberExpr, Module, OwnershipExpr, OwnershipOp, Parameter, Pattern, ReturnStmt,
     SetComprehensionExpr, SliceExpr, Span, Stmt, SwitchArm, SwitchStmt, TaskOwner, TaskPlacement,

@@ -255,16 +255,6 @@ class Qwen2_5_3BSession:
         position += 1
         return next_token
 
-    def generate(maximum_new_tokens: int = 32, end_tokens: list[int] = []) -> list[int]:
-        assert(maximum_new_tokens > 0)
-        if current_token in end_tokens:
-            return output_tokens
-        while size(output_tokens) < maximum_new_tokens and position < 288:
-            token = decode_next()
-            if token in end_tokens:
-                return output_tokens
-        return output_tokens
-
     def close():
         if not closed:
             for layer_index in range(0, size(key_caches)):

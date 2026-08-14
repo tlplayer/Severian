@@ -18,9 +18,12 @@ struct ByteBpe {
 static TOKENIZERS: OnceLock<Mutex<HashMap<String, ByteBpe>>> = OnceLock::new();
 
 unsafe extern "C" {
+    fn __sev_collection_get(collection: *mut c_void, index: i64) -> *mut c_void;
     fn __sev_collection_new(kind: i64) -> *mut c_void;
     fn __sev_collection_push(collection: *mut c_void, value: *mut c_void);
+    fn __sev_collection_size(collection: *mut c_void) -> i64;
     fn __sev_box_i64(value: i64) -> *mut c_void;
+    fn __sev_unbox_i64(value: *mut c_void) -> i64;
 }
 
 fn fail(message: impl std::fmt::Display) -> ! {

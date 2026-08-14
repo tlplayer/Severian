@@ -12,11 +12,12 @@ class CapabilitySet:
         return false
 
     def require(name: string, minimum_version: int = 1) -> Result[unit, CapabilityError]:
-        if not supports(name, minimum_version):
-            return failure(CapabilityError(
-                f"model does not provide capability `{name}` version {minimum_version}",
-            ))
-        return
+        for capability in values:
+            if capability.name == name and capability.version >= minimum_version:
+                return
+        return failure(CapabilityError(
+            f"model does not provide capability `{name}` version {minimum_version}",
+        ))
 
 class CapabilityError:
     message: string

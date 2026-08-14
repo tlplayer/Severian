@@ -18,11 +18,10 @@ class Artifact:
         return files.filter(|file| file.role == role)
 
     def weight_files() -> list[ArtifactFile]:
-        return files_for("weights")
+        return files.filter(|file| file.role == "weights")
 
 class ArtifactRequest:
     source: string
     revision: string = "main"
     sha256: string = ""
     offline: bool = false
-

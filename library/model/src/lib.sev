@@ -31,6 +31,17 @@ import "src/tensor_ops.sev" as tensor_ops
 import "src/types.sev" as types
 import "src/weights.sev" as weight_runtime
 
+unsafe:
+    native("__sev_model_graph_input") def graph_input(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_relu") def graph_relu(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_add") def graph_add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_matmul") def graph_matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_transpose") def graph_transpose(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_scale") def graph_scale(value: Tensor[f64], factor: float) -> Tensor[f64]
+    native("__sev_model_graph_softmax_rows") def graph_softmax(value: Tensor[f64]) -> Tensor[f64]
+    native("__sev_model_graph_layer_norm") def graph_layer_norm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    native("__sev_model_graph_run") def run_graph(value: Tensor[f64]) -> Tensor[f64]
+
 # Public model types stay in this facade so user code never needs to import an
 # implementation submodule just to declare a field.
 trait Module:
@@ -358,7 +369,7 @@ class InferenceModel:
         return qwen.forward(input_ids, qwen_weights, caches, rotary, causal_mask, position, config)
 
     def session(prompt: string) -> qwen.Qwen2_5_3BSession:
-        tokens = encode(prompt)
+        tokens = platform.qwen_tokenize(local_path, prompt)
         return qwen.prefill_qwen2_5_3b_256(qwen_weights, tokens)
 
     def generate(
@@ -367,9 +378,15 @@ class InferenceModel:
         end_tokens: list[int] = [],
     ) -> string:
         assert(maximum_new_tokens > 0)
-        generation = session(prompt)
-        tokens = generation.generate(maximum_new_tokens, end_tokens)
-        text = decode(tokens)
+        prompt_tokens = platform.qwen_tokenize(local_path, prompt)
+        generation = qwen.prefill_qwen2_5_3b_256(qwen_weights, prompt_tokens)
+        while size(generation.output_tokens) < maximum_new_tokens and generation.position < 288:
+            if generation.current_token in end_tokens:
+                break
+            token = generation.decode_next()
+            if token in end_tokens:
+                break
+        text = platform.qwen_decode_tokens(local_path, generation.output_tokens)
         generation.close()
         return text
 
@@ -388,7 +405,8 @@ def load(
     config_path = path.join(directory, "config.json")
     if not path.exists(config_path):
         return failure(types.ModelLoadError("model checkpoint is missing config.json"))
-    config = qwen.parse_qwen_2_config(file.read_text(config_path))
+    config_text = file.read_text(config_path)
+    config = qwen.parse_qwen_2_config(config_text)
     if dtype not in ["auto", "bf16", "bfloat16"]:
         return failure(types.ModelLoadError("Qwen2.5 execution currently requires BF16 compute"))
     store = tensor_runtime.open_safetensors(directory)
@@ -688,6 +706,14 @@ def inference[type](value: type) -> type:
     return value
 def jacobian(operation: layers.Module, input: Tensor[f64], epsilon: float = 0.000001) -> Tensor[f64]:
     return finite_jacobian(operation, input, epsilon)
+def jacobian_list(input: list[float]) -> list[list[float]]:
+    output: list[list[float]] = []
+    for row in indices(input):
+        row_values: list[float] = []
+        for column in indices(input):
+            row_values.append(1.0 if row == column else 0.0)
+        output.append(row_values)
+    return output
 def hessian(operation: layers.Module, input: Tensor[f64], epsilon: float = 0.0001) -> Tensor[f64]:
     source = tensor_ops.values(input)
     base = tensor_ops.values(operation.forward(input))
