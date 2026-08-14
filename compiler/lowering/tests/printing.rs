@@ -609,6 +609,7 @@ fn reports_unranked_tensor_regions_instead_of_panicking() {
             instructions: vec![Instruction::Return(Some(Expression::Typed {
                 id: HirId::synthetic(1),
                 ty: tensor,
+                any_origin: None,
                 expression: Box::new(Expression::Call {
                     target: CallTarget::native("tensor.ranked_matmul", "__sev_tensor_matmul")
                         .with_signature([tensor, tensor], tensor),
@@ -616,11 +617,13 @@ fn reports_unranked_tensor_regions_instead_of_panicking() {
                         Expression::Typed {
                             id: HirId::synthetic(2),
                             ty: tensor,
+                            any_origin: None,
                             expression: Box::new(Expression::Variable("left".into())),
                         },
                         Expression::Typed {
                             id: HirId::synthetic(3),
                             ty: tensor,
+                            any_origin: None,
                             expression: Box::new(Expression::Variable("right".into())),
                         },
                     ],

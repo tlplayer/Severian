@@ -55,11 +55,11 @@ def decoder_layer(
         num_kv_heads,
         head_dimension,
     )
-    current = tensor.add_bf_16(residual, attended.output)
+    current = tensor.ranked_add(residual, attended.output)
     residual = current
     normalized = rms_norm(current, weights.post_attention_norm, epsilon)
     feed_forward = mlp.qwen2_mlp(normalized, weights.mlp)
     return DecoderResult(
-        tensor.add_bf_16(residual, feed_forward),
+        tensor.ranked_add(residual, feed_forward),
         attended.cache,
     )

@@ -1,4 +1,4 @@
-use severian_package::{workspace_binary_targets, BuildPolicy};
+use severian_package::{workspace_binary_targets, BuildPolicy, TypeResolutionPolicy};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -46,6 +46,56 @@ owner = "compiler"
         policy.files.exceptions[0].owner.as_deref(),
         Some("compiler")
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn type_resolution_policy_loads_every_independent_guard() {
+    let root = temporary_directory("type-resolution-policy");
+    std::fs::create_dir_all(&root).unwrap();
+    let manifest = root.join("package.toml");
+    std::fs::write(
+        &manifest,
+        concat!(
+            "[package]\nname = \"strict\"\n",
+            "[compiler.type_resolution]\n",
+            "deny_any = true\n",
+            "deny_tensor_any = true\n",
+            "deny_unresolved = true\n",
+            "deny_inferred_fallback = true\n",
+            "deny_lost_type_information = true\n",
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        TypeResolutionPolicy::for_manifest(Some(&manifest)).unwrap(),
+        TypeResolutionPolicy {
+            deny_any: true,
+            deny_tensor_any: true,
+            deny_unresolved: true,
+            deny_inferred_fallback: true,
+            deny_lost_type_information: true,
+        }
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn type_resolution_policy_rejects_misspelled_guards() {
+    let root = temporary_directory("type-resolution-policy-typo");
+    std::fs::create_dir_all(&root).unwrap();
+    let manifest = root.join("package.toml");
+    std::fs::write(
+        &manifest,
+        "[package]\nname = \"strict\"\n[compiler.type_resolution]\ndeny_an = true\n",
+    )
+    .unwrap();
+
+    let error = TypeResolutionPolicy::for_manifest(Some(&manifest)).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("unknown `compiler.type_resolution` setting `deny_an`"));
     let _ = std::fs::remove_dir_all(root);
 }
 

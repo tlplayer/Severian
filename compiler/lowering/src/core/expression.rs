@@ -3,7 +3,9 @@ use super::*;
 impl LowerContext<'_> {
     pub(super) fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
         match expression {
-            Expression::Typed { id, ty, expression } => {
+            Expression::Typed {
+                id, ty, expression, ..
+            } => {
                 let previous = self.active_hir_id.replace(*id);
                 let result = if let Expression::Conditional {
                     condition,

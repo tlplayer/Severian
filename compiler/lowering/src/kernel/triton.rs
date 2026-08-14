@@ -1,4 +1,5 @@
-use super::{tensor_element_name, KernelBackend, KernelError, KernelIr, KernelOperation};
+use super::{tensor_element_name, KernelBackend, KernelError, KernelIr};
+use severian_mir::{ElementwiseKind, ReductionKind, TensorOp};
 
 const ELEMENTWISE_BLOCK_SIZE: u32 = 256;
 const REDUCTION_BLOCK_SIZE: u32 = 1024;
@@ -15,12 +16,15 @@ pub struct TritonLaunch {
 
 impl TritonLaunch {
     pub fn for_kernel(kernel: &KernelIr) -> Self {
-        let (block_size, programs) = match kernel.operation {
-            KernelOperation::ReductionSum { .. } => (REDUCTION_BLOCK_SIZE, "1".into()),
-            KernelOperation::ElementwiseRelu { .. } => (
+        let (block_size, programs) = match &kernel.operation {
+            TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum => {
+                (REDUCTION_BLOCK_SIZE, "1".into())
+            }
+            TensorOp::Elementwise(operation) if operation.kind == ElementwiseKind::Relu => (
                 ELEMENTWISE_BLOCK_SIZE,
                 format!("ceil_div(element_count, {ELEMENTWISE_BLOCK_SIZE})"),
             ),
+            _ => (ELEMENTWISE_BLOCK_SIZE, "1".into()),
         };
         Self {
             entry: kernel.name.clone(),
@@ -41,12 +45,24 @@ pub fn emit_triton_ir(kernel: &KernelIr) -> Result<String, KernelError> {
             backend: KernelBackend::Triton,
             reason,
         })?;
-    let input = kernel.parameters[kernel.operation.input()];
+    let input =
+        kernel.parameters[kernel
+            .input()
+            .map_err(|reason| KernelError::UnsupportedBackend {
+                kernel: kernel.name.clone(),
+                backend: KernelBackend::Triton,
+                reason,
+            })?];
     let element = tensor_element_name(input.element);
     let launch = TritonLaunch::for_kernel(kernel);
-    let body = match kernel.operation {
-        KernelOperation::ReductionSum { .. } => reduction_sum_body(element, launch.block_size),
-        KernelOperation::ElementwiseRelu { .. } => relu_body(element, launch.block_size),
+    let body = match &kernel.operation {
+        TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum => {
+            reduction_sum_body(element, launch.block_size)
+        }
+        TensorOp::Elementwise(operation) if operation.kind == ElementwiseKind::Relu => {
+            relu_body(element, launch.block_size)
+        }
+        _ => unreachable!("triton_support accepted an unsupported operation"),
     };
     Ok(format!(
         "module attributes {{\"severian.kernel\" = {entry:?}, \"severian.operation\" = {operation:?}, \"severian.launch.programs\" = {programs:?}, \"severian.launch.block_size\" = {block_size} : i32, \"severian.launch.requires_zeroed_output\" = {requires_zeroed_output}}} {{\n  tt.func public @{symbol}(%input: !tt.ptr<{element}>, %output: !tt.ptr<{element}>, %element_count: i32) attributes {{noinline = false}} {{\n{body}  }}\n}}\n",
@@ -104,15 +120,29 @@ fn sanitize_symbol(name: &str) -> String {
 mod tests {
     use super::*;
     use severian_hir::{FunctionId, TensorDimension, TensorElementType, TensorType};
+    use severian_mir::{ElementwiseOp, LocalId, ReductionOp, TensorOperand, ValueRef};
 
-    fn kernel(operation: KernelOperation) -> KernelIr {
+    fn operand(input: TensorType) -> TensorOperand {
+        TensorOperand {
+            value: ValueRef {
+                id: None,
+                ty: Some(severian_hir::ValueType::Tensor(input)),
+                local: Some(LocalId(0)),
+                tensor_op: None,
+            },
+            ty: input,
+        }
+    }
+
+    fn kernel(operation: TensorOp) -> KernelIr {
         let input =
             TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap();
         KernelIr {
             function: FunctionId::from_name("special"),
             name: "special".into(),
             parameters: vec![input],
-            result: input,
+            parameter_locals: vec![LocalId(0)],
+            result: operation.result(),
             operation,
             policy: KernelBackend::Auto,
         }
@@ -120,7 +150,16 @@ mod tests {
 
     #[test]
     fn reduction_is_native_ttir_with_launch_metadata() {
-        let source = emit_triton_ir(&kernel(KernelOperation::ReductionSum { input: 0 })).unwrap();
+        let input =
+            TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap();
+        let result = TensorType::ranked(TensorElementType::F32, &[]).unwrap();
+        let source = emit_triton_ir(&kernel(TensorOp::Reduction(ReductionOp {
+            kind: ReductionKind::Sum,
+            input: operand(input),
+            axes: vec![0],
+            result,
+        })))
+        .unwrap();
         assert!(source.contains("tt.func public @special"));
         assert!(source.contains("\"tt.reduce\""));
         assert!(source.contains("scf.for"));
@@ -134,8 +173,14 @@ mod tests {
 
     #[test]
     fn relu_is_a_masked_elementwise_ttir_kernel() {
-        let source =
-            emit_triton_ir(&kernel(KernelOperation::ElementwiseRelu { input: 0 })).unwrap();
+        let input =
+            TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap();
+        let source = emit_triton_ir(&kernel(TensorOp::Elementwise(ElementwiseOp {
+            kind: ElementwiseKind::Relu,
+            inputs: vec![operand(input)],
+            result: input,
+        })))
+        .unwrap();
         assert!(source.contains("arith.maximumf"));
         assert!(source.contains("tt.store"));
         assert!(!source.contains("scf.for"));

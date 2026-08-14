@@ -1,4 +1,4 @@
-use crate::{TensorType, ValueType};
+use crate::{AnyOrigin, TensorType, ValueType};
 use std::{collections::BTreeMap, path::PathBuf};
 
 macro_rules! stable_id {
@@ -220,6 +220,7 @@ pub enum TypeKind {
     },
     Set(TypeId),
     Tensor(TensorType),
+    TensorAny,
     Channel(TypeId),
     Function {
         parameters: Vec<TypeId>,
@@ -290,7 +291,7 @@ impl TypeTable {
             }
             ValueType::Set => TypeKind::Set(self.intern(TypeKind::Any)),
             ValueType::Tensor(tensor) => TypeKind::Tensor(tensor),
-            ValueType::TensorAny => TypeKind::Any,
+            ValueType::TensorAny => TypeKind::TensorAny,
             ValueType::Channel => TypeKind::Channel(self.intern(TypeKind::Any)),
             ValueType::Function => {
                 let any = self.intern(TypeKind::Any);
@@ -353,6 +354,7 @@ pub struct ProgramMetadata {
     pub sources: SourceMap,
     pub types: TypeTable,
     pub expression_types: BTreeMap<HirId, TypeId>,
+    pub expression_any_origins: BTreeMap<HirId, AnyOrigin>,
     pub globals: BTreeMap<String, TypeId>,
     pub functions: BTreeMap<FunctionId, DetailedFunctionType>,
     pub classes: BTreeMap<TypeDefinitionId, ClassDefinition>,

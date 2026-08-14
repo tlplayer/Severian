@@ -38,9 +38,11 @@ fn lower_function(function: &severian_hir::Function, name: String) -> Function {
         id: function.id,
         name,
         native_symbol: function.native_symbol.clone(),
+        decorators: function.decorators.clone(),
         parameters,
         locals: builder.locals,
         return_type: function.return_type,
+        tensor_operations: builder.tensor_operations,
         blocks: builder.blocks,
     }
 }
@@ -50,6 +52,7 @@ struct FunctionBuilder {
     blocks: Vec<BasicBlock>,
     locals: Vec<Local>,
     bindings: BTreeMap<BindingId, LocalId>,
+    tensor_operations: Vec<TensorOp>,
 }
 
 impl FunctionBuilder {
@@ -85,33 +88,34 @@ impl FunctionBuilder {
                 Instruction::Let { name, value } => {
                     let local =
                         self.reserve_local(name.clone(), value.ty().unwrap_or(ValueType::Any));
-                    self.operation(block, OperationKind::Bind(local), [self.value_ref(value)])
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::Bind(local), [value])
                 }
                 Instruction::TryLet { name, value, .. } => {
                     let local = self.reserve_local(name.clone(), ValueType::Any);
-                    self.operation(
-                        block,
-                        OperationKind::TryBind(local),
-                        [self.value_ref(value)],
-                    )
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::TryBind(local), [value])
                 }
-                Instruction::Assign { target, value, .. } => self.operation(
-                    block,
-                    OperationKind::Assign,
-                    [self.value_ref(target), self.value_ref(value)],
-                ),
+                Instruction::Assign { target, value, .. } => {
+                    let target = self.value_ref(target);
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::Assign, [target, value])
+                }
                 Instruction::Print(value) => {
-                    self.operation(block, OperationKind::Print, [self.value_ref(value)])
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::Print, [value])
                 }
                 Instruction::Assert(value) => {
-                    self.operation(block, OperationKind::Assert, [self.value_ref(value)])
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::Assert, [value])
                 }
                 Instruction::Evaluate(value) => {
-                    self.operation(block, OperationKind::Evaluate, [self.value_ref(value)])
+                    let value = self.value_ref(value);
+                    self.operation(block, OperationKind::Evaluate, [value])
                 }
                 Instruction::Return(value) => {
-                    self.blocks[block.0 as usize].terminator =
-                        Terminator::Return(value.as_ref().map(|value| self.value_ref(value)));
+                    let value = value.as_ref().map(|value| self.value_ref(value));
+                    self.blocks[block.0 as usize].terminator = Terminator::Return(value);
                     return;
                 }
                 Instruction::If {
@@ -122,8 +126,9 @@ impl FunctionBuilder {
                     let then_block = self.reserve_block();
                     let else_block = self.reserve_block();
                     let join = self.reserve_block();
+                    let condition = self.value_ref(condition);
                     self.blocks[block.0 as usize].terminator = Terminator::Branch {
-                        condition: self.value_ref(condition),
+                        condition,
                         then_block,
                         else_block,
                     };
@@ -141,8 +146,9 @@ impl FunctionBuilder {
                     let body = self.reserve_block();
                     let exit = self.reserve_block();
                     self.blocks[block.0 as usize].terminator = Terminator::Goto(header);
+                    let condition = self.value_ref(condition);
                     self.blocks[header.0 as usize].terminator = Terminator::Loop {
-                        condition: self.value_ref(condition),
+                        condition,
                         body,
                         exit,
                     };
@@ -158,9 +164,10 @@ impl FunctionBuilder {
                 } => {
                     let body = self.reserve_block();
                     let exit = self.reserve_block();
+                    let iterable = self.value_ref(iterable);
                     self.blocks[block.0 as usize].terminator = Terminator::For {
                         pattern: pattern.clone(),
-                        iterable: self.value_ref(iterable),
+                        iterable,
                         body,
                         exit,
                     };
@@ -178,8 +185,9 @@ impl FunctionBuilder {
                             arm_block
                         })
                         .collect();
+                    let value = self.value_ref(value);
                     self.blocks[block.0 as usize].terminator = Terminator::Switch {
-                        values: vec![self.value_ref(value)],
+                        values: vec![value],
                         arms: arm_blocks,
                         exit,
                     };
@@ -196,8 +204,9 @@ impl FunctionBuilder {
                             arm_block
                         })
                         .collect();
+                    let values = channels.iter().map(|value| self.value_ref(value)).collect();
                     self.blocks[block.0 as usize].terminator = Terminator::Switch {
-                        values: channels.iter().map(|value| self.value_ref(value)).collect(),
+                        values,
                         arms: arm_blocks,
                         exit,
                     };
@@ -251,14 +260,31 @@ impl FunctionBuilder {
         });
     }
 
-    fn value_ref(&self, expression: &Expression) -> ValueRef {
-        ValueRef {
+    fn value_ref(&mut self, expression: &Expression) -> ValueRef {
+        let mut value = ValueRef {
             id: expression.hir_id(),
             ty: expression.ty(),
             local: match expression.kind() {
                 Expression::Variable(binding) => self.bindings.get(&binding.id).copied(),
                 _ => None,
             },
-        }
+            tensor_op: None,
+        };
+        let Expression::Call { target, args } = expression.kind() else {
+            return value;
+        };
+        let inputs = tensor_operands(args, |argument| self.value_ref(argument));
+        let (Some(intrinsic), Some(ValueType::Tensor(result))) =
+            (target.tensor_intrinsic(), expression.ty())
+        else {
+            return value;
+        };
+        let Some(operation) = resolve_tensor_op(intrinsic, args, inputs, result) else {
+            return value;
+        };
+        let id = TensorOpId(self.tensor_operations.len() as u32);
+        self.tensor_operations.push(operation);
+        value.tensor_op = Some(id);
+        value
     }
 }

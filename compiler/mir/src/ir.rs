@@ -1,4 +1,5 @@
-use severian_hir::{BindingRef, FunctionId, HirId, MatchPattern, ValueType};
+use crate::{TensorOp, TensorOpId};
+use severian_hir::{BindingRef, Decorator, FunctionId, HirId, MatchPattern, ValueType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
@@ -64,9 +65,11 @@ pub struct Function {
     pub id: FunctionId,
     pub name: String,
     pub native_symbol: Option<String>,
+    pub decorators: Vec<Decorator>,
     pub parameters: Vec<LocalId>,
     pub locals: Vec<Local>,
     pub return_type: ValueType,
+    pub tensor_operations: Vec<TensorOp>,
     pub blocks: Vec<BasicBlock>,
 }
 
@@ -99,6 +102,7 @@ pub struct ValueRef {
     pub id: Option<HirId>,
     pub ty: Option<ValueType>,
     pub local: Option<LocalId>,
+    pub tensor_op: Option<TensorOpId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

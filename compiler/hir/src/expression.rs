@@ -1,10 +1,24 @@
 use crate::*;
 
+/// Why an expression still has an erased dynamic type after semantic
+/// resolution. `Explicit` is source intent; every other variant describes
+/// compiler information that a strict package may forbid from escaping into
+/// MIR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AnyOrigin {
+    Explicit,
+    InferenceFallback,
+    UnresolvedType,
+    UnresolvedGeneric,
+    LostTypeInformation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expression {
     Typed {
         id: HirId,
         ty: ValueType,
+        any_origin: Option<AnyOrigin>,
         expression: Box<Expression>,
     },
     Integer(i64),
@@ -177,6 +191,13 @@ impl Expression {
         }
     }
 
+    pub fn any_origin(&self) -> Option<AnyOrigin> {
+        match self {
+            Self::Typed { any_origin, .. } => *any_origin,
+            _ => None,
+        }
+    }
+
     pub fn into_kind(self) -> Self {
         match self {
             Self::Typed { expression, .. } => expression.into_kind(),
@@ -196,7 +217,9 @@ pub struct CallTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FunctionType {
     pub parameters: Vec<ValueType>,
+    pub parameter_any_origins: Vec<Option<AnyOrigin>>,
     pub returns: ValueType,
+    pub return_any_origin: Option<AnyOrigin>,
 }
 
 impl CallTarget {
@@ -225,16 +248,46 @@ impl CallTarget {
         parameters: impl IntoIterator<Item = ValueType>,
         returns: ValueType,
     ) -> Self {
+        let parameters = parameters.into_iter().collect::<Vec<_>>();
         self.signature = Some(FunctionType {
-            parameters: parameters.into_iter().collect(),
+            parameter_any_origins: parameters
+                .iter()
+                .copied()
+                .map(explicit_any_origin)
+                .collect(),
+            parameters,
             returns,
+            return_any_origin: explicit_any_origin(returns),
         });
+        self
+    }
+
+    pub fn with_signature_origins(
+        mut self,
+        parameter_any_origins: Vec<Option<AnyOrigin>>,
+        return_any_origin: Option<AnyOrigin>,
+    ) -> Self {
+        if let Some(signature) = &mut self.signature {
+            debug_assert_eq!(signature.parameters.len(), parameter_any_origins.len());
+            signature.parameter_any_origins = parameter_any_origins;
+            signature.return_any_origin = return_any_origin;
+        }
         self
     }
 
     pub fn lowering_symbol(&self) -> &str {
         self.native_symbol.as_deref().unwrap_or(&self.name)
     }
+
+    pub fn tensor_intrinsic(&self) -> Option<TensorIntrinsic> {
+        self.native_symbol
+            .as_deref()
+            .and_then(TensorIntrinsic::from_native_symbol)
+    }
+}
+
+fn explicit_any_origin(ty: ValueType) -> Option<AnyOrigin> {
+    matches!(ty, ValueType::Any | ValueType::TensorAny).then_some(AnyOrigin::Explicit)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

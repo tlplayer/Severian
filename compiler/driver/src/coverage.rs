@@ -180,12 +180,14 @@ fn hit(id: CoverageRegionId) -> Instruction {
     Instruction::Evaluate(Expression::Typed {
         id: HirId::synthetic(id.0 & ((1 << 20) - 1)),
         ty: ValueType::Unit,
+        any_origin: None,
         expression: Box::new(Expression::Call {
             target: CallTarget::native("coverage.hit", "__sev_coverage_hit")
                 .with_signature([ValueType::Int], ValueType::Unit),
             args: vec![Expression::Typed {
                 id: HirId::synthetic((id.0 & ((1 << 20) - 1)) ^ 1),
                 ty: ValueType::Int,
+                any_origin: None,
                 expression: Box::new(Expression::Integer(id.0 as i64)),
             }],
         }),

@@ -1,5 +1,6 @@
-use super::{KernelBackend, KernelError, KernelIr, KernelOperation};
-use severian_hir::{Expression, Function, Instruction, Program, TensorType, ValueType};
+use super::{KernelBackend, KernelError, KernelIr};
+use severian_hir::ValueType;
+use severian_mir::{Function, OperationKind, Program};
 
 pub fn collect(program: &Program) -> Vec<KernelIr> {
     program
@@ -27,31 +28,51 @@ pub fn find(program: &Program, entry: Option<&str>) -> Result<KernelIr, KernelEr
 }
 
 fn lower_function(function: &Function) -> Option<KernelIr> {
-    if function.native_symbol.is_some() || function.params.is_empty() {
+    if function.native_symbol.is_some() || function.parameters.is_empty() {
         return None;
     }
     let parameters = function
-        .params
+        .parameters
         .iter()
-        .map(|parameter| match parameter.ty {
-            ValueType::Tensor(tensor) => Some(tensor),
-            _ => None,
-        })
+        .map(
+            |parameter| match function.locals.get(parameter.0 as usize)?.ty {
+                ValueType::Tensor(tensor) => Some(tensor),
+                _ => None,
+            },
+        )
         .collect::<Option<Vec<_>>>()?;
-    let ValueType::Tensor(declared_result) = function.return_type else {
+    let [block] = function.blocks.as_slice() else {
         return None;
     };
-    let operation = lower_body(&function.instructions, function)?;
-    let result = match operation {
-        KernelOperation::ReductionSum { .. } => TensorType::ranked(declared_result.element, &[])
-            .expect("a scalar tensor is always representable"),
-        KernelOperation::ElementwiseRelu { .. } => declared_result,
+    if !block
+        .operations
+        .iter()
+        .all(|operation| matches!(operation.kind, OperationKind::With))
+    {
+        return None;
+    }
+    let severian_mir::Terminator::Return(Some(value)) = block.terminator else {
+        return None;
     };
+    let operation = function
+        .tensor_operations
+        .get(value.tensor_op?.0 as usize)?
+        .clone();
+    for input in operation.inputs() {
+        if input.value.tensor_op.is_some() {
+            return None;
+        }
+        let local = input.value.local?;
+        if !function.parameters.contains(&local) {
+            return None;
+        }
+    }
     Some(KernelIr {
         function: function.id,
         name: function.name.clone(),
+        parameter_locals: function.parameters.clone(),
         parameters,
-        result,
+        result: operation.result(),
         operation,
         policy: compile_policy(function),
     })
@@ -73,112 +94,89 @@ fn compile_policy(function: &Function) -> KernelBackend {
     }
 }
 
-fn lower_body(instructions: &[Instruction], function: &Function) -> Option<KernelOperation> {
-    let [instruction] = instructions else {
-        return None;
-    };
-    match instruction {
-        Instruction::Return(Some(value)) => lower_return(value, function),
-        Instruction::With { instructions, .. } => lower_body(instructions, function),
-        _ => None,
-    }
-}
-
-fn lower_return(expression: &Expression, function: &Function) -> Option<KernelOperation> {
-    let Expression::Call { target, args } = expression.kind() else {
-        return None;
-    };
-    let operation = normalized_operation(&target.name);
-    let expected_arity = match operation.as_str() {
-        "sum" | "rankedsum" | "sumlast" | "reducesum" | "tensorsum" => 1,
-        "relu" | "rankedrelu" | "tensorrelu" => 1,
-        _ => return None,
-    };
-    if args.len() != expected_arity {
-        return None;
-    }
-    let Expression::Variable(input_name) = args[0].kind() else {
-        return None;
-    };
-    let input = function
-        .params
-        .iter()
-        .position(|parameter| parameter.name == *input_name)?;
-    match operation.as_str() {
-        "sum" | "rankedsum" | "sumlast" | "reducesum" | "tensorsum" => {
-            Some(KernelOperation::ReductionSum { input })
-        }
-        "relu" | "rankedrelu" | "tensorrelu" => Some(KernelOperation::ElementwiseRelu { input }),
-        _ => None,
-    }
-}
-
-fn normalized_operation(function: &str) -> String {
-    let operation = function
-        .rsplit_once('.')
-        .map(|(_, name)| name)
-        .unwrap_or(function)
-        .to_ascii_lowercase()
-        .replace('_', "");
-    operation
-        .strip_suffix("bf16")
-        .or_else(|| operation.strip_suffix("f32"))
-        .unwrap_or(&operation)
-        .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use severian_hir::{
-        CallTarget, FunctionId, Parameter, Program, TensorDimension, TensorElementType,
+        BindingRef, CallTarget, Expression, Function as HirFunction, FunctionId, Instruction,
+        Parameter, Program as HirProgram, TensorDimension, TensorElementType, TensorType,
     };
+    use severian_mir::{ElementwiseKind, ReductionKind, TensorOp};
 
-    fn direct_program(operation: &str) -> Program {
-        let tensor =
+    fn typed(ty: ValueType, expression: Expression) -> Expression {
+        Expression::Typed {
+            id: severian_hir::HirId::synthetic(1),
+            ty,
+            any_origin: None,
+            expression: Box::new(expression),
+        }
+    }
+
+    fn direct_program(symbol: &str, result: TensorType) -> Program {
+        let input =
             TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap();
-        Program {
-            functions: vec![Function {
-                id: FunctionId::from_name(operation),
-                name: operation.into(),
+        let binding = BindingRef::synthetic("value");
+        let call = typed(
+            ValueType::Tensor(result),
+            Expression::Call {
+                target: CallTarget::native(symbol, symbol),
+                args: vec![typed(
+                    ValueType::Tensor(input),
+                    Expression::Variable(binding.clone()),
+                )],
+            },
+        );
+        severian_mir::lower(&HirProgram {
+            functions: vec![HirFunction {
+                id: FunctionId::from_name(symbol),
+                name: symbol.into(),
                 native_symbol: None,
                 decorators: Vec::new(),
                 contract: None,
                 params: vec![Parameter {
-                    name: "value".into(),
-                    ty: ValueType::Tensor(tensor),
+                    name: binding,
+                    ty: ValueType::Tensor(input),
                     default: None,
                     receiver: None,
                 }],
-                return_type: ValueType::Tensor(tensor),
-                instructions: vec![Instruction::Return(Some(Expression::Call {
-                    target: CallTarget::source(format!("tensor.{operation}")),
-                    args: vec![Expression::Variable("value".into())],
-                }))],
+                return_type: ValueType::Tensor(result),
+                instructions: vec![Instruction::Return(Some(call))],
                 tests: Vec::new(),
             }],
-            ..Program::default()
-        }
+            ..HirProgram::default()
+        })
     }
 
     #[test]
-    fn recognizes_reduction_and_relu_regions() {
+    fn consumes_resolved_mir_reduction_and_relu_operations() {
+        let scalar = TensorType::ranked(TensorElementType::F32, &[]).unwrap();
         assert!(matches!(
-            find(&direct_program("sum"), None).unwrap().operation,
-            KernelOperation::ReductionSum { .. }
+            find(&direct_program("__sev_tensor_sum", scalar), None)
+                .unwrap()
+                .operation,
+            TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum
         ));
+
+        let vector =
+            TensorType::ranked(TensorElementType::F32, &[TensorDimension::Dynamic]).unwrap();
         assert!(matches!(
-            find(&direct_program("relu"), None).unwrap().operation,
-            KernelOperation::ElementwiseRelu { .. }
+            find(&direct_program("__sev_tensor_relu", vector), None)
+                .unwrap()
+                .operation,
+            TensorOp::Elementwise(operation) if operation.kind == ElementwiseKind::Relu
         ));
     }
 
     #[test]
     fn does_not_discard_surrounding_source_operations() {
-        let mut program = direct_program("sum");
-        program.functions[0].instructions.insert(
+        let scalar = TensorType::ranked(TensorElementType::F32, &[]).unwrap();
+        let mut program = direct_program("__sev_tensor_sum", scalar);
+        program.functions[0].blocks[0].operations.insert(
             0,
-            Instruction::Evaluate(Expression::Variable("value".into())),
+            severian_mir::Operation {
+                kind: OperationKind::Evaluate,
+                operands: Vec::new(),
+            },
         );
         assert!(collect(&program).is_empty());
     }

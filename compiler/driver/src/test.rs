@@ -296,7 +296,9 @@ fn native_metric(symbol: &str) -> Expression {
                 native_symbol: Some(symbol.into()),
                 signature: Some(FunctionType {
                     parameters: Vec::new(),
+                    parameter_any_origins: Vec::new(),
                     returns: ValueType::Int,
+                    return_any_origin: None,
                 }),
             },
             args: Vec::new(),
@@ -357,7 +359,9 @@ fn contract_check(clause: &ContractClause) -> Instruction {
                 native_symbol: Some("__sev_contract_fail".into()),
                 signature: Some(FunctionType {
                     parameters: vec![ValueType::String; 3],
+                    parameter_any_origins: vec![None; 3],
                     returns: ValueType::Unit,
+                    return_any_origin: None,
                 }),
             },
             args: arguments,
@@ -374,6 +378,7 @@ fn typed(ty: ValueType, expression: Expression) -> Expression {
     Expression::Typed {
         id: HirId::synthetic(500),
         ty,
+        any_origin: None,
         expression: Box::new(expression),
     }
 }

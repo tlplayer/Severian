@@ -183,3 +183,27 @@ fn omnivoice_has_no_architecture_specific_native_abi() {
         }
     }
 }
+
+#[test]
+fn generic_compiler_layers_do_not_name_model_architectures() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut sources = Vec::new();
+    for relative in [
+        "compiler/backend/src",
+        "compiler/lowering/src",
+        "compiler/platform/src",
+        "compiler/runtime/src",
+    ] {
+        source_files_below(&workspace.join(relative), &mut sources);
+    }
+    for path in sources {
+        let source = std::fs::read_to_string(&path).unwrap().to_ascii_lowercase();
+        for architecture in ["omnivoice", "qwen", "higgs"] {
+            assert!(
+                !source.contains(architecture),
+                "{} must not name model architecture `{architecture}`",
+                path.display(),
+            );
+        }
+    }
+}

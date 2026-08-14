@@ -314,6 +314,8 @@ pub fn analyze_with_packages(
                 compatible(binding.span, inferred, declared)?;
             }
             let ty = declared.unwrap_or(inferred);
+            let any_origin =
+                declared_any_origin(binding.ty.as_ref(), ty).or_else(|| value.any_origin());
             global_scope.insert(
                 binding.name.name.clone(),
                 Binding {
@@ -326,6 +328,7 @@ pub fn analyze_with_packages(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin,
                 },
             );
             globals.push(Global {
@@ -373,6 +376,7 @@ pub fn analyze_with_packages(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: parameter.any_origin,
                 },
             );
             params.push(Parameter {
@@ -498,6 +502,7 @@ pub fn analyze_with_packages(
                     field: true,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: declared_any_origin(field.ty.as_ref(), ty),
                 },
             );
         }

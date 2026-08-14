@@ -27,6 +27,7 @@ pub(super) fn lower_pattern(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: Some(AnyOrigin::LostTypeInformation),
                 },
             );
             Ok(MatchPattern::Bind(reference))
@@ -66,6 +67,7 @@ pub(super) fn lower_pattern(
                                         field: false,
                                         integer_max: None,
                                         known_integer: None,
+                                        any_origin: Some(AnyOrigin::LostTypeInformation),
                                     },
                                 );
                                 MatchPattern::Bind(reference)
@@ -92,6 +94,7 @@ pub(super) fn lower_pattern(
                         field: false,
                         integer_max: None,
                         known_integer: None,
+                        any_origin: Some(AnyOrigin::LostTypeInformation),
                     },
                 );
                 return Ok(MatchPattern::Bind(reference));

@@ -63,6 +63,7 @@ fn verify_function(function: &Function, errors: &mut Vec<VerificationError>) {
 
     let block_count = function.blocks.len();
     let local_count = function.locals.len();
+    let tensor_operation_count = function.tensor_operations.len();
     let mut binding_ids = BTreeSet::new();
     for (index, local) in function.locals.iter().enumerate() {
         if local.id.0 as usize != index {
@@ -88,6 +89,46 @@ fn verify_function(function: &Function, errors: &mut Vec<VerificationError>) {
     for parameter in &function.parameters {
         verify_local_target(function, None, *parameter, local_count, errors);
     }
+    for (operation_index, operation) in function.tensor_operations.iter().enumerate() {
+        for input in operation.inputs() {
+            verify_value_ref(
+                function,
+                None,
+                input.value,
+                local_count,
+                tensor_operation_count,
+                errors,
+            );
+            if input.value.ty != Some(ValueType::Tensor(input.ty)) {
+                errors.push(VerificationError {
+                    function: function.name.clone(),
+                    block: None,
+                    invariant: "tensor-operand-type",
+                    message: format!(
+                        "operation `{}` carries {:?}, but its value is typed {:?}",
+                        operation.name(),
+                        input.ty,
+                        input.value.ty
+                    ),
+                });
+            }
+            if input
+                .value
+                .tensor_op
+                .is_some_and(|dependency| dependency.0 as usize >= operation_index)
+            {
+                errors.push(VerificationError {
+                    function: function.name.clone(),
+                    block: None,
+                    invariant: "tensor-operation-order",
+                    message: format!(
+                        "operation `{}` at index {operation_index} depends on a non-prior tensor operation",
+                        operation.name()
+                    ),
+                });
+            }
+        }
+    }
     for (index, block) in function.blocks.iter().enumerate() {
         if block.id.0 as usize != index {
             errors.push(VerificationError {
@@ -110,9 +151,14 @@ fn verify_function(function: &Function, errors: &mut Vec<VerificationError>) {
                 verify_local_target(function, Some(block.id), local, local_count, errors);
             }
             for operand in &operation.operands {
-                if let Some(local) = operand.local {
-                    verify_local_target(function, Some(block.id), local, local_count, errors);
-                }
+                verify_value_ref(
+                    function,
+                    Some(block.id),
+                    *operand,
+                    local_count,
+                    tensor_operation_count,
+                    errors,
+                );
             }
         }
         for target in successor_blocks(&block.terminator) {
@@ -128,7 +174,58 @@ fn verify_function(function: &Function, errors: &mut Vec<VerificationError>) {
                 });
             }
         }
+        for value in terminator_values(&block.terminator) {
+            verify_value_ref(
+                function,
+                Some(block.id),
+                value,
+                local_count,
+                tensor_operation_count,
+                errors,
+            );
+        }
         verify_terminator_types(function, block, errors);
+    }
+}
+
+fn verify_value_ref(
+    function: &Function,
+    block: Option<BlockId>,
+    value: ValueRef,
+    local_count: usize,
+    tensor_operation_count: usize,
+    errors: &mut Vec<VerificationError>,
+) {
+    if let Some(local) = value.local {
+        verify_local_target(function, block, local, local_count, errors);
+    }
+    let Some(operation) = value.tensor_op else {
+        return;
+    };
+    let Some(operation) = function.tensor_operations.get(operation.0 as usize) else {
+        errors.push(VerificationError {
+            function: function.name.clone(),
+            block,
+            invariant: "valid-tensor-operation",
+            message: format!(
+                "references tensor operation {} but the function has {tensor_operation_count} operation(s)",
+                operation.0
+            ),
+        });
+        return;
+    };
+    if value.ty != Some(ValueType::Tensor(operation.result())) {
+        errors.push(VerificationError {
+            function: function.name.clone(),
+            block,
+            invariant: "tensor-result-type",
+            message: format!(
+                "operation `{}` returns {:?}, but its value is typed {:?}",
+                operation.name(),
+                operation.result(),
+                value.ty
+            ),
+        });
     }
 }
 
@@ -169,6 +266,21 @@ fn successor_blocks(terminator: &Terminator) -> Vec<BlockId> {
             targets
         }
         Terminator::Return(_)
+        | Terminator::Break
+        | Terminator::Continue
+        | Terminator::Unreachable => Vec::new(),
+    }
+}
+
+fn terminator_values(terminator: &Terminator) -> Vec<ValueRef> {
+    match terminator {
+        Terminator::Return(value) => value.iter().copied().collect(),
+        Terminator::Branch { condition, .. } | Terminator::Loop { condition, .. } => {
+            vec![*condition]
+        }
+        Terminator::For { iterable, .. } => vec![*iterable],
+        Terminator::Switch { values, .. } => values.clone(),
+        Terminator::Goto(_)
         | Terminator::Break
         | Terminator::Continue
         | Terminator::Unreachable => Vec::new(),

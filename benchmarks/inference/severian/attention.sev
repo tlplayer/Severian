@@ -43,7 +43,7 @@ def grouped_query_attention(
         tensor.bf16_to_f_32(transposed_key),
     )
     scores = tensor.scale_f_32(scores, 1.0 / (float(head_dimension) ** 0.5))
-    scores = tensor.add_f_32(scores, causal_mask)
+    scores = tensor.ranked_add(scores, causal_mask)
     probabilities = stable_softmax(scores)
     context = tensor.batched_matmul_f_32(probabilities, tensor.bf16_to_f_32(repeated_value))
     return tensor.f32_to_bf_16(context)
@@ -51,7 +51,7 @@ def grouped_query_attention(
 def repeat_key_value(value: Tensor[bf16], repeats: int) -> Tensor[bf16]:
     shape = tensor.shape_bf_16(value)
     assert(size(shape) == 4)
-    expanded := tensor.reshape_bf_16(
+    expanded := tensor.reshape(
         value,
         [shape[0], shape[1], 1, shape[2], shape[3]],
     )
@@ -59,7 +59,7 @@ def repeat_key_value(value: Tensor[bf16], repeats: int) -> Tensor[bf16]:
         expanded,
         [shape[0], shape[1], repeats, shape[2], shape[3]],
     )
-    return tensor.reshape_bf_16(
+    return tensor.reshape(
         expanded,
         [shape[0], shape[1] * repeats, shape[2], shape[3]],
     )
@@ -91,13 +91,13 @@ def self_attention(
     query := tensor.matmul_bf_16(input, query_weight)
     key := tensor.matmul_bf_16(input, key_weight)
     value := tensor.matmul_bf_16(input, value_weight)
-    query = tensor.add_bf_16(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
-    key = tensor.add_bf_16(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
-    value = tensor.add_bf_16(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
+    query = tensor.ranked_add(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
+    key = tensor.ranked_add(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
+    value = tensor.ranked_add(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
     input_shape = tensor.shape_bf_16(input)
-    query = tensor.reshape_bf_16(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
-    key = tensor.reshape_bf_16(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
-    value = tensor.reshape_bf_16(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    query = tensor.reshape(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
+    key = tensor.reshape(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    value = tensor.reshape(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
     query = tensor.transpose_bf_16(query, [0, 2, 1, 3])
     key = tensor.transpose_bf_16(key, [0, 2, 1, 3])
     value = tensor.transpose_bf_16(value, [0, 2, 1, 3])
@@ -113,6 +113,6 @@ def self_attention(
         head_dimension,
     )
     attended = tensor.transpose_bf_16(attended, [0, 2, 1, 3])
-    attended = tensor.reshape_bf_16(attended, [-1, -1, num_heads * head_dimension])
+    attended = tensor.reshape(attended, [-1, -1, num_heads * head_dimension])
     output_weight = tensor.transpose_bf_16(weights.output, [1, 0])
     return AttentionResult(tensor.matmul_bf_16(attended, output_weight), updated_cache)

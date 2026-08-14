@@ -37,7 +37,13 @@ impl Drop for Compilation {
 }
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
     let ast = parse_source(source, Path::new("<memory>"))?;
-    compile_ast(&ast, &[], Path::new("<memory>"), source)
+    compile_ast(
+        &ast,
+        &[],
+        Path::new("<memory>"),
+        source,
+        severian_package::TypeResolutionPolicy::default(),
+    )
 }
 
 fn parse_source(source: &str, source_path: &Path) -> Result<AstModule, CompileError> {
@@ -63,8 +69,9 @@ fn compile_ast(
     interfaces: &[PackageInterface],
     source_path: &Path,
     source: &str,
+    type_resolution: severian_package::TypeResolutionPolicy,
 ) -> Result<Compilation, CompileError> {
-    let hir = check_ast(ast, interfaces, source_path, source)?;
+    let hir = check_ast(ast, interfaces, source_path, source, type_resolution)?;
     let mut optimized_hir = hir.clone();
     link_package_hir(&mut optimized_hir, interfaces)?;
     let fusion_rules = interfaces
@@ -235,6 +242,7 @@ fn check_ast(
     interfaces: &[PackageInterface],
     source_path: &Path,
     source: &str,
+    type_resolution: severian_package::TypeResolutionPolicy,
 ) -> Result<Program, CompileError> {
     let mut hir = severian_semantic::analyze_with_packages(ast, interfaces).map_err(|error| {
         CompileError::Frontend {
@@ -253,6 +261,15 @@ fn check_ast(
         None,
         interfaces,
     );
+    severian_semantic::enforce_type_resolution_policy(ast, &hir, type_resolution).map_err(
+        |error| CompileError::Frontend {
+            stage: "type resolution",
+            span: error.span,
+            message: error.message,
+            source_path: source_path.to_path_buf(),
+            source: source.to_owned(),
+        },
+    )?;
     verify_hir(&hir, "resolved HIR")?;
     severian_ownership::check(&hir)
         .map_err(|error| ownership_compile_error(error.message, source_path, source))?;
@@ -328,8 +345,8 @@ pub fn compile_path(path: &Path) -> Result<Compilation, CompileError> {
         .name("severian-compiler".into())
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
-            let (ast, interfaces, source) = frontend_path(&path, true, None)?;
-            compile_ast(&ast, &interfaces, &path, &source)
+            let (ast, interfaces, source, type_resolution) = frontend_path(&path, true, None)?;
+            compile_ast(&ast, &interfaces, &path, &source, type_resolution)
         })
         .map_err(CompileError::Io)?
         .join()
@@ -340,28 +357,38 @@ pub fn compile_dependency_path(
     path: &Path,
     manifest_path: &Path,
 ) -> Result<Compilation, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, false, Some(manifest_path))?;
-    compile_ast(&ast, &interfaces, path, &source)
+    let (ast, interfaces, source, type_resolution) =
+        frontend_path(path, false, Some(manifest_path))?;
+    compile_ast(&ast, &interfaces, path, &source, type_resolution)
 }
 
 pub fn check_path(path: &Path) -> Result<Program, CompileError> {
-    let (ast, interfaces, source) = frontend_path(path, true, None)?;
-    check_ast(&ast, &interfaces, path, &source)
+    let (ast, interfaces, source, type_resolution) = frontend_path(path, true, None)?;
+    check_ast(&ast, &interfaces, path, &source, type_resolution)
 }
 
 fn frontend_path(
     path: &Path,
     write_lock: bool,
     manifest_override: Option<&Path>,
-) -> Result<(AstModule, Vec<PackageInterface>, String), CompileError> {
+) -> Result<
+    (
+        AstModule,
+        Vec<PackageInterface>,
+        String,
+        severian_package::TypeResolutionPolicy,
+    ),
+    CompileError,
+> {
     let source = std::fs::read_to_string(path)?;
     let ast = parse_source(&source, path)?;
     let manifest_path = manifest_override
         .map(Path::to_path_buf)
         .or_else(|| severian_package::find_manifest(path));
+    let type_resolution =
+        severian_package::TypeResolutionPolicy::for_manifest(manifest_path.as_deref())
+            .map_err(|error| CompileError::Package(error.to_string()))?;
     severian_package::enforce_unsafe_policy(manifest_path.as_deref(), path, &source)
-        .map_err(|error| CompileError::Package(error.to_string()))?;
-    severian_package::enforce_type_safe_policy(manifest_path.as_deref(), path, &ast, &source)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     let project_root = manifest_path
         .as_deref()
@@ -389,16 +416,11 @@ fn frontend_path(
         .collect::<HashSet<_>>();
     let local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
         .map_err(|error| CompileError::Package(error.to_string()))?;
+    let local_paths = local_interfaces
+        .iter()
+        .map(|interface| interface.source_path.clone())
+        .collect::<HashSet<_>>();
     for interface in &local_interfaces {
-        severian_package::enforce_type_safe_policy(
-            manifest_path.as_deref(),
-            &interface.source_path,
-            &interface.module,
-            &interface.source,
-        )
-        .map_err(|error| {
-            CompileError::Package(format!("{}: {error}", interface.source_path.display()))
-        })?;
         for official in load_official_interfaces(&interface.module)? {
             insert_official_interface(&mut interfaces, official, &dependency_names)?;
         }
@@ -409,7 +431,53 @@ fn frontend_path(
     for interface in load_official_interfaces(&ast)? {
         insert_official_interface(&mut interfaces, interface, &dependency_names)?;
     }
-    Ok((ast, interfaces, source))
+    for interface in interfaces
+        .iter()
+        .filter(|interface| local_paths.contains(&interface.source_path))
+    {
+        enforce_interface_type_resolution(interface, &interfaces, type_resolution)?;
+    }
+    Ok((ast, interfaces, source, type_resolution))
+}
+
+fn enforce_interface_type_resolution(
+    interface: &PackageInterface,
+    interfaces: &[PackageInterface],
+    policy: severian_package::TypeResolutionPolicy,
+) -> Result<(), CompileError> {
+    if policy.is_permissive() {
+        return Ok(());
+    }
+    let dependencies = interfaces
+        .iter()
+        .filter(|candidate| candidate.source_path != interface.source_path)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut hir = severian_semantic::analyze_with_packages(&interface.module, &dependencies)
+        .map_err(|error| CompileError::Frontend {
+            stage: "semantic",
+            span: error.span,
+            message: format!("package `{}`: {}", interface.name, error.message),
+            source_path: interface.source_path.clone(),
+            source: interface.source.clone(),
+        })?;
+    severian_semantic::attach_module_metadata_with_packages(
+        &interface.module,
+        &mut hir,
+        interface.source_path.clone(),
+        interface.source.clone(),
+        Some(&interface.name),
+        &dependencies,
+    );
+    severian_semantic::enforce_type_resolution_policy(&interface.module, &hir, policy).map_err(
+        |error| CompileError::Frontend {
+            stage: "type resolution",
+            span: error.span,
+            message: error.message,
+            source_path: interface.source_path.clone(),
+            source: interface.source.clone(),
+        },
+    )
 }
 
 fn insert_official_interface(

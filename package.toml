@@ -19,6 +19,13 @@ branches = 60
 [memory]
 leaks = "deny"
 
+[compiler.type_resolution]
+deny_any = true
+deny_tensor_any = true
+deny_unresolved = true
+deny_inferred_fallback = true
+deny_lost_type_information = true
+
 [architecture.files]
 soft_lines = 500
 hard_lines = 800
@@ -50,13 +57,6 @@ hard_lines = 2700
 reason = "The build policy is now isolated in driver modules; remaining command dispatch must move into command-specific modules."
 expires = "2026-10-15"
 owner = "compiler-driver"
-
-[[architecture.files.exception]]
-path = "compiler/lowering/src/stablehlo/mod.rs"
-hard_lines = 1200
-reason = "StableHLO textual lowering predates the architecture gate and needs an operation-family split."
-expires = "2026-10-15"
-owner = "compiler-lowering"
 
 [[architecture.files.exception]]
 path = "compiler/diagnostics/src/naming.rs"

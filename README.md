@@ -600,18 +600,24 @@ examples/
 name = "geometry-app"
 version = "0.1.0"
 edition = "2026"
-type-safe = true
+
+[compiler.type_resolution]
+deny_any = true
+deny_tensor_any = true
+deny_unresolved = true
+deny_inferred_fallback = true
+deny_lost_type_information = true
 
 [dependencies]
 geometry = { version = "0.1.0", path = "../geometry" }
 ```
 
-`type-safe = true` provides a progressive optimization boundary. In that
-package, a parameter or field which would silently default to `Any` produces
-`E000201` with its source line and an annotation suggestion. Packages without the
-option remain flexible, and explicitly writing `Any` always records intentional
-dynamic typing. See [`docs/error`](docs/error/README.md) for the categorized
-compiler diagnostic catalog.
+`[compiler.type_resolution]` is enforced after semantic checking and before MIR.
+It rejects inference fallback, unresolved types or generics, lost type facts,
+and implicit tensor erasure with `E000207`. Packages without these switches
+remain flexible, and explicitly writing `Any` always records intentional dynamic
+typing. See [`docs/error`](docs/error/README.md) for the categorized compiler
+diagnostic catalog.
 
 `from geometry import Point` resolves `geometry` from the current package, a
 dependency selected by the manifest and lockfile, or the official library.
@@ -798,8 +804,9 @@ owned = move copy
 ```
 
 Parameter declarations contain names and optional types, not ownership modes.
-An omitted type defaults to `Any` unless the package enables `type-safe`; native
-ABI parameters always require explicit types. Parameters are viewed by default.
+An omitted type defaults to `Any` unless package type-resolution policy rejects
+inference fallback; native ABI parameters always require explicit types.
+Parameters are viewed by default.
 A call may use `view`, `borrow`, `clone`, or `move` on an
 argument when the ownership operation must be explicit.
 

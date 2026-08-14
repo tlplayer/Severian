@@ -7,6 +7,7 @@ fn creates_explicit_branch_blocks_with_typed_value_references() {
     let condition = Expression::Typed {
         id: severian_hir::HirId::from_source_range(0, 4),
         ty: ValueType::Bool,
+        any_origin: None,
         expression: Box::new(Expression::Boolean(true)),
     };
     let mut hir = Program {
@@ -125,4 +126,68 @@ fn resolves_operations_to_dense_local_ids_instead_of_names() {
             ref operands,
         } if operands[0].local == Some(severian_mir::LocalId(0))
     ));
+}
+
+#[test]
+fn preserves_resolved_tensor_operations_instead_of_reparsing_names() {
+    let tensor = severian_hir::TensorType::ranked(
+        severian_hir::TensorElementType::F32,
+        &[severian_hir::TensorDimension::Static(8)],
+    )
+    .unwrap();
+    let parameter = BindingRef::synthetic("value");
+    let typed = |expression| Expression::Typed {
+        id: severian_hir::HirId::synthetic(1),
+        ty: ValueType::Tensor(tensor),
+        any_origin: None,
+        expression: Box::new(expression),
+    };
+    let program = |target| Program {
+        functions: vec![Function {
+            id: FunctionId::from_name("kernel"),
+            name: "kernel".into(),
+            native_symbol: None,
+            decorators: Vec::new(),
+            contract: None,
+            params: vec![Parameter {
+                name: parameter.clone(),
+                ty: ValueType::Tensor(tensor),
+                default: None,
+                receiver: None,
+            }],
+            return_type: ValueType::Tensor(tensor),
+            instructions: vec![Instruction::Return(Some(typed(Expression::Call {
+                target,
+                args: vec![typed(Expression::Variable(parameter.clone()))],
+            })))],
+            tests: Vec::new(),
+        }],
+        ..Program::default()
+    };
+
+    let mut resolved = severian_mir::lower(&program(severian_hir::CallTarget::native(
+        "renamed_activation",
+        "__sev_tensor_relu",
+    )));
+    assert!(matches!(
+        resolved.functions[0].tensor_operations.as_slice(),
+        [severian_mir::TensorOp::Elementwise(operation)]
+            if operation.kind == severian_mir::ElementwiseKind::Relu
+    ));
+
+    let unresolved = severian_mir::lower(&program(severian_hir::CallTarget::source(
+        "__sev_tensor_relu",
+    )));
+    assert!(unresolved.functions[0].tensor_operations.is_empty());
+
+    let severian_mir::Terminator::Return(Some(value)) =
+        &mut resolved.functions[0].blocks[0].terminator
+    else {
+        unreachable!()
+    };
+    value.tensor_op = Some(severian_mir::TensorOpId(9));
+    let errors = severian_mir::verify(&resolved).unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|error| error.invariant == "valid-tensor-operation"));
 }

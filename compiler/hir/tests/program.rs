@@ -1,6 +1,6 @@
 use severian_hir::{
-    BindingRef, Expression, Function, FunctionId, Instruction, Parameter, Program, TensorDimension,
-    TensorElementType, TensorType, ValueType,
+    AnyOrigin, BindingRef, Expression, Function, FunctionId, Global, HirId, Instruction, Parameter,
+    Program, TensorDimension, TensorElementType, TensorType, ValueType,
 };
 
 #[test]
@@ -102,4 +102,32 @@ fn verifies_ranked_tensor_compatibility_and_broadcasting() {
     let incompatible =
         TensorType::ranked(TensorElementType::F64, &[TensorDimension::Static(4)]).unwrap();
     assert!(rank_two.broadcast_with(incompatible).is_err());
+}
+
+#[test]
+fn missing_dynamic_type_provenance_becomes_lost_information() {
+    let legacy_id = HirId::from_source_range(0, 5);
+    let mut program = Program {
+        globals: vec![Global {
+            name: BindingRef::source("value", 0, 5),
+            value: Expression::Typed {
+                id: legacy_id,
+                ty: ValueType::Any,
+                any_origin: None,
+                expression: Box::new(Expression::Integer(1)),
+            },
+        }],
+        ..Program::default()
+    };
+
+    program.attach_source_file("fixture.sev", "value");
+    assert_eq!(
+        program
+            .metadata
+            .expression_any_origins
+            .values()
+            .copied()
+            .collect::<Vec<_>>(),
+        [AnyOrigin::LostTypeInformation]
+    );
 }

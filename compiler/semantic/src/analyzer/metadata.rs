@@ -356,6 +356,7 @@ pub(super) fn intern_type(
                 "bool" => types.intern(TypeKind::Bool),
                 "string" => types.intern(TypeKind::String),
                 "unit" => types.intern(TypeKind::Unit),
+                "Any" | "any" => types.intern(TypeKind::Any),
                 "list" => {
                     let element = arguments
                         .first()

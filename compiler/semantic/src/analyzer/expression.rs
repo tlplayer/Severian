@@ -8,14 +8,105 @@ pub(super) fn lower_expression(
 ) -> Result<(Expression, ValueType), SemanticError> {
     let (lowered, ty) = lower_expression_kind(expression, scope, signatures, aliases)?;
     let span = expression.span();
+    let any_origin = expression_any_origin(expression, &lowered, ty, scope);
     Ok((
         Expression::Typed {
             id: HirId::from_source_range(span.start, span.end),
             ty,
+            any_origin,
             expression: Box::new(lowered),
         },
         ty,
     ))
+}
+
+fn expression_any_origin(
+    source: &Expr,
+    lowered: &Expression,
+    ty: ValueType,
+    scope: &HashMap<String, Binding>,
+) -> Option<AnyOrigin> {
+    if !matches!(ty, ValueType::Any | ValueType::TensorAny) {
+        return None;
+    }
+    if let Expr::Identifier(identifier) = source {
+        return scope
+            .get(&identifier.name)
+            .and_then(|binding| binding.any_origin)
+            .or_else(|| {
+                (identifier.name == "invalid")
+                    .then_some(AnyOrigin::Explicit)
+                    .or(Some(AnyOrigin::UnresolvedType))
+            });
+    }
+    let origin = match lowered {
+        Expression::Call { target, args } => combine_any_origins(
+            target
+                .signature
+                .as_ref()
+                .and_then(|signature| signature.return_any_origin)
+                .into_iter()
+                .chain(args.iter().filter_map(Expression::any_origin)),
+        ),
+        Expression::CallValue { callee, args, .. } => combine_any_origins(
+            callee
+                .any_origin()
+                .into_iter()
+                .chain(args.iter().filter_map(Expression::any_origin)),
+        ),
+        Expression::Binary { left, right, .. } => combine_any_origins(
+            [left.any_origin(), right.any_origin()]
+                .into_iter()
+                .flatten(),
+        ),
+        Expression::Unary { expression, .. }
+        | Expression::Await(expression)
+        | Expression::Channel(expression)
+        | Expression::Ownership {
+            value: expression, ..
+        }
+        | Expression::Task {
+            value: expression, ..
+        }
+        | Expression::FusedPipeline {
+            input: expression, ..
+        } => expression.any_origin(),
+        Expression::Conditional {
+            then_expression,
+            else_expression,
+            ..
+        } => combine_any_origins(
+            [then_expression.any_origin(), else_expression.any_origin()]
+                .into_iter()
+                .flatten(),
+        ),
+        Expression::Index { object, .. }
+        | Expression::Slice { object, .. }
+        | Expression::Member { object, .. } => object.any_origin(),
+        Expression::MethodCall { object, args, .. } => combine_any_origins(
+            object
+                .any_origin()
+                .into_iter()
+                .chain(args.iter().filter_map(Expression::any_origin)),
+        ),
+        Expression::Construct { .. }
+        | Expression::ConstructFields { .. }
+        | Expression::ObjectUpdate { .. }
+        | Expression::Variant { .. } => Some(AnyOrigin::Explicit),
+        Expression::ChaosRule { value, .. } => value.any_origin(),
+        _ => None,
+    };
+    origin.or(Some(AnyOrigin::LostTypeInformation))
+}
+
+fn combine_any_origins(origins: impl IntoIterator<Item = AnyOrigin>) -> Option<AnyOrigin> {
+    origins.into_iter().max_by_key(|origin| match origin {
+        AnyOrigin::Explicit => 0,
+        AnyOrigin::InferenceFallback => 1,
+        AnyOrigin::UnresolvedType => 2,
+        AnyOrigin::UnresolvedGeneric => 3,
+        AnyOrigin::LostTypeInformation => 4,
+    })
 }
 
 pub(super) fn lower_expression_kind(
@@ -161,13 +252,23 @@ pub(super) fn lower_expression_kind(
                             "operator `X` requires `@tensor(X)` on this function",
                         ));
                     }
-                    validate_matmul_dimensions(binary.span, left_type, right_type)?;
+                    let result_type =
+                        tensor::infer_matmul_operator(left_type, right_type, binary.span)?;
+                    let target = signatures
+                        .get("tensor.ranked_matmul")
+                        .map(|signature| signature.target.clone())
+                        .unwrap_or_else(|| {
+                            CallTarget::native(
+                                "tensor.ranked_matmul",
+                                severian_hir::TENSOR_MATMUL_NATIVE_SYMBOL,
+                            )
+                        });
                     return Ok((
                         Expression::Call {
-                            target: CallTarget::source("tensor.ranked_matmul"),
+                            target,
                             args: vec![left, right],
                         },
-                        left_type,
+                        result_type,
                     ));
                 }
                 AstBinaryOp::Cross => {
@@ -514,11 +615,17 @@ pub(super) fn lower_expression_kind(
             let mut lambda_scope = scope.clone();
             let mut params = Vec::new();
             for parameter in &lambda.params {
+                let ty = parameter
+                    .ty
+                    .as_ref()
+                    .map(lower_type)
+                    .transpose()?
+                    .unwrap_or(ValueType::Any);
                 lambda_scope.insert(
                     parameter.name.name.clone(),
                     Binding {
                         reference: source_binding(&parameter.name),
-                        ty: ValueType::Any,
+                        ty,
                         class: None,
                         function_return: None,
                         collection_len: None,
@@ -526,6 +633,7 @@ pub(super) fn lower_expression_kind(
                         field: false,
                         integer_max: None,
                         known_integer: None,
+                        any_origin: declared_any_origin(parameter.ty.as_ref(), ty),
                     },
                 );
                 params.push(lambda_scope[&parameter.name.name].reference.clone());
@@ -574,50 +682,6 @@ pub(super) fn lower_expression_kind(
     }
 }
 
-fn validate_matmul_dimensions(
-    span: Span,
-    left: ValueType,
-    right: ValueType,
-) -> Result<(), SemanticError> {
-    let (ValueType::Tensor(left), ValueType::Tensor(right)) = (left, right) else {
-        return Ok(());
-    };
-    let (Some(left_rank), Some(right_rank)) = (left.rank, right.rank) else {
-        return Ok(());
-    };
-    if left_rank == 0 || right_rank == 0 {
-        return Ok(());
-    }
-    let left_axis = left_rank as usize - 1;
-    let right_axis = usize::from(left_rank == 4 && right_rank == 4) * 2;
-    let left_contracting = left.dimensions[left_axis];
-    let right_contracting = right.dimensions[right_axis];
-    let incompatible = matches!(
-        (left_contracting, right_contracting),
-        (TensorDimension::Static(left), TensorDimension::Static(right)) if left != right
-    );
-    if !incompatible {
-        return Ok(());
-    }
-    Err(error(
-        span,
-        format!(
-            "E002401: incompatible tensor dimensions; left is `{}`; right is `{}`; requires `{} == {}`",
-            value_type_name(ValueType::Tensor(left)),
-            value_type_name(ValueType::Tensor(right)),
-            tensor_dimension_name(left_contracting),
-            tensor_dimension_name(right_contracting),
-        ),
-    ))
-}
-
-fn tensor_dimension_name(dimension: TensorDimension) -> String {
-    match dimension {
-        TensorDimension::Static(value) => value.to_string(),
-        TensorDimension::Dynamic => "dynamic".into(),
-    }
-}
-
 pub(super) fn add_test_bindings(
     scope: &mut HashMap<String, Binding>,
     modes: &[severian_ast::TestMode],
@@ -634,6 +698,7 @@ pub(super) fn add_test_bindings(
             field: false,
             integer_max: None,
             known_integer: None,
+            any_origin: None,
         },
     );
     if modes.contains(&severian_ast::TestMode::Integration) {
@@ -650,6 +715,7 @@ pub(super) fn add_test_bindings(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: None,
                 },
             );
         }
@@ -668,6 +734,7 @@ pub(super) fn add_test_bindings(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: None,
                 },
             );
         }

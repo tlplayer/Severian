@@ -63,11 +63,6 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "Named scientific constructs preserve conventional spellings such as ReLU, GELU, SiLU, LSTM, RMSNorm, and Conv2D; functional operations remain snake_case.",
         },
         Explanation {
-            code: "E000201",
-            title: "Inferred Any in a type-safe package",
-            text: "The package enables `[package] type-safe = true`, but a parameter or field has no annotation and would default to `Any`. Add a concrete type to improve checking and optimization, or write `Any` explicitly when the dynamic boundary is intentional.",
-        },
-        Explanation {
             code: "E000101",
             title: "Unterminated block string",
             text: "A triple-double-quoted block string reached the end of the source before its closing triple quotes.",
@@ -121,6 +116,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             code: "E000206",
             title: "Non-exhaustive enum switch",
             text: "A switch over an enum must handle every declared variant, or contain an unguarded wildcard arm. The diagnostic lists variants that are not covered. Exhaustive switches make adding an enum variant a reviewable source change instead of an implicit runtime fallthrough.",
+        },
+        Explanation {
+            code: "E000207",
+            title: "Unresolved type escaped semantic analysis",
+            text: "The package's `[compiler.type_resolution]` policy rejected a dynamic type that was created by inference fallback, an unresolved name or generic, or lost compiler information. Explicit source-level `Any` remains legal. Fix the originating annotation or inference rule instead of weakening the value after type checking.",
         },
         Explanation {
             code: "E000300",

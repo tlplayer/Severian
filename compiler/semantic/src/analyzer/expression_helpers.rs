@@ -101,6 +101,8 @@ pub(super) fn lower_declared_call(
         "math.sqrt" => "sqrt",
         _ => linked_function,
     };
+    let return_type = instantiate_signature_type(&signature.returns, &tensor_types);
+    let return_type = tensor::infer_call_result(&signature.target, &args, return_type, call.span)?;
     Ok((
         Expression::Call {
             target: if runtime_function == linked_function {
@@ -110,7 +112,7 @@ pub(super) fn lower_declared_call(
             },
             args,
         },
-        instantiate_signature_type(&signature.returns, &tensor_types),
+        return_type,
     ))
 }
 
@@ -410,12 +412,14 @@ pub(super) fn lower_signature(
     let params = params
         .iter()
         .map(|param| {
+            let ty = param.ty.as_ref().map_or_else(
+                || Ok(SignatureType::Concrete(ValueType::Any)),
+                |ty| lower_signature_type(ty, &generic_params),
+            )?;
             Ok(SignatureParameter {
                 name: param.name.name.clone(),
-                ty: param.ty.as_ref().map_or_else(
-                    || Ok(SignatureType::Concrete(ValueType::Any)),
-                    |ty| lower_signature_type(ty, &generic_params),
-                )?,
+                any_origin: signature_any_origin(&ty, param.ty.is_some(), AnyOrigin::Explicit),
+                ty,
                 function_return: function_return_type(param.ty.as_ref()),
                 default: param.default.clone(),
             })
@@ -425,6 +429,11 @@ pub(super) fn lower_signature(
         || Ok(SignatureType::Concrete(ValueType::Unit)),
         |ty| lower_signature_type(ty, &generic_params),
     )?;
+    let return_any_origin = signature_any_origin(
+        &returns,
+        return_type.is_some(),
+        AnyOrigin::UnresolvedGeneric,
+    );
     let target = match native_symbol {
         Some(symbol) => CallTarget::native(name, symbol),
         None => CallTarget::source(name),
@@ -432,12 +441,34 @@ pub(super) fn lower_signature(
     .with_signature(
         params.iter().map(|param| param.ty.erased()),
         returns.erased(),
+    )
+    .with_signature_origins(
+        params.iter().map(|param| param.any_origin).collect(),
+        return_any_origin,
     );
     Ok(Signature {
         target,
         params,
         returns,
     })
+}
+
+fn signature_any_origin(
+    ty: &SignatureType,
+    explicitly_declared: bool,
+    generic_origin: AnyOrigin,
+) -> Option<AnyOrigin> {
+    match ty {
+        SignatureType::TensorGeneric(_) => Some(generic_origin),
+        SignatureType::Concrete(ValueType::Any | ValueType::TensorAny) => {
+            Some(if explicitly_declared {
+                AnyOrigin::Explicit
+            } else {
+                AnyOrigin::InferenceFallback
+            })
+        }
+        SignatureType::Concrete(_) => None,
+    }
 }
 
 fn tensor_constraint(ty: &Type) -> Result<severian_hir::TensorElementConstraint, SemanticError> {

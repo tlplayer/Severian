@@ -235,8 +235,6 @@ unsafe:
 
 # These are compiler-recognized tensor primitives. On the XLA target they are
 # decomposed into StableHLO; they are not opaque model/runtime operations.
-    native("__sev_tensor_bf16_add") def add_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
-    native("__sev_tensor_f32_add") def add_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
     native("__sev_tensor_bf16_multiply") def multiply_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
     native("__sev_tensor_f32_multiply") def multiply_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
     native("__sev_tensor_f32_subtract") def subtract_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
@@ -244,8 +242,6 @@ unsafe:
     native("__sev_tensor_bf16_matmul") def matmul_bf_16(left: Tensor[bf16], right: Tensor[bf16]) -> Tensor[bf16]
     native("__sev_tensor_f32_matmul") def matmul_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
     native("__sev_tensor_f32_batched_matmul") def batched_matmul_f_32(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
-    native("__sev_tensor_bf16_reshape") def reshape_bf_16(value: Tensor[bf16], shape: list[int]) -> Tensor[bf16]
-    native("__sev_tensor_f32_reshape") def reshape_f_32(value: Tensor[f32], shape: list[int]) -> Tensor[f32]
     native("__sev_tensor_bf16_transpose") def transpose_bf_16(value: Tensor[bf16], axes: list[int]) -> Tensor[bf16]
     native("__sev_tensor_f32_transpose") def transpose_f_32(value: Tensor[f32], axes: list[int]) -> Tensor[f32]
     native("__sev_tensor_bf16_to_f32") def bf16_to_f_32(value: Tensor[bf16]) -> Tensor[f32]

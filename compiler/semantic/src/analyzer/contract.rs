@@ -166,6 +166,7 @@ pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruct
         Expression::Typed {
             id: HirId::synthetic(102),
             ty: ValueType::String,
+            any_origin: None,
             expression: Box::new(Expression::Format {
                 template: clause
                     .dependencies
@@ -181,6 +182,7 @@ pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruct
                     .map(|(index, (name, ty))| Expression::Typed {
                         id: HirId::synthetic(120 + index as u64),
                         ty: *ty,
+                        any_origin: None,
                         expression: Box::new(Expression::Variable(name.clone())),
                     })
                     .collect(),
@@ -193,6 +195,7 @@ pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruct
     let failure = Expression::Typed {
         id: HirId::synthetic(110),
         ty: ValueType::Unit,
+        any_origin: None,
         expression: Box::new(Expression::Call {
             target: CallTarget {
                 id: FunctionId::from_name("__sev_contract_fail"),
@@ -200,7 +203,9 @@ pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruct
                 native_symbol: Some("__sev_contract_fail".into()),
                 signature: Some(FunctionType {
                     parameters: vec![ValueType::String; 3],
+                    parameter_any_origins: vec![None; 3],
                     returns: ValueType::Unit,
+                    return_any_origin: None,
                 }),
             },
             args: arguments,
@@ -217,6 +222,7 @@ pub(super) fn synthetic_string(id: u64, value: String) -> Expression {
     Expression::Typed {
         id: HirId::synthetic(id),
         ty: ValueType::String,
+        any_origin: None,
         expression: Box::new(Expression::String(value)),
     }
 }

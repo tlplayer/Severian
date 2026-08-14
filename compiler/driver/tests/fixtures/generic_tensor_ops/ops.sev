@@ -16,5 +16,7 @@ def generic_tensor_ops(
     condition: Tensor[bool, 2, 3, 4],
     fallback: Tensor[f32, 2, 3, 4],
 ) -> Tensor[f32, 2, 3, 4]:
-    probabilities = softmax_middle(value)
+    reshaped = tensor.reshape(value, [2, 3, 4])
+    combined = tensor.ranked_add(reshaped, fallback)
+    probabilities = softmax_middle(combined)
     return select_values(condition, probabilities, fallback)

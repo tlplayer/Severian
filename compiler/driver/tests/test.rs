@@ -222,7 +222,8 @@ fn new_creates_and_runs_a_native_severian_project() {
     assert!(root.join("sev.lock").is_file());
     let manifest = std::fs::read_to_string(root.join("package.toml")).unwrap();
     assert!(manifest.contains("diagnostics = \"user\""));
-    assert!(manifest.contains("type-safe = false"));
+    assert!(manifest.contains("[compiler.type_resolution]"));
+    assert!(manifest.contains("deny_inferred_fallback = false"));
     assert!(manifest.contains("minimum = 0"));
     assert!(manifest.contains("leaks = \"allow\""));
     assert!(manifest.contains("[profile.release]"));
@@ -495,12 +496,15 @@ fn formatted_triple_quoted_block_strings_compile_and_interpolate() {
 }
 
 #[test]
-fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
-    let root = std::env::temp_dir().join(format!("severian-type-safe-test-{}", std::process::id()));
+fn strict_type_resolution_rejects_inferred_any_with_actionable_source_context() {
+    let root = std::env::temp_dir().join(format!(
+        "severian-type-resolution-test-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("package.toml"),
-        "[package]\nname = \"strict-example\"\nversion = \"0.1.0\"\ntype-safe = true\n\n[[bin]]\nname = \"strict-example\"\npath = \"src/main.sev\"\n",
+        "[package]\nname = \"strict-example\"\nversion = \"0.1.0\"\n\n[compiler.type_resolution]\ndeny_any = true\ndeny_inferred_fallback = true\n\n[[bin]]\nname = \"strict-example\"\npath = \"src/main.sev\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -516,9 +520,9 @@ fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
         .unwrap();
     assert!(!rejected.status.success());
     let error = String::from_utf8_lossy(&rejected.stderr);
-    assert!(error.contains("E000201: parameter `value` defaults to `Any`"));
-    assert!(error.contains("source: def identity(value) -> Any:"));
-    assert!(error.contains("value: ConcreteType"));
+    assert!(error.contains("E000207"));
+    assert!(error.contains("parameter `value` has no declared type"));
+    assert!(error.contains("deny_inferred_fallback = true"));
 
     std::fs::write(
         root.join("src/main.sev"),
@@ -554,7 +558,8 @@ fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
     assert!(!local_module.status.success());
     let error = String::from_utf8_lossy(&local_module.stderr);
     assert!(error.contains("helpers.sev"));
-    assert!(error.contains("E000201: parameter `value` defaults to `Any`"));
+    assert!(error.contains("E000207"));
+    assert!(error.contains("parameter `value` has no declared type"));
     std::fs::remove_dir_all(root).unwrap();
 }
 

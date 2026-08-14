@@ -55,6 +55,7 @@ pub(super) fn lower_block(
                             field: false,
                             integer_max: None,
                             known_integer: None,
+                            any_origin: declared_any_origin(parameter.ty.as_ref(), ty),
                         },
                     );
                     params.push(Parameter {
@@ -104,6 +105,7 @@ pub(super) fn lower_block(
                     field: false,
                     integer_max: None,
                     known_integer: None,
+                    any_origin: None,
                 };
                 if scope
                     .insert(function.name.name.clone(), binding.clone())
@@ -119,6 +121,7 @@ pub(super) fn lower_block(
                     value: Expression::Typed {
                         id: HirId::from_source_range(function.span.start, function.span.end),
                         ty: ValueType::Function,
+                        any_origin: None,
                         expression: Box::new(Expression::Closure {
                             params,
                             body,
@@ -167,6 +170,12 @@ pub(super) fn lower_block(
                 } else {
                     declared.unwrap_or(inferred)
                 };
+                let any_origin = declared_any_origin(binding.ty.as_ref(), ty)
+                    .or_else(|| value.any_origin())
+                    .or_else(|| {
+                        matches!(ty, ValueType::Any | ValueType::TensorAny)
+                            .then_some(AnyOrigin::InferenceFallback)
+                    });
                 let integer_max = binding
                     .ty
                     .as_ref()
@@ -215,6 +224,7 @@ pub(super) fn lower_block(
                             field: false,
                             integer_max,
                             known_integer,
+                            any_origin,
                         },
                     )
                     .is_some()
@@ -268,6 +278,7 @@ pub(super) fn lower_block(
                             field: false,
                             integer_max: None,
                             known_integer: None,
+                            any_origin: Some(AnyOrigin::LostTypeInformation),
                         },
                     );
                     instructions.push(Instruction::Let {
@@ -361,6 +372,7 @@ pub(super) fn lower_block(
                             field: false,
                             integer_max: None,
                             known_integer: None,
+                            any_origin: None,
                         },
                     )
                     .is_some()
@@ -405,6 +417,7 @@ pub(super) fn lower_block(
                                     statement.span().end,
                                 ),
                                 ty: ValueType::Tuple,
+                                any_origin: None,
                                 expression: Box::new(Expression::PrintArgs(args)),
                             }
                         };

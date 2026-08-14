@@ -70,6 +70,38 @@ impl Default for MemoryPolicy {
     }
 }
 
+/// Package-level boundary for information that must not escape semantic type
+/// resolution. Packages can enable the switches incrementally while the
+/// compiler keeps explicit source-level dynamic types legal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TypeResolutionPolicy {
+    pub deny_any: bool,
+    pub deny_tensor_any: bool,
+    pub deny_unresolved: bool,
+    pub deny_inferred_fallback: bool,
+    pub deny_lost_type_information: bool,
+}
+
+impl TypeResolutionPolicy {
+    pub const fn is_permissive(self) -> bool {
+        !self.deny_any
+            && !self.deny_tensor_any
+            && !self.deny_unresolved
+            && !self.deny_inferred_fallback
+            && !self.deny_lost_type_information
+    }
+
+    pub fn for_manifest(manifest: Option<&Path>) -> Result<Self, PackageError> {
+        let Some(manifest) = manifest else {
+            return Ok(Self::default());
+        };
+        let source = std::fs::read_to_string(manifest)?;
+        let value = toml::from_str::<toml::Value>(&source)
+            .map_err(|error| policy_error(manifest, format!("invalid {MANIFEST_FILE}: {error}")))?;
+        parse_type_resolution(&value, manifest)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileLimitException {
     pub path: String,
@@ -276,6 +308,56 @@ fn parse_memory(value: &toml::Value, manifest: &Path) -> Result<MemoryPolicy, Pa
         }
     };
     Ok(MemoryPolicy { leaks })
+}
+
+fn parse_type_resolution(
+    value: &toml::Value,
+    manifest: &Path,
+) -> Result<TypeResolutionPolicy, PackageError> {
+    let Some(compiler) = value.get("compiler") else {
+        return Ok(TypeResolutionPolicy::default());
+    };
+    let compiler = compiler
+        .as_table()
+        .ok_or_else(|| policy_error(manifest, "`compiler` must be a table"))?;
+    let Some(configured) = compiler.get("type_resolution") else {
+        return Ok(TypeResolutionPolicy::default());
+    };
+    let table = configured
+        .as_table()
+        .ok_or_else(|| policy_error(manifest, "`compiler.type_resolution` must be a table"))?;
+    for key in table.keys() {
+        if !matches!(
+            key.as_str(),
+            "deny_any"
+                | "deny_tensor_any"
+                | "deny_unresolved"
+                | "deny_inferred_fallback"
+                | "deny_lost_type_information"
+        ) {
+            return Err(policy_error(
+                manifest,
+                format!("unknown `compiler.type_resolution` setting `{key}`"),
+            ));
+        }
+    }
+    let flag = |name: &str| -> Result<bool, PackageError> {
+        match table.get(name) {
+            None => Ok(false),
+            Some(toml::Value::Boolean(value)) => Ok(*value),
+            Some(_) => Err(policy_error(
+                manifest,
+                format!("`compiler.type_resolution.{name}` must be a boolean"),
+            )),
+        }
+    };
+    Ok(TypeResolutionPolicy {
+        deny_any: flag("deny_any")?,
+        deny_tensor_any: flag("deny_tensor_any")?,
+        deny_unresolved: flag("deny_unresolved")?,
+        deny_inferred_fallback: flag("deny_inferred_fallback")?,
+        deny_lost_type_information: flag("deny_lost_type_information")?,
+    })
 }
 
 fn parse_file_limits(

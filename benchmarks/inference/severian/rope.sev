@@ -28,4 +28,4 @@ def apply_rotary(
     sine = tensor.broadcast_like_f_32(rope.sine, value_f_32)
     direct = tensor.multiply_f_32(value_f_32, cosine)
     rotated = tensor.multiply_f_32(rotate_half(value_f_32, half_dimension), sine)
-    return tensor.f32_to_bf_16(tensor.add_f_32(direct, rotated))
+    return tensor.f32_to_bf_16(tensor.ranked_add(direct, rotated))

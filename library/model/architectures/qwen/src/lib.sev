@@ -165,15 +165,15 @@ class Qwen3Attention:
         projected_query = query.project(hidden_states)
         projected_key = key.project(hidden_states)
         projected_value = value.project(hidden_states)
-        query_heads := tensor.reshape_bf_16(
+        query_heads := tensor.reshape(
             projected_query,
             [input_shape[0], input_shape[1], num_heads, head_dimension],
         )
-        key_heads := tensor.reshape_bf_16(
+        key_heads := tensor.reshape(
             projected_key,
             [input_shape[0], input_shape[1], num_key_value_heads, head_dimension],
         )
-        value_heads := tensor.reshape_bf_16(
+        value_heads := tensor.reshape(
             projected_value,
             [input_shape[0], input_shape[1], num_key_value_heads, head_dimension],
         )
@@ -191,7 +191,7 @@ class Qwen3Attention:
             head_dimension,
         )
         context = tensor.transpose_bf_16(context, [0, 2, 1, 3])
-        context = tensor.reshape_bf_16(
+        context = tensor.reshape(
             context,
             [input_shape[0], input_shape[1], num_heads * head_dimension],
         )
@@ -222,10 +222,10 @@ class Qwen3DecoderLayer:
         attended = attention.attend(
             input_norm.normalize(hidden_states), position_ids, mask, cache, cache_position,
         )
-        attention_residual = tensor.add_bf_16(hidden_states, attended.hidden)
+        attention_residual = tensor.ranked_add(hidden_states, attended.hidden)
         feed_forward = mlp.transform(post_attention_norm.normalize(attention_residual))
         return Qwen3DecoderLayerOutput(
-            tensor.add_bf_16(attention_residual, feed_forward),
+            tensor.ranked_add(attention_residual, feed_forward),
             attended.cache,
         )
 

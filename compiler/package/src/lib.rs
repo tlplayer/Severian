@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use severian_ast::{FunctionDecl, ImportKind, Item, Module, Parameter, Span};
+use severian_ast::{ImportKind, Item, Module, Span};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,7 @@ pub use lockfile::{LockedExternal, LockedPackage, Lockfile};
 pub use manifest::{InstallRequirement, InstallationManifest, SystemRequirement};
 pub use policy::{
     BuildGate, BuildPolicy, CoveragePolicy, FileLimitException, FileLimitPolicy, MemoryPolicy,
+    TypeResolutionPolicy,
 };
 pub use resolution::{
     publish_package, resolve_dependencies, resolve_dependencies_transient, update_dependencies,

@@ -136,11 +136,11 @@ def rotary_values_at(
 ) -> RopeValues:
     query_shape = tensor.shape_bf_16(query)
     positions = tensor.to_f_32(position_ids)
-    position_column = tensor.reshape_f_32(positions, [query_shape[0], query_shape[2], 1])
-    frequency_row = tensor.reshape_f_32(inverse_frequency, [1, head_dimension / 2])
+    position_column = tensor.reshape(positions, [query_shape[0], query_shape[2], 1])
+    frequency_row = tensor.reshape(inverse_frequency, [1, head_dimension / 2])
     half = tensor.matmul_f_32(position_column, frequency_row)
     frequencies = tensor.concatenate_f_32([half, half], 2)
-    expanded = tensor.reshape_f_32(
+    expanded = tensor.reshape(
         frequencies,
         [query_shape[0], 1, query_shape[2], head_dimension],
     )
@@ -157,7 +157,7 @@ def apply_rotary(value: Tensor[bf16], rope: RopeValues, half_dimension: int) -> 
     sine = tensor.broadcast_like_f_32(rope.sine, value_f_32)
     direct = tensor.multiply_f_32(value_f_32, cosine)
     rotated = tensor.multiply_f_32(rotate_half(value_f_32, half_dimension), sine)
-    return tensor.f32_to_bf_16(tensor.add_f_32(direct, rotated))
+    return tensor.f32_to_bf_16(tensor.ranked_add(direct, rotated))
 
 def stable_softmax(scores: Tensor[f32]) -> Tensor[f32]:
     maximum := tensor.max_last_f_32(scores)
@@ -171,9 +171,9 @@ def stable_softmax(scores: Tensor[f32]) -> Tensor[f32]:
 def repeat_key_value(value: Tensor[bf16], repeats: int) -> Tensor[bf16]:
     shape = tensor.shape_bf_16(value)
     assert(size(shape) == 4)
-    expanded := tensor.reshape_bf_16(value, [shape[0], shape[1], 1, shape[2], shape[3]])
+    expanded := tensor.reshape(value, [shape[0], shape[1], 1, shape[2], shape[3]])
     expanded = tensor.broadcast_bf_16(expanded, [shape[0], shape[1], repeats, shape[2], shape[3]])
-    return tensor.reshape_bf_16(expanded, [shape[0], shape[1] * repeats, shape[2], shape[3]])
+    return tensor.reshape(expanded, [shape[0], shape[1] * repeats, shape[2], shape[3]])
 
 def append_cache(cache: KvCache, key: Tensor[bf16], value: Tensor[bf16], position: int) -> KvCache:
     keys = tensor.dynamic_update_slice_bf_16(cache.keys, key, [0, 0, position, 0])
@@ -193,7 +193,7 @@ def grouped_query_attention(
     transposed_key = tensor.transpose_bf_16(repeated_key, [0, 1, 3, 2])
     scores := tensor.batched_matmul_f_32(tensor.bf16_to_f_32(query), tensor.bf16_to_f_32(transposed_key))
     scores = tensor.scale_f_32(scores, 1.0 / (float(head_dimension) ** 0.5))
-    scores = tensor.add_f_32(scores, causal_mask)
+    scores = tensor.ranked_add(scores, causal_mask)
     probabilities = stable_softmax(scores)
     context = tensor.batched_matmul_f_32(probabilities, tensor.bf16_to_f_32(repeated_value))
     return tensor.f32_to_bf_16(context)
@@ -212,13 +212,13 @@ def self_attention(
     query := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.query, [1, 0]))
     key := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.key, [1, 0]))
     value := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.value, [1, 0]))
-    query = tensor.add_bf_16(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
-    key = tensor.add_bf_16(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
-    value = tensor.add_bf_16(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
+    query = tensor.ranked_add(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
+    key = tensor.ranked_add(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
+    value = tensor.ranked_add(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
     input_shape = tensor.shape_bf_16(input)
-    query = tensor.reshape_bf_16(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
-    key = tensor.reshape_bf_16(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
-    value = tensor.reshape_bf_16(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    query = tensor.reshape(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
+    key = tensor.reshape(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
+    value = tensor.reshape(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
     query = tensor.transpose_bf_16(query, [0, 2, 1, 3])
     key = tensor.transpose_bf_16(key, [0, 2, 1, 3])
     value = tensor.transpose_bf_16(value, [0, 2, 1, 3])
@@ -230,7 +230,7 @@ def self_attention(
         num_heads / num_kv_heads, head_dimension,
     )
     attended = tensor.transpose_bf_16(attended, [0, 2, 1, 3])
-    attended = tensor.reshape_bf_16(attended, [-1, -1, num_heads * head_dimension])
+    attended = tensor.reshape(attended, [-1, -1, num_heads * head_dimension])
     output = tensor.matmul_bf_16(attended, tensor.transpose_bf_16(weights.output, [1, 0]))
     return AttentionResult(output, updated_cache)
 
@@ -269,9 +269,9 @@ def transformer_decoder_layer(
         normalized, weights.attention, cache, rotary, causal_mask, position,
         num_heads, num_kv_heads, head_dimension,
     )
-    current = tensor.add_bf_16(hidden, attended.output)
+    current = tensor.ranked_add(hidden, attended.output)
     feed_forward = gated_mlp(rms_norm_bf_16(current, weights.post_attention_norm, epsilon), weights.mlp)
-    return DecoderResult(tensor.add_bf_16(current, feed_forward), attended.cache)
+    return DecoderResult(tensor.ranked_add(current, feed_forward), attended.cache)
 
 test "Linear follows the conventional input weight bias order":
     x = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

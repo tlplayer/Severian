@@ -256,11 +256,15 @@ pub(super) fn lower_class_function(
 ) -> Result<Function, SemanticError> {
     let mut scope = global_scope.clone();
     for field in fields {
+        let ty = aliases
+            .get(&format!("__class_field_type.{class_name}.{field}"))
+            .and_then(|ty| decode_field_type(ty))
+            .unwrap_or(ValueType::Any);
         scope.insert(
             field.clone(),
             Binding {
                 reference: named_binding(field, format!("{class_name}.{field}")),
-                ty: ValueType::Any,
+                ty,
                 class: aliases
                     .get(&format!("__class_field_class.{class_name}.{field}"))
                     .cloned(),
@@ -270,6 +274,13 @@ pub(super) fn lower_class_function(
                 field: true,
                 integer_max: None,
                 known_integer: None,
+                any_origin: matches!(ty, ValueType::Any | ValueType::TensorAny).then_some(
+                    if aliases.contains_key(&format!("__class_field_type.{class_name}.{field}")) {
+                        AnyOrigin::Explicit
+                    } else {
+                        AnyOrigin::InferenceFallback
+                    },
+                ),
             },
         );
     }
@@ -300,6 +311,7 @@ pub(super) fn lower_class_function(
                 field: false,
                 integer_max: None,
                 known_integer: None,
+                any_origin: declared_any_origin(param.ty.as_ref(), ty),
             },
         );
         params.push(Parameter {

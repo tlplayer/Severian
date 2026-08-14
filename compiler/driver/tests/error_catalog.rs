@@ -48,7 +48,7 @@ fn temporary_directory(label: &str) -> PathBuf {
 fn run_fixture(path: &Path, code: &str) -> Output {
     match code {
         "E000103" => run_invalid_dependency(path),
-        "E000201" => run_type_safe_package(path),
+        "E000207" => run_type_resolution_package(path),
         code if code.starts_with("E0009") => Command::new(env!("CARGO_BIN_EXE_sev"))
             .arg(path)
             .output()
@@ -66,15 +66,15 @@ fn run_fixture(path: &Path, code: &str) -> Output {
     }
 }
 
-fn run_type_safe_package(fixture: &Path) -> Output {
-    let root = temporary_directory("type-safe");
+fn run_type_resolution_package(fixture: &Path) -> Output {
+    let root = temporary_directory("type-resolution");
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("package.toml"),
-        "[package]\nname = \"catalog-type-safe\"\nversion = \"0.1.0\"\ntype-safe = true\n\n[[bin]]\nname = \"catalog-type-safe\"\npath = \"src/E000201-inferred-any.sev\"\n",
+        "[package]\nname = \"catalog-type-resolution\"\nversion = \"0.1.0\"\n\n[compiler.type_resolution]\ndeny_any = true\ndeny_inferred_fallback = true\n\n[[bin]]\nname = \"catalog-type-resolution\"\npath = \"src/E000207-unresolved-type-escape.sev\"\n",
     )
     .unwrap();
-    std::fs::copy(fixture, root.join("src/E000201-inferred-any.sev")).unwrap();
+    std::fs::copy(fixture, root.join("src/E000207-unresolved-type-escape.sev")).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("check")
         .arg(&root)

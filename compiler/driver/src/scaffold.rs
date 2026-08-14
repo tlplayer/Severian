@@ -8,8 +8,6 @@ pub(super) fn package_manifest(name: &str) -> String {
 name = "{name}"
 version = "0.1.0"
 edition = "2026"
-# When true, declarations that silently infer `Any` are rejected.
-type-safe = false
 # Optional package metadata used by registries and documentation.
 # description = ""
 # license = "MIT"
@@ -18,6 +16,15 @@ type-safe = false
 [[bin]]
 name = "{name}"
 path = "src/main.sev"
+
+[compiler.type_resolution]
+# Explicit `Any` remains legal. These switches reject dynamic types created by
+# failed or incomplete compiler resolution.
+deny_any = false
+deny_tensor_any = false
+deny_unresolved = false
+deny_inferred_fallback = false
+deny_lost_type_information = false
 
 # For a library target, create src/lib.sev and enable this table.
 # [lib]
@@ -155,7 +162,10 @@ mod tests {
     fn generated_manifest_is_valid_and_starts_lenient() {
         let source = package_manifest("example-app");
         let manifest = toml::from_str::<toml::Value>(&source).unwrap();
-        assert_eq!(manifest["package"]["type-safe"].as_bool(), Some(false));
+        assert_eq!(
+            manifest["compiler"]["type_resolution"]["deny_any"].as_bool(),
+            Some(false)
+        );
         assert_eq!(manifest["build"]["diagnostics"].as_str(), Some("user"));
         assert_eq!(manifest["coverage"]["minimum"].as_integer(), Some(0));
         assert_eq!(manifest["memory"]["leaks"].as_str(), Some("allow"));

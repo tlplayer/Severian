@@ -146,6 +146,7 @@ fn unsupported(kernel: &KernelIr, backend: KernelBackend, reason: &str) -> Kerne
 mod tests {
     use super::*;
     use severian_hir::{FunctionId, TensorDimension, TensorElementType, TensorType};
+    use severian_mir::{LocalId, ReductionKind, ReductionOp, TensorOp, TensorOperand, ValueRef};
 
     fn reduction() -> KernelIr {
         let input =
@@ -154,8 +155,22 @@ mod tests {
             function: FunctionId::from_name("reduce"),
             name: "reduce".into(),
             parameters: vec![input],
+            parameter_locals: vec![LocalId(0)],
             result: TensorType::ranked(TensorElementType::F32, &[]).unwrap(),
-            operation: super::super::KernelOperation::ReductionSum { input: 0 },
+            operation: TensorOp::Reduction(ReductionOp {
+                kind: ReductionKind::Sum,
+                input: TensorOperand {
+                    value: ValueRef {
+                        id: None,
+                        ty: Some(severian_hir::ValueType::Tensor(input)),
+                        local: Some(LocalId(0)),
+                        tensor_op: None,
+                    },
+                    ty: input,
+                },
+                axes: vec![0],
+                result: TensorType::ranked(TensorElementType::F32, &[]).unwrap(),
+            }),
             policy: KernelBackend::Auto,
         }
     }

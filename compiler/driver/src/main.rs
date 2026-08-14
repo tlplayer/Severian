@@ -152,8 +152,7 @@ fn kernel_command(args: &[String]) -> Result<(), String> {
     }
 
     let compilation = compile_path(&source).map_err(|error| error.to_string())?;
-    let kernel =
-        find(&compilation.optimized_hir, entry.as_deref()).map_err(|error| error.to_string())?;
+    let kernel = find(&compilation.mir, entry.as_deref()).map_err(|error| error.to_string())?;
     let selection = select_backend(&kernel, backend.unwrap_or(kernel.policy), target)
         .map_err(|error| error.to_string())?;
     if action == "inspect" {
@@ -1738,7 +1737,7 @@ fn emit_non_executable_module(
     compilation: &Compilation,
     target: &BinaryTarget,
 ) -> Result<Vec<PathBuf>, String> {
-    let kernels = severian_lowering::kernel::collect(&compilation.optimized_hir);
+    let kernels = severian_lowering::kernel::collect(&compilation.mir);
     if !kernels.is_empty() {
         use severian_lowering::kernel::{
             emit_stablehlo, emit_triton_ir, select_backend, KernelBackend, KernelTarget,

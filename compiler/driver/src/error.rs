@@ -325,6 +325,7 @@ fn primary_label<'a>(code: &str, message: &'a str) -> &'a str {
         "E000204" => "this name is not in the selected signature",
         "E000205" => "this binding has no initial value",
         "E000206" => "not every enum variant is handled",
+        "E000207" => "type resolution must finish here",
         "E000502" => "this divisor is always zero",
         "E002401" => "contracting dimensions do not match",
         "E000104" => "syntax needs another token here",

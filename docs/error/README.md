@@ -34,7 +34,7 @@ The driver test suite discovers every catalog file and requires its filename's
 diagnostic to be the first reported code. Each result must include a source
 file, line, column, snippet, and a registered `sev explain` entry. Diagnostics
 that require package context are tested in that context: E000103 is loaded as an
-invalid dependency and E000201 is compiled with `type-safe = true`.
+invalid dependency and E000207 is compiled with strict type resolution.
 
 `sev build` checks independent package sources before emitting artifacts. It
 reports up to 50 errors by default so a package or an automated repair agent can
@@ -53,9 +53,13 @@ compile to the artifact selected by their `@compile` policy.
 Package boundaries may progressively require concrete types with:
 
 ```toml
-[package]
-type-safe = true
+[compiler.type_resolution]
+deny_any = true
+deny_tensor_any = true
+deny_unresolved = true
+deny_inferred_fallback = true
+deny_lost_type_information = true
 ```
 
-That mode rejects declarations which would silently default to `Any`. Explicit
-`Any` remains available when a dynamic boundary is intentional.
+These checks reject dynamic types created by incomplete compiler resolution.
+Explicit `Any` remains available when a dynamic boundary is intentional.

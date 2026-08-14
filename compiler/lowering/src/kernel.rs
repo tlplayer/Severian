@@ -15,6 +15,7 @@ pub use stablehlo::emit_stablehlo;
 pub use triton::{emit_triton_ir, TritonLaunch};
 
 use severian_hir::{FunctionId, TensorElementType, TensorType};
+use severian_mir::{ElementwiseKind, LocalId, ReductionKind, TensorOp};
 use severian_platform::{resolve_target, GpuVendor, Target};
 use std::fmt;
 
@@ -129,70 +130,81 @@ fn supported_nvidia_architecture(architecture: &str) -> bool {
         .is_some_and(|compute_capability| compute_capability >= 80)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KernelOperation {
-    ReductionSum { input: usize },
-    ElementwiseRelu { input: usize },
-}
-
-impl KernelOperation {
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::ReductionSum { .. } => "reduction.sum",
-            Self::ElementwiseRelu { .. } => "elementwise.relu",
-        }
-    }
-
-    pub const fn input(&self) -> usize {
-        match self {
-            Self::ReductionSum { input } | Self::ElementwiseRelu { input } => *input,
-        }
-    }
-
-    pub const fn supports_triton(&self) -> bool {
-        matches!(
-            self,
-            Self::ReductionSum { .. } | Self::ElementwiseRelu { .. }
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelIr {
     pub function: FunctionId,
     pub name: String,
     pub parameters: Vec<TensorType>,
+    pub parameter_locals: Vec<LocalId>,
     pub result: TensorType,
-    pub operation: KernelOperation,
+    pub operation: TensorOp,
     pub policy: KernelBackend,
 }
 
 impl KernelIr {
+    pub fn input(&self) -> Result<usize, String> {
+        let input =
+            self.operation.inputs().into_iter().next().ok_or_else(|| {
+                format!("operation `{}` has no tensor input", self.operation.name())
+            })?;
+        let local = input
+            .value
+            .local
+            .ok_or_else(|| "kernel input is not a MIR local".to_string())?;
+        self.parameter_locals
+            .iter()
+            .position(|parameter| *parameter == local)
+            .ok_or_else(|| format!("MIR local {} is not a kernel parameter", local.0))
+    }
+
     pub fn triton_support(&self) -> Result<(), String> {
-        if !self.operation.supports_triton() {
+        let supported = matches!(
+            &self.operation,
+            TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum
+        ) || matches!(
+            &self.operation,
+            TensorOp::Elementwise(operation) if operation.kind == ElementwiseKind::Relu
+        );
+        if !supported {
             return Err(format!(
                 "operation `{}` has no direct Triton lowering",
                 self.operation.name()
             ));
         }
+        let input_index = self.input()?;
         let input = self
             .parameters
-            .get(self.operation.input())
-            .ok_or_else(|| format!("kernel input {} does not exist", self.operation.input()))?;
-        match (self.operation, input.element) {
-            (KernelOperation::ReductionSum { .. }, TensorElementType::F32) => Ok(()),
-            (KernelOperation::ReductionSum { .. }, element) => Err(format!(
-                "reduction.sum Triton lowering currently requires f32, found {}",
-                tensor_element_name(element)
-            )),
-            (KernelOperation::ElementwiseRelu { .. }, element)
-                if element.satisfies(severian_hir::TensorElementConstraint::Float) =>
+            .get(input_index)
+            .ok_or_else(|| format!("kernel input {input_index} does not exist"))?;
+        match (&self.operation, input.element) {
+            (TensorOp::Reduction(operation), TensorElementType::F32)
+                if operation.kind == ReductionKind::Sum =>
             {
                 Ok(())
             }
-            (KernelOperation::ElementwiseRelu { .. }, element) => Err(format!(
-                "elementwise.relu requires a floating-point tensor, found {}",
-                tensor_element_name(element)
+            (TensorOp::Reduction(operation), element) if operation.kind == ReductionKind::Sum => {
+                Err(format!(
+                    "reduction.sum Triton lowering currently requires f32, found {}",
+                    tensor_element_name(element)
+                ))
+            }
+            (TensorOp::Elementwise(operation), element)
+                if operation.kind == ElementwiseKind::Relu
+                    && element.satisfies(severian_hir::TensorElementConstraint::Float) =>
+            {
+                Ok(())
+            }
+            (TensorOp::Elementwise(operation), element)
+                if operation.kind == ElementwiseKind::Relu =>
+            {
+                Err(format!(
+                    "elementwise.relu requires a floating-point tensor, found {}",
+                    tensor_element_name(element)
+                ))
+            }
+            _ => Err(format!(
+                "operation `{}` has no direct Triton lowering",
+                self.operation.name()
             )),
         }
     }

@@ -72,6 +72,7 @@ fn mutations(expression: &Expression) -> Vec<(HirId, Expression, String)> {
     let Expression::Typed {
         id,
         ty,
+        any_origin,
         expression: inner,
     } = expression
     else {
@@ -150,6 +151,7 @@ fn mutations(expression: &Expression) -> Vec<(HirId, Expression, String)> {
                 Expression::Typed {
                     id: *id,
                     ty: *ty,
+                    any_origin: *any_origin,
                     expression: Box::new(replacement),
                 },
                 description,

@@ -44,7 +44,10 @@ impl Program {
         let mut spans = Vec::new();
         let mut expression_types = Vec::new();
         self.visit_expressions_mut(&mut |expression| {
-            let Expression::Typed { id, ty, .. } = expression else {
+            let Expression::Typed {
+                id, ty, any_origin, ..
+            } = expression
+            else {
                 return;
             };
             if metadata.sources.expression_span(*id).is_some() {
@@ -56,12 +59,19 @@ impl Program {
             let remapped = HirId::from_source_span(file, range);
             *id = remapped;
             spans.push((remapped, SourceSpan { file, range }));
-            expression_types.push((remapped, *ty));
+            let any_origin = (*any_origin).or_else(|| {
+                matches!(*ty, ValueType::Any | ValueType::TensorAny)
+                    .then_some(AnyOrigin::LostTypeInformation)
+            });
+            expression_types.push((remapped, *ty, any_origin));
         });
         metadata.sources.expression_spans.extend(spans);
-        for (id, ty) in expression_types {
+        for (id, ty, any_origin) in expression_types {
             let ty = metadata.types.legacy(ty);
             metadata.expression_types.insert(id, ty);
+            if let Some(origin) = any_origin {
+                metadata.expression_any_origins.insert(id, origin);
+            }
         }
         file
     }
