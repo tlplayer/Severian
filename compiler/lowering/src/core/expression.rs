@@ -2782,10 +2782,11 @@ impl LowerContext<'_> {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
                     return self.lower_short_circuit_chain(left, *op, right);
                 }
+                let divisor_site = right.hir_id();
                 let left = self.lower_expression(left);
                 let right = self.lower_expression(right);
                 if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
-                    self.emit_runtime_site();
+                    self.emit_runtime_site_for(divisor_site);
                 }
                 if *op == BinaryOp::Power {
                     return self.lower_power_values(left, right);

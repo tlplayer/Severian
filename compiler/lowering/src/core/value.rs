@@ -25,6 +25,17 @@ impl LowerContext<'_> {
             .chars()
             .count()
             + 1;
+        let end_column = file
+            .source
+            .get(..span.range.end)
+            .and_then(|through_end| {
+                through_end
+                    .rsplit_once('\n')
+                    .map(|(_, tail)| tail)
+                    .or(Some(through_end))
+            })
+            .map_or(column + 1, |tail| tail.chars().count() + 1)
+            .max(column + 1);
         let path = file.path.to_string_lossy();
         let Some(index) = self.strings.iter().position(|value| value == path.as_ref()) else {
             return;
@@ -32,6 +43,7 @@ impl LowerContext<'_> {
         let path_value = self.fresh_value();
         let line_value = self.fresh_value();
         let column_value = self.fresh_value();
+        let end_column_value = self.fresh_value();
         writeln!(
             self.output,
             "    {path_value} = llvm.mlir.addressof @__sev_str_{index} : !llvm.ptr"
@@ -47,7 +59,12 @@ impl LowerContext<'_> {
             "    {column_value} = llvm.mlir.constant({column} : i64) : i64"
         )
         .unwrap();
-        writeln!(self.output, "    llvm.call @__sev_runtime_set_site({path_value}, {line_value}, {column_value}) : (!llvm.ptr, i64, i64) -> ()").unwrap();
+        writeln!(
+            self.output,
+            "    {end_column_value} = llvm.mlir.constant({end_column} : i64) : i64"
+        )
+        .unwrap();
+        writeln!(self.output, "    llvm.call @__sev_runtime_set_site({path_value}, {line_value}, {column_value}, {end_column_value}) : (!llvm.ptr, i64, i64, i64) -> ()").unwrap();
     }
 
     pub(super) fn carry_value_metadata(&mut self, source: &str, target: &str) {

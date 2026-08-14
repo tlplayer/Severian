@@ -153,6 +153,7 @@ pub(super) fn lower_expression_kind(
                             "operator `X` requires `@tensor(X)` on this function",
                         ));
                     }
+                    validate_matmul_dimensions(binary.span, left_type, right_type)?;
                     return Ok((
                         Expression::Call {
                             target: CallTarget::source("tensor.ranked_matmul"),
@@ -226,7 +227,7 @@ pub(super) fn lower_expression_kind(
                     return Err(error(
                         *span,
                         format!(
-                            "E0401: An index known to be outside a fixed-length collection is rejected at compile time. (index {element_index}, length {})",
+                            "E000401: An index known to be outside a fixed-length collection is rejected at compile time. (index {element_index}, length {})",
                             length.unwrap()
                         ),
                     ));
@@ -403,7 +404,7 @@ pub(super) fn lower_expression_kind(
                         {
                             return Err(error(
                                 task.span,
-                                "E0601: Mutable method calls across an async boundary require transferring the value's `lock` capability.",
+                                "E000601: Mutable method calls across an async boundary require transferring the value's `lock` capability.",
                             ));
                         }
                     }
@@ -562,6 +563,50 @@ pub(super) fn lower_expression_kind(
             expression.span(),
             "expression is not supported in this compiler slice yet",
         )),
+    }
+}
+
+fn validate_matmul_dimensions(
+    span: Span,
+    left: ValueType,
+    right: ValueType,
+) -> Result<(), SemanticError> {
+    let (ValueType::Tensor(left), ValueType::Tensor(right)) = (left, right) else {
+        return Ok(());
+    };
+    let (Some(left_rank), Some(right_rank)) = (left.rank, right.rank) else {
+        return Ok(());
+    };
+    if left_rank == 0 || right_rank == 0 {
+        return Ok(());
+    }
+    let left_axis = left_rank as usize - 1;
+    let right_axis = usize::from(left_rank == 4 && right_rank == 4) * 2;
+    let left_contracting = left.dimensions[left_axis];
+    let right_contracting = right.dimensions[right_axis];
+    let incompatible = matches!(
+        (left_contracting, right_contracting),
+        (TensorDimension::Static(left), TensorDimension::Static(right)) if left != right
+    );
+    if !incompatible {
+        return Ok(());
+    }
+    Err(error(
+        span,
+        format!(
+            "E002401: incompatible tensor dimensions; left is `{}`; right is `{}`; requires `{} == {}`",
+            value_type_name(ValueType::Tensor(left)),
+            value_type_name(ValueType::Tensor(right)),
+            tensor_dimension_name(left_contracting),
+            tensor_dimension_name(right_contracting),
+        ),
+    ))
+}
+
+fn tensor_dimension_name(dimension: TensorDimension) -> String {
+    match dimension {
+        TensorDimension::Static(value) => value.to_string(),
+        TensorDimension::Dynamic => "dynamic".into(),
     }
 }
 

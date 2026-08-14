@@ -606,7 +606,7 @@ geometry = { version = "0.1.0", path = "../geometry" }
 
 `type-safe = true` provides a progressive optimization boundary. In that
 package, a parameter or field which would silently default to `Any` produces
-`E0201` with its source line and an annotation suggestion. Packages without the
+`E000201` with its source line and an annotation suggestion. Packages without the
 option remain flexible, and explicitly writing `Any` always records intentional
 dynamic typing. See [`docs/error`](docs/error/README.md) for the categorized
 compiler diagnostic catalog.

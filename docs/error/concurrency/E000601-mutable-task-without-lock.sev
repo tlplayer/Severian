@@ -1,4 +1,4 @@
-# E0601: mutable task call without transferring the lock capability
+# E000601: mutable task call without transferring the lock capability
 # Mutable state cannot cross an async boundary as an unsynchronized alias.
 # Use `with self and lock`, or pass frozen data for shared reads.
 

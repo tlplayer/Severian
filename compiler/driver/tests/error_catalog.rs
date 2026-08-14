@@ -47,9 +47,9 @@ fn temporary_directory(label: &str) -> PathBuf {
 
 fn run_fixture(path: &Path, code: &str) -> Output {
     match code {
-        "E0103" => run_invalid_dependency(path),
-        "E0201" => run_type_safe_package(path),
-        code if code.starts_with("E09") => Command::new(env!("CARGO_BIN_EXE_sev"))
+        "E000103" => run_invalid_dependency(path),
+        "E000201" => run_type_safe_package(path),
+        code if code.starts_with("E0009") => Command::new(env!("CARGO_BIN_EXE_sev"))
             .arg(path)
             .output()
             .unwrap(),
@@ -71,10 +71,10 @@ fn run_type_safe_package(fixture: &Path) -> Output {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("package.toml"),
-        "[package]\nname = \"catalog-type-safe\"\nversion = \"0.1.0\"\ntype-safe = true\n\n[[bin]]\nname = \"catalog-type-safe\"\npath = \"src/E0201-inferred-any.sev\"\n",
+        "[package]\nname = \"catalog-type-safe\"\nversion = \"0.1.0\"\ntype-safe = true\n\n[[bin]]\nname = \"catalog-type-safe\"\npath = \"src/E000201-inferred-any.sev\"\n",
     )
     .unwrap();
-    std::fs::copy(fixture, root.join("src/E0201-inferred-any.sev")).unwrap();
+    std::fs::copy(fixture, root.join("src/E000201-inferred-any.sev")).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .arg("check")
         .arg(&root)
@@ -102,12 +102,12 @@ fn run_invalid_dependency(fixture: &Path) -> Output {
     .unwrap();
     std::fs::write(
         dependency.join("package.toml"),
-        "[package]\nname = \"broken\"\nversion = \"0.1.0\"\n\n[lib]\npath = \"src/E0103-invalid-package-source.sev\"\n",
+        "[package]\nname = \"broken\"\nversion = \"0.1.0\"\n\n[lib]\npath = \"src/E000103-invalid-package-source.sev\"\n",
     )
     .unwrap();
     std::fs::copy(
         fixture,
-        dependency.join("src/E0103-invalid-package-source.sev"),
+        dependency.join("src/E000103-invalid-package-source.sev"),
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
@@ -125,7 +125,7 @@ fn first_catalog_code(output: &str) -> Option<&str> {
         .find(|part| {
             matches!(
                 (part.as_bytes().first(), part.len()),
-                (Some(b'E'), 5) | (Some(b'W'), 4)
+                (Some(b'E'), 7) | (Some(b'W'), 4)
             ) && part.as_bytes()[1..].iter().all(u8::is_ascii_digit)
         })
 }

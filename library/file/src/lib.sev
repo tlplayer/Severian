@@ -85,31 +85,13 @@ def default_reader(extension: string) -> file_interface.Reader:
             return file_csv.CsvReader()
         ".json":
             return file_json.JsonReader()
-        ".yaml":
-            return file_yaml.YamlReader()
-        ".yml":
+        ".yaml" | ".yml":
             return file_yaml.YamlReader()
         ".wav":
             return file_wav.WavReader()
         ".mp3":
             return file_mp3.Mp3Reader()
-        ".txt":
-            return file_text.TextReader()
-        ".text":
-            return file_text.TextReader()
-        ".md":
-            return file_text.TextReader()
-        ".sev":
-            return file_text.TextReader()
-        ".toml":
-            return file_text.TextReader()
-        ".xml":
-            return file_text.TextReader()
-        ".html":
-            return file_text.TextReader()
-        ".log":
-            return file_text.TextReader()
-        ".lua":
+        ".txt" | ".text" | ".md" | ".sev" | ".toml" | ".xml" | ".html" | ".log" | ".lua":
             return file_text.TextReader()
         _:
             return file_binary.BinaryReader()

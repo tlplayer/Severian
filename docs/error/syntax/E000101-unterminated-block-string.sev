@@ -1,4 +1,4 @@
-# E0101: unterminated block string
+# E000101: unterminated block string
 # Triple double quotes create a multiline block string and must be closed.
 # Add the closing triple quotes after the final line.
 

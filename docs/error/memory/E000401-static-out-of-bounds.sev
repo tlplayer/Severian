@@ -1,4 +1,4 @@
-# E0401: statically known out-of-bounds index
+# E000401: statically known out-of-bounds index
 # This collection has three elements, so valid indices end at two.
 # Use a valid index; dynamic indices receive runtime bounds checks.
 

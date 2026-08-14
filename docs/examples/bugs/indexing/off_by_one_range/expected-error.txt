@@ -1,4 +1,4 @@
-E0402
+E000402
 invalid.sev:3:14
 [0:size(values)]
 An inclusive range ending at a collection's element count includes one invalid index.

@@ -1,4 +1,4 @@
-# E0202: incompatible argument type
+# E000202: incompatible argument type
 # Calls must satisfy the declared parameter type.
 # Convert the value or correct the function signature.
 

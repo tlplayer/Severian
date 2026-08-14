@@ -130,7 +130,7 @@ impl fmt::Display for PackageError {
                 source,
             } => {
                 let prefix = if matches!(*stage, "lexer" | "parser") && !message.starts_with('E') {
-                    "E0103: "
+                    "E000103: "
                 } else {
                     ""
                 };
@@ -214,7 +214,7 @@ mod diagnostic_tests {
             source: Some("def valid():\n    broken\n".into()),
         };
         let rendered = error.to_string();
-        assert!(rendered.contains("E0103"));
+        assert!(rendered.contains("E000103"));
         assert!(rendered.contains("library/tensor/src/lib.sev:2:5"));
         assert!(rendered.contains("2 |     broken"));
         assert!(!rendered.contains("bytes 17..23"));

@@ -1,4 +1,4 @@
-# E0302: mutation while an immutable view is live
+# E000302: mutation while an immutable view is live
 # Structural mutation could invalidate the live view.
 # Finish using the view first, or clone when an independent snapshot is needed.
 

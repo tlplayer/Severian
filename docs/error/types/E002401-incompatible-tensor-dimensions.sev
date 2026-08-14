@@ -1,0 +1,7 @@
+# E002401: the left contracting dimension is 768, but the right is 1024.
+# Reshape, transpose, or replace an operand so those dimensions agree.
+import tensor
+
+@tensor(X)
+def project(left: Tensor[f32, 32, 768], right: Tensor[f32, 1024, 4096]) -> Tensor[f32, 32, 4096]:
+    return left X right

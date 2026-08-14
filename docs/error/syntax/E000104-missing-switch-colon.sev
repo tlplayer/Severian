@@ -1,0 +1,5 @@
+# E000104: a switch arm pattern must end with a colon.
+def main():
+    switch ".yaml":
+        ".yaml" | ".yml"
+            print("configuration")

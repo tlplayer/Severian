@@ -138,13 +138,13 @@ pub(super) fn lower_block(
                 {
                     return Err(error(
                         source.span(),
-                        "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
+                        "E000501: Checked integer arithmetic cannot produce a value outside the destination type.",
                     ));
                 }
                 if checked_integer_overflow(source, scope) {
                     return Err(error(
                         source.span(),
-                        "E0501: Checked integer arithmetic cannot produce a value outside the destination type.",
+                        "E000501: Checked integer arithmetic cannot produce a value outside the destination type.",
                     ));
                 }
                 let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
@@ -385,7 +385,7 @@ pub(super) fn lower_block(
                 if expression_type == ValueType::Result {
                     return Err(error(
                         statement.span(),
-                        "E0801: A recoverable error must be propagated, handled, or explicitly discarded with a reason.",
+                        "E000801: A recoverable error must be propagated, handled, or explicitly discarded with a reason.",
                     ));
                 }
                 match expression.kind() {
@@ -548,7 +548,7 @@ pub(super) fn lower_block(
                 if inclusive_collection_range(&statement.iterable) {
                     return Err(error(
                         statement.iterable.span(),
-                        "E0402: An inclusive range ending at a collection's element count includes one invalid index.",
+                        "E000402: An inclusive range ending at a collection's element count includes one invalid index.",
                     ));
                 }
                 let (iterable, _) =

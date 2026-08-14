@@ -22,7 +22,7 @@ use std::{
 
 fn main() {
     if let Err(error) = execute(std::env::args().skip(1).collect()) {
-        if error.starts_with("error[E09") {
+        if error.starts_with("error[E") {
             eprintln!("{error}");
         } else {
             eprintln!("error: {error}");
@@ -669,6 +669,7 @@ struct BuildFinding {
     code: String,
     path: PathBuf,
     rendered: String,
+    diagnostic: Option<severian_diagnostics::Diagnostic>,
 }
 
 fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
@@ -913,12 +914,14 @@ fn collect_build_findings(
                                 code: diagnostic.code.0.clone(),
                                 path: source_path.clone(),
                                 rendered,
+                                diagnostic: Some(diagnostic.clone()),
                             });
                         }
                     }
                 }
             }
             Err(error) => {
+                let diagnostic = error.diagnostic();
                 let mut rendered = error.to_string();
                 if diagnostics_mode.is_internal() {
                     rendered.push_str(&format!("\n internal: {error:#?}"));
@@ -930,6 +933,7 @@ fn collect_build_findings(
                         code: diagnostic_code(&rendered).unwrap_or("compiler").to_owned(),
                         path: source_path,
                         rendered,
+                        diagnostic,
                     });
                     errors += 1;
                 }
@@ -950,12 +954,24 @@ fn render_build_findings(findings: &[BuildFinding], format: MessageFormat) {
             let entries = findings
                 .iter()
                 .map(|finding| {
-                    format!(
-                        "{{\"severity\":\"{}\",\"code\":\"{}\",\"path\":\"{}\",\"message\":\"{}\"}}",
-                        finding.severity,
-                        json_escape(&finding.code),
-                        json_escape(&finding.path.display().to_string()),
-                        json_escape(&finding.rendered),
+                    finding.diagnostic.as_ref().map_or_else(
+                        || {
+                            format!(
+                                "{{\"severity\":\"{}\",\"code\":\"{}\",\"path\":\"{}\",\"message\":\"{}\",\"rendered\":\"{}\",\"help\":null,\"labels\":[],\"notes\":[],\"suggestions\":[],\"related\":[]}}",
+                                finding.severity,
+                                json_escape(&finding.code),
+                                json_escape(&finding.path.display().to_string()),
+                                json_escape(&finding.rendered),
+                                json_escape(&finding.rendered),
+                            )
+                        },
+                        |diagnostic| {
+                            severian_diagnostics::render::render_json(
+                                diagnostic,
+                                &finding.rendered,
+                                &finding.path,
+                            )
+                        },
                     )
                 })
                 .collect::<Vec<_>>()
@@ -971,7 +987,7 @@ fn diagnostic_code(message: &str) -> Option<&str> {
         .find(|part| {
             matches!(
                 (part.as_bytes().first(), part.len()),
-                (Some(b'E'), 5) | (Some(b'W'), 4)
+                (Some(b'E'), 7) | (Some(b'W'), 4)
             ) && part.as_bytes()[1..].iter().all(u8::is_ascii_digit)
         })
 }
@@ -1443,8 +1459,7 @@ fn check_targets(input: &Path) -> Result<(), String> {
     let targets = resolve_targets(input)?;
     let mut checked = 0;
     for target in targets {
-        check_path(&target.source)
-            .map_err(|error| format!("{}: {error}", target.source.display()))?;
+        check_path(&target.source).map_err(|error| error.to_string())?;
         checked += 1;
         println!("Checked {}", target.source.display());
     }

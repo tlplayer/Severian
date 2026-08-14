@@ -64,7 +64,11 @@ pub(super) fn lower_declared_call(
             } else {
                 Err(error(
                     call.span,
-                    format!("missing argument `{}`", param.name),
+                    format!(
+                        "E000203: missing argument `{}`; expected `{}`",
+                        param.name,
+                        value_type_name(param.ty.erased())
+                    ),
                 ))
             }
         })

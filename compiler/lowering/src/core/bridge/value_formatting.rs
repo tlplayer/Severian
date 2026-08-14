@@ -133,7 +133,7 @@ static void sev_format_raw(sev_format_buffer *buffer, void *raw, bool nested, in
     case SEV_COLLECTION: sev_format_collection(buffer, value->as.pointer, depth); return;
     case SEV_NULL: sev_format_text(buffer, "null"); return;
   }
-  sev_runtime_fail("E0921", "value cannot be converted to string", "the runtime value has an unknown representation");
+  sev_runtime_fail("E000921", "value cannot be converted to string", "the runtime value has an unknown representation");
 }
 
 void *__sev_value_string(void *raw) {

@@ -1,4 +1,4 @@
-# E0920: a dynamic divisor evaluates to zero.
+# E000920: a dynamic divisor evaluates to zero.
 def divide(value: int, divisor: int) -> int:
     return value / get_divisor(float(divisor))
 

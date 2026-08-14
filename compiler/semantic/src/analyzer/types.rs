@@ -141,8 +141,42 @@ pub(super) fn compatible(
     } else {
         Err(error(
             span,
-            format!("E0202: expected {expected:?}, found {actual:?}"),
+            format!(
+                "E000202: mismatched types: expected `{}`, found `{}`",
+                value_type_name(expected),
+                value_type_name(actual)
+            ),
         ))
+    }
+}
+
+pub(super) fn value_type_name(ty: ValueType) -> String {
+    match ty {
+        ValueType::Int => "int".into(),
+        ValueType::Float => "float".into(),
+        ValueType::Bool => "bool".into(),
+        ValueType::String => "string".into(),
+        ValueType::Unit => "unit".into(),
+        ValueType::List => "list".into(),
+        ValueType::Tuple => "tuple".into(),
+        ValueType::Map => "map".into(),
+        ValueType::Set => "set".into(),
+        ValueType::Result => "Result".into(),
+        ValueType::Option => "Option".into(),
+        ValueType::TensorAny => "Tensor".into(),
+        ValueType::Tensor(tensor) => {
+            let mut parts = vec![tensor.element.name().to_owned()];
+            if let Some(rank) = tensor.rank {
+                parts.extend(tensor.dimensions[..rank as usize].iter().map(|dimension| {
+                    match dimension {
+                        TensorDimension::Static(value) => value.to_string(),
+                        TensorDimension::Dynamic => "dynamic".into(),
+                    }
+                }));
+            }
+            format!("Tensor[{}]", parts.join(", "))
+        }
+        other => format!("{other:?}"),
     }
 }
 

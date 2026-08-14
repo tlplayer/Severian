@@ -119,7 +119,7 @@ fn dynamic_object_set_obeys_mutability_and_known_field_types() {
         "    point.set(\"x\", \"wrong\")\n",
     );
     let ast = parse(&lex(wrong_type).unwrap()).unwrap();
-    assert!(analyze(&ast).unwrap_err().message.contains("E0202"));
+    assert!(analyze(&ast).unwrap_err().message.contains("E000202"));
 
     let missing_field = concat!(
         "class Point:\n",

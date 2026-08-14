@@ -209,6 +209,7 @@ fn is_intrinsic_call(name: &str) -> bool {
         name,
         "print"
             | "panic"
+            | "int"
             | "float"
             | "string"
             | "range"

@@ -1,4 +1,4 @@
-# E0801: unhandled recoverable result
+# E000801: unhandled recoverable result
 # A Result must be propagated, switched over, or explicitly discarded with a
 # reviewable reason. Ignoring it hides failures.
 

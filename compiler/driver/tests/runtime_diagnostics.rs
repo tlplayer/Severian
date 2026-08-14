@@ -33,11 +33,11 @@ fn runtime_failure_has_an_e_code_source_label_and_actionable_detail() {
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error[E0910]: index is out of bounds"));
+    assert!(stderr.contains("error[E000910]: index is out of bounds"));
     assert!(stderr.contains("bounds.sev:3:12"));
     assert!(stderr.contains("3 |     return values[index]"));
     assert!(stderr.contains("collection index 4 is invalid; length is 2"));
-    assert!(stderr.contains("sev explain E0910"));
+    assert!(stderr.contains("sev explain E000910"));
     assert!(!stderr.contains("exited with signal"));
     assert!(!stderr.contains("error: error["));
     std::fs::remove_dir_all(root).unwrap();
@@ -52,15 +52,15 @@ fn internal_runtime_diagnostics_include_protocol_and_artifact_context() {
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error[E0920]: division by zero"));
-    assert!(stderr.contains("runtime-protocol=v1"));
+    assert!(stderr.contains("error[E000920]: division by zero"));
+    assert!(stderr.contains("runtime-protocol=v2"));
     assert!(stderr.contains("artifact="));
     assert!(stderr.contains("source="));
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn an_unmigrated_native_abort_is_reported_as_e0990() {
+fn an_unmigrated_native_abort_is_reported_as_e000990() {
     let (root, output) = run_source(
         "fallback",
         "def main():\n    values = [10]\n    values.remove(2)\n",
@@ -68,8 +68,9 @@ fn an_unmigrated_native_abort_is_reported_as_e0990() {
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr
-        .contains("error[E0990]: native program terminated without a Severian runtime diagnostic"));
+    assert!(stderr.contains(
+        "error[E000990]: native program terminated without a Severian runtime diagnostic"
+    ));
     assert!(stderr.contains("--diagnostics=internal"));
     assert!(!stderr.contains("target/debug/fallback exited with signal"));
     std::fs::remove_dir_all(root).unwrap();

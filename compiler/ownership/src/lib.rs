@@ -555,7 +555,7 @@ impl Checker {
         if let Some(loan) = &state.loan {
             if access == Access::Mutate && loan.kind != LoanKind::Mutable {
                 return Err(ownership_error(
-                    "E0302",
+                    "E000302",
                     format!("shared view `{binding}` cannot be mutated"),
                 ));
             }
@@ -565,7 +565,7 @@ impl Checker {
             match access {
                 Access::Read if self.has_live_loan(&owner, Some(LoanKind::Mutable)) => {
                     return Err(ownership_error(
-                        "E0303",
+                        "E000303",
                         format!(
                             "owner `{owner_name}` cannot be read while an exclusive borrow is live"
                         ),
@@ -573,7 +573,7 @@ impl Checker {
                 }
                 Access::Mutate if self.has_live_loan(&owner, None) => {
                     return Err(ownership_error(
-                        "E0302",
+                        "E000302",
                         format!(
                             "owner `{owner_name}` cannot be mutated while a borrow is live. An owner cannot be structurally mutated while an immutable borrow is live."
                         ),
@@ -593,7 +593,7 @@ impl Checker {
             .ok_or_else(|| unknown(binding))?;
         if state.moved {
             return Err(ownership_error(
-                "E0301",
+                "E000301",
                 format!(
                     "binding `{binding}` cannot be used after its ownership was moved. A binding cannot be read after ownership has moved to another binding."
                 ),
@@ -609,7 +609,7 @@ impl Checker {
         };
         if conflict {
             return Err(ownership_error(
-                "E0303",
+                "E000303",
                 format!(
                     "conflicting borrow of `{}` while another borrow is live",
                     self.binding_name(*owner)
@@ -622,7 +622,7 @@ impl Checker {
     fn ensure_unborrowed(&self, owner: &BindingId, operation: &str) -> Result<(), OwnershipError> {
         if self.has_live_loan(owner, None) {
             return Err(ownership_error(
-                "E0304",
+                "E000304",
                 format!(
                     "cannot {operation} `{}` while it is borrowed",
                     self.binding_name(*owner)
@@ -712,7 +712,7 @@ impl Checker {
 
         if requested < effect {
             return Err(ownership_error(
-                "E0306",
+                "E000306",
                 format!(
                     "argument {} to `{function}` requires {}, but `{source}` is only passed as {}",
                     index + 1,
@@ -772,7 +772,7 @@ impl Checker {
         };
         if let Some(name) = borrowed {
             return Err(ownership_error(
-                "E0305",
+                "E000305",
                 format!("borrowed value `{name}` cannot escape through a return"),
             ));
         }

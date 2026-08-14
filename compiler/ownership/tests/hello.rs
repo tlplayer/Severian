@@ -63,7 +63,7 @@ fn rejects_use_after_move() {
     ]);
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0301"));
+    assert!(error.message.contains("E000301"));
     assert!(error.message.contains("value"));
 }
 
@@ -87,7 +87,7 @@ fn rejects_mutation_while_shared_view_is_live() {
     ]);
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0302"));
+    assert!(error.message.contains("E000302"));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn rejects_two_live_exclusive_borrows() {
     ]);
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0303"));
+    assert!(error.message.contains("E000303"));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn rejects_use_after_move_on_only_one_branch() {
     ]);
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0301"));
+    assert!(error.message.contains("E000301"));
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn infers_that_a_function_consumes_its_parameter() {
     };
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0301"));
+    assert!(error.message.contains("E000301"));
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn inferred_mutable_call_conflicts_with_a_live_view() {
     };
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0303"));
+    assert!(error.message.contains("E000303"));
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn call_argument_loans_overlap_for_the_whole_call() {
     };
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0303"));
+    assert!(error.message.contains("E000303"));
 }
 
 #[test]
@@ -290,5 +290,5 @@ fn borrowed_alias_cannot_escape_through_return() {
     };
 
     let error = severian_ownership::check(&program).unwrap_err();
-    assert!(error.message.contains("E0305"));
+    assert!(error.message.contains("E000305"));
 }

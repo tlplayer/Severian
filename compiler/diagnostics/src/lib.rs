@@ -28,6 +28,12 @@ impl From<&str> for DiagnosticCode {
     }
 }
 
+impl From<String> for DiagnosticCode {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceRange {
     pub file: PathBuf,
@@ -39,6 +45,73 @@ pub struct SourceRange {
     pub end_column: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelStyle {
+    Primary,
+    Secondary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticLabel {
+    pub style: LabelStyle,
+    pub source: SourceRange,
+    pub message: Option<String>,
+}
+
+impl DiagnosticLabel {
+    pub fn primary(source: SourceRange, message: impl Into<String>) -> Self {
+        Self {
+            style: LabelStyle::Primary,
+            source,
+            message: Some(message.into()),
+        }
+    }
+
+    pub fn secondary(source: SourceRange, message: impl Into<String>) -> Self {
+        Self {
+            style: LabelStyle::Secondary,
+            source,
+            message: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applicability {
+    MachineApplicable,
+    MaybeIncorrect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEdit {
+    pub source: SourceRange,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticSuggestion {
+    pub message: String,
+    pub applicability: Applicability,
+    pub edits: Vec<TextEdit>,
+}
+
+impl DiagnosticSuggestion {
+    pub fn machine_applicable(
+        message: impl Into<String>,
+        source: SourceRange,
+        replacement: impl Into<String>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            applicability: Applicability::MachineApplicable,
+            edits: vec![TextEdit {
+                source,
+                replacement: replacement.into(),
+            }],
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -46,6 +119,9 @@ pub struct Diagnostic {
     pub message: String,
     pub help: Option<String>,
     pub source: Option<SourceRange>,
+    pub labels: Vec<DiagnosticLabel>,
+    pub notes: Vec<String>,
+    pub suggestions: Vec<DiagnosticSuggestion>,
     pub related: Vec<Diagnostic>,
 }
 
@@ -57,6 +133,9 @@ impl Diagnostic {
             message: message.into(),
             help: None,
             source: None,
+            labels: Vec::new(),
+            notes: Vec::new(),
+            suggestions: Vec::new(),
             related: Vec::new(),
         }
     }
@@ -68,6 +147,9 @@ impl Diagnostic {
             message: message.into(),
             help: None,
             source: None,
+            labels: Vec::new(),
+            notes: Vec::new(),
+            suggestions: Vec::new(),
             related: Vec::new(),
         }
     }
@@ -79,6 +161,21 @@ impl Diagnostic {
 
     pub fn at(mut self, source: SourceRange) -> Self {
         self.source = Some(source);
+        self
+    }
+
+    pub fn with_label(mut self, label: DiagnosticLabel) -> Self {
+        self.labels.push(label);
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
+    pub fn with_suggestion(mut self, suggestion: DiagnosticSuggestion) -> Self {
+        self.suggestions.push(suggestion);
         self
     }
 }

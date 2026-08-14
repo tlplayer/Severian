@@ -1,4 +1,4 @@
-# E0301: use after move
+# E000301: use after move
 # `move` transfers ownership and invalidates the original binding.
 # Use `outbound`, or clone before moving when two owners are required.
 

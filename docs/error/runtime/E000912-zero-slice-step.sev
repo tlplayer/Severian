@@ -1,4 +1,4 @@
-# E0912: a dynamic slice step evaluates to zero.
+# E000912: a dynamic slice step evaluates to zero.
 def select(step: int) -> list[int]:
     values = [10, 20]
     return values[0:2:step]

@@ -1,4 +1,4 @@
-# E0910: a dynamic collection index is outside the runtime length.
+# E000910: a dynamic collection index is outside the runtime length.
 def select(index: int) -> int:
     values = [10, 20]
     return values[index]

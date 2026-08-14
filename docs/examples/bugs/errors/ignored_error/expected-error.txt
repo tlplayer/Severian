@@ -1,4 +1,4 @@
-E0801
+E000801
 invalid.sev:5:5
 save("state.txt")
 A recoverable error must be propagated, handled, or explicitly discarded with a reason.

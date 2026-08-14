@@ -516,7 +516,7 @@ fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
         .unwrap();
     assert!(!rejected.status.success());
     let error = String::from_utf8_lossy(&rejected.stderr);
-    assert!(error.contains("E0201: parameter `value` defaults to `Any`"));
+    assert!(error.contains("E000201: parameter `value` defaults to `Any`"));
     assert!(error.contains("source: def identity(value) -> Any:"));
     assert!(error.contains("value: ConcreteType"));
 
@@ -554,7 +554,7 @@ fn type_safe_packages_reject_inferred_any_with_actionable_source_context() {
     assert!(!local_module.status.success());
     let error = String::from_utf8_lossy(&local_module.stderr);
     assert!(error.contains("helpers.sev"));
-    assert!(error.contains("E0201: parameter `value` defaults to `Any`"));
+    assert!(error.contains("E000201: parameter `value` defaults to `Any`"));
     std::fs::remove_dir_all(root).unwrap();
 }
 

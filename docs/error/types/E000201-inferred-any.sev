@@ -1,4 +1,4 @@
-# E0201: inferred Any in a type-safe package
+# E000201: inferred Any in a type-safe package
 # With `[package] type-safe = true`, an untyped parameter cannot silently
 # become Any. Annotate it with a concrete type for optimization and checking.
 # Explicit `value: Any` remains legal when dynamic typing is intentional.

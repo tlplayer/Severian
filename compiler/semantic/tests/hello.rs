@@ -263,7 +263,22 @@ fn rejects_incompatible_static_tensor_shapes_at_call_boundaries() {
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let error = analyze(&ast).unwrap_err();
-    assert!(error.message.contains("expected Tensor"));
+    assert!(error.message.contains("expected `Tensor"));
+}
+
+#[test]
+fn rejects_incompatible_matmul_contracting_dimensions_before_lowering() {
+    let source = concat!(
+        "import tensor\n",
+        "@tensor(X)\n",
+        "def project(left: Tensor[f32, 32, 768], right: Tensor[f32, 1024, 4096]) -> Tensor[f32, 32, 4096]:\n",
+        "    return left X right\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.starts_with("E002401:"));
+    assert!(error.message.contains("Tensor[f32, 32, 768]"));
+    assert!(error.message.contains("requires `768 == 1024`"));
 }
 
 #[test]
@@ -535,7 +550,10 @@ fn type_checks_injected_return_values() {
 
     let error = analyze(&ast).unwrap_err();
 
-    assert_eq!(error.message, "E0202: expected Int, found String");
+    assert_eq!(
+        error.message,
+        "E000202: mismatched types: expected `int`, found `string`"
+    );
 }
 
 #[test]
@@ -553,7 +571,10 @@ fn type_checks_calls_against_imported_package_interfaces() {
 
     let error = analyze_with_interfaces(&module, &[("math".into(), interface)]).unwrap_err();
 
-    assert_eq!(error.message, "E0202: expected Float, found String");
+    assert_eq!(
+        error.message,
+        "E000202: mismatched types: expected `float`, found `string`"
+    );
 }
 
 #[test]

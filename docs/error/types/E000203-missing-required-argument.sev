@@ -1,0 +1,8 @@
+# E000203: `load` requires `device`, and the declaration provides no default.
+# Add the argument or give the parameter an intentional default value.
+def load(name: string, device: string):
+    print(name)
+    print(device)
+
+def main():
+    load("Qwen")

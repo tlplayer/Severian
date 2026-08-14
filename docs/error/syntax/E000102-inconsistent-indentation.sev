@@ -1,4 +1,4 @@
-# E0102: inconsistent indentation
+# E000102: inconsistent indentation
 # A block must use one consistent indentation depth. Tabs are never accepted.
 # Align the second print call with the first one.
 

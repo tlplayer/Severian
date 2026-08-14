@@ -47,8 +47,8 @@ fn build_reports_independent_files_in_one_pass() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E0202"));
-    assert!(stderr.contains("E0401"));
+    assert!(stderr.contains("E000202"));
+    assert!(stderr.contains("E000401"));
     assert!(stderr.contains("W001"));
     assert!(stderr.contains("2 independent error(s)"));
     let _ = std::fs::remove_dir_all(root);
@@ -59,18 +59,37 @@ fn build_json_is_bounded_and_machine_readable() {
     let root = fixture();
     let output = Command::new(env!("CARGO_BIN_EXE_sev"))
         .args(["build"])
-        .arg(&root)
+        .arg(root.join("type_error.sev"))
         .args(["--max-errors", "1", "--message-format", "json"])
         .output()
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let finding = &json.as_array().unwrap()[0];
     assert!(stdout.starts_with('['));
     assert!(stdout.trim_end().ends_with(']'));
     assert!(stdout.contains("\"severity\":\"error\""));
     assert_eq!(stdout.matches("\"severity\":\"error\"").count(), 1);
     assert!(stdout.contains("\"path\":"));
     assert!(stdout.contains("\"message\":"));
+    assert!(stdout.contains("\"rendered\":"));
+    assert!(stdout.contains("\"labels\":["));
+    assert!(stdout.contains("\"notes\":["));
+    assert!(stdout.contains("\"suggestions\":["));
+    assert!(stdout.contains("\"related\":["));
+    assert!(stdout.contains("\"applicability\":\"maybe-incorrect\""));
+    assert!(stdout.contains("\"replacement\":\"int(\\\"wrong\\\")\""));
+    assert_eq!(finding["code"], "E000202");
+    assert_eq!(finding["labels"][0]["style"], "primary");
+    assert_eq!(
+        finding["suggestions"][0]["applicability"],
+        "maybe-incorrect"
+    );
+    assert_eq!(
+        finding["suggestions"][0]["edits"][0]["replacement"],
+        "int(\"wrong\")"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

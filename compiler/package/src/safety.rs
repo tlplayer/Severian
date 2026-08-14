@@ -84,7 +84,7 @@ pub fn enforce_type_safe_policy(
             stage: "type safety",
             span,
             message: format!(
-                "E0201: {kind} `{declaration}` defaults to `Any`\n\
+                "E000201: {kind} `{declaration}` defaults to `Any`\n\
                  source: {snippet}\n\
                  add an explicit type, such as `{declaration}: ConcreteType`; write `{declaration}: Any` only when dynamic typing is intentional"
             ),
@@ -290,7 +290,7 @@ fn unsafe_policy_error(reason: &str, span: Span, capability: &str) -> PackageErr
         stage: "unsafe policy",
         span,
         message: format!(
-            "E0701: unsafe capability `{capability}` is not allowed; add it and this source path to `[package.unsafe]`, while native ABI remains library-only and tests remain safe-only"
+            "E000701: unsafe capability `{capability}` is not allowed; add it and this source path to `[package.unsafe]`, while native ABI remains library-only and tests remain safe-only"
         ),
         source_path: None,
         source: None,

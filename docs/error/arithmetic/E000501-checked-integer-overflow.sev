@@ -1,4 +1,4 @@
-# E0501: checked integer overflow
+# E000501: checked integer overflow
 # Safe integer arithmetic cannot exceed the destination type.
 # Select wrapping_add, saturating_add, or overflowing_add explicitly when that
 # behavior is part of the algorithm.

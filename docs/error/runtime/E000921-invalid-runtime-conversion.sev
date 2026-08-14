@@ -1,4 +1,4 @@
-# E0921: a runtime string does not contain a valid base-10 integer.
+# E000921: a runtime string does not contain a valid base-10 integer.
 def parse(value: string) -> int:
     return int(value)
 

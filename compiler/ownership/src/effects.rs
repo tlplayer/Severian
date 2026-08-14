@@ -624,7 +624,7 @@ pub(super) fn ownership_error(code: &str, message: String) -> OwnershipError {
 
 pub(super) fn unknown(binding: &BindingRef) -> OwnershipError {
     ownership_error(
-        "E0300",
+        "E000300",
         format!("ownership operation references unknown binding `{binding}`"),
     )
 }
