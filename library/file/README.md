@@ -15,6 +15,18 @@ settings = file.read("settings.json")
 print(settings.get("voice"))
 ```
 
+Use `file.load(path)` when only the decoded value is needed. It uses the same
+extension dispatch without exposing the path-backed document wrapper:
+
+```sev
+settings = file.load("settings.json")
+rows: list[list[string]] = file.load("people.csv")
+```
+
+For JSON this is the parsed JSON value (an object, array, scalar, or null), not
+the source text. Use `file.read()` when document methods such as `write()`,
+`raw()`, or format-specific mutation are required.
+
 Literal paths refine statically: `.csv` is `csv.CSV`, `.json` is `json.JSON`,
 `.yaml` is `yaml.YAML`, and `.txt` is `file.Text`. Runtime paths retain the
 `file.File` interface and use dynamic trait dispatch for its common methods.
@@ -79,4 +91,5 @@ domain methods remain owned by the playlist package. Low-level reads used by a
 reader adapter stay in `platform`, preventing recursive `file.read()` calls.
 
 `read_text` and `parse_csv` remain compatibility shims. New code uses
-`file.read()` for paths and the relevant format package for in-memory data.
+`file.load()` for decoded values, `file.read()` for path-backed documents, and
+the relevant format package for in-memory data.

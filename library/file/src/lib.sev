@@ -111,6 +111,10 @@ def read(path: string) -> Result[file_interface.File, IOError | file_interface.F
     document = reader.read(path)
     return document
 
+def load(path: string) -> Result[Any, IOError | file_interface.FormatError]:
+    document = read(path)
+    return document.value()
+
 # Compatibility aliases remain temporarily for older packages. New Severian
 # code uses complete snake_case names and receives no abbreviation burden.
 def read_bytes(handle: Any, count: int) -> Result[list[int], IOError]:
@@ -185,6 +189,16 @@ test "read returns parsed JSON and YAML objects":
     _yaml_saved = yaml_file.write()
     changed_yaml = read("/tmp/severian-library-format.yaml")
     assert(changed_yaml.scalar("status") == "complete")
+
+test "load returns the decoded value selected by the file extension":
+    json_path = "/tmp/severian-library-load.json"
+    csv_path = "/tmp/severian-library-load.csv"
+    _json_written = write(json_path, "{\"name\":\"Ada\",\"languages\":2}")
+    _csv_written = write(csv_path, "name,note\nAda,compiler\n")
+    json_value = load(json_path)
+    csv_value: list[list[string]] = load(csv_path)
+    assert(platform.jsonas_string(platform.jsonobject_get(json_value, "name")) == "Ada")
+    assert(csv_value == [["name", "note"], ["Ada", "compiler"]])
 
 test "binary extensions use typed audio and fallback objects":
     mp3_path = "/tmp/severian-library-format.mp3"

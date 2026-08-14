@@ -28,7 +28,15 @@ impl LowerContext<'_> {
                     )
                     .unwrap();
                     writeln!(self.output, "  ^bb{failure_block}:").unwrap();
-                    if self.declared_return == ValueType::Result {
+                    if self.is_main {
+                        let failure = self.fresh_value();
+                        writeln!(
+                            self.output,
+                            "    {failure} = llvm.mlir.constant(1 : i32) : i32"
+                        )
+                        .unwrap();
+                        writeln!(self.output, "    llvm.return {failure} : i32").unwrap();
+                    } else if self.declared_return == ValueType::Result {
                         writeln!(self.output, "    llvm.return {result} : !llvm.ptr").unwrap();
                     } else {
                         writeln!(self.output, "    llvm.call @abort() : () -> ()").unwrap();
@@ -409,11 +417,13 @@ impl LowerContext<'_> {
                         } else {
                             writeln!(self.output, "  ^bb{continue_block}({signature}):").unwrap();
                         }
-                        self.variables = carried
-                            .into_iter()
-                            .zip(arguments)
-                            .map(|((name, _), value)| (name, value))
-                            .collect();
+                        self.variables.clear();
+                        for ((name, (original, _)), (value, ty)) in
+                            carried.into_iter().zip(arguments)
+                        {
+                            self.carry_value_metadata(&original, &value);
+                            self.variables.insert(name, (value, ty));
+                        }
                         self.terminated = false;
                     } else {
                         self.terminated = true;

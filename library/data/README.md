@@ -11,6 +11,21 @@ table = table.unique(["npc_name", "text"])
 groups = table.group(["npc_name"])
 ```
 
+Selected groups can be replaced by an aggregate row while unselected rows keep
+their source positions. The merged row occupies the first selected row's
+position:
+
+```sev
+merged = table.group_merge(
+    |row| row.get("dialog_type") == "item_text",
+    ["npc_name", "zone", "quest_id"],
+    |group| merge_pages(group),
+)
+```
+
+The merge callback receives the complete `Data` group and returns one `Row`,
+so aggregation policy remains application-defined.
+
 The source document continues to own parsing, quoting, encoding, paths, and
 writes. `Data` owns rows, columns, schema projection, transformation, filtering,
 ordering, grouping, and deduplication. CSV, JSON, Parquet, SQL, and Arrow sources can

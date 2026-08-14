@@ -278,7 +278,9 @@ native executable.
 ## Official library
 
 The official library uses flat imports such as `import network` and
-`from math import jacobian`; a full import exposes the package's available names. Its package
+`from math import jacobian`; nested shipped packages use names such as
+`import model.speech`. Official packages never appear in an application's
+`[dependencies]` table. A full import exposes the package's available names. Its package
 catalog and compiler/library/runtime
 ownership boundary are documented in `library/README.md` and
 `library/CATALOG.md`.
@@ -593,12 +595,18 @@ option remain flexible, and explicitly writing `Any` always records intentional
 dynamic typing. See [`docs/error`](docs/error/README.md) for the categorized
 compiler diagnostic catalog.
 
-`from geometry import Point` resolves `geometry` from the current package, the
-standard library, or a dependency selected by the manifest and lockfile. Source
-files do not contain a separate `package` declaration. Standard-library package
-sources are embedded in `sev`, so named imports remain available after the
-compiler binary is installed or relocated. `SEVERIAN_LIBRARY_PATH` deliberately
-overrides those embedded packages for library development.
+`from geometry import Point` resolves `geometry` from the current package, a
+dependency selected by the manifest and lockfile, or the official library.
+Official names are reserved and a declared dependency cannot shadow one. Source
+files do not contain a separate `package` declaration.
+
+The compiler looks for official packages in an explicit
+`SEVERIAN_LIBRARY_PATH`, `$SEVERIAN_HOME/lib/severian/2026`, and an
+executable-relative `../lib/severian/2026` installation before using its source
+checkout or embedded distribution. Standard-library package sources, including
+nested packages, are embedded in `sev`, so named imports remain available after
+the compiler binary is installed or relocated. `SEVERIAN_LIBRARY_PATH`
+deliberately selects editable packages for compiler and library development.
 
 Native ABI declarations must acknowledge their unsafe boundary explicitly, and
 only a declared library target may opt in:

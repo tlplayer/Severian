@@ -273,3 +273,93 @@ fn all_requested_packages_are_workspace_members() {
         );
     }
 }
+
+#[test]
+fn nested_official_package_needs_no_manifest_dependency() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "severian-nested-standard-library-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"stdlib-consumer\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[[bin]]\nname = \"stdlib-consumer\"\npath = \"src/main.sev\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.sev"),
+        "import model.speech as speech\n\ndef main():\n    assert(speech.estimate_audio_tokens(\"hello\", \"reference\", 25, 1.0) > 0)\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("check")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("sev.lock")).unwrap(),
+        "version = 1\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn declared_dependency_cannot_shadow_official_package() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "severian-standard-library-shadow-{}-{nonce}",
+        std::process::id()
+    ));
+    let application = root.join("application");
+    let impostor = root.join("impostor");
+    std::fs::create_dir_all(application.join("src")).unwrap();
+    std::fs::create_dir_all(impostor.join("src")).unwrap();
+    std::fs::write(
+        impostor.join("package.toml"),
+        "[package]\nname = \"file\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        impostor.join("src/lib.sev"),
+        "def impostor() -> bool:\n    return true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        application.join("package.toml"),
+        "[package]\nname = \"shadow-consumer\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[[bin]]\nname = \"shadow-consumer\"\npath = \"src/main.sev\"\n\n[dependencies]\nfile = { path = \"../impostor\", version = \"0.1.0\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        application.join("src/main.sev"),
+        "import file\n\ndef main():\n    print(file.impostor())\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("check")
+        .arg(&application)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("cannot shadow the reserved Severian standard-library package"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -1,7 +1,7 @@
 use severian_hir::{
-    AssignmentOp, BinaryOp, CallTarget, Decorator, Expression, Function, FunctionId, HirId,
-    Instruction, MatchPattern, Parameter, Program, SwitchArm, TaskPlacement, TensorElementType,
-    TensorType, TypeDefinitionId, ValueType, VariantId,
+    AssignmentOp, BinaryOp, CallTarget, Class, Decorator, Expression, Function, FunctionId, HirId,
+    Instruction, MatchPattern, Parameter, Program, ReceiverType, SwitchArm, TaskPlacement,
+    TensorElementType, TensorType, TypeDefinitionId, ValueType, VariantId,
 };
 
 #[test]
@@ -240,6 +240,119 @@ fn lowers_integer_range_for_to_control_flow() {
     assert!(text.contains("llvm.icmp \"slt\""));
     assert!(text.contains("llvm.cond_br"));
     assert!(text.contains("llvm.br"));
+}
+
+#[test]
+fn preserves_abstract_receiver_dispatch_through_for_loop() {
+    let predict = Function {
+        id: FunctionId::from_name("FixedModel.predict"),
+        name: "predict".into(),
+        native_symbol: None,
+        decorators: vec![],
+        contract: None,
+        params: vec![Parameter {
+            name: "tokens".into(),
+            ty: ValueType::List,
+            default: None,
+            receiver: None,
+        }],
+        return_type: ValueType::Any,
+        instructions: vec![Instruction::Return(Some(Expression::Variable(
+            "tokens".into(),
+        )))],
+        tests: vec![],
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![Class {
+            id: TypeDefinitionId::from_name("FixedModel"),
+            name: "FixedModel".into(),
+            decorators: vec![],
+            fields: vec![],
+            field_types: vec![],
+            field_classes: vec![],
+            field_defaults: vec![],
+            field_constraints: vec![],
+            constructors: vec![],
+            methods: vec![predict],
+            method_return_classes: vec![None],
+        }],
+        functions: vec![Function {
+            id: FunctionId::from_name("generate"),
+            name: "generate".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![Parameter {
+                name: "model".into(),
+                ty: ValueType::Any,
+                default: None,
+                receiver: Some(ReceiverType {
+                    name: "MaskedModel".into(),
+                    concrete: false,
+                    methods: vec!["predict".into()],
+                }),
+            }],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::For {
+                setup: None,
+                pattern: MatchPattern::Bind("step".into()),
+                iterable: Expression::Call {
+                    target: CallTarget::source("range"),
+                    args: vec![Expression::Integer(0), Expression::Integer(2)],
+                },
+                instructions: vec![Instruction::Evaluate(Expression::MethodCall {
+                    object: Box::new(Expression::Variable("model".into())),
+                    method: "predict".into(),
+                    args: vec![Expression::List(vec![])],
+                })],
+            }],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.call @__sev_dispatch_predict_list_any"));
+    assert!(!text.contains("llvm.call @__sev_method_MaskedModel_predict"));
+}
+
+#[test]
+fn lowers_propagated_main_failures_to_a_nonzero_exit_status() {
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Result,
+            instructions: vec![Instruction::TryLet {
+                name: "value".into(),
+                value: Expression::Variant {
+                    type_id: Some(TypeDefinitionId::from_name("Result")),
+                    variant_id: VariantId::from_name("failure"),
+                    name: "failure".into(),
+                    fields: vec![Expression::String("unavailable".into())],
+                },
+                receiver: None,
+            }],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program));
+    let main = lowered.as_str().split("llvm.func @main(").nth(1).unwrap();
+    assert!(main.contains("llvm.mlir.constant(1 : i32) : i32"));
+    assert!(main
+        .lines()
+        .filter(|line| line.trim_start().starts_with("llvm.return"))
+        .all(|line| line.ends_with(": i32")));
 }
 
 #[test]

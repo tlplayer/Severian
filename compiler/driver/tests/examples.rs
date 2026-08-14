@@ -102,6 +102,34 @@ fn does_not_fuse_user_functions_that_only_share_activation_names() {
 }
 
 #[test]
+fn chained_class_filter_calls_the_method_instead_of_the_list_intrinsic() {
+    let compilation = compile_source(concat!(
+        "class Dataset:\n",
+        "    value: int\n",
+        "\n",
+        "    def filter(predicate: Function[int, bool]) -> Dataset:\n",
+        "        return Dataset(value)\n",
+        "\n",
+        "def dataset() -> Dataset:\n",
+        "    return Dataset(1)\n",
+        "\n",
+        "def main():\n",
+        "    filtered = dataset().filter(|value| value > 0)\n",
+        "    print(filtered.value)\n",
+    ))
+    .unwrap();
+
+    let main = compilation
+        .mlir
+        .as_str()
+        .split("llvm.func @main(")
+        .nth(1)
+        .unwrap();
+    assert!(main.contains("llvm.call @__sev_method_Dataset_filter"));
+    assert!(!main.contains("llvm.call @__sev_unbox_ptr"));
+}
+
+#[test]
 fn compiles_server_syntax_and_propagated_file_errors() {
     let root = examples_root();
     for fixture in [

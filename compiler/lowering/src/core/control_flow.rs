@@ -178,7 +178,11 @@ impl LowerContext<'_> {
         } else {
             writeln!(self.output, "  ^bb{exit}({signature}):").unwrap();
         }
-        self.variables = carried.into_iter().zip(arguments).collect();
+        self.variables.clear();
+        for (name, (value, ty)) in carried.into_iter().zip(arguments) {
+            self.carry_value_metadata(&incoming[&name].0, &value);
+            self.variables.insert(name, (value, ty));
+        }
         self.terminated = false;
     }
 
@@ -277,9 +281,7 @@ impl LowerContext<'_> {
             if let Some((_, original, _)) =
                 carried.iter().find(|(candidate, _, _)| candidate == name)
             {
-                if let Some(class) = self.object_classes.get(original).cloned() {
-                    self.object_classes.insert(value.clone(), class);
-                }
+                self.carry_value_metadata(original, value);
             }
         }
         let condition = self.lower_expression(condition);
@@ -348,6 +350,11 @@ impl LowerContext<'_> {
             writeln!(self.output, "  ^bb{exit}({exit_signature}):").unwrap();
         }
         for ((name, _, _), (value, ty)) in header_values.iter().zip(exit_arguments) {
+            if let Some((_, original, _)) =
+                carried.iter().find(|(candidate, _, _)| candidate == name)
+            {
+                self.carry_value_metadata(original, &value);
+            }
             self.variables.insert(name.clone(), (value, ty));
         }
         let carried_names = carried
@@ -505,9 +512,7 @@ impl LowerContext<'_> {
             if let Some((_, original, _)) =
                 carried.iter().find(|(candidate, _, _)| candidate == name)
             {
-                if let Some(class) = self.object_classes.get(original).cloned() {
-                    self.object_classes.insert(value.clone(), class);
-                }
+                self.carry_value_metadata(original, value);
             }
         }
         let condition = self.fresh_value();
@@ -659,9 +664,7 @@ impl LowerContext<'_> {
                 .iter()
                 .find(|(candidate, _, _)| candidate == variable)
             {
-                if let Some(class) = self.object_classes.get(original).cloned() {
-                    self.object_classes.insert(value.clone(), class);
-                }
+                self.carry_value_metadata(original, value);
             }
         }
         let carried_names = carried

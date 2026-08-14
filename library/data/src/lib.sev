@@ -109,6 +109,38 @@ def group_records(source_columns: list[string], source_rows: list[list[Any]], co
         result.append(Data(source_columns, groups.get(key, [])))
     return result
 
+def group_merge_records(
+    source_columns: list[string],
+    source_rows: list[list[Any]],
+    predicate: Function[Row, bool],
+    columns: list[string],
+    merge: Function[Data, Row],
+) -> Data:
+    groups := {}
+    selected_keys := []
+    for values in source_rows:
+        row = Row(source_columns, values)
+        if predicate(row):
+            key = normalized_key(row, columns, [], false)
+            group = groups.get(key, [])
+            group.append(values)
+            groups[key] = group
+            selected_keys.append(key)
+        else:
+            selected_keys.append("")
+    emitted := {}
+    retained := []
+    for index, values in enumerate(source_rows):
+        key = selected_keys[index]
+        if size(key) == 0:
+            retained.append(values)
+            continue
+        if not emitted.get(key, false):
+            combined = merge(Data(source_columns, groups.get(key, [])))
+            retained.append(values_for(source_columns, combined))
+            emitted[key] = true
+    return Data(source_columns, retained)
+
 class Data:
     columns_data: list[string]
     rows_data: list[list[Any]]
@@ -278,8 +310,19 @@ class Data:
     def group(columns: list[string]) -> list[Data]:
         return group_records(columns_data, rows_data, columns)
 
+    def group_merge(
+        predicate: Function[Row, bool],
+        columns: list[string],
+        merge: Function[Data, Row],
+    ) -> Data:
+        return group_merge_records(columns_data, rows_data, predicate, columns, merge)
+
 def example_data() -> Data:
     return Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
+
+def join_notes(group: Data) -> Row:
+    first = group.rows()[0]
+    return Row(group.columns(), [first.get("name"), group.get("note").join(" ")])
 
 test "Data provides schema projection, filtering, transforms, and uniqueness":
     constructed := Data(["name"], [["Ada"], ["Grace"]])
@@ -301,3 +344,11 @@ test "Data provides schema projection, filtering, transforms, and uniqueness":
     groups = table.group(["name"])
     assert(size(groups) == 2)
     assert(groups[0].get("name") == ["Ada", "Ada"])
+
+test "group_merge replaces selected groups at their first source position":
+    table := Data(
+        ["name", "note"],
+        [["Ada", "first"], ["Grace", "middle"], ["Ada", "second"], ["Grace", "last"]],
+    )
+    merged = table.group_merge(|row| row.get("name") == "Ada", ["name"], |group| join_notes(group))
+    assert(merged.values() == [["Ada", "first second"], ["Grace", "middle"], ["Grace", "last"]])

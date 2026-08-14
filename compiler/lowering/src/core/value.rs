@@ -1,6 +1,24 @@
 use super::*;
 
 impl LowerContext<'_> {
+    pub(super) fn carry_value_metadata(&mut self, source: &str, target: &str) {
+        if let Some(class) = self.object_classes.get(source).cloned() {
+            self.object_classes.insert(target.to_owned(), class);
+        }
+        if let Some(class_id) = self.object_class_ids.get(source).copied() {
+            self.object_class_ids.insert(target.to_owned(), class_id);
+        }
+        if let Some(receiver) = self.receiver_types.get(source).cloned() {
+            self.receiver_types.insert(target.to_owned(), receiver);
+        }
+        if let Some(result) = self.task_results.get(source).copied() {
+            self.task_results.insert(target.to_owned(), result);
+        }
+        if let Some(channel) = self.channel_types.get(source).copied() {
+            self.channel_types.insert(target.to_owned(), channel);
+        }
+    }
+
     pub(super) fn lower_short_circuit_chain(
         &mut self,
         left: &Expression,
@@ -197,14 +215,15 @@ impl LowerContext<'_> {
     }
 
     pub(super) fn has_known_class_method(&self, object: &Expression, method: &str) -> bool {
-        let Expression::Variable(name) = object.kind() else {
-            return false;
+        let class_id = match object.kind() {
+            Expression::Variable(name) => self
+                .variables
+                .get(&name.id)
+                .and_then(|(value, _)| self.object_class_ids.get(value)),
+            Expression::Call { target, .. } => self.function_return_classes.get(&target.id),
+            _ => None,
         };
-        if let Some(class_id) = self
-            .variables
-            .get(&name.id)
-            .and_then(|(value, _)| self.object_class_ids.get(value))
-        {
+        if let Some(class_id) = class_id {
             return self
                 .classes
                 .iter()
@@ -216,6 +235,9 @@ impl LowerContext<'_> {
                         .any(|candidate| candidate.name == method)
                 });
         }
+        let Expression::Variable(name) = object.kind() else {
+            return false;
+        };
         let class_name = self
             .variables
             .get(&name.id)

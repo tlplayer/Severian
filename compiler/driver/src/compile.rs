@@ -382,6 +382,10 @@ fn frontend_path(
     } else {
         Vec::new()
     };
+    let dependency_names = interfaces
+        .iter()
+        .map(|interface| interface.name.clone())
+        .collect::<HashSet<_>>();
     let local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     for interface in &local_interfaces {
@@ -395,14 +399,14 @@ fn frontend_path(
             CompileError::Package(format!("{}: {error}", interface.source_path.display()))
         })?;
         for official in load_official_interfaces(&interface.module)? {
-            insert_official_interface(&mut interfaces, official)?;
+            insert_official_interface(&mut interfaces, official, &dependency_names)?;
         }
     }
     for interface in local_interfaces {
         insert_interface(&mut interfaces, interface)?;
     }
     for interface in load_official_interfaces(&ast)? {
-        insert_official_interface(&mut interfaces, interface)?;
+        insert_official_interface(&mut interfaces, interface, &dependency_names)?;
     }
     Ok((ast, interfaces, source))
 }
@@ -410,13 +414,27 @@ fn frontend_path(
 fn insert_official_interface(
     interfaces: &mut Vec<PackageInterface>,
     interface: PackageInterface,
+    dependency_names: &HashSet<String>,
 ) -> Result<(), CompileError> {
-    // A manifest dependency owns its import name. Embedded standard packages
-    // are the fallback for undeclared names, never a second competing source.
-    if interfaces
+    if let Some(existing) = interfaces
         .iter()
-        .any(|existing| existing.name == interface.name)
+        .find(|existing| existing.name == interface.name)
     {
+        let same_source = existing.source_path == interface.source_path
+            || matches!(
+                (
+                    existing.source_path.canonicalize(),
+                    interface.source_path.canonicalize(),
+                ),
+                (Ok(existing), Ok(official)) if existing == official
+            );
+        if dependency_names.contains(&interface.name) && !same_source {
+            return Err(CompileError::Package(format!(
+                "dependency `{}` cannot shadow the reserved Severian standard-library package at {}",
+                interface.name,
+                interface.source_path.display()
+            )));
+        }
         return Ok(());
     }
     insert_interface(interfaces, interface)
@@ -458,6 +476,11 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
             .map_err(|error| CompileError::Package(error.to_string()));
     }
 
+    if let Some(library_root) = installed_library_root() {
+        return severian_package::load_official_interfaces(module, &library_root)
+            .map_err(|error| CompileError::Package(error.to_string()));
+    }
+
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library");
     if checkout.is_dir() {
         severian_package::load_official_interfaces(module, &checkout)
@@ -465,6 +488,49 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
     } else {
         severian_package::load_embedded_official_interfaces(module, EMBEDDED_OFFICIAL_PACKAGES)
             .map_err(|error| CompileError::Package(error.to_string()))
+    }
+}
+
+fn installed_library_root() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = std::env::var_os("SEVERIAN_HOME").map(PathBuf::from) {
+        candidates.push(home.join("lib/severian/2026"));
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(binary_directory) = executable.parent() {
+            candidates.push(binary_directory.join("../lib/severian/2026"));
+        }
+    }
+    candidates.into_iter().find(|candidate| candidate.is_dir())
+}
+
+#[cfg(test)]
+mod official_library_tests {
+    use super::{parse_source, EMBEDDED_OFFICIAL_PACKAGES};
+    use std::path::Path;
+
+    #[test]
+    fn embedded_distribution_contains_nested_official_packages() {
+        assert!(EMBEDDED_OFFICIAL_PACKAGES
+            .iter()
+            .any(|package| package.name == "model.speech"));
+        let module = parse_source(
+            "import model.speech as speech\n",
+            Path::new("embedded-consumer.sev"),
+        )
+        .unwrap();
+        let interfaces = severian_package::load_embedded_official_interfaces(
+            &module,
+            EMBEDDED_OFFICIAL_PACKAGES,
+        )
+        .unwrap();
+        let names = interfaces
+            .iter()
+            .map(|interface| interface.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"model.speech"));
+        assert!(names.contains(&"math"));
+        assert!(names.contains(&"random"));
     }
 }
 

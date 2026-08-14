@@ -34,44 +34,37 @@ fn main() {
 
 fn embed_official_libraries(manifest: &std::path::Path, out: &std::path::Path) {
     let library_root = manifest.join("../../library");
-    let mut directories = fs::read_dir(&library_root)
-        .unwrap_or_else(|error| {
-            panic!(
-                "reading the Severian standard library at {} failed: {error}",
-                library_root.display()
-            )
-        })
-        .map(|entry| {
-            entry
-                .expect("standard library directory entry is readable")
-                .path()
-        })
-        .filter(|path| path.join("package.toml").is_file())
-        .collect::<Vec<_>>();
+    let mut directories = Vec::new();
+    collect_package_directories(&library_root, &mut directories);
     directories.sort();
 
     let mut generated = String::from(
         "pub(crate) const EMBEDDED_OFFICIAL_PACKAGES: &[severian_package::EmbeddedOfficialPackage<'static>] = &[\n",
     );
     for directory in directories {
-        let name = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("standard library package names are UTF-8");
         let manifest_path = directory.join("package.toml");
-        let source_path = directory.join("src/lib.sev");
         let manifest_source = fs::read_to_string(&manifest_path)
             .unwrap_or_else(|error| panic!("reading {} failed: {error}", manifest_path.display()));
+        let parsed = toml::from_str::<toml::Value>(&manifest_source)
+            .unwrap_or_else(|error| panic!("parsing {} failed: {error}", manifest_path.display()));
+        let name = parsed
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("{} has no package.name", manifest_path.display()));
+        let library_path = parsed
+            .get("lib")
+            .and_then(|library| library.get("path"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("src/lib.sev");
+        let source_path = directory.join(library_path);
         let source = fs::read_to_string(&source_path)
             .unwrap_or_else(|error| panic!("reading {} failed: {error}", source_path.display()));
-        let mut module_paths = fs::read_dir(directory.join("src"))
-            .unwrap_or_else(|error| panic!("reading package sources failed: {error}"))
-            .map(|entry| entry.expect("package source entry is readable").path())
-            .filter(|path| {
-                path.extension().and_then(|extension| extension.to_str()) == Some("sev")
-                    && path.file_name().and_then(|name| name.to_str()) != Some("lib.sev")
-            })
-            .collect::<Vec<_>>();
+        let canonical_source = source_path
+            .canonicalize()
+            .unwrap_or_else(|error| panic!("resolving {} failed: {error}", source_path.display()));
+        let mut module_paths = Vec::new();
+        collect_package_modules(&directory, &directory, &canonical_source, &mut module_paths);
         module_paths.sort();
         let modules = module_paths
             .iter()
@@ -98,4 +91,64 @@ fn embed_official_libraries(manifest: &std::path::Path, out: &std::path::Path) {
     generated.push_str("];\n");
     fs::write(out.join("official_libraries.rs"), generated)
         .expect("writing embedded Severian library assets must succeed");
+}
+
+fn collect_package_directories(directory: &std::path::Path, packages: &mut Vec<PathBuf>) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("reading {} failed: {error}", directory.display()))
+        .map(|entry| {
+            entry
+                .expect("standard library directory entry is readable")
+                .path()
+        })
+        .filter(|path| path.is_dir() && !ignored_directory(path))
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.join("package.toml").is_file() {
+            packages.push(path.clone());
+        }
+        collect_package_directories(&path, packages);
+    }
+}
+
+fn collect_package_modules(
+    package_root: &std::path::Path,
+    directory: &std::path::Path,
+    library_source: &std::path::Path,
+    modules: &mut Vec<PathBuf>,
+) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("reading {} failed: {error}", directory.display()))
+        .map(|entry| {
+            entry
+                .expect("standard library source entry is readable")
+                .path()
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            if ignored_directory(&path) {
+                continue;
+            }
+            if path != package_root && path.join("package.toml").is_file() {
+                continue;
+            }
+            collect_package_modules(package_root, &path, library_source, modules);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("sev")
+            && path
+                .canonicalize()
+                .ok()
+                .is_none_or(|candidate| candidate != library_source)
+        {
+            modules.push(path);
+        }
+    }
+}
+
+fn ignored_directory(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "target" || name.starts_with('.'))
 }
