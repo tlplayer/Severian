@@ -74,7 +74,9 @@ static void sev_format_collection(sev_format_buffer *buffer, sev_collection *val
 }
 
 static void sev_format_object(sev_format_buffer *buffer, sev_object *value, int depth) {
-  sev_format_text(buffer, value->class_name && *value->class_name ? value->class_name : "Object");
+  const char *class_name = value->class_name && *value->class_name ? value->class_name : "Object";
+  const char *qualified_separator = strrchr(class_name, '.');
+  sev_format_text(buffer, qualified_separator ? qualified_separator + 1 : class_name);
   sev_format_text(buffer, "(");
   for (int64_t index = 0; index < value->size; ++index) {
     if (index) sev_format_text(buffer, ", ");

@@ -50,7 +50,10 @@ impl BuildGate {
 pub struct CoveragePolicy {
     pub minimum: f64,
     pub changed_minimum: Option<f64>,
+    pub regions: Option<f64>,
     pub branches: Option<f64>,
+    pub functions: Option<f64>,
+    pub per_file: bool,
 }
 
 impl Default for CoveragePolicy {
@@ -58,7 +61,10 @@ impl Default for CoveragePolicy {
         Self {
             minimum: 75.0,
             changed_minimum: None,
+            regions: None,
             branches: None,
+            functions: None,
+            per_file: false,
         }
     }
 }
@@ -285,6 +291,33 @@ fn parse_coverage(value: &toml::Value, manifest: &Path) -> Result<CoveragePolicy
     let Some(table) = value.get("coverage").and_then(toml::Value::as_table) else {
         return Ok(CoveragePolicy::default());
     };
+    for key in table.keys() {
+        if !matches!(
+            key.as_str(),
+            "minimum"
+                | "changed_minimum"
+                | "changed-code-minimum"
+                | "regions"
+                | "branches"
+                | "functions"
+                | "per_file"
+        ) {
+            return Err(policy_error(
+                manifest,
+                format!("unknown `coverage` setting `{key}`"),
+            ));
+        }
+    }
+    let per_file = match table.get("per_file") {
+        None => false,
+        Some(toml::Value::Boolean(value)) => *value,
+        Some(_) => {
+            return Err(policy_error(
+                manifest,
+                "`coverage.per_file` must be a boolean",
+            ))
+        }
+    };
     Ok(CoveragePolicy {
         minimum: percentage(table.get("minimum"), 75.0, manifest, "coverage.minimum")?,
         changed_minimum: optional_percentage(
@@ -294,7 +327,10 @@ fn parse_coverage(value: &toml::Value, manifest: &Path) -> Result<CoveragePolicy
             manifest,
             "coverage.changed_minimum",
         )?,
+        regions: optional_percentage(table.get("regions"), manifest, "coverage.regions")?,
         branches: optional_percentage(table.get("branches"), manifest, "coverage.branches")?,
+        functions: optional_percentage(table.get("functions"), manifest, "coverage.functions")?,
+        per_file,
     })
 }
 

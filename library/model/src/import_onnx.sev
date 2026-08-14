@@ -25,7 +25,7 @@ class ProtoReader:
             assert(multiplier <= 72057594037927936, "protobuf varint is too long")
 
     def key() -> tuple[int, int]:
-        encoded = varint()
+        encoded = self.varint()
         return (encoded / 8, encoded % 8)
 
     def take(count: int) -> list[int]:
@@ -35,17 +35,17 @@ class ProtoReader:
         return output
 
     def bytes() -> list[int]:
-        return take(varint())
+        return self.take(self.varint())
 
     def skip(wire: int):
         if wire == 0:
-            _value = varint()
+            _value = self.varint()
         else if wire == 1:
-            _value = take(8)
+            _value = self.take(8)
         else if wire == 2:
-            _value = bytes()
+            _value = self.bytes()
         else if wire == 5:
-            _value = take(4)
+            _value = self.take(4)
         else:
             assert(false, "unsupported protobuf wire type")
 
@@ -61,7 +61,7 @@ def unsigned_le(data: list[int]) -> int:
     return value
 
 def ieee_float(data: list[int], exponent_bits: int, fraction_bits: int) -> float:
-    encoded = unsigned_le(data)
+    encoded := unsigned_le(data)
     fraction_base := 1
     for _index in range(0, fraction_bits):
         fraction_base *= 2
@@ -74,10 +74,10 @@ def ieee_float(data: list[int], exponent_bits: int, fraction_bits: int) -> float
     sign = -1.0 if encoded / exponent_base == 1 else 1.0
     bias = exponent_base / 2 - 1
     if exponent == 0:
-        return sign * math.pow(2.0, 1 - bias) * fraction / fraction_base
+        return sign * math.pow(2.0, float(1 - bias)) * float(fraction) / float(fraction_base)
     if exponent == exponent_base - 1:
         assert(false, "ONNX initializer contains non-finite floating point data")
-    return sign * math.pow(2.0, exponent - bias) * (1.0 + fraction / fraction_base)
+    return sign * math.pow(2.0, float(exponent - bias)) * (1.0 + float(fraction) / float(fraction_base))
 
 def packed_varints(data: list[int]) -> list[int]:
     reader = ProtoReader(data)
@@ -206,7 +206,7 @@ def parse_tensor(data: list[int]) -> types.TensorValue:
 def parse_attribute(data: list[int]) -> tuple[string, Any]:
     reader = ProtoReader(data)
     name := ""
-    value: Any = 0
+    value: Any := 0
     integers := []
     floats := []
     while not reader.done():
@@ -254,13 +254,16 @@ def parse_node(data: list[int], index: int) -> types.GraphNode:
     while not reader.done():
         field, wire = reader.key()
         if field == 1:
-            inputs.append(utf8(reader.bytes()))
+            input_name: string = utf8(reader.bytes())
+            inputs.append(input_name)
         else if field == 2:
-            outputs.append(utf8(reader.bytes()))
+            output_name: string = utf8(reader.bytes())
+            outputs.append(output_name)
         else if field == 3:
             name = utf8(reader.bytes())
         else if field == 4:
-            operation = normalize_operation(utf8(reader.bytes()))
+            operation_name: string = utf8(reader.bytes())
+            operation = normalize_operation(operation_name)
         else if field == 5:
             attribute_name, value = parse_attribute(reader.bytes())
             json.object_set(attributes, attribute_name, value)
@@ -298,7 +301,7 @@ def parse_graph(data: list[int]) -> types.ModelGraph:
 def import_model(path: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError]:
     bytes = artifacts.read_bytes(path)
     reader = ProtoReader(bytes)
-    graph: types.ModelGraph = types.ModelGraph("", [], [], [], [])
+    graph: types.ModelGraph := types.ModelGraph("", [], [], [], [])
     found := false
     while not reader.done():
         field, wire = reader.key()

@@ -1,4 +1,4 @@
-use severian_ast::{Expr, Item, Literal, Stmt, TaskOwner, TaskPlacement};
+use severian_ast::{Expr, Item, LetKind, Literal, Stmt, TaskOwner, TaskPlacement};
 use severian_lexer::lex;
 use severian_parser::parse;
 
@@ -24,6 +24,20 @@ fn parses_the_hello_fixture_into_the_source_ast() {
         &call.args[0].value,
         Expr::Literal(Literal::String { value, .. }) if value == "hello, severian"
     ));
+}
+
+#[test]
+fn preserves_typed_changeable_bindings() {
+    let source = "def main():\n    value: Any := 1\n    value = \"updated\"\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(main) = &module.items[0] else {
+        panic!("expected a function");
+    };
+    let Stmt::Let(binding) = &main.body.statements[0] else {
+        panic!("expected a typed binding");
+    };
+    assert_eq!(binding.kind, LetKind::Changeable);
+    assert!(binding.ty.is_some());
 }
 
 #[test]

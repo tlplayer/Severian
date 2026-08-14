@@ -40,8 +40,11 @@ pipeline = [
 ]
 
 [coverage]
-minimum = 75
-branches = 60
+minimum = 99
+regions = 99
+branches = 99
+functions = 99
+per_file = true
 
 [memory]
 leaks = "deny"
@@ -97,10 +100,14 @@ expires = "2026-10-15"
 An expired exception fails the architecture gate even when the file remains
 below its exceptional hard limit.
 
-The compiler repository currently pins its own line floor to 55%, just below
-the measured 57.50% baseline. When a manifest omits coverage policy, the parser
-still uses a 75% fallback. `sev init` and `sev new` now write every available
-control and explicitly start new applications at 0% with permissive memory and
-file-size policy. This keeps a fresh project usable while making the intended
-ratchets visible in `package.toml`; teams can raise them over the project's
-lifetime without researching hidden keys.
+The compiler repository requires 99% line, region, branch, and function
+coverage from the aggregate report and from every individual Severian source
+file. Per-file enforcement prevents a large, well-tested module from hiding a
+regression in a smaller module. A metric with no executable regions is treated
+as fully covered.
+
+When a manifest omits coverage policy, the parser uses a 75% aggregate line
+fallback. `sev init` and `sev new` write every available control and explicitly
+start new applications at 0% with permissive memory and file-size policy. This
+keeps a fresh project usable while making the intended ratchets visible in
+`package.toml`; teams can raise them without researching hidden keys.

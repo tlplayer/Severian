@@ -20,3 +20,16 @@ def difference[type](left: set[type], right: set[type]) -> set[type]:
 
 def symmetric_difference[type](left: set[type], right: set[type]) -> set[type]:
     return left.symmetric_difference(right)
+
+test "set facade covers mutation and all algebra operations":
+    values := {1, 2}
+    add(values, 3)
+    add(values, 3)
+    assert(values == {1, 2, 3})
+    remove(values, 2)
+    discard(values, 99)
+    assert(values == {1, 3})
+    assert(union(values, {3, 4}) == {1, 3, 4})
+    assert(intersection(values, {3, 4}) == {3})
+    assert(difference(values, {3, 4}) == {1})
+    assert(symmetric_difference(values, {3, 4}) == {1, 4})

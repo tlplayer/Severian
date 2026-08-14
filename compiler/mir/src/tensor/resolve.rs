@@ -8,6 +8,7 @@ pub(crate) fn resolve_tensor_op(
     inputs: Vec<TensorOperand>,
     scalar: Option<ValueRef>,
     result: TensorType,
+    mut lower: impl FnMut(&severian_hir::Expression) -> Result<ValueRef, MirLoweringError>,
 ) -> Result<TensorOp, MirLoweringError> {
     use ElementwiseKind as Elementwise;
     use TensorIntrinsic as Intrinsic;
@@ -53,26 +54,29 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::Transpose => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let permutation = match source_arguments.get(1) {
-                Some(argument) => integer_list(argument).ok_or_else(|| {
-                    failure(
-                        intrinsic,
-                        "permutation argument must be a list of non-negative integers",
-                    )
-                })?,
-                None => {
-                    let rank = input.ty.rank.ok_or_else(|| {
+            let (permutation, permutation_known) = match source_arguments.get(1) {
+                Some(argument) => (
+                    integer_list(argument).ok_or_else(|| {
                         failure(
                             intrinsic,
-                            "cannot infer a default permutation for an unranked tensor",
+                            "permutation argument must be a list of non-negative integers",
                         )
-                    })?;
-                    (0..u64::from(rank)).rev().collect()
-                }
+                    })?,
+                    true,
+                ),
+                None => (
+                    input
+                        .ty
+                        .rank
+                        .map(|rank| (0..u64::from(rank)).rev().collect())
+                        .unwrap_or_default(),
+                    input.ty.rank.is_some(),
+                ),
             };
             Ok(TensorOp::Transpose(TransposeOp {
                 input,
                 permutation,
+                permutation_known,
                 result,
             }))
         }
@@ -117,12 +121,14 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::Sum | Intrinsic::SumLast | Intrinsic::MeanLast | Intrinsic::MaxLast => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let (kind, axes, reduce_last_axis) = match intrinsic {
+            let (kind, axes, axes_known, reduce_last_axis) = match intrinsic {
                 Intrinsic::Sum => {
-                    let rank = input.ty.rank.ok_or_else(|| {
-                        failure(intrinsic, "full reduction input must have a resolved rank")
-                    })?;
-                    (ReductionKind::Sum, (0..u64::from(rank)).collect(), false)
+                    let axes = input
+                        .ty
+                        .rank
+                        .map(|rank| (0..u64::from(rank)).collect())
+                        .unwrap_or_default();
+                    (ReductionKind::Sum, axes, input.ty.rank.is_some(), false)
                 }
                 Intrinsic::SumLast | Intrinsic::MeanLast | Intrinsic::MaxLast => {
                     let kind = match intrinsic {
@@ -137,7 +143,7 @@ pub(crate) fn resolve_tensor_op(
                         .map(|rank| last_axis(intrinsic, rank).map(|axis| vec![axis]))
                         .transpose()?
                         .unwrap_or_default();
-                    (kind, axes, true)
+                    (kind, axes, input.ty.rank.is_some(), true)
                 }
                 _ => unreachable!(),
             };
@@ -145,6 +151,7 @@ pub(crate) fn resolve_tensor_op(
                 kind,
                 input,
                 axes,
+                axes_known,
                 last_axis: reduce_last_axis,
                 result,
                 accumulation: accumulation_type(result.element),
@@ -153,24 +160,25 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::Softmax | Intrinsic::SoftmaxAxis => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let rank = input.ty.rank.ok_or_else(|| {
-                failure(intrinsic, "normalization input must have a resolved rank")
-            })?;
-            let axis = if intrinsic == Intrinsic::Softmax {
-                last_axis(intrinsic, rank)?
+            let requested_axis = if intrinsic == Intrinsic::Softmax {
+                -1
             } else {
-                let axis = source_arguments
+                source_arguments
                     .get(1)
                     .and_then(signed_integer)
+                    .ok_or_else(|| failure(intrinsic, "axis argument must be an integer literal"))?
+            };
+            let axis = if let Some(rank) = input.ty.rank {
+                normalize_axis(requested_axis, rank)
+                    .map(|axis| axis as i64)
                     .ok_or_else(|| {
-                        failure(intrinsic, "axis argument must be an integer literal")
-                    })?;
-                normalize_axis(axis, rank).ok_or_else(|| {
-                    failure(
-                        intrinsic,
-                        format!("axis {axis} is outside tensor rank {rank}"),
-                    )
-                })?
+                        failure(
+                            intrinsic,
+                            format!("axis {requested_axis} is outside tensor rank {rank}"),
+                        )
+                    })?
+            } else {
+                requested_axis
             };
             Ok(TensorOp::Normalization(NormalizationOp {
                 kind: NormalizationKind::Softmax,
@@ -183,21 +191,24 @@ pub(crate) fn resolve_tensor_op(
         Intrinsic::LayerNorm => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let rank = input.ty.rank.ok_or_else(|| {
-                failure(intrinsic, "normalization input must have a resolved rank")
-            })?;
             let epsilon = source_arguments
                 .get(1)
                 .map(|argument| {
-                    scalar_bits(argument).ok_or_else(|| {
-                        failure(intrinsic, "epsilon argument must be a numeric literal")
-                    })
+                    if let Some(value) = scalar_bits(argument) {
+                        Ok(ScalarValue::Literal(value))
+                    } else {
+                        lower(argument).map(ScalarValue::Operand)
+                    }
                 })
                 .transpose()?;
             Ok(TensorOp::Normalization(NormalizationOp {
                 kind: NormalizationKind::LayerNorm,
                 input,
-                axis: last_axis(intrinsic, rank)?,
+                axis: input
+                    .ty
+                    .rank
+                    .map(|rank| i64::from(rank.saturating_sub(1)))
+                    .unwrap_or(-1),
                 epsilon,
                 result,
             }))
@@ -226,11 +237,17 @@ pub(crate) fn resolve_tensor_op(
         }
         Intrinsic::Slice => {
             expect_input_count(intrinsic, &inputs, 1)?;
+            let starts =
+                slice_indices_argument(intrinsic, source_arguments, 1, "starts", &mut lower)?;
+            let limits =
+                slice_indices_argument(intrinsic, source_arguments, 2, "limits", &mut lower)?;
+            let strides =
+                slice_indices_argument(intrinsic, source_arguments, 3, "strides", &mut lower)?;
             Ok(TensorOp::Slice(SliceOp {
                 input: inputs[0],
-                starts: integer_list_argument(intrinsic, source_arguments, 1, "starts")?,
-                limits: integer_list_argument(intrinsic, source_arguments, 2, "limits")?,
-                strides: integer_list_argument(intrinsic, source_arguments, 3, "strides")?,
+                starts,
+                limits,
+                strides,
                 result,
             }))
         }
@@ -238,8 +255,14 @@ pub(crate) fn resolve_tensor_op(
             expect_input_count(intrinsic, &inputs, 1)?;
             Ok(TensorOp::DynamicSlice(DynamicSliceOp {
                 input: inputs[0],
-                starts: integer_list_argument(intrinsic, source_arguments, 1, "starts")?,
-                sizes: integer_list_argument(intrinsic, source_arguments, 2, "sizes")?,
+                starts: slice_indices_argument(
+                    intrinsic,
+                    source_arguments,
+                    1,
+                    "starts",
+                    &mut lower,
+                )?,
+                sizes: slice_indices_argument(intrinsic, source_arguments, 2, "sizes", &mut lower)?,
                 result,
             }))
         }
@@ -248,7 +271,13 @@ pub(crate) fn resolve_tensor_op(
             Ok(TensorOp::DynamicUpdateSlice(DynamicUpdateSliceOp {
                 input: inputs[0],
                 update: inputs[1],
-                starts: integer_list_argument(intrinsic, source_arguments, 2, "starts")?,
+                starts: slice_indices_argument(
+                    intrinsic,
+                    source_arguments,
+                    2,
+                    "starts",
+                    &mut lower,
+                )?,
                 dynamic_index: None,
                 axis: None,
                 result,
@@ -345,18 +374,32 @@ fn expect_input_count(
     }
 }
 
-fn integer_list_argument(
+fn slice_indices_argument(
     intrinsic: TensorIntrinsic,
     arguments: &[severian_hir::Expression],
     index: usize,
     name: &str,
-) -> Result<Vec<u64>, MirLoweringError> {
-    arguments.get(index).and_then(integer_list).ok_or_else(|| {
-        failure(
+    lower: &mut impl FnMut(&severian_hir::Expression) -> Result<ValueRef, MirLoweringError>,
+) -> Result<Vec<SliceIndex>, MirLoweringError> {
+    let Some(argument) = arguments.get(index) else {
+        return Err(failure(intrinsic, format!("missing `{name}` argument")));
+    };
+    let severian_hir::Expression::List(values) = argument.kind() else {
+        return Err(failure(
             intrinsic,
-            format!("`{name}` argument must be a list of non-negative integers"),
-        )
-    })
+            format!("`{name}` argument must be an integer list"),
+        ));
+    };
+    values
+        .iter()
+        .map(|value| {
+            if let Some(value) = signed_integer(value) {
+                Ok(SliceIndex::Static(value))
+            } else {
+                lower(value).map(SliceIndex::Dynamic)
+            }
+        })
+        .collect()
 }
 
 fn last_axis(intrinsic: TensorIntrinsic, rank: u8) -> Result<u64, MirLoweringError> {

@@ -9,8 +9,8 @@ def cross_entropy(logits: Tensor[f64], targets: list[int]) -> float:
     loss := 0.0
     for row, target in enumerate(targets):
         assert(target >= 0 and target < classes)
-        loss -= math.log(max([probabilities[row * classes + target], 0.000000000001]))
-    return loss / size(targets)
+        loss -= math.log([probabilities[row * classes + target], 0.000000000001].maximum())
+    return loss / float(size(targets))
 
 def binary_cross_entropy(probabilities: Tensor[f64], targets: Tensor[f64]) -> float:
     predicted = tensor_ops.values(probabilities)
@@ -18,9 +18,9 @@ def binary_cross_entropy(probabilities: Tensor[f64], targets: Tensor[f64]) -> fl
     assert(size(predicted) == size(expected))
     loss := 0.0
     for index in indices(predicted):
-        probability = min([0.999999999999, max([0.000000000001, predicted[index]])])
+        probability = [0.999999999999, [0.000000000001, predicted[index]].maximum()].minimum()
         loss -= expected[index] * math.log(probability) + (1.0 - expected[index]) * math.log(1.0 - probability)
-    return loss / size(predicted)
+    return loss / float(size(predicted))
 
 def binary_cross_entropy_logits(logits: Tensor[f64], targets: Tensor[f64]) -> float:
     return binary_cross_entropy(tensor_ops.sigmoid(logits), targets)
@@ -33,7 +33,7 @@ def mse(predicted: Tensor[f64], expected: Tensor[f64]) -> float:
     for index in indices(left):
         difference = left[index] - right[index]
         total += difference * difference
-    return total / size(left)
+    return total / float(size(left))
 
 def mae(predicted: Tensor[f64], expected: Tensor[f64]) -> float:
     left = tensor_ops.values(predicted)
@@ -43,7 +43,7 @@ def mae(predicted: Tensor[f64], expected: Tensor[f64]) -> float:
     for index in indices(left):
         difference = left[index] - right[index]
         total += difference if difference >= 0.0 else -difference
-    return total / size(left)
+    return total / float(size(left))
 
 def huber(predicted: Tensor[f64], expected: Tensor[f64], delta: float = 1.0) -> float:
     left = tensor_ops.values(predicted)
@@ -53,7 +53,7 @@ def huber(predicted: Tensor[f64], expected: Tensor[f64], delta: float = 1.0) -> 
         difference = left[index] - right[index]
         absolute = difference if difference >= 0.0 else -difference
         total += 0.5 * absolute * absolute if absolute <= delta else delta * (absolute - 0.5 * delta)
-    return total / size(left)
+    return total / float(size(left))
 
 def nll_loss(log_probabilities: Tensor[f64], targets: list[int]) -> float:
     source = tensor_ops.values(log_probabilities)
@@ -62,7 +62,7 @@ def nll_loss(log_probabilities: Tensor[f64], targets: list[int]) -> float:
     total := 0.0
     for row, target in enumerate(targets):
         total -= source[row * dimensions[1] + target]
-    return total / size(targets)
+    return total / float(size(targets))
 
 def kl_divergence(log_probabilities: Tensor[f64], targets: Tensor[f64]) -> float:
     predicted = tensor_ops.values(log_probabilities)
@@ -71,15 +71,15 @@ def kl_divergence(log_probabilities: Tensor[f64], targets: Tensor[f64]) -> float
     for index in indices(predicted):
         if expected[index] > 0.0:
             total += expected[index] * (math.log(expected[index]) - predicted[index])
-    return total / size(predicted)
+    return total / float(size(predicted))
 
 def cosine_embedding_loss(left: Tensor[f64], right: Tensor[f64], target: float = 1.0, margin: float = 0.0) -> float:
     left_norm = math.sqrt(tensor_ops.dot(left, left))
     right_norm = math.sqrt(tensor_ops.dot(right, right))
-    similarity = tensor_ops.dot(left, right) / max([0.000000000001, left_norm * right_norm])
+    similarity = tensor_ops.dot(left, right) / [0.000000000001, left_norm * right_norm].maximum()
     if target > 0.0:
         return 1.0 - similarity
-    return max([0.0, similarity - margin])
+    return [0.0, similarity - margin].maximum()
 
 def triplet_loss(anchor: Tensor[f64], positive: Tensor[f64], negative: Tensor[f64], margin: float = 1.0) -> float:
     anchor_values = tensor_ops.values(anchor)
@@ -92,5 +92,4 @@ def triplet_loss(anchor: Tensor[f64], positive: Tensor[f64], negative: Tensor[f6
         negative_delta = anchor_values[index] - negative_values[index]
         positive_distance += positive_delta * positive_delta
         negative_distance += negative_delta * negative_delta
-    return max([0.0, positive_distance - negative_distance + margin])
-
+    return [0.0, positive_distance - negative_distance + margin].maximum()

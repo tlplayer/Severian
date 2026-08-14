@@ -209,7 +209,12 @@ impl Parser<'_> {
                     message: format!("E000205: binding `{}` requires an initializer", name.name),
                 });
             }
-            self.expect_simple(TokenKind::Equal, "`=` after binding type")?;
+            let kind = if self.take_simple(&TokenKind::ChangeableEqual).is_some() {
+                LetKind::Changeable
+            } else {
+                self.expect_simple(TokenKind::Equal, "`=` or `:=` after binding type")?;
+                LetKind::Stable
+            };
             let value = self.parse_expression()?;
             let end = self
                 .expect_simple(TokenKind::Newline, "newline after typed binding")?
@@ -217,7 +222,7 @@ impl Parser<'_> {
                 .end;
             return Ok(Stmt::Let(LetStmt {
                 span: Span::new(start, end),
-                kind: LetKind::Stable,
+                kind,
                 name,
                 ty: Some(ty),
                 value: Some(value),

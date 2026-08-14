@@ -63,6 +63,7 @@ test "KVM discovery reports reality rather than inventing availability":
 test "guest memory mappings require host page alignment":
     page_size = platform.host_page_size()
     assert(memory_errors(MemoryRegion(1, page_size - 1, true)) == ["memory region is smaller than one page", "guest address is not page aligned", "memory size is not page aligned"])
+    assert(memory_errors(MemoryRegion(0 - page_size, page_size, true)) == ["guest address is negative"])
     assert(memory_errors(MemoryRegion(0, page_size, true)) == [])
 
 test "hypervisor plans include CPUs memory interrupts and devices":

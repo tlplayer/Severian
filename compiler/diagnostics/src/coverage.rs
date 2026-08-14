@@ -58,3 +58,40 @@ fn check(bag: &mut DiagnosticBag, category: &str, actual: f64, required: Option<
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enforces_every_coverage_metric_at_the_exact_boundary() {
+        let required = CoverageThresholds {
+            lines: Some(99.0),
+            regions: Some(99.0),
+            branches: Some(99.0),
+            functions: Some(99.0),
+        };
+        assert!(!check_thresholds(
+            CoveragePercentages {
+                lines: 99.0,
+                regions: 99.0,
+                branches: 99.0,
+                functions: 99.0,
+            },
+            required,
+        )
+        .has_errors());
+
+        let diagnostics = check_thresholds(
+            CoveragePercentages {
+                lines: 98.999,
+                regions: 98.999,
+                branches: 98.999,
+                functions: 98.999,
+            },
+            required,
+        );
+        assert_eq!(diagnostics.error_count(), 4);
+        assert!(diagnostics.has_errors());
+    }
+}

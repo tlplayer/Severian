@@ -9,38 +9,41 @@ class Parameter:
     def zero_grad():
         gradient = tensor_ops.zeros(tensor_ops.shape(value))
 
-class Optimizer:
+trait Optimizer:
+    def zero_grad()
+    def set_learning_rate(value: float)
+    def set_weight_decay(value: float)
+    def step()
+    def current_learning_rate() -> float
+    def current_weight_decay() -> float
+    def current_step() -> int
+
+def clear_gradients(parameters: list[Parameter]):
+    for parameter in parameters:
+        parameter.zero_grad()
+
+class SGD: Optimizer
     parameters: list[Parameter]
     learning_rate: float
     weight_decay: float = 0.0
     step_count: int = 0
+    momentum: float = 0.0
+    velocity: list[list[float]] = []
 
     def zero_grad():
-        for parameter in parameters:
-            parameter.zero_grad()
-
+        clear_gradients(parameters)
     def set_learning_rate(value: float):
         assert(value >= 0.0)
         learning_rate = value
-
     def set_weight_decay(value: float):
         assert(value >= 0.0)
         weight_decay = value
-
-    def step():
-        step_count += 1
-        for parameter in parameters:
-            if not parameter.requires_grad:
-                continue
-            current = tensor_ops.values(parameter.value)
-            gradient = tensor_ops.values(parameter.gradient)
-            for index in indices(current):
-                current[index] -= learning_rate * (gradient[index] + weight_decay * current[index])
-            parameter.value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
-
-class SGD: Optimizer
-    momentum: float = 0.0
-    velocity: list[list[float]] = []
+    def current_learning_rate() -> float:
+        return learning_rate
+    def current_weight_decay() -> float:
+        return weight_decay
+    def current_step() -> int:
+        return step_count
 
     def set_momentum(value: float):
         assert(value >= 0.0 and value < 1.0)
@@ -58,14 +61,33 @@ class SGD: Optimizer
             for index in indices(current):
                 velocity[parameter_index][index] = momentum * velocity[parameter_index][index] + gradient[index] + weight_decay * current[index]
                 current[index] -= learning_rate * velocity[parameter_index][index]
-            parameter.value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
+            parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class Adam: Optimizer
+    parameters: list[Parameter]
+    learning_rate: float
+    weight_decay: float = 0.0
+    step_count: int = 0
     beta1: float = 0.9
     beta2: float = 0.999
     epsilon: float = 0.00000001
     first_moment: list[list[float]] = []
     second_moment: list[list[float]] = []
+
+    def zero_grad():
+        clear_gradients(parameters)
+    def set_learning_rate(value: float):
+        assert(value >= 0.0)
+        learning_rate = value
+    def set_weight_decay(value: float):
+        assert(value >= 0.0)
+        weight_decay = value
+    def current_learning_rate() -> float:
+        return learning_rate
+    def current_weight_decay() -> float:
+        return weight_decay
+    def current_step() -> int:
+        return step_count
 
     def step():
         step_count += 1
@@ -82,14 +104,33 @@ class Adam: Optimizer
                 g = gradient[index] + weight_decay * current[index]
                 first_moment[parameter_index][index] = beta1 * first_moment[parameter_index][index] + (1.0 - beta1) * g
                 second_moment[parameter_index][index] = beta2 * second_moment[parameter_index][index] + (1.0 - beta2) * g * g
-                corrected_first = first_moment[parameter_index][index] / (1.0 - math.pow(beta1, step_count))
-                corrected_second = second_moment[parameter_index][index] / (1.0 - math.pow(beta2, step_count))
+                corrected_first = first_moment[parameter_index][index] / (1.0 - math.pow(beta1, float(step_count)))
+                corrected_second = second_moment[parameter_index][index] / (1.0 - math.pow(beta2, float(step_count)))
                 current[index] -= learning_rate * corrected_first / (math.sqrt(corrected_second) + epsilon)
-            parameter.value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
+            parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class Adagrad: Optimizer
+    parameters: list[Parameter]
+    learning_rate: float
+    weight_decay: float = 0.0
+    step_count: int = 0
     epsilon: float = 0.00000001
     accumulated: list[list[float]] = []
+
+    def zero_grad():
+        clear_gradients(parameters)
+    def set_learning_rate(value: float):
+        assert(value >= 0.0)
+        learning_rate = value
+    def set_weight_decay(value: float):
+        assert(value >= 0.0)
+        weight_decay = value
+    def current_learning_rate() -> float:
+        return learning_rate
+    def current_weight_decay() -> float:
+        return weight_decay
+    def current_step() -> int:
+        return step_count
 
     def step():
         step_count += 1
@@ -101,12 +142,31 @@ class Adagrad: Optimizer
             for index in indices(current):
                 accumulated[parameter_index][index] += gradient[index] * gradient[index]
                 current[index] -= learning_rate * gradient[index] / (math.sqrt(accumulated[parameter_index][index]) + epsilon)
-            parameter.value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
+            parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class RMSprop: Optimizer
+    parameters: list[Parameter]
+    learning_rate: float
+    weight_decay: float = 0.0
+    step_count: int = 0
     alpha: float = 0.99
     epsilon: float = 0.00000001
     average: list[list[float]] = []
+
+    def zero_grad():
+        clear_gradients(parameters)
+    def set_learning_rate(value: float):
+        assert(value >= 0.0)
+        learning_rate = value
+    def set_weight_decay(value: float):
+        assert(value >= 0.0)
+        weight_decay = value
+    def current_learning_rate() -> float:
+        return learning_rate
+    def current_weight_decay() -> float:
+        return weight_decay
+    def current_step() -> int:
+        return step_count
 
     def step():
         step_count += 1
@@ -118,7 +178,7 @@ class RMSprop: Optimizer
             for index in indices(current):
                 average[parameter_index][index] = alpha * average[parameter_index][index] + (1.0 - alpha) * gradient[index] * gradient[index]
                 current[index] -= learning_rate * gradient[index] / (math.sqrt(average[parameter_index][index]) + epsilon)
-            parameter.value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
+            parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class Scheduler:
     optimizer: Optimizer
@@ -132,15 +192,15 @@ class Scheduler:
     patience: int = 10
 
     def step(metric: float = 0.0):
-        position = optimizer.step_count
+        position = optimizer.current_step()
         if warmup_steps > 0 and position < warmup_steps:
-            optimizer.learning_rate = initial_rate * (position + 1) / warmup_steps
+            optimizer.set_learning_rate(initial_rate * float(position + 1) / float(warmup_steps))
         else if kind == "linear":
-            optimizer.learning_rate = initial_rate * max([0.0, 1.0 - position / max([1, total_steps])])
+            optimizer.set_learning_rate(initial_rate * [0.0, 1.0 - float(position) / float([1, total_steps].maximum())].maximum())
         else if kind == "cosine":
-            optimizer.learning_rate = initial_rate * 0.5 * (1.0 + math.cos(3.141592653589793 * position / max([1, total_steps])))
+            optimizer.set_learning_rate(initial_rate * 0.5 * (1.0 + math.cos(3.141592653589793 * float(position) / float([1, total_steps].maximum()))))
         else if kind == "exponential":
-            optimizer.learning_rate = initial_rate * math.pow(gamma, position)
+            optimizer.set_learning_rate(initial_rate * math.pow(gamma, float(position)))
         else if kind == "plateau":
             if metric < best:
                 best = metric
@@ -148,7 +208,7 @@ class Scheduler:
             else:
                 stale_steps += 1
                 if stale_steps >= patience:
-                    optimizer.learning_rate *= gamma
+                    optimizer.set_learning_rate(optimizer.current_learning_rate() * gamma)
                     stale_steps = 0
 
 def sgd(parameters: list[Parameter], learning_rate: float = 0.01, momentum: float = 0.0, weight_decay: float = 0.0) -> SGD:
@@ -170,16 +230,16 @@ def rmsprop(parameters: list[Parameter], learning_rate: float = 0.001) -> RMSpro
     return RMSprop(parameters, learning_rate)
 
 def linear_lr(optimizer: Optimizer, total_steps: int) -> Scheduler:
-    return Scheduler(optimizer, optimizer.learning_rate, "linear", total_steps)
+    return Scheduler(optimizer, optimizer.current_learning_rate(), "linear", total_steps)
 
 def cosine_lr(optimizer: Optimizer, total_steps: int) -> Scheduler:
-    return Scheduler(optimizer, optimizer.learning_rate, "cosine", total_steps)
+    return Scheduler(optimizer, optimizer.current_learning_rate(), "cosine", total_steps)
 
 def exponential_lr(optimizer: Optimizer, gamma: float = 0.99) -> Scheduler:
-    return Scheduler(optimizer, optimizer.learning_rate, "exponential", 1, gamma)
+    return Scheduler(optimizer, optimizer.current_learning_rate(), "exponential", 1, gamma)
 
 def reduce_lr_on_plateau(optimizer: Optimizer, factor: float = 0.1, patience: int = 10) -> Scheduler:
-    return Scheduler(optimizer, optimizer.learning_rate, "plateau", 1, factor, 0, 999999999999.0, 0, patience)
+    return Scheduler(optimizer, optimizer.current_learning_rate(), "plateau", 1, factor, 0, 999999999999.0, 0, patience)
 
 def warmup(optimizer: Optimizer, steps: int) -> Scheduler:
-    return Scheduler(optimizer, optimizer.learning_rate, "linear", steps, 0.1, steps)
+    return Scheduler(optimizer, optimizer.current_learning_rate(), "linear", steps, 0.1, steps)

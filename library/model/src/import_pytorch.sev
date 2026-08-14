@@ -36,10 +36,12 @@ class RestrictedUnpickler:
             if byte == 10:
                 break
             bytes.append(byte)
-        return file.utf8(bytes)
+        text: string = file.utf8(bytes)
+        return text
 
     def unicode(count: int) -> PickleValue:
-        return PickleValue("string", file.utf8(reader.take(count)))
+        text: string = file.utf8(reader.take(count))
+        return PickleValue("string", text)
 
     def marked_items() -> list[PickleValue]:
         start = marks.pop()
@@ -91,93 +93,93 @@ class RestrictedUnpickler:
             else if opcode == 149:
                 _frame = reader.take(8)
             else if opcode == 46:
-                return pop()                       # STOP
+                return self.pop()                  # STOP
             else if opcode == 40:
                 marks.append(size(stack))          # MARK
             else if opcode == 78:
-                push(PickleValue("none"))          # NONE
+                self.push(PickleValue("none"))     # NONE
             else if opcode == 136:
-                push(PickleValue("bool", "", 1))
+                self.push(PickleValue("bool", "", 1))
             else if opcode == 137:
-                push(PickleValue("bool", "", 0))
+                self.push(PickleValue("bool", "", 0))
             else if opcode == 75:
-                push(PickleValue("int", "", reader.u8()))
+                self.push(PickleValue("int", "", reader.u8()))
             else if opcode == 77:
-                push(PickleValue("int", "", reader.u16()))
+                self.push(PickleValue("int", "", reader.u16()))
             else if opcode == 74:
-                push(PickleValue("int", "", signed_i32(reader.take(4))))
+                self.push(PickleValue("int", "", signed_i32(reader.take(4))))
             else if opcode == 138:
                 count = reader.u8()
-                push(PickleValue("int", "", little_integer(reader.take(count))))
+                self.push(PickleValue("int", "", little_integer(reader.take(count))))
             else if opcode == 88:
-                push(unicode(reader.u32()))
+                self.push(self.unicode(reader.u32()))
             else if opcode == 140:
-                push(unicode(reader.u8()))
+                self.push(self.unicode(reader.u8()))
             else if opcode == 141:
-                push(unicode(little_integer(reader.take(8))))
+                self.push(self.unicode(little_integer(reader.take(8))))
             else if opcode == 99:
-                module = line()
-                name = line()
-                push(allowed_global(module, name))
+                module = self.line()
+                name = self.line()
+                self.push(self.allowed_global(module, name))
             else if opcode == 147:
-                name = pop()
-                module = pop()
-                push(allowed_global(module.text, name.text))
+                name = self.pop()
+                module = self.pop()
+                self.push(self.allowed_global(module.text, name.text))
             else if opcode == 41:
-                push(tuple_value([]))
+                self.push(self.tuple_value([]))
             else if opcode == 116:
-                push(tuple_value(marked_items()))
+                self.push(self.tuple_value(self.marked_items()))
             else if opcode == 133:
-                push(tuple_value([pop()]))
+                self.push(self.tuple_value([self.pop()]))
             else if opcode == 134:
-                right = pop()
-                left = pop()
-                push(tuple_value([left, right]))
+                right = self.pop()
+                left = self.pop()
+                self.push(self.tuple_value([left, right]))
             else if opcode == 135:
-                third = pop()
-                second = pop()
-                first = pop()
-                push(tuple_value([first, second, third]))
+                third = self.pop()
+                second = self.pop()
+                first = self.pop()
+                self.push(self.tuple_value([first, second, third]))
             else if opcode == 93:
-                push(PickleValue("list"))
+                self.push(PickleValue("list"))
             else if opcode == 125:
-                push(PickleValue("dict"))
+                self.push(PickleValue("dict"))
             else if opcode == 101:
-                items = marked_items()
+                items = self.marked_items()
                 stack[size(stack) - 1].items.extend(items)
             else if opcode == 97:
-                stack[size(stack) - 1].items.append(pop())
+                stack[size(stack) - 1].items.append(self.pop())
             else if opcode == 115:
-                value = pop()
-                key = pop()
+                value = self.pop()
+                key = self.pop()
                 stack[size(stack) - 1].items.extend([key, value])
             else if opcode == 117:
-                items = marked_items()
+                items = self.marked_items()
                 stack[size(stack) - 1].items.extend(items)
             else if opcode == 82:
-                arguments = pop()
-                callable = pop()
-                push(reduce(callable, arguments))
+                arguments = self.pop()
+                callable = self.pop()
+                self.push(self.reduce(callable, arguments))
             else if opcode == 81:
-                push(persistent(pop()))
+                self.push(self.persistent(self.pop()))
             else if opcode == 98:
-                _state = pop()                    # BUILD metadata only
+                _state = self.pop()               # BUILD metadata only
             else if opcode == 113:
-                memo_set(reader.u8(), stack[size(stack) - 1])
+                self.memo_set(reader.u8(), stack[size(stack) - 1])
             else if opcode == 114:
-                memo_set(reader.u32(), stack[size(stack) - 1])
+                self.memo_set(reader.u32(), stack[size(stack) - 1])
             else if opcode == 104:
-                push(memo[reader.u8()])
+                self.push(memo[reader.u8()])
             else if opcode == 106:
-                push(memo[reader.u32()])
+                self.push(memo[reader.u32()])
             else if opcode == 148:
                 memo.append(stack[size(stack) - 1])
             else if opcode == 48:
-                _discarded = pop()
+                _discarded = self.pop()
             else if opcode == 49:
                 start = marks.pop()
                 while size(stack) > start:
-                    _discarded = pop()
+                    _discarded = self.pop()
             else:
                 assert(false, "unsupported opcode in restricted PyTorch weights pickle: " + string(opcode))
         return PickleValue("none")
@@ -220,7 +222,7 @@ def decode_storage(data: list[int], dtype: string, offset: int, count: int) -> l
     return output
 
 def ieee_float(data: list[int], exponent_bits: int, fraction_bits: int) -> float:
-    encoded = little_integer(data)
+    encoded := little_integer(data)
     fraction_base := 1
     for _index in range(0, fraction_bits):
         fraction_base *= 2
@@ -233,9 +235,9 @@ def ieee_float(data: list[int], exponent_bits: int, fraction_bits: int) -> float
     sign = -1.0 if encoded / exponent_base == 1 else 1.0
     bias = exponent_base / 2 - 1
     if exponent == 0:
-        return sign * math.pow(2.0, 1 - bias) * fraction / fraction_base
+        return sign * math.pow(2.0, float(1 - bias)) * float(fraction) / float(fraction_base)
     assert(exponent != exponent_base - 1, "PyTorch state contains a non-finite tensor value")
-    return sign * math.pow(2.0, exponent - bias) * (1.0 + fraction / fraction_base)
+    return sign * math.pow(2.0, float(exponent - bias)) * (1.0 + float(fraction) / float(fraction_base))
 
 def state_tensors(root: PickleValue, entries: list[archive.ZipEntry]) -> list[types.TensorValue]:
     assert(root.kind == "dict", "PyTorch weights root must be a state dictionary")
@@ -277,7 +279,7 @@ def infer_graph(parameters: list[types.TensorValue]) -> types.ModelGraph:
 
 def import_model(path: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError]:
     entries = archive.zip_entries(path)
-    pickle_entry: archive.ZipEntry = archive.ZipEntry("", [])
+    pickle_entry: archive.ZipEntry := archive.ZipEntry("", [])
     found := false
     for entry in entries:
         if entry.name.ends_with("/data.pkl") or entry.name == "data.pkl":

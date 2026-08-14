@@ -209,11 +209,11 @@ def command_index(specification: Command, name: string) -> int:
     return -1
 
 def edit_distance(left: string, right: string) -> int:
-    previous: list[int] = []
-    for column in range(0, size(right) + 1):
-        previous.append(column)
     left_characters = left.characters()
     right_characters = right.characters()
+    previous := [0]
+    for column in indices(right_characters):
+        previous.append(column + 1)
     for row in range(0, size(left_characters)):
         current: list[int] = [row + 1]
         for column in range(0, size(right_characters)):
@@ -254,9 +254,9 @@ def append_option(
             "CLI004", "option `--" + item.name + "` may only be used once", "",
             "remove the duplicate option",
         ))
-    if item.name not in collected:
-        collected[item.name] = []
-    collected[item.name].append(value)
+    values = collected.get(item.name, [])
+    values.append(value)
+    collected[item.name] = values
     return
 
 def validate_value(specification: Command, item: OptionSpec, value: string) -> Result[unit, CliError]:
@@ -334,7 +334,7 @@ def parse(specification: Command, input: list[string]) -> Result[Matches, CliErr
         option_token := token
         inline_value := ""
         has_inline := false
-        if token.starts_with("--") and "=" in token:
+        if token.starts_with("--") and token.contains("="):
             parts = token.split("=", 1)
             option_token = parts[0]
             inline_value = parts[1]
@@ -529,8 +529,19 @@ test "declarative parsing and generated diagnostics":
     application = command("betterquest", "Local speech generation", "1.0.0", [], [], [generate])
     parsed = parse(application, ["generate", "--text", "For the Alliance", "-v"])
     assert(parsed.command == "generate")
-    assert(text(parsed, "text") == "For the Alliance")
-    assert(text(parsed, "output") == "speech.wav")
-    assert(boolean(parsed, "verbose"))
+    assert(present(parsed, "text"))
+    assert(values(parsed, "text") == ["For the Alliance"])
+    verbose = boolean(parsed, "verbose")
+    switch text(parsed, "text"):
+        ok parsed_text:
+            assert(parsed_text == "For the Alliance")
+        failure error:
+            assert(false, error.message)
+    switch text(parsed, "output"):
+        ok output_path:
+            assert(output_path == "speech.wav")
+        failure error:
+            assert(false, error.message)
+    assert(verbose)
     assert(check(application).errors == 0)
     assert("--text" in complete(generate, "--t"))

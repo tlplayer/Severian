@@ -92,6 +92,8 @@ impl LowerContext<'_> {
             Expression::Variable(name) => {
                 if let Some(value) = self.variables.get(&name.id).cloned() {
                     value
+                } else if name.name == "self" && self.field_object.is_some() {
+                    (self.field_object.clone().unwrap(), ValueType::Any)
                 } else if self.field_names.contains(&name.name) {
                     let object = self.field_object.clone().unwrap();
                     let field = self.string_address(&name.name);
@@ -1967,6 +1969,8 @@ impl LowerContext<'_> {
                     } else {
                         format!(" {{{}}}", attributes.join(", "))
                     };
+                    let class = mangle_symbol_component(&class);
+                    let method = mangle_symbol_component(method);
                     writeln!(self.output, "    {result} = llvm.call @__sev_task_spawn_{class}_{method}({object}{value_suffix}){placement_attribute} : (!llvm.ptr{type_suffix}) -> !llvm.ptr").unwrap();
                     self.task_results
                         .insert(result.clone(), definition.return_type);
@@ -2319,32 +2323,33 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|argument| self.lower_expression(argument))
                     .collect::<Vec<_>>();
-                let compiler_intrinsic = matches!(
-                    function.as_str(),
-                    "int"
-                        | "float"
-                        | "string"
-                        | "len"
-                        | "size"
-                        | "bytes"
-                        | "bits"
-                        | "capacity"
-                        | "range"
-                        | "abs"
-                        | "min"
-                        | "max"
-                        | "divmod"
-                        | "enumerate"
-                        | "zip"
-                        | "any"
-                        | "all"
-                );
+                let compiler_intrinsic = target.signature.is_none()
+                    && matches!(
+                        function.as_str(),
+                        "int"
+                            | "float"
+                            | "string"
+                            | "len"
+                            | "size"
+                            | "bytes"
+                            | "bits"
+                            | "capacity"
+                            | "range"
+                            | "abs"
+                            | "min"
+                            | "max"
+                            | "divmod"
+                            | "enumerate"
+                            | "zip"
+                            | "any"
+                            | "all"
+                    );
                 let args = if compiler_intrinsic {
                     args
                 } else {
                     self.coerce_resolved_call_arguments(target, args)
                 };
-                if function == "int" {
+                if compiler_intrinsic && function == "int" {
                     let argument = args.first().cloned().unwrap();
                     if argument.1 == ValueType::Int {
                         return argument;
@@ -2359,7 +2364,7 @@ impl LowerContext<'_> {
                     .unwrap();
                     return (result, ValueType::Int);
                 }
-                if function == "float" {
+                if compiler_intrinsic && function == "float" {
                     let (value, ty) = args.first().cloned().unwrap();
                     return match ty {
                         ValueType::Float => (value, ValueType::Float),
@@ -2394,7 +2399,7 @@ impl LowerContext<'_> {
                         }
                     };
                 }
-                if function == "string" {
+                if compiler_intrinsic && function == "string" {
                     let argument = args.first().cloned().unwrap();
                     if argument.1 == ValueType::String {
                         return argument;
@@ -2405,7 +2410,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_string({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::String);
                 }
-                if function == "len" || function == "size" {
+                if compiler_intrinsic && (function == "len" || function == "size") {
                     let (value, ty) = args.first().cloned().unwrap();
                     if let ValueType::Tensor(tensor) = ty {
                         if let Some(elements) = static_tensor_elements(tensor) {
@@ -2446,7 +2451,8 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_size({value}) : (!llvm.ptr) -> i64").unwrap();
                     return (result, ValueType::Int);
                 }
-                if matches!(function.as_str(), "bytes" | "bits" | "capacity") {
+                if compiler_intrinsic && matches!(function.as_str(), "bytes" | "bits" | "capacity")
+                {
                     let (value, ty) = args.first().cloned().unwrap();
                     let result = self.fresh_value();
                     if let ValueType::Tensor(tensor) = ty {
@@ -2528,7 +2534,7 @@ impl LowerContext<'_> {
                     }
                     return (result, ValueType::Int);
                 }
-                if function == "range" {
+                if compiler_intrinsic && function == "range" {
                     let mut integer_args = Vec::with_capacity(args.len());
                     for argument in args.iter().cloned() {
                         integer_args.push(self.unbox_value(argument, ValueType::Int));
@@ -2551,7 +2557,9 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_range({start}, {end}, {step}) : (i64, i64, i64) -> !llvm.ptr").unwrap();
                     return (result, ValueType::List);
                 }
-                if matches!(function.as_str(), "abs" | "min" | "max" | "divmod") {
+                if compiler_intrinsic
+                    && matches!(function.as_str(), "abs" | "min" | "max" | "divmod")
+                {
                     let boxed = args
                         .iter()
                         .cloned()
@@ -2574,7 +2582,7 @@ impl LowerContext<'_> {
                     }
                     return (result, ValueType::Any);
                 }
-                if function == "enumerate" {
+                if compiler_intrinsic && function == "enumerate" {
                     let (mut value, ty) = args.first().cloned().unwrap();
                     if ty == ValueType::Any {
                         value = self.unbox_value((value, ty), ValueType::List).0;
@@ -2583,7 +2591,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_enumerate({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::List);
                 }
-                if function == "zip" {
+                if compiler_intrinsic && function == "zip" {
                     let values = args
                         .iter()
                         .cloned()
@@ -2599,7 +2607,7 @@ impl LowerContext<'_> {
                     writeln!(self.output, "    {result} = llvm.call @__sev_collection_zip({}, {}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr", values[0], values[1]).unwrap();
                     return (result, ValueType::List);
                 }
-                if function == "any" || function == "all" {
+                if compiler_intrinsic && (function == "any" || function == "all") {
                     let (mut value, ty) = args.first().cloned().unwrap();
                     if ty == ValueType::Any {
                         value = self.unbox_value((value, ty), ValueType::List).0;
@@ -2703,7 +2711,7 @@ impl LowerContext<'_> {
                 };
                 let symbol = if let Some(symbol) = &target.native_symbol {
                     symbol.clone()
-                } else if function == "sqrt" {
+                } else if target.signature.is_none() && function == "sqrt" {
                     "llvm.sqrt.f64".to_owned()
                 } else {
                     self.native_symbols

@@ -13,8 +13,11 @@ pipeline = [
 ]
 
 [coverage]
-minimum = 55
-branches = 60
+minimum = 99
+regions = 99
+branches = 99
+functions = 99
+per_file = true
 
 [memory]
 leaks = "deny"

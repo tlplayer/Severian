@@ -13,13 +13,13 @@ class StandardScaler:
             for column in indices(row):
                 means[column] += row[column]
         for column in indices(means):
-            means[column] /= size(input)
+            means[column] /= float(size(input))
         for row in input:
             for column in indices(row):
                 difference = row[column] - means[column]
                 scales[column] += difference * difference
         for column in indices(scales):
-            scales[column] = math.sqrt(scales[column] / max([1, size(input) - 1]))
+            scales[column] = math.sqrt(scales[column] / float([1, size(input) - 1].maximum()))
             if scales[column] == 0.0:
                 scales[column] = 1.0
         return self
@@ -34,8 +34,8 @@ class StandardScaler:
         return output
 
     def fit_transform(input: list[list[float]]) -> list[list[float]]:
-        _fitted = fit(input)
-        return transform(input)
+        _fitted = self.fit(input)
+        return self.transform(input)
 
 class MinMaxScaler:
     minima: list[float] = []
@@ -46,8 +46,8 @@ class MinMaxScaler:
         maxima = input[0][0:size(input[0])]
         for row in input:
             for column in indices(row):
-                minima[column] = min([minima[column], row[column]])
-                maxima[column] = max([maxima[column], row[column]])
+                minima[column] = [minima[column], row[column]].minimum()
+                maxima[column] = [maxima[column], row[column]].maximum()
         return self
 
     def transform(input: list[list[float]]) -> list[list[float]]:
@@ -61,8 +61,8 @@ class MinMaxScaler:
         return output
 
     def fit_transform(input: list[list[float]]) -> list[list[float]]:
-        _fitted = fit(input)
-        return transform(input)
+        _fitted = self.fit(input)
+        return self.transform(input)
 
 class RobustScaler:
     medians: list[float] = []
@@ -79,7 +79,7 @@ class RobustScaler:
             medians.append(ordered[size(ordered) / 2])
             lower = ordered[size(ordered) / 4]
             upper = ordered[(3 * size(ordered)) / 4]
-            ranges.append(max([0.000000000001, upper - lower]))
+            ranges.append([0.000000000001, upper - lower].maximum())
         return self
 
     def transform(input: list[list[float]]) -> list[list[float]]:
@@ -92,8 +92,8 @@ class RobustScaler:
         return output
 
     def fit_transform(input: list[list[float]]) -> list[list[float]]:
-        _fitted = fit(input)
-        return transform(input)
+        _fitted = self.fit(input)
+        return self.transform(input)
 
 def normalize(input: list[list[float]]) -> list[list[float]]:
     output := []
@@ -123,8 +123,8 @@ class LabelEncoder:
         return output
 
     def fit_transform(values: list[string]) -> list[int]:
-        _fitted = fit(values)
-        return transform(values)
+        _fitted = self.fit(values)
+        return self.transform(values)
 
 class OneHotEncoder:
     categories: list[string] = []
@@ -143,8 +143,8 @@ class OneHotEncoder:
         return output
 
     def fit_transform(values: list[string]) -> list[list[float]]:
-        _fitted = fit(values)
-        return transform(values)
+        _fitted = self.fit(values)
+        return self.transform(values)
 
 class Imputer:
     fill_values: list[float] = []
@@ -158,7 +158,7 @@ class Imputer:
                 if row[column] != missing:
                     total += row[column]
                     count += 1
-            fill_values.append(total / max([1, count]))
+            fill_values.append(total / float([1, count].maximum()))
         return self
 
     def transform(input: list[list[float]], missing: float = 0.0) -> list[list[float]]:
@@ -190,16 +190,16 @@ class PolynomialFeatures:
         return self
 
     def fit_transform(input: list[list[float]]) -> list[list[float]]:
-        return transform(input)
+        return self.transform(input)
 
 def pad(tokens: list[int], length: int, value: int = 0) -> list[int]:
-    result = tokens[0:min([length, size(tokens)])]
+    result = tokens[0:[length, size(tokens)].minimum()]
     while size(result) < length:
         result.append(value)
     return result
 
 def truncate(tokens: list[int], length: int) -> list[int]:
-    return tokens[0:min([length, size(tokens)])]
+    return tokens[0:[length, size(tokens)].minimum()]
 
 def tokenize(text: string) -> list[string]:
     return text.lower().split()

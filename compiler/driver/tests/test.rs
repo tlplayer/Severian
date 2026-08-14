@@ -182,6 +182,65 @@ fn build_is_blocked_below_seventy_five_percent_line_coverage() {
 }
 
 #[test]
+fn per_file_coverage_cannot_be_subsidized_by_well_tested_files() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!(
+        "severian-per-file-coverage-gate-test-{}",
+        std::process::id()
+    ));
+    let source_directory = root.join("src");
+    std::fs::create_dir_all(&source_directory).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        concat!(
+            "[package]\nname = \"per-file-demo\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+            "\n[coverage]\nminimum = 99\nper_file = true\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        source_directory.join("helper.sev"),
+        concat!(
+            "def covered() -> int:\n    return 1\n",
+            "\ndef uncovered() -> int:\n    return 2\n",
+        ),
+    )
+    .unwrap();
+
+    let mut main = String::from(
+        "import \"src/helper.sev\" as helper\n\ndef covered_0() -> int:\n    return helper.covered()\n",
+    );
+    for index in 1..=100 {
+        main.push_str(&format!(
+            "\ndef covered_{index}() -> int:\n    return {index}\n"
+        ));
+    }
+    main.push_str("\ntest:\n    assert(covered_0() == 1)\n");
+    for index in 1..=100 {
+        main.push_str(&format!("    assert(covered_{index}() == {index})\n"));
+    }
+    std::fs::write(source_directory.join("main.sev"), main).unwrap();
+
+    let coverage = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("coverage")
+        .arg(&root)
+        .output()
+        .unwrap();
+
+    assert!(!coverage.status.success());
+    let stdout = String::from_utf8_lossy(&coverage.stdout);
+    let stderr = String::from_utf8_lossy(&coverage.stderr);
+    assert!(stdout.contains("Lines       99.03%"), "{stdout}");
+    assert!(
+        stderr.contains("Per-file coverage threshold failure"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("helper.sev"), "{stderr}");
+    assert!(stderr.contains("lines coverage is 50.00%"), "{stderr}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn init_exposes_the_complete_lenient_manifest_contract() {
     let root = std::env::temp_dir().join(format!("severian-init-test-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();

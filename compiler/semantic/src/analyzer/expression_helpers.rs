@@ -642,6 +642,8 @@ fn compatible_declared_type(
 ) -> Result<(), SemanticError> {
     let expected_name = declaration_type_name(expected).unwrap_or_default();
     let short_name = expected_name.rsplit('.').next().unwrap_or(&expected_name);
+    let resolved_expected =
+        resolved_class_type_name(expected, aliases).unwrap_or_else(|| expected_name.clone());
     if aliases.contains_key(&format!("__trait.{short_name}")) {
         let Some(actual_class) = actual_class else {
             return Err(error(
@@ -679,7 +681,10 @@ fn compatible_declared_type(
         // permissive here until object types have a first-class HIR carrier.
         return Ok(());
     };
-    if actual_class == short_name || actual_class == expected_name {
+    if actual_class == short_name
+        || actual_class == expected_name
+        || actual_class == resolved_expected
+    {
         Ok(())
     } else {
         Err(error(

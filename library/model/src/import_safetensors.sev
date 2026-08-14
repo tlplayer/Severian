@@ -23,7 +23,8 @@ def header_tensors(shard_path: string) -> Result[list[types.TensorValue], types.
     prefix = file.read_exact(handle, 8)
     header_length = file.little_endian_u64(prefix)
     assert(header_length > 1 and header_length < 100000000, "invalid safetensors header length")
-    header_text = file.utf8(file.read_exact(handle, header_length))
+    header_bytes: list[int] = file.read_exact(handle, header_length)
+    header_text: string = file.utf8(header_bytes)
     _closed = file.close(handle)
     header: Any = json.decode[Any](header_text)
     data_start = 8 + header_length
@@ -63,7 +64,8 @@ def load_parameters(source: string) -> Result[list[types.TensorValue], types.Mod
         shards = json.object_values(weight_map).map(|value| json.as_string(value)).unique().sorted()
         output := []
         for shard in shards:
-            output.extend(header_tensors(path.join(source, shard)))
+            tensors: list[types.TensorValue] = header_tensors(path.join(source, shard))
+            output.extend(tensors)
         return output
     return header_tensors(path.join(source, "model.safetensors"))
 
@@ -182,7 +184,7 @@ def import_model(source: string) -> Result[types.ModelGraph, types.ModelLoadErro
         if architecture.family in ["qwen2", "qwen3", "qwen2_moe"]:
             prefix = registry.infer_weight_prefix(parameters, "model.embed_tokens.weight")
             _valid = validate_qwen_weights(architecture.config, parameters, prefix)
-            graph = qwen_graph(architecture.config, parameters, prefix)
+            graph := qwen_graph(architecture.config, parameters, prefix)
             graph.name = architecture.name
             return graph
     return inferred_linear_graph(parameters)

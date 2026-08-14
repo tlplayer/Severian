@@ -56,6 +56,12 @@ def container_create_plan(spec: ContainerSpec) -> list[string]:
 test "container specifications validate namespaces and cgroups":
     invalid = ContainerSpec("api", "", [], 0, 0, ["network"], [], [], [])
     assert(container_errors(invalid) == ["container image is empty", "container command is empty", "CPU limit must be positive", "memory limit must be positive", "pid namespace is required", "mount namespace is required"])
+    assert(not container_valid(invalid))
+
+test "container validation reports an empty name independently":
+    unnamed = ContainerSpec("", "sev://images/job:v1", ["/bin/job"], 1, 1, ["pid", "mount"], [], [], [])
+    assert(container_errors(unnamed) == ["container name is empty"])
+    assert(not container_valid(unnamed))
 
 test "container plans cover the complete isolation surface":
     spec = ContainerSpec("api", "sev://images/api:v3", ["/bin/api", "--port=8080"], 500, 256, ["pid", "mount", "network", "user"], ["rootfs:ro"], ["frontend"], ["state:/var/lib/api"])

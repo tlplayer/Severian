@@ -29,8 +29,15 @@ pub fn emit_stablehlo(kernel: &KernelIr) -> Result<Module, KernelError> {
         TensorOp::Reduction(operation) if operation.kind == ReductionKind::Sum => {
             let axes = if operation.last_axis {
                 vec![u64::from(input.rank.unwrap_or(1).saturating_sub(1))]
-            } else {
+            } else if operation.axes_known {
                 operation.axes.clone()
+            } else {
+                let rank = input.rank.ok_or_else(|| KernelError::UnsupportedBackend {
+                    kernel: kernel.name.clone(),
+                    backend: KernelBackend::Xla,
+                    reason: "full reduction requires a statically ranked XLA input".into(),
+                })?;
+                (0..u64::from(rank)).collect()
             };
             reduction::reduce_sum(&mut emitter, &argument, &axes, kernel.result)
         }

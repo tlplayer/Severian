@@ -157,6 +157,7 @@ mod tests {
             kind: ReductionKind::Sum,
             input: operand(input),
             axes: vec![0],
+            axes_known: true,
             last_axis: false,
             result,
             accumulation: TensorElementType::F32,

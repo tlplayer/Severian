@@ -1,5 +1,81 @@
 use super::*;
 
+pub(super) fn class_type_name(ty: &Type) -> Option<String> {
+    let Type::Named(path) = ty else { return None };
+    let name = path.segments.last()?.name.as_str();
+    if matches!(
+        name,
+        "int"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "float"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "string"
+            | "unit"
+            | "list"
+            | "map"
+            | "set"
+            | "Tensor"
+            | "Channel"
+            | "Function"
+            | "Result"
+            | "Option"
+    ) {
+        None
+    } else {
+        Some(if path.args.is_empty() {
+            name.to_owned()
+        } else {
+            declaration_type_key(ty)
+        })
+    }
+}
+
+pub(super) fn resolved_class_type_name(
+    ty: &Type,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let Type::Named(path) = ty else { return None };
+    let raw = path
+        .segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
+    let canonical = path
+        .segments
+        .split_first()
+        .map(|(first, rest)| {
+            std::iter::once(
+                aliases
+                    .get(&first.name)
+                    .map(String::as_str)
+                    .unwrap_or(&first.name),
+            )
+            .chain(rest.iter().map(|segment| segment.name.as_str()))
+            .collect::<Vec<_>>()
+            .join(".")
+        })
+        .unwrap_or_default();
+    aliases
+        .get(&format!("__module_class.{raw}"))
+        .or_else(|| aliases.get(&format!("__module_class.{canonical}")))
+        .cloned()
+        .or_else(|| {
+            path.segments
+                .last()
+                .and_then(|segment| aliases.get(&segment.name))
+                .and_then(|identity| identity.strip_prefix("__class."))
+                .map(str::to_owned)
+        })
+        .or_else(|| class_type_name(ty))
+}
+
 pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
     match ty {
         Type::Union { .. } => Ok(ValueType::Any),

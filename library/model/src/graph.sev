@@ -19,68 +19,71 @@ def attribute_ints(attributes: Any, name: string, fallback: list[int]) -> list[i
 def execute_node(node: types.GraphNode, environment: map[string, Tensor[f64]]) -> Tensor[f64]:
     operation = node.operation
     inputs = node.inputs.map(|name| environment[name])
+    primary: Tensor[f64] = inputs[0]
     if operation == "identity" or operation == "dropout":
-        return inputs[0]
+        return primary
     if operation == "add":
-        left = tensor_ops.values(inputs[0])
-        right = tensor_ops.values(inputs[1])
+        left = tensor_ops.values(primary)
+        right := tensor_ops.values(inputs[1])
         if size(right) < size(left):
             right = range(0, size(left)).map(|index| right[index % size(right)])
-        return tensor_ops.tensor(indices(left).map(|index| left[index] + right[index]), tensor_ops.shape(inputs[0]))
+        return tensor_ops.tensor(indices(left).map(|index| left[index] + right[index]), tensor_ops.shape(primary))
     if operation == "subtract":
-        left = tensor_ops.values(inputs[0])
+        left = tensor_ops.values(primary)
         right = tensor_ops.values(inputs[1])
-        return tensor_ops.tensor(indices(left).map(|index| left[index] - right[index % size(right)]), tensor_ops.shape(inputs[0]))
+        return tensor_ops.tensor(indices(left).map(|index| left[index] - right[index % size(right)]), tensor_ops.shape(primary))
     if operation == "multiply":
-        left = tensor_ops.values(inputs[0])
+        left = tensor_ops.values(primary)
         right = tensor_ops.values(inputs[1])
-        return tensor_ops.tensor(indices(left).map(|index| left[index] * right[index % size(right)]), tensor_ops.shape(inputs[0]))
+        return tensor_ops.tensor(indices(left).map(|index| left[index] * right[index % size(right)]), tensor_ops.shape(primary))
     if operation == "divide":
-        left = tensor_ops.values(inputs[0])
+        left = tensor_ops.values(primary)
         right = tensor_ops.values(inputs[1])
-        return tensor_ops.tensor(indices(left).map(|index| left[index] / right[index % size(right)]), tensor_ops.shape(inputs[0]))
+        return tensor_ops.tensor(indices(left).map(|index| left[index] / right[index % size(right)]), tensor_ops.shape(primary))
     if operation == "matmul":
-        return tensor_ops.matmul(inputs[0], inputs[1])
+        left: Tensor[f64] = primary
+        right: Tensor[f64] = inputs[1]
+        return tensor_ops.matmul(left, right)
     if operation == "gemm":
-        weight = inputs[1]
+        graph_input: Tensor[f64] = primary
+        weight: Tensor[f64] = inputs[1]
         # ONNX/Keras/PyTorch store dense weights in different orientations.
-        if tensor_ops.shape(inputs[0])[size(tensor_ops.shape(inputs[0])) - 1] == tensor_ops.shape(weight)[1]:
-            weight = tensor_ops.transpose(weight)
-        output = tensor_ops.matmul(inputs[0], weight)
+        effective_weight = tensor_ops.transpose(weight) if tensor_ops.shape(graph_input)[size(tensor_ops.shape(graph_input)) - 1] == tensor_ops.shape(weight)[1] else weight
+        output = tensor_ops.matmul(graph_input, effective_weight)
         if size(inputs) == 3:
             values = tensor_ops.values(output)
             bias = tensor_ops.values(inputs[2])
-            output = tensor_ops.tensor(indices(values).map(|index| values[index] + bias[index % size(bias)]), tensor_ops.shape(output))
+            return tensor_ops.tensor(indices(values).map(|index| values[index] + bias[index % size(bias)]), tensor_ops.shape(output))
         return output
     if operation == "relu":
-        return tensor_ops.relu(inputs[0])
+        return tensor_ops.relu(primary)
     if operation == "sigmoid":
-        return tensor_ops.sigmoid(inputs[0])
+        return tensor_ops.sigmoid(primary)
     if operation == "tanh":
-        return tensor_ops.tanh(inputs[0])
+        return tensor_ops.tanh(primary)
     if operation == "gelu":
-        return tensor_ops.gelu(inputs[0])
+        return tensor_ops.gelu(primary)
     if operation == "silu":
-        return tensor_ops.silu(inputs[0])
+        return tensor_ops.silu(primary)
     if operation == "softmax":
-        return tensor_ops.softmax(inputs[0])
+        return tensor_ops.softmax(primary)
     if operation == "log_softmax":
-        return tensor_ops.log_softmax(inputs[0])
+        return tensor_ops.log_softmax(primary)
     if operation == "flatten":
-        return tensor_ops.flatten(inputs[0], attribute_int(node.attributes, "axis", 1))
+        return tensor_ops.flatten(primary, attribute_int(node.attributes, "axis", 1))
     if operation == "reshape":
-        dimensions = attribute_ints(node.attributes, "shape", [])
+        dimensions := attribute_ints(node.attributes, "shape", [])
         if size(inputs) > 1:
             dimensions = tensor_ops.values(inputs[1]).map(|value| int(value))
-        return tensor_ops.reshape(inputs[0], dimensions)
+        return tensor_ops.reshape(primary, dimensions)
     if operation == "transpose":
-        return tensor_ops.transpose(inputs[0])
+        return tensor_ops.transpose(primary)
     if operation == "concat":
         return tensor_ops.concat(inputs, attribute_int(node.attributes, "axis", 0))
     if operation == "layer_norm":
-        return layers.LayerNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(inputs[0])
+        return layers.LayerNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(primary)
     if operation == "batch_norm":
-        return layers.BatchNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(inputs[0])
+        return layers.BatchNorm(attribute_float(node.attributes, "epsilon", 0.00001)).forward(primary)
     if operation == "embedding":
         return layers.Embedding(inputs[0]).forward(inputs[1])
     if operation in ["conv1d", "conv2d"]:
@@ -88,15 +91,15 @@ def execute_node(node: types.GraphNode, environment: map[string, Tensor[f64]]) -
         bias = inputs[2] if size(inputs) > 2 else tensor_ops.zeros([tensor_ops.shape(inputs[1])[0]])
         strides = attribute_ints(node.attributes, "strides", [1] * dimensions)
         padding = attribute_ints(node.attributes, "pads", [0] * dimensions)
-        return layers.Convolution(inputs[1], bias, strides, padding, dimensions).forward(inputs[0])
+        return layers.Convolution(inputs[1], bias, strides, padding, dimensions).forward(primary)
     if operation in ["max_pool1d", "max_pool2d", "avg_pool1d", "avg_pool2d"]:
         dimensions = 1 if operation.ends_with("1d") else 2
         mode = "max" if operation.starts_with("max") else "average"
         kernel = attribute_ints(node.attributes, "kernel_shape", [2])[0]
         stride = attribute_ints(node.attributes, "strides", [kernel])[0]
-        return layers.Pool(kernel, stride, mode, dimensions).forward(inputs[0])
+        return layers.Pool(kernel, stride, mode, dimensions).forward(primary)
     assert(false, "imported graph operator is not interpretable: " + operation)
-    return inputs[0]
+    return primary
 
 def execute(graph: types.ModelGraph, input: Tensor[f64]) -> Tensor[f64]:
     _valid = graph.validate()

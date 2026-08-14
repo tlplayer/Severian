@@ -30,7 +30,7 @@ impl LowerContext<'_> {
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
             && matches!(
                 operand_type,
-                ValueType::List | ValueType::Tuple | ValueType::Set
+                ValueType::List | ValueType::Tuple | ValueType::Map | ValueType::Set
             )
             && operand_type == right_type
         {
@@ -52,6 +52,21 @@ impl LowerContext<'_> {
             let result = self.fresh_value();
             writeln!(self.output, "    {result} = llvm.call @__sev_string_concat({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
             return (result, ValueType::String);
+        }
+        if op == BinaryOp::Mul
+            && matches!(
+                (operand_type, right_type),
+                (ValueType::List, ValueType::Int) | (ValueType::Int, ValueType::List)
+            )
+        {
+            let (collection, count) = if operand_type == ValueType::List {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            let result = self.fresh_value();
+            writeln!(self.output, "    {result} = llvm.call @__sev_collection_repeat({collection}, {count}) : (!llvm.ptr, i64) -> !llvm.ptr").unwrap();
+            return (result, ValueType::List);
         }
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
             && operand_type == ValueType::String
@@ -131,7 +146,7 @@ impl LowerContext<'_> {
         if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
             && matches!(
                 operand_type,
-                ValueType::List | ValueType::Tuple | ValueType::Set
+                ValueType::List | ValueType::Tuple | ValueType::Map | ValueType::Set
             )
             && operand_type == right_type
         {

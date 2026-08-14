@@ -23,6 +23,13 @@ name = "policy"
 [build]
 pipeline = ["compile", "architecture", "test", "profile", "coverage", "memory", "integration"]
 
+[coverage]
+minimum = 99
+regions = 99
+branches = 99
+functions = 99
+per_file = true
+
 [architecture.files]
 soft_lines = 400
 hard_lines = 700
@@ -40,12 +47,32 @@ owner = "compiler"
 
     let policy = BuildPolicy::for_input(&root).unwrap();
     assert_eq!(policy.pipeline.len(), 7);
+    assert_eq!(policy.coverage.minimum, 99.0);
+    assert_eq!(policy.coverage.regions, Some(99.0));
+    assert_eq!(policy.coverage.branches, Some(99.0));
+    assert_eq!(policy.coverage.functions, Some(99.0));
+    assert!(policy.coverage.per_file);
     assert_eq!(policy.files.soft_lines, 400);
     assert_eq!(policy.files.exceptions.len(), 1);
     assert_eq!(
         policy.files.exceptions[0].owner.as_deref(),
         Some("compiler")
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn coverage_policy_rejects_unknown_and_mistyped_settings() {
+    let root = temporary_directory("coverage-policy-invalid");
+    std::fs::create_dir_all(&root).unwrap();
+    let manifest = root.join("package.toml");
+    std::fs::write(&manifest, "[coverage]\nfunctons = 99\n").unwrap();
+    let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
+    assert!(error.contains("unknown `coverage` setting `functons`"));
+
+    std::fs::write(&manifest, "[coverage]\nper_file = \"yes\"\n").unwrap();
+    let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
+    assert!(error.contains("`coverage.per_file` must be a boolean"));
     let _ = std::fs::remove_dir_all(root);
 }
 

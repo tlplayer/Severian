@@ -100,6 +100,11 @@ test "migrations reject removal and type changes":
     assert(migration_errors(["id", "name"], ["int", "string"], ["id"], ["string"]) == ["changed field type: id", "removed field: name"])
     assert(schema_compatible(["id"], ["int"], ["id", "name"], ["int", "string"]))
 
+test "migrations reject either side of an arity mismatch before indexing":
+    assert(migration_errors(["id"], [], ["id"], ["int"]) == ["migration schema arity mismatch"])
+    assert(migration_errors(["id"], ["int"], ["id", "name"], ["int"]) == ["migration schema arity mismatch"])
+    assert(not schema_compatible(["id"], [], ["id"], ["int"]))
+
 test "SQL adapters consume PQL output":
     users = pql.Schema("users", ["id"], ["int"], [false], "id")
     query = pql.Query("users", ["id"], ["id"], [false], "", "", [])

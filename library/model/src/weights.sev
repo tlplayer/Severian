@@ -32,19 +32,19 @@ class WeightRef:
         return entry.f8e4m3fn()
 
     def f8e5m2() -> Result[Tensor[f8e5m2], types.ModelLoadError]:
-        _dtype = require("F8_E5M2")
+        _dtype = self.require("F8_E5M2")
         return entry.f8e5m2()
 
     def f16() -> Result[Tensor[f16], types.ModelLoadError]:
-        _dtype = require("F16")
+        _dtype = self.require("F16")
         return entry.f16()
 
     def bf16() -> Result[Tensor[bf16], types.ModelLoadError]:
-        _dtype = require("BF16")
+        _dtype = self.require("BF16")
         return entry.bf16()
 
     def f32() -> Result[Tensor[f32], types.ModelLoadError]:
-        _dtype = require("F32")
+        _dtype = self.require("F32")
         return entry.f32()
 
 class WeightStore:
@@ -56,33 +56,38 @@ class WeightStore:
         return tensor.open_safetensors(model_directory)
 
     def keys() -> Result[list[string], types.ModelLoadError | IOError | JsonError]:
-        store = tensor_store()
+        store = self.tensor_store()
         return store.keys()
 
     def contains(name: string) -> Result[bool, types.ModelLoadError | IOError | JsonError]:
-        names = keys()
+        names = self.keys()
         return name in names
 
     def get(name: string) -> Result[WeightRef, types.ModelLoadError | IOError | JsonError]:
-        store = tensor_store()
+        store = self.tensor_store()
         if name not in store.keys():
             return failure(types.ModelLoadError("checkpoint has no weight `" + name + "`"))
         return WeightRef(store.get(name))
 
     def f8e4m3fn(name: string) -> Result[Tensor[f8e4m3fn], types.ModelLoadError | IOError | JsonError]:
-        return get(name).f8e4m3fn()
+        weight: WeightRef = self.get(name)
+        return weight.f8e4m3fn()
 
     def f8e5m2(name: string) -> Result[Tensor[f8e5m2], types.ModelLoadError | IOError | JsonError]:
-        return get(name).f8e5m2()
+        weight: WeightRef = self.get(name)
+        return weight.f8e5m2()
 
     def f16(name: string) -> Result[Tensor[f16], types.ModelLoadError | IOError | JsonError]:
-        return get(name).f16()
+        weight: WeightRef = self.get(name)
+        return weight.f16()
 
     def bf16(name: string) -> Result[Tensor[bf16], types.ModelLoadError | IOError | JsonError]:
-        return get(name).bf16()
+        weight: WeightRef = self.get(name)
+        return weight.bf16()
 
     def f32(name: string) -> Result[Tensor[f32], types.ModelLoadError | IOError | JsonError]:
-        return get(name).f32()
+        weight: WeightRef = self.get(name)
+        return weight.f32()
 
 def open(source: string) -> WeightStore:
     return WeightStore(source if path.is_dir(source) else path.dirname(source))

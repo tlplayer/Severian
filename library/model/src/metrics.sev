@@ -6,7 +6,7 @@ def accuracy(expected: list[int], predicted: list[int]) -> float:
     for index in indices(expected):
         if expected[index] == predicted[index]:
             correct += 1
-    return correct / size(expected)
+    return float(correct) / float(size(expected))
 
 def class_counts(expected: list[int], predicted: list[int], positive: int = 1) -> list[int]:
     true_positive := 0
@@ -26,11 +26,11 @@ def class_counts(expected: list[int], predicted: list[int], positive: int = 1) -
 
 def precision(expected: list[int], predicted: list[int], positive: int = 1) -> float:
     counts = class_counts(expected, predicted, positive)
-    return counts[0] / max([1, counts[0] + counts[1]])
+    return float(counts[0]) / float([1, counts[0] + counts[1]].maximum())
 
 def recall(expected: list[int], predicted: list[int], positive: int = 1) -> float:
     counts = class_counts(expected, predicted, positive)
-    return counts[0] / max([1, counts[0] + counts[2]])
+    return float(counts[0]) / float([1, counts[0] + counts[2]].maximum())
 
 def f1(expected: list[int], predicted: list[int], positive: int = 1) -> float:
     p = precision(expected, predicted, positive)
@@ -40,7 +40,7 @@ def f1(expected: list[int], predicted: list[int], positive: int = 1) -> float:
 def confusion_matrix(expected: list[int], predicted: list[int], classes: int = 0) -> list[list[int]]:
     class_count := classes
     if class_count == 0:
-        class_count = max(expected + predicted) + 1
+        class_count = (expected + predicted).maximum() + 1
     matrix := []
     for _row in range(0, class_count):
         matrix.append([0] * class_count)
@@ -49,7 +49,7 @@ def confusion_matrix(expected: list[int], predicted: list[int], classes: int = 0
     return matrix
 
 def classification_report(expected: list[int], predicted: list[int]) -> string:
-    classes = max(expected + predicted) + 1
+    classes = (expected + predicted).maximum() + 1
     lines := ["class precision recall f1"]
     for label in range(0, classes):
         lines.append(
@@ -63,7 +63,7 @@ def mse(expected: list[float], predicted: list[float]) -> float:
     for index in indices(expected):
         difference = expected[index] - predicted[index]
         total += difference * difference
-    return total / size(expected)
+    return total / float(size(expected))
 
 def rmse(expected: list[float], predicted: list[float]) -> float:
     return math.sqrt(mse(expected, predicted))
@@ -73,16 +73,16 @@ def mae(expected: list[float], predicted: list[float]) -> float:
     for index in indices(expected):
         difference = expected[index] - predicted[index]
         total += difference if difference >= 0.0 else -difference
-    return total / size(expected)
+    return total / float(size(expected))
 
 def r2(expected: list[float], predicted: list[float]) -> float:
-    center = sum(expected) / size(expected)
+    center = expected.sum() / float(size(expected))
     residual := 0.0
     total := 0.0
     for index in indices(expected):
         residual += (expected[index] - predicted[index]) * (expected[index] - predicted[index])
         total += (expected[index] - center) * (expected[index] - center)
-    return 1.0 - residual / max([0.000000000001, total])
+    return 1.0 - residual / [0.000000000001, total].maximum()
 
 def roc_auc(expected: list[int], probabilities: list[float]) -> float:
     positives := 0
@@ -100,7 +100,7 @@ def roc_auc(expected: list[int], probabilities: list[float]) -> float:
                 favorable += 1.0
             else if probabilities[left] == probabilities[right]:
                 favorable += 0.5
-    return favorable / max([1, positives * negatives])
+    return favorable / float([1, positives * negatives].maximum())
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
     dot := 0.0
@@ -110,7 +110,7 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
         dot += left[index] * right[index]
         left_norm += left[index] * left[index]
         right_norm += right[index] * right[index]
-    return dot / max([0.000000000001, math.sqrt(left_norm * right_norm)])
+    return dot / [0.000000000001, math.sqrt(left_norm * right_norm)].maximum()
 
 def pairwise_distance(left: list[float], right: list[float]) -> float:
     total := 0.0

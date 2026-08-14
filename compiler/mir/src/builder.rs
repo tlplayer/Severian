@@ -310,8 +310,10 @@ impl FunctionBuilder {
         .transpose()?
         .flatten();
         let inputs = tensor_operands(args, |argument| self.value_ref(argument))?;
-        let operation = resolve_tensor_op(intrinsic, args, inputs, scalar, result)
-            .map_err(|error| error.at_expression(expression.hir_id()))?;
+        let operation = resolve_tensor_op(intrinsic, args, inputs, scalar, result, |argument| {
+            self.value_ref(argument)
+        })
+        .map_err(|error| error.at_expression(expression.hir_id()))?;
         let id = TensorOpId(self.tensor_operations.len() as u32);
         self.tensor_operations.push(operation);
         value.tensor_op = Some(id);

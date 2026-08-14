@@ -1,6 +1,5 @@
 use severian_package::{
     load_embedded_official_interfaces, load_official_interfaces, EmbeddedOfficialPackage,
-    GraphOperation,
 };
 use std::path::PathBuf;
 
@@ -14,7 +13,7 @@ fn library_root() -> PathBuf {
 }
 
 #[test]
-fn loads_package_owned_symbols_and_fusion_contracts() {
+fn keeps_tensor_fusion_contracts_out_of_the_model_package() {
     let module = parse("import model\nimport tensor\n");
     let interfaces = load_official_interfaces(&module, &library_root()).unwrap();
     let model = interfaces
@@ -22,15 +21,9 @@ fn loads_package_owned_symbols_and_fusion_contracts() {
         .find(|interface| interface.name == "model")
         .unwrap();
 
-    assert_eq!(model.compiler.symbols["Relu"], "relu_list");
-    assert!(model
-        .compiler
-        .fusion_aliases
-        .iter()
-        .any(|alias| { alias.function == "model.relu_list" && alias.target == "tensor.relu" }));
-    assert!(model.compiler.graph_rules.iter().any(|rule| {
-        rule.function == "model.graph_matmul" && rule.operation == GraphOperation::Matmul
-    }));
+    assert!(model.compiler.symbols.is_empty());
+    assert!(model.compiler.fusion_aliases.is_empty());
+    assert!(model.compiler.graph_rules.is_empty());
     let tensor = interfaces
         .iter()
         .find(|interface| interface.name == "tensor")
@@ -57,7 +50,10 @@ fn loads_only_reachable_official_interfaces() {
             "data",
             "file",
             "json",
+            "os",
+            "path",
             "platform",
+            "regex",
             "src.file_binary",
             "src.file_csv",
             "src.file_interface",

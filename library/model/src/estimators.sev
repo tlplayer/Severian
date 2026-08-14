@@ -38,15 +38,15 @@ class LinearEstimator:
             bias_gradient := 0.0
             for row, target in zip(features, targets):
                 raw = dot(row, weights) + bias
-                predicted = sigmoid(raw) if task in ["logistic", "svm"] else raw
-                error = predicted - target
+                predicted := sigmoid(raw) if task in ["logistic", "svm"] else raw
+                error := predicted - target
                 if task == "poisson":
-                    predicted = math.exp(min([20.0, raw]))
+                    predicted = math.exp([20.0, raw].minimum())
                     error = predicted - target
                 else if task == "quantile":
                     error = -quantile if target > raw else 1.0 - quantile
                 else if task == "robust":
-                    error = max([-1.0, min([1.0, error])])
+                    error = [-1.0, [1.0, error].minimum()].maximum()
                 else if task == "svm":
                     label = 1.0 if target > 0.0 else -1.0
                     error = -label if label * raw < 1.0 else 0.0
@@ -54,13 +54,13 @@ class LinearEstimator:
                     weight_gradient[column] += error * row[column]
                 bias_gradient += error
             for column in indices(weights):
-                gradient = weight_gradient[column] / size(features)
+                gradient := weight_gradient[column] / float(size(features))
                 if penalty in ["ridge", "elastic"]:
                     gradient += regularization * weights[column]
                 if penalty in ["lasso", "elastic"]:
                     gradient += regularization * (1.0 if weights[column] > 0.0 else -1.0 if weights[column] < 0.0 else 0.0)
                 weights[column] -= learning_rate * gradient
-            bias -= learning_rate * bias_gradient / size(features)
+            bias -= learning_rate * bias_gradient / float(size(features))
         return self
 
     def predict_values(features: list[list[float]]) -> list[float]:
@@ -72,13 +72,13 @@ class LinearEstimator:
             else if task == "svm":
                 output.append(1.0 if raw >= 0.0 else 0.0)
             else if task == "poisson":
-                output.append(math.exp(min([20.0, raw])))
+                output.append(math.exp([20.0, raw].minimum()))
             else:
                 output.append(raw)
         return output
 
     def predict(features: list[list[float]]) -> list[float]:
-        return predict_values(features)
+        return self.predict_values(features)
 
     def predict_proba(features: list[list[float]]) -> list[list[float]]:
         output := []
@@ -88,7 +88,7 @@ class LinearEstimator:
         return output
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        predicted = predict_values(features)
+        predicted = self.predict_values(features)
         if task in ["logistic", "svm"]:
             expected = targets.map(|value| int(value))
             actual = predicted.map(|value| int(value))
@@ -109,14 +109,14 @@ class KNearestNeighbors:
     def nearest(row: list[float]) -> list[int]:
         candidates := indices(train_features)
         candidates = candidates.sorted(|index| distance(row, train_features[index]))
-        return candidates[0:min([neighbors, size(candidates)])]
+        return candidates[0:[neighbors, size(candidates)].minimum()]
 
     def predict(features: list[list[float]]) -> list[float]:
         output := []
         for row in features:
-            selected = nearest(row)
+            selected = self.nearest(row)
             if task == "regression":
-                output.append(sum(selected.map(|index| train_targets[index])) / size(selected))
+                output.append(selected.map(|index| train_targets[index]).sum() / float(size(selected)))
             else:
                 counts: map[float, int] = {}
                 for index in selected:
@@ -128,19 +128,19 @@ class KNearestNeighbors:
         output := []
         classes = train_targets.unique().sorted()
         for row in features:
-            selected = nearest(row)
+            selected = self.nearest(row)
             probabilities := []
             for label in classes:
                 matches := 0
                 for index in selected:
                     if train_targets[index] == label:
                         matches += 1
-                probabilities.append(matches / size(selected))
+                probabilities.append(float(matches) / float(size(selected)))
             output.append(probabilities)
         return output
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        predicted = predict(features)
+        predicted = self.predict(features)
         if task == "regression":
             return metrics.r2(targets, predicted)
         return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value)))
@@ -165,20 +165,20 @@ class GaussianNaiveBayes:
             spread = [0.0] * size(features[0])
             for row in members:
                 for column in indices(row):
-                    center[column] += row[column] / size(members)
+                    center[column] += row[column] / float(size(members))
             for row in members:
                 for column in indices(row):
                     difference = row[column] - center[column]
-                    spread[column] += difference * difference / max([1, size(members) - 1])
+                    spread[column] += difference * difference / float([1, size(members) - 1].maximum())
             means.append(center)
-            variances.append(spread.map(|value| max([0.000000001, value])))
-            priors.append(size(members) / size(features))
+            variances.append(spread.map(|value| [0.000000001, value].maximum()))
+            priors.append(float(size(members)) / float(size(features)))
         return self
 
     def log_probabilities(row: list[float]) -> list[float]:
         scores := []
         for class_index in indices(classes):
-            score = math.log(priors[class_index])
+            score := math.log(priors[class_index])
             for column in indices(row):
                 variance = variances[class_index][column]
                 difference = row[column] - means[class_index][column]
@@ -187,20 +187,20 @@ class GaussianNaiveBayes:
         return scores
 
     def predict(features: list[list[float]]) -> list[float]:
-        return features.map(|row| classes[log_probabilities(row).index(max(log_probabilities(row)))])
+        return features.map(|row| classes[self.log_probabilities(row).index(self.log_probabilities(row).maximum())])
 
     def predict_proba(features: list[list[float]]) -> list[list[float]]:
         output := []
         for row in features:
-            scores = log_probabilities(row)
-            peak = max(scores)
+            scores = self.log_probabilities(row)
+            peak = scores.maximum()
             exponentials = scores.map(|score| math.exp(score - peak))
-            normalizer = sum(exponentials)
+            normalizer = exponentials.sum()
             output.append(exponentials.map(|value| value / normalizer))
         return output
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        return metrics.accuracy(targets.map(|value| int(value)), predict(features).map(|value| int(value)))
+        return metrics.accuracy(targets.map(|value| int(value)), self.predict(features).map(|value| int(value)))
 
 class DecisionStump:
     feature: int = 0
@@ -223,8 +223,8 @@ class DecisionStump:
                         right.append(targets[index])
                 if size(left) == 0 or size(right) == 0:
                     continue
-                left_prediction = majority(left) if task == "classification" else sum(left) / size(left)
-                right_prediction = majority(right) if task == "classification" else sum(right) / size(right)
+                left_prediction = majority(left) if task == "classification" else left.sum() / float(size(left))
+                right_prediction = majority(right) if task == "classification" else right.sum() / float(size(right))
                 loss := 0.0
                 for index, row in enumerate(features):
                     prediction = left_prediction if row[column] <= candidate else right_prediction
@@ -242,7 +242,7 @@ class DecisionStump:
         return features.map(|row| left_value if row[feature] <= threshold else right_value)
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        predicted = predict(features)
+        predicted = self.predict(features)
         return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
 
 def majority(values: list[float]) -> float:
@@ -272,11 +272,11 @@ class Forest:
         output := []
         for row in features:
             votes = estimators.map(|tree| tree.predict([row])[0])
-            output.append(majority(votes) if task == "classification" else sum(votes) / size(votes))
+            output.append(majority(votes) if task == "classification" else votes.sum() / float(size(votes)))
         return output
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        predicted = predict(features)
+        predicted = self.predict(features)
         return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
 
 class GradientBoosting:
@@ -287,7 +287,7 @@ class GradientBoosting:
     trees: list[DecisionStump] = []
 
     def fit(features: list[list[float]], targets: list[float]) -> GradientBoosting:
-        baseline = sum(targets) / size(targets)
+        baseline = targets.sum() / float(size(targets))
         predictions = [baseline] * size(targets)
         trees = []
         for _index in range(0, estimators):
@@ -312,7 +312,7 @@ class GradientBoosting:
         return output
 
     def score(features: list[list[float]], targets: list[float]) -> float:
-        predicted = predict(features)
+        predicted = self.predict(features)
         return metrics.accuracy(targets.map(|value| int(value)), predicted.map(|value| int(value))) if task == "classification" else metrics.r2(targets, predicted)
 
 class KMeans:
@@ -324,7 +324,7 @@ class KMeans:
         assert(clusters > 0 and clusters <= size(features))
         centroids = features[0:clusters].map(|row| row[0:size(row)])
         for _iteration in range(0, iterations):
-            assignments = predict(features)
+            assignments = self.predict(features)
             sums := []
             counts := [0] * clusters
             for _cluster in range(0, clusters):
@@ -338,7 +338,7 @@ class KMeans:
             for cluster in range(0, clusters):
                 if counts[cluster] == 0:
                     continue
-                updated = sums[cluster].map(|value| value / counts[cluster])
+                updated = sums[cluster].map(|value| value / float(counts[cluster]))
                 if distance(updated, centroids[cluster]) > 0.0000001:
                     changed = true
                 centroids[cluster] = updated
@@ -360,8 +360,8 @@ class KMeans:
         return features.map(|row| centroids.map(|center| distance(row, center)))
 
     def fit_transform(features: list[list[float]]) -> list[list[float]]:
-        _fitted = fit(features)
-        return transform(features)
+        _fitted = self.fit(features)
+        return self.transform(features)
 
 class DBSCAN:
     epsilon: float = 0.5
@@ -416,7 +416,7 @@ class PCA:
         mean = [0.0] * size(features[0])
         for row in features:
             for column in indices(row):
-                mean[column] += row[column] / size(features)
+                mean[column] += row[column] / float(size(features))
         centered = features.map(|row| row.zip(mean).map(|pair| pair[0] - pair[1]))
         covariance := []
         for left in indices(mean):
@@ -425,11 +425,11 @@ class PCA:
                 value := 0.0
                 for row in centered:
                     value += row[left] * row[right]
-                covariance_row.append(value / max([1, size(centered) - 1]))
+                covariance_row.append(value / float([1, size(centered) - 1].maximum()))
             covariance.append(covariance_row)
         axes = []
-        for component in range(0, min([components, size(mean)])):
-            vector = [1.0 / math.sqrt(size(mean))] * size(mean)
+        for component in range(0, [components, size(mean)].minimum()):
+            vector := [1.0 / math.sqrt(float(size(mean)))] * size(mean)
             vector[component] += 0.01
             for _iteration in range(0, iterations):
                 next = covariance.map(|row| dot(row, vector))
@@ -448,8 +448,8 @@ class PCA:
         return features.map(|row| axes.map(|axis| dot(row.zip(mean).map(|pair| pair[0] - pair[1]), axis)))
 
     def fit_transform(features: list[list[float]]) -> list[list[float]]:
-        _fitted = fit(features)
-        return transform(features)
+        _fitted = self.fit(features)
+        return self.transform(features)
 
 class NMF:
     components: int
@@ -487,7 +487,7 @@ class NMF:
         return coefficients
 
     def fit(features: list[list[float]]) -> NMF:
-        _transformed = fit_transform(features)
+        _transformed = self.fit_transform(features)
         return self
 
     def transform(features: list[list[float]]) -> list[list[float]]:
@@ -655,8 +655,8 @@ def variance_threshold(features: list[list[float]], threshold: float = 0.0) -> l
     selected := []
     for column in indices(features[0]):
         values = features.map(|row| row[column])
-        center = sum(values) / size(values)
-        variance = sum(values.map(|value| (value - center) * (value - center))) / size(values)
+        center = values.sum() / float(size(values))
+        variance = values.map(|value| (value - center) * (value - center)).sum() / float(size(values))
         if variance > threshold:
             selected.append(column)
     return selected
@@ -669,21 +669,21 @@ def feature_selection(features: list[list[float]], targets: list[float], count: 
 
 def mutual_information(features: list[list[float]], targets: list[float]) -> list[float]:
     # Gaussian correlation approximation is deterministic and useful for continuous data.
-    return indices(features[0]).map(|column| -0.5 * math.log(max([0.000000001, 1.0 - math.pow(metrics.cosine_similarity(features.map(|row| row[column]), targets), 2.0)])))
+    return indices(features[0]).map(|column| -0.5 * math.log([0.000000001, 1.0 - math.pow(metrics.cosine_similarity(features.map(|row| row[column]), targets), 2.0)].maximum()))
 
 def chi_square(observed: list[float], expected: list[float]) -> float:
     total := 0.0
     for index in indices(observed):
-        total += math.pow(observed[index] - expected[index], 2.0) / max([0.000000001, expected[index]])
+        total += math.pow(observed[index] - expected[index], 2.0) / [0.000000001, expected[index]].maximum()
     return total
 
 def anova(groups: list[list[float]]) -> float:
     all_values = groups.flatten()
-    grand_mean = sum(all_values) / size(all_values)
+    grand_mean = all_values.sum() / float(size(all_values))
     between := 0.0
     within := 0.0
     for group in groups:
-        center = sum(group) / size(group)
-        between += size(group) * math.pow(center - grand_mean, 2.0)
-        within += sum(group.map(|value| math.pow(value - center, 2.0)))
-    return (between / max([1, size(groups) - 1])) / max([0.000000001, within / max([1, size(all_values) - size(groups)])])
+        center = group.sum() / float(size(group))
+        between += float(size(group)) * math.pow(center - grand_mean, 2.0)
+        within += group.map(|value| math.pow(value - center, 2.0)).sum()
+    return (between / [1, size(groups) - 1].maximum()) / [0.000000001, within / [1, size(all_values) - size(groups)].maximum()].maximum()

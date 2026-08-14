@@ -24,3 +24,12 @@ def sub(pattern: string, replacement: string, text: string) -> string:
 test "POSIX extended matching":
     assert(matches("release-42", "^[a-z]+-[0-9]+$"))
     assert(not matches("release", "^[a-z]+-[0-9]+$"))
+
+test "regex facade preserves pattern order and replacement behavior":
+    assert(compile("[0-9]+") == "[0-9]+")
+    assert(match("[a-z]+", "abc123"))
+    assert(not match("[0-9]+", "abc123"))
+    assert(search("[0-9]+", "abc123"))
+    assert(findall("[0-9]+", "a12b34") == ["12", "34"])
+    assert(split("[,:]", "a,b:c") == ["a", "b", "c"])
+    assert(sub("[0-9]+", "#", "a12b34") == "a#b#")

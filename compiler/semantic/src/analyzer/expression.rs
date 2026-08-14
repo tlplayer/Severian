@@ -220,6 +220,14 @@ pub(super) fn lower_expression_kind(
                     BinaryOp::Sub,
                     merge_numeric(left_type, right_type, binary.span)?,
                 ),
+                AstBinaryOp::Mul
+                    if matches!(
+                        (left_type, right_type),
+                        (ValueType::List, ValueType::Int) | (ValueType::Int, ValueType::List)
+                    ) =>
+                {
+                    (BinaryOp::Mul, ValueType::List)
+                }
                 AstBinaryOp::Mul => (
                     BinaryOp::Mul,
                     merge_numeric(left_type, right_type, binary.span)?,

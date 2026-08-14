@@ -8,3 +8,12 @@ def set(name: string, value: string) -> bool:
 
 def remove(name: string) -> bool:
     return platform.environment_remove(name)
+
+test "environment values round-trip and removal restores fallback behavior":
+    name = "SEVERIAN_STDLIB_ENVIRONMENT_COVERAGE_VALUE"
+    remove(name)
+    assert(get(name, "missing") == "missing")
+    assert(set(name, "present"))
+    assert(get(name, "missing") == "present")
+    assert(remove(name))
+    assert(get(name, "missing") == "missing")

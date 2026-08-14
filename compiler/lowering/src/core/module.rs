@@ -80,6 +80,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_value_string(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_collection_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_collection_repeat(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_equal(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_string_char_at(!llvm.ptr, i64) -> !llvm.ptr\n",
         "  llvm.func @__sev_string_slice(!llvm.ptr, i64, i64, i64) -> !llvm.ptr\n",

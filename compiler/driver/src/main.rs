@@ -1,5 +1,6 @@
 mod architecture_command;
 mod build_options;
+mod coverage_policy;
 mod error_catalog;
 mod runtime_diagnostics;
 mod scaffold;
@@ -2185,38 +2186,7 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
         ));
     }
 
-    let diagnostics = severian_diagnostics::coverage::check_thresholds(
-        severian_diagnostics::coverage::CoveragePercentages {
-            lines: report.lines.percent,
-            regions: report.regions.percent,
-            branches: report.branches.percent,
-            functions: report.functions.percent,
-        },
-        severian_diagnostics::coverage::CoverageThresholds {
-            lines: Some(policy.coverage.minimum),
-            regions: None,
-            branches: policy.coverage.branches,
-            functions: None,
-        },
-    );
-    if diagnostics.has_errors() {
-        eprintln!(
-            "{}",
-            severian_diagnostics::render::render_bag(
-                &diagnostics,
-                None,
-                &severian_diagnostics::render::RenderOptions {
-                    color: false,
-                    ..Default::default()
-                },
-            )
-        );
-        return Err(format!(
-            "line coverage is {:.2}%; at least {:.2}% is required",
-            report.lines.percent, policy.coverage.minimum
-        ));
-    }
-    Ok(())
+    coverage_policy::enforce(&report, &files, &policy.coverage)
 }
 
 fn is_expected_negative_coverage_fixture(source: &Path) -> bool {

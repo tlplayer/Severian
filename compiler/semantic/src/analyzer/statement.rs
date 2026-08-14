@@ -48,7 +48,10 @@ pub(super) fn lower_block(
                         Binding {
                             reference: source_binding(&parameter.name),
                             ty,
-                            class: parameter.ty.as_ref().and_then(class_type_name),
+                            class: parameter
+                                .ty
+                                .as_ref()
+                                .and_then(|ty| resolved_class_type_name(ty, aliases)),
                             function_return: function_return_type(parameter.ty.as_ref()),
                             collection_len: None,
                             mutable: false,
@@ -196,7 +199,7 @@ pub(super) fn lower_block(
                 let class = binding
                     .ty
                     .as_ref()
-                    .and_then(class_type_name)
+                    .and_then(|ty| resolved_class_type_name(ty, aliases))
                     .or_else(|| receiver.as_ref().map(|receiver| receiver.name.clone()))
                     .or_else(|| expression_class(source, scope, aliases));
                 if scope

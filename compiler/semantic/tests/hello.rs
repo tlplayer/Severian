@@ -9,6 +9,31 @@ use severian_semantic::{
     analyze, analyze_with_interfaces, analyze_with_packages, attach_module_metadata,
     attach_module_metadata_with_packages,
 };
+
+#[test]
+fn list_repetition_is_typed_in_both_operand_orders() {
+    let source = concat!(
+        "def repeated() -> list[int]:\n",
+        "    return [1, 2] * 2\n",
+        "\n",
+        "def mirrored() -> list[int]:\n",
+        "    return 2 * [1, 2]\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+}
+
+#[test]
+fn typed_changeable_any_bindings_accept_heterogeneous_updates() {
+    let source = concat!(
+        "def parse_dynamic() -> Any:\n",
+        "    value: Any := 1\n",
+        "    value = \"updated\"\n",
+        "    return value\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    analyze(&module).unwrap();
+}
 use std::path::PathBuf;
 
 #[test]
@@ -774,7 +799,7 @@ fn refines_literal_file_reads_to_the_extension_class() {
     else {
         panic!("expected fallible assignment to preserve its success receiver");
     };
-    assert_eq!(receiver.name, "WAV");
+    assert_eq!(receiver.name, "file.WAV");
 
     let dynamic_source = concat!(
         "import file\n",
@@ -910,4 +935,26 @@ fn imported_function_returns_keep_the_canonical_class_definition() {
     };
     assert_eq!(*definition, TypeDefinitionId::from_name("data.Data"));
     assert_eq!(name, "tabular.Data");
+}
+
+#[test]
+fn local_import_aliases_preserve_qualified_class_fields() {
+    let optimizer_source = concat!("class SGD:\n", "    momentum: float\n",);
+    let optimizer_module = parse(&lex(optimizer_source).unwrap()).unwrap();
+    let interface = PackageInterface {
+        name: "src.optimizers".into(),
+        export_package: None,
+        module: optimizer_module,
+        compiler: Default::default(),
+        source_path: PathBuf::from("/workspace/src/optimizers.sev"),
+        source: optimizer_source.into(),
+    };
+    let consumer_source = concat!(
+        "import \"src/optimizers.sev\" as optimizers\n",
+        "\n",
+        "def momentum(optimizer: optimizers.SGD) -> float:\n",
+        "    return optimizer.momentum\n",
+    );
+    let consumer = parse(&lex(consumer_source).unwrap()).unwrap();
+    analyze_with_packages(&consumer, &[interface]).unwrap();
 }

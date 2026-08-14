@@ -118,9 +118,11 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_string_char_at(void *raw, int64_t index) { const unsigned char *text = raw; int64_t count = __sev_string_length(raw); int64_t requested = index; if (index < 0) index += count; if (index < 0 || index >= count) sev_runtime_fail_bounds(\"string\", requested, count); int64_t offset = sev_utf8_offset(raw, index); int64_t width = sev_utf8_width(text[offset]); char *result = sev_allocate((size_t)width + 1); memcpy(result, text + offset, (size_t)width); return result; }\n",
         "static void sev_slice_bounds(int64_t size, int64_t *start, int64_t *end, int64_t *step) { const int64_t missing = INT64_MIN; if (*step == missing) *step = 1; if (*step == 0) sev_runtime_fail(\"E000912\", \"slice step cannot be zero\", \"use a positive or negative non-zero step\"); if (*step > 0) { if (*start == missing) *start = 0; else { if (*start < 0) *start += size; if (*start < 0) *start = 0; if (*start > size) *start = size; } if (*end == missing) *end = size; else { if (*end < 0) *end += size; if (*end < 0) *end = 0; if (*end > size) *end = size; } } else { if (*start == missing) *start = size - 1; else { if (*start < 0) *start += size; if (*start < -1) *start = -1; if (*start >= size) *start = size - 1; } if (*end == missing) *end = -1; else { if (*end < 0) *end += size; if (*end < -1) *end = -1; if (*end >= size) *end = size - 1; } } }\n",
         "void *__sev_string_slice(void *raw, int64_t start, int64_t end, int64_t step) { const unsigned char *text = raw; int64_t count = __sev_string_length(raw); sev_slice_bounds(count, &start, &end, &step); int64_t *offsets = sev_allocate((size_t)(count + 1) * sizeof(*offsets)); offsets[0] = 0; for (int64_t index = 0; index < count; ++index) offsets[index + 1] = offsets[index] + sev_utf8_width(text[offsets[index]]); char *result = sev_allocate((size_t)__sev_strlen(raw) + 1); int64_t write = 0; for (int64_t index = start; step > 0 ? index < end : index > end; index += step) { int64_t width = offsets[index + 1] - offsets[index]; memcpy(result + write, text + offsets[index], (size_t)width); write += width; } result[write] = '\\0'; free(offsets); return result; }\n",
+        "static bool sev_value_equal(sev_value *left, sev_value *right);\n",
+        "static bool sev_map_equal(sev_map *left, sev_map *right) { if (!left || !right || left->size != right->size) return false; for (int64_t left_index = 0; left_index < left->size; ++left_index) { bool found = false; for (int64_t right_index = 0; right_index < right->size; ++right_index) if (sev_value_equal(left->keys[left_index], right->keys[right_index])) { if (!sev_value_equal(left->values[left_index], right->values[right_index])) return false; found = true; break; } if (!found) return false; } return true; }\n",
         "static bool sev_value_equal(sev_value *left, sev_value *right) {\n",
         "  if (!left || !right || left->kind != right->kind) return false;\n",
-        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } case SEV_NULL: return true; }\n",
+        "  switch (left->kind) { case SEV_INT: return left->as.i64 == right->as.i64; case SEV_FLOAT: return left->as.f64 == right->as.f64; case SEV_BOOL: return left->as.boolean == right->as.boolean; case SEV_STRING: return strcmp(left->as.string, right->as.string) == 0; case SEV_COLLECTION: { sev_collection *left_collection = left->as.pointer; sev_collection *right_collection = right->as.pointer; if (!left_collection || !right_collection || left_collection->kind != right_collection->kind || left_collection->size != right_collection->size) return false; if (left_collection->kind == 3) return sev_map_equal((sev_map *)left_collection, (sev_map *)right_collection); for (int64_t index = 0; index < left_collection->size; ++index) if (!sev_value_equal(left_collection->items[index], right_collection->items[index])) return false; return true; } case SEV_NULL: return true; }\n",
         "  return false;\n",
         "}\n",
         "bool __sev_value_equal(void *left, void *right) { return sev_value_equal(left, right); }\n",
@@ -134,6 +136,7 @@ pub(super) fn native_bridge_source_for_target(
         "void __sev_collection_appendleft(void *raw, void *item) { __sev_collection_insert(raw, 0, item); }\n",
         "void __sev_collection_extend(void *raw, void *other_raw) { sev_collection *value = raw; sev_collection *other = other_raw; if (!value || !other) abort(); for (int64_t index = 0; index < other->size; ++index) __sev_collection_push(value, other->items[index]); }\n",
         "void *__sev_collection_concat(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != 0 || right->kind != 0) abort(); sev_collection *result = __sev_collection_clone(left); __sev_collection_extend(result, right); return result; }\n",
+        "void *__sev_collection_repeat(void *raw, int64_t count) { sev_collection *value = raw; if (!value || value->kind != 0) abort(); sev_collection *result = __sev_collection_new(0); for (int64_t repetition = 0; repetition < count; ++repetition) __sev_collection_extend(result, value); return result; }\n",
         "void *__sev_collection_pop_at(void *raw, int64_t index) { sev_collection *value = raw; if (!value) sev_runtime_fail_invariant(\"collection storage is null\"); int64_t requested = index; if (index < 0) index += value->size; if (index < 0 || index >= value->size) sev_runtime_fail_bounds(\"collection\", requested, value->size); sev_value *result = value->items[index]; memmove(value->items + index, value->items + index + 1, (size_t)(value->size - index - 1) * sizeof(*value->items)); value->size -= 1; return result; }\n",
         "void __sev_collection_remove(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); for (int64_t index = 0; index < value->size; ++index) if (sev_value_equal(value->items[index], item)) { (void)__sev_collection_pop_at(value, index); return; } abort(); }\n",
         "void __sev_collection_heap_push(void *raw, void *item) { sev_collection *value = raw; if (!value) abort(); __sev_collection_push(value, item); int64_t child = value->size - 1; while (child > 0) { int64_t parent = (child - 1) / 2; if (!__sev_value_less(value->items[child], value->items[parent])) break; sev_value *temporary = value->items[parent]; value->items[parent] = value->items[child]; value->items[child] = temporary; child = parent; } }\n",
@@ -150,7 +153,7 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_value_get(void *raw, void *key_raw) { sev_value *value = raw; sev_value *key = key_raw; if (!value || !key) abort(); if (value->kind == SEV_STRING && key->kind == SEV_INT) return __sev_box_string(__sev_string_char_at((void *)value->as.string, key->as.i64)); if (value->kind != SEV_COLLECTION) abort(); sev_collection *collection = value->as.pointer; if (!collection) abort(); if (collection->kind == 3) return __sev_map_get(collection, key); if (key->kind != SEV_INT) abort(); return __sev_collection_get(collection, key->as.i64); }\n",
         "void __sev_value_set(void *raw, void *key_raw, void *item) { sev_value *value = raw; sev_value *key = key_raw; if (!value || !key || !item || value->kind != SEV_COLLECTION) abort(); sev_collection *collection = value->as.pointer; if (!collection) abort(); if (collection->kind == 3) { __sev_map_insert(collection, key, item); return; } if (key->kind != SEV_INT) abort(); __sev_collection_set(collection, key->as.i64, item); }\n",
         "void *__sev_value_slice(void *raw, int64_t start, int64_t end, int64_t step) { sev_value *value = raw; if (!value) abort(); if (value->kind == SEV_COLLECTION) return __sev_box_collection(__sev_collection_slice(value->as.pointer, start, end, step)); if (value->kind == SEV_STRING) return __sev_box_string(__sev_string_slice((void *)value->as.string, start, end, step)); abort(); }\n",
-        "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
+        "bool __sev_collection_equal(void *left_raw, void *right_raw) { sev_collection *left = left_raw; sev_collection *right = right_raw; if (!left || !right || left->kind != right->kind || left->size != right->size) return false; if (left->kind == 3) return sev_map_equal((sev_map *)left, (sev_map *)right); for (int64_t i = 0; i < left->size; ++i) if (!sev_value_equal(left->items[i], right->items[i])) return false; return true; }\n",
         "void *__sev_collection_reversed(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t i = value->size; i > 0; --i) __sev_collection_push(result, value->items[i - 1]); return result; }\n",
         "static double sev_fast_sigmoid(double value) { double magnitude = value < 0.0 ? -value : value; return 0.5 + value / (2.0 * (1.0 + magnitude)); }\n",
         "static double sev_fast_tanh(double value) { double magnitude = value < 0.0 ? -value : value; return value / (1.0 + magnitude); }\n",
@@ -1847,6 +1850,8 @@ int64_t __sev_host_page_size(void) {
     }
     for class in &program.classes {
         for method in &class.methods {
+            let class_symbol = mangle_symbol_component(&class.name);
+            let method_task_symbol = mangle_symbol_component(&method.name);
             let result_type = c_type(method.return_type);
             let method_symbol = class_function_symbol(&class.name, &method.name);
             write!(source, "extern {result_type} {method_symbol}(void *").unwrap();
@@ -1863,17 +1868,19 @@ int64_t __sev_host_page_size(void) {
             for (index, parameter) in method.params.iter().enumerate() {
                 writeln!(source, "  {} arg_{index};", c_type(parameter.ty)).unwrap();
             }
-            writeln!(source, "}} sev_method_task_{}_{};", class.name, method.name).unwrap();
             writeln!(
                 source,
-                "static void *__sev_method_worker_{}_{}(void *raw) {{",
-                class.name, method.name
+                "}} sev_method_task_{class_symbol}_{method_task_symbol};"
             )
             .unwrap();
             writeln!(
                 source,
-                "  sev_method_task_{}_{} *task = raw;",
-                class.name, method.name
+                "static void *__sev_method_worker_{class_symbol}_{method_task_symbol}(void *raw) {{"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "  sev_method_task_{class_symbol}_{method_task_symbol} *task = raw;"
             )
             .unwrap();
             source.push_str("  pthread_mutex_lock(&task->self->mutex);\n");
@@ -1892,8 +1899,7 @@ int64_t __sev_host_page_size(void) {
             source.push_str("  pthread_mutex_unlock(&task->self->mutex);\n  return NULL;\n}\n");
             write!(
                 source,
-                "void *__sev_task_spawn_{}_{}(void *self_raw",
-                class.name, method.name
+                "void *__sev_task_spawn_{class_symbol}_{method_task_symbol}(void *self_raw"
             )
             .unwrap();
             for (index, parameter) in method.params.iter().enumerate() {
@@ -1902,15 +1908,14 @@ int64_t __sev_host_page_size(void) {
             source.push_str(") {\n");
             writeln!(
                 source,
-                "  sev_method_task_{}_{} *task = calloc(1, sizeof(*task));",
-                class.name, method.name
+                "  sev_method_task_{class_symbol}_{method_task_symbol} *task = calloc(1, sizeof(*task));"
             )
             .unwrap();
             source.push_str("  if (!task) abort();\n  task->self = self_raw;\n");
             for index in 0..method.params.len() {
                 writeln!(source, "  task->arg_{index} = arg_{index};").unwrap();
             }
-            writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_method_worker_{}_{}, task) != 0) abort();", class.name, method.name).unwrap();
+            writeln!(source, "  if (pthread_create(&task->base.thread, NULL, __sev_method_worker_{class_symbol}_{method_task_symbol}, task) != 0) abort();").unwrap();
             source.push_str("  return task;\n}\n\n");
         }
     }

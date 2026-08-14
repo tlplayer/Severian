@@ -44,6 +44,12 @@ fn check_function(
 ) -> Result<(), OwnershipError> {
     let mut checker = globals.clone();
     checker.remaining = count_instruction_uses(&function.instructions);
+    if let Some(class) = class {
+        checker.define(
+            BindingRef::new(BindingId::from_name(&format!("{class}.self")), "self"),
+            None,
+        );
+    }
     for field in fields {
         checker.define(
             BindingRef::new(
@@ -74,6 +80,12 @@ fn check_function(
     for test in &function.tests {
         let mut test_checker = globals.clone();
         test_checker.remaining = count_instruction_uses(&test.instructions);
+        if let Some(class) = class {
+            test_checker.define(
+                BindingRef::new(BindingId::from_name(&format!("{class}.self")), "self"),
+                None,
+            );
+        }
         for field in fields {
             test_checker.define(
                 BindingRef::new(

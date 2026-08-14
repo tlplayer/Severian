@@ -169,6 +169,7 @@ mod tests {
                     ty: input,
                 },
                 axes: vec![0],
+                axes_known: true,
                 last_axis: false,
                 result: TensorType::ranked(TensorElementType::F32, &[]).unwrap(),
                 accumulation: TensorElementType::F32,

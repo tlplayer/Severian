@@ -527,47 +527,11 @@ pub(super) fn source_span(file: severian_hir::SourceFileId, span: Span) -> Sourc
     }
 }
 
-pub(super) fn class_type_name(ty: &Type) -> Option<String> {
-    let Type::Named(path) = ty else { return None };
-    let name = path.segments.last()?.name.as_str();
-    if matches!(
-        name,
-        "int"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "usize"
-            | "float"
-            | "f32"
-            | "f64"
-            | "bool"
-            | "string"
-            | "unit"
-            | "list"
-            | "map"
-            | "set"
-            | "Tensor"
-            | "Channel"
-            | "Function"
-            | "Result"
-            | "Option"
-    ) {
-        None
-    } else {
-        Some(if path.args.is_empty() {
-            name.to_owned()
-        } else {
-            declaration_type_key(ty)
-        })
-    }
-}
-
 pub(super) fn declared_receiver_type(
     ty: &Type,
     aliases: &HashMap<String, String>,
 ) -> Option<ReceiverType> {
-    let name = class_type_name(ty)?;
+    let name = resolved_class_type_name(ty, aliases)?;
     let methods = aliases
         .get(&format!("__class_methods.{name}"))?
         .split(',')

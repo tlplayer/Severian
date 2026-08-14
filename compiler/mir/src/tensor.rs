@@ -77,6 +77,7 @@ pub struct ReductionOp {
     pub kind: ReductionKind,
     pub input: TensorOperand,
     pub axes: Vec<u64>,
+    pub axes_known: bool,
     pub last_axis: bool,
     pub result: TensorType,
     pub accumulation: TensorElementType,
@@ -92,6 +93,7 @@ pub struct ReshapeOp {
 pub struct TransposeOp {
     pub input: TensorOperand,
     pub permutation: Vec<u64>,
+    pub permutation_known: bool,
     pub result: TensorType,
 }
 
@@ -115,8 +117,10 @@ pub struct ScalarOp {
 pub struct NormalizationOp {
     pub kind: NormalizationKind,
     pub input: TensorOperand,
-    pub axis: u64,
-    pub epsilon: Option<u64>,
+    /// Negative axes remain relative when the source tensor rank is dynamic.
+    /// Backends that require a concrete axis resolve them once rank is known.
+    pub axis: i64,
+    pub epsilon: Option<ScalarValue>,
     pub result: TensorType,
 }
 
@@ -134,19 +138,25 @@ pub struct ConvertOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SliceIndex {
+    Static(i64),
+    Dynamic(ValueRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SliceOp {
     pub input: TensorOperand,
-    pub starts: Vec<u64>,
-    pub limits: Vec<u64>,
-    pub strides: Vec<u64>,
+    pub starts: Vec<SliceIndex>,
+    pub limits: Vec<SliceIndex>,
+    pub strides: Vec<SliceIndex>,
     pub result: TensorType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicSliceOp {
     pub input: TensorOperand,
-    pub starts: Vec<u64>,
-    pub sizes: Vec<u64>,
+    pub starts: Vec<SliceIndex>,
+    pub sizes: Vec<SliceIndex>,
     pub result: TensorType,
 }
 
@@ -154,7 +164,7 @@ pub struct DynamicSliceOp {
 pub struct DynamicUpdateSliceOp {
     pub input: TensorOperand,
     pub update: TensorOperand,
-    pub starts: Vec<u64>,
+    pub starts: Vec<SliceIndex>,
     pub dynamic_index: Option<TensorOperand>,
     pub axis: Option<u64>,
     pub result: TensorType,

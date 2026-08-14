@@ -43,7 +43,11 @@ pub(super) fn mangle_symbol_component(name: &str) -> String {
 }
 
 pub(super) fn class_function_symbol(class: &str, method: &str) -> String {
-    format!("__sev_method_{class}_{method}")
+    format!(
+        "__sev_method_{}_{}",
+        mangle_symbol_component(class),
+        mangle_symbol_component(method)
+    )
 }
 
 #[derive(Debug, Clone)]

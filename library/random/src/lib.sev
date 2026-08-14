@@ -20,3 +20,21 @@ def sample[type](values: list[type], count: int) -> list[type]:
 
 def seed(value: int):
     platform.random_seed(value)
+
+test "seeded random helpers respect bounds membership and sample size":
+    seed(12345)
+    scalar = random()
+    assert(scalar >= 0.0 and scalar < 1.0)
+    integer = randint(3, 7)
+    assert(integer >= 3 and integer < 7)
+    decimal = uniform(-2.0, 4.0)
+    assert(decimal >= -2.0 and decimal < 4.0)
+    assert(choice([10, 20, 30]) in [10, 20, 30])
+    values := [1, 2, 3, 4]
+    shuffle(values)
+    assert(values.sorted() == [1, 2, 3, 4])
+    selected = sample([1, 2, 3, 4], 2)
+    assert(size(selected) == 2)
+    assert(selected[0] in [1, 2, 3, 4])
+    assert(selected[1] in [1, 2, 3, 4])
+    assert(selected[0] != selected[1])

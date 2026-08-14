@@ -189,6 +189,7 @@ fn native_test_compilation_selected(
             }
         }
     });
+    retain_test_reachable_items(&mut hir);
     let mir = severian_mir::lower(&hir)?;
     let native = Compilation {
         mlir: severian_lowering::lower(&mir),
@@ -197,6 +198,95 @@ fn native_test_compilation_selected(
         hir,
     };
     Ok((native, count))
+}
+
+/// Keep the test executable closed over the items its synthetic `main` can
+/// reach. Besides producing smaller binaries, this prevents an uncalled GPU or
+/// platform-specific function from imposing its native link requirements on
+/// an unrelated CPU unit test. The full source program remains unchanged for
+/// diagnostics and coverage-region accounting.
+fn retain_test_reachable_items(program: &mut Program) {
+    let mut reachable_functions = HashSet::new();
+    let mut reachable_classes = HashSet::new();
+    let mut pending_functions = vec!["main".to_owned()];
+    let mut pending_classes = Vec::new();
+
+    for global in &program.globals {
+        collect_runtime_dependencies(
+            std::slice::from_ref(&Instruction::Evaluate(global.value.clone())),
+            &mut pending_functions,
+            &mut pending_classes,
+        );
+    }
+
+    loop {
+        while let Some(name) = pending_functions.pop() {
+            let Some(function) = program.functions.iter().find(|function| {
+                function.name == name || function.native_symbol.as_deref() == Some(name.as_str())
+            }) else {
+                continue;
+            };
+            if !reachable_functions.insert(function.name.clone()) {
+                continue;
+            }
+            collect_runtime_dependencies(
+                &function.instructions,
+                &mut pending_functions,
+                &mut pending_classes,
+            );
+        }
+
+        let Some(name) = pending_classes.pop() else {
+            break;
+        };
+        if !reachable_classes.insert(name.clone()) {
+            continue;
+        }
+        let Some(class) = program.classes.iter().find(|class| class.name == name) else {
+            continue;
+        };
+        pending_classes.extend(class.field_classes.iter().flatten().cloned());
+        pending_classes.extend(class.method_return_classes.iter().flatten().cloned());
+        for function in class.methods.iter().chain(&class.constructors) {
+            collect_runtime_dependencies(
+                &function.instructions,
+                &mut pending_functions,
+                &mut pending_classes,
+            );
+        }
+    }
+
+    program.functions.retain(|function| {
+        function.native_symbol.is_some() || reachable_functions.contains(&function.name)
+    });
+    program
+        .classes
+        .retain(|class| reachable_classes.contains(&class.name));
+}
+
+fn collect_runtime_dependencies(
+    instructions: &[Instruction],
+    functions: &mut Vec<String>,
+    classes: &mut Vec<String>,
+) {
+    walk_instructions(instructions, &mut |expression| match expression {
+        Expression::Call { target, .. } => {
+            functions.push(target.name.clone());
+            if let Some(symbol) = &target.native_symbol {
+                functions.push(symbol.clone());
+            }
+        }
+        Expression::Function(target) => {
+            functions.push(target.name.clone());
+            if let Some(symbol) = &target.native_symbol {
+                functions.push(symbol.clone());
+            }
+        }
+        Expression::Construct { class, .. }
+        | Expression::ConstructFields { class, .. }
+        | Expression::ObjectUpdate { class, .. } => classes.push(class.clone()),
+        _ => {}
+    });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

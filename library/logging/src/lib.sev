@@ -14,3 +14,10 @@ def error(message: string):
 
 def critical(message: string):
     log.info("CRITICAL " + message)
+
+test "logging facade delegates every severity":
+    debug("debug")
+    info("info")
+    warning("warning")
+    error("error")
+    critical("critical")

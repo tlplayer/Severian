@@ -565,23 +565,23 @@ def arange(start: float, stop: float = 0.0, step: float = 1.0) -> Tensor[f64]:
     return tensor_ops.arange(start, stop, step)
 def linspace(start: float, stop: float, steps: int) -> Tensor[f64]:
     return tensor_ops.linspace(start, stop, steps)
-def shape[type](input: Tensor[type]) -> list[int]:
+def shape(input: Tensor[f64]) -> list[int]:
     return tensor_ops.shape(input)
-def size[type](input: Tensor[type]) -> int:
+def size(input: Tensor[f64]) -> int:
     return tensor_ops.size_of(input)
-def reshape[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
+def reshape(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
     return tensor_ops.reshape(input, dimensions)
-def view[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
+def view(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
     return tensor_ops.view(input, dimensions)
-def flatten[type](input: Tensor[type], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[type]:
+def flatten(input: Tensor[f64], start_dimension: int = 0, end_dimension: int = -1) -> Tensor[f64]:
     return tensor_ops.flatten(input, start_dimension, end_dimension)
-def squeeze[type](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
+def squeeze(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     return tensor_ops.squeeze(input, dimension)
-def unsqueeze[type](input: Tensor[type], dimension: int) -> Tensor[type]:
+def unsqueeze(input: Tensor[f64], dimension: int) -> Tensor[f64]:
     return tensor_ops.unsqueeze(input, dimension)
-def transpose[type](input: Tensor[type], first: int = -2, second: int = -1) -> Tensor[type]:
+def transpose(input: Tensor[f64], first: int = -2, second: int = -1) -> Tensor[f64]:
     return tensor_ops.transpose(input, first, second)
-def permute[type](input: Tensor[type], dimensions: list[int]) -> Tensor[type]:
+def permute(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
     return tensor_ops.permute(input, dimensions)
 def concat(inputs: list[Tensor[f64]], dimension: int = 0) -> Tensor[f64]:
     return tensor_ops.concat(inputs, dimension)
@@ -607,17 +607,17 @@ def std(input: Tensor[f64], correction: int = 1) -> float:
     return tensor_ops.std(input, correction)
 def var(input: Tensor[f64], correction: int = 1) -> float:
     return tensor_ops.var(input, correction)
-def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.matmul(left, right)
-def add[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.add(left, right)
-def subtract[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+def subtract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.subtract(left, right)
-def multiply[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+def multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.multiply(left, right)
-def divide[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]:
+def divide(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.divide(left, right)
-def scale[type: Float](input: Tensor[type], factor: float) -> Tensor[type]:
+def scale(input: Tensor[f64], factor: float) -> Tensor[f64]:
     return tensor_ops.scale(input, factor)
 def dot(left: Tensor[f64], right: Tensor[f64]) -> float:
     return tensor_ops.dot(left, right)
@@ -635,7 +635,7 @@ def sort(input: Tensor[f64], descending: bool = false) -> Tensor[f64]:
     return tensor_ops.sort(input, descending)
 def argsort(input: Tensor[f64], descending: bool = false) -> list[int]:
     return tensor_ops.argsort(input, descending)
-def exp[type: Float](input: Tensor[type]) -> Tensor[type]:
+def exp(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.exp(input)
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.log(input)
@@ -649,19 +649,19 @@ def abs(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.abs(input)
 def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:
     return tensor_ops.pow(input, exponent)
-def softmax[type: Float](input: Tensor[type], dimension: int = -1) -> Tensor[type]:
+def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     return tensor_ops.softmax(input, dimension)
 def log_softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     return tensor_ops.log_softmax(input, dimension)
-def sigmoid[type: Float](input: Tensor[type]) -> Tensor[type]:
+def sigmoid(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.sigmoid(input)
-def relu[type: Float](input: Tensor[type]) -> Tensor[type]:
+def relu(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.relu(input)
-def gelu[type: Float](input: Tensor[type]) -> Tensor[type]:
+def gelu(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.gelu(input)
-def silu[type: Float](input: Tensor[type]) -> Tensor[type]:
+def silu(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.silu(input)
-def tanh[type: Float](input: Tensor[type]) -> Tensor[type]:
+def tanh(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.tanh(input)
 
 # Layers.
@@ -761,11 +761,11 @@ def step(optimizer: optimizers.Optimizer):
 def learning_rate(optimizer: optimizers.Optimizer, value: float = -1.0) -> float:
     if value >= 0.0:
         optimizer.set_learning_rate(value)
-    return optimizer.learning_rate
+    return optimizer.current_learning_rate()
 def weight_decay(optimizer: optimizers.Optimizer, value: float = -1.0) -> float:
     if value >= 0.0:
         optimizer.set_weight_decay(value)
-    return optimizer.weight_decay
+    return optimizer.current_weight_decay()
 def momentum(optimizer: optimizers.SGD, value: float = -1.0) -> float:
     if value >= 0.0:
         optimizer.set_momentum(value)

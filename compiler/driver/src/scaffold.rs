@@ -59,7 +59,10 @@ pipeline = [
 [coverage]
 minimum = 0
 changed_minimum = 0
+regions = 0
 branches = 0
+functions = 0
+per_file = true
 
 [memory]
 # Change to `deny` once the project is ready to make leaks build-blocking.
@@ -186,6 +189,10 @@ mod tests {
         );
         assert_eq!(manifest["build"]["diagnostics"].as_str(), Some("user"));
         assert_eq!(manifest["coverage"]["minimum"].as_integer(), Some(0));
+        assert_eq!(manifest["coverage"]["regions"].as_integer(), Some(0));
+        assert_eq!(manifest["coverage"]["branches"].as_integer(), Some(0));
+        assert_eq!(manifest["coverage"]["functions"].as_integer(), Some(0));
+        assert_eq!(manifest["coverage"]["per_file"].as_bool(), Some(true));
         assert_eq!(manifest["memory"]["leaks"].as_str(), Some("allow"));
         assert_eq!(manifest["architecture"]["enforce"].as_bool(), Some(true));
         assert_eq!(

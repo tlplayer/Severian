@@ -15,3 +15,11 @@ def parse_date(value: string) -> Result[float, IOError]:
 test "calendar dates convert to an epoch timestamp":
     timestamp = parse_date("2020-01-02")
     assert(timestamp > 1577836800.0)
+
+test "wall and monotonic clocks remain ordered across a zero-duration sleep":
+    wall = time()
+    before = monotonic()
+    sleep(0.0)
+    after = monotonic()
+    assert(wall > 1577836800.0)
+    assert(after >= before)

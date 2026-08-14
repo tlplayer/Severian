@@ -449,6 +449,14 @@ pub(super) fn lower_call(
     if let Some(class) = canonical.strip_prefix("__class.") {
         return lower_class_invocation(call, class, scope, signatures, aliases);
     }
+    // Constructors such as `present` and `failure` are contextual language
+    // forms, not reserved identifiers. A source declaration must win when the
+    // call resolves to an actual function signature.
+    if !intrinsic {
+        if let Some(signature) = signatures.get(canonical) {
+            return lower_declared_call(call, canonical, signature, scope, signatures, aliases);
+        }
+    }
     let builtin = match canonical {
         "print" | "io.print" => Some(("print", ValueType::Unit)),
         "panic" => Some(("panic", ValueType::Unit)),

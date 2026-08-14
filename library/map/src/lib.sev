@@ -23,3 +23,21 @@ def clear[key, value](values: map[key, value]):
 
 def setdefault[key, value](values: map[key, value], name: key, fallback: value) -> value:
     return values.set_default(name, fallback)
+
+test "map facade covers lookup mutation enumeration and fallback paths":
+    entries := {"one": 1, "two": 2}
+    assert(get(entries, "one", -1) == 1)
+    assert(get(entries, "missing", -1) == -1)
+    assert(keys(entries) == ["one", "two"])
+    assert(values(entries) == [1, 2])
+    assert(items(entries) == [("one", 1), ("two", 2)])
+    update(entries, {"two": 20, "three": 3})
+    assert(entries == {"one": 1, "two": 20, "three": 3})
+    assert(entries == {"three": 3, "two": 20, "one": 1})
+    assert(entries != {"one": 1, "two": 2, "three": 3})
+    assert(setdefault(entries, "three", 30) == 3)
+    assert(setdefault(entries, "four", 4) == 4)
+    assert(pop(entries, "one", -1) == 1)
+    assert(pop(entries, "missing", -1) == -1)
+    clear(entries)
+    assert(entries == {})

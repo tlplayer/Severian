@@ -3,7 +3,7 @@ use severian_ast::Module as AstModule;
 use severian_hir::Program;
 use severian_mlir::Module;
 use severian_package::PackageInterface;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 include!(concat!(env!("OUT_DIR"), "/official_libraries.rs"));
@@ -174,20 +174,42 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
         .iter()
         .map(|function| function.name.clone())
         .collect::<HashSet<_>>();
+    let local_classes = program
+        .classes
+        .iter()
+        .map(|class| (class.name.clone(), format!("{package}.{}", class.name)))
+        .collect::<HashMap<_, _>>();
     for function in &mut program.functions {
+        qualify_function_receiver_names(function, &local_classes);
         function.name = format!("{package}.{}", function.name);
         function.id = severian_hir::FunctionId::from_name(&function.name);
     }
     for class in &mut program.classes {
-        class.id = severian_hir::TypeDefinitionId::from_name(&format!("{package}.{}", class.name));
+        let qualified = local_classes[&class.name].clone();
+        class.field_classes.iter_mut().flatten().for_each(|field| {
+            if let Some(qualified) = local_classes.get(field) {
+                *field = qualified.clone();
+            }
+        });
+        class
+            .method_return_classes
+            .iter_mut()
+            .flatten()
+            .for_each(|returned| {
+                if let Some(qualified) = local_classes.get(returned) {
+                    *returned = qualified.clone();
+                }
+            });
+        class.name = qualified.clone();
+        class.id = severian_hir::TypeDefinitionId::from_name(&qualified);
         for function in &mut class.constructors {
+            qualify_function_receiver_names(function, &local_classes);
             function.id = function.id.in_namespace(package);
         }
         for function in &mut class.methods {
-            function.id = severian_hir::FunctionId::from_name(&format!(
-                "{package}.{}.{}",
-                class.name, function.name
-            ));
+            qualify_function_receiver_names(function, &local_classes);
+            function.id =
+                severian_hir::FunctionId::from_name(&format!("{}.{}", class.name, function.name));
         }
     }
     program.visit_expressions_mut(&mut |expression| match expression {
@@ -207,8 +229,95 @@ fn qualify_package_functions(program: &mut Program, package: &str) {
             function.name = format!("{package}.{}", function.name);
             function.id = severian_hir::FunctionId::from_name(&function.name);
         }
+        severian_hir::Expression::Construct { type_id, class, .. }
+        | severian_hir::Expression::ConstructFields { type_id, class, .. }
+        | severian_hir::Expression::ObjectUpdate { type_id, class, .. }
+            if local_classes.contains_key(class) =>
+        {
+            *class = local_classes[class].clone();
+            *type_id = severian_hir::TypeDefinitionId::from_name(class);
+        }
+        severian_hir::Expression::Closure { params, .. } => {
+            for parameter in params {
+                qualify_receiver_name(parameter.receiver.as_mut(), &local_classes);
+            }
+        }
         _ => {}
     });
+}
+
+fn qualify_function_receiver_names(
+    function: &mut severian_hir::Function,
+    classes: &HashMap<String, String>,
+) {
+    for parameter in &mut function.params {
+        qualify_receiver_name(parameter.receiver.as_mut(), classes);
+    }
+    qualify_instruction_receiver_names(&mut function.instructions, classes);
+    for test in &mut function.tests {
+        qualify_instruction_receiver_names(&mut test.instructions, classes);
+    }
+}
+
+fn qualify_instruction_receiver_names(
+    instructions: &mut [severian_hir::Instruction],
+    classes: &HashMap<String, String>,
+) {
+    for instruction in instructions {
+        match instruction {
+            severian_hir::Instruction::TryLet { receiver, .. } => {
+                qualify_receiver_name(receiver.as_mut(), classes);
+            }
+            severian_hir::Instruction::If {
+                then_instructions,
+                else_instructions,
+                ..
+            } => {
+                qualify_instruction_receiver_names(then_instructions, classes);
+                qualify_instruction_receiver_names(else_instructions, classes);
+            }
+            severian_hir::Instruction::While {
+                setup,
+                instructions,
+                ..
+            }
+            | severian_hir::Instruction::For {
+                setup,
+                instructions,
+                ..
+            } => {
+                if let Some(setup) = setup {
+                    qualify_instruction_receiver_names(std::slice::from_mut(setup), classes);
+                }
+                qualify_instruction_receiver_names(instructions, classes);
+            }
+            severian_hir::Instruction::Switch { arms, .. }
+            | severian_hir::Instruction::ChannelSwitch { arms, .. } => {
+                for arm in arms {
+                    for receiver in arm.receivers.values_mut() {
+                        qualify_receiver_name(Some(receiver), classes);
+                    }
+                    qualify_instruction_receiver_names(&mut arm.instructions, classes);
+                }
+            }
+            severian_hir::Instruction::With { instructions, .. } => {
+                qualify_instruction_receiver_names(instructions, classes);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn qualify_receiver_name(
+    receiver: Option<&mut severian_hir::ReceiverType>,
+    classes: &HashMap<String, String>,
+) {
+    let Some(receiver) = receiver else {
+        return;
+    };
+    if let Some(qualified) = classes.get(&receiver.name) {
+        receiver.name = qualified.clone();
+    }
 }
 
 fn is_intrinsic_call(name: &str) -> bool {

@@ -162,6 +162,15 @@ fn analyze_specialized(
     let mut signatures = HashMap::new();
     for interface in interfaces {
         let module_name = &interface.name;
+        let interface_classes = interface
+            .module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Class(class) => Some(class.name.name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         for item in &interface.module.items {
             if let Item::Trait(declaration) = item {
                 register_trait_aliases(&mut aliases, declaration);
@@ -177,18 +186,16 @@ fn analyze_specialized(
             }
             if let Item::Class(class) = item {
                 let exported = format!("{module_name}.{}", class.name.name);
-                aliases.insert(
-                    format!("__module_class.{exported}"),
-                    class.name.name.clone(),
-                );
+                let class_identity = exported.clone();
+                aliases.insert(format!("__module_class.{exported}"), class_identity.clone());
                 if let Some(package) = &interface.export_package {
                     aliases.insert(
                         format!("__module_class.{package}.{}", class.name.name),
-                        class.name.name.clone(),
+                        class_identity.clone(),
                     );
                 }
                 aliases
-                    .entry(format!("__class_fields.{}", class.name.name))
+                    .entry(format!("__class_fields.{class_identity}"))
                     .or_insert_with(|| {
                         class
                             .fields
@@ -198,7 +205,7 @@ fn analyze_specialized(
                             .join(",")
                     });
                 aliases
-                    .entry(format!("__class_methods.{}", class.name.name))
+                    .entry(format!("__class_methods.{class_identity}"))
                     .or_insert_with(|| {
                         class
                             .methods
@@ -208,7 +215,7 @@ fn analyze_specialized(
                             .join(",")
                     });
                 aliases
-                    .entry(format!("__class_constructor_arities.{}", class.name.name))
+                    .entry(format!("__class_constructor_arities.{class_identity}"))
                     .or_insert_with(|| {
                         class
                             .constructors
@@ -218,7 +225,7 @@ fn analyze_specialized(
                             .join(",")
                     });
                 aliases
-                    .entry(format!("__class_traits.{}", class.name.name))
+                    .entry(format!("__class_traits.{class_identity}"))
                     .or_insert_with(|| {
                         class
                             .traits
@@ -227,15 +234,32 @@ fn analyze_specialized(
                             .collect::<Vec<_>>()
                             .join(",")
                     });
-                register_class_field_aliases(&mut aliases, &class.name.name, &class.fields)?;
+                register_class_field_aliases(&mut aliases, &class_identity, &class.fields)?;
+                for field in &class.fields {
+                    let key = format!("__class_field_class.{class_identity}.{}", field.name.name);
+                    if let Some(field_class) = aliases.get(&key).cloned() {
+                        if interface_classes.contains(field_class.as_str()) {
+                            aliases.insert(key, format!("{module_name}.{field_class}"));
+                        }
+                    }
+                }
                 for method in &class.methods {
                     register_method_return_alias(
                         &mut aliases,
-                        &class.name.name,
+                        &class_identity,
                         &method.name.name,
                         method.return_type.as_ref(),
                     )?;
-                    register_class_method_signature_alias(&mut aliases, &class.name.name, method);
+                    let return_key = format!(
+                        "__class_method_return_class.{class_identity}.{}",
+                        method.name.name
+                    );
+                    if let Some(return_class) = aliases.get(&return_key).cloned() {
+                        if interface_classes.contains(return_class.as_str()) {
+                            aliases.insert(return_key, format!("{module_name}.{return_class}"));
+                        }
+                    }
+                    register_class_method_signature_alias(&mut aliases, &class_identity, method);
                 }
                 if imports_entire_module(module, module_name)
                     || interface
@@ -245,7 +269,7 @@ fn analyze_specialized(
                 {
                     aliases
                         .entry(class.name.name.clone())
-                        .or_insert_with(|| format!("__class.{}", class.name.name));
+                        .or_insert_with(|| format!("__class.{class_identity}"));
                 }
                 continue;
             }
@@ -260,7 +284,12 @@ fn analyze_specialized(
                 _ => continue,
             };
             let key = format!("{module_name}.{}", name.name);
-            if let Some(class) = return_type.and_then(class_type_name) {
+            if let Some(class) = return_type.and_then(|ty| resolved_class_type_name(ty, &aliases)) {
+                let class = if interface_classes.contains(class.as_str()) {
+                    format!("{module_name}.{class}")
+                } else {
+                    class
+                };
                 aliases.insert(format!("__function_return_class.{key}"), class.clone());
                 if imports_entire_module(module, module_name) {
                     aliases
@@ -287,6 +316,40 @@ fn analyze_specialized(
             }
         }
     }
+    // Imported class identities are only known after package interfaces have
+    // been registered. Refresh local class relationships now so fields and
+    // method returns declared as `module.Class` retain that qualified identity.
+    for item in &module.items {
+        let Item::Class(class) = item else { continue };
+        for field in &class.fields {
+            let Some(ty) = &field.ty else { continue };
+            let Some(field_class) = resolved_class_type_name(ty, &aliases) else {
+                continue;
+            };
+            aliases.insert(
+                format!(
+                    "__class_field_class.{}.{}",
+                    class.name.name, field.name.name
+                ),
+                field_class,
+            );
+        }
+        for method in &class.methods {
+            let Some(ty) = &method.return_type else {
+                continue;
+            };
+            let Some(return_class) = resolved_class_type_name(ty, &aliases) else {
+                continue;
+            };
+            aliases.insert(
+                format!(
+                    "__class_method_return_class.{}.{}",
+                    class.name.name, method.name.name
+                ),
+                return_class,
+            );
+        }
+    }
     register_concrete_trait_aliases(&mut aliases, module, interfaces)?;
     for item in &module.items {
         let (name, native_symbol, generic_params, params, return_type) = match item {
@@ -299,7 +362,7 @@ fn analyze_specialized(
             ),
             _ => continue,
         };
-        if let Some(class) = return_type.and_then(class_type_name) {
+        if let Some(class) = return_type.and_then(|ty| resolved_class_type_name(ty, &aliases)) {
             aliases.insert(format!("__function_return_class.{}", name.name), class);
         }
         let signature = lower_signature(
@@ -390,7 +453,7 @@ fn analyze_specialized(
                         .params
                         .get(index)
                         .and_then(|parameter| parameter.ty.as_ref())
-                        .and_then(class_type_name),
+                        .and_then(|ty| resolved_class_type_name(ty, &function_aliases)),
                     function_return: parameter.function_return,
                     collection_len: None,
                     mutable: false,
@@ -515,7 +578,10 @@ fn analyze_specialized(
                         format!("{}.{}", class.name.name, field.name.name),
                     ),
                     ty,
-                    class: field.ty.as_ref().and_then(class_type_name),
+                    class: field
+                        .ty
+                        .as_ref()
+                        .and_then(|ty| resolved_class_type_name(ty, &aliases)),
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -601,7 +667,12 @@ fn analyze_specialized(
             field_classes: class
                 .fields
                 .iter()
-                .map(|field| field.ty.as_ref().and_then(class_type_name))
+                .map(|field| {
+                    field
+                        .ty
+                        .as_ref()
+                        .and_then(|ty| resolved_class_type_name(ty, &aliases))
+                })
                 .collect(),
             field_defaults,
             field_constraints,
@@ -610,7 +681,12 @@ fn analyze_specialized(
             method_return_classes: class
                 .methods
                 .iter()
-                .map(|method| method.return_type.as_ref().and_then(class_type_name))
+                .map(|method| {
+                    method
+                        .return_type
+                        .as_ref()
+                        .and_then(|ty| resolved_class_type_name(ty, &aliases))
+                })
                 .collect(),
         });
     }

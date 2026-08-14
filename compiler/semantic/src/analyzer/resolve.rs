@@ -106,7 +106,20 @@ pub(super) fn file_read_result_class(
     if called.as_deref() != Some("file.read") && !package_file_read && !local_file_read {
         return None;
     }
-    Some(literal_class.unwrap_or("File").to_owned())
+    let class = literal_class.unwrap_or("File");
+    aliases
+        .get(&format!("__module_class.file.{class}"))
+        .cloned()
+        .or_else(|| {
+            let suffix = format!(".{class}");
+            let mut matches = aliases
+                .iter()
+                .filter(|(key, _)| key.starts_with("__module_class.") && key.ends_with(&suffix))
+                .map(|(_, value)| value)
+                .collect::<HashSet<_>>();
+            (matches.len() == 1).then(|| matches.drain().next().unwrap().clone())
+        })
+        .or_else(|| Some(class.to_owned()))
 }
 
 pub(super) fn file_read_receiver_type(
@@ -255,6 +268,21 @@ pub(super) fn lower_class_function(
     aliases: &HashMap<String, String>,
 ) -> Result<Function, SemanticError> {
     let mut scope = global_scope.clone();
+    scope.insert(
+        "self".into(),
+        Binding {
+            reference: named_binding("self", format!("{class_name}.self")),
+            ty: ValueType::Any,
+            class: Some(class_name.into()),
+            function_return: None,
+            collection_len: None,
+            mutable: false,
+            field: false,
+            integer_max: None,
+            known_integer: None,
+            any_origin: Some(AnyOrigin::Explicit),
+        },
+    );
     for field in fields {
         let ty = aliases
             .get(&format!("__class_field_type.{class_name}.{field}"))
@@ -303,7 +331,10 @@ pub(super) fn lower_class_function(
             Binding {
                 reference: source_binding(&param.name),
                 ty,
-                class: param.ty.as_ref().and_then(class_type_name),
+                class: param
+                    .ty
+                    .as_ref()
+                    .and_then(|ty| resolved_class_type_name(ty, aliases)),
                 function_return: function_return_type(param.ty.as_ref()),
                 collection_len: None,
                 mutable: false,
