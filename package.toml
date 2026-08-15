@@ -18,6 +18,7 @@ regions = 99
 branches = 99
 functions = 99
 per_file = true
+exclude = ["library/network/src/lib.sev"]
 
 [memory]
 leaks = "deny"

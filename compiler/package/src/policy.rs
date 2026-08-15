@@ -54,6 +54,7 @@ pub struct CoveragePolicy {
     pub branches: Option<f64>,
     pub functions: Option<f64>,
     pub per_file: bool,
+    pub exclude: Vec<String>,
 }
 
 impl Default for CoveragePolicy {
@@ -65,6 +66,7 @@ impl Default for CoveragePolicy {
             branches: None,
             functions: None,
             per_file: false,
+            exclude: Vec::new(),
         }
     }
 }
@@ -301,6 +303,7 @@ fn parse_coverage(value: &toml::Value, manifest: &Path) -> Result<CoveragePolicy
                 | "branches"
                 | "functions"
                 | "per_file"
+                | "exclude"
         ) {
             return Err(policy_error(
                 manifest,
@@ -331,6 +334,8 @@ fn parse_coverage(value: &toml::Value, manifest: &Path) -> Result<CoveragePolicy
         branches: optional_percentage(table.get("branches"), manifest, "coverage.branches")?,
         functions: optional_percentage(table.get("functions"), manifest, "coverage.functions")?,
         per_file,
+        exclude: string_array(table.get("exclude"), manifest, "coverage.exclude")?
+            .unwrap_or_default(),
     })
 }
 

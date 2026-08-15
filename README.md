@@ -1138,19 +1138,6 @@ def transform(a: Tensor[f64], b: Tensor[f64]) -> Tensor[f64]:
 Decorator arguments name the symbols being imported into that function's syntax.
 For example, `@tensor(X)` imports the tensor contraction meaning of `X`.
 
-Multiple decorators can compose isolated symbol packs.
-
-```sev
-import tensor
-import probability
-
-@tensor(X)
-@probability(P)
-def expected(weights: Tensor[f64], samples: Tensor[f64]) -> f32:
-    projected = weights X samples
-    return P(tensor.rankedValues(projected)[0] > 0.5)
-```
-
 Outside decorated functions, those spellings are not silently reinterpreted. Each
 decorator gives the compiler a link to the library or domain that owns the
 symbols, their type rules, and their lowering behavior.

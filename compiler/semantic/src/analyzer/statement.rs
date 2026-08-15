@@ -608,8 +608,9 @@ pub(super) fn lower_block(
                 validate_exhaustive_enum_switch(statement, scope, aliases)?;
                 let result_receiver = (statement.values.len() == 1)
                     .then(|| {
-                        result_payload_receiver(&statement.values[0], signatures, aliases)
-                            .or_else(|| file_read_receiver_type(&statement.values[0], aliases))
+                        file_read_receiver_type(&statement.values[0], aliases).or_else(|| {
+                            result_payload_receiver(&statement.values[0], signatures, aliases)
+                        })
                     })
                     .flatten();
                 let setup = statement

@@ -15,7 +15,7 @@ Package functions are ordinary `def` declarations with real bodies. There is
 no separate export header or `extern def` form.
 
 The initial general-purpose surface is available through flat imports such as
-`core`, `list`, `map`, `set`, `string`, `math`, `random`, `file`, `path`,
+`core`, `list`, `set`, `string`, `math`, `random`, `file`, `path`,
 `json`, `regex`, `time`, `process`, `environment`, `http`, `network`,
 and `tensor`. Collection APIs are typed and mutating operations act
 on the supplied collection; OS-backed behavior is implemented behind the
@@ -48,7 +48,7 @@ Every public operation has one implementation owner:
 | Owner | Responsibility | Examples |
 | --- | --- | --- |
 | compiler | Language primitives, type checking, ownership, and intrinsics | `int`, `string`, `Result`, borrowing, `size` |
-| library | Public APIs and portable Severian algorithms | `boolean`, `probability`, JSON values |
+| library | Public APIs and portable Severian algorithms | `boolean`, JSON values |
 | platform | typed native ABI used underneath library APIs | sockets, files, clocks, entropy |
 
 The compiler must not silently invent a package API. Native-backed packages use

@@ -29,6 +29,7 @@ regions = 99
 branches = 99
 functions = 99
 per_file = true
+exclude = ["src/os/**", "src/generated.sev"]
 
 [architecture.files]
 soft_lines = 400
@@ -52,6 +53,7 @@ owner = "compiler"
     assert_eq!(policy.coverage.branches, Some(99.0));
     assert_eq!(policy.coverage.functions, Some(99.0));
     assert!(policy.coverage.per_file);
+    assert_eq!(policy.coverage.exclude, ["src/os/**", "src/generated.sev"]);
     assert_eq!(policy.files.soft_lines, 400);
     assert_eq!(policy.files.exceptions.len(), 1);
     assert_eq!(
@@ -73,6 +75,10 @@ fn coverage_policy_rejects_unknown_and_mistyped_settings() {
     std::fs::write(&manifest, "[coverage]\nper_file = \"yes\"\n").unwrap();
     let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
     assert!(error.contains("`coverage.per_file` must be a boolean"));
+
+    std::fs::write(&manifest, "[coverage]\nexclude = [\"src/os/**\", 1]\n").unwrap();
+    let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
+    assert!(error.contains("every `coverage.exclude` entry must be a string"));
     let _ = std::fs::remove_dir_all(root);
 }
 

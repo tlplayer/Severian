@@ -34,6 +34,7 @@ pub fn safetensors_source() -> &'static str {
 
 /// Existing platform runtime source surface.
 pub fn tensor_source(
+    typed: bool,
     relu: bool,
     add: bool,
     matmul: bool,
@@ -48,6 +49,7 @@ pub fn tensor_source(
     rocm: bool,
 ) -> String {
     tensor::source(
+        typed,
         relu,
         add,
         matmul,

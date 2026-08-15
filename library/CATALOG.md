@@ -5,8 +5,8 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Area | Packages | Initial status |
 | --- | --- | --- |
 | Language foundation | `core`, `prelude`, `option`, `result`, `iteration` | `core` experimental |
-| Core data | `list`, `map`, `set`, `string`, `boolean`, `bytes`, `data` | collection, string, and tabular APIs experimental |
-| Numerics | `math`, `tensor`, `probability`, `statistics`, `random` | `math`, `tensor`, `probability`, and `random` experimental |
+| Core data | `list`, `set`, `string`, `boolean`, `bytes`, `data` | collection, string, and tabular APIs experimental |
+| Numerics | `math`, `tensor`, `statistics`, `random` | `math`, `tensor`, and `random` experimental |
 | Visualization | `graphics`, `plot` | deterministic headless canvas and charts experimental; windows and GPU backends planned |
 | Machine learning | `model`, `model.neuralnet`, `autodiff`, `optimization` | `tensor` is the canonical container; `model` owns the public machine-learning hierarchy |
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |

@@ -1,4 +1,7 @@
+mod typed;
+
 pub(crate) fn source(
+    typed: bool,
     relu: bool,
     add: bool,
     matmul: bool,
@@ -12,7 +15,8 @@ pub(crate) fn source(
     autodiff: bool,
     rocm: bool,
 ) -> String {
-    if !relu
+    if !typed
+        && !relu
         && !add
         && !matmul
         && !transpose
@@ -596,6 +600,9 @@ void *__sev_tensor_sgd(void *value_raw, double learning_rate) {
 }
 "#,
         );
+    }
+    if typed {
+        source.push_str(typed::SOURCE);
     }
     source
 }

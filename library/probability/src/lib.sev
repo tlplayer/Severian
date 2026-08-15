@@ -1,5 +1,0 @@
-def probability(condition: bool) -> float:
-    return 0.5 if condition else 0.0
-
-test "true event has nonzero probability":
-    assert(probability(true) == 0.5)

@@ -2010,7 +2010,19 @@ int64_t __sev_host_page_size(void) {
     let has_model_graph = native_symbols
         .iter()
         .any(|symbol| symbol.starts_with("__sev_model_graph_"));
+    let has_typed_tensor = native_symbols.iter().any(|symbol| {
+        symbol.starts_with("__sev_tensor_f32_")
+            || symbol.starts_with("__sev_tensor_bf16_")
+            || matches!(
+                symbol.as_str(),
+                "__sev_tensor_to_f32"
+                    | "__sev_tensor_to_f64"
+                    | "__sev_tensor_to_i64"
+                    | "__sev_tensor_to_bf16"
+            )
+    });
     source.push_str(&severian_platform::tensor_source(
+        has_typed_tensor,
         native_symbols.contains("__sev_tensor_relu") || has_model_graph,
         native_symbols.contains("__sev_tensor_add") || has_model_graph,
         native_symbols.contains("__sev_tensor_matmul") || has_model_graph,

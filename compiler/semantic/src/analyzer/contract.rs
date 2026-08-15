@@ -121,10 +121,12 @@ pub(super) fn contract_mutating_method(method: &str) -> bool {
             | "heap_pop"
             | "heapPop"
             | "clear"
+            | "update"
             | "sort"
             | "reverse"
             | "set"
             | "set_default"
+            | "setdefault"
             | "setDefault"
     )
 }

@@ -1097,7 +1097,7 @@ pub(super) fn method_return_type(object: ValueType, method: &str) -> ValueType {
             "characters" | "words" | "split" | "rsplit" | "splitlines" | "split_lines" | "lines",
         )
         | (ValueType::List, "reversed" | "sorted" | "map" | "filter")
-        | (ValueType::Map, "keys" | "values")
+        | (ValueType::Map, "keys" | "values" | "items")
         | (ValueType::Set, "to_list" | "toList") => ValueType::List,
         (ValueType::String | ValueType::List, "frequencies") => ValueType::Map,
         (ValueType::List, "to_set" | "toSet") | (ValueType::Set, "difference") => ValueType::Set,
@@ -1166,6 +1166,7 @@ pub(super) fn method_return_type(object: ValueType, method: &str) -> ValueType {
             "append" | "append_left" | "appendleft" | "extend" | "insert" | "remove" | "heap_push"
             | "heapPush",
         ) => ValueType::Unit,
+        (ValueType::Map, "update" | "clear") => ValueType::Unit,
         (
             ValueType::Set,
             "union" | "intersection" | "symmetric_difference" | "symmetricDifference",
@@ -1192,6 +1193,7 @@ pub(super) fn collection_shape_mutating_method(method: &str) -> bool {
             | "heap_pop"
             | "heapPop"
             | "clear"
+            | "update"
     )
 }
 
@@ -1225,9 +1227,10 @@ pub(super) fn validate_builtin_method(
             | "symmetricDifference",
         ) => Some(1..=1),
         (ValueType::Set, "to_list" | "toList") => Some(0..=0),
-        (ValueType::Map, "get" | "set_default" | "setDefault") => Some(2..=2),
+        (ValueType::Map, "get" | "setdefault" | "set_default" | "setDefault") => Some(2..=2),
         (ValueType::Map, "pop") => Some(1..=2),
-        (ValueType::Map, "keys" | "values") => Some(0..=0),
+        (ValueType::Map, "update") => Some(1..=1),
+        (ValueType::Map, "keys" | "values" | "items" | "clear") => Some(0..=0),
         (
             ValueType::String,
             "characters"

@@ -241,6 +241,49 @@ fn per_file_coverage_cannot_be_subsidized_by_well_tested_files() {
 }
 
 #[test]
+fn coverage_excludes_declared_os_wrapper_files() {
+    let _lock = native_cli_lock();
+    let root = std::env::temp_dir().join(format!(
+        "severian-coverage-exclusion-test-{}",
+        std::process::id()
+    ));
+    let source_directory = root.join("src");
+    std::fs::create_dir_all(&source_directory).unwrap();
+    std::fs::write(
+        root.join("package.toml"),
+        concat!(
+            "[package]\nname = \"coverage-exclusion\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+            "\n[coverage]\nminimum = 99\nper_file = true\nexclude = [\"src/os_wrapper.sev\"]\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        source_directory.join("os_wrapper.sev"),
+        "def host_value() -> int:\n    return 1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source_directory.join("main.sev"),
+        "def covered() -> int:\n    return 1\n\ntest:\n    assert(covered() == 1)\n",
+    )
+    .unwrap();
+
+    let coverage = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("coverage")
+        .arg(&root)
+        .output()
+        .unwrap();
+
+    assert!(
+        coverage.status.success(),
+        "{}",
+        String::from_utf8_lossy(&coverage.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&coverage.stdout).contains("os_wrapper.sev"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn init_exposes_the_complete_lenient_manifest_contract() {
     let root = std::env::temp_dir().join(format!("severian-init-test-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();

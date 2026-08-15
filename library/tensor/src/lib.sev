@@ -194,6 +194,7 @@ unsafe:
     native("__sev_tensor_to_bf16") def to_bf_16[type: Numeric](value: Tensor[type]) -> Tensor[bf16]
     native("__sev_tensor_to_f32") def to_f_32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
     native("__sev_tensor_to_f64") def to_f_64[type: Numeric](value: Tensor[type]) -> Tensor[f64]
+    native("__sev_tensor_to_i64") def to_i_64[type: Numeric](value: Tensor[type]) -> Tensor[i64]
 
     native("__sev_tensor_convert_like") def convert_like[source: Numeric, target: Numeric](value: Tensor[source], target_value: Tensor[target]) -> Tensor[target]
 

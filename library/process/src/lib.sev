@@ -17,3 +17,22 @@ def exit(status: int = 0):
 
 def arguments() -> list[string]:
     return platform.process_arguments()
+
+test "exit propagates status through an isolated child process":
+    current = arguments()
+    assert(size(current) > 0)
+    if size(current) > 1 and current[1] == "--severian-process-exit-probe":
+        exit(7)
+    command = "\"" + current[0] + "\" --severian-process-exit-probe"
+    assert(run(command) == 7)
+
+test "commands spawn wait terminate and expose arguments":
+    assert(run("exit 3") == 3)
+    completed = spawn("exit 9")
+    assert(completed > 0)
+    assert(wait(completed) == 9)
+    sleeping = spawn("exec sleep 30")
+    assert(sleeping > 0)
+    assert(kill(sleeping))
+    assert(wait(sleeping) == 128)
+    assert(size(arguments()) > 0)

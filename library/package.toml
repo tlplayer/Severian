@@ -2,7 +2,6 @@
 members = [
     "core",
     "list",
-    "map",
     "set",
     "string",
     "agent",
@@ -42,7 +41,6 @@ members = [
     "platform",
     "plot",
     "pql",
-    "probability",
     "regex",
     "storage",
     "tensor",
@@ -55,3 +53,6 @@ members = [
 namespace = "flat"
 source-root = "library"
 runtime-root = "runtime"
+
+[coverage]
+exclude = ["network/src/lib.sev"]

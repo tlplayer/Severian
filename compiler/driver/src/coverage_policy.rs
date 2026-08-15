@@ -102,6 +102,7 @@ mod tests {
             branches: Some(99.0),
             functions: Some(99.0),
             per_file: true,
+            exclude: Vec::new(),
         };
         let aggregate = report([100.0; 4]);
 

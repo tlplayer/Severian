@@ -653,6 +653,30 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
+            } if method == "update" && args.len() == 1 && object.ty() == Some(ValueType::Map) => {
+                let (object, _) = self.lower_expression(object);
+                let additions = self.lower_expression(&args[0]);
+                let additions = self.unbox_value(additions, ValueType::Map).0;
+                writeln!(self.output, "    llvm.call @__sev_map_update({object}, {additions}) : (!llvm.ptr, !llvm.ptr) -> ()").unwrap();
+                (String::new(), ValueType::Unit)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "clear" && args.is_empty() && object.ty() == Some(ValueType::Map) => {
+                let (object, _) = self.lower_expression(object);
+                writeln!(
+                    self.output,
+                    "    llvm.call @__sev_map_clear({object}) : (!llvm.ptr) -> ()"
+                )
+                .unwrap();
+                (String::new(), ValueType::Unit)
+            }
+            Expression::MethodCall {
+                object,
+                method,
+                args,
             } if method == "pop"
                 && (1..=2).contains(&args.len())
                 && object.ty() == Some(ValueType::Map) =>
@@ -1515,8 +1539,10 @@ impl LowerContext<'_> {
                 object,
                 method,
                 args,
-            } if matches!(method.as_str(), "get" | "set_default" | "setDefault")
-                && args.len() == 2
+            } if matches!(
+                method.as_str(),
+                "get" | "setdefault" | "set_default" | "setDefault"
+            ) && args.len() == 2
                 && !self.has_known_class_method(object, method)
                 && !self.has_abstract_class_method(object, method) =>
             {
@@ -2731,15 +2757,6 @@ impl LowerContext<'_> {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_add({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
-                }
-                if function == "probability.probability" {
-                    let result = self.fresh_value();
-                    writeln!(
-                        self.output,
-                        "    {result} = llvm.mlir.constant(0.5 : f64) : f64"
-                    )
-                    .unwrap();
-                    return (result, ValueType::Float);
                 }
                 if function == "regex.matches" {
                     let result = self.fresh_value();

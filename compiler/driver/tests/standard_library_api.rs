@@ -21,7 +21,6 @@ fn requested_standard_library_surface_executes_natively() {
         r#"import core
 import list
 import collections
-import map
 import set
 import string
 import math
@@ -73,8 +72,15 @@ def main():
     random.seed(7)
     assert(random.randint(1, 1) == 1)
     mapping := {"answer": 42}
-    assert(map.get(mapping, "answer", 0) == 42)
-    assert(mapping.set_default("missing", 7) == 7)
+    assert(mapping.get("answer", 0) == 42)
+    assert(mapping.keys() == ["answer"])
+    assert(mapping.values() == [42])
+    assert(mapping.items() == [("answer", 42)])
+    mapping.update({"extra": 9})
+    assert(mapping.pop("extra", 0) == 9)
+    assert(mapping.setdefault("missing", 7) == 7)
+    mapping.clear()
+    assert(mapping == {})
     entries := {1, 2}
     set.add(entries, 3)
     assert(3 in entries)
@@ -319,7 +325,6 @@ fn all_requested_packages_are_workspace_members() {
         "core",
         "list",
         "collections",
-        "map",
         "set",
         "string",
         "math",

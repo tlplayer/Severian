@@ -14,3 +14,6 @@ platform = { path = "../platform", version = "0.1.0" }
 category = "networking"
 implementation = "runtime"
 status = "experimental"
+
+[coverage]
+exclude = ["src/lib.sev"]

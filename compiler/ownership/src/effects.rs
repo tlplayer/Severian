@@ -359,6 +359,7 @@ pub(super) fn mutating_method(method: &str) -> bool {
             | "popleft"
             | "remove"
             | "clear"
+            | "update"
             | "insert"
             | "sort"
             | "reverse"
@@ -368,6 +369,7 @@ pub(super) fn mutating_method(method: &str) -> bool {
             | "heap_pop"
             | "setDefault"
             | "set_default"
+            | "setdefault"
             | "set"
     )
 }

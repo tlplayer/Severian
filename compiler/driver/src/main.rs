@@ -2150,14 +2150,14 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
         executed += 1;
     }
 
-    let map_path = report_root.join("coverage-map.json");
-    all_regions
-        .save_json(&map_path)
-        .map_err(|error| error.to_string())?;
     let hits_path = report_root.join("coverage.hits");
     severian_coverage::save_language_hits(&hits_path, &all_hits)
         .map_err(|error| error.to_string())?;
-    let project_regions = all_regions.within_root(&targets[0].package_root);
+    let project_regions = coverage_regions(&all_regions, policy);
+    let map_path = report_root.join("coverage-map.json");
+    project_regions
+        .save_json(&map_path)
+        .map_err(|error| error.to_string())?;
     let (report, files) = severian_coverage::language_report(&project_regions, &all_hits);
     let report_path = report_root.join("coverage-report.json");
     severian_coverage::save_language_report(&report_path, &report, &files)
@@ -2181,6 +2181,33 @@ fn coverage_with_policy(input: &Path, policy: &BuildPolicy) -> Result<(), String
     }
 
     coverage_policy::enforce(&report, &files, &policy.coverage)
+}
+
+fn coverage_regions(
+    regions: &severian_coverage::CoverageSourceMap,
+    policy: &BuildPolicy,
+) -> severian_coverage::CoverageSourceMap {
+    let root = std::fs::canonicalize(&policy.root).unwrap_or_else(|_| policy.root.clone());
+    let mut included = severian_coverage::CoverageSourceMap::default();
+    let project_regions = regions.within_root(&root);
+    for region in project_regions.regions() {
+        let relative = region
+            .span
+            .file
+            .strip_prefix(&root)
+            .unwrap_or(&region.span.file)
+            .to_string_lossy();
+        if policy
+            .coverage
+            .exclude
+            .iter()
+            .any(|pattern| severian_package::architecture_path_matches(pattern, &relative))
+        {
+            continue;
+        }
+        included.insert(region.clone());
+    }
+    included
 }
 
 fn is_expected_negative_coverage_fixture(source: &Path) -> bool {

@@ -174,3 +174,53 @@ test "TransformerEncoderLayer composes attention residuals and FFN":
     output = layer.forward(x)
     assert(tensor.ranked_shape(output) == [3, 2])
     assert(tensor.ranked_values(output)[0] > 0.99)
+
+test "rotary primitives preserve shape and apply quarter turns":
+    frequencies = tensor.to_f_32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 1, 1, 4]))
+    rope = rotary_values(frequencies)
+    assert(tensor.ranked_values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0, 1.0, 1.0])
+    assert(tensor.ranked_values(tensor.to_f_64(rope.sine)) == [0.0, 0.0, 0.0, 0.0])
+    rotated = rotate_half(tensor.to_f_32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4])), 2)
+    assert(tensor.ranked_values(tensor.to_f_64(rotated)) == [-3.0, -4.0, 1.0, 2.0])
+    value = tensor.to_bf_16(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4]))
+    applied = apply_rotary(value, rope, 2)
+    assert(tensor.ranked_values(tensor.to_f_64(applied)) == [1.0, 2.0, 3.0, 4.0])
+
+test "rotary embeddings derive and apply position frequencies":
+    inverse_frequency = tensor.to_f_32(tensor.ranked([1.0], [1]))
+    position_ids = tensor.to_i_64(tensor.ranked([0.0], [1]))
+    query = tensor.to_bf_16(tensor.ranked([1.0, 2.0], [1, 1, 1, 2]))
+    embedding = RotaryEmbedding(inverse_frequency, 10000.0, 2)
+    rope = embedding.rope_values_at(position_ids, query)
+    assert(tensor.ranked_values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0])
+    assert(tensor.ranked_values(tensor.to_f_64(rope.sine)) == [0.0, 0.0])
+    rotated = embedding.apply(query, query, position_ids)
+    assert(tensor.ranked_values(tensor.to_f_64(rotated.query)) == [1.0, 2.0])
+    assert(tensor.ranked_values(tensor.to_f_64(rotated.key)) == [1.0, 2.0])
+
+test "attention helpers normalize repeat cache and attend":
+    scores = tensor.to_f_32(tensor.ranked([0.0, 0.0], [1, 2]))
+    normalized = stable_softmax(scores)
+    assert(tensor.ranked_values(tensor.to_f_64(normalized)) == [0.5, 0.5])
+
+    value = tensor.to_bf_16(tensor.ranked([1.0, 2.0], [1, 1, 1, 2]))
+    repeated = repeat_key_value(value, 2)
+    assert(tensor.ranked_shape(repeated) == [1, 2, 1, 2])
+    assert(tensor.ranked_values(tensor.to_f_64(repeated)) == [1.0, 2.0, 1.0, 2.0])
+
+    empty = tensor.to_bf_16(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 1, 2, 2]))
+    update = tensor.to_bf_16(tensor.ranked([3.0, 4.0], [1, 1, 1, 2]))
+    cache = append_cache(KvCache(empty, empty), update, value, 1)
+    assert(tensor.ranked_values(tensor.to_f_64(cache.keys)) == [0.0, 0.0, 3.0, 4.0])
+    assert(tensor.ranked_values(tensor.to_f_64(cache.values)) == [0.0, 0.0, 1.0, 2.0])
+
+    query = tensor.to_bf_16(tensor.ranked([1.0, 0.0], [1, 1, 1, 2]))
+    attended = grouped_query_attention(
+        query,
+        query,
+        update,
+        tensor.to_f_32(tensor.ranked([0.0], [1, 1, 1, 1])),
+        1,
+        2,
+    )
+    assert(tensor.ranked_values(tensor.to_f_64(attended)) == [3.0, 4.0])
