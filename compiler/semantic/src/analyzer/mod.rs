@@ -12,11 +12,11 @@ use severian_hir::{
     Decorator as HirDecorator, DecoratorOption as HirDecoratorOption, DefinitionId,
     DetailedFunctionType, EnumDefinition, Expression, FieldDefinition, Function,
     FunctionContract as HirFunctionContract, FunctionId, FunctionType, Global, HirId, Instruction,
-    MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType, SemanticContext,
-    SemanticMember, SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement,
-    TensorDimension, TensorElementType, TensorType, Test, TestMode as HirTestMode,
-    TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType, VariantDefinition,
-    VariantId,
+    MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType,
+    ScopedBehavior as HirScopedBehavior, SemanticContext, SemanticMember, SourceRange, SourceSpan,
+    SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension, TensorElementType, TensorType, Test,
+    TestMode as HirTestMode, TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType,
+    VariantDefinition, VariantId,
 };
 use severian_package::{local_import_exposed_name, local_import_module_name, PackageInterface};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -114,13 +114,18 @@ struct TraitSemanticNamespace {
     traits: Vec<String>,
     operators: BTreeMap<String, Vec<TraitMemberProvider>>,
     operations: BTreeMap<String, Vec<TraitMemberProvider>>,
-    hooks: BTreeMap<String, Vec<TraitMemberProvider>>,
+    scoped_behaviors: Vec<TraitScopedBehaviorProvider>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 struct TraitMemberProvider {
     trait_name: String,
     qualified_member: String,
+}
+
+#[derive(Clone)]
+struct TraitScopedBehaviorProvider {
+    trait_name: String,
 }
 
 fn source_binding(identifier: &severian_ast::Ident) -> BindingRef {

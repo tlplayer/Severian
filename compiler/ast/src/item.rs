@@ -204,6 +204,23 @@ pub struct TraitDecl {
     pub composed_traits: Vec<Type>,
     pub methods: Vec<TraitMethod>,
     pub operators: Vec<TraitOperator>,
+    /// Compiler-owned behavior executed on entry to and exit from a semantic
+    /// scope. A provider must declare one `with` and one `without` body.
+    pub scoped_behaviors: Vec<TraitScopedBehavior>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraitScopedBehaviorPhase {
+    With,
+    Without,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitScopedBehavior {
+    pub span: Span,
+    pub phase: TraitScopedBehaviorPhase,
+    pub params: Vec<Parameter>,
+    pub body: Block,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -48,7 +48,8 @@ A decorator declared inside a trait defines a semantic marker. When that marker
 decorates a function, HIR receives a `SemanticContext` containing:
 
 - the capability trait and explicitly selected composed traits;
-- every operator, operation, and hook candidate with its provider;
+- every operator and operation candidate with its provider;
+- ordered, provider-qualified `with`/`without` scoped behavior;
 - a selected provider when explicit context or a single candidate proves one;
 - named policy values inherited from the trait marker and overridden at use.
 
@@ -58,10 +59,22 @@ until the source uses the member. An unresolved use reports `E000210` and asks
 for a selector such as `@tensor(xla)`. Policy-driven `auto` planning may choose
 a unique legal candidate later without changing this source or HIR shape.
 
-The current vertical slice resolves the trait-owned tensor `@` operator and
-retains operation and `before`/`after` hook provenance in HIR. Backend cost
-planning and MIR hook insertion remain subsequent lowering stages; the compiler
-does not execute decorators as arbitrary user functions.
+Function-header entries such as `with { metric }` are resolved against the same
+trait marker registry as `@metric`; the latter is syntax sugar and both produce
+the same HIR decorator and `SemanticContext`. Other expressions in the set stay
+ordinary Boolean contract clauses.
+
+Composed behaviors enter in trait declaration order and exit in reverse order.
+HIR preserves the structured scope, while MIR emits explicit provider-qualified
+entry and exit operations. Return and loop-control terminators receive cleanup
+operations for every scope they leave. This establishes stack semantics before
+backend lowering and prevents decorators from becoming arbitrary wrapper
+functions.
+
+The current vertical slice resolves the trait-owned tensor `@` operator,
+validates paired lifecycle declarations, and preserves lifecycle sequencing
+through MIR. Backend cost planning and execution of compiler-context lifecycle
+bodies remain subsequent lowering stages.
 
 ## Migration order
 

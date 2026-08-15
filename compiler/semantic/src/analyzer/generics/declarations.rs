@@ -55,6 +55,12 @@ impl Specializer {
                 self.rewrite_type(returns, &context)?;
             }
         }
+        for behavior in &mut trait_.scoped_behaviors {
+            for parameter in &mut behavior.params {
+                self.rewrite_parameter(parameter, &context)?;
+            }
+            self.rewrite_block(&mut behavior.body, &context)?;
+        }
         Ok(())
     }
 

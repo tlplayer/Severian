@@ -18,6 +18,10 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
   explicit symbol pack; named policies such as `@tensor(backend = auto)` retain
   their key and value separately. Traits may declare decorators to own a
   semantic namespace. Activation and provider resolution belong to HIR.
+- Trait declarations retain paired `with(context)` and `without(context)`
+  bodies as scoped semantic behavior. Function-header `with` entries remain
+  expressions until semantic analysis distinguishes trait markers from Boolean
+  contract conditions.
 - Python-like syntax should remain visible as blocks, declarations, calls,
   members, and collection literals.
 - Rust-like safety hooks are represented explicitly through result types,
@@ -29,8 +33,8 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 
 - Modules, `import`, `from ... import ...`, functions, classes, constructors,
   traits, fields, trait methods, operator contracts, trait-owned semantic
-  decorators, and direct trait composition requirements in either body or
-  `Trait: First + Second` header form.
+  decorators, scoped behavior bodies, and direct trait composition requirements
+  in either body or `Trait: First + Second` header form.
 - Statements for stable `=` bindings, changeable `:=` bindings, safe `?=`
   result capture, assignment,
   assertions, returns, loops, `while condition with setup` clauses, ordinary

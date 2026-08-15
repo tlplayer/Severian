@@ -44,11 +44,12 @@ fn lower_function(function: &Function) -> Option<KernelIr> {
     let [block] = function.blocks.as_slice() else {
         return None;
     };
-    if !block
-        .operations
-        .iter()
-        .all(|operation| matches!(operation.kind, OperationKind::With))
-    {
+    if !block.operations.iter().all(|operation| {
+        matches!(
+            operation.kind,
+            OperationKind::With | OperationKind::ScopeEnter(_) | OperationKind::ScopeExit(_)
+        )
+    }) {
         return None;
     }
     let severian_mir::Terminator::Return(Some(value)) = block.terminator else {

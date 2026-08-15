@@ -433,10 +433,14 @@ fn analyze_specialized(
         let Item::Function(function) = item else {
             continue;
         };
-        let decorators =
-            lower_decorators(&function.decorators, &imported_modules, trait_semantics)?;
+        let (source_decorators, source_contract) = function_semantic_decorators(
+            &function.decorators,
+            function.contract.as_ref(),
+            trait_semantics,
+        )?;
+        let decorators = lower_decorators(&source_decorators, &imported_modules, trait_semantics)?;
         let function_aliases =
-            aliases_with_decorators(&aliases, &function.decorators, trait_semantics)?;
+            aliases_with_decorators(&aliases, &source_decorators, trait_semantics)?;
         let signature = signatures.get(&function.name.name).unwrap();
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
@@ -527,12 +531,13 @@ fn analyze_specialized(
             });
         }
         let contract = lower_function_contract(
-            function.contract.as_ref(),
+            source_contract.as_ref(),
             &scope,
             &signatures,
             &function_aliases,
         )?;
         enforce_function_contract(&mut instructions, contract.as_ref());
+        wrap_scoped_behaviors(&mut instructions, &decorators);
         functions.push(Function {
             id: FunctionId::from_name(&function.name.name),
             name: function.name.name.clone(),
@@ -614,10 +619,15 @@ fn analyze_specialized(
             .collect::<Result<Vec<_>, SemanticError>>()?;
         let mut constructors = Vec::new();
         for constructor in &class.constructors {
+            let (source_decorators, source_contract) = function_semantic_decorators(
+                &constructor.decorators,
+                constructor.contract.as_ref(),
+                trait_semantics,
+            )?;
             let decorators =
-                lower_decorators(&constructor.decorators, &imported_modules, trait_semantics)?;
+                lower_decorators(&source_decorators, &imported_modules, trait_semantics)?;
             let function_aliases =
-                aliases_with_decorators(&aliases, &constructor.decorators, trait_semantics)?;
+                aliases_with_decorators(&aliases, &source_decorators, trait_semantics)?;
             constructors.push(lower_class_function(
                 constructor_id(&class.name.name, &constructor.name.name, constructor.span),
                 &class.name.name,
@@ -625,7 +635,7 @@ fn analyze_specialized(
                 &constructor.name.name,
                 decorators,
                 &constructor.params,
-                constructor.contract.as_ref(),
+                source_contract.as_ref(),
                 &constructor.body,
                 &constructor.tests,
                 ValueType::Unit,
@@ -636,10 +646,15 @@ fn analyze_specialized(
         }
         let mut methods = Vec::new();
         for method in &class.methods {
+            let (source_decorators, source_contract) = function_semantic_decorators(
+                &method.decorators,
+                method.contract.as_ref(),
+                trait_semantics,
+            )?;
             let decorators =
-                lower_decorators(&method.decorators, &imported_modules, trait_semantics)?;
+                lower_decorators(&source_decorators, &imported_modules, trait_semantics)?;
             let function_aliases =
-                aliases_with_decorators(&aliases, &method.decorators, trait_semantics)?;
+                aliases_with_decorators(&aliases, &source_decorators, trait_semantics)?;
             let returns = method
                 .return_type
                 .as_ref()
@@ -652,7 +667,7 @@ fn analyze_specialized(
                 &method.name.name,
                 decorators,
                 &method.params,
-                method.contract.as_ref(),
+                source_contract.as_ref(),
                 &method.body,
                 &method.tests,
                 returns,

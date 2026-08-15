@@ -758,6 +758,7 @@ pub(super) fn lower_block(
                 instructions.push(Instruction::With {
                     placement,
                     resources,
+                    scoped_behaviors: Vec::new(),
                     instructions: body,
                 });
             }

@@ -159,6 +159,32 @@ fn parses_provenance_aware_trait_headers_decorators_and_at_operator() {
 }
 
 #[test]
+fn parses_trait_scoped_behavior_pairs() {
+    let source = concat!(
+        "trait Metric:\n",
+        "    @metric\n",
+        "    with(context):\n",
+        "        context.start()\n",
+        "    without(context):\n",
+        "        context.finish()\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Trait(metric) = &module.items[0] else {
+        panic!("expected Metric trait");
+    };
+    assert_eq!(metric.scoped_behaviors.len(), 2);
+    assert_eq!(
+        metric.scoped_behaviors[0].phase,
+        severian_ast::TraitScopedBehaviorPhase::With
+    );
+    assert_eq!(
+        metric.scoped_behaviors[1].phase,
+        severian_ast::TraitScopedBehaviorPhase::Without
+    );
+    assert_eq!(metric.scoped_behaviors[0].params[0].name.name, "context");
+}
+
+#[test]
 fn parses_bitwise_precedence_below_comparisons_and_arithmetic() {
     let source =
         "def combine(a: int, b: int, c: int) -> bool:\n    return a + 1 & b ^ c | a == b\n";

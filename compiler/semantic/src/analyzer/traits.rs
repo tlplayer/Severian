@@ -151,12 +151,64 @@ fn collect_trait_semantic_namespace(
         push_trait_provider(&mut namespace.operators, &operator.symbol, &entry.canonical);
     }
     for method in &entry.declaration.methods {
-        let members = if matches!(method.name.name.as_str(), "before" | "after") {
-            &mut namespace.hooks
-        } else {
-            &mut namespace.operations
+        push_trait_provider(
+            &mut namespace.operations,
+            &method.name.name,
+            &entry.canonical,
+        );
+    }
+    let mut with_behavior = None;
+    let mut without_behavior = None;
+    for behavior in &entry.declaration.scoped_behaviors {
+        let slot = match behavior.phase {
+            severian_ast::TraitScopedBehaviorPhase::With => &mut with_behavior,
+            severian_ast::TraitScopedBehaviorPhase::Without => &mut without_behavior,
         };
-        push_trait_provider(members, &method.name.name, &entry.canonical);
+        if slot.replace(behavior.clone()).is_some() {
+            return Err(error(
+                behavior.span,
+                format!(
+                    "E000211: trait `{}` declares the same scoped behavior phase more than once",
+                    entry.canonical
+                ),
+            ));
+        }
+    }
+    match (with_behavior, without_behavior) {
+        (Some(with_behavior), Some(without_behavior)) => {
+            let with_type = with_behavior.params[0]
+                .ty
+                .as_ref()
+                .map(declaration_type_key);
+            let without_type = without_behavior.params[0]
+                .ty
+                .as_ref()
+                .map(declaration_type_key);
+            if with_type != without_type {
+                return Err(error(
+                    without_behavior.params[0].span,
+                    format!(
+                        "E000211: trait `{}` must use the same `context` type for `with` and `without`",
+                        entry.canonical
+                    ),
+                ));
+            }
+            namespace
+                .scoped_behaviors
+                .push(TraitScopedBehaviorProvider {
+                    trait_name: entry.canonical.clone(),
+                });
+        }
+        (Some(behavior), None) | (None, Some(behavior)) => {
+            return Err(error(
+                behavior.span,
+                format!(
+                    "E000211: trait `{}` must declare both `with(context)` and `without(context)`",
+                    entry.canonical
+                ),
+            ));
+        }
+        (None, None) => {}
     }
     for composed in &entry.declaration.composed_traits {
         let raw = declaration_type_name(composed).ok_or_else(|| {

@@ -1,5 +1,7 @@
 use crate::{TensorOp, TensorOpId};
-use severian_hir::{BindingRef, Decorator, FunctionId, HirId, MatchPattern, ValueType};
+use severian_hir::{
+    BindingRef, Decorator, FunctionId, HirId, MatchPattern, ScopedBehavior, ValueType,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub u32);
@@ -96,6 +98,8 @@ pub enum OperationKind {
     Assert,
     Evaluate,
     With,
+    ScopeEnter(ScopedBehavior),
+    ScopeExit(ScopedBehavior),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

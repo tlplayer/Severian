@@ -811,6 +811,46 @@ provider is selected. A single candidate resolves automatically. Named
 decorator arguments such as `backend = auto` are semantic policies, while
 positional arguments such as `xla` are selectors.
 
+Traits can also contribute structured behavior around an activated scope. Entry
+and exit use ordinary Severian words rather than a separate hook language:
+
+```sev
+trait Time:
+    @time
+    with(context):
+        context.timer.start()
+    without(context):
+        context.timer.stop()
+
+trait Memory:
+    @memory
+    with(context):
+        context.memory.begin()
+    without(context):
+        context.memory.end()
+
+trait Profile: Time + Memory:
+    @profile
+
+def inference(value: Tensor[f32]) with { profile, memory < 4gb }:
+    print(value)
+```
+
+The compiler enters `Time` and then `Memory`, runs the function, and removes
+them in reverse order. Contract conditions and semantic behaviors can coexist
+in one `with` set because every entry is type-resolved. A decorator is only
+sugar for the trait-backed form:
+
+```sev
+@profile
+def inference(value: Tensor[f32]):
+    print(value)
+```
+
+Both forms produce the same HIR semantic context and structured scope. MIR
+records reverse-order cleanup on normal fallthrough, return, and loop-control
+exits; decorators never execute as arbitrary wrapper functions.
+
 ## Counts, Bytes, And Midpoints
 
 `size(values)` returns the number of elements in a collection. `values.size()`
@@ -1208,7 +1248,7 @@ The decorator package must first be imported unless the decorator is declared
 by a local semantic trait. Decorators are retained as typed compiler metadata;
 they are not runtime Python-style function wrappers. Trait-owned decorators
 additionally retain the active traits, provider-qualified operator and
-operation candidates, hook declarations, and named policies.
+operation candidates, scoped `with`/`without` behavior, and named policies.
 
 Integer bit operations use the `bits` capability. They resolve automatically
 from integer operands, or a decorator can isolate an explicit symbolic subset.

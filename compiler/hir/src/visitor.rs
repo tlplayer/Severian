@@ -112,6 +112,7 @@ pub(crate) fn visit_instructions_mut(
                 placement: _,
                 resources,
                 instructions,
+                ..
             } => {
                 for resource in resources {
                     visit_expression_mut(resource, visitor);

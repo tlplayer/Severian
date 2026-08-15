@@ -371,8 +371,15 @@ pub struct SemanticContext {
     pub traits: Vec<String>,
     pub operators: Vec<SemanticMember>,
     pub operations: Vec<SemanticMember>,
-    pub hooks: Vec<SemanticMember>,
+    pub scoped_behaviors: Vec<ScopedBehavior>,
     pub policies: Vec<DecoratorOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedBehavior {
+    pub provider: String,
+    pub with_member: String,
+    pub without_member: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -579,6 +586,7 @@ pub enum Instruction {
     With {
         placement: TaskPlacement,
         resources: Vec<Expression>,
+        scoped_behaviors: Vec<ScopedBehavior>,
         instructions: Vec<Instruction>,
     },
     Break,

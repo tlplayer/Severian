@@ -1,5 +1,6 @@
 use severian_hir::{
-    BindingRef, Expression, Function, FunctionId, Instruction, Parameter, Program, ValueType,
+    BindingRef, Expression, Function, FunctionId, Instruction, Parameter, Program, ScopedBehavior,
+    TaskPlacement, ValueType,
 };
 
 #[test]
@@ -55,6 +56,138 @@ fn creates_explicit_branch_blocks_with_typed_value_references() {
     assert_eq!(span.range.start, 0);
     assert_eq!(span.range.end, 4);
     assert_eq!(mir.metadata().sources.files().len(), 1);
+}
+
+#[test]
+fn scoped_behaviors_exit_in_reverse_order_on_early_and_normal_returns() {
+    let time = ScopedBehavior {
+        provider: "Time".into(),
+        with_member: "Time::with".into(),
+        without_member: "Time::without".into(),
+    };
+    let memory = ScopedBehavior {
+        provider: "Memory".into(),
+        with_member: "Memory::with".into(),
+        without_member: "Memory::without".into(),
+    };
+    let hir = Program {
+        metadata: Default::default(),
+        globals: Vec::new(),
+        classes: Vec::new(),
+        functions: vec![Function {
+            id: FunctionId::from_name("measured"),
+            name: "measured".into(),
+            native_symbol: None,
+            decorators: Vec::new(),
+            contract: None,
+            params: Vec::new(),
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::With {
+                placement: TaskPlacement::Default,
+                resources: Vec::new(),
+                scoped_behaviors: vec![time.clone(), memory.clone()],
+                instructions: vec![Instruction::If {
+                    condition: Expression::Boolean(true),
+                    then_instructions: vec![Instruction::Return(None)],
+                    else_instructions: vec![Instruction::Evaluate(Expression::Integer(1))],
+                }],
+            }],
+            tests: Vec::new(),
+        }],
+    };
+
+    let mir = severian_mir::lower(&hir).unwrap();
+    let function = &mir.functions[0];
+    let entered = function.blocks[0]
+        .operations
+        .iter()
+        .filter_map(|operation| {
+            let severian_mir::OperationKind::ScopeEnter(behavior) = &operation.kind else {
+                return None;
+            };
+            Some(behavior.provider.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entered, ["Time", "Memory"]);
+    let return_blocks = function
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.terminator, severian_mir::Terminator::Return(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(return_blocks.len(), 2);
+    for block in return_blocks {
+        assert!(matches!(
+            block.operations.as_slice(),
+            [.., severian_mir::Operation {
+                kind: severian_mir::OperationKind::ScopeExit(memory_exit),
+                ..
+            }, severian_mir::Operation {
+                kind: severian_mir::OperationKind::ScopeExit(time_exit),
+                ..
+            }] if memory_exit == &memory && time_exit == &time
+        ));
+    }
+}
+
+#[test]
+fn loop_control_exits_only_the_scoped_behaviors_it_leaves() {
+    let metric = ScopedBehavior {
+        provider: "Metric".into(),
+        with_member: "Metric::with".into(),
+        without_member: "Metric::without".into(),
+    };
+    let hir = Program {
+        metadata: Default::default(),
+        globals: Vec::new(),
+        classes: Vec::new(),
+        functions: vec![Function {
+            id: FunctionId::from_name("looping"),
+            name: "looping".into(),
+            native_symbol: None,
+            decorators: Vec::new(),
+            contract: None,
+            params: Vec::new(),
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::While {
+                setup: None,
+                capabilities: Vec::new(),
+                condition: Expression::Boolean(true),
+                instructions: vec![Instruction::With {
+                    placement: TaskPlacement::Default,
+                    resources: Vec::new(),
+                    scoped_behaviors: vec![metric.clone()],
+                    instructions: vec![Instruction::If {
+                        condition: Expression::Boolean(true),
+                        then_instructions: vec![Instruction::Break],
+                        else_instructions: vec![Instruction::Continue],
+                    }],
+                }],
+            }],
+            tests: Vec::new(),
+        }],
+    };
+
+    let mir = severian_mir::lower(&hir).unwrap();
+    let loop_exit_blocks = mir.functions[0]
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                severian_mir::Terminator::Break | severian_mir::Terminator::Continue
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(loop_exit_blocks.len(), 2);
+    for block in loop_exit_blocks {
+        assert!(matches!(
+            block.operations.last(),
+            Some(severian_mir::Operation {
+                kind: severian_mir::OperationKind::ScopeExit(behavior),
+                ..
+            }) if behavior == &metric
+        ));
+    }
 }
 
 #[test]

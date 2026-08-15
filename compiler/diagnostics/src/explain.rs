@@ -138,6 +138,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "The active semantic trait context contains more than one valid provider for an operation. Composition preserves every provider's owning trait, so overlap is legal until an operation needs resolution. Add a selection to the capability decorator, such as `@tensor(xla)` or `@tensor(triton)`, or remove the conflicting provider from the composed context.",
         },
         Explanation {
+            code: "E000211",
+            title: "Incomplete scoped behavior",
+            text: "A trait-backed scoped behavior must declare exactly one `with(context)` entry body and one matching `without(context)` exit body. Both context parameters must use the same type. The compiler pairs them so entry follows composition order and cleanup runs in reverse order on every structured exit path.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",

@@ -929,10 +929,18 @@ fn provenance_tensor_traits() -> &'static str {
         "trait GPU:\n",
         "    @gpu\n",
         "    def broadcast(value: Tensor[f32]) -> Tensor[f32]\n",
+        "    with(context):\n",
+        "        context.gpu_activate()\n",
+        "    without(context):\n",
+        "        context.gpu_release()\n",
         "\n",
         "trait CPU:\n",
         "    @cpu\n",
         "    def broadcast(value: Tensor[f32]) -> Tensor[f32]\n",
+        "    with(context):\n",
+        "        context.cpu_activate()\n",
+        "    without(context):\n",
+        "        context.cpu_release()\n",
         "\n",
         "trait Tensor: XLA + Triton + GPU + CPU\n",
         "    @tensor(backend = auto, device = auto)\n",
@@ -943,7 +951,7 @@ fn provenance_tensor_traits() -> &'static str {
 #[test]
 fn semantic_decorators_select_trait_owned_providers_and_retain_candidates() {
     let source = format!(
-        "{}@tensor(cpu, xla)\ndef multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:\n    return left @ right\n",
+        "{}def multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32] with {{ tensor(gpu, xla) }}:\n    return left @ right\n",
         provenance_tensor_traits()
     );
     let ast = parse(&lex(&source).unwrap()).unwrap();
@@ -954,7 +962,7 @@ fn semantic_decorators_select_trait_owned_providers_and_retain_candidates() {
         .as_ref()
         .expect("tensor decorator should carry trait provenance");
     assert_eq!(context.capability, "Tensor");
-    assert_eq!(context.traits, ["Tensor", "CPU", "XLA"]);
+    assert_eq!(context.traits, ["Tensor", "GPU", "XLA"]);
     let matrix_multiply = context
         .operators
         .iter()
@@ -968,7 +976,9 @@ fn semantic_decorators_select_trait_owned_providers_and_retain_candidates() {
         .find(|operation| operation.name == "broadcast")
         .unwrap();
     assert_eq!(broadcast.candidates, ["GPU::broadcast", "CPU::broadcast"]);
-    assert_eq!(broadcast.selected.as_deref(), Some("CPU::broadcast"));
+    assert_eq!(broadcast.selected.as_deref(), Some("GPU::broadcast"));
+    assert_eq!(context.scoped_behaviors.len(), 1);
+    assert_eq!(context.scoped_behaviors[0].provider, "GPU");
     assert_eq!(
         context
             .policies
@@ -1031,34 +1041,104 @@ fn one_semantic_provider_resolves_automatically_and_policies_are_typed() {
 }
 
 #[test]
-fn semantic_hook_declarations_are_retained_without_becoming_wrappers() {
-    let source = concat!(
+fn with_set_behaviors_and_decorator_sugar_share_one_semantic_representation() {
+    let traits = concat!(
         "trait Metric:\n",
         "    @metric\n",
-        "    def before()\n",
-        "    def after()\n",
+        "    with(context):\n",
+        "        context.start()\n",
+        "    without(context):\n",
+        "        context.finish()\n",
         "\n",
-        "@metric\n",
-        "def measured(value: int) -> int:\n",
+    );
+    let decorated =
+        format!("{traits}@metric\ndef measured(value: int) -> int:\n    return value\n");
+    let scoped = format!(
+        "{traits}def measured(value: int) -> int with {{ metric, value >= 0 }}:\n    return value\n"
+    );
+    let decorated = analyze(&parse(&lex(&decorated).unwrap()).unwrap()).unwrap();
+    let scoped = analyze(&parse(&lex(&scoped).unwrap()).unwrap()).unwrap();
+    assert_eq!(
+        decorated.functions[0].decorators,
+        scoped.functions[0].decorators
+    );
+    let context = scoped.functions[0].decorators[0]
+        .semantic_context
+        .as_ref()
+        .unwrap();
+    assert_eq!(context.scoped_behaviors.len(), 1);
+    assert_eq!(context.scoped_behaviors[0].provider, "Metric");
+    assert_eq!(
+        scoped.functions[0].contract.as_ref().unwrap().clauses.len(),
+        1
+    );
+    let Instruction::With {
+        scoped_behaviors,
+        instructions,
+        ..
+    } = &scoped.functions[0].instructions[0]
+    else {
+        panic!("expected a structured semantic scope");
+    };
+    assert_eq!(scoped_behaviors, &context.scoped_behaviors);
+    assert!(matches!(
+        instructions.last(),
+        Some(Instruction::Return(Some(_)))
+    ));
+}
+
+#[test]
+fn composed_scoped_behaviors_enter_in_declaration_order() {
+    let source = concat!(
+        "trait Time:\n",
+        "    @time\n",
+        "    with(context):\n",
+        "        context.timer_start()\n",
+        "    without(context):\n",
+        "        context.timer_stop()\n",
+        "\n",
+        "trait Memory:\n",
+        "    @memory\n",
+        "    with(context):\n",
+        "        context.memory_begin()\n",
+        "    without(context):\n",
+        "        context.memory_end()\n",
+        "\n",
+        "trait Profile: Time + Memory:\n",
+        "    @profile\n",
+        "\n",
+        "def measured(value: int) -> int with { profile }:\n",
         "    return value\n",
     );
-    let ast = parse(&lex(source).unwrap()).unwrap();
-    let program = analyze(&ast).unwrap();
+    let program = analyze(&parse(&lex(source).unwrap()).unwrap()).unwrap();
     let context = program.functions[0].decorators[0]
         .semantic_context
         .as_ref()
         .unwrap();
+    assert_eq!(context.traits, ["Profile", "Time", "Memory"]);
     assert_eq!(
         context
-            .hooks
+            .scoped_behaviors
             .iter()
-            .map(|hook| (hook.name.as_str(), hook.selected.as_deref()))
+            .map(|behavior| behavior.provider.as_str())
             .collect::<Vec<_>>(),
-        [
-            ("after", Some("Metric::after")),
-            ("before", Some("Metric::before"))
-        ]
+        ["Time", "Memory"]
     );
+}
+
+#[test]
+fn scoped_behavior_requires_a_matching_without_phase() {
+    let source = concat!(
+        "trait Metric:\n",
+        "    @metric\n",
+        "    with(context):\n",
+        "        context.start()\n",
+    );
+    let error = analyze(&parse(&lex(source).unwrap()).unwrap()).unwrap_err();
+    assert!(error.message.contains("E000211"));
+    assert!(error
+        .message
+        .contains("must declare both `with(context)` and `without(context)`"));
 }
 
 #[test]

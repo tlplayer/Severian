@@ -1,0 +1,7 @@
+# E000211: incomplete scoped behavior
+# Every trait-backed scope needs both entry and exit behavior.
+
+trait Metric:
+    @metric
+    with(context):
+        context.start()

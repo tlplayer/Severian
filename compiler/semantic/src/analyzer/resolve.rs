@@ -387,6 +387,7 @@ pub(super) fn lower_class_function(
     }
     let contract = lower_function_contract(source_contract, &scope, signatures, aliases)?;
     enforce_function_contract(&mut instructions, contract.as_ref());
+    wrap_scoped_behaviors(&mut instructions, &decorators);
     Ok(Function {
         id,
         name: name.into(),
@@ -513,6 +514,127 @@ pub(super) fn collect_imports(module: &Module) -> HashMap<String, String> {
         }
     }
     aliases
+}
+
+pub(super) fn function_semantic_decorators(
+    decorators: &[severian_ast::Decorator],
+    contract: Option<&severian_ast::FunctionContract>,
+    trait_semantics: &TraitSemantics,
+) -> Result<
+    (
+        Vec<severian_ast::Decorator>,
+        Option<severian_ast::FunctionContract>,
+    ),
+    SemanticError,
+> {
+    let mut decorators = decorators.to_vec();
+    let Some(contract) = contract else {
+        return Ok((decorators, None));
+    };
+    let mut filtered = contract.clone();
+    filtered.clauses.clear();
+    for clause in &contract.clauses {
+        let Some(decorator) =
+            semantic_decorator_from_expression(&clause.condition, trait_semantics)?
+        else {
+            filtered.clauses.push(clause.clone());
+            continue;
+        };
+        if clause.deferred || clause.failure.is_some() {
+            return Err(error(
+                clause.span,
+                "a scoped semantic behavior cannot be deferred or have a contract failure action",
+            ));
+        }
+        decorators.push(decorator);
+    }
+    Ok((decorators, Some(filtered)))
+}
+
+fn semantic_decorator_from_expression(
+    expression: &Expr,
+    trait_semantics: &TraitSemantics,
+) -> Result<Option<severian_ast::Decorator>, SemanticError> {
+    let (segments, arguments, span) = match expression {
+        Expr::Identifier(identifier) => (vec![identifier.clone()], &[][..], identifier.span),
+        Expr::Call(call) => {
+            let Expr::Identifier(identifier) = call.callee.as_ref() else {
+                return Ok(None);
+            };
+            (vec![identifier.clone()], call.args.as_slice(), call.span)
+        }
+        _ => return Ok(None),
+    };
+    let name = segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
+    if !trait_semantics.decorators.contains_key(&name) {
+        return Ok(None);
+    }
+    let mut symbols = Vec::new();
+    for argument in arguments {
+        let Expr::Identifier(value) = &argument.value else {
+            return Err(error(
+                argument.value.span(),
+                format!(
+                    "semantic behavior `{name}` accepts only trait selectors or named identifier policies"
+                ),
+            ));
+        };
+        let (spelling, value) = if let Some(parameter) = &argument.name {
+            (parameter.name.clone(), Some(value.name.clone()))
+        } else {
+            (value.name.clone(), None)
+        };
+        symbols.push(severian_ast::DecoratorSymbol {
+            span: argument.span,
+            spelling,
+            value,
+        });
+    }
+    Ok(Some(severian_ast::Decorator {
+        span,
+        name: severian_ast::TypePath {
+            span: Span::new(
+                segments.first().unwrap().span.start,
+                segments.last().unwrap().span.end,
+            ),
+            segments,
+            args: Vec::new(),
+        },
+        symbols,
+    }))
+}
+
+pub(super) fn wrap_scoped_behaviors(
+    instructions: &mut Vec<Instruction>,
+    decorators: &[HirDecorator],
+) {
+    let mut scoped_behaviors = Vec::new();
+    for behavior in decorators
+        .iter()
+        .filter_map(|decorator| decorator.semantic_context.as_ref())
+        .flat_map(|context| context.scoped_behaviors.iter())
+    {
+        if !scoped_behaviors
+            .iter()
+            .any(|existing: &HirScopedBehavior| existing.provider == behavior.provider)
+        {
+            scoped_behaviors.push(behavior.clone());
+        }
+    }
+    if scoped_behaviors.is_empty() {
+        return;
+    }
+    let body = std::mem::take(instructions);
+    instructions.push(Instruction::With {
+        placement: TaskPlacement::Default,
+        resources: Vec::new(),
+        scoped_behaviors,
+        instructions: body,
+    });
 }
 
 pub(super) fn aliases_with_decorators(
@@ -761,19 +883,45 @@ fn semantic_context_for(
         existing.1 = option.1.clone();
     }
 
-    let mut active_traits = vec![definition.owner.clone()];
-    active_traits.extend(selected_traits.iter().cloned());
+    let active_traits = if selected_traits.is_empty() {
+        namespace.traits.clone()
+    } else {
+        let mut traits = vec![definition.owner.clone()];
+        traits.extend(selected_traits.iter().cloned());
+        traits
+    };
     Ok(Some(SemanticContext {
         capability: definition.owner.clone(),
         traits: active_traits,
         operators: semantic_members(&namespace.operators, &selected_traits),
         operations: semantic_members(&namespace.operations, &selected_traits),
-        hooks: semantic_members(&namespace.hooks, &selected_traits),
+        scoped_behaviors: semantic_scoped_behaviors(namespace, &definition.owner, &selected_traits),
         policies: policies
             .into_iter()
             .map(|(name, value)| HirDecoratorOption { name, value })
             .collect(),
     }))
+}
+
+fn semantic_scoped_behaviors(
+    namespace: &TraitSemanticNamespace,
+    owner: &str,
+    selected_traits: &[String],
+) -> Vec<HirScopedBehavior> {
+    namespace
+        .scoped_behaviors
+        .iter()
+        .filter(|behavior| {
+            selected_traits.is_empty()
+                || behavior.trait_name == owner
+                || selected_traits.contains(&behavior.trait_name)
+        })
+        .map(|behavior| HirScopedBehavior {
+            provider: behavior.trait_name.clone(),
+            with_member: format!("{}::with", behavior.trait_name),
+            without_member: format!("{}::without", behavior.trait_name),
+        })
+        .collect()
 }
 
 fn semantic_members(

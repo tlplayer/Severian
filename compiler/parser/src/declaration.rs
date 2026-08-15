@@ -116,15 +116,57 @@ impl Parser<'_> {
                     break;
                 }
             }
+            // A closing colon is accepted for the Python-shaped spelling
+            // `trait Profile: Time + Memory:`. The terser form without it
+            // remains valid and is equivalent.
+            self.take_simple(&TokenKind::Colon);
         }
         self.expect_simple(TokenKind::Newline, "newline after trait header")?;
         self.expect_simple(TokenKind::Indent, "indented trait body")?;
         let mut decorators = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
+        let mut scoped_behaviors = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             if self.at(&TokenKind::At) {
                 decorators.extend(self.parse_decorators()?);
+                continue;
+            }
+            let behavior_phase = if self.at(&TokenKind::With) {
+                Some(TraitScopedBehaviorPhase::With)
+            } else if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "without")
+                && self.peek_kind(1, &TokenKind::LeftParen)
+            {
+                Some(TraitScopedBehaviorPhase::Without)
+            } else {
+                None
+            };
+            if let Some(phase) = behavior_phase {
+                let behavior_start = self.advance().span.start;
+                let params = self.parse_parameters()?;
+                if params.len() != 1 || params[0].name.name != "context" {
+                    return Err(ParseError {
+                        span: Span::new(
+                            behavior_start,
+                            params
+                                .last()
+                                .map_or(behavior_start, |parameter| parameter.span.end),
+                        ),
+                        message: "trait scoped behavior requires exactly one `context` parameter"
+                            .into(),
+                    });
+                }
+                self.expect_simple(TokenKind::Colon, "`:` after scoped behavior")?;
+                let body = self.parse_suite(match phase {
+                    TraitScopedBehaviorPhase::With => "with",
+                    TraitScopedBehaviorPhase::Without => "without",
+                })?;
+                scoped_behaviors.push(TraitScopedBehavior {
+                    span: Span::new(behavior_start, body.span.end),
+                    phase,
+                    params,
+                    body,
+                });
                 continue;
             }
             if self.take_simple(&TokenKind::Operator).is_some() {
@@ -210,6 +252,7 @@ impl Parser<'_> {
             composed_traits,
             methods,
             operators,
+            scoped_behaviors,
         })
     }
 

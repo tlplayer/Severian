@@ -1,5 +1,5 @@
 use crate::*;
-use severian_hir::{BindingId, BindingRef, Expression, Instruction, ValueType};
+use severian_hir::{BindingId, BindingRef, Expression, Instruction, ScopedBehavior, ValueType};
 use std::collections::BTreeMap;
 
 pub fn lower(hir: &severian_hir::Program) -> Result<Program, MirLoweringError> {
@@ -57,6 +57,8 @@ struct FunctionBuilder {
     bindings: BTreeMap<BindingId, LocalId>,
     source_tensor_intrinsics: usize,
     tensor_operations: Vec<TensorOp>,
+    cleanup_stack: Vec<ScopedBehavior>,
+    loop_cleanup_depths: Vec<usize>,
 }
 
 impl FunctionBuilder {
@@ -122,6 +124,7 @@ impl FunctionBuilder {
                         .as_ref()
                         .map(|value| self.value_ref(value))
                         .transpose()?;
+                    self.emit_cleanups(block, 0);
                     self.blocks[block.0 as usize].terminator = Terminator::Return(value);
                     return Ok(());
                 }
@@ -159,7 +162,10 @@ impl FunctionBuilder {
                         body,
                         exit,
                     };
-                    self.lower_block(body, instructions, Some(header))?;
+                    self.loop_cleanup_depths.push(self.cleanup_stack.len());
+                    let lowered = self.lower_block(body, instructions, Some(header));
+                    self.loop_cleanup_depths.pop();
+                    lowered?;
                     self.lower_block(exit, rest, fallthrough)?;
                     return Ok(());
                 }
@@ -178,7 +184,10 @@ impl FunctionBuilder {
                         body,
                         exit,
                     };
-                    self.lower_block(body, instructions, Some(block))?;
+                    self.loop_cleanup_depths.push(self.cleanup_stack.len());
+                    let lowered = self.lower_block(body, instructions, Some(block));
+                    self.loop_cleanup_depths.pop();
+                    lowered?;
                     self.lower_block(exit, rest, fallthrough)?;
                     return Ok(());
                 }
@@ -221,6 +230,7 @@ impl FunctionBuilder {
                 }
                 Instruction::With {
                     resources,
+                    scoped_behaviors,
                     instructions,
                     ..
                 } => {
@@ -229,16 +239,30 @@ impl FunctionBuilder {
                         .map(|value| self.value_ref(value))
                         .collect::<Result<Vec<_>, _>>()?;
                     self.operation(block, OperationKind::With, resources);
-                    let mut combined = instructions.clone();
-                    combined.extend_from_slice(rest);
-                    self.lower_block(block, &combined, fallthrough)?;
+                    for behavior in scoped_behaviors {
+                        self.operation(block, OperationKind::ScopeEnter(behavior.clone()), []);
+                    }
+                    let cleanup_depth = self.cleanup_stack.len();
+                    self.cleanup_stack.extend(scoped_behaviors.iter().cloned());
+                    let scope_exit = self.reserve_block();
+                    let lowered = self.lower_block(block, instructions, Some(scope_exit));
+                    self.cleanup_stack.truncate(cleanup_depth);
+                    lowered?;
+                    for behavior in scoped_behaviors.iter().rev() {
+                        self.operation(scope_exit, OperationKind::ScopeExit(behavior.clone()), []);
+                    }
+                    self.lower_block(scope_exit, rest, fallthrough)?;
                     return Ok(());
                 }
                 Instruction::Break => {
+                    let cleanup_depth = self.loop_cleanup_depths.last().copied().unwrap_or(0);
+                    self.emit_cleanups(block, cleanup_depth);
                     self.blocks[block.0 as usize].terminator = Terminator::Break;
                     return Ok(());
                 }
                 Instruction::Continue => {
+                    let cleanup_depth = self.loop_cleanup_depths.last().copied().unwrap_or(0);
+                    self.emit_cleanups(block, cleanup_depth);
                     self.blocks[block.0 as usize].terminator = Terminator::Continue;
                     return Ok(());
                 }
@@ -265,6 +289,17 @@ impl FunctionBuilder {
             kind,
             operands: operands.into_iter().collect(),
         });
+    }
+
+    fn emit_cleanups(&mut self, block: BlockId, depth: usize) {
+        let behaviors = self.cleanup_stack[depth..]
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>();
+        for behavior in behaviors {
+            self.operation(block, OperationKind::ScopeExit(behavior), []);
+        }
     }
 
     fn value_ref(&mut self, expression: &Expression) -> Result<ValueRef, MirLoweringError> {

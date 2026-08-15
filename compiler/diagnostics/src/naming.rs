@@ -170,6 +170,12 @@ impl Checker<'_> {
                             }
                         }
                     }
+                    for behavior in &trait_.scoped_behaviors {
+                        for parameter in &behavior.params {
+                            self.name(&parameter.name, Role::Variable);
+                        }
+                        self.block(&behavior.body);
+                    }
                 }
                 Item::Enum(enum_) => {
                     self.name(&enum_.name, Role::Type);

@@ -335,6 +335,7 @@ fn primary_label<'a>(code: &str, message: &'a str) -> &'a str {
         "E000206" => "not every enum variant is handled",
         "E000207" => "type resolution must finish here",
         "E000210" => "this operation has more than one valid semantic provider",
+        "E000211" => "this scoped behavior does not have a valid entry/exit pair",
         "E000502" => "this divisor is always zero",
         "E002401" => "contracting dimensions do not match",
         "E000104" => "syntax needs another token here",
