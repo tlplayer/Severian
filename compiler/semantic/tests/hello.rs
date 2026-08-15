@@ -914,6 +914,153 @@ fn tensor_style_traits_can_compose_named_symbolic_operator_contracts() {
     analyze(&ast).unwrap();
 }
 
+fn provenance_tensor_traits() -> &'static str {
+    concat!(
+        "trait XLA:\n",
+        "    @xla\n",
+        "    def matmul(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait Triton:\n",
+        "    @triton\n",
+        "    def matmul(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait GPU:\n",
+        "    @gpu\n",
+        "    def broadcast(value: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait CPU:\n",
+        "    @cpu\n",
+        "    def broadcast(value: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait Tensor: XLA + Triton + GPU + CPU\n",
+        "    @tensor(backend = auto, device = auto)\n",
+        "\n",
+    )
+}
+
+#[test]
+fn semantic_decorators_select_trait_owned_providers_and_retain_candidates() {
+    let source = format!(
+        "{}@tensor(cpu, xla)\ndef multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:\n    return left @ right\n",
+        provenance_tensor_traits()
+    );
+    let ast = parse(&lex(&source).unwrap()).unwrap();
+    let program = analyze(&ast).unwrap();
+    let decorator = &program.functions[0].decorators[0];
+    let context = decorator
+        .semantic_context
+        .as_ref()
+        .expect("tensor decorator should carry trait provenance");
+    assert_eq!(context.capability, "Tensor");
+    assert_eq!(context.traits, ["Tensor", "CPU", "XLA"]);
+    let matrix_multiply = context
+        .operators
+        .iter()
+        .find(|operator| operator.name == "@")
+        .unwrap();
+    assert_eq!(matrix_multiply.candidates, ["XLA::@", "Triton::@"]);
+    assert_eq!(matrix_multiply.selected.as_deref(), Some("XLA::@"));
+    let broadcast = context
+        .operations
+        .iter()
+        .find(|operation| operation.name == "broadcast")
+        .unwrap();
+    assert_eq!(broadcast.candidates, ["GPU::broadcast", "CPU::broadcast"]);
+    assert_eq!(broadcast.selected.as_deref(), Some("CPU::broadcast"));
+    assert_eq!(
+        context
+            .policies
+            .iter()
+            .map(|policy| (policy.name.as_str(), policy.value.as_str()))
+            .collect::<Vec<_>>(),
+        [("backend", "auto"), ("device", "auto")]
+    );
+}
+
+#[test]
+fn overlapping_trait_operators_are_diagnosed_only_when_use_is_ambiguous() {
+    let unused = format!(
+        "{}@tensor\ndef identity(value: int) -> int:\n    return value\n",
+        provenance_tensor_traits()
+    );
+    let ast = parse(&lex(&unused).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+
+    let ambiguous = format!(
+        "{}@tensor\ndef multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:\n    return left @ right\n",
+        provenance_tensor_traits()
+    );
+    let ast = parse(&lex(&ambiguous).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("E000210: ambiguous operator `@`"));
+    assert!(error.message.contains("XLA::@"));
+    assert!(error.message.contains("Triton::@"));
+}
+
+#[test]
+fn one_semantic_provider_resolves_automatically_and_policies_are_typed() {
+    let source = concat!(
+        "trait XLA:\n",
+        "    @xla\n",
+        "    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait Tensor: XLA\n",
+        "    @tensor(backend = auto)\n",
+        "\n",
+        "@tensor(backend = xla)\n",
+        "def multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:\n",
+        "    return left @ right\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let program = analyze(&ast).unwrap();
+    let context = program.functions[0].decorators[0]
+        .semantic_context
+        .as_ref()
+        .unwrap();
+    assert_eq!(context.operators[0].selected.as_deref(), Some("XLA::@"));
+    assert_eq!(context.policies[0].value, "xla");
+
+    let invalid = source.replace("backend = xla", "scheduler = eager");
+    let ast = parse(&lex(&invalid).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("unknown policy `scheduler` for semantic decorator `@tensor`"));
+}
+
+#[test]
+fn semantic_hook_declarations_are_retained_without_becoming_wrappers() {
+    let source = concat!(
+        "trait Metric:\n",
+        "    @metric\n",
+        "    def before()\n",
+        "    def after()\n",
+        "\n",
+        "@metric\n",
+        "def measured(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let program = analyze(&ast).unwrap();
+    let context = program.functions[0].decorators[0]
+        .semantic_context
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        context
+            .hooks
+            .iter()
+            .map(|hook| (hook.name.as_str(), hook.selected.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("after", Some("Metric::after")),
+            ("before", Some("Metric::before"))
+        ]
+    );
+}
+
 #[test]
 fn validates_traits_imported_from_packages() {
     let interface_source = "trait File:\n    kind() -> string\n";

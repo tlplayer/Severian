@@ -352,6 +352,34 @@ pub struct ContractClause {
 pub struct Decorator {
     pub package: String,
     pub symbols: Vec<String>,
+    pub options: Vec<DecoratorOption>,
+    pub semantic_context: Option<SemanticContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecoratorOption {
+    pub name: String,
+    pub value: String,
+}
+
+/// Provenance retained for a semantic decorator after trait composition.
+/// Candidates remain visible even when policy or an explicit selector chooses
+/// one provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticContext {
+    pub capability: String,
+    pub traits: Vec<String>,
+    pub operators: Vec<SemanticMember>,
+    pub operations: Vec<SemanticMember>,
+    pub hooks: Vec<SemanticMember>,
+    pub policies: Vec<DecoratorOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticMember {
+    pub name: String,
+    pub candidates: Vec<String>,
+    pub selected: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

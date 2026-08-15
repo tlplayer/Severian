@@ -133,6 +133,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "Class and trait method receivers are implicit in Severian. Remove the leading `self` parameter; fields, methods, and the receiver value remain available inside the method body.",
         },
         Explanation {
+            code: "E000210",
+            title: "Ambiguous semantic provider",
+            text: "The active semantic trait context contains more than one valid provider for an operation. Composition preserves every provider's owning trait, so overlap is legal until an operation needs resolution. Add a selection to the capability decorator, such as `@tensor(xla)` or `@tensor(triton)`, or remove the conflicting provider from the composed context.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",

@@ -257,7 +257,7 @@ pub(super) fn lower_class_function(
     class_name: &str,
     fields: &[String],
     name: &str,
-    source_decorators: &[severian_ast::Decorator],
+    decorators: Vec<HirDecorator>,
     source_params: &[severian_ast::Parameter],
     source_contract: Option<&severian_ast::FunctionContract>,
     body: &Block,
@@ -391,7 +391,7 @@ pub(super) fn lower_class_function(
         id,
         name: name.into(),
         native_symbol: None,
-        decorators: decorator_metadata(source_decorators),
+        decorators,
         contract,
         params,
         return_type,
@@ -518,7 +518,8 @@ pub(super) fn collect_imports(module: &Module) -> HashMap<String, String> {
 pub(super) fn aliases_with_decorators(
     aliases: &HashMap<String, String>,
     decorators: &[severian_ast::Decorator],
-) -> HashMap<String, String> {
+    trait_semantics: &TraitSemantics,
+) -> Result<HashMap<String, String>, SemanticError> {
     let mut aliases = aliases.clone();
     for decorator in decorators {
         let package = decorator
@@ -530,6 +531,9 @@ pub(super) fn aliases_with_decorators(
             .join(".");
         aliases.insert(format!("__capability.{package}"), String::new());
         for symbol in &decorator.symbols {
+            if symbol.value.is_some() {
+                continue;
+            }
             aliases.insert(format!("__symbol.{}", symbol.spelling), package.clone());
             if let Some(function) =
                 aliases.get(&format!("__symbol_alias.{package}.{}", symbol.spelling))
@@ -537,8 +541,28 @@ pub(super) fn aliases_with_decorators(
                 aliases.insert(symbol.spelling.clone(), function.clone());
             }
         }
+        if let Some(context) = semantic_context_for(decorator, trait_semantics)? {
+            for operator in context.operators {
+                aliases.insert(
+                    format!("__semantic.operator_candidates.{}", operator.name),
+                    operator.candidates.join(","),
+                );
+                if let Some(selected) = operator.selected {
+                    aliases.insert(format!("__semantic.operator.{}", operator.name), selected);
+                }
+            }
+            for operation in context.operations {
+                aliases.insert(
+                    format!("__semantic.operation_candidates.{}", operation.name),
+                    operation.candidates.join(","),
+                );
+                if let Some(selected) = operation.selected {
+                    aliases.insert(format!("__semantic.operation.{}", operation.name), selected);
+                }
+            }
+        }
     }
-    aliases
+    Ok(aliases)
 }
 
 pub(super) fn collect_imported_modules(module: &Module) -> HashSet<String> {
@@ -570,6 +594,7 @@ pub(super) fn collect_imported_modules(module: &Module) -> HashSet<String> {
 pub(super) fn lower_decorators(
     decorators: &[severian_ast::Decorator],
     imported_modules: &HashSet<String>,
+    trait_semantics: &TraitSemantics,
 ) -> Result<Vec<HirDecorator>, SemanticError> {
     let mut compile_policy_seen = false;
     for decorator in decorators {
@@ -594,7 +619,11 @@ pub(super) fn lower_decorators(
                     "`@compile` expects exactly one backend policy: `auto`, `xla`, or `triton`",
                 ));
             }
-        } else if !imported_modules.contains(root) {
+        } else if !imported_modules.contains(root)
+            && !trait_semantics
+                .decorators
+                .contains_key(&decorator_name(decorator))
+        {
             return Err(error(
                 decorator.name.span,
                 format!("decorator package `{root}` must be imported"),
@@ -621,33 +650,167 @@ pub(super) fn lower_decorators(
         }
         let mut seen = HashSet::new();
         for symbol in &decorator.symbols {
-            if !seen.insert(&symbol.spelling) {
+            let identity = (&symbol.spelling, &symbol.value);
+            if !seen.insert(identity) {
                 return Err(error(
                     symbol.span,
                     format!("duplicate decorator symbol `{}`", symbol.spelling),
                 ));
             }
         }
+        semantic_context_for(decorator, trait_semantics)?;
     }
-    Ok(decorator_metadata(decorators))
+    decorator_metadata(decorators, trait_semantics)
 }
 
-pub(super) fn decorator_metadata(decorators: &[severian_ast::Decorator]) -> Vec<HirDecorator> {
+pub(super) fn decorator_metadata(
+    decorators: &[severian_ast::Decorator],
+    trait_semantics: &TraitSemantics,
+) -> Result<Vec<HirDecorator>, SemanticError> {
     decorators
         .iter()
-        .map(|decorator| HirDecorator {
-            package: decorator
-                .name
-                .segments
-                .iter()
-                .map(|segment| segment.name.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-            symbols: decorator
-                .symbols
-                .iter()
-                .map(|symbol| symbol.spelling.clone())
-                .collect(),
+        .map(|decorator| {
+            Ok(HirDecorator {
+                package: decorator
+                    .name
+                    .segments
+                    .iter()
+                    .map(|segment| segment.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+                symbols: decorator
+                    .symbols
+                    .iter()
+                    .filter(|symbol| symbol.value.is_none())
+                    .map(|symbol| symbol.spelling.clone())
+                    .collect(),
+                options: decorator
+                    .symbols
+                    .iter()
+                    .filter_map(|symbol| {
+                        symbol.value.as_ref().map(|value| HirDecoratorOption {
+                            name: symbol.spelling.clone(),
+                            value: value.clone(),
+                        })
+                    })
+                    .collect(),
+                semantic_context: semantic_context_for(decorator, trait_semantics)?,
+            })
         })
         .collect()
+}
+
+fn semantic_context_for(
+    decorator: &severian_ast::Decorator,
+    trait_semantics: &TraitSemantics,
+) -> Result<Option<SemanticContext>, SemanticError> {
+    let decorator_name = decorator_name(decorator);
+    let Some(definition) = trait_semantics.decorators.get(&decorator_name) else {
+        return Ok(None);
+    };
+    let namespace = &trait_semantics.namespaces[&definition.owner];
+    let mut selected_traits = Vec::new();
+    for selector in decorator
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.value.is_none() && symbol.spelling != "auto")
+    {
+        let Some(selected) = trait_semantics.decorators.get(&selector.spelling) else {
+            return Err(error(
+                selector.span,
+                format!(
+                    "unknown selector `{}` for semantic decorator `@{decorator_name}`",
+                    selector.spelling
+                ),
+            ));
+        };
+        if !namespace.traits.contains(&selected.owner) {
+            return Err(error(
+                selector.span,
+                format!(
+                    "selector `@{}` is not part of `{}`'s composed trait namespace",
+                    selector.spelling, definition.owner
+                ),
+            ));
+        }
+        if selected.owner != definition.owner && !selected_traits.contains(&selected.owner) {
+            selected_traits.push(selected.owner.clone());
+        }
+    }
+
+    let mut policies = definition.policies.clone();
+    for option in decorator
+        .symbols
+        .iter()
+        .filter_map(|symbol| symbol.value.as_ref().map(|value| (&symbol.spelling, value)))
+    {
+        let Some(existing) = policies.iter_mut().find(|policy| policy.0 == *option.0) else {
+            let symbol = decorator
+                .symbols
+                .iter()
+                .find(|symbol| symbol.spelling == *option.0 && symbol.value.is_some())
+                .expect("the named policy came from this decorator");
+            return Err(error(
+                symbol.span,
+                format!(
+                    "unknown policy `{}` for semantic decorator `@{decorator_name}`",
+                    option.0
+                ),
+            ));
+        };
+        existing.1 = option.1.clone();
+    }
+
+    let mut active_traits = vec![definition.owner.clone()];
+    active_traits.extend(selected_traits.iter().cloned());
+    Ok(Some(SemanticContext {
+        capability: definition.owner.clone(),
+        traits: active_traits,
+        operators: semantic_members(&namespace.operators, &selected_traits),
+        operations: semantic_members(&namespace.operations, &selected_traits),
+        hooks: semantic_members(&namespace.hooks, &selected_traits),
+        policies: policies
+            .into_iter()
+            .map(|(name, value)| HirDecoratorOption { name, value })
+            .collect(),
+    }))
+}
+
+fn semantic_members(
+    members: &BTreeMap<String, Vec<TraitMemberProvider>>,
+    selected_traits: &[String],
+) -> Vec<SemanticMember> {
+    members
+        .iter()
+        .map(|(name, providers)| {
+            let matching_providers = providers
+                .iter()
+                .filter(|provider| selected_traits.contains(&provider.trait_name))
+                .collect::<Vec<_>>();
+            let resolution_candidates = if matching_providers.is_empty() {
+                providers.iter().collect::<Vec<_>>()
+            } else {
+                matching_providers
+            };
+            SemanticMember {
+                name: name.clone(),
+                candidates: providers
+                    .iter()
+                    .map(|provider| provider.qualified_member.clone())
+                    .collect(),
+                selected: (resolution_candidates.len() == 1)
+                    .then(|| resolution_candidates[0].qualified_member.clone()),
+            }
+        })
+        .collect()
+}
+
+fn decorator_name(decorator: &severian_ast::Decorator) -> String {
+    decorator
+        .name
+        .segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join(".")
 }

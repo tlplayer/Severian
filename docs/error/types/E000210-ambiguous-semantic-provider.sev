@@ -1,0 +1,17 @@
+# E000210: ambiguous semantic provider
+# XLA and Triton both own `@`. Select one provider in the capability decorator.
+
+trait XLA:
+    @xla
+    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+
+trait Triton:
+    @triton
+    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+
+trait Tensor: XLA + Triton
+    @tensor
+
+@tensor
+def multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:
+    return left @ right

@@ -774,6 +774,43 @@ Implementing `Drawable` therefore satisfies both `Drawable` and `Named`.
 Composition is dependency syntax: merely calling an operation declared by
 another trait does not compose that trait.
 
+The equivalent compact header form uses `+` only as a trait-list separator:
+
+```sev
+trait Visible:
+    visible() -> bool
+
+trait Drawable: Named + Visible
+    draw()
+```
+
+Traits may also own semantic decorators and overlapping operator contracts.
+Composition preserves the provider instead of turning the operation into a
+global symbol.
+
+```sev
+trait XLA:
+    @xla
+    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+
+trait Triton:
+    @triton
+    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]
+
+trait Tensor: XLA + Triton
+    @tensor(backend = auto)
+
+@tensor(xla)
+def multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:
+    return left @ right
+```
+
+Here the active context resolves `@` to `XLA::@`. Bare `@tensor` retains both
+`XLA::@` and `Triton::@` as candidates; using `@` then reports `E000210` until a
+provider is selected. A single candidate resolves automatically. Named
+decorator arguments such as `backend = auto` are semantic policies, while
+positional arguments such as `xla` are selectors.
+
 ## Counts, Bytes, And Midpoints
 
 `size(values)` returns the number of elements in a collection. `values.size()`
@@ -1167,8 +1204,11 @@ Outside decorated functions, those spellings are not silently reinterpreted. Eac
 decorator gives the compiler a link to the library or domain that owns the
 symbols, their type rules, and their lowering behavior.
 
-The decorator package must first be imported. Decorators are retained as typed
-compiler metadata; they are not runtime Python-style function wrappers.
+The decorator package must first be imported unless the decorator is declared
+by a local semantic trait. Decorators are retained as typed compiler metadata;
+they are not runtime Python-style function wrappers. Trait-owned decorators
+additionally retain the active traits, provider-qualified operator and
+operation candidates, hook declarations, and named policies.
 
 Integer bit operations use the `bits` capability. They resolve automatically
 from integer operands, or a decorator can isolate an explicit symbolic subset.

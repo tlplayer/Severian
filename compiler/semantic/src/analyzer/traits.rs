@@ -11,7 +11,7 @@ struct TraitEntry {
 pub(super) fn expand_trait_compositions(
     module: &Module,
     interfaces: &[PackageInterface],
-) -> Result<(Module, Vec<PackageInterface>), SemanticError> {
+) -> Result<(Module, Vec<PackageInterface>, TraitSemantics), SemanticError> {
     let mut registry = HashMap::<String, TraitEntry>::new();
     let local_aliases = collect_imports(module);
     for item in &module.items {
@@ -57,6 +57,7 @@ pub(super) fn expand_trait_compositions(
     for key in canonical_keys {
         expand_trait(&key, &registry, &mut cache, &mut Vec::new())?;
     }
+    let semantics = build_trait_semantics(&registry)?;
 
     let mut expanded_module = module.clone();
     for item in &mut expanded_module.items {
@@ -75,7 +76,132 @@ pub(super) fn expand_trait_compositions(
             *declaration = cache[&key].clone();
         }
     }
-    Ok((expanded_module, expanded_interfaces))
+    Ok((expanded_module, expanded_interfaces, semantics))
+}
+
+fn build_trait_semantics(
+    registry: &HashMap<String, TraitEntry>,
+) -> Result<TraitSemantics, SemanticError> {
+    let mut semantics = TraitSemantics::default();
+    let mut keys = registry
+        .values()
+        .map(|entry| entry.canonical.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    keys.sort();
+
+    for key in &keys {
+        let entry = &registry[key];
+        for decorator in &entry.declaration.decorators {
+            let name = decorator_name(decorator);
+            if let Some(existing) = semantics.decorators.get(&name) {
+                if existing.owner != entry.canonical {
+                    return Err(error(
+                        decorator.name.span,
+                        format!(
+                            "semantic decorator `@{name}` is owned by both `{}` and `{}`",
+                            existing.owner, entry.canonical
+                        ),
+                    ));
+                }
+                continue;
+            }
+            semantics.decorators.insert(
+                name,
+                TraitDecoratorDefinition {
+                    owner: entry.canonical.clone(),
+                    policies: decorator
+                        .symbols
+                        .iter()
+                        .filter_map(|symbol| {
+                            symbol
+                                .value
+                                .as_ref()
+                                .map(|value| (symbol.spelling.clone(), value.clone()))
+                        })
+                        .collect(),
+                },
+            );
+        }
+    }
+
+    for key in keys {
+        let mut namespace = TraitSemanticNamespace::default();
+        collect_trait_semantic_namespace(&key, registry, &mut HashSet::new(), &mut namespace)?;
+        semantics.namespaces.insert(key, namespace);
+    }
+    Ok(semantics)
+}
+
+fn collect_trait_semantic_namespace(
+    key: &str,
+    registry: &HashMap<String, TraitEntry>,
+    visited: &mut HashSet<String>,
+    namespace: &mut TraitSemanticNamespace,
+) -> Result<(), SemanticError> {
+    if !visited.insert(key.to_owned()) {
+        return Ok(());
+    }
+    let entry = registry
+        .get(key)
+        .expect("semantic trait keys come from the trait registry");
+    namespace.traits.push(entry.canonical.clone());
+    for operator in &entry.declaration.operators {
+        push_trait_provider(&mut namespace.operators, &operator.symbol, &entry.canonical);
+    }
+    for method in &entry.declaration.methods {
+        let members = if matches!(method.name.name.as_str(), "before" | "after") {
+            &mut namespace.hooks
+        } else {
+            &mut namespace.operations
+        };
+        push_trait_provider(members, &method.name.name, &entry.canonical);
+    }
+    for composed in &entry.declaration.composed_traits {
+        let raw = declaration_type_name(composed).ok_or_else(|| {
+            error(
+                composed.span(),
+                "a composed trait requirement must be a named trait",
+            )
+        })?;
+        let composed_key = resolve_composed_trait(&raw, entry, registry).ok_or_else(|| {
+            error(
+                composed.span(),
+                format!(
+                    "unknown trait `{raw}` composed by `{}`",
+                    entry.declaration.name.name
+                ),
+            )
+        })?;
+        collect_trait_semantic_namespace(&composed_key, registry, visited, namespace)?;
+    }
+    Ok(())
+}
+
+fn push_trait_provider(
+    members: &mut BTreeMap<String, Vec<TraitMemberProvider>>,
+    member: &str,
+    trait_name: &str,
+) {
+    let provider = TraitMemberProvider {
+        trait_name: trait_name.to_owned(),
+        qualified_member: format!("{trait_name}::{member}"),
+    };
+    let providers = members.entry(member.to_owned()).or_default();
+    if !providers.contains(&provider) {
+        providers.push(provider);
+    }
+}
+
+fn decorator_name(decorator: &severian_ast::Decorator) -> String {
+    decorator
+        .name
+        .segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 fn expand_trait(
@@ -448,6 +574,7 @@ fn builtin_operator_satisfies(operator: &severian_ast::TraitOperator) -> bool {
                     || matches!(left.as_str(), "float" | "f32" | "f64")
                     || left.starts_with("Tensor["))
         }
+        ("@", [left, right]) => left == right && returns == *left && left.starts_with("Tensor["),
         _ => false,
     }
 }

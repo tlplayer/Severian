@@ -146,6 +146,8 @@ impl Parser<'_> {
             } else if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "X") {
                 self.advance();
                 Some(BinaryOp::MatMul)
+            } else if self.take_simple(&TokenKind::At).is_some() {
+                Some(BinaryOp::MatMul)
             } else if self.take_simple(&TokenKind::Slash).is_some() {
                 Some(BinaryOp::Div)
             } else if self.take_simple(&TokenKind::Percent).is_some() {

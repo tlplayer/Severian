@@ -29,6 +29,40 @@ represents result wrapping and reachability without its HIR sidecar.
 `sev build --verify-each` exposes
 those successful boundaries in development logs.
 
+## Provenance-aware semantic traits
+
+Trait composition has two compiler views with different jobs:
+
+```text
+direct trait graph ──┬──> expanded requirements for conformance checking
+                    └──> provider graph for semantic resolution
+```
+
+The requirements view may deduplicate identical inherited signatures. The
+provider graph never infers ownership from that flattened list: it traverses
+the direct composition edges and records members as `Trait::member` or
+`Trait::operator`. Consequently, two traits may both declare `@`, `matmul`, or
+`broadcast` without losing their identities.
+
+A decorator declared inside a trait defines a semantic marker. When that marker
+decorates a function, HIR receives a `SemanticContext` containing:
+
+- the capability trait and explicitly selected composed traits;
+- every operator, operation, and hook candidate with its provider;
+- a selected provider when explicit context or a single candidate proves one;
+- named policy values inherited from the trait marker and overridden at use.
+
+Resolution follows the same boundary for every semantic member: zero candidates
+is an error, one selects automatically, and multiple candidates remain legal
+until the source uses the member. An unresolved use reports `E000210` and asks
+for a selector such as `@tensor(xla)`. Policy-driven `auto` planning may choose
+a unique legal candidate later without changing this source or HIR shape.
+
+The current vertical slice resolves the trait-owned tensor `@` operator and
+retains operation and `before`/`after` hook provenance in HIR. Backend cost
+planning and MIR hook insertion remain subsequent lowering stages; the compiler
+does not execute decorators as arbitrary user functions.
+
 ## Migration order
 
 1. Move post-resolution bindings, fields, methods, modules, packages, symbols,

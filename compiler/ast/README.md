@@ -15,8 +15,9 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
   Uninitialized fields and parameters use `name: Type`; parameters can accept
   alternatives with union types such as `value: string | int | float`.
 - Decorators such as `@math(X, *)` are recorded as a package path plus an
-  explicit symbol pack so later phases can resolve domain-specific syntax and
-  checks.
+  explicit symbol pack; named policies such as `@tensor(backend = auto)` retain
+  their key and value separately. Traits may declare decorators to own a
+  semantic namespace. Activation and provider resolution belong to HIR.
 - Python-like syntax should remain visible as blocks, declarations, calls,
   members, and collection literals.
 - Rust-like safety hooks are represented explicitly through result types,
@@ -27,8 +28,9 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 ## Current Coverage
 
 - Modules, `import`, `from ... import ...`, functions, classes, constructors,
-  traits, fields, trait methods, operator contracts, and direct trait
-  composition requirements.
+  traits, fields, trait methods, operator contracts, trait-owned semantic
+  decorators, and direct trait composition requirements in either body or
+  `Trait: First + Second` header form.
 - Statements for stable `=` bindings, changeable `:=` bindings, safe `?=`
   result capture, assignment,
   assertions, returns, loops, `while condition with setup` clauses, ordinary

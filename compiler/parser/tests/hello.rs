@@ -1,4 +1,4 @@
-use severian_ast::{Expr, Item, LetKind, Literal, Stmt, TaskOwner, TaskPlacement};
+use severian_ast::{BinaryOp, Expr, Item, LetKind, Literal, Stmt, TaskOwner, TaskPlacement};
 use severian_lexer::lex;
 use severian_parser::parse;
 
@@ -112,6 +112,50 @@ fn parses_composed_traits_and_operator_contracts_without_inheritance_keywords() 
     };
     assert_eq!(flags.composed_traits.len(), 1);
     assert_eq!(flags.methods[0].name.name, "enabled");
+}
+
+#[test]
+fn parses_provenance_aware_trait_headers_decorators_and_at_operator() {
+    let source = concat!(
+        "trait XLA:\n",
+        "    @xla\n",
+        "    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait Triton:\n",
+        "    @triton\n",
+        "    operator @(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]\n",
+        "\n",
+        "trait Tensor: XLA + Triton\n",
+        "    @tensor(\n",
+        "        backend = auto,\n",
+        "        device = auto,\n",
+        "    )\n",
+        "\n",
+        "@tensor(xla)\n",
+        "def multiply(left: Tensor[f32], right: Tensor[f32]) -> Tensor[f32]:\n",
+        "    return left @ right\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Trait(tensor) = &module.items[2] else {
+        panic!("expected Tensor trait");
+    };
+    assert_eq!(tensor.composed_traits.len(), 2);
+    assert_eq!(tensor.decorators[0].name.segments[0].name, "tensor");
+    assert_eq!(tensor.decorators[0].symbols[0].spelling, "backend");
+    assert_eq!(
+        tensor.decorators[0].symbols[0].value.as_deref(),
+        Some("auto")
+    );
+    let Item::Function(multiply) = &module.items[3] else {
+        panic!("expected multiply function");
+    };
+    let Stmt::Return(return_) = &multiply.body.statements[0] else {
+        panic!("expected return");
+    };
+    let Some(Expr::Binary(operation)) = &return_.value else {
+        panic!("expected matrix multiplication");
+    };
+    assert_eq!(operation.op, BinaryOp::MatMul);
 }
 
 #[test]

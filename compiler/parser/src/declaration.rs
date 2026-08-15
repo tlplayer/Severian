@@ -108,12 +108,25 @@ impl Parser<'_> {
         let name = self.expect_identifier("trait name")?;
         let generic_params = self.parse_generic_parameters()?;
         self.expect_simple(TokenKind::Colon, "`:` after trait name")?;
+        let mut composed_traits = Vec::new();
+        if !self.at(&TokenKind::Newline) {
+            loop {
+                composed_traits.push(self.parse_type()?);
+                if self.take_simple(&TokenKind::Plus).is_none() {
+                    break;
+                }
+            }
+        }
         self.expect_simple(TokenKind::Newline, "newline after trait header")?;
         self.expect_simple(TokenKind::Indent, "indented trait body")?;
-        let mut composed_traits = Vec::new();
+        let mut decorators = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            if self.at(&TokenKind::At) {
+                decorators.extend(self.parse_decorators()?);
+                continue;
+            }
             if self.take_simple(&TokenKind::Operator).is_some() {
                 let operator_start = self.peek().span.start;
                 let token = self.advance().clone();
@@ -130,6 +143,7 @@ impl Parser<'_> {
                     TokenKind::And => "and".into(),
                     TokenKind::Or => "or".into(),
                     TokenKind::Not => "not".into(),
+                    TokenKind::At => "@".into(),
                     TokenKind::Identifier(symbol) => symbol,
                     _ => {
                         return Err(ParseError {
@@ -192,6 +206,7 @@ impl Parser<'_> {
             span: Span::new(start, end),
             name,
             generic_params,
+            decorators,
             composed_traits,
             methods,
             operators,

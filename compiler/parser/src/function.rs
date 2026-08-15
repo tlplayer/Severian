@@ -306,6 +306,7 @@ impl Parser<'_> {
             let name_end = segments.last().unwrap().span.end;
             let mut symbols = Vec::new();
             let end = if self.take_simple(&TokenKind::LeftParen).is_some() {
+                self.skip_parenthesized_layout();
                 if self.at(&TokenKind::RightParen) {
                     return Err(self.error(
                         "empty decorator arguments are not allowed; write the decorator without `()`",
@@ -323,6 +324,7 @@ impl Parser<'_> {
                         TokenKind::Minus => "-".into(),
                         TokenKind::Slash => "/".into(),
                         TokenKind::Percent => "%".into(),
+                        TokenKind::At => "@".into(),
                         _ => {
                             return Err(ParseError {
                                 span: token.span,
@@ -330,14 +332,28 @@ impl Parser<'_> {
                             })
                         }
                     };
+                    let mut symbol_end = token.span.end;
+                    let value = if self.take_simple(&TokenKind::Equal).is_some() {
+                        let value = self.expect_identifier("decorator policy value")?;
+                        symbol_end = value.span.end;
+                        Some(value.name)
+                    } else {
+                        None
+                    };
                     symbols.push(DecoratorSymbol {
-                        span: token.span,
+                        span: Span::new(token.span.start, symbol_end),
                         spelling,
+                        value,
                     });
                     if self.take_simple(&TokenKind::Comma).is_none() {
                         break;
                     }
+                    self.skip_parenthesized_layout();
+                    if self.at(&TokenKind::RightParen) {
+                        break;
+                    }
                 }
+                self.skip_parenthesized_layout();
                 self.expect_simple(TokenKind::RightParen, "`)` after decorator symbols")?
                     .span
                     .end

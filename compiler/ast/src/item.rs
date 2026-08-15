@@ -149,6 +149,9 @@ pub struct Decorator {
 pub struct DecoratorSymbol {
     pub span: Span,
     pub spelling: String,
+    /// An optional value for a named semantic policy, as in
+    /// `@tensor(backend = auto)`. Positional selectors leave this unset.
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +194,10 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub generic_params: Vec<GenericParameter>,
+    /// Semantic decorators declared by this trait. Unlike function
+    /// decorators, these define a semantic namespace rather than activating
+    /// it for executable code.
+    pub decorators: Vec<Decorator>,
     /// Traits named directly in this contract. Their requirements are part of
     /// this trait transitively; Severian deliberately has no separate
     /// `extends` or `inherits` syntax.

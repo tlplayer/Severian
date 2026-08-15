@@ -29,14 +29,15 @@ pub fn analyze_with_packages(
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
     validate_explicit_self_parameters(module)?;
-    let (module, interfaces) = expand_trait_compositions(module, interfaces)?;
+    let (module, interfaces, trait_semantics) = expand_trait_compositions(module, interfaces)?;
     let module = specialize_generic_classes_with_interfaces(&module, &interfaces)?;
-    analyze_specialized(&module, &interfaces)
+    analyze_specialized(&module, &interfaces, &trait_semantics)
 }
 
 fn analyze_specialized(
     module: &Module,
     interfaces: &[PackageInterface],
+    trait_semantics: &TraitSemantics,
 ) -> Result<Program, SemanticError> {
     validate_compiler_function_names(module)?;
     let mut aliases = collect_imports(module);
@@ -432,8 +433,10 @@ fn analyze_specialized(
         let Item::Function(function) = item else {
             continue;
         };
-        let decorators = lower_decorators(&function.decorators, &imported_modules)?;
-        let function_aliases = aliases_with_decorators(&aliases, &function.decorators);
+        let decorators =
+            lower_decorators(&function.decorators, &imported_modules, trait_semantics)?;
+        let function_aliases =
+            aliases_with_decorators(&aliases, &function.decorators, trait_semantics)?;
         let signature = signatures.get(&function.name.name).unwrap();
         let mut scope = global_scope.clone();
         let mut params = Vec::new();
@@ -545,7 +548,8 @@ fn analyze_specialized(
     let mut classes = Vec::new();
     for item in &module.items {
         let Item::Class(class) = item else { continue };
-        let class_decorators = lower_decorators(&class.decorators, &imported_modules)?;
+        let class_decorators =
+            lower_decorators(&class.decorators, &imported_modules, trait_semantics)?;
         let fields = class
             .fields
             .iter()
@@ -610,13 +614,16 @@ fn analyze_specialized(
             .collect::<Result<Vec<_>, SemanticError>>()?;
         let mut constructors = Vec::new();
         for constructor in &class.constructors {
-            lower_decorators(&constructor.decorators, &imported_modules)?;
+            let decorators =
+                lower_decorators(&constructor.decorators, &imported_modules, trait_semantics)?;
+            let function_aliases =
+                aliases_with_decorators(&aliases, &constructor.decorators, trait_semantics)?;
             constructors.push(lower_class_function(
                 constructor_id(&class.name.name, &constructor.name.name, constructor.span),
                 &class.name.name,
                 &fields,
                 &constructor.name.name,
-                &constructor.decorators,
+                decorators,
                 &constructor.params,
                 constructor.contract.as_ref(),
                 &constructor.body,
@@ -624,12 +631,15 @@ fn analyze_specialized(
                 ValueType::Unit,
                 &global_scope,
                 &signatures,
-                &aliases,
+                &function_aliases,
             )?);
         }
         let mut methods = Vec::new();
         for method in &class.methods {
-            lower_decorators(&method.decorators, &imported_modules)?;
+            let decorators =
+                lower_decorators(&method.decorators, &imported_modules, trait_semantics)?;
+            let function_aliases =
+                aliases_with_decorators(&aliases, &method.decorators, trait_semantics)?;
             let returns = method
                 .return_type
                 .as_ref()
@@ -640,7 +650,7 @@ fn analyze_specialized(
                 &class.name.name,
                 &fields,
                 &method.name.name,
-                &method.decorators,
+                decorators,
                 &method.params,
                 method.contract.as_ref(),
                 &method.body,
@@ -648,7 +658,7 @@ fn analyze_specialized(
                 returns,
                 &global_scope,
                 &signatures,
-                &aliases,
+                &function_aliases,
             )?);
         }
         classes.push(Class {

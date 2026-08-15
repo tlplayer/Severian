@@ -795,6 +795,8 @@ fn reports_unranked_tensor_regions_instead_of_panicking() {
             decorators: vec![Decorator {
                 package: "tensor".into(),
                 symbols: vec![],
+                options: vec![],
+                semantic_context: None,
             }],
             contract: None,
             params: vec![

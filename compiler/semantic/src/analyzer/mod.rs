@@ -9,10 +9,11 @@ use severian_hir::{
     AnyOrigin, AssignmentOp, BinaryOp, BindingId, BindingRef, CallTarget,
     ChaosAction as HirChaosAction, Class, ClassDefinition,
     ComprehensionClause as HirComprehensionClause, ContractClause as HirContractClause,
-    Decorator as HirDecorator, DefinitionId, DetailedFunctionType, EnumDefinition, Expression,
-    FieldDefinition, Function, FunctionContract as HirFunctionContract, FunctionId, FunctionType,
-    Global, HirId, Instruction, MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata,
-    ReceiverType, SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement,
+    Decorator as HirDecorator, DecoratorOption as HirDecoratorOption, DefinitionId,
+    DetailedFunctionType, EnumDefinition, Expression, FieldDefinition, Function,
+    FunctionContract as HirFunctionContract, FunctionId, FunctionType, Global, HirId, Instruction,
+    MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType, SemanticContext,
+    SemanticMember, SourceRange, SourceSpan, SwitchArm as HirSwitchArm, TaskPlacement,
     TensorDimension, TensorElementType, TensorType, Test, TestMode as HirTestMode,
     TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType, VariantDefinition,
     VariantId,
@@ -94,6 +95,32 @@ struct Binding {
     integer_max: Option<i64>,
     known_integer: Option<i64>,
     any_origin: Option<AnyOrigin>,
+}
+
+#[derive(Clone, Default)]
+struct TraitSemantics {
+    decorators: HashMap<String, TraitDecoratorDefinition>,
+    namespaces: HashMap<String, TraitSemanticNamespace>,
+}
+
+#[derive(Clone)]
+struct TraitDecoratorDefinition {
+    owner: String,
+    policies: Vec<(String, String)>,
+}
+
+#[derive(Clone, Default)]
+struct TraitSemanticNamespace {
+    traits: Vec<String>,
+    operators: BTreeMap<String, Vec<TraitMemberProvider>>,
+    operations: BTreeMap<String, Vec<TraitMemberProvider>>,
+    hooks: BTreeMap<String, Vec<TraitMemberProvider>>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct TraitMemberProvider {
+    trait_name: String,
+    qualified_member: String,
 }
 
 fn source_binding(identifier: &severian_ast::Ident) -> BindingRef {

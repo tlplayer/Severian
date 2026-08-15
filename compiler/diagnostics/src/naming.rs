@@ -148,6 +148,11 @@ impl Checker<'_> {
                 }
                 Item::Trait(trait_) => {
                     self.name(&trait_.name, Role::Type);
+                    for decorator in &trait_.decorators {
+                        for segment in &decorator.name.segments {
+                            self.name(segment, Role::Decorator);
+                        }
+                    }
                     for method in &trait_.methods {
                         self.name(&method.name, Role::Function);
                         for parameter in &method.params {

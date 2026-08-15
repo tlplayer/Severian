@@ -259,12 +259,37 @@ pub(super) fn lower_expression_kind(
                     (BinaryOp::Power, result)
                 }
                 AstBinaryOp::MatMul => {
-                    let package = aliases.get("__symbol.X").map(String::as_str);
-                    if package != Some("tensor") {
-                        return Err(error(
-                            binary.span,
-                            "operator `X` requires `@tensor(X)` on this function",
-                        ));
+                    if let Some(candidates) = aliases.get("__semantic.operator_candidates.@") {
+                        let candidates = candidates
+                            .split(',')
+                            .filter(|candidate| !candidate.is_empty())
+                            .collect::<Vec<_>>();
+                        if aliases.get("__semantic.operator.@").is_none() && candidates.len() > 1 {
+                            return Err(error(
+                                binary.span,
+                                format!(
+                                    "E000210: ambiguous operator `@`; provided by {}; select a lowering context with the semantic decorator",
+                                    candidates.join(", ")
+                                ),
+                            ));
+                        }
+                        if candidates.is_empty() {
+                            return Err(error(
+                                binary.span,
+                                "operator `@` has no valid provider in the active semantic context",
+                            ));
+                        }
+                    } else {
+                        let package = aliases
+                            .get("__symbol.@")
+                            .or_else(|| aliases.get("__symbol.X"))
+                            .map(String::as_str);
+                        if package != Some("tensor") {
+                            return Err(error(
+                                binary.span,
+                                "operator `@` requires a tensor semantic decorator with an explicit provider",
+                            ));
+                        }
                     }
                     let result_type =
                         tensor::infer_matmul_operator(left_type, right_type, binary.span)?;
