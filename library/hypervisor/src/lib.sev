@@ -73,7 +73,3 @@ test "hypervisor plans include CPUs memory interrupts and devices":
     assert(plan[2] == "memory 0:" + string(page_size))
     assert(plan[3] == "interrupt 32 cpu=0")
     assert(plan[4] == "device virtio-block:root")
-
-test "KVM create probe is safe when the backend is unavailable":
-    created = can_create_machine()
-    assert(created or not created)

@@ -1,5 +1,0 @@
-def scale(value: int | float, factor: int | float) -> float:
-    return float(value) * float(factor)
-
-test:
-    assert(scale(4, 2.5) == 10.0)

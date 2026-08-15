@@ -12,11 +12,11 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
 | Data formats | `json`, `csv`, `yaml`, `base64`, `binary` | format packages own codecs and documents; `file.read()` provides extension dispatch |
 | Files and I/O | `io`, `file`, `path`, `os` | typed contents in `file`; namespace operations and metadata in `os` |
-| Time and environment | `time`, `environment`, `process`, `system` | clock, environment, and process APIs experimental; `system` reserved |
+| Time and environment | `time`, `environment`, `process` | clock, environment, and process APIs experimental |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
 | Networking | `network`, `http`, `url` | network and HTTP/1 client APIs experimental |
-| Observability | `log`, `logging`, `trace`, `metrics` | logging sinks experimental |
+| Observability | `log`, `trace`, `metrics` | logging sinks experimental |
 | Security | `hash`, `crypto`, `tls` | `hash` native baseline implemented; provider policy required for cryptography |
 | Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and native MariaDB/MySQL clients experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
@@ -38,8 +38,7 @@ Packages move through explicit stages:
 5. `stable`: documented behavior, failures, ownership, and compatibility are
    maintained.
 
-Package names use complete words. In particular, Severian uses `system`, not
-the clipped Python spelling `sys`. Acronyms remain acceptable when they are the
+Package names use complete words. Acronyms remain acceptable when they are the
 established name of a domain rather than a shortened ordinary word.
 
 Native capabilities use typed `native(\"symbol\") def ...` declarations inside explicit `unsafe:` blocks

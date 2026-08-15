@@ -1183,6 +1183,6 @@ The folders are ordered so the compiler can grow in passes:
    constraints.
 3. `08-concurrency` through `10-numerics-mlir` layer in Go-style concurrency,
    systems boundaries, and MLIR-oriented numeric kernels.
-4. `12-enums-aliases` onward cover evolving features: enums, aliases, method
+4. `12-enums-aliases` onward cover evolving features: enums, method
    mutation contracts, Cargo-like packaging, specialized tests, and
    compiler-stage fixture organization.

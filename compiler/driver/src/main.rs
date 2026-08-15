@@ -87,8 +87,6 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "metadata" if args.len() == 2 => metadata(Path::new(&args[1])),
         "explain" if args.len() == 2 => explain(&args[1]),
         "errors" if args.len() == 1 => error_catalog::print(),
-        "emit-mlir" if args.len() == 2 => emit_stdout(Path::new(&args[1]), EmitMode::Mlir),
-        "compile" if args.len() == 2 || args.len() == 4 => legacy_compile(&args),
         "compile-tests" if args.len() == 4 && args[2] == "-o" => {
             let compilation =
                 compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
@@ -2449,31 +2447,6 @@ fn explain(code: &str) -> Result<(), String> {
         "{}: {}\n\n{}",
         explanation.code, explanation.title, explanation.text
     );
-    Ok(())
-}
-
-fn emit_stdout(input: &Path, mode: EmitMode) -> Result<(), String> {
-    let targets = resolve_targets(input)?;
-    if targets.len() != 1 {
-        return Err("stdout emission requires exactly one source target".into());
-    }
-    let compilation = compile_path(&targets[0].source).map_err(|error| error.to_string())?;
-    match mode {
-        EmitMode::Mlir => print!("{}", compilation.mlir),
-        _ => unreachable!(),
-    }
-    Ok(())
-}
-
-fn legacy_compile(args: &[String]) -> Result<(), String> {
-    let output = match args {
-        [_, _, flag, output] if flag == "-o" => PathBuf::from(output),
-        [_, _] => PathBuf::from("a.out"),
-        _ => return Err(usage()),
-    };
-    let compilation = compile_path(Path::new(&args[1])).map_err(|error| error.to_string())?;
-    compile_native(&compilation, &output).map_err(|error| error.to_string())?;
-    println!("{}", output.display());
     Ok(())
 }
 

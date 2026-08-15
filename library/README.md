@@ -17,7 +17,7 @@ no separate export header or `extern def` form.
 The initial general-purpose surface is available through flat imports such as
 `core`, `list`, `map`, `set`, `string`, `math`, `random`, `file`, `path`,
 `json`, `regex`, `time`, `process`, `environment`, `http`, `network`,
-`logging`, and `tensor`. Collection APIs are typed and mutating operations act
+and `tensor`. Collection APIs are typed and mutating operations act
 on the supplied collection; OS-backed behavior is implemented behind the
 trusted `platform` boundary.
 

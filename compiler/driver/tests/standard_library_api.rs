@@ -333,7 +333,6 @@ fn all_requested_packages_are_workspace_members() {
         "environment",
         "http",
         "network",
-        "logging",
         "io",
         "tensor",
     ] {
