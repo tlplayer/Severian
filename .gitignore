@@ -22,3 +22,5 @@ tmp/*
 !docs/examples/**/*.stderr
 !docs/examples/**/*.stdout
 *TODO.md
+
+*.CLEANUP.md

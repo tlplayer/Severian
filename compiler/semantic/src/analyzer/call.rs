@@ -245,22 +245,6 @@ pub(super) fn lower_call(
                     ValueType::Result,
                 ));
             }
-            if object.name == "http" && member.member.name == "get" {
-                let args = call
-                    .args
-                    .iter()
-                    .map(|arg| {
-                        lower_expression(&arg.value, scope, signatures, aliases).map(|(arg, _)| arg)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                return Ok((
-                    Expression::Call {
-                        target: CallTarget::source("http.get"),
-                        args,
-                    },
-                    ValueType::Result,
-                ));
-            }
             if member.member.name == "zero" && !scope.contains_key(&object.name) {
                 return Ok((
                     Expression::Call {
