@@ -1,12 +1,6 @@
 unsafe:
     native("__sev_monotonic_ns") def monotonic_ns() -> int
 
-    native("__sev_qwen_tokenize") def qwen_tokenize(model_path: string, text: string) -> list[int]
-
-    native("__sev_qwen_decode_token") def qwen_decode_token(model_path: string, token: int) -> string
-
-    native("__sev_qwen_decode_tokens") def qwen_decode_tokens(model_path: string, tokens: list[int]) -> string
-
     native("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
     native("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
     native("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value
@@ -86,40 +80,29 @@ unsafe:
     native("__sev_platform_any") def core_any(values: list[bool]) -> bool
     native("__sev_platform_abs") def core_abs[type](value: type) -> type
 
-    native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
     native("__sev_file_read") def file_read(path: string) -> Result[string, IOError]
 
-    native("__sev_file_write") def fileWrite(path: string, contents: string) -> Result[unit, IOError]
     native("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
 
-    native("__sev_file_open_binary") def fileOpenBinary(path: string) -> Result[Any, IOError]
     native("__sev_file_open_binary") def file_open_binary(path: string) -> Result[Any, IOError]
 
-    native("__sev_file_read_bytes") def fileReadBytes(handle: Any, count: int) -> Result[list[int], IOError]
     native("__sev_file_read_bytes") def file_read_bytes(handle: Any, count: int) -> Result[list[int], IOError]
 
-    native("__sev_file_read_exact") def fileReadExact(handle: Any, count: int) -> Result[list[int], IOError]
     native("__sev_file_read_exact") def file_read_exact(handle: Any, count: int) -> Result[list[int], IOError]
 
     native("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> Result[string, IOError]
     native("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> Result[string, IOError]
 
-    native("__sev_file_seek") def fileSeek(handle: Any, offset: int) -> Result[unit, IOError]
     native("__sev_file_seek") def file_seek(handle: Any, offset: int) -> Result[unit, IOError]
 
-    native("__sev_file_size") def fileSize(handle: Any) -> Result[int, IOError]
     native("__sev_file_size") def file_size(handle: Any) -> Result[int, IOError]
 
-    native("__sev_file_close") def fileClose(handle: Any) -> Result[unit, IOError]
     native("__sev_file_close") def file_close(handle: Any) -> Result[unit, IOError]
 
-    native("__sev_file_map") def fileMap(path: string) -> Result[Any, IOError]
     native("__sev_file_map") def file_map(path: string) -> Result[Any, IOError]
 
-    native("__sev_file_mapped_size") def fileMappedSize(mapping: Any) -> int
     native("__sev_file_mapped_size") def file_mapped_size(mapping: Any) -> int
 
-    native("__sev_file_unmap") def fileUnmap(mapping: Any) -> Result[unit, IOError]
     native("__sev_file_unmap") def file_unmap(mapping: Any) -> Result[unit, IOError]
 
     native("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
@@ -128,18 +111,6 @@ unsafe:
     native("__sev_file_format_register") def file_format_register(extension: string, reader: Any)
 
     native("__sev_file_format_reader") def file_format_reader(extension: string, fallback: Any) -> Any
-
-test "native file ABI":
-    path = "/tmp/severian-platform-roundtrip.txt"
-    switch fileWrite(path, "platform ABI"):
-        ok:
-            switch fileRead(path):
-                ok contents:
-                    assert(contents == "platform ABI")
-                failure error:
-                    assert(false, error)
-        failure error:
-            assert(false, error)
 
 unsafe:
     native("__sev_json_decode") def jsondecode(text: string) -> Result[Any, JsonError]
@@ -189,21 +160,9 @@ test "native log ABI":
 unsafe:
     native("__sev_log_error") def log_error(message: string, cause: Any)
 
-    native("__sev_network_listen") def networkListen(address: string) -> Result[TCPListener, IOError]
-
     native("__sev_network_listen") def network_listen(address: string) -> Result[TCPListener, IOError]
 
-    native("__sev_network_loopback_echo") def networkLoopbackEcho(message: string) -> Result[string, IOError]
-
     native("__sev_network_loopback_echo") def network_loopback_echo(message: string) -> Result[string, IOError]
-
-test with integration "native network ABI":
-    switch networkLoopbackEcho("platform loopback"):
-        ok echoed:
-            assert(echoed == "platform loopback")
-        failure error:
-            log_error("native network ABI failed", error)
-            assert(false, error)
 
 unsafe:
     native("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool
@@ -246,9 +205,3 @@ unsafe:
     native("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
     native("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
     native("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]
-
-def string_lstrip(value: string) -> string:
-    return value.lstrip()
-
-def string_rstrip(value: string) -> string:
-    return value.rstrip()

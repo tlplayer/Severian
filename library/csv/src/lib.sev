@@ -162,3 +162,99 @@ test "CSV documents support rows, quoting, and mutation":
     assert(value.encode() == "name,note\nAda,language designer\n")
     table = value.data().require_columns(["id", "name"])
     assert(table.columns() == ["id", "name", "note"])
+
+test "CSV metadata and row views handle sparse records":
+    empty = document("")
+    assert(empty.headers().is_empty())
+    assert(empty.records().is_empty())
+    assert(empty.row_count() == 0)
+    value = document("name,score,note\nAda,10\nGrace,20,compiler\n")
+    assert(value.path().is_empty())
+    assert(value.name().is_empty())
+    assert(value.extension().is_empty())
+    assert(value.kind() == "csv")
+    assert(value.media_type() == "text/csv")
+    assert(value.size() == value.bytes())
+    assert(value.raw() == platform.string_encode(value.encode()))
+    switch value.text():
+        ok text_value:
+            assert(text_value == value.encode())
+        failure error:
+            assert(false, error)
+    assert(value.value() == [["name", "score", "note"], ["Ada", "10"], ["Grace", "20", "compiler"]])
+    assert(value.headers() == value.header())
+    assert(value.columns() == ["name", "score", "note"])
+    assert(value.records() == [["Ada", "10"], ["Grace", "20", "compiler"]])
+    assert(value.row_count() == 2)
+    assert(value.column_index("score") == 1)
+    assert(value.column_index("missing") == -1)
+    assert(value.column("note") == ["", "compiler"])
+    assert(value.column("missing").is_empty())
+    rows = value.rows()
+    first: CsvRow = rows[0]
+    assert(first.get("name") == "Ada")
+    assert(first.get("note").is_empty())
+    assert(first.get("missing").is_empty())
+    assert(CsvRow(["name", "score"], ["Ada", "10"]).values() == ["Ada", "10"])
+    assert(CsvRow(["name", "score", "note"], ["Ada", "10"]).as_map() == {"name": "Ada", "score": "10", "note": ""})
+
+test "CSV cell access and mutation report every boundary":
+    value := document("left,right\na\nb,c\n")
+    assert(value.get(0, "left") == "a")
+    assert(value.get(0, "right").is_empty())
+    assert(value.get(-1, "left").is_empty())
+    assert(value.get(4, "left").is_empty())
+    assert(value.get(0, "missing").is_empty())
+    switch value.cell(0, "right"):
+        ok cell_value:
+            assert(cell_value.is_empty())
+        failure error:
+            assert(false, error)
+    switch value.cell(0, "missing"):
+        ok _cell_value:
+            assert(false, "missing column unexpectedly succeeded")
+        failure error:
+            assert(error.message.contains("does not exist"))
+    switch value.cell(4, "left"):
+        ok _cell_value:
+            assert(false, "missing row unexpectedly succeeded")
+        failure error:
+            assert(error.message.contains("outside"))
+    _extended = value.set(0, "right", "extended")
+    assert(value.get(0, "right") == "extended")
+    switch value.set(0, "missing", "value"):
+        ok:
+            assert(false, "missing column unexpectedly succeeded")
+        failure error:
+            assert(error.message.contains("does not exist"))
+    switch value.set(4, "left", "value"):
+        ok:
+            assert(false, "missing row unexpectedly succeeded")
+        failure error:
+            assert(error.message.contains("outside"))
+
+test "CSV data replacement and file writes preserve encoded content":
+    in_memory := document("old\nvalue\n")
+    in_memory.set_data(data.Data(["id", "name"], [["1", "Ada"], ["2", "Grace"]]))
+    assert(in_memory.encode() == "id,name\n1,Ada\n2,Grace\n")
+    switch in_memory.write():
+        ok:
+            assert(false, "an in-memory document unexpectedly wrote without a path")
+        failure error:
+            assert(error.message.contains("no path"))
+    destination = "/tmp/severian-csv-write-to.csv"
+    _written = in_memory.write_to(destination)
+    switch platform.file_read(destination):
+        ok contents:
+            assert(contents == in_memory.encode())
+        failure error:
+            assert(false, error)
+    attached := file_document("/tmp/severian-csv-attached.CSV", in_memory.encode())
+    assert(attached.name() == "severian-csv-attached.CSV")
+    assert(attached.extension() == ".csv")
+    _saved = attached.write()
+    switch platform.file_read(attached.path()):
+        ok contents:
+            assert(contents == attached.encode())
+        failure error:
+            assert(false, error)

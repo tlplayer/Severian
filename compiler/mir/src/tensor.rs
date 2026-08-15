@@ -86,6 +86,9 @@ pub struct ReductionOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReshapeOp {
     pub input: TensorOperand,
+    /// Runtime shape storage when the source shape is not a literal. Static
+    /// shapes are fully represented by `result` and need no extra operand.
+    pub shape_operand: Option<ValueRef>,
     pub result: TensorType,
 }
 
@@ -94,6 +97,8 @@ pub struct TransposeOp {
     pub input: TensorOperand,
     pub permutation: Vec<u64>,
     pub permutation_known: bool,
+    /// Runtime permutation storage when `permutation_known` is false.
+    pub permutation_operand: Option<ValueRef>,
     pub result: TensorType,
 }
 

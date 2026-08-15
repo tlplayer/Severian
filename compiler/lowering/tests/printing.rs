@@ -369,6 +369,135 @@ fn preserves_abstract_receiver_dispatch_through_for_loop() {
 }
 
 #[test]
+fn lowers_an_abstract_method_without_a_local_implementation() {
+    let predicate = BindingRef::synthetic("predicate");
+    let input = BindingRef::synthetic("input");
+    let target = BindingRef::synthetic("target");
+    let typed_any = |id, value| Expression::Typed {
+        id: HirId::synthetic(id),
+        ty: ValueType::Any,
+        any_origin: None,
+        expression: Box::new(value),
+    };
+    let call = Expression::Typed {
+        id: HirId::synthetic(3),
+        ty: ValueType::Bool,
+        any_origin: None,
+        expression: Box::new(Expression::MethodCall {
+            object: Box::new(Expression::Variable(predicate.clone())),
+            method: "forward".into(),
+            args: vec![
+                typed_any(1, Expression::Variable(input.clone())),
+                typed_any(2, Expression::Variable(target.clone())),
+            ],
+        }),
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("select"),
+            name: "select".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![
+                Parameter {
+                    name: predicate,
+                    ty: ValueType::Interface(TypeDefinitionId::from_name("Predicate")),
+                    default: None,
+                    receiver: Some(ReceiverType {
+                        name: "Predicate".into(),
+                        concrete: false,
+                        methods: vec!["forward".into()],
+                    }),
+                },
+                Parameter {
+                    name: input,
+                    ty: ValueType::Any,
+                    default: None,
+                    receiver: None,
+                },
+                Parameter {
+                    name: target,
+                    ty: ValueType::Any,
+                    default: None,
+                    receiver: None,
+                },
+            ],
+            return_type: ValueType::Bool,
+            instructions: vec![Instruction::Return(Some(call))],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program).unwrap());
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.func @__sev_dispatch_forward_any_any_bool"));
+    assert!(text.contains("llvm.call @__sev_dispatch_forward_any_any_bool"));
+}
+
+#[test]
+fn class_methods_take_precedence_over_builtin_method_names() {
+    let type_id = TypeDefinitionId::from_name("Rows");
+    let values_method = Function {
+        id: FunctionId::from_name("Rows.values"),
+        name: "values".into(),
+        native_symbol: None,
+        decorators: vec![],
+        contract: None,
+        params: vec![],
+        return_type: ValueType::List,
+        instructions: vec![Instruction::Return(Some(Expression::List(vec![
+            Expression::Integer(7),
+        ])))],
+        tests: vec![],
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![Class {
+            id: type_id,
+            name: "Rows".into(),
+            decorators: vec![],
+            fields: vec![],
+            field_types: vec![],
+            field_classes: vec![],
+            field_defaults: vec![],
+            field_constraints: vec![],
+            constructors: vec![],
+            methods: vec![values_method],
+            method_return_classes: vec![None],
+        }],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Evaluate(Expression::MethodCall {
+                object: Box::new(Expression::Construct {
+                    type_id,
+                    class: "Rows".into(),
+                    args: vec![],
+                }),
+                method: "values".into(),
+                args: vec![],
+            })],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program).unwrap());
+    let text = lowered.as_str();
+    assert!(text.contains("llvm.call @__sev_method_Rows_values"));
+    assert!(!text.contains("llvm.call @__sev_map_values"));
+}
+
+#[test]
 fn lowers_propagated_main_failures_to_a_nonzero_exit_status() {
     let program = Program {
         metadata: Default::default(),

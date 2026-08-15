@@ -63,3 +63,27 @@ test "filesystem namespace and stat metadata":
     assert(size(entries) >= 0)
     aliases = ls(directory)
     assert(aliases == entries)
+
+test "filesystem aliases copy, move, inspect, and remove files":
+    directory = "/tmp/severian-library-os-aliases"
+    _created = mkdir(directory)
+    source = directory + "/source.txt"
+    copied = directory + "/copied.txt"
+    moved = directory + "/moved.txt"
+    switch platform.file_write(source, "filesystem aliases"):
+        ok:
+            source_information = stat(source)
+            assert(source_information.is_file)
+            assert(not source_information.is_directory)
+            assert(source_information.size == 18)
+            _copied = cp(source, copied)
+            assert(exists(copied))
+            _moved = mv(copied, moved)
+            assert(not exists(copied))
+            assert(exists(moved))
+            _removed_source = rm(source)
+            _removed_moved = remove(moved)
+            assert(not exists(source))
+            assert(not exists(moved))
+        failure error:
+            assert(false, error)

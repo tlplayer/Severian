@@ -1,10 +1,7 @@
 import file
 import json
 import math
-import neuralnet
 import path
-import platform
-import qwen
 import random
 import tensor as tensor_runtime
 import "src/artifacts.sev" as artifacts
@@ -18,14 +15,12 @@ import "src/import_safetensors.sev" as safetensors_importer
 import "src/layers.sev" as layers
 import "src/losses.sev" as losses
 import "src/metrics.sev" as metrics
-import "src/model.sev" as model_runtime
 import "src/optimizers.sev" as optimizers
 import "src/preprocessing.sev" as preprocessing
 import "src/serialization.sev" as serialization
 import "src/artifact.sev" as artifact_runtime
 import "src/capabilities.sev" as capability_runtime
 import "src/executable.sev" as executable_runtime
-import "src/plan.sev" as plan_runtime
 import "src/session.sev" as session_runtime
 import "src/tensor_ops.sev" as tensor_ops
 import "src/types.sev" as types
@@ -248,12 +243,6 @@ class NeuralNet:
     def summary() -> string:
         return artifact.summary() + ", " + string(size(artifact.graph.nodes)) + " operations, " + string(size(artifact.graph.initializers)) + " tensors"
 
-    def encode(text: string) -> list[int]:
-        return platform.qwen_tokenize(artifact.resolved_source, text)
-
-    def decode_token(token: int) -> string:
-        return platform.qwen_decode_token(artifact.resolved_source, token)
-
     def to(device: string):
         artifact.device = device
         return
@@ -342,165 +331,6 @@ def load_graph(
         selected_dtype = graph.initializers[0].dtype
     artifact = types.ModelArtifact(source, resolved.local_path, resolved.format, graph.name, device, selected_dtype, config, graph.initializers, graph, resolved.content_sha256)
     return NeuralNet(artifact, weight_runtime.open(resolved.local_path))
-
-# First compiler-backed vertical slice. The legacy framework-import path remains
-# available as load_graph(); model.load() now means checkpoint + architecture +
-# executable generation semantics.
-class TokenBatch:
-    token_ids: list[int] with { size(token_ids) > 0 }
-    attention_mask: list[bool] with
-    {
-        size(attention_mask) == size(token_ids),
-        attention_mask[size(attention_mask) - 1],
-    }
-
-    def length() -> int:
-        return size(token_ids)
-
-    def validate(maximum_tokens: int = 256) with
-    {
-        maximum_tokens > 0,
-        size(token_ids) <= maximum_tokens,
-    }:
-        return
-
-    # Device tensors are materialized lazily. Tokenization remains a cheap,
-    # portable host operation and the execution boundary owns placement.
-    def input_tensor_256() -> Tensor[i64, 1, 256] with { size(token_ids) <= 256 }:
-        return tensor_runtime.from_i64_tokens_256(token_ids)
-
-    def causal_mask_tensor_256() -> Tensor[f32, 1, 1, 256, 256] with { size(token_ids) <= 256 }:
-        return tensor_runtime.attention_mask_256(attention_mask)
-
-class Tokenizer:
-    model_path: string
-
-    def encode(text: string) -> TokenBatch:
-        ids = platform.qwen_tokenize(model_path, text)
-        mask := []
-        for _token in ids:
-            mask.append(true)
-        return TokenBatch(ids, mask)
-
-    def encode_ids(text: string) -> list[int]:
-        return platform.qwen_tokenize(model_path, text)
-
-    def decode(tokens: list[int]) -> string:
-        return platform.qwen_decode_tokens(model_path, tokens)
-
-    def decode_batch(batch: TokenBatch) -> string:
-        return platform.qwen_decode_tokens(model_path, batch.token_ids)
-
-    def decode_token(token: int) -> string:
-        return platform.qwen_decode_token(model_path, token)
-
-class TextModelOutput:
-    logits: Tensor[bf16]
-    next_token: int
-    input_tokens: list[int]
-    closed: bool = false
-
-    def close():
-        if not closed:
-            tensor_runtime.release(logits)
-            closed = true
-        return
-
-test "token batches preserve ids and attention state":
-    batch = TokenBatch([10, 20, 30], [false, true, true])
-    assert(batch.length() == 3)
-    assert(batch.token_ids[1] == 20)
-    assert(batch.attention_mask == [false, true, true])
-
-class InferenceModel:
-    source: string
-    local_path: string
-    tokenizer: Tokenizer
-    config: qwen.Qwen2Config
-    qwen_weights: qwen.Qwen2Weights
-    execution_plan: plan_runtime.ModelPlan
-
-    def encode(text: string) -> TokenBatch:
-        return tokenizer.encode(text)
-
-    def decode(tokens: list[int]) -> string:
-        return tokenizer.decode(tokens)
-
-    # The author-facing path owns tokenization shapes and temporary device
-    # buffers. The returned logits stay live until TextModelOutput.close().
-    def forward(batch: TokenBatch) -> TextModelOutput:
-        batch.validate(256)
-        input_ids = batch.input_tensor_256()
-        mask = batch.causal_mask_tensor_256()
-        output = qwen.forward_qwen2_5_3b_256(qwen_weights, input_ids, batch.token_ids, mask)
-        tensor_runtime.release(input_ids)
-        tensor_runtime.release(mask)
-        return TextModelOutput(output.logits, output.next_token, batch.token_ids, false)
-
-    # Architecture and compiler work can still exercise the generic Qwen graph
-    # directly without conflating that ABI with the ordinary model API.
-    def forward_kernel(
-        input_ids: Tensor[i64],
-        caches: list[neuralnet.KvCache],
-        rotary: neuralnet.RopeValues,
-        causal_mask: Tensor[f32],
-        position: int,
-    ) -> qwen.Qwen2Output:
-        return qwen.forward(input_ids, qwen_weights, caches, rotary, causal_mask, position, config)
-
-    def session(prompt: string) -> qwen.Qwen2_5_3BSession:
-        batch = tokenizer.encode(prompt)
-        batch.validate(256)
-        return qwen.prefill_qwen2_5_3b_256(qwen_weights, batch.token_ids)
-
-    def session_from(batch: TokenBatch) -> qwen.Qwen2_5_3BSession:
-        batch.validate(256)
-        return qwen.prefill_qwen2_5_3b_256(qwen_weights, batch.token_ids)
-
-    def generate(
-        prompt: string,
-        maximum_new_tokens: int = 32,
-        end_tokens: list[int] = [],
-    ) -> string:
-        assert(maximum_new_tokens > 0)
-        batch = tokenizer.encode(prompt)
-        batch.validate(256)
-        generation = qwen.prefill_qwen2_5_3b_256(qwen_weights, batch.token_ids)
-        while size(generation.output_tokens) < maximum_new_tokens and generation.position < 288:
-            if generation.current_token in end_tokens:
-                break
-            token = generation.decode_next()
-            if token in end_tokens:
-                break
-        text = tokenizer.decode(generation.output_tokens)
-        generation.close()
-        return text
-
-def load(
-    source: string,
-    device: string = "auto",
-    dtype: string = "auto",
-    sha256: string = "",
-) -> Result[InferenceModel, types.ModelLoadError | qwen.QwenConfigError | IOError | JsonError]:
-    if device not in ["auto", "cpu", "gpu"]:
-        return failure(types.ModelLoadError("unsupported inference device `" + device + "`"))
-    resolved = artifacts.resolve(source, sha256)
-    if resolved.format not in ["safetensors", "huggingface-safetensors"]:
-        return failure(types.ModelLoadError("model.load requires a safetensors checkpoint directory"))
-    directory = resolved.local_path if path.is_dir(resolved.local_path) else path.dirname(resolved.local_path)
-    config_path = path.join(directory, "config.json")
-    if not path.exists(config_path):
-        return failure(types.ModelLoadError("model checkpoint is missing config.json"))
-    config_text = file.read_text(config_path)
-    config = qwen.parse_qwen_2_config(config_text)
-    if not config.supports_qwen2_5_3b_serving():
-        return failure(types.ModelLoadError("the current compiled Qwen execution plan supports Qwen2.5-3B only"))
-    if dtype not in ["auto", "bf16", "bfloat16"]:
-        return failure(types.ModelLoadError("Qwen2.5 execution currently requires BF16 compute"))
-    store = tensor_runtime.open_safetensors(directory)
-    weights = qwen.load_weights(store, config)
-    execution_plan = model_runtime.qwen_2_plan(config, resolved.content_sha256)
-    return InferenceModel(source, directory, Tokenizer(directory), config, weights, execution_plan)
 
 # Generic estimator protocol helpers.
 def fit(estimator: Any, features: Any, targets: Any) -> Any:

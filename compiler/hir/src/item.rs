@@ -82,6 +82,19 @@ impl Program {
             .find(|function| function.name == "main")
     }
 
+    pub fn uses_xla_runtime(&self) -> bool {
+        self.functions.iter().any(|function| {
+            function
+                .native_symbol
+                .as_deref()
+                .is_some_and(|symbol| symbol.starts_with("__sev_xla_"))
+                || function
+                    .decorators
+                    .iter()
+                    .any(|decorator| decorator.package == "tensor")
+        })
+    }
+
     pub fn test_count(&self) -> usize {
         self.functions
             .iter()

@@ -13,6 +13,20 @@ pub(super) fn tensor_from_shape(
     TensorType::ranked(element, &dimensions).map_err(|reason| tensor_error(span, operation, reason))
 }
 
+pub(super) fn tensor_from_reshape_shape(
+    element: TensorElementType,
+    expression: Option<&Expression>,
+    operation: severian_hir::TensorIntrinsic,
+    span: Span,
+) -> Result<TensorType, SemanticError> {
+    let shape =
+        expression.ok_or_else(|| tensor_error(span, operation, "missing shape metadata"))?;
+    if matches!(shape.ty(), Some(ValueType::List)) && !matches!(shape.kind(), Expression::List(_)) {
+        return Ok(TensorType::dynamic(element));
+    }
+    tensor_from_shape(element, Some(shape), operation, span)
+}
+
 pub(super) fn integer_shape(
     expression: &Expression,
     operation: severian_hir::TensorIntrinsic,

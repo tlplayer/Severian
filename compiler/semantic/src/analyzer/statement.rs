@@ -606,8 +606,11 @@ pub(super) fn lower_block(
             }
             Stmt::Switch(statement) => {
                 validate_exhaustive_enum_switch(statement, scope, aliases)?;
-                let file_receiver = (statement.values.len() == 1)
-                    .then(|| file_read_receiver_type(&statement.values[0], aliases))
+                let result_receiver = (statement.values.len() == 1)
+                    .then(|| {
+                        result_payload_receiver(&statement.values[0], signatures, aliases)
+                            .or_else(|| file_read_receiver_type(&statement.values[0], aliases))
+                    })
                     .flatten();
                 let setup = statement
                     .setup
@@ -640,10 +643,10 @@ pub(super) fn lower_block(
                 for arm in &statement.arms {
                     let mut arm_scope = scope.clone();
                     let pattern = lower_pattern(&arm.pattern, &mut arm_scope, aliases)?;
-                    if let Some(receiver) = &file_receiver {
+                    if let Some(receiver) = &result_receiver {
                         refine_success_pattern_bindings(&pattern, &receiver.name, &mut arm_scope);
                     }
-                    let receivers = file_receiver
+                    let receivers = result_receiver
                         .as_ref()
                         .map(|receiver| success_pattern_receivers(&pattern, receiver))
                         .unwrap_or_default();

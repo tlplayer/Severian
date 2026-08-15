@@ -193,6 +193,16 @@ pub(super) fn infer_transpose(
         return Ok(input);
     };
     let permutation = match arguments.get(1) {
+        Some(argument)
+            if matches!(argument.ty(), Some(ValueType::List))
+                && !matches!(argument.kind(), Expression::List(_)) =>
+        {
+            return TensorType::ranked(
+                input.element,
+                &vec![TensorDimension::Dynamic; usize::from(rank)],
+            )
+            .map_err(|reason| tensor_error(span, operation, reason));
+        }
         Some(argument) => integer_list(argument, operation, span)?
             .into_iter()
             .map(|axis| usize::try_from(axis).ok())

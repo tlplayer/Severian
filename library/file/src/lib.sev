@@ -114,20 +114,6 @@ def load(path: string) -> Result[Any, IOError | file_interface.FormatError]:
     document = read(path)
     return document.value()
 
-# Compatibility aliases remain temporarily for older packages. New Severian
-# code uses complete snake_case names and receives no abbreviation burden.
-def read_bytes(handle: Any, count: int) -> Result[list[int], IOError]:
-    return read_bytes_from(handle, count)
-
-def readExact(handle: Any, count: int) -> Result[list[int], IOError]:
-    return read_exact(handle, count)
-
-def mappedBytes(mapping: Any) -> int:
-    return mapped_bytes(mapping)
-
-def little_endian_u_64(data: list[int]) -> int:
-    return little_endian_u64(data)
-
 test "native file round trip":
     path = "/tmp/severian-library-file-roundtrip.txt"
     _written = write(path, "severian file runtime")

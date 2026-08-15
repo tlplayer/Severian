@@ -21,10 +21,6 @@ def close(socket: Any) -> Result[unit, IOError]:
 def loopback_echo(message: string) -> Result[string, IOError]:
     return platform.network_loopback_echo(message)
 
-# Compatibility alias for sources written before the snake-case API.
-def loopbackEcho(message: string) -> Result[string, IOError]:
-    return loopback_echo(message)
-
 test with integration "native TCP loopback":
     switch loopback_echo("severian network runtime"):
         ok echoed:

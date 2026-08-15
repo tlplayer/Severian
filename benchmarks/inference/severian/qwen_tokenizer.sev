@@ -1,7 +1,0 @@
-import platform
-
-def encode(model_path: string, text: string) -> list[int]:
-    return platform.qwen_tokenize(model_path, text)
-
-def decode_token(model_path: string, token: int) -> string:
-    return platform.qwen_decode_token(model_path, token)

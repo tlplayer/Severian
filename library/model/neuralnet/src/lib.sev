@@ -77,37 +77,9 @@ class RotaryEmbedding:
             apply_rotary(key, rope, head_dimension / 2),
         )
 
-class AttentionProjectionWeights:
-    query: Tensor[bf16]
-    query_bias: Tensor[bf16]
-    key: Tensor[bf16]
-    key_bias: Tensor[bf16]
-    value: Tensor[bf16]
-    value_bias: Tensor[bf16]
-    output: Tensor[bf16]
-
-class GatedMlpWeights:
-    gate: Tensor[bf16]
-    up: Tensor[bf16]
-    down: Tensor[bf16]
-
-class TransformerDecoderWeights:
-    input_norm: Tensor[bf16]
-    attention: AttentionProjectionWeights
-    post_attention_norm: Tensor[bf16]
-    mlp: GatedMlpWeights
-
 class KvCache:
     keys: Tensor[bf16]
     values: Tensor[bf16]
-
-class AttentionResult:
-    output: Tensor[bf16]
-    cache: KvCache
-
-class DecoderResult:
-    hidden: Tensor[bf16]
-    cache: KvCache
 
 def rotary_values(position_frequencies: Tensor[f32]) -> RopeValues:
     return RopeValues(
@@ -184,81 +156,6 @@ def grouped_query_attention(
     probabilities = stable_softmax(scores)
     context = tensor.batched_matmul_f_32(probabilities, tensor.bf16_to_f_32(repeated_value))
     return tensor.f32_to_bf_16(context)
-
-def self_attention(
-    input: Tensor[bf16],
-    weights: AttentionProjectionWeights,
-    cache: KvCache,
-    rotary: RopeValues,
-    causal_mask: Tensor[f32],
-    position: int,
-    num_heads: int,
-    num_kv_heads: int,
-    head_dimension: int,
-) -> AttentionResult:
-    query := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.query, [1, 0]))
-    key := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.key, [1, 0]))
-    value := tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.value, [1, 0]))
-    query = tensor.ranked_add(query, tensor.broadcast_like_bf_16(weights.query_bias, query))
-    key = tensor.ranked_add(key, tensor.broadcast_like_bf_16(weights.key_bias, key))
-    value = tensor.ranked_add(value, tensor.broadcast_like_bf_16(weights.value_bias, value))
-    input_shape = tensor.shape_bf_16(input)
-    query = tensor.reshape(query, [input_shape[0], input_shape[1], num_heads, head_dimension])
-    key = tensor.reshape(key, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
-    value = tensor.reshape(value, [input_shape[0], input_shape[1], num_kv_heads, head_dimension])
-    query = tensor.transpose_bf_16(query, [0, 2, 1, 3])
-    key = tensor.transpose_bf_16(key, [0, 2, 1, 3])
-    value = tensor.transpose_bf_16(value, [0, 2, 1, 3])
-    query = apply_rotary(query, rotary, head_dimension / 2)
-    key = apply_rotary(key, rotary, head_dimension / 2)
-    updated_cache = append_cache(cache, key, value, position)
-    attended := grouped_query_attention(
-        query, updated_cache.keys, updated_cache.values, causal_mask,
-        num_heads / num_kv_heads, head_dimension,
-    )
-    attended = tensor.transpose_bf_16(attended, [0, 2, 1, 3])
-    attended = tensor.reshape(attended, [-1, -1, num_heads * head_dimension])
-    output = tensor.matmul_bf_16(attended, tensor.transpose_bf_16(weights.output, [1, 0]))
-    return AttentionResult(output, updated_cache)
-
-def silu_bf_16(value: Tensor[bf16]) -> Tensor[bf16]:
-    return tensor.multiply_bf_16(value, tensor.sigmoid_bf_16(value))
-
-def gated_mlp(input: Tensor[bf16], weights: GatedMlpWeights) -> Tensor[bf16]:
-    gate = tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.gate, [1, 0]))
-    up = tensor.matmul_bf_16(input, tensor.transpose_bf_16(weights.up, [1, 0]))
-    hidden = tensor.multiply_bf_16(silu_bf_16(gate), up)
-    return tensor.matmul_bf_16(hidden, tensor.transpose_bf_16(weights.down, [1, 0]))
-
-def rms_norm_bf_16(input: Tensor[bf16], weight: Tensor[bf16], epsilon: float) -> Tensor[bf16]:
-    input_f_32 = tensor.bf16_to_f_32(input)
-    variance := tensor.mean_last_f_32(tensor.multiply_f_32(input_f_32, input_f_32))
-    variance = tensor.add_scalar_f_32(variance, epsilon)
-    inverse_rms := tensor.rsqrt_f_32(variance)
-    inverse_rms = tensor.broadcast_like_f_32(inverse_rms, input_f_32)
-    normalized = tensor.f32_to_bf_16(tensor.multiply_f_32(input_f_32, inverse_rms))
-    return tensor.multiply_bf_16(normalized, tensor.broadcast_like_bf_16(weight, normalized))
-
-def transformer_decoder_layer(
-    hidden: Tensor[bf16],
-    weights: TransformerDecoderWeights,
-    cache: KvCache,
-    rotary: RopeValues,
-    causal_mask: Tensor[f32],
-    position: int,
-    epsilon: float,
-    num_heads: int,
-    num_kv_heads: int,
-    head_dimension: int,
-) -> DecoderResult:
-    normalized = rms_norm_bf_16(hidden, weights.input_norm, epsilon)
-    attended = self_attention(
-        normalized, weights.attention, cache, rotary, causal_mask, position,
-        num_heads, num_kv_heads, head_dimension,
-    )
-    current = tensor.ranked_add(hidden, attended.output)
-    feed_forward = gated_mlp(rms_norm_bf_16(current, weights.post_attention_norm, epsilon), weights.mlp)
-    return DecoderResult(tensor.ranked_add(current, feed_forward), attended.cache)
 
 test "Linear follows the conventional input weight bias order":
     x = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

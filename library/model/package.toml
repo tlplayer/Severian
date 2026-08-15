@@ -18,10 +18,8 @@ hash = { path = "../hash", version = "0.1.0" }
 http = { path = "../http", version = "0.1.0" }
 json = { path = "../json", version = "0.1.0" }
 math = { path = "../math", version = "0.1.0" }
-neuralnet = { package = "model.neuralnet", path = "neuralnet", version = "0.1.0" }
 path = { path = "../path", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }
-qwen = { package = "model.architectures.qwen", path = "architectures/qwen", version = "0.1.0" }
 random = { path = "../random", version = "0.1.0" }
 tensor = { path = "../tensor", version = "0.1.0" }
 

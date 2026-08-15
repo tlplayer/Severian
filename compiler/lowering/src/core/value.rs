@@ -288,6 +288,9 @@ impl LowerContext<'_> {
                 .get(&name.id)
                 .and_then(|(value, _)| self.object_class_ids.get(value)),
             Expression::Call { target, .. } => self.function_return_classes.get(&target.id),
+            Expression::Construct { type_id, .. }
+            | Expression::ConstructFields { type_id, .. }
+            | Expression::ObjectUpdate { type_id, .. } => Some(type_id),
             _ => None,
         };
         if let Some(class_id) = class_id {
@@ -747,6 +750,7 @@ impl LowerContext<'_> {
             closure_callback: false,
             placement: TaskPlacement::Default,
             active_hir_id: self.active_hir_id,
+            active_expression_type: self.active_expression_type,
         }
     }
 }

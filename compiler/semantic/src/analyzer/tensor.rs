@@ -3,7 +3,7 @@ use super::*;
 mod metadata;
 mod shape;
 
-use metadata::{tensor_from_shape, validate_axis};
+use metadata::{tensor_from_reshape_shape, tensor_from_shape, validate_axis};
 pub(super) use shape::infer_matmul_operator;
 use shape::{
     broadcast, infer_concatenate, infer_gather, infer_matmul, infer_slice, infer_transpose,
@@ -38,7 +38,8 @@ pub(super) fn infer_call_result(
         }
         Op::Reshape => {
             let input = tensor_argument(arguments, 0, intrinsic, span)?;
-            let result = tensor_from_shape(input.element, arguments.get(1), intrinsic, span)?;
+            let result =
+                tensor_from_reshape_shape(input.element, arguments.get(1), intrinsic, span)?;
             validate_reshape(input, result, intrinsic, span)?;
             result
         }

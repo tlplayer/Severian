@@ -26,3 +26,41 @@ def put(url: string, body: string = "") -> Result[string, IOError]:
 
 def delete(url: string) -> Result[string, IOError]:
     return request("DELETE", url)
+
+test "HTTP verb helpers preserve typed failures for invalid URLs":
+    switch request("PATCH", "invalid"):
+        ok _response:
+            assert(false, "an invalid URL unexpectedly succeeded")
+        failure _error:
+            assert(true)
+    switch get("invalid"):
+        ok _response:
+            assert(false, "an invalid URL unexpectedly succeeded")
+        failure _error:
+            assert(true)
+    switch post("invalid", "payload"):
+        ok _response:
+            assert(false, "an invalid URL unexpectedly succeeded")
+        failure _error:
+            assert(true)
+    switch put("invalid", "payload"):
+        ok _response:
+            assert(false, "an invalid URL unexpectedly succeeded")
+        failure _error:
+            assert(true)
+    switch delete("invalid"):
+        ok _response:
+            assert(false, "an invalid URL unexpectedly succeeded")
+        failure _error:
+            assert(true)
+
+test "HTTP message types retain constructor values and defaults":
+    request_value = Request("POST", "/events", "payload")
+    response_value = Response()
+    server = Server("127.0.0.1:8080")
+    assert(request_value.method == "POST")
+    assert(request_value.path == "/events")
+    assert(request_value.body == "payload")
+    assert(response_value.status == 200)
+    assert(response_value.body.is_empty())
+    assert(server.address == "127.0.0.1:8080")

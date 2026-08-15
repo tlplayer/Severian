@@ -1,3 +1,5 @@
+import platform
+
 def sum[type](values: list[type]) -> type:
     return values.sum()
 
@@ -12,4 +14,14 @@ def sorted[type](values: list[type], reverse: bool = false) -> list[type]:
 def reversed[type](values: list[type]) -> list[type]:
     return values.reversed()
 
-import platform
+test "generic collection helpers preserve values and ordering":
+    assert(sum([1, 2, 3, 4]) == 10)
+    assert(sum([1.5, 2.5]) == 4.0)
+    assert(sorted([3, 1, 2]) == [1, 2, 3])
+    assert(sorted([3, 1, 2], true) == [3, 2, 1])
+    assert(reversed([1, 2, 3]) == [3, 2, 1])
+
+test "round handles default, positive, and negative precision":
+    assert(round(2.6) == 3.0)
+    assert(round(2.675, 2) == 2.68)
+    assert(round(149.0, -1) == 150.0)

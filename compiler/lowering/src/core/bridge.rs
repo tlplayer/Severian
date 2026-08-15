@@ -2050,8 +2050,6 @@ int64_t __sev_host_page_size(void) {
     if !tensor_regions.is_empty() {
         source.push_str(concat!(
             "extern void *__sev_xla_execute(uint64_t, const uint8_t *, size_t, void **, size_t);\n",
-            "extern void *__sev_xla_i64_token(int64_t);\n",
-            "extern int64_t __sev_xla_argmax_bf16(void *);\n\n",
         ));
         for function in tensor_regions {
             let module = stablehlo::lower_entry(program, function.id)?;

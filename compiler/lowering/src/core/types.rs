@@ -93,6 +93,57 @@ pub(super) fn dynamic_method_dispatches(program: &Program) -> Vec<DynamicMethodD
                 .push(class.name.clone());
         }
     }
+    for function in program.functions.iter().chain(
+        program
+            .classes
+            .iter()
+            .flat_map(|class| class.methods.iter().chain(&class.constructors)),
+    ) {
+        let receivers = function
+            .params
+            .iter()
+            .filter_map(|parameter| {
+                parameter
+                    .receiver
+                    .as_ref()
+                    .filter(|receiver| !receiver.concrete)
+                    .map(|receiver| (parameter.name.id, receiver.methods.clone()))
+            })
+            .collect::<HashMap<_, _>>();
+        if receivers.is_empty() {
+            continue;
+        }
+        let mut fragment = Program {
+            functions: vec![function.clone()],
+            ..Program::default()
+        };
+        fragment.visit_expressions_mut(&mut |expression| {
+            let Some(returns) = expression.ty() else {
+                return;
+            };
+            let Expression::MethodCall {
+                object,
+                method,
+                args,
+            } = expression.kind()
+            else {
+                return;
+            };
+            let Expression::Variable(binding) = object.kind() else {
+                return;
+            };
+            if !receivers
+                .get(&binding.id)
+                .is_some_and(|methods| methods.contains(method))
+            {
+                return;
+            }
+            let Some(params) = args.iter().map(Expression::ty).collect::<Option<Vec<_>>>() else {
+                return;
+            };
+            groups.entry((method.clone(), params, returns)).or_default();
+        });
+    }
     let mut dispatches = groups
         .into_iter()
         .map(|((method, params, returns), mut classes)| {

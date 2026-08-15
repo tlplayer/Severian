@@ -124,31 +124,6 @@ def is_null(value: Any) -> bool:
 def kind(value: Any) -> string:
     return platform.jsonkind(value)
 
-# Compatibility aliases while callers migrate to the snake_case surface.
-def objectGet(value: Any, key: string) -> Any:
-    return object_get(value, key)
-
-def objectKeys(value: Any) -> list[string]:
-    return object_keys(value)
-
-def asString(value: Any) -> string:
-    return as_string(value)
-
-def asInt(value: Any) -> int:
-    return as_int(value)
-
-def asFloat(value: Any) -> float:
-    return as_float(value)
-
-def asBool(value: Any) -> bool:
-    return as_bool(value)
-
-def asIntList(value: Any) -> list[int]:
-    return as_int_list(value)
-
-def asStringList(value: Any) -> list[string]:
-    return as_string_list(value)
-
 test "JSON document supports memory and mutation":
     decoded = decode[Any]("{\"name\":\"Ada\",\"languages\":2}")
     value := Json("", decoded)
@@ -156,3 +131,73 @@ test "JSON document supports memory and mutation":
     assert(as_string(value.get("name")) == "Ada")
     value.set("name", "Grace")
     assert(value.encode() == "{\"name\":\"Grace\",\"languages\":2}")
+
+test "JSON scalar and collection adapters preserve runtime types":
+    object = decode[Any]("{\"integer\":7,\"float\":2.5,\"truth\":true,\"strings\":[\"a\",\"b\"],\"integers\":[1,2],\"nothing\":null}")
+    assert(kind(object) == "object")
+    assert(object_keys(object) == ["integer", "float", "truth", "strings", "integers", "nothing"])
+    assert(size(object_values(object)) == 6)
+    assert(as_int(object_get(object, "integer")) == 7)
+    assert(as_float(object_get(object, "float")) == 2.5)
+    assert(as_bool(object_get(object, "truth")))
+    assert(as_string_list(object_get(object, "strings")) == ["a", "b"])
+    assert(as_int_list(object_get(object, "integers")) == [1, 2])
+    assert(size(as_list(object_get(object, "strings"))) == 2)
+    assert(is_null(object_get(object, "nothing")))
+    assert(as_string("text") == "text")
+    object_set(object, "added", 9)
+    assert(as_int(object_get(object, "added")) == 9)
+    switch loads[int]("42"):
+        ok loaded:
+            assert(loaded == 42)
+        failure error:
+            assert(false, error)
+    assert(dumps([1, 2]) == "[1,2]")
+
+test "JSON documents expose metadata and typed write failures":
+    switch document("[1,2,3]"):
+        ok array_document:
+            assert(array_document.path().is_empty())
+            assert(array_document.name().is_empty())
+            assert(array_document.extension().is_empty())
+            assert(array_document.kind() == "json")
+            assert(array_document.media_type() == "application/json")
+            assert(array_document.size() == array_document.bytes())
+            assert(array_document.raw() == platform.string_encode("[1,2,3]"))
+            switch array_document.text():
+                ok text_value:
+                    assert(text_value == "[1,2,3]")
+                failure error:
+                    assert(false, error)
+            assert(array_document.keys().is_empty())
+            assert(array_document.values().is_empty())
+            assert(array_document.value() == [1, 2, 3])
+            switch array_document.write():
+                ok:
+                    assert(false, "an in-memory document unexpectedly wrote without a path")
+                failure error:
+                    assert(error.message.contains("no path"))
+        failure error:
+            assert(false, error)
+    destination = "/tmp/severian-json-write-to.json"
+    attached_path = "/tmp/severian-json-attached.JSON"
+    switch file_document(attached_path, "{\"ready\":true}"):
+        ok attached:
+            assert(attached.name() == "severian-json-attached.JSON")
+            assert(attached.extension() == ".json")
+            _written_to = attached.write_to(destination)
+            _written = attached.write()
+            switch platform.file_read(destination):
+                ok contents:
+                    assert(contents == attached.encode())
+                failure error:
+                    assert(false, error)
+        failure error:
+            assert(false, error)
+
+test "invalid JSON remains a typed parse failure":
+    switch decode[Any]("{"):
+        ok _value:
+            assert(false, "invalid JSON unexpectedly decoded")
+        failure _error:
+            assert(true)

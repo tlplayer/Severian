@@ -713,13 +713,7 @@ mod official_library_tests {
 }
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
-    let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
-        function
-            .decorators
-            .iter()
-            .any(|decorator| decorator.package == "tensor")
-    });
-    let result = if has_xla_regions {
+    let result = if compilation.optimized_hir.uses_xla_runtime() {
         let directory = output.parent().unwrap_or_else(|| Path::new("."));
         let runtime = crate::runtime_asset::materialize_xla_runtime(directory)?;
         severian_backend::compile_native_with_xla_runtime(
@@ -739,13 +733,7 @@ pub fn compile_native_with_options(
     output: &Path,
     options: &severian_backend::NativeCompileOptions,
 ) -> Result<(), CompileError> {
-    let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
-        function
-            .decorators
-            .iter()
-            .any(|decorator| decorator.package == "tensor")
-    });
-    let result = if has_xla_regions {
+    let result = if compilation.optimized_hir.uses_xla_runtime() {
         let directory = output.parent().unwrap_or_else(|| Path::new("."));
         let runtime = crate::runtime_asset::materialize_xla_runtime(directory)?;
         severian_backend::compile_native_with_xla_runtime_and_options(

@@ -122,20 +122,7 @@ fn pointer_examples_can_receive_a_source_scoped_capability() {
 fn qwen_packages_use_safe_tensor_and_platform_apis() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let qwen_sources = [
-        "benchmarks/inference/severian/qwen_kernels.sev",
-        "benchmarks/inference/severian/qwen_prefill_kernels.sev",
-        "benchmarks/inference/severian/qwen_decode_kernels.sev",
-        "benchmarks/inference/severian/qwen_tokenizer.sev",
         "library/model/architectures/qwen/src/lib.sev",
-        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_decode.sev",
-        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_prefill_32.sev",
-        "library/model/architectures/qwen/src/kernels/qwen2_5_3b_prefill_256.sev",
-    ];
-    let qwen_manifests = [
-        "benchmarks/inference/severian/modules/qwen_kernels/package.toml",
-        "benchmarks/inference/severian/modules/qwen_prefill_kernels/package.toml",
-        "benchmarks/inference/severian/modules/qwen_decode_kernels/package.toml",
-        "benchmarks/inference/severian/modules/qwen_tokenizer/package.toml",
     ];
 
     for relative in qwen_sources {
@@ -144,13 +131,6 @@ fn qwen_packages_use_safe_tensor_and_platform_apis() {
         assert!(
             !source.contains("native("),
             "{relative} must use library APIs"
-        );
-    }
-    for relative in qwen_manifests {
-        let manifest = std::fs::read_to_string(workspace.join(relative)).unwrap();
-        assert!(
-            !manifest.contains("[package.unsafe]"),
-            "{relative} must not receive an unsafe capability"
         );
     }
 }

@@ -93,3 +93,77 @@ fn tensor_operator_resolves_to_the_same_intrinsic_and_shape_rules() {
         ))
     );
 }
+
+#[test]
+fn runtime_reshape_shape_preserves_dtype_with_dynamic_rank() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: list[int]) -> Tensor[T]\n",
+        "\n",
+        "def reshape_dynamic(input: Tensor[f32, 2, 8], shape: list[int]) -> Tensor[f32]:\n",
+        "    return tensor_reshape(input, shape)\n",
+    );
+    let program = analyze_source(source).unwrap();
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == "reshape_dynamic")
+        .unwrap();
+    let Instruction::Return(Some(value)) = &function.instructions[0] else {
+        panic!("expected a returned tensor operation");
+    };
+    assert_eq!(
+        value.ty(),
+        Some(ValueType::Tensor(TensorType::dynamic(
+            TensorElementType::F32
+        )))
+    );
+}
+
+#[test]
+fn reshape_rejects_a_non_list_shape() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: int) -> Tensor[T]\n",
+        "\n",
+        "def reshape_invalid(input: Tensor[f32, 2, 8]) -> Tensor[f32]:\n",
+        "    return tensor_reshape(input, 16)\n",
+    );
+    let error = analyze_source(source).unwrap_err();
+    assert!(error.message.contains("E002402"));
+    assert!(error.message.contains("expected a compile-time shape"));
+}
+
+#[test]
+fn runtime_transpose_permutation_preserves_dtype_and_rank() {
+    let source = concat!(
+        "unsafe:\n",
+        "    native(\"__sev_tensor_transpose\") def tensor_transpose[T: Numeric](input: Tensor[T], axes: list[int]) -> Tensor[T]\n",
+        "\n",
+        "def permute_dynamic(input: Tensor[f32, 2, 4, 8], axes: list[int]) -> Tensor[f32]:\n",
+        "    return tensor_transpose(input, axes)\n",
+    );
+    let program = analyze_source(source).unwrap();
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == "permute_dynamic")
+        .unwrap();
+    let Instruction::Return(Some(value)) = &function.instructions[0] else {
+        panic!("expected a returned tensor operation");
+    };
+    assert_eq!(
+        value.ty(),
+        Some(ValueType::Tensor(
+            TensorType::ranked(
+                TensorElementType::F32,
+                &[
+                    TensorDimension::Dynamic,
+                    TensorDimension::Dynamic,
+                    TensorDimension::Dynamic,
+                ],
+            )
+            .unwrap()
+        ))
+    );
+}

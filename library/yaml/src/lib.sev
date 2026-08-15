@@ -10,7 +10,10 @@ def strip_scalar(value: string) -> string:
     return cleaned.strip()
 
 def append_values(destination: list[string], source: string) -> list[string]:
-    for raw in source.split(","):
+    content := source.strip()
+    if content.starts_with("[") and content.ends_with("]"):
+        content = content[1:-1]
+    for raw in content.split(","):
         value = strip_scalar(raw)
         if size(value) > 0:
             destination.append(value)
@@ -141,3 +144,61 @@ test "YAML mapping documents support lists and scalars":
     assert(value.scalar("status") == "ready")
     value.set("status", "complete")
     assert(value.scalar("status") == "complete")
+
+test "YAML parsing handles comments, inline lists, quotes, and empty values":
+    value := document("# heading\n\nengineers: [\"Ada\", 'Grace']\nstatus: 'ready'\nempty:\n")
+    assert(value.keys() == ["engineers", "status", "empty"])
+    assert(value.values_for("engineers") == ["Ada", "Grace"])
+    assert(value.scalar("status") == "ready")
+    assert(value.scalar("empty").is_empty())
+    assert(value.scalar("missing").is_empty())
+    assert(value.scalar_or("missing", "fallback") == "fallback")
+    assert(value.scalar_or("status", "fallback") == "ready")
+    assert(value.get("missing") == [])
+    assert(size(value.values()) == 3)
+    assert(value.value() == {"engineers": ["Ada", "Grace"], "status": ["ready"], "empty": []})
+    assert(strip_scalar(" [ value ] ") == "value")
+    assert(strip_scalar("\"quoted\"") == "quoted")
+    assert(strip_scalar("'quoted'") == "quoted")
+    assert(append_values([], "one, ,two") == ["one", "two"])
+
+test "YAML mutation encodes arrays, strings, and scalar JSON values":
+    value := document("")
+    value.set("array", ["one", "two"])
+    value.set("string", "ready")
+    value.set("integer", 7)
+    assert(value.values_for("array") == ["one", "two"])
+    assert(value.values_for("string") == ["ready"])
+    assert(value.values_for("integer") == ["7"])
+    assert(value.encode() == "array:\n- one\n- two\nstring: ready\ninteger: 7\n")
+
+test "YAML documents expose metadata and file persistence":
+    value := document("status: ready\n")
+    assert(value.path().is_empty())
+    assert(value.name().is_empty())
+    assert(value.extension().is_empty())
+    assert(value.kind() == "yaml")
+    assert(value.media_type() == "application/yaml")
+    assert(value.size() == value.bytes())
+    assert(value.raw() == platform.string_encode(value.encode()))
+    switch value.text():
+        ok text_value:
+            assert(text_value == value.encode())
+        failure error:
+            assert(false, error)
+    switch value.write():
+        ok:
+            assert(false, "an in-memory document unexpectedly wrote without a path")
+        failure error:
+            assert(error.message.contains("no path"))
+    destination = "/tmp/severian-yaml-write-to.yaml"
+    _written_to = value.write_to(destination)
+    attached := file_document("/tmp/severian-yaml-attached.YML", value.encode())
+    assert(attached.name() == "severian-yaml-attached.YML")
+    assert(attached.extension() == ".yml")
+    _written = attached.write()
+    switch platform.file_read(destination):
+        ok contents:
+            assert(contents == value.encode())
+        failure error:
+            assert(false, error)

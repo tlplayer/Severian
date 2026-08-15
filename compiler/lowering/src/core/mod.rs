@@ -84,6 +84,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         closure_callback: false,
         placement: TaskPlacement::Default,
         active_hir_id: None,
+        active_expression_type: None,
     };
     for (index, parameter) in function.params.iter().enumerate() {
         if let Some(receiver) = &parameter.receiver {
@@ -188,6 +189,7 @@ fn lower_class_function(
         declared_return: function.return_type,
         placement: TaskPlacement::Default,
         active_hir_id: None,
+        active_expression_type: None,
     };
     for (index, parameter) in function.params.iter().enumerate() {
         if let Some(receiver) = &parameter.receiver {
@@ -253,6 +255,7 @@ struct LowerContext<'a> {
     placement: TaskPlacement,
     loop_targets: Vec<LoopTarget>,
     active_hir_id: Option<severian_hir::HirId>,
+    active_expression_type: Option<ValueType>,
 }
 
 mod bridge;

@@ -16,7 +16,6 @@ pub mod pjrt;
 mod runtime;
 pub mod safetensors;
 pub mod stablehlo;
-mod tokenizer;
 
 pub use client::XlaClient;
 pub use executable_cache::ExecutableCache;

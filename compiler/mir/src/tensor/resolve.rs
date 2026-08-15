@@ -46,37 +46,43 @@ pub(crate) fn resolve_tensor_op(
         }
         Intrinsic::Reshape => {
             expect_input_count(intrinsic, &inputs, 1)?;
+            let shape_operand = source_arguments
+                .get(1)
+                .filter(|shape| !matches!(shape.kind(), severian_hir::Expression::List(_)))
+                .map(&mut lower)
+                .transpose()?;
             Ok(TensorOp::Reshape(ReshapeOp {
                 input: inputs[0],
+                shape_operand,
                 result,
             }))
         }
         Intrinsic::Transpose => {
             expect_input_count(intrinsic, &inputs, 1)?;
             let input = inputs[0];
-            let (permutation, permutation_known) = match source_arguments.get(1) {
-                Some(argument) => (
-                    integer_list(argument).ok_or_else(|| {
-                        failure(
-                            intrinsic,
-                            "permutation argument must be a list of non-negative integers",
-                        )
-                    })?,
-                    true,
-                ),
-                None => (
-                    input
-                        .ty
-                        .rank
-                        .map(|rank| (0..u64::from(rank)).rev().collect())
-                        .unwrap_or_default(),
-                    input.ty.rank.is_some(),
-                ),
-            };
+            let (permutation, permutation_known, permutation_operand) =
+                match source_arguments.get(1) {
+                    Some(argument) if integer_list(argument).is_some() => (
+                        integer_list(argument).expect("literal permutation was already resolved"),
+                        true,
+                        None,
+                    ),
+                    Some(argument) => (Vec::new(), false, Some(lower(argument)?)),
+                    None => (
+                        input
+                            .ty
+                            .rank
+                            .map(|rank| (0..u64::from(rank)).rev().collect())
+                            .unwrap_or_default(),
+                        input.ty.rank.is_some(),
+                        None,
+                    ),
+                };
             Ok(TensorOp::Transpose(TransposeOp {
                 input,
                 permutation,
                 permutation_known,
+                permutation_operand,
                 result,
             }))
         }

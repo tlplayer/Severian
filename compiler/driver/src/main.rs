@@ -1624,13 +1624,9 @@ fn run_targets(
         }
         let mut command = Command::new(&output);
         command.args(application_arguments);
-        let has_xla_regions = compilation.optimized_hir.functions.iter().any(|function| {
-            function
-                .decorators
-                .iter()
-                .any(|decorator| decorator.package == "tensor")
-        });
-        if has_xla_regions && std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN").is_none() {
+        if compilation.optimized_hir.uses_xla_runtime()
+            && std::env::var_os("SEVERIAN_ROCM_PJRT_PLUGIN").is_none()
+        {
             if let Some(plugin) = local_rocm_pjrt_plugin(&target.package_root) {
                 command.env("SEVERIAN_ROCM_PJRT_PLUGIN", plugin);
             }

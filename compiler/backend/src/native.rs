@@ -69,17 +69,12 @@ pub fn compile_native(
             .as_deref()
             .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
     });
-    let uses_xla = program.functions.iter().any(|function| {
-        function
-            .decorators
-            .iter()
-            .any(|decorator| decorator.package == "tensor")
-    });
+    let uses_xla = program.uses_xla_runtime();
     let mut libraries = Vec::new();
     if uses_xla {
         let library = xla_runtime.ok_or_else(|| {
             BackendError(std::io::Error::other(
-                "native program contains XLA tensor regions but no runtime archive was supplied",
+                "native program uses the XLA runtime but no runtime archive was supplied",
             ))
         })?;
         libraries.push(library.to_path_buf());

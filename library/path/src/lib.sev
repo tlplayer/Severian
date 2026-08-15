@@ -44,3 +44,25 @@ def sanitize_name(value: string) -> string:
 
 test "path names are safe and stable":
     assert(sanitize_name("High  Overlord Saurfang!") == "high_overlord_saurfang")
+    assert(sanitize_name("  !!! keep-me  ") == "keep-me")
+
+test "path inspection handles files, directories, and missing paths":
+    file_path = "/tmp/severian-library-path.txt"
+    switch platform.file_write(file_path, "path coverage"):
+        ok:
+            assert(exists(file_path))
+            assert(is_file(file_path))
+            assert(not is_dir(file_path))
+            assert(basename(file_path) == "severian-library-path.txt")
+            assert(dirname(file_path) == "/tmp")
+            assert(extension(file_path) == ".txt")
+            assert(absolute(file_path) == file_path)
+        failure error:
+            assert(false, error)
+    assert(join("/tmp", "child") == "/tmp/child")
+    assert(is_dir("/tmp"))
+    assert(not is_file("/tmp"))
+    missing = "/tmp/severian-path-does-not-exist/child"
+    assert(not exists(missing))
+    assert(not is_file(missing))
+    assert(not is_dir(missing))

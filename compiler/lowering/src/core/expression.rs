@@ -7,6 +7,7 @@ impl LowerContext<'_> {
                 id, ty, expression, ..
             } => {
                 let previous = self.active_hir_id.replace(*id);
+                let previous_type = self.active_expression_type.replace(*ty);
                 let result = if let Expression::Conditional {
                     condition,
                     then_expression,
@@ -44,6 +45,7 @@ impl LowerContext<'_> {
                     }
                 };
                 self.active_hir_id = previous;
+                self.active_expression_type = previous_type;
                 result
             }
             Expression::Integer(value) => {
@@ -1694,12 +1696,21 @@ impl LowerContext<'_> {
                     });
                 if let Some(receiver) = self.receiver_types.get(&object) {
                     if !receiver.concrete && receiver.methods.iter().any(|name| name == method) {
-                        let first = inferred_methods[0].1;
-                        let params = first
-                            .params
-                            .iter()
-                            .map(|parameter| parameter.ty)
-                            .collect::<Vec<_>>();
+                        let params = inferred_methods.first().map_or_else(
+                            || lowered_args.iter().map(|(_, ty)| *ty).collect::<Vec<_>>(),
+                            |(_, definition)| {
+                                definition
+                                    .params
+                                    .iter()
+                                    .map(|parameter| parameter.ty)
+                                    .collect::<Vec<_>>()
+                            },
+                        );
+                        let return_type = inferred_methods
+                            .first()
+                            .map(|(_, definition)| definition.return_type)
+                            .or(self.active_expression_type)
+                            .unwrap_or(ValueType::Any);
                         let lowered = lowered_args
                             .iter()
                             .cloned()
@@ -1729,9 +1740,8 @@ impl LowerContext<'_> {
                         for parameter in &params {
                             write!(types, ", {}", mlir_type(*parameter)).unwrap();
                         }
-                        let symbol =
-                            dynamic_method_dispatch_symbol(method, &params, first.return_type);
-                        if first.return_type == ValueType::Unit {
+                        let symbol = dynamic_method_dispatch_symbol(method, &params, return_type);
+                        if return_type == ValueType::Unit {
                             writeln!(
                                 self.output,
                                 "    llvm.call @{symbol}({operands}) : ({types}) -> ()"
@@ -1743,10 +1753,10 @@ impl LowerContext<'_> {
                         writeln!(
                             self.output,
                             "    {result} = llvm.call @{symbol}({operands}) : ({types}) -> {}",
-                            mlir_type(first.return_type)
+                            mlir_type(return_type)
                         )
                         .unwrap();
-                        return (result, first.return_type);
+                        return (result, return_type);
                     }
                 }
                 if class.is_none() && inferred_methods.len() > 1 {
