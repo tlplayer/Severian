@@ -1,7 +1,27 @@
 import platform
+import "src/expression.sev" as expression
+import "src/query.sev" as query
+import "src/schema.sev" as schema_logic
+import "src/sql.sev" as sql_parser
 
 trait Source:
     data() -> Data
+
+class Schema:
+    columns: list[string]
+    types: list[string]
+    nullable: list[bool]
+    def has(column: string) -> bool:
+        return column in columns
+
+def column(name: string) -> expression.Column:
+    return expression.column(name)
+
+def all_of(left: expression.Expression, right: expression.Expression) -> expression.Expression:
+    return expression.Expression("and", "", true, [left, right])
+
+def any_of(left: expression.Expression, right: expression.Expression) -> expression.Expression:
+    return expression.Expression("or", "", true, [left, right])
 
 def column_position(columns: list[string], name: string) -> int:
     for index, column in enumerate(columns):
@@ -15,13 +35,11 @@ def cell_at(values: list[Any], position: int) -> Any:
 class Row:
     columns_data: list[string]
     values_data: list[Any]
-
     def get(column: string) -> Any:
         return cell_at(values_data, column_position(columns_data, column))
 
     def values() -> list[Any]:
         return values_data
-
     def as_map() -> map[string, Any]:
         result := {}
         for index in range(size(columns_data)):
@@ -144,35 +162,73 @@ def group_merge_records(
 class Data:
     columns_data: list[string]
     rows_data: list[list[Any]]
+    query_steps: list[query.Step]
+    source_name: string
 
+    def Data(columns: list[string], rows: list[list[Any]]):
+        columns_data = columns
+        rows_data = rows
+        query_steps = []
+        source_name = "memory"
+
+    def Data(columns: list[string], rows: list[list[Any]], steps: list[query.Step], source: string):
+        columns_data = columns
+        rows_data = rows
+        query_steps = steps
+        source_name = source
     def data() -> Data:
-        return Data(columns_data, rows_data)
+        return self.collect()
+
+    def is_lazy() -> bool:
+        return size(query_steps) > 0
+
+    def lazy(source: string = "memory") -> Data:
+        return Data(columns_data, rows_data, [query.Step("scan", [], expression.literal(true), 0, false)], source)
+
+    def plan() -> list[query.Step]:
+        return query.copied(query_steps)
+    def schema() -> Schema:
+        materialized = self.collect()
+        width = size(materialized.columns_data)
+        return Schema(materialized.columns_data, schema_logic.inferred_types(materialized.rows_data, width), schema_logic.inferred_nullability(materialized.rows_data, width))
 
     def columns() -> list[string]:
+        if self.is_lazy():
+            return self.collect().columns_data
         return columns_data
 
     def rows() -> list[Row]:
+        if self.is_lazy():
+            return self.collect().rows()
         result: list[Row] = []
         for values in rows_data:
             result.append(Row(columns_data, values))
         return result
 
     def values() -> list[list[Any]]:
+        if self.is_lazy():
+            return self.collect().rows_data
         return rows_data
 
     def records() -> list[list[Any]]:
+        if self.is_lazy():
+            return self.collect().records()
         records := [columns_data]
         for values in rows_data:
             records.append(values)
         return records
-
     def row_count() -> int:
+        if self.is_lazy():
+            return size(self.collect().rows_data)
         return size(rows_data)
 
     def has_column(column: string) -> bool:
+        if self.is_lazy():
+            return self.collect().has_column(column)
         return column_position(columns_data, column) >= 0
-
     def get(column: string) -> list[Any]:
+        if self.is_lazy():
+            return self.collect().get(column)
         position = column_position(columns_data, column)
         if position < 0:
             return []
@@ -180,8 +236,9 @@ class Data:
         for values in rows_data:
             result.append(cell_at(values, position))
         return result
-
     def column(column: string) -> list[Any]:
+        if self.is_lazy():
+            return self.collect().column(column)
         position = column_position(columns_data, column)
         if position < 0:
             return []
@@ -189,17 +246,18 @@ class Data:
         for values in rows_data:
             result.append(cell_at(values, position))
         return result
-
     def select(columns: list[string]) -> Data:
+        if self.is_lazy():
+            steps = query.copied(query_steps)
+            steps.append(query.project(columns))
+            return Data(columns_data, rows_data, steps, source_name)
         return project_records(columns_data, rows_data, columns)
-
     def drop(columns: list[string]) -> Data:
         retained := []
         for column in columns_data:
             if not (column in columns):
                 retained.append(column)
         return project_records(columns_data, rows_data, retained)
-
     def rename(source: string, destination: string) -> Data:
         columns := []
         for column in columns_data:
@@ -280,13 +338,31 @@ class Data:
                 filtered.append(values)
         return Data(columns_data, filtered)
 
+    def where(predicate: expression.Expression) -> Data:
+        steps = query.copied(query_steps)
+        if size(steps) == 0:
+            steps.append(query.Step("scan", [], expression.literal(true), 0, false))
+        steps.append(query.filter(predicate))
+        return Data(columns_data, rows_data, steps, source_name)
+
+    def filter_expression(predicate: expression.Expression) -> Data:
+        return self.where(predicate)
+
     def sort(column: string) -> Data:
+        if self.is_lazy():
+            steps = query.copied(query_steps)
+            steps.append(query.sort(column))
+            return Data(columns_data, rows_data, steps, source_name)
         position = column_position(columns_data, column)
         if position < 0:
             return Data(columns_data, rows_data)
         return Data(columns_data, rows_data.sorted(|values| cell_at(values, position)))
 
     def sort_descending(column: string) -> Data:
+        if self.is_lazy():
+            steps = query.copied(query_steps)
+            steps.append(query.sort(column, true))
+            return Data(columns_data, rows_data, steps, source_name)
         position = column_position(columns_data, column)
         if position < 0:
             return Data(columns_data, rows_data)
@@ -316,6 +392,61 @@ class Data:
         merge: Function[Data, Row],
     ) -> Data:
         return group_merge_records(columns_data, rows_data, predicate, columns, merge)
+
+    def limit(count: int) -> Data:
+        assert(count >= 0, "Data.limit requires a non-negative row count")
+        if not self.is_lazy():
+            end = count if count < size(rows_data) else size(rows_data)
+            return Data(columns_data, rows_data[0:end])
+        steps = query.copied(query_steps)
+        steps.append(query.limit(count))
+        return Data(columns_data, rows_data, steps, source_name)
+
+    def collect() -> Data:
+        if not self.is_lazy():
+            return Data(columns_data, rows_data)
+        result := Data(columns_data, rows_data)
+        for step in query_steps:
+            if step.operation == "scan":
+                continue
+            if step.operation == "filter":
+                retained := []
+                for values in result.rows_data:
+                    if expression.evaluate(step.predicate, Row(result.columns_data, values).as_map()):
+                        retained.append(values)
+                result = Data(result.columns_data, retained)
+                continue
+            if step.operation == "project":
+                result = project_records(result.columns_data, result.rows_data, step.columns)
+                continue
+            if step.operation == "sort":
+                result = result.sort_descending(step.columns[0]) if step.descending else result.sort(step.columns[0])
+                continue
+            if step.operation == "limit":
+                result = result.limit(step.count)
+        return result
+
+    def explain() -> string:
+        steps := []
+        for step in query_steps:
+            if step.operation != "scan":
+                steps.append(step)
+        return query.explain(source_name, columns_data, steps)
+
+    def sql(statement: string) -> Data:
+        parsed = sql_parser.parse(statement)
+        assert(parsed.error == "", parsed.error)
+        assert(parsed.relation.lower() == "self", "instance SQL must read FROM self")
+        result := self.lazy(source_name)
+        if parsed.filter_column != "":
+            result = result.where(expression.compare(parsed.filter_column, parsed.filter_operation, parsed.filter_value))
+        if parsed.order_column != "":
+            result = result.sort_descending(parsed.order_column) if parsed.descending else result.sort(parsed.order_column)
+        if parsed.columns != ["*"]:
+            result = result.select(parsed.columns)
+        if parsed.limit_count >= 0:
+            result = result.limit(parsed.limit_count)
+        return result
 
 def example_data() -> Data:
     return Data(["name", "group"], [["Ada", "A"], ["Grace", "B"], ["Ada", "a"]])
@@ -352,3 +483,18 @@ test "group_merge replaces selected groups at their first source position":
     )
     merged = table.group_merge(|row| row.get("name") == "Ada", ["name"], |group| join_notes(group))
     assert(merged.values() == [["Ada", "first second"], ["Grace", "middle"], ["Grace", "last"]])
+
+test "expression queries stay lazy until collection and expose their plan":
+    table := Data(["name", "age", "active"], [["Ada", 36, true], ["Grace", 17, true], ["Linus", 28, false], ["Edsger", 42, true]])
+    adults = table.where(column("age").greater_or_equal(18).and_(column("active").equal(true))).select(["name", "age"]).sort_descending("age").limit(2)
+    assert(adults.is_lazy())
+    assert(adults.explain() == "DataQuery\n  Scan memory [name, age, active]\n  -> Filter (age >= 18 and active = true)\n  -> Project name, age\n  -> Sort age descending\n  -> Limit 2")
+    assert(adults.collect().records() == [["name", "age"], ["Edsger", 42], ["Ada", 36]])
+    assert(adults.schema().columns == ["name", "age"])
+    assert(adults.schema().types == ["string", "integer"])
+
+test "instance SQL lowers to the same query steps":
+    table := Data(["name", "age", "active"], [["Ada", 36, true], ["Grace", 17, true], ["Edsger", 42, true]])
+    result = table.sql("SELECT name, age FROM self WHERE active = true ORDER BY age DESC LIMIT 1")
+    assert(result.is_lazy())
+    assert(result.collect().records() == [["name", "age"], ["Edsger", 42]])

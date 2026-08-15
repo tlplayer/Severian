@@ -1,0 +1,103 @@
+import platform
+
+class Expression:
+    operation: string
+    column_name: string
+    literal_value: Any
+    operands: list[Expression]
+
+    def and_(other: Expression) -> Expression:
+        return Expression("and", "", true, [self, other])
+
+    def or_(other: Expression) -> Expression:
+        return Expression("or", "", true, [self, other])
+
+    def negate() -> Expression:
+        return Expression("not", "", true, [self])
+
+    def describe() -> string:
+        if operation == "column":
+            return column_name
+        if operation == "literal":
+            return string(literal_value)
+        if operation == "not":
+            return "not (" + operands[0].describe() + ")"
+        if operation == "and" or operation == "or":
+            return "(" + operands[0].describe() + " " + operation + " " + operands[1].describe() + ")"
+        return operands[0].describe() + " " + operation + " " + operands[1].describe()
+
+class Column:
+    name: string
+
+    def expression() -> Expression:
+        return Expression("column", name, true, [])
+
+    def equal(value: Any) -> Expression:
+        return comparison(self.expression(), "=", literal(value))
+
+    def not_equal(value: Any) -> Expression:
+        return comparison(self.expression(), "!=", literal(value))
+
+    def greater_than(value: Any) -> Expression:
+        return comparison(self.expression(), ">", literal(value))
+
+    def greater_or_equal(value: Any) -> Expression:
+        return comparison(self.expression(), ">=", literal(value))
+
+    def less_than(value: Any) -> Expression:
+        return comparison(self.expression(), "<", literal(value))
+
+    def less_or_equal(value: Any) -> Expression:
+        return comparison(self.expression(), "<=", literal(value))
+
+    def is_null() -> Expression:
+        return Expression("is null", "", true, [self.expression()])
+
+    def is_not_null() -> Expression:
+        return Expression("is not null", "", true, [self.expression()])
+
+def column(name: string) -> Column:
+    return Column(name)
+
+def literal(value: Any) -> Expression:
+    return Expression("literal", "", value, [])
+
+def comparison(left: Expression, operation: string, right: Expression) -> Expression:
+    return Expression(operation, "", true, [left, right])
+
+def compare(column_name: string, operation: string, value: Any) -> Expression:
+    return comparison(column(column_name).expression(), operation, literal(value))
+
+def value(expression: Expression, row: map[string, Any]) -> Any:
+    if expression.operation == "literal":
+        return expression.literal_value
+    if expression.operation == "column":
+        return row.get(expression.column_name, "")
+    return ""
+
+def evaluate(expression: Expression, row: map[string, Any]) -> bool:
+    if expression.operation == "not":
+        return not evaluate(expression.operands[0], row)
+    if expression.operation == "and":
+        return evaluate(expression.operands[0], row) and evaluate(expression.operands[1], row)
+    if expression.operation == "or":
+        return evaluate(expression.operands[0], row) or evaluate(expression.operands[1], row)
+    if expression.operation == "is null":
+        return platform.jsonis_null(value(expression.operands[0], row))
+    if expression.operation == "is not null":
+        return not platform.jsonis_null(value(expression.operands[0], row))
+    left = value(expression.operands[0], row)
+    right = value(expression.operands[1], row)
+    if expression.operation == "=":
+        return left == right
+    if expression.operation == "!=":
+        return left != right
+    if expression.operation == ">":
+        return left > right
+    if expression.operation == ">=":
+        return left >= right
+    if expression.operation == "<":
+        return left < right
+    if expression.operation == "<=":
+        return left <= right
+    return false

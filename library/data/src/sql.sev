@@ -1,0 +1,81 @@
+import platform
+
+class SqlQuery:
+    relation: string
+    columns: list[string]
+    filter_column: string
+    filter_operation: string
+    filter_value: Any
+    order_column: string
+    descending: bool
+    limit_count: int
+    error: string
+
+def empty() -> SqlQuery:
+    return SqlQuery("", [], "", "", "", "", false, -1, "")
+
+def invalid(message: string) -> SqlQuery:
+    return SqlQuery("", [], "", "", "", "", false, -1, message)
+
+def literal(text: string) -> Any:
+    if size(text) >= 2 and text.starts_with("'") and text.ends_with("'"):
+        return text[1:-1]
+    switch platform.jsondecode(text):
+        ok value:
+            return value
+        failure _:
+            return text
+
+def parse(statement: string) -> SqlQuery:
+    tokens = statement.replace(",", " , ").replace(";", " ").strip().words()
+    if size(tokens) < 4 or tokens[0].upper() != "SELECT":
+        return invalid("SQL must start with SELECT")
+
+    columns := []
+    cursor := 1
+    while cursor < size(tokens) and tokens[cursor].upper() != "FROM":
+        if tokens[cursor] != ",":
+            columns.append(tokens[cursor])
+        cursor += 1
+    if cursor + 1 >= size(tokens):
+        return invalid("SQL SELECT requires FROM self")
+    if size(columns) == 0:
+        return invalid("SQL SELECT requires at least one column")
+
+    relation = tokens[cursor + 1]
+    filter_column := ""
+    filter_operation := ""
+    filter_value: Any := literal("\"\"")
+    order_column := ""
+    descending := false
+    limit_count := -1
+    cursor += 2
+    while cursor < size(tokens):
+        keyword = tokens[cursor].upper()
+        if keyword == "WHERE":
+            if cursor + 3 >= size(tokens):
+                return invalid("SQL WHERE requires a column, operator, and value")
+            filter_column = tokens[cursor + 1]
+            filter_operation = tokens[cursor + 2]
+            if filter_operation not in ["=", "!=", ">", ">=", "<", "<="]:
+                return invalid("unsupported SQL comparison: " + filter_operation)
+            filter_value = literal(tokens[cursor + 3])
+            cursor += 4
+            continue
+        if keyword == "ORDER":
+            if cursor + 2 >= size(tokens) or tokens[cursor + 1].upper() != "BY":
+                return invalid("SQL ORDER must be followed by BY and a column")
+            order_column = tokens[cursor + 2]
+            cursor += 3
+            if cursor < size(tokens) and (tokens[cursor].upper() == "ASC" or tokens[cursor].upper() == "DESC"):
+                descending = tokens[cursor].upper() == "DESC"
+                cursor += 1
+            continue
+        if keyword == "LIMIT":
+            if cursor + 1 >= size(tokens):
+                return invalid("SQL LIMIT requires a row count")
+            limit_count = int(tokens[cursor + 1])
+            cursor += 2
+            continue
+        return invalid("unsupported SQL clause: " + tokens[cursor])
+    return SqlQuery(relation, columns, filter_column, filter_operation, filter_value, order_column, descending, limit_count, "")

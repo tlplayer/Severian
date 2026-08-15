@@ -1,0 +1,26 @@
+import platform
+
+def inferred_types(rows: list[list[Any]], width: int) -> list[string]:
+    result := []
+    for position in range(width):
+        kind := "null"
+        for values in rows:
+            value_kind = platform.jsonkind(values[position]) if position < size(values) else "null"
+            if value_kind != "null":
+                if kind == "null":
+                    kind = value_kind
+                else:
+                    if kind != value_kind:
+                        kind = "any"
+        result.append(kind)
+    return result
+
+def inferred_nullability(rows: list[list[Any]], width: int) -> list[bool]:
+    result := []
+    for position in range(width):
+        nullable := false
+        for values in rows:
+            if position >= size(values) or platform.jsonkind(values[position]) == "null":
+                nullable = true
+        result.append(nullable)
+    return result
