@@ -2,9 +2,23 @@ pub fn source() -> &'static str {
     r#"
 #include <strings.h>
 
-typedef struct { bool secure; sev_tcp_handle *tcp; sev_tls_handle *tls; } sev_http_stream;
+int32_t sev_abi_v1_network_connect(sev_string_view_v1 host, uint16_t port, sev_handle_v1 *connection, sev_error_v1 *error);
+int32_t sev_abi_v1_network_read(sev_handle_v1 connection, size_t count, sev_handle_v1 *bytes, sev_error_v1 *error);
+int32_t sev_abi_v1_network_write(sev_handle_v1 connection, sev_bytes_view_v1 data, size_t *written, sev_error_v1 *error);
+int32_t sev_abi_v1_network_close(sev_handle_v1 connection, sev_error_v1 *error);
+int32_t sev_abi_v1_network_set_read_timeout(sev_handle_v1 connection, uint64_t milliseconds, sev_error_v1 *error);
+int32_t sev_abi_v1_network_set_write_timeout(sev_handle_v1 connection, uint64_t milliseconds, sev_error_v1 *error);
+size_t sev_abi_v1_network_bytes_length(sev_handle_v1 bytes);
+uint8_t sev_abi_v1_network_bytes_at(sev_handle_v1 bytes, size_t index);
+void sev_abi_v1_network_bytes_release(sev_handle_v1 bytes);
+
+typedef struct { bool secure; sev_handle_v1 tcp; sev_tls_handle *tls; } sev_http_stream;
 typedef struct { int status; int64_t content_length; bool chunked; char location[4096]; } sev_http_head;
 typedef struct { bool secure; char host[256]; int64_t port; char path[4096]; } sev_http_url;
+
+static sev_string_view_v1 sev_http_view(const char *value) {
+  sev_string_view_v1 view = { .data = (const uint8_t *)value, .length = value ? strlen(value) : 0 }; return view;
+}
 
 static ssize_t sev_http_stream_read(sev_http_stream *stream, unsigned char *buffer, size_t size) {
   if (stream->secure) {
@@ -12,7 +26,11 @@ static ssize_t sev_http_stream_read(sev_http_stream *stream, unsigned char *buff
     if (received <= 0 && SSL_get_error(stream->tls->stream, received) == SSL_ERROR_ZERO_RETURN) return 0;
     return received;
   }
-  ssize_t received; do received = recv(stream->tcp->socket, buffer, size, 0); while (received < 0 && errno == EINTR); return received;
+  sev_handle_v1 bytes = {0}; sev_error_v1 error = {0};
+  if (sev_abi_v1_network_read(stream->tcp, size, &bytes, &error) != 0) return -1;
+  size_t received = sev_abi_v1_network_bytes_length(bytes);
+  for (size_t index = 0; index < received; ++index) buffer[index] = sev_abi_v1_network_bytes_at(bytes, index);
+  sev_abi_v1_network_bytes_release(bytes); return (ssize_t)received;
 }
 
 static bool sev_http_stream_write_all(sev_http_stream *stream, const unsigned char *buffer, size_t size) {
@@ -20,7 +38,7 @@ static bool sev_http_stream_write_all(sev_http_stream *stream, const unsigned ch
   while (offset < size) {
     ssize_t written;
     if (stream->secure) written = SSL_write(stream->tls->stream, buffer + offset, size - offset > INT_MAX ? INT_MAX : (int)(size - offset));
-    else { do written = send(stream->tcp->socket, buffer + offset, size - offset, 0); while (written < 0 && errno == EINTR); }
+    else { size_t count = 0; sev_error_v1 error = {0}; sev_bytes_view_v1 data = { .data = buffer + offset, .length = size - offset }; written = sev_abi_v1_network_write(stream->tcp, data, &count, &error) == 0 ? (ssize_t)count : -1; }
     if (written <= 0) return false;
     offset += (size_t)written;
   }
@@ -32,7 +50,7 @@ static void sev_http_stream_close(sev_http_stream *stream) {
     SSL_shutdown(stream->tls->stream); SSL_free(stream->tls->stream); SSL_CTX_free(stream->tls->context);
     stream->tls->closed = true;
   }
-  if (stream->tcp && !stream->tcp->closed) { close(stream->tcp->socket); stream->tcp->closed = true; }
+  if (stream->tcp.value) { sev_error_v1 error = {0}; sev_abi_v1_network_close(stream->tcp, &error); stream->tcp.value = NULL; }
 }
 
 static bool sev_http_parse_url(const char *url, sev_http_url *parsed) {
@@ -84,10 +102,10 @@ static bool sev_http_read_line(sev_http_stream *stream, char *line, size_t capac
 static bool sev_http_open(const char *method, const char *url, const char *body, sev_http_stream *stream, sev_http_url *parsed, sev_http_head *head) {
   if (!sev_http_parse_url(url, parsed)) return false;
   memset(stream, 0, sizeof(*stream)); memset(head, 0, sizeof(*head)); head->content_length = -1;
-  stream->tcp = sev_tcp_connect_native(parsed->host, parsed->port); if (!stream->tcp) return false;
-  struct timeval timeout = { .tv_sec = 30, .tv_usec = 0 };
-  setsockopt(stream->tcp->socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-  setsockopt(stream->tcp->socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  sev_error_v1 network_error = {0};
+  if (sev_abi_v1_network_connect(sev_http_view(parsed->host), (uint16_t)parsed->port, &stream->tcp, &network_error) != 0) return false;
+  sev_abi_v1_network_set_read_timeout(stream->tcp, 30000, &network_error);
+  sev_abi_v1_network_set_write_timeout(stream->tcp, 30000, &network_error);
   stream->secure = parsed->secure;
   if (stream->secure) { stream->tls = sev_tls_wrap_native(stream->tcp, parsed->host); if (!stream->tls) { sev_http_stream_close(stream); return false; } }
   size_t body_size = body ? strlen(body) : 0; char request[8192];

@@ -71,7 +71,9 @@ pub(super) fn enforce_manifest_unsafe_policy(
     let source_allowed = sources
         .iter()
         .any(|source| Path::new(source) == relative_source);
-    let is_library = interface_library || source_is_library(manifest, manifest_path, source_path);
+    let is_library = interface_library
+        || source_is_library(manifest, manifest_path, source_path)
+        || (source_allowed && manifest.get("lib").is_some());
     if requested.contains("native-abi") && !is_library {
         return Err(unsafe_policy_error(
             &format!("non-library target `{}`", relative_source.display()),
@@ -147,6 +149,13 @@ fn unsafe_capabilities(tokens: &[severian_lexer::Token]) -> BTreeSet<&'static st
 }
 
 fn manifest_relative_source(manifest_path: &Path, source_path: &Path) -> PathBuf {
+    if let (Some(root), Ok(source)) = (manifest_path.parent(), source_path.canonicalize()) {
+        if let Ok(root) = root.canonicalize() {
+            if let Ok(relative) = source.strip_prefix(root) {
+                return relative.to_path_buf();
+            }
+        }
+    }
     manifest_path
         .parent()
         .and_then(|root| source_path.strip_prefix(root).ok())

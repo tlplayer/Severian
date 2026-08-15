@@ -6,6 +6,8 @@ use severian_package::PackageInterface;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod native_plan;
+
 include!(concat!(env!("OUT_DIR"), "/official_libraries.rs"));
 
 #[derive(Debug, Clone)]
@@ -14,6 +16,8 @@ pub struct Compilation {
     pub optimized_hir: Program,
     pub mir: severian_mir::Program,
     pub mlir: Module,
+    pub native_units: Vec<severian_package::NativeUnit>,
+    pub native_assets: Vec<severian_package::EmbeddedNativeAsset>,
 }
 
 impl Drop for Compilation {
@@ -71,9 +75,15 @@ fn compile_ast(
     source: &str,
     type_resolution: severian_package::TypeResolutionPolicy,
 ) -> Result<Compilation, CompileError> {
+    let plan_interfaces = native_plan::interfaces_with_root(interfaces, ast, source_path, source)?;
+    let (native_units, native_assets, external_functions) = native_plan::build(&plan_interfaces)?;
     let hir = check_ast(ast, interfaces, source_path, source, type_resolution)?;
     let mut optimized_hir = hir.clone();
     link_package_hir(&mut optimized_hir, interfaces)?;
+    optimized_hir
+        .metadata
+        .external_functions
+        .extend(external_functions);
     let fusion_rules = interfaces
         .iter()
         .flat_map(|interface| interface.compiler.fusion_rules.iter().cloned());
@@ -98,6 +108,8 @@ fn compile_ast(
         optimized_hir,
         mir,
         mlir,
+        native_units,
+        native_assets,
     })
 }
 
@@ -523,8 +535,21 @@ fn frontend_path(
         .iter()
         .map(|interface| interface.name.clone())
         .collect::<HashSet<_>>();
-    let local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
+    let mut local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
         .map_err(|error| CompileError::Package(error.to_string()))?;
+    if let Some(manifest_path) = manifest_path.as_deref() {
+        let native_units = severian_package::load_manifest_native_units(manifest_path)
+            .map_err(|error| CompileError::Package(error.to_string()))?;
+        for interface in &mut local_interfaces {
+            severian_package::enforce_unsafe_policy(
+                Some(manifest_path),
+                &interface.source_path,
+                &interface.source,
+            )
+            .map_err(|error| CompileError::Package(error.to_string()))?;
+            interface.native_units = native_units.clone();
+        }
+    }
     let local_paths = local_interfaces
         .iter()
         .map(|interface| interface.source_path.clone())
@@ -683,47 +708,29 @@ fn installed_library_root() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod official_library_tests {
-    use super::{parse_source, EMBEDDED_OFFICIAL_PACKAGES};
-    use std::path::Path;
-
-    #[test]
-    fn embedded_distribution_contains_nested_official_packages() {
-        assert!(EMBEDDED_OFFICIAL_PACKAGES
-            .iter()
-            .any(|package| package.name == "model.speech"));
-        let module = parse_source(
-            "import model.speech as speech\n",
-            Path::new("embedded-consumer.sev"),
-        )
-        .unwrap();
-        let interfaces = severian_package::load_embedded_official_interfaces(
-            &module,
-            EMBEDDED_OFFICIAL_PACKAGES,
-        )
-        .unwrap();
-        let names = interfaces
-            .iter()
-            .map(|interface| interface.name.as_str())
-            .collect::<Vec<_>>();
-        assert!(names.contains(&"model.speech"));
-        assert!(names.contains(&"math"));
-        assert!(names.contains(&"random"));
-    }
-}
+#[path = "compile/official_library_tests.rs"]
+mod official_library_tests;
 
 pub fn compile_native(compilation: &Compilation, output: &Path) -> Result<(), CompileError> {
     let result = if compilation.optimized_hir.uses_xla_runtime() {
         let directory = output.parent().unwrap_or_else(|| Path::new("."));
         let runtime = crate::runtime_asset::materialize_xla_runtime(directory)?;
-        severian_backend::compile_native_with_xla_runtime(
+        severian_backend::compile_native_with_xla_runtime_and_package_units(
             &compilation.optimized_hir,
             &compilation.mlir,
             output,
             &runtime,
+            &compilation.native_units,
+            &compilation.native_assets,
         )
     } else {
-        severian_backend::compile_native(&compilation.optimized_hir, &compilation.mlir, output)
+        severian_backend::compile_native_with_package_units(
+            &compilation.optimized_hir,
+            &compilation.mlir,
+            output,
+            &compilation.native_units,
+            &compilation.native_assets,
+        )
     };
     result.map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))
 }
@@ -736,19 +743,23 @@ pub fn compile_native_with_options(
     let result = if compilation.optimized_hir.uses_xla_runtime() {
         let directory = output.parent().unwrap_or_else(|| Path::new("."));
         let runtime = crate::runtime_asset::materialize_xla_runtime(directory)?;
-        severian_backend::compile_native_with_xla_runtime_and_options(
+        severian_backend::compile_native_with_xla_runtime_package_units_and_options(
             &compilation.optimized_hir,
             &compilation.mlir,
             output,
             &runtime,
             options,
+            &compilation.native_units,
+            &compilation.native_assets,
         )
     } else {
-        severian_backend::compile_native_with_options(
+        severian_backend::compile_native_with_package_units_and_options(
             &compilation.optimized_hir,
             &compilation.mlir,
             output,
             options,
+            &compilation.native_units,
+            &compilation.native_assets,
         )
     };
     result.map_err(|error| CompileError::Io(std::io::Error::other(error.to_string())))

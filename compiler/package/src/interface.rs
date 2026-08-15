@@ -1,5 +1,9 @@
 use super::*;
 
+mod native;
+pub use native::load_manifest_native_units;
+use native::native_units;
+
 pub fn load_path_dependency_interfaces(
     manifest_path: &Path,
 ) -> Result<Vec<PackageInterface>, PackageError> {
@@ -132,6 +136,8 @@ fn collect_local_interfaces(
             export_package: None,
             module: imported,
             compiler: CompilerMetadata::default(),
+            native_units: Vec::new(),
+            native_assets: Vec::new(),
             source_path,
             source,
         });
@@ -266,13 +272,23 @@ pub fn load_embedded_official_interfaces(
                 package.name
             )));
         }
-        let interface = load_interface_source(
+        let mut interface = load_interface_source(
             &name,
             &manifest,
             &manifest_path,
             source_path,
             package.source.to_owned(),
         )?;
+        interface.native_assets = package
+            .native_assets
+            .iter()
+            .map(|asset| EmbeddedNativeAsset {
+                path: PathBuf::from("<severian-stdlib>")
+                    .join(package.name)
+                    .join(asset.path),
+                contents: asset.contents.to_vec(),
+            })
+            .collect();
         pending.extend(imported_packages(&interface.module));
         interfaces.push(interface);
         for embedded in package.modules {
@@ -342,8 +358,36 @@ fn load_interface_tree_as(
     directory: &Path,
 ) -> Result<Vec<PackageInterface>, PackageError> {
     let root = load_interface_as(import_name, expected_package, directory)?;
+    let manifest_path = manifest_in(directory).unwrap_or_else(|| directory.join(MANIFEST_FILE));
+    let manifest = parse_manifest(&manifest_path)?;
     let mut local = load_local_interfaces(&root.module, directory)?;
     for interface in &mut local {
+        let tokens =
+            severian_lexer::lex(&interface.source).map_err(|error| PackageError::Frontend {
+                package: expected_package.into(),
+                stage: "lexer",
+                span: error.span,
+                message: error.message,
+                source_path: Some(interface.source_path.clone()),
+                source: Some(interface.source.clone()),
+            })?;
+        if let Some(token) = tokens
+            .iter()
+            .find(|token| token.kind == severian_lexer::TokenKind::Unsafe)
+        {
+            enforce_manifest_unsafe_policy(
+                &manifest,
+                &manifest_path,
+                &interface.source_path,
+                &tokens,
+                token.span,
+                true,
+            )
+            .map_err(|error| {
+                with_frontend_source(error, &interface.source_path, &interface.source)
+            })?;
+        }
+        interface.native_units = root.native_units.clone();
         interface.export_package = Some(import_name.to_owned());
     }
     let mut interfaces = Vec::with_capacity(local.len() + 1);
@@ -417,6 +461,8 @@ fn load_interface_source(
         export_package: None,
         module,
         compiler: compiler_metadata(name, manifest, manifest_path)?,
+        native_units: native_units(name, manifest, manifest_path)?,
+        native_assets: Vec::new(),
         source_path,
         source,
     })

@@ -15,6 +15,8 @@ pub fn analyze_with_interfaces(
             export_package: None,
             module: module.clone(),
             compiler: Default::default(),
+            native_units: Vec::new(),
+            native_assets: Vec::new(),
             source_path: PathBuf::from(format!("<interface:{name}>")),
             source: String::new(),
         })

@@ -906,6 +906,8 @@ fn imported_function_returns_keep_the_canonical_class_definition() {
         export_package: None,
         module: data_module,
         compiler: Default::default(),
+        native_units: Vec::new(),
+        native_assets: Vec::new(),
         source_path: PathBuf::from("/workspace/data.sev"),
         source: data_source.into(),
     };
@@ -946,6 +948,8 @@ fn local_import_aliases_preserve_qualified_class_fields() {
         export_package: None,
         module: optimizer_module,
         compiler: Default::default(),
+        native_units: Vec::new(),
+        native_assets: Vec::new(),
         source_path: PathBuf::from("/workspace/src/optimizers.sev"),
         source: optimizer_source.into(),
     };

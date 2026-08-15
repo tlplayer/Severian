@@ -49,6 +49,11 @@ pub(super) fn class_type_name(ty: &Type) -> Option<String> {
     if matches!(
         name,
         "int"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "isize"
             | "u8"
             | "u16"
             | "u32"
@@ -129,7 +134,8 @@ pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
                 .map(|segment| segment.name.as_str())
                 .unwrap_or("");
             match name {
-                "int" | "u8" | "u16" | "u32" | "u64" | "usize" => Ok(ValueType::Int),
+                "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
+                | "usize" => Ok(ValueType::Int),
                 "float" | "f32" | "f64" => Ok(ValueType::Float),
                 "bool" => Ok(ValueType::Bool),
                 "string" => Ok(ValueType::String),

@@ -121,9 +121,7 @@ fn pointer_examples_can_receive_a_source_scoped_capability() {
 #[test]
 fn qwen_packages_use_safe_tensor_and_platform_apis() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let qwen_sources = [
-        "library/model/architectures/qwen/src/lib.sev",
-    ];
+    let qwen_sources = ["library/model/architectures/qwen/src/lib.sev"];
 
     for relative in qwen_sources {
         let source = std::fs::read_to_string(workspace.join(relative)).unwrap();
@@ -186,4 +184,33 @@ fn generic_compiler_layers_do_not_name_model_architectures() {
             );
         }
     }
+}
+
+#[test]
+fn lowering_cannot_implement_the_network_service() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut sources = Vec::new();
+    source_files_below(&workspace.join("compiler/lowering/src"), &mut sources);
+    for path in sources {
+        let source = std::fs::read_to_string(&path).unwrap();
+        for forbidden in [
+            "#include <sys/socket.h>",
+            "struct sockaddr",
+            "getaddrinfo(",
+            "socket(AF_",
+            "__sev_network_",
+            "__sev_udp_",
+            "network_source(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} must emit generic external calls, not implement networking via `{forbidden}`",
+                path.display(),
+            );
+        }
+    }
+    assert!(workspace
+        .join("library/network/native/posix/network.c")
+        .is_file());
+    assert!(!workspace.join("compiler/platform/src/network.rs").exists());
 }

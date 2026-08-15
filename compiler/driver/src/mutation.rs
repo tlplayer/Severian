@@ -55,6 +55,8 @@ pub fn apply(
             optimized_hir: hir,
             mir,
             mlir,
+            native_units: compilation.native_units.clone(),
+            native_assets: compilation.native_assets.clone(),
         },
         mutation,
     )))

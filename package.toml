@@ -39,6 +39,7 @@ deny_layer_violations = true
 [architecture.layers]
 include = ["compiler/*"]
 order = [
+    "abi",
     "ast",
     "build",
     "coverage",
@@ -65,11 +66,16 @@ order = [
 
 [[architecture.rule]]
 from = "compiler/hir/**"
-allow = ["compiler/dtype/**"]
+allow = ["compiler/abi/**", "compiler/dtype/**"]
+
+[[architecture.rule]]
+from = "compiler/package/**"
+allow = ["compiler/abi/**"]
 
 [[architecture.rule]]
 from = "compiler/semantic/**"
 allow = [
+    "compiler/abi/**",
     "compiler/ast/**",
     "compiler/hir/**",
     "compiler/package/**",
@@ -82,6 +88,7 @@ allow = ["compiler/hir/**"]
 [[architecture.rule]]
 from = "compiler/lowering/**"
 allow = [
+    "compiler/abi/**",
     "compiler/coverage/**",
     "compiler/hir/**",
     "compiler/mir/**",
@@ -93,9 +100,11 @@ allow = [
 [[architecture.rule]]
 from = "compiler/backend/**"
 allow = [
+    "compiler/abi/**",
     "compiler/hir/**",
     "compiler/lowering/**",
     "compiler/mlir/**",
+    "compiler/package/**",
 ]
 
 [architecture.files]

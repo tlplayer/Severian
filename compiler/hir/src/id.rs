@@ -364,6 +364,8 @@ pub struct ProgramMetadata {
     pub functions: BTreeMap<FunctionId, DetailedFunctionType>,
     pub classes: BTreeMap<TypeDefinitionId, ClassDefinition>,
     pub enums: BTreeMap<TypeDefinitionId, EnumDefinition>,
+    /// Package-owned external functions keyed by their provider symbol.
+    pub external_functions: BTreeMap<String, severian_abi::ExternalFunction>,
 }
 
 fn stable_name_hash(name: &str) -> u64 {

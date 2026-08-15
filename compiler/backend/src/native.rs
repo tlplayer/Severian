@@ -1,4 +1,5 @@
 use crate::{
+    ffi::compile_package_native_units,
     linker::{link_native_executable, NativeLinkOptions},
     llvm::{lower_module_to_llvm_ir, LlvmLoweringOptions},
     toolchain::TemporaryFiles,
@@ -32,6 +33,8 @@ pub fn compile_native(
     output: &Path,
     xla_runtime: Option<&Path>,
     options: &NativeCompileOptions,
+    native_units: &[severian_package::NativeUnit],
+    native_assets: &[severian_package::EmbeddedNativeAsset],
 ) -> Result<(), BackendError> {
     let temporary = TemporaryFiles::new("severian-native");
     let source_mlir = temporary.path("source.mlir");
@@ -57,23 +60,16 @@ pub fn compile_native(
         Some(bridge_source.as_path())
     };
 
-    let uses_database = program.functions.iter().any(|function| {
-        function
-            .native_symbol
-            .as_deref()
-            .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
-    });
-    let uses_mysql = program.functions.iter().any(|function| {
-        function
-            .native_symbol
-            .as_deref()
-            .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
-    });
-    let uses_tls = program.functions.iter().any(|function| {
-        function.native_symbol.as_deref().is_some_and(|symbol| {
-            symbol.starts_with("__sev_tls_") || symbol.starts_with("__sev_http_")
-        })
-    });
+    let called_native_symbols = program.referenced_native_symbols();
+    let uses_database = called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_database_"));
+    let uses_mysql = called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_mysql_"));
+    let uses_tls = called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_tls_") || symbol.starts_with("__sev_http_"));
     let uses_xla = program.uses_xla_runtime();
     let mut libraries = Vec::new();
     if uses_xla {
@@ -84,6 +80,14 @@ pub fn compile_native(
         })?;
         libraries.push(library.to_path_buf());
     }
+    let package_native = compile_package_native_units(
+        program,
+        native_units,
+        native_assets,
+        &temporary,
+        if options.debug { 0 } else { 2 },
+    )?;
+    libraries.extend(package_native.objects);
 
     let sanitizer_names = options
         .sanitizers
@@ -114,6 +118,12 @@ pub fn compile_native(
         additional_arguments.push(OsString::from("-lssl"));
         additional_arguments.push(OsString::from("-lcrypto"));
     }
+    additional_arguments.extend(
+        package_native
+            .system_libraries
+            .iter()
+            .map(|library| OsString::from(format!("-l{library}"))),
+    );
     if !sanitizer_names.is_empty() {
         additional_arguments.extend([
             format!("-fsanitize={}", sanitizer_names.join(",")).into(),

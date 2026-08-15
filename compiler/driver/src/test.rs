@@ -196,6 +196,8 @@ fn native_test_compilation_selected(
         optimized_hir: hir.clone(),
         mir,
         hir,
+        native_units: compilation.native_units.clone(),
+        native_assets: compilation.native_assets.clone(),
     };
     Ok((native, count))
 }

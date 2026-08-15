@@ -25,7 +25,6 @@ pub(super) fn native_bridge_source_for_target(
     let uses_channels = uses_channels(program);
     let mut source = String::from(concat!(
         "#include <pthread.h>\n",
-        "#include <arpa/inet.h>\n",
         "#include <fcntl.h>\n",
         "#include <ctype.h>\n",
         "#include <dirent.h>\n",
@@ -38,7 +37,6 @@ pub(super) fn native_bridge_source_for_target(
         "#include <stdlib.h>\n",
         "#include <string.h>\n",
         "#include <time.h>\n",
-        "#include <sys/socket.h>\n",
         "#include <sys/ioctl.h>\n",
         "#include <sys/file.h>\n",
         "#include <sys/mman.h>\n",
@@ -67,6 +65,8 @@ pub(super) fn native_bridge_source_for_target(
         "static sev_allocation *sev_allocations = NULL;\n",
         "static bool sev_cleanup_registered = false;\n",
     ));
+    source.push_str(severian_abi::C_V1_PREAMBLE);
+    source.push('\n');
     source.push_str(runtime_diagnostics::SOURCE);
     source.push_str(concat!(
         "static void sev_cleanup_allocations(void) { pthread_mutex_lock(&sev_allocation_mutex); sev_allocation *allocation = sev_allocations; sev_allocations = NULL; pthread_mutex_unlock(&sev_allocation_mutex); while (allocation) { sev_allocation *next = allocation->next; free(allocation); allocation = next; } }\n",
@@ -526,11 +526,18 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_builtin_float_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); char *end = NULL; double value = strtod(text, &end); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); return __sev_variant_new(\"ok\", __sev_box_f64(value)); }\n",
         "\n",
     ));
+    super::ffi_shim::append_c_v1_shims(&mut source, program);
     source.push_str(
         r#"
 static void *sev_failure(const char *message) {
   return __sev_variant_new("failure", __sev_box_string((void *)message));
 }
+
+"#,
+    );
+
+    source.push_str(
+        r#"
 
 void *__sev_agent_model_request(void *endpoint, void *model, void *system_prompt, void *prompt, int64_t context_tokens, int64_t output_tokens, double temperature, int64_t timeout_millis) {
   (void)endpoint; (void)model; (void)system_prompt; (void)prompt; (void)context_tokens; (void)output_tokens; (void)temperature; (void)timeout_millis;
@@ -1425,48 +1432,30 @@ int64_t __sev_host_page_size(void) {
 
 "#,
     );
-    let uses_http = program.functions.iter().any(|function| {
-        function
-            .native_symbol
-            .as_deref()
-            .is_some_and(|symbol| symbol.starts_with("__sev_http_"))
-    });
+    let called_native_symbols = program.referenced_native_symbols();
+    let uses_http = called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_http_"));
     let uses_tls = uses_http
-        || program.functions.iter().any(|function| {
-            function
-                .native_symbol
-                .as_deref()
-                .is_some_and(|symbol| symbol.starts_with("__sev_tls_"))
-        });
-    let uses_network = uses_tls
-        || program.functions.iter().any(|function| {
-            function.native_symbol.as_deref().is_some_and(|symbol| {
-                symbol.starts_with("__sev_network_") || symbol.starts_with("__sev_udp_")
-            })
-        });
-    if uses_network {
-        source.push_str(severian_platform::network_source());
-    }
+        || called_native_symbols
+            .iter()
+            .any(|symbol| symbol.starts_with("__sev_tls_"));
     if uses_tls {
         source.push_str(severian_platform::tls_source());
     }
     if uses_http {
         source.push_str(severian_platform::http_source());
     }
-    if program.functions.iter().any(|function| {
-        function
-            .native_symbol
-            .as_deref()
-            .is_some_and(|symbol| symbol.starts_with("__sev_database_"))
-    }) {
+    if called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_database_"))
+    {
         source.push_str(severian_platform::database_source());
     }
-    if program.functions.iter().any(|function| {
-        function
-            .native_symbol
-            .as_deref()
-            .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
-    }) {
+    if called_native_symbols
+        .iter()
+        .any(|symbol| symbol.starts_with("__sev_mysql_"))
+    {
         source.push_str(severian_platform::mysql_source());
     }
     let drawable_classes = program

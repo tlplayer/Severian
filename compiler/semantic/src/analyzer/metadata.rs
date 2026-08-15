@@ -371,9 +371,8 @@ pub(super) fn intern_type(
                 .map(|argument| intern_type(argument, known_types, types))
                 .collect::<Vec<_>>();
             match name.as_str() {
-                "int" | "u8" | "u16" | "u32" | "u64" | "usize" | "i32" | "i64" => {
-                    types.intern(TypeKind::Int)
-                }
+                "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
+                | "usize" => types.intern(TypeKind::Int),
                 "float" | "f32" | "f64" => types.intern(TypeKind::Float),
                 "bool" => types.intern(TypeKind::Bool),
                 "string" => types.intern(TypeKind::String),

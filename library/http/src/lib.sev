@@ -1,3 +1,4 @@
+import network
 import platform
 
 class Request:

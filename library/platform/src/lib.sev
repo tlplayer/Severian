@@ -78,30 +78,7 @@ unsafe:
     native("__sev_process_arguments") def process_arguments() -> list[string]
     native("__sev_hash_md5") def hash_md5(value: string) -> string
     native("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
-    native("__sev_network_connect") def network_connect(host: string, port: int) -> Result[TcpHandle, IOError]
-    native("__sev_network_listen") def network_listen(host: string, port: int) -> Result[TcpListenerHandle, IOError]
-    native("__sev_network_accept") def network_accept(listener: TcpListenerHandle) -> Result[TcpHandle, IOError]
-    native("__sev_network_read") def network_read(connection: TcpHandle, count: int) -> Result[list[int], IOError]
-    native("__sev_network_write") def network_write(connection: TcpHandle, data: list[int]) -> Result[int, IOError]
-    native("__sev_network_close") def network_close(connection: TcpHandle) -> Result[unit, IOError]
-    native("__sev_network_listener_close") def network_listener_close(listener: TcpListenerHandle) -> Result[unit, IOError]
-    native("__sev_network_local_host") def network_local_host(connection: TcpHandle) -> Result[string, IOError]
-    native("__sev_network_local_port") def network_local_port(connection: TcpHandle) -> Result[int, IOError]
-    native("__sev_network_remote_host") def network_remote_host(connection: TcpHandle) -> Result[string, IOError]
-    native("__sev_network_remote_port") def network_remote_port(connection: TcpHandle) -> Result[int, IOError]
-    native("__sev_network_listener_host") def network_listener_host(listener: TcpListenerHandle) -> Result[string, IOError]
-    native("__sev_network_listener_port") def network_listener_port(listener: TcpListenerHandle) -> Result[int, IOError]
-    native("__sev_network_set_read_timeout") def network_set_read_timeout(connection: TcpHandle, milliseconds: int) -> Result[unit, IOError]
-    native("__sev_network_set_write_timeout") def network_set_write_timeout(connection: TcpHandle, milliseconds: int) -> Result[unit, IOError]
-    native("__sev_network_set_keep_alive") def network_set_keep_alive(connection: TcpHandle, enabled: bool) -> Result[unit, IOError]
-    native("__sev_network_shutdown") def network_shutdown(connection: TcpHandle, direction: int) -> Result[unit, IOError]
-    native("__sev_network_resolve") def network_resolve(host: string) -> Result[list[string], IOError]
-    native("__sev_network_parse_ip") def network_parse_ip(value: string) -> Result[tuple[string, int], IOError]
-    native("__sev_udp_bind") def udp_bind(host: string, port: int) -> Result[UdpHandle, IOError]
-    native("__sev_udp_send_to") def udp_send_to(socket: UdpHandle, data: list[int], host: string, port: int) -> Result[int, IOError]
-    native("__sev_udp_receive_from") def udp_receive_from(socket: UdpHandle, count: int) -> Result[tuple[list[int], string, int], IOError]
-    native("__sev_udp_close") def udp_close(socket: UdpHandle) -> Result[unit, IOError]
-    native("__sev_tls_connect") def tls_connect(connection: TcpHandle, server_name: string) -> Result[TlsHandle, IOError]
+    native("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]
     native("__sev_tls_read") def tls_read(connection: TlsHandle, count: int) -> Result[list[int], IOError]
     native("__sev_tls_write") def tls_write(connection: TlsHandle, data: list[int]) -> Result[int, IOError]
     native("__sev_tls_close") def tls_close(connection: TlsHandle) -> Result[unit, IOError]
@@ -193,8 +170,6 @@ test "native log ABI":
 
 unsafe:
     native("__sev_log_error") def log_error(message: string, cause: Any)
-
-    native("__sev_network_loopback_echo") def network_loopback_echo(message: string) -> Result[string, IOError]
 
 unsafe:
     native("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool

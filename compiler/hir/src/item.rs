@@ -1,6 +1,6 @@
 use crate::visitor::{visit_expression_mut, visit_function_expressions_mut};
 use crate::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +93,27 @@ impl Program {
                     .iter()
                     .any(|decorator| decorator.package == "tensor")
         })
+    }
+
+    /// Native symbols referenced by executable expressions. Declarations that
+    /// are merely present in an imported interface are intentionally excluded.
+    pub fn referenced_native_symbols(&self) -> BTreeSet<String> {
+        let mut program = self.clone();
+        let mut symbols = BTreeSet::new();
+        program.visit_expressions_mut(&mut |expression| match expression {
+            Expression::Call { target, .. } | Expression::Function(target) => {
+                if let Some(symbol) = &target.native_symbol {
+                    symbols.insert(symbol.clone());
+                }
+            }
+            Expression::ChaosRule { function, .. } => {
+                if let Some(symbol) = &function.native_symbol {
+                    symbols.insert(symbol.clone());
+                }
+            }
+            _ => {}
+        });
+        symbols
     }
 
     pub fn test_count(&self) -> usize {

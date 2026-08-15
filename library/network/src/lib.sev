@@ -1,5 +1,5 @@
 import io
-import platform
+import "src/ffi.sev" as ffi
 
 class NetworkError:
     message: string
@@ -19,195 +19,284 @@ class Address:
     def display() -> string:
         return "[" + host + "]:" + string(port) if host.contains(":") else host + ":" + string(port)
 
-def stream_failure(error: IOError) -> io.StreamError:
-    return io.StreamError(string(error))
+def new_error() -> ffi.OutError:
+    return ffi.OutError(0, "")
 
-def network_failure(error: IOError) -> NetworkError:
-    return NetworkError(string(error))
+def network_failure(error: ffi.OutError) -> NetworkError:
+    return NetworkError(error.message, error.code)
+
+def stream_failure(error: ffi.OutError) -> io.StreamError:
+    return io.StreamError(error.message)
+
+def valid_port(port: int) -> bool:
+    return port >= 0 and port <= 65535
+
+def native_handle(value: Any) -> ffi.Handle:
+    return ffi.Handle(value)
+
+def bytes_from(handle: Any) -> list[int]:
+    output := []
+    length = ffi.bytes_length(native_handle(handle))
+    for index in range(length):
+        output.append(ffi.bytes_at(native_handle(handle), index))
+    ffi.bytes_release(native_handle(handle))
+    return output
+
+def address_from(handle: Any) -> Address:
+    address = Address(ffi.address_host(native_handle(handle)), ffi.address_port(native_handle(handle)))
+    ffi.address_release(native_handle(handle))
+    return address
 
 def parse_ip(value: string) -> Result[Ip, NetworkError]:
-    switch platform.network_parse_ip(value):
-        ok parsed:
-            normalized, family = parsed
-            return Ip(normalized, family)
-        failure error:
-            return failure(network_failure(error))
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.parse_ip_raw(value, output, error) != 0:
+        return failure(network_failure(error))
+    parsed = Ip(ffi.address_host(native_handle(output.value)), ffi.address_family(native_handle(output.value)))
+    ffi.address_release(native_handle(output.value))
+    return parsed
 
 class TcpConnection:
-    handle: platform.TcpHandle
+    handle: Any
 
     def read(count: int) -> Result[list[int], io.StreamError]:
-        switch platform.network_read(handle, count):
-            ok data:
-                return data
-            failure error:
-                return failure(stream_failure(error))
+        if count < 0:
+            return failure(io.StreamError("read count cannot be negative"))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.read(native_handle(handle), count, output, error) != 0:
+            return failure(stream_failure(error))
+        return bytes_from(output.value)
 
     def write(data: list[int]) -> Result[int, io.StreamError]:
-        switch platform.network_write(handle, data):
-            ok count:
-                return count
-            failure error:
-                return failure(stream_failure(error))
+        for value in data:
+            if value < 0 or value > 255:
+                return failure(io.StreamError("network bytes must be between 0 and 255"))
+        written = ffi.OutUsize(0)
+        error = new_error()
+        if ffi.write(native_handle(handle), ffi.BytesView(data), written, error) != 0:
+            return failure(stream_failure(error))
+        return written.value
+
+    def read_exact(count: int) -> Result[list[int], io.StreamError]:
+        if count < 0:
+            return failure(io.StreamError("read count cannot be negative"))
+        output := []
+        while size(output) < count:
+            chunk = self.read(count - size(output))
+            if size(chunk) == 0:
+                return failure(io.StreamError("stream ended before the requested byte count"))
+            output.extend(chunk)
+        return output
+
+    def write_all(data: list[int]) -> Result[int, io.StreamError]:
+        offset := 0
+        while offset < size(data):
+            written = self.write(data[offset:size(data)])
+            if written <= 0:
+                return failure(io.StreamError("stream accepted no bytes"))
+            offset += written
+        return offset
 
     def close() -> Result[unit, io.StreamError]:
-        switch platform.network_close(handle):
-            ok _value:
-                return
-            failure error:
-                return failure(stream_failure(error))
+        error = new_error()
+        if ffi.close(native_handle(handle), error) != 0:
+            return failure(stream_failure(error))
+        handle = 0
+        return
 
     def local_address() -> Result[Address, NetworkError]:
-        switch platform.network_local_host(handle):
-            failure error:
-                return failure(network_failure(error))
-            ok host:
-                switch platform.network_local_port(handle):
-                    ok port:
-                        return Address(host, port)
-                    failure error:
-                        return failure(network_failure(error))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.local_address(native_handle(handle), output, error) != 0:
+            return failure(network_failure(error))
+        return address_from(output.value)
 
     def remote_address() -> Result[Address, NetworkError]:
-        switch platform.network_remote_host(handle):
-            failure error:
-                return failure(network_failure(error))
-            ok host:
-                switch platform.network_remote_port(handle):
-                    ok port:
-                        return Address(host, port)
-                    failure error:
-                        return failure(network_failure(error))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.remote_address(native_handle(handle), output, error) != 0:
+            return failure(network_failure(error))
+        return address_from(output.value)
 
     def set_read_timeout(milliseconds: int) -> Result[unit, NetworkError]:
-        switch platform.network_set_read_timeout(handle, milliseconds):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        if milliseconds < 0:
+            return failure(NetworkError("timeout cannot be negative"))
+        error = new_error()
+        if ffi.set_read_timeout(native_handle(handle), milliseconds, error) != 0:
+            return failure(network_failure(error))
+        return
 
     def set_write_timeout(milliseconds: int) -> Result[unit, NetworkError]:
-        switch platform.network_set_write_timeout(handle, milliseconds):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        if milliseconds < 0:
+            return failure(NetworkError("timeout cannot be negative"))
+        error = new_error()
+        if ffi.set_write_timeout(native_handle(handle), milliseconds, error) != 0:
+            return failure(network_failure(error))
+        return
 
     def set_keep_alive(enabled: bool) -> Result[unit, NetworkError]:
-        switch platform.network_set_keep_alive(handle, enabled):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        error = new_error()
+        if ffi.set_keep_alive(native_handle(handle), enabled, error) != 0:
+            return failure(network_failure(error))
+        return
 
     def shutdown_read() -> Result[unit, NetworkError]:
-        switch platform.network_shutdown(handle, 0):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        error = new_error()
+        if ffi.shutdown(native_handle(handle), 0, error) != 0:
+            return failure(network_failure(error))
+        return
 
     def shutdown_write() -> Result[unit, NetworkError]:
-        switch platform.network_shutdown(handle, 1):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        error = new_error()
+        if ffi.shutdown(native_handle(handle), 1, error) != 0:
+            return failure(network_failure(error))
+        return
 
-    def native_handle() -> platform.TcpHandle:
+    def native_handle() -> Any:
         return handle
 
 class TcpListener:
-    handle: platform.TcpListenerHandle
+    handle: Any
 
     def accept() -> Result[TcpConnection, NetworkError]:
-        switch platform.network_accept(handle):
-            ok connection:
-                return TcpConnection(connection)
-            failure error:
-                return failure(network_failure(error))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.accept(native_handle(handle), output, error) != 0:
+            return failure(network_failure(error))
+        return TcpConnection(output.value)
 
     def local_address() -> Result[Address, NetworkError]:
-        switch platform.network_listener_host(handle):
-            failure error:
-                return failure(network_failure(error))
-            ok host:
-                switch platform.network_listener_port(handle):
-                    ok port:
-                        return Address(host, port)
-                    failure error:
-                        return failure(network_failure(error))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.listener_address(native_handle(handle), output, error) != 0:
+            return failure(network_failure(error))
+        return address_from(output.value)
 
     def close() -> Result[unit, NetworkError]:
-        switch platform.network_listener_close(handle):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        error = new_error()
+        if ffi.listener_close(native_handle(handle), error) != 0:
+            return failure(network_failure(error))
+        handle = 0
+        return
 
 class Datagram:
     data: list[int]
     address: Address
 
 class UdpConnection:
-    handle: platform.UdpHandle
+    handle: Any
 
     def send_to(data: list[int], host: string, port: int) -> Result[int, NetworkError]:
-        switch platform.udp_send_to(handle, data, host, port):
-            ok count:
-                return count
-            failure error:
-                return failure(network_failure(error))
+        if not valid_port(port):
+            return failure(NetworkError("invalid network port"))
+        for value in data:
+            if value < 0 or value > 255:
+                return failure(NetworkError("network bytes must be between 0 and 255"))
+        sent = ffi.OutUsize(0)
+        error = new_error()
+        if ffi.udp_send_to(native_handle(handle), ffi.BytesView(data), host, port, sent, error) != 0:
+            return failure(network_failure(error))
+        return sent.value
 
     def receive_from(count: int) -> Result[Datagram, NetworkError]:
-        switch platform.udp_receive_from(handle, count):
-            ok packet:
-                data, host, port = packet
-                return Datagram(data, Address(host, port))
-            failure error:
-                return failure(network_failure(error))
+        if count < 0:
+            return failure(NetworkError("receive count cannot be negative"))
+        output = ffi.OutHandle(0)
+        error = new_error()
+        if ffi.udp_receive_from(native_handle(handle), count, output, error) != 0:
+            return failure(network_failure(error))
+        data := []
+        length = ffi.packet_length(native_handle(output.value))
+        for index in range(length):
+            data.append(ffi.packet_at(native_handle(output.value), index))
+        address = Address(ffi.packet_host(native_handle(output.value)), ffi.packet_port(native_handle(output.value)))
+        ffi.packet_release(native_handle(output.value))
+        return Datagram(data, address)
 
     def close() -> Result[unit, NetworkError]:
-        switch platform.udp_close(handle):
-            ok _value:
-                return
-            failure error:
-                return failure(network_failure(error))
+        error = new_error()
+        if ffi.udp_close(native_handle(handle), error) != 0:
+            return failure(network_failure(error))
+        handle = 0
+        return
 
 def connect(host: string, port: int) -> Result[TcpConnection, NetworkError]:
-    switch platform.network_connect(host, port):
-        ok connection:
-            return TcpConnection(connection)
-        failure error:
-            return failure(network_failure(error))
+    if not valid_port(port):
+        return failure(NetworkError("invalid network port"))
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.connect_raw(host, port, output, error) != 0:
+        return failure(network_failure(error))
+    return TcpConnection(output.value)
 
 def listen(host: string, port: int) -> Result[TcpListener, NetworkError]:
-    switch platform.network_listen(host, port):
-        ok listener:
-            return TcpListener(listener)
-        failure error:
-            return failure(network_failure(error))
+    if not valid_port(port):
+        return failure(NetworkError("invalid network port"))
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.listen_raw(host, port, output, error) != 0:
+        return failure(network_failure(error))
+    return TcpListener(output.value)
 
 def resolve(host: string) -> Result[list[Ip], NetworkError]:
-    switch platform.network_resolve(host):
-        ok values:
-            addresses := []
-            for value in values:
-                parsed = parse_ip(value)
-                addresses.append(parsed)
-            return addresses
-        failure error:
-            return failure(network_failure(error))
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.resolve_raw(host, output, error) != 0:
+        return failure(network_failure(error))
+    values := []
+    length = ffi.address_list_length(native_handle(output.value))
+    for index in range(length):
+        value = ffi.address_list_at(native_handle(output.value), index)
+        parsed = parse_ip(value)
+        values.append(parsed)
+    ffi.address_list_release(native_handle(output.value))
+    return values
 
 def udp_bind(host: string, port: int) -> Result[UdpConnection, NetworkError]:
-    switch platform.udp_bind(host, port):
-        ok socket:
-            return UdpConnection(socket)
-        failure error:
-            return failure(network_failure(error))
+    if not valid_port(port):
+        return failure(NetworkError("invalid network port"))
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.udp_bind_raw(host, port, output, error) != 0:
+        return failure(network_failure(error))
+    return UdpConnection(output.value)
 
 def loopback_echo(message: string) -> Result[string, IOError]:
-    return platform.network_loopback_echo(message)
+    output = ffi.OutHandle(0)
+    error = new_error()
+    if ffi.loopback_echo_raw(message, output, error) != 0:
+        return failure(IOError(error.message))
+    echoed = ffi.text_value(native_handle(output.value))
+    ffi.text_release(native_handle(output.value))
+    return echoed
+
+def echo_once(listener: TcpListener) -> Result[unit, Any]:
+    switch listener.accept():
+        ok connection:
+            switch connection.read_exact(2):
+                ok first:
+                    switch connection.read_exact(3):
+                        ok second:
+                            switch connection.write_all(first):
+                                ok first_written:
+                                    assert(first_written == 2)
+                                    switch connection.write_all(second):
+                                        ok second_written:
+                                            assert(second_written == 3)
+                                            _closed = connection.close()
+                                            _listener_closed = listener.close()
+                                            return
+                                        failure error:
+                                            return failure(error)
+                                failure error:
+                                    return failure(error)
+                        failure error:
+                            return failure(error)
+                failure error:
+                    return failure(error)
+        failure error:
+            return failure(error)
 
 test "IP and address values distinguish IPv4 and IPv6":
     ipv4 = parse_ip("127.0.0.1")
@@ -221,4 +310,28 @@ test with integration "native TCP loopback":
         ok echoed:
             assert(echoed == "severian network runtime")
         failure error:
-            assert(false, error)
+            assert(false, error.message)
+
+test with integration "TCP handles partial reads writes addresses timeouts and cleanup":
+    listener = listen("127.0.0.1", 0)
+    local = listener.local_address()
+    server = async echo_once(listener) with self
+    connection = connect(local.host, local.port)
+    _read_timeout = connection.set_read_timeout(2000)
+    _write_timeout = connection.set_write_timeout(2000)
+    _keep_alive = connection.set_keep_alive(true)
+    remote = connection.remote_address()
+    assert(remote.port == local.port)
+    sent = connection.write_all([1, 2, 3, 4, 5])
+    assert(sent == 5)
+    echoed = connection.read_exact(5)
+    assert(echoed == [1, 2, 3, 4, 5])
+    _closed = connection.close()
+    await server
+
+test with integration "DNS failures remain typed":
+    switch resolve(""):
+        ok _addresses:
+            assert(false)
+        failure error:
+            assert(error.code != 0)

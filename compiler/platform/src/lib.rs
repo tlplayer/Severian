@@ -4,7 +4,6 @@ mod database;
 mod http;
 mod model_graph;
 mod mysql;
-mod network;
 mod safetensors;
 mod tensor;
 mod tls;
@@ -24,10 +23,6 @@ pub fn database_source() -> &'static str {
 
 pub fn mysql_source() -> &'static str {
     mysql::source()
-}
-
-pub fn network_source() -> &'static str {
-    network::source()
 }
 
 pub fn tls_source() -> &'static str {

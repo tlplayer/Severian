@@ -41,10 +41,9 @@ This first milestone intentionally makes missing stack capabilities visible:
 
 - `graphics` has no interactive window, input events, camera, sprite/image, or
   deterministic bundled-font backend yet, so the lab emits SVG;
-- `network` still exposes untyped socket handles for connect/accept, has no
-  framed message codec, deadlines, cancellation, listener close, or way to ask
-  a port-zero listener for its assigned address; the safe loopback primitive is
-  therefore the only collision-free native acceptance path;
+- `network` now exposes typed TCP connections and listeners over package-owned
+  opaque handles, including listener close and port-zero address inspection;
+  framed message codecs, cancellation, and higher-level deadlines remain open;
 - channels have no close/select/timeout protocol, so workers receive explicit
   sentinel jobs and the coordinator must know the worker count;
 - integration-test syntax is recognized, but the current CLI has no integration

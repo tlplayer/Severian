@@ -82,8 +82,32 @@ fn embed_official_libraries(manifest: &std::path::Path, out: &std::path::Path) {
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let mut native_paths = Vec::new();
+        let native_root = directory.join("native");
+        if native_root.is_dir() {
+            collect_native_assets(&native_root, &mut native_paths);
+        }
+        native_paths.sort();
+        let native_assets = native_paths
+            .iter()
+            .map(|path| {
+                let relative = path
+                    .strip_prefix(&directory)
+                    .expect("native asset is inside its package")
+                    .to_string_lossy();
+                let absolute = path
+                    .canonicalize()
+                    .unwrap_or_else(|error| panic!("resolving {} failed: {error}", path.display()));
+                println!("cargo:rerun-if-changed={}", path.display());
+                format!(
+                    "severian_package::EmbeddedOfficialNativeAsset {{ path: {relative:?}, contents: include_bytes!({:?}) }}",
+                    absolute.to_string_lossy()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         generated.push_str(&format!(
-            "    severian_package::EmbeddedOfficialPackage {{ name: {name:?}, manifest: {manifest_source:?}, source: {source:?}, modules: &[{modules}] }},\n"
+            "    severian_package::EmbeddedOfficialPackage {{ name: {name:?}, manifest: {manifest_source:?}, source: {source:?}, modules: &[{modules}], native_assets: &[{native_assets}] }},\n"
         ));
         println!("cargo:rerun-if-changed={}", manifest_path.display());
         println!("cargo:rerun-if-changed={}", source_path.display());
@@ -91,6 +115,21 @@ fn embed_official_libraries(manifest: &std::path::Path, out: &std::path::Path) {
     generated.push_str("];\n");
     fs::write(out.join("official_libraries.rs"), generated)
         .expect("writing embedded Severian library assets must succeed");
+}
+
+fn collect_native_assets(directory: &std::path::Path, assets: &mut Vec<PathBuf>) {
+    let mut entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("reading {} failed: {error}", directory.display()))
+        .map(|entry| entry.expect("native asset entry is readable").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            collect_native_assets(&path, assets);
+        } else if path.is_file() {
+            assets.push(path);
+        }
+    }
 }
 
 fn collect_package_directories(directory: &std::path::Path, packages: &mut Vec<PathBuf>) {

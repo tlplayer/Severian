@@ -12,6 +12,7 @@ name = "sev"
 path = "src/main.rs"
 
 [dependencies]
+severian-abi = { version = "0.1.0", path = "../abi" }
 severian-ast = { version = "0.1.0", path = "../ast" }
 severian-backend = { version = "0.1.0", path = "../backend" }
 severian-coverage = { version = "0.1.0", path = "../coverage" }

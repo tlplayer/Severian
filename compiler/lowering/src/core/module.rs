@@ -8,6 +8,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     let metadata = program.metadata.clone();
     let mut resolved_program = program.clone();
     resolve_contract_locations(&mut resolved_program, &metadata);
+    resolve_external_symbols(&mut resolved_program);
     let program = &resolved_program;
     let mut strings = Vec::new();
     for class in &program.classes {
@@ -537,6 +538,39 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     output.push_str(&closure_definitions.borrow());
     output.push_str("}\n");
     Module::new(output)
+}
+
+fn resolve_external_symbols(program: &mut Program) {
+    let shims = program
+        .metadata
+        .external_functions
+        .iter()
+        .map(|(symbol, function)| (symbol.clone(), function.shim_symbol.clone()))
+        .collect::<HashMap<_, _>>();
+    let replace = |symbol: &mut Option<String>| {
+        if let Some(shim) = symbol
+            .as_ref()
+            .and_then(|symbol| shims.get(symbol))
+            .cloned()
+        {
+            *symbol = Some(shim);
+        }
+    };
+    for function in &mut program.functions {
+        replace(&mut function.native_symbol);
+    }
+    for class in &mut program.classes {
+        for function in class.methods.iter_mut().chain(&mut class.constructors) {
+            replace(&mut function.native_symbol);
+        }
+    }
+    program.visit_expressions_mut(&mut |expression| match expression {
+        Expression::Call { target, .. } | Expression::Function(target) => {
+            replace(&mut target.native_symbol)
+        }
+        Expression::ChaosRule { function, .. } => replace(&mut function.native_symbol),
+        _ => {}
+    });
 }
 
 pub(super) fn resolve_contract_locations(

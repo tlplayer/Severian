@@ -6,6 +6,7 @@ license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
+severian-abi = { version = "0.1.0", path = "../abi" }
 severian-coverage = { version = "0.1.0", path = "../coverage" }
 severian-hir = { version = "0.1.0", path = "../hir" }
 severian-mir = { version = "0.1.0", path = "../mir" }

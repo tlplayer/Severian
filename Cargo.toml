@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "compiler/abi",
     "compiler/ast",
     "compiler/backend",
     "compiler/build",

@@ -4,16 +4,27 @@ version = "0.1.0"
 edition = "2026"
 description = "Ownership-safe networking"
 
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/ffi.sev"]
+
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
 io = { path = "../io", version = "0.1.0" }
-platform = { path = "../platform", version = "0.1.0" }
+
+[[ffi.c]]
+name = "network-posix"
+abi = "c-v1"
+targets = ["linux", "macos"]
+sources = ["native/posix/network.c"]
+include = ["native/include"]
+libraries = []
 
 [package.metadata.library]
 category = "networking"
-implementation = "runtime"
+implementation = "native-abi"
 status = "experimental"
 
 [coverage]

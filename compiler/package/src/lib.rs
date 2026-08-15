@@ -35,6 +35,59 @@ pub use trust::{Date, TrustRegistry, TrustedPublisher};
 
 pub const MANIFEST_FILE: &str = "package.toml";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeLanguage {
+    C,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetPattern(pub String);
+
+impl TargetPattern {
+    pub fn matches_host(&self) -> bool {
+        self.specificity_for_host().is_some()
+    }
+
+    pub fn specificity_for_host(&self) -> Option<u8> {
+        let target = self.0.as_str();
+        let host = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+        if target == host {
+            Some(3)
+        } else if target == std::env::consts::OS {
+            Some(2)
+        } else if target == "*"
+            || target
+                .strip_prefix("*-")
+                .is_some_and(|os| os == std::env::consts::OS)
+            || target
+                .strip_suffix("-*")
+                .is_some_and(|arch| arch == std::env::consts::ARCH)
+        {
+            Some(u8::from(target != "*"))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeUnit {
+    pub package: String,
+    pub name: String,
+    pub abi: severian_abi::AbiVersion,
+    pub language: NativeLanguage,
+    pub sources: Vec<PathBuf>,
+    pub include_directories: Vec<PathBuf>,
+    pub libraries: Vec<String>,
+    pub targets: Vec<TargetPattern>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddedNativeAsset {
+    pub path: PathBuf,
+    pub contents: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionRule {
     pub function: String,
@@ -86,6 +139,8 @@ pub struct PackageInterface {
     pub export_package: Option<String>,
     pub module: Module,
     pub compiler: CompilerMetadata,
+    pub native_units: Vec<NativeUnit>,
+    pub native_assets: Vec<EmbeddedNativeAsset>,
     pub source_path: PathBuf,
     pub source: String,
 }
@@ -96,12 +151,19 @@ pub struct EmbeddedOfficialPackage<'a> {
     pub manifest: &'a str,
     pub source: &'a str,
     pub modules: &'a [EmbeddedOfficialModule<'a>],
+    pub native_assets: &'a [EmbeddedOfficialNativeAsset<'a>],
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct EmbeddedOfficialModule<'a> {
     pub path: &'a str,
     pub source: &'a str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EmbeddedOfficialNativeAsset<'a> {
+    pub path: &'a str,
+    pub contents: &'a [u8],
 }
 
 #[derive(Debug)]

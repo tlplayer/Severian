@@ -2,6 +2,7 @@
 
 pub mod coverage;
 pub mod debug;
+mod ffi;
 pub mod linker;
 pub mod llvm;
 pub mod native;
@@ -161,6 +162,26 @@ pub fn compile_native(
         output,
         None,
         &NativeCompileOptions::default(),
+        &[],
+        &[],
+    )
+}
+
+pub fn compile_native_with_package_units(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    native_units: &[severian_package::NativeUnit],
+    native_assets: &[severian_package::EmbeddedNativeAsset],
+) -> Result<(), BackendError> {
+    native::compile_native(
+        program,
+        module,
+        output,
+        None,
+        &NativeCompileOptions::default(),
+        native_units,
+        native_assets,
     )
 }
 
@@ -176,6 +197,27 @@ pub fn compile_native_with_xla_runtime(
         output,
         Some(xla_runtime),
         &NativeCompileOptions::default(),
+        &[],
+        &[],
+    )
+}
+
+pub fn compile_native_with_xla_runtime_and_package_units(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    xla_runtime: &Path,
+    native_units: &[severian_package::NativeUnit],
+    native_assets: &[severian_package::EmbeddedNativeAsset],
+) -> Result<(), BackendError> {
+    native::compile_native(
+        program,
+        module,
+        output,
+        Some(xla_runtime),
+        &NativeCompileOptions::default(),
+        native_units,
+        native_assets,
     )
 }
 
@@ -185,7 +227,26 @@ pub fn compile_native_with_options(
     output: &Path,
     options: &NativeCompileOptions,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output, None, options)
+    native::compile_native(program, module, output, None, options, &[], &[])
+}
+
+pub fn compile_native_with_package_units_and_options(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    options: &NativeCompileOptions,
+    native_units: &[severian_package::NativeUnit],
+    native_assets: &[severian_package::EmbeddedNativeAsset],
+) -> Result<(), BackendError> {
+    native::compile_native(
+        program,
+        module,
+        output,
+        None,
+        options,
+        native_units,
+        native_assets,
+    )
 }
 
 pub fn compile_native_with_xla_runtime_and_options(
@@ -195,7 +256,35 @@ pub fn compile_native_with_xla_runtime_and_options(
     xla_runtime: &Path,
     options: &NativeCompileOptions,
 ) -> Result<(), BackendError> {
-    native::compile_native(program, module, output, Some(xla_runtime), options)
+    native::compile_native(
+        program,
+        module,
+        output,
+        Some(xla_runtime),
+        options,
+        &[],
+        &[],
+    )
+}
+
+pub fn compile_native_with_xla_runtime_package_units_and_options(
+    program: &Program,
+    module: &Module,
+    output: &Path,
+    xla_runtime: &Path,
+    options: &NativeCompileOptions,
+    native_units: &[severian_package::NativeUnit],
+    native_assets: &[severian_package::EmbeddedNativeAsset],
+) -> Result<(), BackendError> {
+    native::compile_native(
+        program,
+        module,
+        output,
+        Some(xla_runtime),
+        options,
+        native_units,
+        native_assets,
+    )
 }
 
 /// Compiles GPU execution regions to an AMD code object, embeds it in the host

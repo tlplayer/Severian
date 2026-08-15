@@ -1,10 +1,22 @@
 pub(crate) fn source() -> &'static str {
     r#"
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #include <sqlite3.h>
 
 typedef struct { sqlite3 *connection; } sev_database;
 typedef struct { int listener; uint16_t port; sqlite3 *connection; pthread_t thread; } sev_database_server;
 typedef struct { uint16_t port; } sev_database_client;
+
+static bool sev_socket_write_all(int socket_fd, const char *data, size_t size) {
+  while (size) { ssize_t written = send(socket_fd, data, size, 0); if (written < 0 && errno == EINTR) continue; if (written <= 0) return false; data += written; size -= (size_t)written; }
+  return true;
+}
+
+static bool sev_socket_read_all(int socket_fd, char *data, size_t size) {
+  while (size) { ssize_t received = recv(socket_fd, data, size, 0); if (received < 0 && errno == EINTR) continue; if (received <= 0) return false; data += received; size -= (size_t)received; }
+  return true;
+}
 
 static char *sev_database_copy(const char *text) {
   size_t size = strlen(text);

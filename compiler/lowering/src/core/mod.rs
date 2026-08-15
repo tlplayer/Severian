@@ -263,6 +263,7 @@ mod collect;
 mod collection;
 mod control_flow;
 mod expression;
+mod ffi_shim;
 mod instruction;
 mod module;
 mod operator;

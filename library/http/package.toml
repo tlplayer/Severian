@@ -8,4 +8,5 @@ description = "HTTP clients and typed server messages"
 path = "src/lib.sev"
 
 [dependencies]
+network = { path = "../network", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }

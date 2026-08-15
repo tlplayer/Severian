@@ -420,6 +420,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-abi"
+version = "0.1.0"
+
+[[package]]
 name = "severian-ast"
 version = "0.1.0"
 
@@ -427,9 +431,12 @@ version = "0.1.0"
 name = "severian-backend"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-hir",
  "severian-lowering",
  "severian-mlir",
+ "severian-package",
+ "sha2",
 ]
 
 [[package]]
@@ -465,6 +472,7 @@ name = "severian-driver"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "severian-abi",
  "severian-ast",
  "severian-backend",
  "severian-coverage",
@@ -492,6 +500,7 @@ version = "0.1.0"
 name = "severian-hir"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-dtype",
 ]
 
@@ -506,6 +515,7 @@ dependencies = [
 name = "severian-lowering"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-coverage",
  "severian-hir",
  "severian-mir",
@@ -544,6 +554,7 @@ name = "severian-package"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "severian-abi",
  "severian-ast",
  "severian-lexer",
  "severian-parser",
@@ -580,6 +591,7 @@ version = "0.1.0"
 name = "severian-semantic"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-ast",
  "severian-hir",
  "severian-lexer",

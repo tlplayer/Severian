@@ -18,6 +18,7 @@ pub enum Tool {
     RocmInfo,
     SpirvOpt,
     SpirvVal,
+    Nm,
 }
 
 impl Tool {
@@ -34,6 +35,7 @@ impl Tool {
             Self::RocmInfo => "rocminfo",
             Self::SpirvOpt => "spirv-opt",
             Self::SpirvVal => "spirv-val",
+            Self::Nm => "nm",
         }
     }
 
@@ -62,6 +64,7 @@ impl Tool {
             Self::RocmInfo => &["rocminfo", "/opt/rocm/bin/rocminfo"],
             Self::SpirvOpt => &["spirv-opt"],
             Self::SpirvVal => &["spirv-val"],
+            Self::Nm => &["llvm-nm", "nm", "/usr/bin/nm"],
         }
     }
 }
