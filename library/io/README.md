@@ -1,5 +1,7 @@
 # io
 
-Common stream abstractions and standard process streams. `print` is a language
-primitive, while native output sinks are explicitly declared by `platform`.
-Stream ownership and error-returning writes remain to be designed.
+Composable stream contracts shared by files, sockets, codecs, archives, and
+process pipes. `Reader`, `Writer`, `Seeker`, and `Closer` use structural trait
+conformance, while `MemoryStream` provides a deterministic reference
+implementation with atomic failures, explicit EOF, seeking, truncation, and
+zero-filled sparse writes.

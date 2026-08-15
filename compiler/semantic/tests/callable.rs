@@ -64,7 +64,7 @@ fn class_methods_can_return_the_implicit_receiver() {
         "class Counter:\n",
         "    value: int\n",
         "\n",
-        "    def increment(self) -> Counter:\n",
+        "    def increment() -> Counter:\n",
         "        value += 1\n",
         "        return self\n",
         "\n",

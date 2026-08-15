@@ -1,8 +1,5 @@
 import platform
 
-def sqrt(value: float) -> float:
-    return platform.math_sqrt(value)
-
 def pow(value: float, exponent: float) -> float:
     return platform.math_pow(value, exponent)
 

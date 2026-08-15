@@ -14,7 +14,7 @@ def distance(left: list[float], right: list[float]) -> float:
     for index in indices(left):
         difference = left[index] - right[index]
         total += difference * difference
-    return math.sqrt(total)
+    return sqrt(total)
 
 def sigmoid(value: float) -> float:
     return 1.0 / (1.0 + math.exp(-value))
@@ -429,7 +429,7 @@ class PCA:
             covariance.append(covariance_row)
         axes = []
         for component in range(0, [components, size(mean)].minimum()):
-            vector := [1.0 / math.sqrt(float(size(mean)))] * size(mean)
+            vector := [1.0 / sqrt(float(size(mean)))] * size(mean)
             vector[component] += 0.01
             for _iteration in range(0, iterations):
                 next = covariance.map(|row| dot(row, vector))
@@ -437,7 +437,7 @@ class PCA:
                     projection = dot(next, previous)
                     for column in indices(next):
                         next[column] -= projection * previous[column]
-                norm = math.sqrt(dot(next, next))
+                norm = sqrt(dot(next, next))
                 if norm == 0.0:
                     break
                 vector = next.map(|value| value / norm)

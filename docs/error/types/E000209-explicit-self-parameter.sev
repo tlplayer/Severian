@@ -1,0 +1,8 @@
+# E000209: explicit self parameter
+# Method receivers are implicit. Declare only the method's real arguments.
+
+class Counter:
+    value: int
+
+    def increment(self, amount: int) -> int:
+        return value + amount

@@ -26,6 +26,7 @@ pub fn analyze_with_packages(
     module: &Module,
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
+    validate_explicit_self_parameters(module)?;
     let module = specialize_generic_classes_with_interfaces(module, interfaces)?;
     analyze_specialized(&module, interfaces)
 }
@@ -34,6 +35,7 @@ fn analyze_specialized(
     module: &Module,
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
+    validate_compiler_function_names(module)?;
     let mut aliases = collect_imports(module);
     let imported_modules = collect_imported_modules(module);
     for interface in interfaces {
@@ -696,4 +698,45 @@ fn analyze_specialized(
         classes,
         functions,
     })
+}
+
+fn validate_compiler_function_names(module: &Module) -> Result<(), SemanticError> {
+    for item in &module.items {
+        let Item::Function(function) = item else {
+            continue;
+        };
+        if is_compiler_function_name(&function.name.name) {
+            return Err(error(
+                function.name.span,
+                format!(
+                    "E000208: `{}` is reserved for a compiler-provided function",
+                    function.name.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_explicit_self_parameters(module: &Module) -> Result<(), SemanticError> {
+    for item in &module.items {
+        match item {
+            Item::Function(function) => validate_no_explicit_self_parameter(&function.params)?,
+            Item::Class(class) => {
+                for constructor in &class.constructors {
+                    validate_no_explicit_self_parameter(&constructor.params)?;
+                }
+                for method in &class.methods {
+                    validate_no_explicit_self_parameter(&method.params)?;
+                }
+            }
+            Item::Trait(declaration) => {
+                for method in &declaration.methods {
+                    validate_no_explicit_self_parameter(&method.params)?;
+                }
+            }
+            Item::Enum(_) | Item::Import(_) | Item::Statement(_) => {}
+        }
+    }
+    Ok(())
 }

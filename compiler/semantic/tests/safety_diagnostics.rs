@@ -44,3 +44,88 @@ fn constant_zero_divisors_fail_before_lowering() {
         "E000502: division by zero is known at compile time"
     );
 }
+
+#[test]
+fn compiler_function_names_cannot_be_redeclared_at_module_scope() {
+    for name in ["size", "len", "sqrt", "min", "max"] {
+        let source = format!("def {name}(value: int) -> int:\n    return value\n");
+        let ast = parse(&lex(&source).unwrap()).unwrap();
+        let error = analyze(&ast).unwrap_err();
+        assert_eq!(
+            error.message,
+            format!("E000208: `{name}` is reserved for a compiler-provided function")
+        );
+    }
+}
+
+#[test]
+fn compiler_function_names_remain_legal_in_method_namespaces() {
+    let source = concat!(
+        "class Buffer:\n",
+        "    values: list[int]\n",
+        "\n",
+        "    def size() -> int:\n",
+        "        return len(values)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+}
+
+#[test]
+fn explicit_self_parameters_are_rejected_before_generic_specialization() {
+    let message = analyze_error(concat!(
+        "class Accumulator[T]:\n",
+        "    value: T\n",
+        "\n",
+        "    def current(self) -> T:\n",
+        "        return value\n",
+    ));
+    assert_eq!(
+        message,
+        "E000209: `self` is an implicit class receiver and must not be declared as a parameter"
+    );
+}
+
+#[test]
+fn nested_functions_cannot_claim_the_implicit_receiver_name() {
+    let message = analyze_error(concat!(
+        "def outer():\n",
+        "    def inner(self):\n",
+        "        return\n",
+    ));
+    assert_eq!(
+        message,
+        "E000209: `self` is an implicit class receiver and must not be declared as a parameter"
+    );
+}
+
+#[test]
+fn implicit_receivers_keep_fields_and_self_available() {
+    let source = concat!(
+        "class Accumulator:\n",
+        "    value: int\n",
+        "\n",
+        "    def current() -> int:\n",
+        "        return value\n",
+        "\n",
+        "    def receiver() -> Accumulator:\n",
+        "        return self\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+}
+
+#[test]
+fn recoverable_results_cannot_leak_into_binary_operators() {
+    let message = analyze_error(concat!(
+        "def checked() -> Result[int, string]:\n",
+        "    return 3\n",
+        "\n",
+        "def main():\n",
+        "    assert(checked() == 3)\n",
+    ));
+    assert_eq!(
+        message,
+        "E000801: a recoverable Result cannot be used as an operator operand; bind it to propagate success or handle it with switch"
+    );
+}

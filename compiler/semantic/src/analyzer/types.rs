@@ -1,5 +1,48 @@
 use super::*;
 
+pub(super) const COMPILER_FUNCTION_NAMES: &[&str] = &[
+    "abs",
+    "all",
+    "any",
+    "bits",
+    "bytes",
+    "capacity",
+    "divmod",
+    "enumerate",
+    "float",
+    "indices",
+    "int",
+    "len",
+    "max",
+    "min",
+    "panic",
+    "print",
+    "range",
+    "size",
+    "sqrt",
+    "string",
+    "zip",
+];
+
+pub(super) fn is_compiler_function_name(name: &str) -> bool {
+    COMPILER_FUNCTION_NAMES.contains(&name)
+}
+
+pub(super) fn validate_no_explicit_self_parameter(
+    parameters: &[severian_ast::Parameter],
+) -> Result<(), SemanticError> {
+    let Some(parameter) = parameters
+        .first()
+        .filter(|parameter| parameter.name.name == "self")
+    else {
+        return Ok(());
+    };
+    Err(error(
+        parameter.name.span,
+        "E000209: `self` is an implicit class receiver and must not be declared as a parameter",
+    ))
+}
+
 pub(super) fn class_type_name(ty: &Type) -> Option<String> {
     let Type::Named(path) = ty else { return None };
     let name = path.segments.last()?.name.as_str();

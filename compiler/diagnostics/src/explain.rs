@@ -123,6 +123,16 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "The package's `[compiler.type_resolution]` policy rejected a dynamic type that was created by inference fallback, an unresolved name or generic, or lost compiler information. Explicit source-level `Any` remains legal. Fix the originating annotation or inference rule instead of weakening the value after type checking.",
         },
         Explanation {
+            code: "E000208",
+            title: "Compiler function name is reserved",
+            text: "A top-level function declaration reused a name owned by a compiler-provided operation, such as `size`, `len`, `sqrt`, `min`, or `max`. Compiler functions have one stable meaning and cannot be shadowed. Remove the declaration and call the compiler function directly, or choose a domain-specific name such as `element_count`, `square_root`, `minimum`, or `maximum`. Method names remain in their owning type's namespace and are unaffected.",
+        },
+        Explanation {
+            code: "E000209",
+            title: "Explicit self parameter",
+            text: "Class and trait method receivers are implicit in Severian. Remove the leading `self` parameter; fields, methods, and the receiver value remain available inside the method body.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",

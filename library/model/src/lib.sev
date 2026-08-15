@@ -98,7 +98,7 @@ class LayerNorm: Module
             row = source[row_start:row_start + width]
             center = row.reduce(|total, value| total + value, 0.0) / width
             variance = row.map(|value| (value - center) * (value - center)).reduce(|total, value| total + value, 0.0) / width
-            scale = 1.0 / math.sqrt(variance + epsilon)
+            scale = 1.0 / sqrt(variance + epsilon)
             output.extend(row.map(|value| (value - center) * scale))
         return tensor_ops.tensor(output, dimensions)
 
@@ -136,7 +136,7 @@ class MultiheadAttention: Module
         width = tensor_ops.shape(query_value)[1]
         scores = tensor_ops.scale(
             tensor_ops.matmul(query_value, tensor_ops.transpose(key_value)),
-            1.0 / math.sqrt(float(width)),
+            1.0 / sqrt(float(width)),
         )
         return output.forward(tensor_ops.matmul(tensor_ops.softmax(scores), value_value))
 
@@ -567,7 +567,7 @@ def linspace(start: float, stop: float, steps: int) -> Tensor[f64]:
     return tensor_ops.linspace(start, stop, steps)
 def shape(input: Tensor[f64]) -> list[int]:
     return tensor_ops.shape(input)
-def size(input: Tensor[f64]) -> int:
+def element_count(input: Tensor[f64]) -> int:
     return tensor_ops.size_of(input)
 def reshape(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
     return tensor_ops.reshape(input, dimensions)
@@ -595,10 +595,10 @@ def sum(input: Tensor[f64]) -> float:
     return tensor_ops.sum(input)
 def mean(input: Tensor[f64]) -> float:
     return tensor_ops.mean(input)
-def min(input: Tensor[f64]) -> float:
-    return tensor_ops.min(input)
-def max(input: Tensor[f64]) -> float:
-    return tensor_ops.max(input)
+def minimum(input: Tensor[f64]) -> float:
+    return tensor_ops.minimum(input)
+def maximum(input: Tensor[f64]) -> float:
+    return tensor_ops.maximum(input)
 def argmin(input: Tensor[f64]) -> int:
     return tensor_ops.argmin(input)
 def argmax(input: Tensor[f64]) -> int:
@@ -639,14 +639,14 @@ def exp(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.exp(input)
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.log(input)
-def sqrt(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_ops.sqrt(input)
+def square_root(input: Tensor[f64]) -> Tensor[f64]:
+    return tensor_ops.square_root(input)
 def sin(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.sin(input)
 def cos(input: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.cos(input)
-def abs(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_ops.abs(input)
+def absolute(input: Tensor[f64]) -> Tensor[f64]:
+    return tensor_ops.absolute(input)
 def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:
     return tensor_ops.pow(input, exponent)
 def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:

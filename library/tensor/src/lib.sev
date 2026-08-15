@@ -286,8 +286,8 @@ unsafe:
     native("__sev_tensor_matmul") def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
     native("__sev_tensor_sum") def sum[type: Numeric](value: Tensor[type]) -> Tensor[type]
     native("__sev_tensor_mean") def mean(value: Tensor[f64]) -> float
-    native("__sev_tensor_max") def max(value: Tensor[f64]) -> float
-    native("__sev_tensor_min") def min(value: Tensor[f64]) -> float
+    native("__sev_tensor_max") def maximum(value: Tensor[f64]) -> float
+    native("__sev_tensor_min") def minimum(value: Tensor[f64]) -> float
     native("__sev_tensor_softmax_rows") def softmax[type: Float](value: Tensor[type]) -> Tensor[type]
 
     native("__sev_tensor_to_f32") def compute_as_f32[type: Numeric](value: Tensor[type]) -> Tensor[f32]

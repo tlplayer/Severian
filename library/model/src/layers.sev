@@ -140,7 +140,7 @@ class LayerNorm: Module
             variance := 0.0
             for value in row:
                 variance += (value - center) * (value - center)
-            scale = 1.0 / math.sqrt(variance / float(width) + epsilon)
+            scale = 1.0 / sqrt(variance / float(width) + epsilon)
             output.extend(row.map(|value| (value - center) * scale))
         return tensor_ops.tensor(output, dimensions)
 
@@ -175,7 +175,7 @@ class BatchNorm: Module
         output = source[0:size(source)]
         for batch in range(0, dimensions[0]):
             for channel in range(0, channels):
-                scale = 1.0 / math.sqrt(variances[channel] / float(count) + epsilon)
+                scale = 1.0 / sqrt(variances[channel] / float(count) + epsilon)
                 for offset in range(0, channel_stride):
                     index = batch * batch_stride + channel * channel_stride + offset
                     output[index] = (source[index] - means[channel]) * scale
@@ -281,7 +281,7 @@ class MultiheadAttention: Module
         v = value.forward(input)
         width = tensor_ops.shape(q)[1]
         scores = tensor_ops.matmul(q, tensor_ops.transpose(k))
-        scaled = tensor_ops.tensor(tensor_ops.values(scores).map(|item| item / math.sqrt(float(width))), tensor_ops.shape(scores))
+        scaled = tensor_ops.tensor(tensor_ops.values(scores).map(|item| item / sqrt(float(width))), tensor_ops.shape(scores))
         context = tensor_ops.matmul(tensor_ops.softmax(scaled), v)
         return output.forward(context)
 
@@ -395,7 +395,7 @@ class Transformer: Module
         return Sequential(layers).parameters()
 
 def initialized_linear(inputs: int, outputs: int) -> Linear:
-    scale = math.sqrt(2.0 / float([1, inputs + outputs].maximum()))
+    scale = sqrt(2.0 / float([1, inputs + outputs].maximum()))
     weight = tensor_ops.tensor(tensor_ops.values(tensor_ops.randn([inputs, outputs])).map(|value| value * scale), [inputs, outputs])
     return Linear(weight, tensor_ops.zeros([outputs]))
 

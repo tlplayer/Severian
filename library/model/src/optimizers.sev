@@ -106,7 +106,7 @@ class Adam: Optimizer
                 second_moment[parameter_index][index] = beta2 * second_moment[parameter_index][index] + (1.0 - beta2) * g * g
                 corrected_first = first_moment[parameter_index][index] / (1.0 - math.pow(beta1, float(step_count)))
                 corrected_second = second_moment[parameter_index][index] / (1.0 - math.pow(beta2, float(step_count)))
-                current[index] -= learning_rate * corrected_first / (math.sqrt(corrected_second) + epsilon)
+                current[index] -= learning_rate * corrected_first / (sqrt(corrected_second) + epsilon)
             parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class Adagrad: Optimizer
@@ -141,7 +141,7 @@ class Adagrad: Optimizer
             gradient = tensor_ops.values(parameter.gradient)
             for index in indices(current):
                 accumulated[parameter_index][index] += gradient[index] * gradient[index]
-                current[index] -= learning_rate * gradient[index] / (math.sqrt(accumulated[parameter_index][index]) + epsilon)
+                current[index] -= learning_rate * gradient[index] / (sqrt(accumulated[parameter_index][index]) + epsilon)
             parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class RMSprop: Optimizer
@@ -177,7 +177,7 @@ class RMSprop: Optimizer
             gradient = tensor_ops.values(parameter.gradient)
             for index in indices(current):
                 average[parameter_index][index] = alpha * average[parameter_index][index] + (1.0 - alpha) * gradient[index] * gradient[index]
-                current[index] -= learning_rate * gradient[index] / (math.sqrt(average[parameter_index][index]) + epsilon)
+                current[index] -= learning_rate * gradient[index] / (sqrt(average[parameter_index][index]) + epsilon)
             parameters[parameter_index].value = tensor_ops.tensor(current, tensor_ops.shape(parameter.value))
 
 class Scheduler:

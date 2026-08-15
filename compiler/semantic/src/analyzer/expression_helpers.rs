@@ -87,31 +87,11 @@ pub(super) fn lower_declared_call(
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let external_operation = aliases.contains_key(&format!("__external_function.{function}"));
-    let linked_function = if external_operation {
-        function
-    } else {
-        function
-            .rsplit_once('.')
-            .map(|(_, name)| name)
-            .filter(|name| signatures.contains_key(*name))
-            .unwrap_or(function)
-    };
-    let runtime_function = match linked_function {
-        // The MLIR backend currently exposes this intrinsic under its C symbol.
-        // Its type comes from library/math, not from this mapping.
-        "math.sqrt" => "sqrt",
-        _ => linked_function,
-    };
     let return_type = instantiate_signature_type(&signature.returns, &tensor_types, aliases);
     let return_type = tensor::infer_call_result(&signature.target, &args, return_type, call.span)?;
     Ok((
         Expression::Call {
-            target: if runtime_function == linked_function {
-                signature.target.clone()
-            } else {
-                CallTarget::source(runtime_function)
-            },
+            target: signature.target.clone(),
             args,
         },
         return_type,

@@ -69,7 +69,7 @@ def main():
     assert("severian".starts_with("sev"))
     assert("severian".ends_with("ian"))
     assert(numbers.to_set() == {1, 2, 3})
-    assert(math.floor(math.sqrt(9.0)) == 3)
+    assert(math.floor(sqrt(9.0)) == 3)
     random.seed(7)
     assert(random.randint(1, 1) == 1)
     mapping := {"answer": 42}
@@ -98,6 +98,55 @@ def main():
     assert(tensor.mean(value) == 1.0)
     assert(time.monotonic() > 0.0)
     assert(process.run("true") == 0)
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("run")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn implicit_receivers_execute_across_a_package_boundary() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "severian-implicit-receiver-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("main.sev");
+    std::fs::write(
+        &source,
+        r#"import io
+
+def main():
+    source = io.MemoryStream([1, 2, 3])
+    destination = io.MemoryStream([])
+    switch io.copy(source, destination, 2):
+        ok count:
+            assert(count == 3)
+            assert(destination.snapshot() == [1, 2, 3])
+        failure _error:
+            assert(false)
+    limited = io.LimitedWriter(io.MemoryStream([]), 1)
+    switch io.copy(io.MemoryStream([1, 2]), limited, 2):
+        ok _count:
+            assert(false)
+        failure error:
+            assert(error.message == "writer accepted only part of a stream chunk")
 "#,
     )
     .unwrap();
@@ -285,6 +334,7 @@ fn all_requested_packages_are_workspace_members() {
         "http",
         "network",
         "logging",
+        "io",
         "tensor",
     ] {
         assert!(

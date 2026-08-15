@@ -206,6 +206,12 @@ pub(super) fn lower_expression_kind(
         Expr::Binary(binary) => {
             let (left, left_type) = lower_expression(&binary.left, scope, signatures, aliases)?;
             let (right, right_type) = lower_expression(&binary.right, scope, signatures, aliases)?;
+            if left_type == ValueType::Result || right_type == ValueType::Result {
+                return Err(error(
+                    binary.span,
+                    "E000801: a recoverable Result cannot be used as an operator operand; bind it to propagate success or handle it with switch",
+                ));
+            }
             let (op, result_type) = match binary.op {
                 AstBinaryOp::Add
                     if left_type == ValueType::List && right_type == ValueType::List =>

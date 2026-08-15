@@ -12,12 +12,12 @@ const PRELUDE: &str = concat!(
     "    zero() -> Self\n",
     "\n",
     "trait Module[T: TensorDType]:\n",
-    "    def forward(self, x: Tensor[T]) -> Tensor[T]\n",
+    "    def forward(x: Tensor[T]) -> Tensor[T]\n",
     "\n",
     "class Linear[T: TensorDType]:\n",
     "    weight: Tensor[T]\n",
     "\n",
-    "    def forward(self, x: Tensor[T]) -> Tensor[T]:\n",
+    "    def forward(x: Tensor[T]) -> Tensor[T]:\n",
     "        return x\n",
     "\n",
 );
@@ -167,7 +167,7 @@ fn rejects_a_structural_trait_signature_mismatch() {
             "class Broken[T: TensorDType]:\n",
             "    weight: Tensor[T]\n",
             "\n",
-            "    def forward(self, x: Tensor[T]) -> int:\n",
+            "    def forward(x: Tensor[T]) -> int:\n",
             "        return 1\n",
             "\n",
             "def consume(module: Module[f32], x: Tensor[f32]) -> Tensor[f32]:\n",
@@ -203,12 +203,12 @@ fn rejects_a_type_argument_outside_its_bound() {
 fn class_bounds_use_structural_trait_conformance() {
     let source = concat!(
         "trait Serializable:\n",
-        "    encode(self) -> string\n",
+        "    encode() -> string\n",
         "\n",
         "class Record:\n",
         "    value: string\n",
         "\n",
-        "    def encode(self) -> string:\n",
+        "    def encode() -> string:\n",
         "        return value\n",
         "\n",
         "class Envelope[T: Serializable]:\n",
@@ -230,7 +230,7 @@ fn imported_generic_traits_retain_their_concrete_method_contract() {
     let contracts = parse(
         &lex(concat!(
             "trait Module[T: TensorDType]:\n",
-            "    def forward(self, x: Tensor[T]) -> Tensor[T]\n",
+            "    def forward(x: Tensor[T]) -> Tensor[T]\n",
         ))
         .unwrap(),
     )
@@ -241,7 +241,7 @@ fn imported_generic_traits_retain_their_concrete_method_contract() {
         "class Linear:\n",
         "    weight: Tensor[f32]\n",
         "\n",
-        "    def forward(self, x: Tensor[f32]) -> Tensor[f32]:\n",
+        "    def forward(x: Tensor[f32]) -> Tensor[f32]:\n",
         "        return x\n",
         "\n",
         "def consume(module: contracts.Module[f32], x: Tensor[f32]) -> Tensor[f32]:\n",
@@ -271,7 +271,7 @@ fn imported_generic_classes_specialize_in_the_consuming_module() {
             "class Box[T: Numeric]:\n",
             "    value: T\n",
             "\n",
-            "    def get(self) -> T:\n",
+            "    def get() -> T:\n",
             "        return value\n",
         ))
         .unwrap(),

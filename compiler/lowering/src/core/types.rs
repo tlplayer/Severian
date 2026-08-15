@@ -31,15 +31,17 @@ pub(super) fn source_function_symbol(name: &str) -> String {
 }
 
 pub(super) fn mangle_symbol_component(name: &str) -> String {
-    name.chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    use std::fmt::Write as _;
+
+    let mut symbol = String::with_capacity(name.len());
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            symbol.push(char::from(byte));
+        } else {
+            write!(symbol, "_{byte:02x}").unwrap();
+        }
+    }
+    symbol
 }
 
 pub(super) fn class_function_symbol(class: &str, method: &str) -> String {
@@ -48,6 +50,23 @@ pub(super) fn class_function_symbol(class: &str, method: &str) -> String {
         mangle_symbol_component(class),
         mangle_symbol_component(method)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mangle_symbol_component;
+
+    #[test]
+    fn symbol_mangling_distinguishes_qualified_and_underscored_names() {
+        assert_ne!(
+            mangle_symbol_component("collections.Deque__int"),
+            mangle_symbol_component("collections_Deque__int")
+        );
+        assert_eq!(
+            mangle_symbol_component("collections.Deque__int"),
+            "collections_2eDeque_5f_5fint"
+        );
+    }
 }
 
 #[derive(Debug, Clone)]

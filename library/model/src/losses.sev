@@ -74,8 +74,8 @@ def kl_divergence(log_probabilities: Tensor[f64], targets: Tensor[f64]) -> float
     return total / float(size(predicted))
 
 def cosine_embedding_loss(left: Tensor[f64], right: Tensor[f64], target: float = 1.0, margin: float = 0.0) -> float:
-    left_norm = math.sqrt(tensor_ops.dot(left, left))
-    right_norm = math.sqrt(tensor_ops.dot(right, right))
+    left_norm = sqrt(tensor_ops.dot(left, left))
+    right_norm = sqrt(tensor_ops.dot(right, right))
     similarity = tensor_ops.dot(left, right) / [0.000000000001, left_norm * right_norm].maximum()
     if target > 0.0:
         return 1.0 - similarity

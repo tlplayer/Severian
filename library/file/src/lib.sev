@@ -49,9 +49,6 @@ def seek(handle: Any, offset: int) -> Result[unit, IOError]:
 def byte_length(handle: Any) -> Result[int, IOError]:
     return platform.file_size(handle)
 
-def bytes(handle: Any) -> Result[int, IOError]:
-    return byte_length(handle)
-
 def close(handle: Any) -> Result[unit, IOError]:
     return platform.file_close(handle)
 

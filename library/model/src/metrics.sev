@@ -66,7 +66,7 @@ def mse(expected: list[float], predicted: list[float]) -> float:
     return total / float(size(expected))
 
 def rmse(expected: list[float], predicted: list[float]) -> float:
-    return math.sqrt(mse(expected, predicted))
+    return sqrt(mse(expected, predicted))
 
 def mae(expected: list[float], predicted: list[float]) -> float:
     total := 0.0
@@ -110,11 +110,11 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
         dot += left[index] * right[index]
         left_norm += left[index] * left[index]
         right_norm += right[index] * right[index]
-    return dot / [0.000000000001, math.sqrt(left_norm * right_norm)].maximum()
+    return dot / [0.000000000001, sqrt(left_norm * right_norm)].maximum()
 
 def pairwise_distance(left: list[float], right: list[float]) -> float:
     total := 0.0
     for index in indices(left):
         difference = left[index] - right[index]
         total += difference * difference
-    return math.sqrt(total)
+    return sqrt(total)

@@ -99,14 +99,37 @@ impl LowerContext<'_> {
                     let field = self.string_address(&name.name);
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                    if let Some(class) = self.field_classes.get(&name.name).cloned() {
-                        self.object_classes.insert(result.clone(), class);
-                    }
                     let ty = self
                         .field_types
                         .get(&name.name)
                         .copied()
                         .unwrap_or(ValueType::Any);
+                    if let Some(class) = self.field_classes.get(&name.name).cloned() {
+                        if matches!(ty, ValueType::Interface(_)) {
+                            let methods = self
+                                .classes
+                                .iter()
+                                .find(|definition| definition.name == class)
+                                .map(|definition| {
+                                    definition
+                                        .methods
+                                        .iter()
+                                        .map(|method| method.name.clone())
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            self.receiver_types.insert(
+                                result.clone(),
+                                severian_hir::ReceiverType {
+                                    concrete: false,
+                                    name: class,
+                                    methods,
+                                },
+                            );
+                        } else {
+                            self.object_classes.insert(result.clone(), class);
+                        }
+                    }
                     if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
                         (result, ty)
                     } else {
@@ -392,8 +415,31 @@ impl LowerContext<'_> {
                 let result = self.fresh_value();
                 writeln!(self.output, "    {result} = llvm.call @__sev_object_get({object}, {field}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                 let metadata = self.object_field_metadata(&object, member);
-                if let Some((_, Some(class))) = &metadata {
-                    self.object_classes.insert(result.clone(), class.clone());
+                if let Some((ty, Some(class))) = &metadata {
+                    if matches!(ty, ValueType::Interface(_)) {
+                        let methods = self
+                            .classes
+                            .iter()
+                            .find(|definition| definition.name == *class)
+                            .map(|definition| {
+                                definition
+                                    .methods
+                                    .iter()
+                                    .map(|method| method.name.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        self.receiver_types.insert(
+                            result.clone(),
+                            severian_hir::ReceiverType {
+                                concrete: false,
+                                name: class.clone(),
+                                methods,
+                            },
+                        );
+                    } else {
+                        self.object_classes.insert(result.clone(), class.clone());
+                    }
                 }
                 let ty = metadata.map(|(ty, _)| ty).unwrap_or(ValueType::Any);
                 if ty == ValueType::Any || matches!(ty, ValueType::Tensor(_)) {
@@ -2335,6 +2381,7 @@ impl LowerContext<'_> {
                             | "bits"
                             | "capacity"
                             | "range"
+                            | "sqrt"
                             | "abs"
                             | "min"
                             | "max"
@@ -2409,6 +2456,35 @@ impl LowerContext<'_> {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_string({value}) : (!llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::String);
+                }
+                if compiler_intrinsic && function == "sqrt" {
+                    let (value, ty) = args.first().cloned().unwrap();
+                    let value = match ty {
+                        ValueType::Float => value,
+                        ValueType::Int => {
+                            let converted = self.fresh_value();
+                            writeln!(
+                                self.output,
+                                "    {converted} = llvm.sitofp {value} : i64 to f64"
+                            )
+                            .unwrap();
+                            converted
+                        }
+                        ValueType::Any => {
+                            self.emit_runtime_site();
+                            let converted = self.fresh_value();
+                            writeln!(self.output, "    {converted} = llvm.call @__sev_value_float({value}) : (!llvm.ptr) -> f64").unwrap();
+                            converted
+                        }
+                        _ => unreachable!("semantic analysis validates sqrt operands"),
+                    };
+                    let result = self.fresh_value();
+                    writeln!(
+                        self.output,
+                        "    {result} = llvm.call @llvm.sqrt.f64({value}) : (f64) -> f64"
+                    )
+                    .unwrap();
+                    return (result, ValueType::Float);
                 }
                 if compiler_intrinsic && (function == "len" || function == "size") {
                     let (value, ty) = args.first().cloned().unwrap();
@@ -2700,7 +2776,7 @@ impl LowerContext<'_> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let return_type = match function.as_str() {
-                    "sqrt" | "float" => ValueType::Float,
+                    "float" => ValueType::Float,
                     "int" | "len" | "size" | "bytes" | "bits" | "capacity" => ValueType::Int,
                     _ => target
                         .signature
@@ -2711,8 +2787,6 @@ impl LowerContext<'_> {
                 };
                 let symbol = if let Some(symbol) = &target.native_symbol {
                     symbol.clone()
-                } else if target.signature.is_none() && function == "sqrt" {
-                    "llvm.sqrt.f64".to_owned()
                 } else {
                     self.native_symbols
                         .get(&target.id)

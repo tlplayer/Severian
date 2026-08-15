@@ -11,6 +11,7 @@ pub(super) fn lower_block(
     for statement in &block.statements {
         match statement {
             Stmt::Function(function) => {
+                validate_no_explicit_self_parameter(&function.params)?;
                 if !function.generic_params.is_empty() {
                     return Err(error(
                         function.span,

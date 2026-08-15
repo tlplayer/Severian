@@ -405,29 +405,7 @@ pub(super) fn lower_call(
             ValueType::Any,
         ));
     };
-    let intrinsic = matches!(
-        callee.name.as_str(),
-        "print"
-            | "panic"
-            | "int"
-            | "float"
-            | "string"
-            | "range"
-            | "indices"
-            | "enumerate"
-            | "zip"
-            | "any"
-            | "all"
-            | "abs"
-            | "min"
-            | "max"
-            | "divmod"
-            | "len"
-            | "size"
-            | "bytes"
-            | "bits"
-            | "capacity"
-    );
+    let intrinsic = is_compiler_function_name(&callee.name);
     let imported = if intrinsic {
         callee.name.as_str()
     } else if signatures.contains_key(&callee.name) {
@@ -470,6 +448,7 @@ pub(super) fn lower_call(
         "any" => Some(("any", ValueType::Bool)),
         "all" => Some(("all", ValueType::Bool)),
         "abs" | "min" | "max" => Some((canonical, ValueType::Any)),
+        "sqrt" => Some(("sqrt", ValueType::Float)),
         "divmod" => Some(("divmod", ValueType::Tuple)),
         "read" if !signatures.contains_key(&callee.name) => Some(("read", ValueType::Result)),
         "len" | "size" | "bytes" | "bits" | "capacity" => Some((canonical, ValueType::Int)),
@@ -566,6 +545,10 @@ pub(super) fn lower_call(
                 .any(|ty| !matches!(ty, ValueType::List | ValueType::Tuple | ValueType::Set))
         {
             return Err(error(call.span, "`zip` expects two iterables"));
+        }
+        if name == "sqrt" && !matches!(types[0], ValueType::Int | ValueType::Float | ValueType::Any)
+        {
+            return Err(error(call.span, "`sqrt` expects a numeric value"));
         }
         let args = lowered.into_iter().map(|(arg, _)| arg).collect();
         return Ok((

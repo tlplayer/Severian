@@ -305,6 +305,13 @@ impl LowerContext<'_> {
         let Expression::Variable(name) = object.kind() else {
             return false;
         };
+        if self
+            .field_types
+            .get(&name.name)
+            .is_some_and(|ty| matches!(ty, ValueType::Interface(_)))
+        {
+            return false;
+        }
         let class_name = self
             .variables
             .get(&name.id)
@@ -328,6 +335,22 @@ impl LowerContext<'_> {
         let Expression::Variable(name) = object.kind() else {
             return false;
         };
+        if self
+            .field_types
+            .get(&name.name)
+            .is_some_and(|ty| matches!(ty, ValueType::Interface(_)))
+        {
+            return self
+                .field_classes
+                .get(&name.name)
+                .and_then(|class_name| self.classes.iter().find(|class| class.name == *class_name))
+                .is_some_and(|class| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|candidate| candidate.name == method)
+                });
+        }
         let Some(receiver) = self
             .variables
             .get(&name.id)

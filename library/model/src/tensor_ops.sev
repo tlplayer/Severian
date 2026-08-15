@@ -49,7 +49,7 @@ def randn(shape: list[int]) -> Tensor[f64]:
     while size(data) < product(shape):
         u1 = [random.random(), 0.000000000001].maximum()
         u2 = random.random()
-        radius = math.sqrt(-2.0 * math.log(u1))
+        radius = sqrt(-2.0 * math.log(u1))
         data.append(radius * math.cos(6.283185307179586 * u2))
         if size(data) < product(shape):
             data.append(radius * math.sin(6.283185307179586 * u2))
@@ -234,10 +234,10 @@ def mean(input: Tensor[f64]) -> float:
     assert(size_of(input) > 0)
     return sum(input) / float(size_of(input))
 
-def min(input: Tensor[f64]) -> float:
+def minimum(input: Tensor[f64]) -> float:
     return values(input).minimum()
 
-def max(input: Tensor[f64]) -> float:
+def maximum(input: Tensor[f64]) -> float:
     return values(input).maximum()
 
 def argmin(input: Tensor[f64]) -> int:
@@ -265,7 +265,7 @@ def var(input: Tensor[f64], correction: int = 1) -> float:
     return total / float(divisor)
 
 def std(input: Tensor[f64], correction: int = 1) -> float:
-    return math.sqrt(var(input, correction))
+    return sqrt(var(input, correction))
 
 def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_runtime.matmul(left, right)
@@ -362,8 +362,8 @@ def exp(input: Tensor[f64]) -> Tensor[f64]:
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.log(value))
 
-def sqrt(input: Tensor[f64]) -> Tensor[f64]:
-    return map_values(input, |value| math.sqrt(value))
+def square_root(input: Tensor[f64]) -> Tensor[f64]:
+    return map_values(input, |value| sqrt(value))
 
 def sin(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.sin(value))
@@ -371,7 +371,7 @@ def sin(input: Tensor[f64]) -> Tensor[f64]:
 def cos(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.cos(value))
 
-def abs(input: Tensor[f64]) -> Tensor[f64]:
+def absolute(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| value if value >= 0.0 else -value)
 
 def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:

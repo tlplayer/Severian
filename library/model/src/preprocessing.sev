@@ -19,7 +19,7 @@ class StandardScaler:
                 difference = row[column] - means[column]
                 scales[column] += difference * difference
         for column in indices(scales):
-            scales[column] = math.sqrt(scales[column] / float([1, size(input) - 1].maximum()))
+            scales[column] = sqrt(scales[column] / float([1, size(input) - 1].maximum()))
             if scales[column] == 0.0:
                 scales[column] = 1.0
         return self
@@ -101,7 +101,7 @@ def normalize(input: list[list[float]]) -> list[list[float]]:
         norm := 0.0
         for value in row:
             norm += value * value
-        norm = math.sqrt(norm)
+        norm = sqrt(norm)
         output.append(row if norm == 0.0 else row.map(|value| value / norm))
     return output
 

@@ -56,12 +56,12 @@ fn preserves_generic_parameters_and_capability_constraints() {
 fn preserves_bounded_generic_classes_and_traits() {
     let source = concat!(
         "trait Module[T: TensorDType]:\n",
-        "    def forward(self, x: Tensor[T]) -> Tensor[T]\n",
+        "    def forward(x: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "class Linear[T: TensorDType + Serializable]:\n",
         "    weight: Tensor[T]\n",
         "\n",
-        "    def forward(self, x: Tensor[T]) -> Tensor[T]:\n",
+        "    def forward(x: Tensor[T]) -> Tensor[T]:\n",
         "        return x\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
@@ -72,7 +72,7 @@ fn preserves_bounded_generic_classes_and_traits() {
     assert_eq!(module_trait.generic_params.len(), 1);
     assert_eq!(module_trait.generic_params[0].name.name, "T");
     assert_eq!(module_trait.generic_params[0].constraints.len(), 1);
-    assert_eq!(module_trait.methods[0].params[0].name.name, "self");
+    assert_eq!(module_trait.methods[0].params[0].name.name, "x");
 
     let Item::Class(linear) = &module.items[1] else {
         panic!("expected generic class");
@@ -80,7 +80,7 @@ fn preserves_bounded_generic_classes_and_traits() {
     assert_eq!(linear.generic_params.len(), 1);
     assert_eq!(linear.generic_params[0].name.name, "T");
     assert_eq!(linear.generic_params[0].constraints.len(), 2);
-    assert_eq!(linear.methods[0].params[0].name.name, "self");
+    assert_eq!(linear.methods[0].params[0].name.name, "x");
 }
 
 #[test]

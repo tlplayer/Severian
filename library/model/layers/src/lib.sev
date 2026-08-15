@@ -1,12 +1,12 @@
 import tensor
 
 trait Module[T: TensorDType]:
-    def forward(self, input: Tensor[T]) -> Tensor[T]
+    def forward(input: Tensor[T]) -> Tensor[T]
 
 class Linear[T: TensorDType + Float]:
     weight: Tensor[T, dynamic, dynamic]
 
-    def forward(self, input: Tensor[T]) -> Tensor[T]:
+    def forward(input: Tensor[T]) -> Tensor[T]:
         compute_input = tensor.compute_as_f32(input)
         compute_weight = tensor.compute_as_f32(weight)
         projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
@@ -16,7 +16,7 @@ class LinearWithBias[T: TensorDType + Float]:
     weight: Tensor[T, dynamic, dynamic]
     bias: Tensor[T]
 
-    def forward(self, input: Tensor[T]) -> Tensor[T]:
+    def forward(input: Tensor[T]) -> Tensor[T]:
         compute_input = tensor.compute_as_f32(input)
         compute_weight = tensor.compute_as_f32(weight)
         projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
@@ -28,7 +28,7 @@ class RMSNorm[T: TensorDType + Float]:
     weight: Tensor[T]
     epsilon: f32
 
-    def forward(self, input: Tensor[T]) -> Tensor[T]:
+    def forward(input: Tensor[T]) -> Tensor[T]:
         input_f_32 = tensor.compute_as_f32(input)
         square = tensor.ranked_multiply(input_f_32, input_f_32)
         variance = tensor.mean_last(square)
