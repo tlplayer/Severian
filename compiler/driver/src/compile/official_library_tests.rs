@@ -42,10 +42,7 @@ fn embedded_network_package_contains_its_native_provider_assets() {
 fn migrated_packages_embed_their_owned_native_providers() {
     for (name, expected) in [
         ("math", ["native/include/math_abi.h", "native/math.c"]),
-        (
-            "random",
-            ["native/include/random_abi.h", "native/random.c"],
-        ),
+        ("random", ["native/include/random_abi.h", "native/random.c"]),
         (
             "environment",
             [
@@ -55,10 +52,12 @@ fn migrated_packages_embed_their_owned_native_providers() {
         ),
         (
             "process",
-            [
-                "native/include/process_abi.h",
-                "native/posix/process.c",
-            ],
+            ["native/include/process_abi.h", "native/posix/process.c"],
+        ),
+        ("file", ["native/include/file_abi.h", "native/posix/file.c"]),
+        (
+            "regex",
+            ["native/include/regex_abi.h", "native/posix/regex.c"],
         ),
     ] {
         let package = EMBEDDED_OFFICIAL_PACKAGES

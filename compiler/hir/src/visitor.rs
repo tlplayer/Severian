@@ -252,7 +252,7 @@ pub(crate) fn visit_expression_mut(
             visit_expression_mut(left, visitor);
             visit_expression_mut(right, visitor);
         }
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 visit_expression_mut(arg, visitor);
             }

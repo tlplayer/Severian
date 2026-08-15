@@ -44,9 +44,6 @@ unsafe:
     extern("__sev_time_sleep") def time_sleep(seconds: float)
     extern("__sev_time_monotonic") def time_monotonic() -> float
     extern("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
-    extern("__sev_regex_findall") def regex_findall(text: string, pattern: string) -> list[string]
-    extern("__sev_regex_split") def regex_split(text: string, pattern: string) -> list[string]
-    extern("__sev_regex_sub") def regex_sub(text: string, pattern: string, replacement: string) -> string
     extern("__sev_hash_md5") def hash_md5(value: string) -> string
     extern("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
     extern("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]
@@ -61,8 +58,6 @@ unsafe:
     extern("__sev_platform_all") def core_all(values: list[bool]) -> bool
     extern("__sev_platform_any") def core_any(values: list[bool]) -> bool
     extern("__sev_platform_abs") def core_abs[type](value: type) -> type
-
-    extern("__sev_file_read") def file_read(path: string) -> Result[string, IOError]
 
     extern("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
 
@@ -141,12 +136,6 @@ test "native log ABI":
 
 unsafe:
     extern("__sev_log_error") def log_error(message: string, cause: Any)
-
-unsafe:
-    extern("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool
-
-test "native regex ABI":
-    assert(regex_matches("release-42", "^[a-z]+-[0-9]+$"))
 
 unsafe:
     extern("__sev_host_container_backend") def host_container_backend() -> string

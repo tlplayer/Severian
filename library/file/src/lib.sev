@@ -1,4 +1,5 @@
 import "src/file_interface.sev" as file_interface
+import "src/io.sev" as file_io
 import "src/file_text.sev" as file_text
 import "src/file_csv.sev" as file_csv
 import "src/file_json.sev" as file_json
@@ -7,6 +8,9 @@ import "src/file_wav.sev" as file_wav
 import "src/file_mp3.sev" as file_mp3
 import "src/file_binary.sev" as file_binary
 import platform
+
+def source_text(path: string) -> Result[string, IOError]:
+    return file_io.read_text(path)
 
 def read_text(path: string) -> Result[string, IOError | file_interface.FormatError]:
     document = read(path)
@@ -119,6 +123,13 @@ test "native file round trip":
     _written = write(path, "severian file runtime")
     contents = read_text(path)
     assert(contents == "severian file runtime")
+
+test "missing source text reports an IO error":
+    switch source_text("/tmp/severian-library-file-does-not-exist.txt"):
+        ok contents:
+            assert(false, contents)
+        failure error:
+            assert(error.message != "")
 
 test "read dispatches text and csv formats":
     text_path = "/tmp/severian-library-format.txt"

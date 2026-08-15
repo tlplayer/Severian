@@ -73,7 +73,17 @@ pub struct Function {
     pub return_type: ValueType,
     pub(crate) source_tensor_intrinsics: usize,
     pub tensor_operations: Vec<TensorOp>,
+    /// Typed calls crossing package-owned foreign ABI boundaries. MIR records
+    /// argument/result identities without interpreting the requested domain.
+    pub foreign_calls: Vec<ForeignCall>,
     pub blocks: Vec<BasicBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignCall {
+    pub function: severian_abi::ExternalFunction,
+    pub arguments: Vec<ValueRef>,
+    pub result: ValueRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

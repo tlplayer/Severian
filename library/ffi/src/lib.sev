@@ -1,3 +1,21 @@
+import abi
+
+class Library:
+    name: string
+
+    def symbol(symbol_name: string, signature: abi.Function) -> Symbol:
+        return Symbol(name, symbol_name, signature)
+
+class Symbol:
+    library: string
+    name: string
+    signature: abi.Function
+
+def library(name: string) -> Library:
+    return Library(name)
+
+# Compatibility wrappers for packages written before ABI and symbol lookup
+# were separated. New package-private provider declarations use `abi.*`.
 class Handle:
     opaque: isize
 

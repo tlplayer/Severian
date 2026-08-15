@@ -609,7 +609,6 @@ fn find_hip_library() -> Option<PathBuf> {
         "/opt/rocm/lib/libamdhip64.so",
         "/opt/rocm/lib64/libamdhip64.so",
         "/usr/lib/x86_64-linux-gnu/libamdhip64.so",
-        "/usr/local/lib/ollama/rocm_v7_2/libamdhip64.so.7",
     ]
     .iter()
     .map(PathBuf::from)

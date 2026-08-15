@@ -304,7 +304,9 @@ pub(super) fn infer_expression_effect(
             infer_expression_effect(left, Access::Read, parameters, effects);
             infer_expression_effect(right, Access::Read, parameters, effects);
         }
-        Expression::Format { args, .. } | Expression::Call { args, .. } => {
+        Expression::Format { args, .. }
+        | Expression::Call { args, .. }
+        | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 infer_expression_effect(arg, Access::Read, parameters, effects);
             }
@@ -548,7 +550,9 @@ pub(super) fn count_expression(expression: &Expression, counts: &mut HashMap<Bin
                 count_expression(bound, counts);
             }
         }
-        Expression::Format { args, .. } | Expression::Call { args, .. } => {
+        Expression::Format { args, .. }
+        | Expression::Call { args, .. }
+        | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 count_expression(arg, counts);
             }

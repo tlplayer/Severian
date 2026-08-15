@@ -46,6 +46,7 @@ fn lower_function(
         return_type: function.return_type,
         source_tensor_intrinsics: builder.source_tensor_intrinsics,
         tensor_operations: builder.tensor_operations,
+        foreign_calls: builder.foreign_calls,
         blocks: builder.blocks,
     })
 }
@@ -57,6 +58,7 @@ struct FunctionBuilder {
     bindings: BTreeMap<BindingId, LocalId>,
     source_tensor_intrinsics: usize,
     tensor_operations: Vec<TensorOp>,
+    foreign_calls: Vec<ForeignCall>,
     cleanup_stack: Vec<ScopedBehavior>,
     loop_cleanup_depths: Vec<usize>,
 }
@@ -312,6 +314,18 @@ impl FunctionBuilder {
             },
             tensor_op: None,
         };
+        if let Expression::ForeignCall { function, args } = expression.kind() {
+            let arguments = args
+                .iter()
+                .map(|argument| self.value_ref(argument))
+                .collect::<Result<Vec<_>, _>>()?;
+            self.foreign_calls.push(ForeignCall {
+                function: function.clone(),
+                arguments,
+                result: value,
+            });
+            return Ok(value);
+        }
         let Expression::Call { target, args } = expression.kind() else {
             self.lower_nested_tensor_ops(expression)?;
             return Ok(value);
@@ -474,7 +488,7 @@ impl FunctionBuilder {
                 lower(left)?;
                 lower(right)
             }
-            Expression::Call { args, .. } => {
+            Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
                 for argument in args {
                     lower(argument)?;
                 }

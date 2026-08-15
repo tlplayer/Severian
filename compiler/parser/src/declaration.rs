@@ -124,12 +124,35 @@ impl Parser<'_> {
         self.expect_simple(TokenKind::Newline, "newline after trait header")?;
         self.expect_simple(TokenKind::Indent, "indented trait body")?;
         let mut decorators = Vec::new();
+        let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
         let mut scoped_behaviors = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             if self.at(&TokenKind::At) {
                 decorators.extend(self.parse_decorators()?);
+                continue;
+            }
+            if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "property") {
+                let property_start = self.advance().span.start;
+                let property_name = self.expect_identifier("trait property name")?;
+                self.expect_simple(TokenKind::Colon, "`:` after trait property name")?;
+                let ty = self.parse_type()?;
+                let default = if self.take_simple(&TokenKind::Equal).is_some() {
+                    Some(self.parse_expression()?)
+                } else {
+                    None
+                };
+                let end = self
+                    .expect_simple(TokenKind::Newline, "newline after trait property")?
+                    .span
+                    .end;
+                properties.push(TraitProperty {
+                    span: Span::new(property_start, end),
+                    name: property_name,
+                    ty,
+                    default,
+                });
                 continue;
             }
             let behavior_phase = if self.at(&TokenKind::With) {
@@ -250,6 +273,7 @@ impl Parser<'_> {
             generic_params,
             decorators,
             composed_traits,
+            properties,
             methods,
             operators,
             scoped_behaviors,
@@ -278,6 +302,9 @@ impl Parser<'_> {
                     break;
                 }
             }
+            // Accept the fully Python-shaped `class Provider: Trait:` spelling
+            // as equivalent to Severian's terser `class Provider: Trait`.
+            self.take_simple(&TokenKind::Colon);
         }
         self.expect_simple(TokenKind::Newline, "newline after class header")?;
         self.expect_simple(TokenKind::Indent, "indented class body")?;

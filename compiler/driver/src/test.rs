@@ -739,7 +739,7 @@ fn walk_expression<'expression>(
         Expression::FusedPipeline { input, .. } => walk_expression(input, visit),
         Expression::Ownership { value, .. } => walk_expression(value, visit),
         Expression::Lambda { body, .. } => walk_expression(body, visit),
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 walk_expression(arg, visit);
             }

@@ -391,7 +391,7 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
             walk_expression(left, visitor);
             walk_expression(right, visitor);
         }
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for argument in args {
                 walk_expression(argument, visitor);
             }

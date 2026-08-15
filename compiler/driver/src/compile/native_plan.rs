@@ -68,7 +68,8 @@ pub(super) fn build(
             }
         })?;
         for function in validated {
-            if let Some(existing) = functions.insert(function.symbol.clone(), function.clone()) {
+            if let Some(existing) = functions.insert(function.symbol.name.clone(), function.clone())
+            {
                 return Err(CompileError::Frontend {
                     stage: "native ABI",
                     span: severian_ast::Span::empty(0),

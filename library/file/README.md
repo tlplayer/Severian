@@ -44,6 +44,11 @@ The packages do not duplicate one another:
 - `file_csv.sev`, `file_json.sev`, and `file_yaml.sev` are thin reader adapters
   which connect extensions to those document packages.
 
+Text-family reads are implemented by the `file` package's own `c-v1` native
+provider. `abi` defines the stable types and ownership descriptors at that
+boundary; `ffi` defines library and symbol lookup. The compiler only validates
+and lowers the resulting typed foreign call.
+
 In-memory and file-backed values therefore share one type:
 
 ```sev
@@ -72,14 +77,13 @@ Readers advertise their extensions and can be registered together:
 
 ```sev
 import file
-import platform
 
 class PlaylistReader: file.Reader
     def extensions() -> list[string]:
         return [".m3u", ".m3u8"]
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
-        content = platform.file_read(path)
+        content = file.source_text(path)
         return Playlist(path, content.split("\n"))
 
 def install():
@@ -87,8 +91,9 @@ def install():
 ```
 
 The `Playlist` document structurally implements `file.File`; its parsing and
-domain methods remain owned by the playlist package. Low-level reads used by a
-reader adapter stay in `platform`, preventing recursive `file.read()` calls.
+domain methods remain owned by the playlist package. `file.source_text()` goes
+directly to the package-owned text provider, preventing recursive
+`file.read()` calls.
 
 `read_text` and `parse_csv` remain compatibility shims. New code uses
 `file.load()` for decoded values, `file.read()` for path-backed documents, and

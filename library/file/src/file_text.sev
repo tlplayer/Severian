@@ -1,4 +1,5 @@
 import "src/file_interface.sev" as file_interface
+import "src/io.sev" as file_io
 import platform
 
 class Text: file_interface.File
@@ -49,5 +50,5 @@ class TextReader: file_interface.Reader
         return [".txt", ".text", ".md", ".sev", ".toml", ".xml", ".html", ".log", ".lua"]
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
-        content = platform.file_read(path)
+        content = file_io.read_text(path)
         return Text(path, content)

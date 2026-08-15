@@ -32,6 +32,12 @@ impl Specializer {
         for composed in &mut trait_.composed_traits {
             self.rewrite_type(composed, &context)?;
         }
+        for property in &mut trait_.properties {
+            self.rewrite_type(&mut property.ty, &context)?;
+            if let Some(default) = &mut property.default {
+                self.rewrite_expression(default, &context)?;
+            }
+        }
         for method in &mut trait_.methods {
             if method
                 .params

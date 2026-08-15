@@ -453,6 +453,11 @@ impl Checker {
                 }
             }
             Expression::Call { target, args } => self.check_call(target, args)?,
+            Expression::ForeignCall { args, .. } => {
+                for argument in args {
+                    self.check_expression(argument, Access::Read)?;
+                }
+            }
             Expression::Typed { expression, .. } => self.check_expression(expression, access)?,
             Expression::MethodCall {
                 object,

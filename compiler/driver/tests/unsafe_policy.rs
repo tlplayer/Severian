@@ -176,7 +176,15 @@ fn generic_compiler_layers_do_not_name_model_architectures() {
     }
     for path in sources {
         let source = std::fs::read_to_string(&path).unwrap().to_ascii_lowercase();
-        for architecture in ["omnivoice", "qwen", "higgs"] {
+        for architecture in [
+            "omnivoice",
+            "qwen",
+            "higgs",
+            "llama",
+            "whisper",
+            "mistral",
+            "ollama",
+        ] {
             assert!(
                 !source.contains(architecture),
                 "{} must not name model architecture `{architecture}`",
@@ -219,7 +227,11 @@ fn lowering_cannot_implement_the_network_service() {
 fn migrated_library_services_do_not_return_to_the_compiler_bridge() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut sources = Vec::new();
-    for relative in ["compiler/lowering/src", "compiler/platform/src"] {
+    for relative in [
+        "compiler/backend/src",
+        "compiler/lowering/src",
+        "compiler/platform/src",
+    ] {
         source_files_below(&workspace.join(relative), &mut sources);
     }
     for path in sources {
@@ -229,6 +241,15 @@ fn migrated_library_services_do_not_return_to_the_compiler_bridge() {
             "__sev_random_",
             "__sev_environment_",
             "__sev_process_",
+            "void *__sev_file_read(",
+            "sev_abi_v1_file_",
+            "__sev_regex_",
+            "sev_abi_v1_regex_",
+            "#include <regex.h>",
+            "regcomp(",
+            "library/file",
+            "library/process",
+            "library/network",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -242,6 +263,8 @@ fn migrated_library_services_do_not_return_to_the_compiler_bridge() {
         "library/random/native/random.c",
         "library/environment/native/posix/environment.c",
         "library/process/native/posix/process.c",
+        "library/file/native/posix/file.c",
+        "library/regex/native/posix/regex.c",
     ] {
         assert!(workspace.join(provider).is_file(), "missing {provider}");
     }

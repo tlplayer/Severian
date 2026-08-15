@@ -224,17 +224,25 @@ pub(super) fn native_call_signatures(program: &Program) -> HashMap<String, Nativ
         else {
             return;
         };
-        let Expression::Call { target, args } = kind.as_ref() else {
-            return;
-        };
-        let Some(symbol) = &target.native_symbol else {
-            return;
+        let (id, symbol, args) = match kind.as_ref() {
+            Expression::Call { target, args } => {
+                let Some(symbol) = &target.native_symbol else {
+                    return;
+                };
+                (target.id, symbol.clone(), args)
+            }
+            Expression::ForeignCall { function, args } => (
+                FunctionId::from_name(&function.function),
+                function.shim_symbol.clone(),
+                args,
+            ),
+            _ => return,
         };
         signatures
             .entry(symbol.clone())
             .or_insert_with(|| NativeCallSignature {
-                id: target.id,
-                symbol: symbol.clone(),
+                id,
+                symbol,
                 params: args
                     .iter()
                     .map(|argument| argument.ty().unwrap_or(ValueType::Any))
@@ -245,10 +253,34 @@ pub(super) fn native_call_signatures(program: &Program) -> HashMap<String, Nativ
     signatures
 }
 
+pub(super) fn foreign_result_type(ty: severian_abi::AbiType) -> ValueType {
+    match ty {
+        severian_abi::AbiType::Unit => ValueType::Unit,
+        severian_abi::AbiType::Bool => ValueType::Bool,
+        severian_abi::AbiType::F32 | severian_abi::AbiType::F64 => ValueType::Float,
+        severian_abi::AbiType::StringView => ValueType::String,
+        severian_abi::AbiType::BytesView
+        | severian_abi::AbiType::Handle
+        | severian_abi::AbiType::OutHandle
+        | severian_abi::AbiType::OutError
+        | severian_abi::AbiType::OutUsize => ValueType::Any,
+        severian_abi::AbiType::I8
+        | severian_abi::AbiType::I16
+        | severian_abi::AbiType::I32
+        | severian_abi::AbiType::I64
+        | severian_abi::AbiType::U8
+        | severian_abi::AbiType::U16
+        | severian_abi::AbiType::U32
+        | severian_abi::AbiType::U64
+        | severian_abi::AbiType::Usize
+        | severian_abi::AbiType::Isize => ValueType::Int,
+    }
+}
+
 pub(super) fn is_predeclared_native_symbol(symbol: &str) -> bool {
     matches!(
         symbol,
-        "__sev_regex_matches" | "__sev_json_object_get" | "__sev_map_pop"
+        "__sev_string_length" | "__sev_json_object_get" | "__sev_map_pop"
     )
 }
 

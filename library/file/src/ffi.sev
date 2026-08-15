@@ -1,0 +1,20 @@
+import abi
+import ffi
+
+def read_text_descriptor() -> ffi.Symbol:
+    provider = ffi.library("file-posix")
+    signature = abi.c().function(
+        "sev_abi_v1_file_read_text",
+        [
+            abi.Type("string-view", abi.borrowed(), false),
+            abi.Type("out-handle", abi.out(), false),
+            abi.Type("out-error", abi.out(), false),
+        ],
+        abi.Type("i32", abi.copy(), false),
+    )
+    return provider.symbol("sev_abi_v1_file_read_text", signature)
+
+unsafe:
+    extern("sev_abi_v1_file_read_text") def read_text(path: abi.StringView, content: abi.OutHandle, error: abi.OutError) -> i32
+    extern("sev_abi_v1_file_text_value") def text_value(content: abi.Handle) -> string
+    extern("sev_abi_v1_file_text_release") def text_release(content: abi.Handle)

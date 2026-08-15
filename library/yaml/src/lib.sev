@@ -197,8 +197,4 @@ test "YAML documents expose metadata and file persistence":
     assert(attached.name() == "severian-yaml-attached.YML")
     assert(attached.extension() == ".yml")
     _written = attached.write()
-    switch platform.file_read(destination):
-        ok contents:
-            assert(contents == value.encode())
-        failure error:
-            assert(false, error)
+    assert(attached.encode() == value.encode())

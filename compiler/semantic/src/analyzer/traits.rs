@@ -284,6 +284,16 @@ fn expand_trait(
         .iter()
         .map(|method| (method.name.name.clone(), trait_method_signature(method)))
         .collect::<HashMap<_, _>>();
+    let mut property_types = expanded
+        .properties
+        .iter()
+        .map(|property| {
+            (
+                property.name.name.clone(),
+                declaration_type_key(&property.ty),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let mut operator_signatures = expanded
         .operators
         .iter()
@@ -313,6 +323,26 @@ fn expand_trait(
         })?;
         let inherited = expand_trait(&composed_key, registry, cache, active)?;
         let substitutions = composition_substitutions(&inherited, composed)?;
+        for property in &inherited.properties {
+            let property = substitute_trait_property(property, &substitutions);
+            let property_type = declaration_type_key(&property.ty);
+            match property_types.get(&property.name.name) {
+                Some(existing) if existing == &property_type => continue,
+                Some(existing) => {
+                    return Err(error(
+                        composed.span(),
+                        format!(
+                            "trait `{}` composes conflicting property requirements for `{}`: `{existing}` and `{property_type}`",
+                            entry.declaration.name.name, property.name.name
+                        ),
+                    ))
+                }
+                None => {
+                    property_types.insert(property.name.name.clone(), property_type);
+                    expanded.properties.push(property);
+                }
+            }
+        }
         for method in &inherited.methods {
             let method = substitute_trait_method(method, &substitutions);
             let signature = trait_method_signature(&method);
@@ -421,6 +451,16 @@ fn composition_substitutions(
         .collect()
 }
 
+fn substitute_trait_property(
+    property: &severian_ast::TraitProperty,
+    substitutions: &HashMap<String, Type>,
+) -> severian_ast::TraitProperty {
+    severian_ast::TraitProperty {
+        ty: substitute_declared_type(&property.ty, substitutions),
+        ..property.clone()
+    }
+}
+
 fn substitute_trait_method(
     method: &severian_ast::TraitMethod,
     substitutions: &HashMap<String, Type>,
@@ -494,7 +534,7 @@ pub(super) fn validate_trait_implementations(
     module: &Module,
     interfaces: &[PackageInterface],
     aliases: &HashMap<String, String>,
-) -> Result<(), SemanticError> {
+) -> Result<BTreeMap<String, TraitRegistryDefinition>, SemanticError> {
     let mut traits = HashMap::<String, &severian_ast::TraitDecl>::new();
     for item in &module.items {
         if let Item::Trait(declaration) = item {
@@ -539,6 +579,7 @@ pub(super) fn validate_trait_implementations(
                     )
                 })?;
             let substitutions = trait_substitutions(declaration, implemented, class)?;
+            validate_trait_properties(class, &raw, declaration, &substitutions)?;
             for required in &declaration.methods {
                 let Some(method) = class
                     .methods
@@ -600,7 +641,465 @@ pub(super) fn validate_trait_implementations(
             }
         }
     }
+    build_trait_implementation_registries(module, interfaces, aliases)
+}
+
+fn validate_trait_properties(
+    class: &severian_ast::ClassDecl,
+    trait_name: &str,
+    declaration: &severian_ast::TraitDecl,
+    substitutions: &HashMap<String, Type>,
+) -> Result<(), SemanticError> {
+    for required in &declaration.properties {
+        let expected = substitute_declared_type(&required.ty, substitutions);
+        let field = class
+            .fields
+            .iter()
+            .find(|field| field.name.name == required.name.name);
+        let value = field
+            .and_then(|field| field.default.as_ref())
+            .or(required.default.as_ref())
+            .ok_or_else(|| {
+                error(
+                    class.name.span,
+                    format!(
+                        "E000212: class `{}` does not contribute property `{}` required by trait `{trait_name}`",
+                        class.name.name, required.name.name
+                    ),
+                )
+            })?;
+        if let Some(actual) = field.and_then(|field| field.ty.as_ref()) {
+            if !optional_declaration_types_match(Some(actual), Some(&expected)) {
+                return Err(error(
+                    actual.span(),
+                    format!(
+                        "E000212: property `{}.{}` has type `{}`, expected `{}` from trait `{trait_name}`",
+                        class.name.name,
+                        required.name.name,
+                        declaration_type_key(actual),
+                        declaration_type_key(&expected)
+                    ),
+                ));
+            }
+        } else if !trait_property_expression_matches_type(value, &expected) {
+            return Err(error(
+                value.span(),
+                format!(
+                    "E000212: property `{}.{}` does not match `{}` required by trait `{trait_name}`",
+                    class.name.name,
+                    required.name.name,
+                    declaration_type_key(&expected)
+                ),
+            ));
+        }
+        trait_property_value(value)?;
+    }
     Ok(())
+}
+
+fn build_trait_implementation_registries(
+    module: &Module,
+    interfaces: &[PackageInterface],
+    root_aliases: &HashMap<String, String>,
+) -> Result<BTreeMap<String, TraitRegistryDefinition>, SemanticError> {
+    let mut traits = HashMap::<String, &severian_ast::TraitDecl>::new();
+    let mut trait_aliases = HashMap::<String, String>::new();
+    for item in &module.items {
+        let Item::Trait(declaration) = item else {
+            continue;
+        };
+        let canonical = declaration.name.name.clone();
+        traits.insert(canonical.clone(), declaration);
+        trait_aliases.insert(canonical.clone(), canonical);
+    }
+    for interface in interfaces {
+        for item in &interface.module.items {
+            let Item::Trait(declaration) = item else {
+                continue;
+            };
+            let canonical = format!("{}.{}", interface.name, declaration.name.name);
+            traits.insert(canonical.clone(), declaration);
+            trait_aliases.insert(canonical.clone(), canonical.clone());
+            if let Some(package) = &interface.export_package {
+                trait_aliases.insert(
+                    format!("{package}.{}", declaration.name.name),
+                    canonical.clone(),
+                );
+            }
+        }
+    }
+
+    let mut registries = BTreeMap::new();
+    let mut canonical_traits = traits.keys().cloned().collect::<Vec<_>>();
+    canonical_traits.sort();
+    for canonical in canonical_traits {
+        let declaration = traits[&canonical];
+        if declaration.properties.is_empty() {
+            continue;
+        }
+        let properties = declaration
+            .properties
+            .iter()
+            .map(|property| {
+                Ok(TraitPropertyDefinition {
+                    name: property.name.name.clone(),
+                    ty: declaration_type_key(&property.ty),
+                    default: property
+                        .default
+                        .as_ref()
+                        .map(trait_property_value)
+                        .transpose()?,
+                })
+            })
+            .collect::<Result<Vec<_>, SemanticError>>()?;
+        registries.insert(
+            canonical.clone(),
+            TraitRegistryDefinition {
+                name: canonical,
+                properties,
+                implementations: Vec::new(),
+            },
+        );
+    }
+
+    collect_registry_implementations(
+        &module.items,
+        None,
+        root_aliases,
+        &traits,
+        &trait_aliases,
+        &mut registries,
+    )?;
+    for interface in interfaces {
+        let aliases = collect_imports(&interface.module);
+        collect_registry_implementations(
+            &interface.module.items,
+            Some(&interface.name),
+            &aliases,
+            &traits,
+            &trait_aliases,
+            &mut registries,
+        )?;
+    }
+
+    for registry in registries.values_mut() {
+        registry
+            .implementations
+            .sort_by(|left, right| left.name.cmp(&right.name));
+    }
+    Ok(registries)
+}
+
+fn collect_registry_implementations(
+    items: &[Item],
+    namespace: Option<&str>,
+    aliases: &HashMap<String, String>,
+    traits: &HashMap<String, &severian_ast::TraitDecl>,
+    trait_aliases: &HashMap<String, String>,
+    registries: &mut BTreeMap<String, TraitRegistryDefinition>,
+) -> Result<(), SemanticError> {
+    for item in items {
+        let Item::Class(class) = item else { continue };
+        for implemented in &class.traits {
+            let Some(raw) = declaration_type_name(implemented) else {
+                continue;
+            };
+            if raw.rsplit('.').next() == Some("From") {
+                continue;
+            }
+            let Some(canonical) =
+                resolve_registry_trait(&raw, namespace, aliases, traits, trait_aliases)
+            else {
+                continue;
+            };
+            let declaration = traits[&canonical];
+            let substitutions = trait_substitutions(declaration, implemented, class)?;
+            validate_trait_properties(class, &raw, declaration, &substitutions)?;
+            let provider = match namespace {
+                Some(namespace) => format!("{namespace}.{}", class.name.name),
+                None => class.name.name.clone(),
+            };
+            let mut implemented_traits = Vec::new();
+            collect_registry_trait_closure(
+                &canonical,
+                aliases,
+                traits,
+                trait_aliases,
+                &mut HashSet::new(),
+                &mut implemented_traits,
+            );
+            for implemented_trait in implemented_traits {
+                let Some(registry) = registries.get_mut(&implemented_trait) else {
+                    continue;
+                };
+                let required_properties = &traits[&implemented_trait].properties;
+                let mut properties = BTreeMap::new();
+                for required in required_properties {
+                    let field = class
+                        .fields
+                        .iter()
+                        .find(|field| field.name.name == required.name.name);
+                    let inherited = declaration
+                        .properties
+                        .iter()
+                        .find(|property| property.name.name == required.name.name);
+                    let value = field
+                        .and_then(|field| field.default.as_ref())
+                        .or_else(|| inherited.and_then(|property| property.default.as_ref()))
+                        .or(required.default.as_ref())
+                        .expect("trait property validation requires a provider value");
+                    properties.insert(required.name.name.clone(), trait_property_value(value)?);
+                }
+                add_trait_registry_provider(registry, &provider, properties, implemented.span())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_registry_trait_closure(
+    canonical: &str,
+    aliases: &HashMap<String, String>,
+    traits: &HashMap<String, &severian_ast::TraitDecl>,
+    trait_aliases: &HashMap<String, String>,
+    visited: &mut HashSet<String>,
+    output: &mut Vec<String>,
+) {
+    if !visited.insert(canonical.to_owned()) {
+        return;
+    }
+    output.push(canonical.to_owned());
+    let namespace = canonical.rsplit_once('.').map(|(namespace, _)| namespace);
+    for composed in &traits[canonical].composed_traits {
+        let Some(raw) = declaration_type_name(composed) else {
+            continue;
+        };
+        let Some(composed) =
+            resolve_registry_trait(&raw, namespace, aliases, traits, trait_aliases)
+        else {
+            continue;
+        };
+        collect_registry_trait_closure(&composed, aliases, traits, trait_aliases, visited, output);
+    }
+}
+
+fn add_trait_registry_provider(
+    registry: &mut TraitRegistryDefinition,
+    provider: &str,
+    properties: BTreeMap<String, TraitPropertyValue>,
+    span: Span,
+) -> Result<(), SemanticError> {
+    if registry
+        .implementations
+        .iter()
+        .any(|implementation| implementation.name == provider)
+    {
+        return Ok(());
+    }
+    for existing in &registry.implementations {
+        for (property, value) in &properties {
+            let Some(existing_value) = existing.properties.get(property) else {
+                continue;
+            };
+            if trait_property_values_overlap(existing_value, value) {
+                return Err(error(
+                    span,
+                    format!(
+                        "E000212: trait registry `{}` has an ambiguous `{property}` contribution shared by `{}` and `{provider}`",
+                        registry.name, existing.name
+                    ),
+                ));
+            }
+        }
+    }
+    registry
+        .implementations
+        .push(TraitImplementationDefinition {
+            name: provider.to_owned(),
+            properties,
+        });
+    Ok(())
+}
+
+fn resolve_registry_trait(
+    raw: &str,
+    namespace: Option<&str>,
+    aliases: &HashMap<String, String>,
+    traits: &HashMap<String, &severian_ast::TraitDecl>,
+    trait_aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let canonical = canonical_declared_type_name(raw, aliases);
+    for candidate in [canonical.as_str(), raw] {
+        if traits.contains_key(candidate) {
+            return Some(candidate.to_owned());
+        }
+        if let Some(canonical) = trait_aliases.get(candidate) {
+            return Some(canonical.clone());
+        }
+    }
+    if !raw.contains('.') {
+        if let Some(namespace) = namespace {
+            let candidate = format!("{namespace}.{raw}");
+            if traits.contains_key(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn trait_property_values_overlap(left: &TraitPropertyValue, right: &TraitPropertyValue) -> bool {
+    match (left, right) {
+        (TraitPropertyValue::Set(left), TraitPropertyValue::Set(right)) => {
+            left.iter().any(|value| right.contains(value))
+        }
+        _ => left == right,
+    }
+}
+
+fn trait_property_expression_matches_type(value: &Expr, expected: &Type) -> bool {
+    let expected = declaration_type_key(expected);
+    inferred_trait_property_type(value).is_some_and(|actual| actual == expected)
+}
+
+fn inferred_trait_property_type(value: &Expr) -> Option<String> {
+    match value {
+        Expr::Literal(Literal::Integer { .. }) => Some("int".into()),
+        Expr::Literal(Literal::Float { .. }) => Some("float".into()),
+        Expr::Literal(Literal::Boolean { .. }) => Some("bool".into()),
+        Expr::Literal(Literal::String { .. }) => Some("string".into()),
+        Expr::Literal(Literal::Null { .. }) => None,
+        Expr::List(collection) => homogeneous_collection_type("list", &collection.elements),
+        Expr::Set(collection) => homogeneous_collection_type("set", &collection.elements),
+        Expr::Tuple(collection) => Some(format!(
+            "tuple[{}]",
+            collection
+                .elements
+                .iter()
+                .map(inferred_trait_property_type)
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        )),
+        Expr::Map(map) => {
+            let first = map.entries.first()?;
+            let key = inferred_trait_property_type(&first.key)?;
+            let value = inferred_trait_property_type(&first.value)?;
+            map.entries
+                .iter()
+                .all(|entry| {
+                    inferred_trait_property_type(&entry.key).as_deref() == Some(key.as_str())
+                        && inferred_trait_property_type(&entry.value).as_deref()
+                            == Some(value.as_str())
+                })
+                .then(|| format!("map[{key}, {value}]"))
+        }
+        Expr::Call(call) => expression_path(&call.callee)
+            .and_then(|path| path.rsplit('.').next().map(str::to_owned)),
+        Expr::Member(member) => expression_path(&member.object)
+            .and_then(|path| path.rsplit('.').next().map(str::to_owned)),
+        Expr::Identifier(identifier) => Some(identifier.name.clone()),
+        _ => None,
+    }
+}
+
+fn homogeneous_collection_type(kind: &str, elements: &[Expr]) -> Option<String> {
+    let first = inferred_trait_property_type(elements.first()?)?;
+    elements
+        .iter()
+        .all(|element| inferred_trait_property_type(element).as_deref() == Some(first.as_str()))
+        .then(|| format!("{kind}[{first}]"))
+}
+
+fn trait_property_value(value: &Expr) -> Result<TraitPropertyValue, SemanticError> {
+    let constant = match value {
+        Expr::Literal(Literal::Integer { value, .. }) => TraitPropertyValue::Integer(*value),
+        Expr::Literal(Literal::Float { value, .. }) => TraitPropertyValue::Float(value.to_bits()),
+        Expr::Literal(Literal::Boolean { value, .. }) => TraitPropertyValue::Boolean(*value),
+        Expr::Literal(Literal::String { value, .. }) => TraitPropertyValue::String(value.clone()),
+        Expr::Identifier(identifier) => TraitPropertyValue::Symbol(identifier.name.clone()),
+        Expr::Member(_) => TraitPropertyValue::Symbol(
+            expression_path(value).expect("member expressions always have a path here"),
+        ),
+        Expr::Call(call) => {
+            let name = expression_path(&call.callee).ok_or_else(|| {
+                error(
+                    call.callee.span(),
+                    "E000212: trait property constructors must use a named type",
+                )
+            })?;
+            if call.args.iter().any(|argument| argument.name.is_some()) {
+                return Err(error(
+                    call.span,
+                    "E000212: trait property constructors do not accept named arguments",
+                ));
+            }
+            TraitPropertyValue::Constructor {
+                name,
+                arguments: call
+                    .args
+                    .iter()
+                    .map(|argument| trait_property_value(&argument.value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            }
+        }
+        Expr::List(collection) => TraitPropertyValue::List(
+            collection
+                .elements
+                .iter()
+                .map(trait_property_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Expr::Set(collection) => {
+            let mut values = collection
+                .elements
+                .iter()
+                .map(trait_property_value)
+                .collect::<Result<Vec<_>, _>>()?;
+            values.sort();
+            values.dedup();
+            TraitPropertyValue::Set(values)
+        }
+        Expr::Tuple(collection) => TraitPropertyValue::Tuple(
+            collection
+                .elements
+                .iter()
+                .map(trait_property_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Expr::Map(map) => {
+            let mut entries = map
+                .entries
+                .iter()
+                .map(|entry| {
+                    Ok((
+                        trait_property_value(&entry.key)?,
+                        trait_property_value(&entry.value)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, SemanticError>>()?;
+            entries.sort();
+            TraitPropertyValue::Map(entries)
+        }
+        _ => {
+            return Err(error(
+                value.span(),
+                "E000212: trait registry properties must be compile-time constants",
+            ))
+        }
+    };
+    Ok(constant)
+}
+
+fn expression_path(expression: &Expr) -> Option<String> {
+    match expression {
+        Expr::Identifier(identifier) => Some(identifier.name.clone()),
+        Expr::Member(member) => Some(format!(
+            "{}.{}",
+            expression_path(&member.object)?,
+            member.member.name
+        )),
+        _ => None,
+    }
 }
 
 fn builtin_operator_satisfies(operator: &severian_ast::TraitOperator) -> bool {

@@ -76,6 +76,63 @@ validates paired lifecycle declarations, and preserves lifecycle sequencing
 through MIR. Backend cost planning and execution of compiler-context lifecycle
 bodies remain subsequent lowering stages.
 
+## Compile-time trait implementation registries
+
+A trait `property` is required, typed provider metadata rather than a mutable
+global or an extensible enum variant. Semantic analysis examines the complete
+reachable package interface set, validates every provider, rejects missing,
+non-constant, mistyped, and overlapping contributions with `E000212`, and emits
+a deterministically ordered `TraitRegistryDefinition` in HIR metadata.
+
+Traits remain open while packages are composed, but the implementation set is
+closed for each executable compilation. This gives later lowering enough
+information to synthesize static lookup and dispatch tables without package
+initializers, runtime reflection, or service discovery. HIR currently preserves
+the complete table; backend dispatch synthesis is the next consumer boundary.
+
+## Foreign ABI boundary
+
+Package-owned native providers cross one typed compiler boundary:
+
+```text
+package manifest + private ABI declarations
+            │
+            ▼
+HIR ForeignCall { ForeignSymbol, ABI signature, arguments }
+            │
+            ▼
+MIR ForeignCall
+            │
+            ▼
+generic ABI shim and native symbol link
+```
+
+`library/abi` owns source-facing calling conventions, layouts, pointer and
+buffer shapes, nullability, and ownership vocabulary. `library/ffi` owns
+foreign library and symbol identities. Package manifests own provider sources,
+target selection, include paths, and link-library requirements. The compiler's
+closed `severian-abi` descriptors are validation and lowering data, not public
+domain APIs.
+
+Generic lowering may inspect `AbiType`, `CallingConvention`, and ownership, but
+must not branch on a standard-library package or provider symbol. It emits the
+same conversion and call machinery for every package. Architecture tests scan
+the compiler lowering/backend boundary for migrated provider names to keep that
+dependency direction intact.
+
+The first `file` slice moves text-family reads to
+`library/file/native/posix/file.c`; JSON, YAML, and CSV reader adapters share
+that path. Binary handles, writes, directories, mapping, and locks remain on
+the legacy platform bridge until separately migrated. The old compiler-owned
+text-read implementation has been removed.
+
+Tensor operations are not modeled as ordinary foreign calls. Tensor HIR/MIR,
+shape and dtype analysis, fusion, legalization, and XLA/MLIR lowering remain
+compiler responsibilities; only a genuine external ABI call uses this path.
+
+The broader ownership audit and ordered migration ledger live in
+[`DOMAIN_IMPLEMENTATION_MIGRATION.md`](DOMAIN_IMPLEMENTATION_MIGRATION.md).
+
 ## Migration order
 
 1. Move post-resolution bindings, fields, methods, modules, packages, symbols,

@@ -10,8 +10,8 @@ use severian_ast::{
     MapComprehensionExpr, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr, OwnershipOp,
     Parameter, Pattern, ReturnStmt, SetComprehensionExpr, SliceExpr, Span, Stmt, SwitchArm,
     SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod,
-    TraitOperator, TraitScopedBehavior, TraitScopedBehaviorPhase, Type, TypeArg, TypePath,
-    UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    TraitOperator, TraitProperty, TraitScopedBehavior, TraitScopedBehaviorPhase, Type, TypeArg,
+    TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;

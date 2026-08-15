@@ -7,6 +7,9 @@ description = "Stable foreign-function interface types"
 [lib]
 path = "src/lib.sev"
 
+[dependencies]
+abi = { path = "../abi", version = "0.1.0" }
+
 [package.metadata.library]
 category = "runtime"
 implementation = "source"

@@ -38,7 +38,7 @@ pub fn linear_last_dimension(
     emitter.dot_general(input, weight, &[], &[], &[rank - 1], &[0], result_type)
 }
 
-pub fn llama_mlp(
+pub fn swiglu_mlp(
     emitter: &mut StableHloEmitter,
     input: &MlirValue,
     gate_weight: &MlirValue,

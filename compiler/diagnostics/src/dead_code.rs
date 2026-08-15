@@ -227,6 +227,13 @@ fn collect_expression_calls(expression: &Expression, calls: &mut BTreeSet<String
             }
         }
 
+        Expression::ForeignCall { function, args } => {
+            calls.insert(function.function.clone());
+            for argument in args {
+                collect_expression_calls(argument, calls);
+            }
+        }
+
         Expression::Function(function) => {
             calls.insert(function.name.clone());
         }

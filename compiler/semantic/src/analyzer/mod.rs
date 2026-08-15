@@ -15,8 +15,9 @@ use severian_hir::{
     MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType,
     ScopedBehavior as HirScopedBehavior, SemanticContext, SemanticMember, SourceRange, SourceSpan,
     SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension, TensorElementType, TensorType, Test,
-    TestMode as HirTestMode, TypeDefinitionId, TypeId, TypeKind, TypeTable, UnaryOp, ValueType,
-    VariantDefinition, VariantId,
+    TestMode as HirTestMode, TraitImplementationDefinition, TraitPropertyDefinition,
+    TraitPropertyValue, TraitRegistryDefinition, TypeDefinitionId, TypeId, TypeKind, TypeTable,
+    UnaryOp, ValueType, VariantDefinition, VariantId,
 };
 use severian_package::{local_import_exposed_name, local_import_module_name, PackageInterface};
 use std::collections::{BTreeMap, HashMap, HashSet};

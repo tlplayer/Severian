@@ -202,11 +202,23 @@ pub struct TraitDecl {
     /// this trait transitively; Severian deliberately has no separate
     /// `extends` or `inherits` syntax.
     pub composed_traits: Vec<Type>,
+    /// Compile-time metadata every concrete implementation contributes to the
+    /// trait's closed implementation registry. A default turns a requirement
+    /// into an inherited contribution that implementations may override.
+    pub properties: Vec<TraitProperty>,
     pub methods: Vec<TraitMethod>,
     pub operators: Vec<TraitOperator>,
     /// Compiler-owned behavior executed on entry to and exit from a semantic
     /// scope. A provider must declare one `with` and one `without` body.
     pub scoped_behaviors: Vec<TraitScopedBehavior>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitProperty {
+    pub span: Span,
+    pub name: Ident,
+    pub ty: Type,
+    pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

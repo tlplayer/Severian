@@ -1,25 +1,50 @@
-import platform
+import abi
+import "src/ffi.sev" as externs
+
+def native_handle(value: isize) -> abi.Handle:
+    return abi.Handle(value)
+
+def collect_strings(output: abi.OutHandle) -> list[string]:
+    values := []
+    handle = native_handle(output.value)
+    length = externs.strings_length(handle)
+    for index in range(length):
+        values.append(externs.strings_at(handle, index))
+    externs.strings_release(handle)
+    return values
 
 def matches(text: string, pattern: string) -> bool:
-    return platform.regex_matches(text, pattern)
+    return externs.matches(abi.StringView(text), abi.StringView(pattern))
 
 def compile(pattern: string) -> string:
     return pattern
 
 def match(pattern: string, text: string) -> bool:
-    return platform.regex_matches(text, "^" + pattern)
+    return matches(text, "^" + pattern)
 
 def search(pattern: string, text: string) -> bool:
-    return platform.regex_matches(text, pattern)
+    return matches(text, pattern)
 
 def findall(pattern: string, text: string) -> list[string]:
-    return platform.regex_findall(text, pattern)
+    output = abi.OutHandle(0)
+    if externs.find_all(abi.StringView(text), abi.StringView(pattern), output) != 0:
+        return []
+    return collect_strings(output)
 
 def split(pattern: string, text: string) -> list[string]:
-    return platform.regex_split(text, pattern)
+    output = abi.OutHandle(0)
+    if externs.split(abi.StringView(text), abi.StringView(pattern), output) != 0:
+        return [text]
+    return collect_strings(output)
 
 def sub(pattern: string, replacement: string, text: string) -> string:
-    return platform.regex_sub(text, pattern, replacement)
+    output = abi.OutHandle(0)
+    if externs.substitute(abi.StringView(text), abi.StringView(pattern), abi.StringView(replacement), output) != 0:
+        return text
+    handle = native_handle(output.value)
+    value = externs.text_value(handle)
+    externs.text_release(handle)
+    return value
 
 test "POSIX extended matching":
     assert(matches("release-42", "^[a-z]+-[0-9]+$"))
@@ -33,3 +58,9 @@ test "regex facade preserves pattern order and replacement behavior":
     assert(findall("[0-9]+", "a12b34") == ["12", "34"])
     assert(split("[,:]", "a,b:c") == ["a", "b", "c"])
     assert(sub("[0-9]+", "#", "a12b34") == "a#b#")
+
+test "invalid dynamic patterns retain safe fallbacks":
+    assert(not matches("text", "["))
+    assert(findall("[", "text") == [])
+    assert(split("[", "text") == ["text"])
+    assert(sub("[", "#", "text") == "text")

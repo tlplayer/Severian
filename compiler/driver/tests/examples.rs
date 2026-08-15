@@ -6,6 +6,14 @@ fn examples_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/examples")
 }
 
+#[test]
+fn compiles_trait_registry_examples_with_four_providers_each() {
+    let root = examples_root().join("31-trait-registries");
+    for fixture in ["file.sev", "image.sev"] {
+        compile_path(&root.join(fixture)).unwrap_or_else(|error| panic!("{fixture}: {error}"));
+    }
+}
+
 fn severian_files(directory: &Path) -> Vec<PathBuf> {
     let mut files = std::fs::read_dir(directory)
         .unwrap()
@@ -28,24 +36,21 @@ fn checks_all_concurrency_examples_through_the_frontend() {
 fn native_calls_require_an_explicit_declaration_and_lower_to_its_abi_symbol() {
     let compilation = compile_source(concat!(
         "unsafe:\n",
-        "    extern(\"__sev_regex_matches\") def matches(\n",
-        "        value: string,\n",
-        "        pattern: string,\n",
-        "    ) -> bool\n",
+        "    extern(\"__sev_string_length\") def string_length(value: string) -> int\n",
         "\n",
         "def main():\n",
-        "    print(matches(\"severian\", \"sev.*\"))\n",
+        "    print(string_length(\"severian\"))\n",
     ))
     .unwrap();
 
     assert!(compilation
         .mlir
         .as_str()
-        .contains("llvm.func @__sev_regex_matches"));
+        .contains("llvm.func @__sev_string_length"));
     assert!(compilation
         .mlir
         .as_str()
-        .contains("llvm.call @__sev_regex_matches"));
+        .contains("llvm.call @__sev_string_length"));
 
     let error =
         compile_source("def main():\n    print(runtime.fileRead(\"missing.txt\"))\n").unwrap_err();

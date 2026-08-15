@@ -409,7 +409,7 @@ fn inspect_expression(
             inspect_expression(right, used, config, bag, false);
         }
 
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for argument in args {
                 inspect_expression(argument, used, config, bag, false);
             }

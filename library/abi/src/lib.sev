@@ -1,0 +1,122 @@
+class CallingConvention:
+    name: string
+
+class Ownership:
+    name: string
+
+trait ForeignType:
+    def abi_name() -> string
+
+class Type: ForeignType
+    name: string
+    ownership: Ownership
+    nullable: bool
+
+    def abi_name() -> string:
+        return name
+
+class Pointer: ForeignType
+    pointee: ForeignType
+    mutable: bool
+    ownership: Ownership
+    nullable: bool
+
+    def abi_name() -> string:
+        return "pointer"
+
+class Array: ForeignType
+    element: ForeignType
+    length: usize
+
+    def abi_name() -> string:
+        return "array"
+
+class Field:
+    name: string
+    field_type: ForeignType
+
+class Struct: ForeignType
+    name: string
+    fields: list[Field]
+
+    def abi_name() -> string:
+        return name
+
+class Callback: ForeignType
+    parameters: list[ForeignType]
+    returns: ForeignType
+
+    def abi_name() -> string:
+        return "callback"
+
+class Function:
+    symbol: string
+    parameters: list[ForeignType]
+    returns: ForeignType
+    convention: CallingConvention
+
+class C:
+    version: string
+
+    def function(symbol: string, parameters: list[ForeignType], returns: ForeignType) -> Function:
+        return Function(symbol, parameters, returns, CallingConvention("c"))
+
+    def pointer(pointee: ForeignType, mutable: bool, ownership: Ownership, nullable: bool = false) -> Pointer:
+        return Pointer(pointee, mutable, ownership, nullable)
+
+    def array(element: ForeignType, length: usize) -> Array:
+        return Array(element, length)
+
+    def struct(name: string, fields: list[Field]) -> Struct:
+        return Struct(name, fields)
+
+    def callback(parameters: list[ForeignType], returns: ForeignType) -> Callback:
+        return Callback(parameters, returns)
+
+# Stable boundary wrappers recognized by the generic compiler ABI contract.
+class Handle:
+    opaque: isize
+
+class StringView:
+    data: string
+
+class BytesView:
+    data: list[int]
+
+class OutHandle:
+    value: isize
+
+class OutError:
+    code: i32
+    message: string
+
+class OutUsize:
+    value: usize
+
+def c() -> C:
+    return C("c-v1")
+
+def copy() -> Ownership:
+    return Ownership("copy")
+
+def borrowed() -> Ownership:
+    return Ownership("borrowed")
+
+def owned() -> Ownership:
+    return Ownership("owned")
+
+def out() -> Ownership:
+    return Ownership("out")
+
+test "C descriptors retain layout and ownership information":
+    byte = Type("u8", copy(), false)
+    pointer = c().pointer(byte, true, borrowed())
+    array = c().array(byte, 16)
+    structure = c().struct("Packet", [Field("payload", array)])
+    callback = c().callback([pointer], Type("i32", copy(), false))
+    function = c().function("consume", [structure, callback], Type("i32", copy(), false))
+    assert(pointer.mutable)
+    assert(pointer.ownership.name == "borrowed")
+    assert(array.length == 16)
+    assert(function.parameters[0].abi_name() == "Packet")
+    assert(function.parameters[1].abi_name() == "callback")

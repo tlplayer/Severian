@@ -1,7 +1,7 @@
 use severian_hir::TensorType;
 
 use super::{
-    linear::{linear_last_dimension, llama_mlp},
+    linear::{linear_last_dimension, swiglu_mlp},
     normalization::{rms_norm, softmax_last_axis},
     MlirValue, StableHloEmitter,
 };
@@ -72,10 +72,10 @@ pub struct TransformerBlockTypes {
     pub mlp_intermediate: TensorType,
 }
 
-/// A pre-norm Llama transformer block: RMSNorm, attention, residual,
+/// A generic pre-norm transformer block: RMSNorm, attention, residual,
 /// RMSNorm, SwiGLU MLP, residual. Every operation is ordinary StableHLO.
 #[allow(clippy::too_many_arguments)]
-pub fn llama_transformer_block(
+pub fn pre_norm_swiglu_transformer_block(
     emitter: &mut StableHloEmitter,
     input: &MlirValue,
     attention_norm_weight: &MlirValue,
@@ -123,7 +123,7 @@ pub fn llama_transformer_block(
         hidden_size,
         epsilon,
     );
-    let mlp = llama_mlp(
+    let mlp = swiglu_mlp(
         emitter,
         &normalized,
         gate_weight,

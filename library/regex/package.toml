@@ -4,13 +4,26 @@ version = "0.1.0"
 edition = "2026"
 description = "Regular-expression compilation and matching"
 
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/ffi.sev"]
+
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+abi = { path = "../abi", version = "0.1.0" }
+ffi = { path = "../ffi", version = "0.1.0" }
+
+[[ffi.c]]
+name = "regex-posix"
+abi = "c-v1"
+targets = ["linux", "macos"]
+sources = ["native/posix/regex.c"]
+include = ["native/include"]
+libraries = []
 
 [package.metadata.library]
 category = "text-processing"
-implementation = "compiler-symbol-pack"
+implementation = "native-abi"
 status = "experimental"

@@ -354,6 +354,48 @@ pub struct EnumDefinition {
     pub variants: Vec<VariantDefinition>,
 }
 
+/// The implementation set for one semantic trait after the reachable package
+/// graph has been closed. Providers and properties are stored in deterministic
+/// order so builds never depend on source discovery order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitRegistryDefinition {
+    pub name: String,
+    pub properties: Vec<TraitPropertyDefinition>,
+    pub implementations: Vec<TraitImplementationDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitPropertyDefinition {
+    pub name: String,
+    pub ty: String,
+    pub default: Option<TraitPropertyValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitImplementationDefinition {
+    pub name: String,
+    pub properties: BTreeMap<String, TraitPropertyValue>,
+}
+
+/// Closed, compiler-readable constants accepted in trait registry properties.
+/// `Float` retains IEEE bits so registry metadata remains equality comparable.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TraitPropertyValue {
+    Integer(i64),
+    Float(u64),
+    Boolean(bool),
+    String(String),
+    Symbol(String),
+    Constructor {
+        name: String,
+        arguments: Vec<TraitPropertyValue>,
+    },
+    List(Vec<TraitPropertyValue>),
+    Set(Vec<TraitPropertyValue>),
+    Tuple(Vec<TraitPropertyValue>),
+    Map(Vec<(TraitPropertyValue, TraitPropertyValue)>),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProgramMetadata {
     pub sources: SourceMap,
@@ -364,6 +406,8 @@ pub struct ProgramMetadata {
     pub functions: BTreeMap<FunctionId, DetailedFunctionType>,
     pub classes: BTreeMap<TypeDefinitionId, ClassDefinition>,
     pub enums: BTreeMap<TypeDefinitionId, EnumDefinition>,
+    /// Statically closed trait provider sets for this package graph.
+    pub trait_registries: BTreeMap<String, TraitRegistryDefinition>,
     /// Package-owned external functions keyed by their provider symbol.
     pub external_functions: BTreeMap<String, severian_abi::ExternalFunction>,
 }

@@ -260,7 +260,7 @@ class PlaylistReader: file.Reader
         return [".m3u"]
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
-        content = platform.file_read(path)
+        content = file.source_text(path)
         return Playlist(path, content.split("\n"))
 
 def main():
@@ -331,6 +331,7 @@ fn all_requested_packages_are_workspace_members() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library/package.toml");
     let manifest = std::fs::read_to_string(workspace).unwrap();
     for package in [
+        "abi",
         "core",
         "bits",
         "list",

@@ -2398,6 +2398,43 @@ impl LowerContext<'_> {
                     }
                 }
             }
+            Expression::ForeignCall { function, args } => {
+                let args = args
+                    .iter()
+                    .map(|argument| self.lower_expression(argument))
+                    .collect::<Vec<_>>();
+                let values = args
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let types = args
+                    .iter()
+                    .map(|(_, ty)| mlir_type(*ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let return_type = self
+                    .active_expression_type
+                    .unwrap_or_else(|| foreign_result_type(function.result.ty));
+                if return_type == ValueType::Unit {
+                    writeln!(
+                        self.output,
+                        "    llvm.call @{}({values}) : ({types}) -> ()",
+                        function.shim_symbol
+                    )
+                    .unwrap();
+                    return (String::new(), ValueType::Unit);
+                }
+                let result = self.fresh_value();
+                writeln!(
+                    self.output,
+                    "    {result} = llvm.call @{}({values}) : ({types}) -> {}",
+                    function.shim_symbol,
+                    mlir_type(return_type)
+                )
+                .unwrap();
+                (result, return_type)
+            }
             Expression::Call { target, args } => {
                 let function = &target.name;
                 let linked_function = function.as_str();
@@ -2757,11 +2794,6 @@ impl LowerContext<'_> {
                     let result = self.fresh_value();
                     writeln!(self.output, "    {result} = llvm.call @__sev_value_add({left}, {right}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
                     return (result, ValueType::Any);
-                }
-                if function == "regex.matches" {
-                    let result = self.fresh_value();
-                    writeln!(self.output, "    {result} = llvm.call @__sev_regex_matches({}, {}) : (!llvm.ptr, !llvm.ptr) -> i1", args[0].0, args[1].0).unwrap();
-                    return (result, ValueType::Bool);
                 }
                 if !self.function_returns.contains_key(&target.id) {
                     let builtin = match function.as_str() {

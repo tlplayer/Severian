@@ -1,0 +1,25 @@
+import abi
+import ffi
+
+def matches_descriptor() -> ffi.Symbol:
+    provider = ffi.library("regex-posix")
+    signature = abi.c().function(
+        "sev_abi_v1_regex_matches",
+        [
+            abi.Type("string-view", abi.borrowed(), false),
+            abi.Type("string-view", abi.borrowed(), false),
+        ],
+        abi.Type("bool", abi.copy(), false),
+    )
+    return provider.symbol("sev_abi_v1_regex_matches", signature)
+
+unsafe:
+    extern("sev_abi_v1_regex_matches") def matches(text: abi.StringView, pattern: abi.StringView) -> bool
+    extern("sev_abi_v1_regex_find_all") def find_all(text: abi.StringView, pattern: abi.StringView, values: abi.OutHandle) -> i32
+    extern("sev_abi_v1_regex_split") def split(text: abi.StringView, pattern: abi.StringView, values: abi.OutHandle) -> i32
+    extern("sev_abi_v1_regex_strings_length") def strings_length(values: abi.Handle) -> usize
+    extern("sev_abi_v1_regex_strings_at") def strings_at(values: abi.Handle, index: usize) -> string
+    extern("sev_abi_v1_regex_strings_release") def strings_release(values: abi.Handle)
+    extern("sev_abi_v1_regex_substitute") def substitute(text: abi.StringView, pattern: abi.StringView, replacement: abi.StringView, value: abi.OutHandle) -> i32
+    extern("sev_abi_v1_regex_text_value") def text_value(value: abi.Handle) -> string
+    extern("sev_abi_v1_regex_text_release") def text_release(value: abi.Handle)

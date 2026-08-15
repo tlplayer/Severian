@@ -1,3 +1,7 @@
+use severian_abi::{
+    AbiParameter, AbiResult, AbiType, AbiVersion, CallingConvention, ExternalFunction,
+    ForeignSymbol, Ownership,
+};
 use severian_hir::{
     AnyOrigin, BindingRef, Expression, Function, FunctionId, Global, HirId, Instruction, Parameter,
     Program, TensorDimension, TensorElementType, TensorType, ValueType,
@@ -130,4 +134,60 @@ fn missing_dynamic_type_provenance_becomes_lost_information() {
             .collect::<Vec<_>>(),
         [AnyOrigin::LostTypeInformation]
     );
+}
+
+#[test]
+fn resolves_declared_native_calls_to_typed_foreign_calls() {
+    let symbol = "sev_abi_v1_file_read_text";
+    let descriptor = ExternalFunction {
+        package: "file".into(),
+        function: "file.ffi.read_text".into(),
+        symbol: ForeignSymbol::new(Some("file".into()), symbol),
+        shim_symbol: format!("__sev_ffi_shim_{symbol}"),
+        abi: AbiVersion::CV1,
+        calling_convention: CallingConvention::C,
+        parameters: vec![AbiParameter {
+            name: "path".into(),
+            ty: AbiType::StringView,
+            ownership: Ownership::Borrowed,
+            nullable: false,
+        }],
+        result: AbiResult {
+            ty: AbiType::I32,
+            ownership: Ownership::Copy,
+            nullable: false,
+        },
+    };
+    let mut program = Program {
+        functions: vec![Function {
+            id: FunctionId::from_name("read"),
+            name: "read".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Evaluate(Expression::Call {
+                target: severian_hir::CallTarget::native("read_text", symbol),
+                args: vec![Expression::String("config.txt".into())],
+            })],
+            tests: vec![],
+        }],
+        ..Program::default()
+    };
+    program
+        .metadata
+        .external_functions
+        .insert(symbol.into(), descriptor.clone());
+
+    program.resolve_foreign_calls();
+
+    let Instruction::Evaluate(Expression::ForeignCall { function, args }) =
+        &program.functions[0].instructions[0]
+    else {
+        panic!("native call was not reified as a ForeignCall")
+    };
+    assert_eq!(function, &descriptor);
+    assert_eq!(function.symbol.library.as_deref(), Some("file"));
+    assert_eq!(args, &[Expression::String("config.txt".into())]);
 }

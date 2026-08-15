@@ -8,7 +8,8 @@ The repository is being built piece by piece around a checked, native CPU core:
 - `compiler/ast`: source-level syntax tree nodes.
 - `library`: official Severian packages, manifests, documentation, and
   language-native tests.
-- `library/ffi`: stable types used by package-owned foreign interfaces.
+- `library/abi`: stable layouts and ownership descriptions for foreign calls.
+- `library/ffi`: foreign library and symbol identities used by packages.
 - `docs/language`: living language notes.
 - `docs/examples`: example `.sev` programs that should become compiler fixtures.
 - `docs/examples/14-packages`: Cargo-like package and workspace examples.
@@ -651,8 +652,10 @@ path = "src/lib.sev"
 ```
 
 ```sev
+import abi
+
 unsafe:
-    extern("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
+    extern("sev_abi_v1_provider_probe") def probe(value: abi.StringView) -> i32
 ```
 
 Unsafe code is denied unless both its capability and exact source file appear in
@@ -850,6 +853,35 @@ def inference(value: Tensor[f32]):
 Both forms produce the same HIR semantic context and structured scope. MIR
 records reverse-order cleanup on normal fallthrough, return, and loop-control
 exits; decorators never execute as arbitrary wrapper functions.
+
+Traits may also declare required compile-time properties. Every reachable class
+that implements such a trait contributes one entry to a compiler-owned registry:
+
+```sev
+class FileType:
+    name: string
+
+trait File:
+    @file
+    property file_type: FileType
+    property extensions: set[string]
+    def read(path: string) -> FileData
+
+class LuaFile: File
+    file_type = FileType("lua")
+    extensions = {".lua"}
+
+    def read(path: string) -> FileData:
+        return lua.parse(bytes.read(path))
+```
+
+The reachable package graph closes the implementation set at compile time. A
+Lua dependency therefore contributes `LuaFile` and its `.lua` lookup key without
+package initialization, runtime discovery, mutable registration, or changing a
+closed enum. Property values must be compile-time constants of the declared
+type; overlapping contributions report `E000212`. HIR retains providers and
+their values in deterministic order for static dispatch generation. See the
+[four File and four Image providers](docs/examples/31-trait-registries/README.md).
 
 ## Counts, Bytes, And Midpoints
 

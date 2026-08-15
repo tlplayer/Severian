@@ -148,7 +148,7 @@ pub(super) fn collect_expression_strings(expression: &Expression, strings: &mut 
             collect_expression_strings(left, strings);
             collect_expression_strings(right, strings);
         }
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for argument in args {
                 collect_expression_strings(argument, strings);
             }
@@ -584,7 +584,7 @@ pub(super) fn collect_task_names_expression(expression: &Expression, names: &mut
                 }
             }
         }
-        Expression::Call { args, .. } => {
+        Expression::Call { args, .. } | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 collect_task_names_expression(arg, names);
             }

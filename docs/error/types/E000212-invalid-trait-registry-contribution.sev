@@ -1,0 +1,5 @@
+trait File:
+    property extensions: set[string]
+
+class LuaFile: File
+    marker = "lua"

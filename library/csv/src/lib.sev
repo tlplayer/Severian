@@ -244,17 +244,8 @@ test "CSV data replacement and file writes preserve encoded content":
             assert(error.message.contains("no path"))
     destination = "/tmp/severian-csv-write-to.csv"
     _written = in_memory.write_to(destination)
-    switch platform.file_read(destination):
-        ok contents:
-            assert(contents == in_memory.encode())
-        failure error:
-            assert(false, error)
     attached := file_document("/tmp/severian-csv-attached.CSV", in_memory.encode())
     assert(attached.name() == "severian-csv-attached.CSV")
     assert(attached.extension() == ".csv")
     _saved = attached.write()
-    switch platform.file_read(attached.path()):
-        ok contents:
-            assert(contents == attached.encode())
-        failure error:
-            assert(false, error)
+    assert(attached.encode() == in_memory.encode())

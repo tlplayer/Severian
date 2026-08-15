@@ -143,6 +143,11 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "A trait-backed scoped behavior must declare exactly one `with(context)` entry body and one matching `without(context)` exit body. Both context parameters must use the same type. The compiler pairs them so entry follows composition order and cleanup runs in reverse order on every structured exit path.",
         },
         Explanation {
+            code: "E000212",
+            title: "Invalid trait registry contribution",
+            text: "A trait property is compile-time metadata required from every concrete implementation. Supply a constant value with the declared type, or give the property a trait default. Contributions used by more than one provider must not overlap, because the compiler closes the reachable implementation set and generates deterministic static dispatch metadata.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",

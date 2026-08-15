@@ -210,7 +210,6 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_builtin_int_parse(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_float_parse(!llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_builtin_file_write(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n\n",
-        "  llvm.func @__sev_regex_matches(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_task_await_unit(!llvm.ptr)\n\n",
         "  llvm.func @llvm.sqrt.f64(f64) -> f64\n\n",
     ));

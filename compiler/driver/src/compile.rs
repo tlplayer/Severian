@@ -99,6 +99,8 @@ fn compile_ast(
             verify_hir(program, &format!("HIR after `{pass}`")).map_err(|error| error.to_string())
         })
         .map_err(|error| CompileError::Optimization(error.to_string()))?;
+    optimized_hir.resolve_foreign_calls();
+    verify_hir(&optimized_hir, "resolved foreign calls")?;
     let mir = severian_mir::lower(&optimized_hir)?;
     verify_mir(&mir)?;
     let mlir = severian_lowering::lower(&mir);

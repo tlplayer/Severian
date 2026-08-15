@@ -342,7 +342,9 @@ fn substitute_expression(
                 substitute_expression(bound, facts, visiting);
             }
         }
-        Expression::Format { args, .. } | Expression::Call { args, .. } => {
+        Expression::Format { args, .. }
+        | Expression::Call { args, .. }
+        | Expression::ForeignCall { args, .. } => {
             for arg in args {
                 substitute_expression(arg, facts, visiting);
             }

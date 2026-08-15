@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+use std::fmt;
+use std::ops::Deref;
+
 /// Stable foreign-function ABI versions understood by the compiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AbiVersion {
@@ -119,11 +122,58 @@ pub struct AbiResult {
     pub nullable: bool,
 }
 
+/// A provider-owned symbol named independently from the package that declares
+/// its typed ABI signature.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignSymbol {
+    pub library: Option<String>,
+    pub name: String,
+}
+
+impl ForeignSymbol {
+    pub fn new(library: Option<String>, name: impl Into<String>) -> Self {
+        Self {
+            library,
+            name: name.into(),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Deref for ForeignSymbol {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for ForeignSymbol {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.name.fmt(formatter)
+    }
+}
+
+impl From<String> for ForeignSymbol {
+    fn from(name: String) -> Self {
+        Self::new(None, name)
+    }
+}
+
+impl From<&str> for ForeignSymbol {
+    fn from(name: &str) -> Self {
+        Self::new(None, name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExternalFunction {
     pub package: String,
     pub function: String,
-    pub symbol: String,
+    pub symbol: ForeignSymbol,
     pub shim_symbol: String,
     pub abi: AbiVersion,
     pub calling_convention: CallingConvention,

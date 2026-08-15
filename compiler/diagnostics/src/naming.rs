@@ -153,6 +153,12 @@ impl Checker<'_> {
                             self.name(segment, Role::Decorator);
                         }
                     }
+                    for property in &trait_.properties {
+                        self.name(&property.name, Role::Variable);
+                        if let Some(default) = &property.default {
+                            self.expression(default);
+                        }
+                    }
                     for method in &trait_.methods {
                         self.name(&method.name, Role::Function);
                         for parameter in &method.params {

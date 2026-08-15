@@ -45,7 +45,6 @@ pub(super) fn native_bridge_source_for_target(
         "#include <sys/syscall.h>\n",
         "#include <unistd.h>\n",
         "#include <signal.h>\n",
-        "#include <regex.h>\n",
         "#ifdef __linux__\n#include <execinfo.h>\n#include <linux/kvm.h>\n#endif\n\n",
         "typedef enum { SEV_INT, SEV_FLOAT, SEV_BOOL, SEV_STRING, SEV_COLLECTION, SEV_NULL } sev_value_kind;\n",
         "typedef struct { sev_value_kind kind; union { int64_t i64; double f64; bool boolean; const char *string; void *pointer; } as; } sev_value;\n",
@@ -706,18 +705,6 @@ void *__sev_builtin_file_write(void *path, void *text) {
   return __sev_file_write(path, text);
 }
 
-void *__sev_file_read(void *path_raw) {
-  FILE *file = fopen((const char *)path_raw, "rb");
-  if (!file) return sev_failure("could not open file for reading");
-  if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return sev_failure("could not seek file"); }
-  long size = ftell(file);
-  if (size < 0 || fseek(file, 0, SEEK_SET) != 0) { fclose(file); return sev_failure("could not size file"); }
-  char *contents = sev_allocate((size_t)size + 1);
-  bool success = fread(contents, 1, (size_t)size, file) == (size_t)size && fclose(file) == 0;
-  if (!success) return sev_failure("could not read file");
-  return __sev_variant_new("ok", __sev_box_string(contents));
-}
-
 void *__sev_file_remove(void *path_raw) {
   return unlink(path_raw) == 0 ? __sev_variant_new("ok", NULL) : sev_failure("could not remove file");
 }
@@ -1281,69 +1268,6 @@ void __sev_log_error(void *message, void *cause) {
   } else {
     fprintf(stderr, "ERROR %s\n", (const char *)message);
   }
-}
-
-bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
-  regex_t expression;
-  if (regcomp(&expression, (const char *)pattern_raw, REG_EXTENDED | REG_NOSUB) != 0) return false;
-  bool matches = regexec(&expression, (const char *)text_raw, 0, NULL, 0) == 0;
-  regfree(&expression);
-  return matches;
-}
-
-void *__sev_regex_findall(void *text_raw, void *pattern_raw) {
-  const char *text = text_raw;
-  regex_t expression;
-  sev_collection *result = __sev_collection_new(0);
-  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) return result;
-  regmatch_t match;
-  const char *cursor = text;
-  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
-    __sev_collection_push(result, __sev_box_string(sev_string_range(cursor, match.rm_so, match.rm_eo - match.rm_so)));
-    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
-  }
-  regfree(&expression);
-  return result;
-}
-
-void *__sev_regex_split(void *text_raw, void *pattern_raw) {
-  const char *text = text_raw;
-  regex_t expression;
-  sev_collection *result = __sev_collection_new(0);
-  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) { __sev_collection_push(result, __sev_box_string(strdup(text))); return result; }
-  regmatch_t match;
-  const char *cursor = text;
-  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
-    __sev_collection_push(result, __sev_box_string(sev_string_range(cursor, 0, match.rm_so)));
-    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
-  }
-  __sev_collection_push(result, __sev_box_string(strdup(cursor)));
-  regfree(&expression);
-  return result;
-}
-
-void *__sev_regex_sub(void *text_raw, void *pattern_raw, void *replacement_raw) {
-  const char *text = text_raw;
-  const char *replacement = replacement_raw;
-  regex_t expression;
-  if (regcomp(&expression, pattern_raw, REG_EXTENDED) != 0) return strdup(text);
-  size_t capacity = strlen(text) + 1;
-  char *result = sev_allocate(capacity);
-  size_t used = 0;
-  regmatch_t match;
-  const char *cursor = text;
-  while (regexec(&expression, cursor, 1, &match, 0) == 0) {
-    size_t prefix = (size_t)match.rm_so;
-    size_t replacement_size = strlen(replacement);
-    size_t required = used + prefix + replacement_size + strlen(cursor + match.rm_eo) + 1;
-    if (required > capacity) { capacity = required; result = realloc(result, capacity); if (!result) abort(); }
-    memcpy(result + used, cursor, prefix); used += prefix;
-    memcpy(result + used, replacement, replacement_size); used += replacement_size;
-    cursor += match.rm_eo > 0 ? match.rm_eo : 1;
-  }
-  strcpy(result + used, cursor);
-  regfree(&expression);
-  return result;
 }
 
 void *__sev_host_container_backend(void) {

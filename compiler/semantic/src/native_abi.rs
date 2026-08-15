@@ -1,5 +1,6 @@
 use severian_abi::{
-    AbiParameter, AbiResult, AbiType, AbiVersion, CallingConvention, ExternalFunction, Ownership,
+    AbiParameter, AbiResult, AbiType, AbiVersion, CallingConvention, ExternalFunction,
+    ForeignSymbol, Ownership,
 };
 use severian_ast::{Item, Type};
 use severian_package::PackageInterface;
@@ -107,7 +108,7 @@ pub fn validate_native_abi(
         functions.push(ExternalFunction {
             package: package.clone(),
             function: format!("{}.{}", interface.name, function.name.name),
-            symbol: symbol.clone(),
+            symbol: ForeignSymbol::new(Some(package.clone()), symbol.clone()),
             shim_symbol: format!("__sev_ffi_shim_{symbol}"),
             abi: AbiVersion::CV1,
             calling_convention: CallingConvention::C,
@@ -150,11 +151,11 @@ fn abi_type(ty: &Type, returning: bool) -> Result<AbiType, SemanticError> {
         // from C are copied into ordinary Severian strings.
         "StringView" if !returning => AbiType::StringView,
         "string" if returning => AbiType::StringView,
-        "BytesView" if !returning => AbiType::BytesView,
+        "BytesView" => AbiType::BytesView,
         "Handle" => AbiType::Handle,
-        "OutHandle" if !returning => AbiType::OutHandle,
-        "OutError" if !returning => AbiType::OutError,
-        "OutUsize" if !returning => AbiType::OutUsize,
+        "OutHandle" => AbiType::OutHandle,
+        "OutError" => AbiType::OutError,
+        "OutUsize" => AbiType::OutUsize,
         _ => return Err(not_safe(ty, name)),
     };
     Ok(abi)
@@ -170,7 +171,7 @@ fn ownership(ty: AbiType) -> Ownership {
 
 fn not_safe(ty: &Type, name: &str) -> SemanticError {
     let help = if name == "Any" {
-        "use an opaque `ffi.Handle[T]` or an explicit byte/string view"
+        "use an opaque `abi.Handle` or an explicit byte/string view"
     } else {
         "use a fixed-width scalar, an opaque Handle, or an explicit byte/string view"
     };
@@ -229,15 +230,31 @@ mod tests {
         let source = "unsafe:\n    extern(\"sev_abi_v1_bad\") def bad(value: Any) -> Any\n";
         let error = validate_native_abi(&interface(source)).unwrap_err();
         assert!(error.message.contains("`Any` is not C-ABI-safe"));
-        assert!(error.message.contains("ffi.Handle"));
+        assert!(error.message.contains("abi.Handle"));
     }
 
     #[test]
     fn records_real_out_parameter_signature() {
-        let source = "import ffi\n\nunsafe:\n    extern(\"sev_abi_v1_network_connect\") def connect_raw(host: ffi.StringView, port: u16, connection: ffi.OutHandle, error: ffi.OutError) -> i32\n";
+        let source = "import abi\n\nunsafe:\n    extern(\"sev_abi_v1_network_connect\") def connect_raw(host: abi.StringView, port: u16, connection: abi.OutHandle, error: abi.OutError) -> i32\n";
         let functions = validate_native_abi(&interface(source)).unwrap();
         assert_eq!(functions[0].parameters[0].ty, AbiType::StringView);
         assert_eq!(functions[0].parameters[2].ty, AbiType::OutHandle);
         assert_eq!(functions[0].result.ty, AbiType::I32);
+    }
+
+    #[test]
+    fn rejects_output_ownership_wrappers_in_return_position() {
+        let source = "import abi\n\nunsafe:\n    extern(\"sev_abi_v1_bad_out\") def bad() -> abi.OutHandle\n";
+        let error = validate_native_abi(&interface(source)).unwrap_err();
+        assert!(error.message.contains("not a valid c-v1 return type"));
+        assert!(error.message.contains("OutHandle"));
+    }
+
+    #[test]
+    fn rejects_unbounded_collections_in_parameters() {
+        let source =
+            "unsafe:\n    extern(\"sev_abi_v1_bad_list\") def bad(values: list[int]) -> i32\n";
+        let error = validate_native_abi(&interface(source)).unwrap_err();
+        assert!(error.message.contains("not C-ABI-safe"));
     }
 }

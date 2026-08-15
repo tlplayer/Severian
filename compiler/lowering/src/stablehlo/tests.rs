@@ -1,6 +1,6 @@
 use super::*;
 use crate::stablehlo::{
-    attention::{llama_transformer_block, AttentionTypes, TransformerBlockTypes},
+    attention::{pre_norm_swiglu_transformer_block, AttentionTypes, TransformerBlockTypes},
     normalization::{last_axis_reduced_type, reduced_axis_type, softmax_axis, softmax_last_axis},
 };
 use severian_hir::{TensorDimension, TensorElementType};
@@ -42,7 +42,7 @@ fn softmax_axis_preserves_every_non_reduced_dimension() {
 }
 
 #[test]
-fn llama_block_contains_attention_mlp_norms_and_residuals() {
+fn pre_norm_swiglu_block_contains_attention_mlp_norms_and_residuals() {
     let model = tensor(3);
     let reduced_model = tensor(2);
     let weight = tensor(2);
@@ -76,7 +76,7 @@ fn llama_block_contains_attention_mlp_norms_and_residuals() {
         mlp_intermediate: tensor(3),
     };
     let mut emitter = StableHloEmitter::new();
-    llama_transformer_block(
+    pre_norm_swiglu_transformer_block(
         &mut emitter,
         &input,
         &norm_a,

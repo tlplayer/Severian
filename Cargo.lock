@@ -528,6 +528,7 @@ dependencies = [
 name = "severian-mir"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-hir",
 ]
 

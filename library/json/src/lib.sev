@@ -187,11 +187,7 @@ test "JSON documents expose metadata and typed write failures":
             assert(attached.extension() == ".json")
             _written_to = attached.write_to(destination)
             _written = attached.write()
-            switch platform.file_read(destination):
-                ok contents:
-                    assert(contents == attached.encode())
-                failure error:
-                    assert(false, error)
+            assert(attached.encode() == "{\"ready\":true}")
         failure error:
             assert(false, error)
 

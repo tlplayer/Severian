@@ -1,3 +1,7 @@
+use severian_abi::{
+    AbiParameter, AbiResult, AbiType, AbiVersion, CallingConvention, ExternalFunction,
+    ForeignSymbol, Ownership,
+};
 use severian_hir::{
     BindingRef, Expression, Function, FunctionId, Instruction, Parameter, Program, ScopedBehavior,
     TaskPlacement, ValueType,
@@ -466,4 +470,64 @@ fn verifier_rejects_a_missing_operation_for_a_recognized_intrinsic() {
     assert!(errors
         .iter()
         .any(|error| error.invariant == "complete-tensor-lowering"));
+}
+
+#[test]
+fn records_typed_foreign_calls_without_domain_specific_operations() {
+    let function = ExternalFunction {
+        package: "file".into(),
+        function: "file.ffi.text_release".into(),
+        symbol: ForeignSymbol::new(Some("file".into()), "sev_abi_v1_file_text_release"),
+        shim_symbol: "__sev_ffi_shim_sev_abi_v1_file_text_release".into(),
+        abi: AbiVersion::CV1,
+        calling_convention: CallingConvention::C,
+        parameters: vec![AbiParameter {
+            name: "content".into(),
+            ty: AbiType::Handle,
+            ownership: Ownership::Borrowed,
+            nullable: false,
+        }],
+        result: AbiResult {
+            ty: AbiType::Unit,
+            ownership: Ownership::Copy,
+            nullable: false,
+        },
+    };
+    let argument = Expression::Typed {
+        id: severian_hir::HirId::synthetic(40),
+        ty: ValueType::Int,
+        any_origin: None,
+        expression: Box::new(Expression::Integer(1)),
+    };
+    let call = Expression::Typed {
+        id: severian_hir::HirId::synthetic(41),
+        ty: ValueType::Unit,
+        any_origin: None,
+        expression: Box::new(Expression::ForeignCall {
+            function: function.clone(),
+            args: vec![argument],
+        }),
+    };
+    let hir = Program {
+        functions: vec![Function {
+            id: FunctionId::from_name("release"),
+            name: "release".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![Instruction::Evaluate(call)],
+            tests: vec![],
+        }],
+        ..Program::default()
+    };
+
+    let mir = severian_mir::lower(&hir).unwrap();
+
+    assert_eq!(mir.functions[0].foreign_calls.len(), 1);
+    let call = &mir.functions[0].foreign_calls[0];
+    assert_eq!(call.function, function);
+    assert_eq!(call.arguments.len(), 1);
+    assert_eq!(call.result.ty, Some(ValueType::Unit));
 }

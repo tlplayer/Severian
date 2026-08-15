@@ -1,0 +1,39 @@
+class ImageType:
+    name: string
+
+trait Image:
+    @image
+    property image_type: ImageType
+    property extensions: set[string]
+    def read(path: string) -> string
+
+class PngImage: Image:
+    image_type = ImageType("png")
+    extensions = {".png"}
+
+    def read(path: string) -> string:
+        return path
+
+class JpegImage: Image:
+    image_type = ImageType("jpeg")
+    extensions = {".jpg", ".jpeg"}
+
+    def read(path: string) -> string:
+        return path
+
+class WebpImage: Image:
+    image_type = ImageType("webp")
+    extensions = {".webp"}
+
+    def read(path: string) -> string:
+        return path
+
+class GifImage: Image:
+    image_type = ImageType("gif")
+    extensions = {".gif"}
+
+    def read(path: string) -> string:
+        return path
+
+def main():
+    print("Image registry: PNG, JPEG, WebP, GIF")

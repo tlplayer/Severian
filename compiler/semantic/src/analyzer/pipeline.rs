@@ -65,7 +65,7 @@ fn analyze_specialized(
             );
         }
     }
-    validate_trait_implementations(module, interfaces, &aliases)?;
+    let trait_registries = validate_trait_implementations(module, interfaces, &aliases)?;
     for item in &module.items {
         if let Item::Trait(declaration) = item {
             register_trait_aliases(&mut aliases, declaration);
@@ -721,7 +721,10 @@ fn analyze_specialized(
         });
     }
     Ok(Program {
-        metadata: Default::default(),
+        metadata: ProgramMetadata {
+            trait_registries,
+            ..Default::default()
+        },
         globals,
         classes,
         functions,

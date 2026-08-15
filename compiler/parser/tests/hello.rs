@@ -185,6 +185,32 @@ fn parses_trait_scoped_behavior_pairs() {
 }
 
 #[test]
+fn parses_required_and_defaulted_trait_registry_properties() {
+    let source = concat!(
+        "trait File:\n",
+        "    property file_type: FileType\n",
+        "    property extensions: set[string] = {\".txt\"}\n",
+        "    def read(path: string) -> string\n",
+        "\n",
+        "class TextFile: File:\n",
+        "    file_type = FileType.TXT\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Trait(file) = &module.items[0] else {
+        panic!("expected File trait");
+    };
+    assert_eq!(file.properties.len(), 2);
+    assert_eq!(file.properties[0].name.name, "file_type");
+    assert!(file.properties[0].default.is_none());
+    assert_eq!(file.properties[1].name.name, "extensions");
+    assert!(file.properties[1].default.is_some());
+    let Item::Class(text_file) = &module.items[1] else {
+        panic!("expected TextFile class");
+    };
+    assert_eq!(text_file.traits.len(), 1);
+}
+
+#[test]
 fn parses_bitwise_precedence_below_comparisons_and_arithmetic() {
     let source =
         "def combine(a: int, b: int, c: int) -> bool:\n    return a + 1 & b ^ c | a == b\n";

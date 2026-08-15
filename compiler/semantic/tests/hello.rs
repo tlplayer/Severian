@@ -1,6 +1,6 @@
 use severian_hir::{
     DefinitionId, Expression, FunctionId, Instruction, TaskPlacement, TensorDimension,
-    TensorElementType, TypeDefinitionId, TypeKind, ValueType, VariantId,
+    TensorElementType, TraitPropertyValue, TypeDefinitionId, TypeKind, ValueType, VariantId,
 };
 use severian_lexer::lex;
 use severian_package::PackageInterface;
@@ -1139,6 +1139,186 @@ fn scoped_behavior_requires_a_matching_without_phase() {
     assert!(error
         .message
         .contains("must declare both `with(context)` and `without(context)`"));
+}
+
+#[test]
+fn trait_properties_build_a_deterministic_four_provider_registry() {
+    let source = concat!(
+        "trait File:\n",
+        "    property file_type: string\n",
+        "    property extensions: set[string]\n",
+        "    def read(path: string) -> string\n",
+        "\n",
+        "class JsonFile: File\n",
+        "    file_type = \"json\"\n",
+        "    extensions = {\".json\"}\n",
+        "    def read(path: string) -> string:\n",
+        "        return path\n",
+        "\n",
+        "class TextFile: File\n",
+        "    file_type = \"text\"\n",
+        "    extensions = {\".txt\"}\n",
+        "    def read(path: string) -> string:\n",
+        "        return path\n",
+        "\n",
+        "class YamlFile: File\n",
+        "    file_type = \"yaml\"\n",
+        "    extensions = {\".yaml\", \".yml\"}\n",
+        "    def read(path: string) -> string:\n",
+        "        return path\n",
+        "\n",
+        "class LuaFile: File\n",
+        "    file_type = \"lua\"\n",
+        "    extensions = {\".lua\"}\n",
+        "    def read(path: string) -> string:\n",
+        "        return path\n",
+    );
+    let program = analyze(&parse(&lex(source).unwrap()).unwrap()).unwrap();
+    let registry = &program.metadata.trait_registries["File"];
+    assert_eq!(registry.properties.len(), 2);
+    assert_eq!(
+        registry
+            .implementations
+            .iter()
+            .map(|implementation| implementation.name.as_str())
+            .collect::<Vec<_>>(),
+        ["JsonFile", "LuaFile", "TextFile", "YamlFile"]
+    );
+    assert_eq!(
+        registry.implementations[3].properties["extensions"],
+        TraitPropertyValue::Set(vec![
+            TraitPropertyValue::String(".yaml".into()),
+            TraitPropertyValue::String(".yml".into()),
+        ])
+    );
+}
+
+#[test]
+fn trait_registry_properties_accept_typed_identifier_constructors() {
+    let source = concat!(
+        "class FileType:\n",
+        "    name: string\n",
+        "\n",
+        "trait File:\n",
+        "    property file_type: FileType\n",
+        "\n",
+        "class LuaFile: File\n",
+        "    file_type = FileType(\"lua\")\n",
+    );
+    let program = analyze(&parse(&lex(source).unwrap()).unwrap()).unwrap();
+    assert_eq!(
+        program.metadata.trait_registries["File"].implementations[0].properties["file_type"],
+        TraitPropertyValue::Constructor {
+            name: "FileType".into(),
+            arguments: vec![TraitPropertyValue::String("lua".into())],
+        }
+    );
+}
+
+#[test]
+fn composed_registry_traits_receive_transitive_implementations() {
+    let source = concat!(
+        "trait Extensions:\n",
+        "    property extensions: set[string]\n",
+        "\n",
+        "trait File: Extensions\n",
+        "    property file_type: string\n",
+        "\n",
+        "class LuaFile: File\n",
+        "    file_type = \"lua\"\n",
+        "    extensions = {\".lua\"}\n",
+    );
+    let program = analyze(&parse(&lex(source).unwrap()).unwrap()).unwrap();
+    assert_eq!(
+        program.metadata.trait_registries["File"].implementations[0].name,
+        "LuaFile"
+    );
+    assert_eq!(
+        program.metadata.trait_registries["Extensions"].implementations[0].name,
+        "LuaFile"
+    );
+}
+
+#[test]
+fn trait_registry_rejects_missing_and_ambiguous_property_contributions() {
+    let missing = concat!(
+        "trait File:\n",
+        "    property extensions: set[string]\n",
+        "\n",
+        "class LuaFile: File\n",
+        "    marker = \"lua\"\n",
+    );
+    let error = analyze(&parse(&lex(missing).unwrap()).unwrap()).unwrap_err();
+    assert!(error.message.contains("E000212"));
+    assert!(error
+        .message
+        .contains("does not contribute property `extensions`"));
+
+    let ambiguous = concat!(
+        "trait File:\n",
+        "    property extensions: set[string]\n",
+        "\n",
+        "class First: File\n",
+        "    extensions = {\".lua\"}\n",
+        "\n",
+        "class Second: File\n",
+        "    extensions = {\".lua\"}\n",
+    );
+    let error = analyze(&parse(&lex(ambiguous).unwrap()).unwrap()).unwrap_err();
+    assert!(error.message.contains("E000212"));
+    assert!(error
+        .message
+        .contains("ambiguous `extensions` contribution"));
+}
+
+#[test]
+fn reachable_package_implementations_close_one_trait_registry() {
+    let core_source = concat!(
+        "trait File:\n",
+        "    property file_type: string\n",
+        "    property extensions: set[string]\n",
+        "\n",
+        "class JsonFile: File\n",
+        "    file_type = \"json\"\n",
+        "    extensions = {\".json\"}\n",
+        "\n",
+        "class TextFile: File\n",
+        "    file_type = \"text\"\n",
+        "    extensions = {\".txt\"}\n",
+    );
+    let yaml_source = concat!(
+        "import core\n",
+        "class YamlFile: core.File\n",
+        "    file_type = \"yaml\"\n",
+        "    extensions = {\".yaml\", \".yml\"}\n",
+    );
+    let lua_source = concat!(
+        "import core\n",
+        "class LuaFile: core.File\n",
+        "    file_type = \"lua\"\n",
+        "    extensions = {\".lua\"}\n",
+    );
+    let application = parse(&lex("import core\nimport yaml\nimport lua\n").unwrap()).unwrap();
+    let interfaces = vec![
+        ("core".into(), parse(&lex(core_source).unwrap()).unwrap()),
+        ("yaml".into(), parse(&lex(yaml_source).unwrap()).unwrap()),
+        ("lua".into(), parse(&lex(lua_source).unwrap()).unwrap()),
+    ];
+    let program = analyze_with_interfaces(&application, &interfaces).unwrap();
+    let registry = &program.metadata.trait_registries["core.File"];
+    assert_eq!(
+        registry
+            .implementations
+            .iter()
+            .map(|implementation| implementation.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "core.JsonFile",
+            "core.TextFile",
+            "lua.LuaFile",
+            "yaml.YamlFile"
+        ]
+    );
 }
 
 #[test]

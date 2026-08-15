@@ -162,6 +162,13 @@ pub enum Expression {
         target: CallTarget,
         args: Vec<Expression>,
     },
+    /// A package-declared call across a typed foreign ABI boundary. Domain
+    /// packages choose the symbol and provide its implementation; generic
+    /// compiler lowering only consumes this descriptor.
+    ForeignCall {
+        function: severian_abi::ExternalFunction,
+        args: Vec<Expression>,
+    },
     CallValue {
         callee: Box<Expression>,
         args: Vec<Expression>,

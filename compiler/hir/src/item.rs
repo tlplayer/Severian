@@ -106,6 +106,9 @@ impl Program {
                     symbols.insert(symbol.clone());
                 }
             }
+            Expression::ForeignCall { function, .. } => {
+                symbols.insert(function.symbol.name.clone());
+            }
             Expression::ChaosRule { function, .. } => {
                 if let Some(symbol) = &function.native_symbol {
                     symbols.insert(symbol.clone());
@@ -114,6 +117,29 @@ impl Program {
             _ => {}
         });
         symbols
+    }
+
+    /// Reifies package-declared external symbols as typed foreign calls after
+    /// package linking has supplied the closed external-function table.
+    pub fn resolve_foreign_calls(&mut self) {
+        let functions = self.metadata.external_functions.clone();
+        self.visit_expressions_mut(&mut |expression| {
+            let replacement = match expression {
+                Expression::Call { target, args } => target
+                    .native_symbol
+                    .as_ref()
+                    .and_then(|symbol| functions.get(symbol))
+                    .cloned()
+                    .map(|function| Expression::ForeignCall {
+                        function,
+                        args: std::mem::take(args),
+                    }),
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                *expression = replacement;
+            }
+        });
     }
 
     pub fn test_count(&self) -> usize {
