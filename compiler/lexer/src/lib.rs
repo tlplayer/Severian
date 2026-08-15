@@ -11,7 +11,7 @@ pub struct Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    Native,
+    Extern,
     Def,
     Class,
     Trait,
@@ -408,7 +408,7 @@ impl<'source> Lexer<'source> {
                     }
                     let value = &line[start..index];
                     let kind = match value {
-                        "native" => TokenKind::Native,
+                        "extern" => TokenKind::Extern,
                         "def" => TokenKind::Def,
                         "class" => TokenKind::Class,
                         "trait" => TokenKind::Trait,

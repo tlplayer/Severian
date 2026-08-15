@@ -330,6 +330,7 @@ fn all_requested_packages_are_workspace_members() {
         "math",
         "random",
         "file",
+        "ffi",
         "path",
         "json",
         "regex",

@@ -30,7 +30,7 @@ use-after-move safety; they do not insert lifetime-driven heap releases.
 Effect inference currently examines direct uses in each function body. It does
 not yet compute a transitive call-graph fixed point or serialize effects in
 package interfaces. A call whose implementation is unavailable to the current
-program, including a native declaration, defaults to a shared view unless the
+program, including an extern declaration, defaults to a shared view unless the
 argument explicitly requests `borrow` or `move`.
 
 The native runtime's collection `clone` copies the collection header and item

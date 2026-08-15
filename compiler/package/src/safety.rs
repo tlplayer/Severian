@@ -126,7 +126,7 @@ fn unsafe_string_array(
 fn unsafe_capabilities(tokens: &[severian_lexer::Token]) -> BTreeSet<&'static str> {
     use severian_lexer::TokenKind;
     let mut capabilities = BTreeSet::new();
-    if tokens.iter().any(|token| token.kind == TokenKind::Native) {
+    if tokens.iter().any(|token| token.kind == TokenKind::Extern) {
         capabilities.insert("native-abi");
     }
     if tokens

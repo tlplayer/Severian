@@ -265,7 +265,7 @@ fn retains_typed_conditional_expressions_in_hir() {
 #[test]
 fn retains_ranked_tensor_element_and_dimension_types_in_hir() {
     let source = concat!(
-        "unsafe:\n    native(\"tensor_identity\") def identity(value: Tensor[f32, 2, dynamic]) -> Tensor[f32, 2, dynamic]\n",
+        "unsafe:\n    extern(\"tensor_identity\") def identity(value: Tensor[f32, 2, dynamic]) -> Tensor[f32, 2, dynamic]\n",
     );
     let ast = parse(&lex(source).unwrap()).unwrap();
     let hir = analyze(&ast).unwrap();
@@ -282,7 +282,7 @@ fn retains_ranked_tensor_element_and_dimension_types_in_hir() {
 #[test]
 fn rejects_incompatible_static_tensor_shapes_at_call_boundaries() {
     let source = concat!(
-        "unsafe:\n    native(\"consume\") def consume(value: Tensor[f64, 2, 3])\n",
+        "unsafe:\n    extern(\"consume\") def consume(value: Tensor[f64, 2, 3])\n",
         "def wrong(value: Tensor[f64, 2, 4]):\n",
         "    consume(value)\n",
     );
@@ -310,7 +310,7 @@ fn rejects_incompatible_matmul_contracting_dimensions_before_lowering() {
 fn tensor_wildcard_parameters_infer_each_callers_dtype() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"release_tensor\") def release[type](value: Tensor[type])\n",
+        "    extern(\"release_tensor\") def release[type](value: Tensor[type])\n",
         "\n",
         "def release_all(bfloat: Tensor[bf16], float: Tensor[f32], integer: Tensor[i64]):\n",
         "    release(bfloat)\n",
@@ -326,9 +326,9 @@ fn tensor_wildcard_parameters_infer_each_callers_dtype() {
 fn conventional_tensor_type_variables_are_interface_wildcards() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"accept_t\") def accept_t(value: Tensor[T])\n",
-        "    native(\"accept_k\") def accept_k(value: Tensor[K])\n",
-        "    native(\"accept_v\") def accept_v(value: Tensor[V])\n",
+        "    extern(\"accept_t\") def accept_t(value: Tensor[T])\n",
+        "    extern(\"accept_k\") def accept_k(value: Tensor[K])\n",
+        "    extern(\"accept_v\") def accept_v(value: Tensor[V])\n",
         "\n",
         "def accept_all(float: Tensor[f32], integer: Tensor[i8]):\n",
         "    accept_t(float)\n",
@@ -346,7 +346,7 @@ fn conventional_tensor_type_variables_are_interface_wildcards() {
 fn tensor_wildcard_parameters_reject_non_tensor_values() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"release_tensor\") def release[type](value: Tensor[type])\n",
+        "    extern(\"release_tensor\") def release[type](value: Tensor[type])\n",
         "\n",
         "def wrong():\n",
         "    release(\"not a tensor\")\n",
@@ -362,7 +362,7 @@ fn tensor_wildcard_parameters_reject_non_tensor_values() {
 fn generic_tensor_return_preserves_fp8_dtype_at_call_site() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"identity\") def identity[T: Float](value: Tensor[T]) -> Tensor[T]\n",
+        "    extern(\"identity\") def identity[T: Float](value: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "def apply(value: Tensor[f8e4m3fn]) -> Tensor[f8e4m3fn]:\n",
         "    return identity(value)\n",
@@ -384,7 +384,7 @@ fn generic_tensor_return_preserves_fp8_dtype_at_call_site() {
 fn generic_tensor_constraints_reject_the_wrong_dtype_class() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"softmax\") def softmax[T: Float](value: Tensor[T]) -> Tensor[T]\n",
+        "    extern(\"softmax\") def softmax[T: Float](value: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "def wrong(value: Tensor[i8]) -> Tensor[i8]:\n",
         "    return softmax(value)\n",
@@ -398,7 +398,7 @@ fn generic_tensor_constraints_reject_the_wrong_dtype_class() {
 fn repeated_tensor_type_variables_require_one_dtype() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"add\") def add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
+        "    extern(\"add\") def add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "def wrong(left: Tensor[f16], right: Tensor[f32]) -> Tensor[f32]:\n",
         "    return add(left, right)\n",
@@ -414,7 +414,7 @@ fn repeated_tensor_type_variables_require_one_dtype() {
 fn parses_the_complete_tensor_dtype_surface() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"types\") def types(",
+        "    extern(\"types\") def types(",
         "a: Tensor[bool], b: Tensor[i8], c: Tensor[i16], d: Tensor[i32], e: Tensor[i64], ",
         "f: Tensor[u8], g: Tensor[u16], h: Tensor[u32], i: Tensor[u64], ",
         "j: Tensor[f8e4m3fn], k: Tensor[f8e5m2], l: Tensor[f16], m: Tensor[bf16], ",
@@ -825,7 +825,7 @@ fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
         "class Box:\n",
         "    values: list[int]\n",
         "\n",
-        "unsafe:\n    native(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
+        "unsafe:\n    extern(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
         "\n",
         "def choose() -> Outcome:\n",
         "    return Found(1)\n",

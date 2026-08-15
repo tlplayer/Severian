@@ -47,7 +47,7 @@ class AgentResult:
     state: AgentState
 
 unsafe:
-    native("__sev_agent_model_request") def model_request(
+    extern("__sev_agent_model_request") def model_request(
         endpoint: string,
         model: string,
         system_prompt: string,
@@ -58,20 +58,20 @@ unsafe:
         timeout_millis: int,
     ) -> Result[ModelReply, string]
 
-    native("__sev_agent_execute") def execute_command(
+    extern("__sev_agent_execute") def execute_command(
         workspace: string,
         command: string,
         timeout_millis: int,
         max_output_bytes: int,
     ) -> Result[CommandResult, string]
 
-    native("__sev_agent_read_file") def read_file(path: string) -> Result[string, string]
+    extern("__sev_agent_read_file") def read_file(path: string) -> Result[string, string]
 
-    native("__sev_agent_write_file") def write_file(path: string, content: string) -> Result[int, string]
+    extern("__sev_agent_write_file") def write_file(path: string, content: string) -> Result[int, string]
 
-    native("__sev_agent_git_status") def git_status(workspace: string) -> Result[list[string], string]
+    extern("__sev_agent_git_status") def git_status(workspace: string) -> Result[list[string], string]
 
-    native("__sev_agent_reset_workspace") def reset_workspace(workspace: string) -> Result[int, string]
+    extern("__sev_agent_reset_workspace") def reset_workspace(workspace: string) -> Result[int, string]
 
 def default_model_config() -> ModelConfig:
     return ModelConfig(

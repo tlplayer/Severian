@@ -4,4 +4,4 @@
 # `[package.unsafe]` configuration.
 
 unsafe:
-    native("host_secret") def host_secret() -> int
+    extern("host_secret") def host_secret() -> int

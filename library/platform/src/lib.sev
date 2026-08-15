@@ -11,120 +11,120 @@ class TlsHandle:
     opaque: int
 
 unsafe:
-    native("__sev_monotonic_ns") def monotonic_ns() -> int
+    extern("__sev_monotonic_ns") def monotonic_ns() -> int
 
-    native("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
-    native("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
-    native("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value
-    native("__sev_map_clear") def map_clear[key, value](values: map[key, value])
-    native("__sev_platform_set_add") def set_add[type](values: set[type], value: type)
-    native("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
-    native("__sev_string_casefold") def string_casefold(value: string) -> string
-    native("__sev_string_encode") def string_encode(value: string) -> list[int]
-    native("__sev_math_sqrt") def math_sqrt(value: float) -> float
-    native("__sev_math_pow") def math_pow(value: float, exponent: float) -> float
-    native("__sev_math_exp") def math_exp(value: float) -> float
-    native("__sev_math_log") def math_log(value: float) -> float
-    native("__sev_math_log2") def math_log2(value: float) -> float
-    native("__sev_math_log10") def math_log10(value: float) -> float
-    native("__sev_math_sin") def math_sin(value: float) -> float
-    native("__sev_math_cos") def math_cos(value: float) -> float
-    native("__sev_math_tan") def math_tan(value: float) -> float
-    native("__sev_math_floor") def math_floor(value: float) -> int
-    native("__sev_math_ceil") def math_ceil(value: float) -> int
-    native("__sev_math_isfinite") def math_isfinite(value: float) -> bool
-    native("__sev_math_isnan") def math_isnan(value: float) -> bool
-    native("__sev_math_round") def math_round(value: float, digits: int) -> float
-    native("__sev_random_float") def random_float() -> float
-    native("__sev_random_int") def random_int(start: int, stop: int) -> int
-    native("__sev_random_seed") def random_seed(value: int)
-    native("__sev_random_choice") def random_choice[type](values: list[type]) -> type
-    native("__sev_random_shuffle") def random_shuffle[type](values: list[type])
-    native("__sev_random_sample") def random_sample[type](values: list[type], count: int) -> list[type]
-    native("__sev_file_exists") def file_exists(path: string) -> bool
-    native("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
-    native("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
-    native("__sev_file_copy") def file_copy(source: string, destination: string) -> Result[unit, IOError]
-    native("__sev_file_append") def file_append(path: string, contents: string) -> Result[unit, IOError]
-    native("__sev_file_write_bytes") def file_write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]
-    native("__sev_file_size_path") def file_size_path(path: string) -> Result[int, IOError]
-    native("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> Result[float, IOError]
-    native("__sev_directory_list") def directory_list(path: string) -> Result[list[string], IOError]
-    native("__sev_directory_make_all") def directory_make_all(path: string) -> Result[unit, IOError]
-    native("__sev_csv_parse") def csv_parse(contents: string) -> list[list[string]]
-    native("__sev_csv_encode") def csv_encode(rows: list[list[string]]) -> string
-    native("__sev_path_join") def path_join(left: string, right: string) -> string
-    native("__sev_path_is_file") def path_is_file(path: string) -> bool
-    native("__sev_path_is_dir") def path_is_dir(path: string) -> bool
-    native("__sev_path_basename") def path_basename(path: string) -> string
-    native("__sev_path_dirname") def path_dirname(path: string) -> string
-    native("__sev_path_extension") def path_extension(path: string) -> string
-    native("__sev_path_absolute") def path_absolute(path: string) -> string
-    native("__sev_time_seconds") def time_seconds() -> float
-    native("__sev_time_sleep") def time_sleep(seconds: float)
-    native("__sev_time_monotonic") def time_monotonic() -> float
-    native("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
-    native("__sev_environment_get") def environment_get(name: string, fallback: string) -> string
-    native("__sev_environment_set") def environment_set(name: string, value: string) -> bool
-    native("__sev_environment_remove") def environment_remove(name: string) -> bool
-    native("__sev_regex_findall") def regex_findall(text: string, pattern: string) -> list[string]
-    native("__sev_regex_split") def regex_split(text: string, pattern: string) -> list[string]
-    native("__sev_regex_sub") def regex_sub(text: string, pattern: string, replacement: string) -> string
-    native("__sev_process_run") def process_run(command: string) -> int
-    native("__sev_process_spawn") def process_spawn(command: string) -> int
-    native("__sev_process_wait") def process_wait(process: int) -> int
-    native("__sev_process_kill") def process_kill(process: int) -> bool
-    native("__sev_process_exit") def process_exit(status: int)
-    native("__sev_process_arguments") def process_arguments() -> list[string]
-    native("__sev_hash_md5") def hash_md5(value: string) -> string
-    native("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
-    native("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]
-    native("__sev_tls_read") def tls_read(connection: TlsHandle, count: int) -> Result[list[int], IOError]
-    native("__sev_tls_write") def tls_write(connection: TlsHandle, data: list[int]) -> Result[int, IOError]
-    native("__sev_tls_close") def tls_close(connection: TlsHandle) -> Result[unit, IOError]
-    native("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
-    native("__sev_http_download") def http_download(url: string, destination: string) -> Result[unit, IOError]
-    native("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
-    native("__sev_platform_enumerate") def core_enumerate[type](values: list[type]) -> list[tuple[int, type]]
-    native("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]
-    native("__sev_platform_all") def core_all(values: list[bool]) -> bool
-    native("__sev_platform_any") def core_any(values: list[bool]) -> bool
-    native("__sev_platform_abs") def core_abs[type](value: type) -> type
+    extern("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
+    extern("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
+    extern("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value
+    extern("__sev_map_clear") def map_clear[key, value](values: map[key, value])
+    extern("__sev_platform_set_add") def set_add[type](values: set[type], value: type)
+    extern("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
+    extern("__sev_string_casefold") def string_casefold(value: string) -> string
+    extern("__sev_string_encode") def string_encode(value: string) -> list[int]
+    extern("__sev_math_sqrt") def math_sqrt(value: float) -> float
+    extern("__sev_math_pow") def math_pow(value: float, exponent: float) -> float
+    extern("__sev_math_exp") def math_exp(value: float) -> float
+    extern("__sev_math_log") def math_log(value: float) -> float
+    extern("__sev_math_log2") def math_log2(value: float) -> float
+    extern("__sev_math_log10") def math_log10(value: float) -> float
+    extern("__sev_math_sin") def math_sin(value: float) -> float
+    extern("__sev_math_cos") def math_cos(value: float) -> float
+    extern("__sev_math_tan") def math_tan(value: float) -> float
+    extern("__sev_math_floor") def math_floor(value: float) -> int
+    extern("__sev_math_ceil") def math_ceil(value: float) -> int
+    extern("__sev_math_isfinite") def math_isfinite(value: float) -> bool
+    extern("__sev_math_isnan") def math_isnan(value: float) -> bool
+    extern("__sev_math_round") def math_round(value: float, digits: int) -> float
+    extern("__sev_random_float") def random_float() -> float
+    extern("__sev_random_int") def random_int(start: int, stop: int) -> int
+    extern("__sev_random_seed") def random_seed(value: int)
+    extern("__sev_random_choice") def random_choice[type](values: list[type]) -> type
+    extern("__sev_random_shuffle") def random_shuffle[type](values: list[type])
+    extern("__sev_random_sample") def random_sample[type](values: list[type], count: int) -> list[type]
+    extern("__sev_file_exists") def file_exists(path: string) -> bool
+    extern("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
+    extern("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
+    extern("__sev_file_copy") def file_copy(source: string, destination: string) -> Result[unit, IOError]
+    extern("__sev_file_append") def file_append(path: string, contents: string) -> Result[unit, IOError]
+    extern("__sev_file_write_bytes") def file_write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]
+    extern("__sev_file_size_path") def file_size_path(path: string) -> Result[int, IOError]
+    extern("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> Result[float, IOError]
+    extern("__sev_directory_list") def directory_list(path: string) -> Result[list[string], IOError]
+    extern("__sev_directory_make_all") def directory_make_all(path: string) -> Result[unit, IOError]
+    extern("__sev_csv_parse") def csv_parse(contents: string) -> list[list[string]]
+    extern("__sev_csv_encode") def csv_encode(rows: list[list[string]]) -> string
+    extern("__sev_path_join") def path_join(left: string, right: string) -> string
+    extern("__sev_path_is_file") def path_is_file(path: string) -> bool
+    extern("__sev_path_is_dir") def path_is_dir(path: string) -> bool
+    extern("__sev_path_basename") def path_basename(path: string) -> string
+    extern("__sev_path_dirname") def path_dirname(path: string) -> string
+    extern("__sev_path_extension") def path_extension(path: string) -> string
+    extern("__sev_path_absolute") def path_absolute(path: string) -> string
+    extern("__sev_time_seconds") def time_seconds() -> float
+    extern("__sev_time_sleep") def time_sleep(seconds: float)
+    extern("__sev_time_monotonic") def time_monotonic() -> float
+    extern("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
+    extern("__sev_environment_get") def environment_get(name: string, fallback: string) -> string
+    extern("__sev_environment_set") def environment_set(name: string, value: string) -> bool
+    extern("__sev_environment_remove") def environment_remove(name: string) -> bool
+    extern("__sev_regex_findall") def regex_findall(text: string, pattern: string) -> list[string]
+    extern("__sev_regex_split") def regex_split(text: string, pattern: string) -> list[string]
+    extern("__sev_regex_sub") def regex_sub(text: string, pattern: string, replacement: string) -> string
+    extern("__sev_process_run") def process_run(command: string) -> int
+    extern("__sev_process_spawn") def process_spawn(command: string) -> int
+    extern("__sev_process_wait") def process_wait(process: int) -> int
+    extern("__sev_process_kill") def process_kill(process: int) -> bool
+    extern("__sev_process_exit") def process_exit(status: int)
+    extern("__sev_process_arguments") def process_arguments() -> list[string]
+    extern("__sev_hash_md5") def hash_md5(value: string) -> string
+    extern("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
+    extern("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]
+    extern("__sev_tls_read") def tls_read(connection: TlsHandle, count: int) -> Result[list[int], IOError]
+    extern("__sev_tls_write") def tls_write(connection: TlsHandle, data: list[int]) -> Result[int, IOError]
+    extern("__sev_tls_close") def tls_close(connection: TlsHandle) -> Result[unit, IOError]
+    extern("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
+    extern("__sev_http_download") def http_download(url: string, destination: string) -> Result[unit, IOError]
+    extern("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
+    extern("__sev_platform_enumerate") def core_enumerate[type](values: list[type]) -> list[tuple[int, type]]
+    extern("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]
+    extern("__sev_platform_all") def core_all(values: list[bool]) -> bool
+    extern("__sev_platform_any") def core_any(values: list[bool]) -> bool
+    extern("__sev_platform_abs") def core_abs[type](value: type) -> type
 
-    native("__sev_file_read") def file_read(path: string) -> Result[string, IOError]
+    extern("__sev_file_read") def file_read(path: string) -> Result[string, IOError]
 
-    native("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
+    extern("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
 
-    native("__sev_file_open_binary") def file_open_binary(path: string) -> Result[Any, IOError]
+    extern("__sev_file_open_binary") def file_open_binary(path: string) -> Result[Any, IOError]
 
-    native("__sev_file_read_bytes") def file_read_bytes(handle: Any, count: int) -> Result[list[int], IOError]
+    extern("__sev_file_read_bytes") def file_read_bytes(handle: Any, count: int) -> Result[list[int], IOError]
 
-    native("__sev_file_read_exact") def file_read_exact(handle: Any, count: int) -> Result[list[int], IOError]
+    extern("__sev_file_read_exact") def file_read_exact(handle: Any, count: int) -> Result[list[int], IOError]
 
-    native("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> Result[string, IOError]
-    native("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> Result[string, IOError]
+    extern("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> Result[string, IOError]
+    extern("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> Result[string, IOError]
 
-    native("__sev_file_seek") def file_seek(handle: Any, offset: int) -> Result[unit, IOError]
+    extern("__sev_file_seek") def file_seek(handle: Any, offset: int) -> Result[unit, IOError]
 
-    native("__sev_file_size") def file_size(handle: Any) -> Result[int, IOError]
+    extern("__sev_file_size") def file_size(handle: Any) -> Result[int, IOError]
 
-    native("__sev_file_close") def file_close(handle: Any) -> Result[unit, IOError]
+    extern("__sev_file_close") def file_close(handle: Any) -> Result[unit, IOError]
 
-    native("__sev_file_map") def file_map(path: string) -> Result[Any, IOError]
+    extern("__sev_file_map") def file_map(path: string) -> Result[Any, IOError]
 
-    native("__sev_file_mapped_size") def file_mapped_size(mapping: Any) -> int
+    extern("__sev_file_mapped_size") def file_mapped_size(mapping: Any) -> int
 
-    native("__sev_file_unmap") def file_unmap(mapping: Any) -> Result[unit, IOError]
+    extern("__sev_file_unmap") def file_unmap(mapping: Any) -> Result[unit, IOError]
 
-    native("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
-    native("__sev_file_unlock") def file_unlock(handle: Any) -> Result[unit, IOError]
+    extern("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
+    extern("__sev_file_unlock") def file_unlock(handle: Any) -> Result[unit, IOError]
 
-    native("__sev_file_format_register") def file_format_register(extension: string, reader: Any)
+    extern("__sev_file_format_register") def file_format_register(extension: string, reader: Any)
 
-    native("__sev_file_format_reader") def file_format_reader(extension: string, fallback: Any) -> Any
+    extern("__sev_file_format_reader") def file_format_reader(extension: string, fallback: Any) -> Any
 
 unsafe:
-    native("__sev_json_decode") def jsondecode(text: string) -> Result[Any, JsonError]
+    extern("__sev_json_decode") def jsondecode(text: string) -> Result[Any, JsonError]
 
 test "native JSON decode ABI":
     switch jsondecode("42"):
@@ -134,81 +134,81 @@ test "native JSON decode ABI":
             assert(false, error)
 
 unsafe:
-    native("__sev_json_encode") def jsonencode(value: Any) -> string
+    extern("__sev_json_encode") def jsonencode(value: Any) -> string
 
-    native("__sev_json_object_get") def jsonobject_get(value: Any, key: string) -> Any
+    extern("__sev_json_object_get") def jsonobject_get(value: Any, key: string) -> Any
 
-    native("__sev_json_object_keys") def jsonobject_keys(value: Any) -> list[string]
+    extern("__sev_json_object_keys") def jsonobject_keys(value: Any) -> list[string]
 
-    native("__sev_json_object_values") def jsonobject_values(value: Any) -> list[Any]
+    extern("__sev_json_object_values") def jsonobject_values(value: Any) -> list[Any]
 
-    native("__sev_json_object_set") def jsonobject_set(value: Any, key: string, item: Any)
+    extern("__sev_json_object_set") def jsonobject_set(value: Any, key: string, item: Any)
 
-    native("__sev_json_as_string") def jsonas_string(value: Any) -> string
+    extern("__sev_json_as_string") def jsonas_string(value: Any) -> string
 
-    native("__sev_json_as_int") def jsonas_int(value: Any) -> int
+    extern("__sev_json_as_int") def jsonas_int(value: Any) -> int
 
-    native("__sev_json_as_float") def jsonas_float(value: Any) -> float
+    extern("__sev_json_as_float") def jsonas_float(value: Any) -> float
 
-    native("__sev_json_as_bool") def jsonas_bool(value: Any) -> bool
+    extern("__sev_json_as_bool") def jsonas_bool(value: Any) -> bool
 
-    native("__sev_json_as_int_list") def jsonas_int_list(value: Any) -> list[int]
+    extern("__sev_json_as_int_list") def jsonas_int_list(value: Any) -> list[int]
 
-    native("__sev_json_as_string_list") def jsonas_string_list(value: Any) -> list[string]
-    native("__sev_json_as_list") def jsonas_list(value: Any) -> list[Any]
-    native("__sev_json_is_null") def jsonis_null(value: Any) -> bool
-    native("__sev_json_kind") def jsonkind(value: Any) -> string
+    extern("__sev_json_as_string_list") def jsonas_string_list(value: Any) -> list[string]
+    extern("__sev_json_as_list") def jsonas_list(value: Any) -> list[Any]
+    extern("__sev_json_is_null") def jsonis_null(value: Any) -> bool
+    extern("__sev_json_kind") def jsonkind(value: Any) -> string
 
 test "native JSON encode ABI":
     assert(jsonencode([1, 2, 3]) == "[1,2,3]")
 
 unsafe:
-    native("__sev_log_info") def log_info(message: string)
+    extern("__sev_log_info") def log_info(message: string)
 
 test "native log ABI":
     log_info("platform ready")
 
 unsafe:
-    native("__sev_log_error") def log_error(message: string, cause: Any)
+    extern("__sev_log_error") def log_error(message: string, cause: Any)
 
 unsafe:
-    native("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool
+    extern("__sev_regex_matches") def regex_matches(text: string, pattern: string) -> bool
 
 test "native regex ABI":
     assert(regex_matches("release-42", "^[a-z]+-[0-9]+$"))
 
 unsafe:
-    native("__sev_host_container_backend") def host_container_backend() -> string
+    extern("__sev_host_container_backend") def host_container_backend() -> string
 
-    native("__sev_host_kvm_api_version") def host_kvm_api_version() -> int
+    extern("__sev_host_kvm_api_version") def host_kvm_api_version() -> int
 
-    native("__sev_host_kvm_create_probe") def host_kvm_create_probe() -> bool
+    extern("__sev_host_kvm_create_probe") def host_kvm_create_probe() -> bool
 
-    native("__sev_host_page_size") def host_page_size() -> int
+    extern("__sev_host_page_size") def host_page_size() -> int
 
-    native("__sev_database_open") def database_open(path: string) -> Result[Database, DatabaseError]
+    extern("__sev_database_open") def database_open(path: string) -> Result[Database, DatabaseError]
 
-    native("__sev_database_execute") def database_execute(database: Database, sql: string) -> Result[int, DatabaseError]
+    extern("__sev_database_execute") def database_execute(database: Database, sql: string) -> Result[int, DatabaseError]
 
-    native("__sev_database_query") def database_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+    extern("__sev_database_query") def database_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    native("__sev_database_close") def database_close(database: Database) -> Result[unit, DatabaseError]
+    extern("__sev_database_close") def database_close(database: Database) -> Result[unit, DatabaseError]
 
-    native("__sev_database_server_start") def database_server_start(path: string) -> Result[DatabaseServer, DatabaseError]
+    extern("__sev_database_server_start") def database_server_start(path: string) -> Result[DatabaseServer, DatabaseError]
 
-    native("__sev_database_server_address") def database_server_address(server: DatabaseServer) -> string
+    extern("__sev_database_server_address") def database_server_address(server: DatabaseServer) -> string
 
-    native("__sev_database_server_connect") def database_server_connect(address: string) -> Result[DatabaseConnection, DatabaseError]
+    extern("__sev_database_server_connect") def database_server_connect(address: string) -> Result[DatabaseConnection, DatabaseError]
 
-    native("__sev_database_server_execute") def database_server_execute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
+    extern("__sev_database_server_execute") def database_server_execute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
 
-    native("__sev_database_server_query") def database_server_query(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
+    extern("__sev_database_server_query") def database_server_query(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    native("__sev_database_server_close") def database_server_close(connection: DatabaseConnection) -> Result[unit, DatabaseError]
+    extern("__sev_database_server_close") def database_server_close(connection: DatabaseConnection) -> Result[unit, DatabaseError]
 
-    native("__sev_database_server_stop") def database_server_stop(server: DatabaseServer) -> Result[unit, DatabaseError]
+    extern("__sev_database_server_stop") def database_server_stop(server: DatabaseServer) -> Result[unit, DatabaseError]
 
-    native("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Result[Database, DatabaseError]
-    native("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
-    native("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
-    native("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]
+    extern("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Result[Database, DatabaseError]
+    extern("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
+    extern("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
+    extern("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]

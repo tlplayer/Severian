@@ -14,6 +14,7 @@ members = [
     "database",
     "distributed",
     "file",
+    "ffi",
     "io",
     "json",
     "kernel",

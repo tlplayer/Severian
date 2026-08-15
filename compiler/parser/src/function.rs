@@ -24,7 +24,7 @@ impl Parser<'_> {
         self.parse_function_with_decorators(Vec::new())
     }
 
-    pub(super) fn parse_unsafe_native_block(&mut self) -> Result<Vec<Item>, ParseError> {
+    pub(super) fn parse_unsafe_extern_block(&mut self) -> Result<Vec<Item>, ParseError> {
         self.expect_simple(TokenKind::Unsafe, "`unsafe`")?;
         self.expect_simple(TokenKind::Colon, "`:` after unsafe")?;
         self.expect_simple(TokenKind::Newline, "newline after unsafe header")?;
@@ -32,23 +32,22 @@ impl Parser<'_> {
 
         let mut functions = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            if !self.at(&TokenKind::Native) {
-                return Err(
-                    self.error("module-level `unsafe:` blocks may only declare native functions")
-                );
+            if !self.at(&TokenKind::Extern) {
+                return Err(self
+                    .error("module-level `unsafe:` blocks may only contain extern declarations"));
             }
             let start = self.peek().span.start;
-            functions.push(self.parse_native_function(start)?);
+            functions.push(self.parse_extern_function(start)?);
         }
         self.expect_simple(TokenKind::Dedent, "end of unsafe body")?;
 
         if functions.is_empty() {
-            return Err(self.error("module-level `unsafe:` blocks require a native declaration"));
+            return Err(self.error("module-level `unsafe:` blocks require an extern declaration"));
         }
         while self.at(&TokenKind::Test) {
             functions
                 .last_mut()
-                .expect("an unsafe native block has at least one declaration")
+                .expect("an unsafe extern block has at least one declaration")
                 .tests
                 .push(self.parse_test()?);
         }
@@ -56,28 +55,28 @@ impl Parser<'_> {
         Ok(functions.into_iter().map(Item::Function).collect())
     }
 
-    pub(super) fn parse_native_function(
+    pub(super) fn parse_extern_function(
         &mut self,
         start: usize,
     ) -> Result<FunctionDecl, ParseError> {
-        self.expect_simple(TokenKind::Native, "`native` inside `unsafe:`")?;
-        self.expect_simple(TokenKind::LeftParen, "`(` after `native`")?;
+        self.expect_simple(TokenKind::Extern, "`extern` inside `unsafe:`")?;
+        self.expect_simple(TokenKind::LeftParen, "`(` after `extern`")?;
         let symbol = match self.advance().clone() {
             Token {
                 kind: TokenKind::String(symbol),
                 ..
             } => symbol,
-            _ => return Err(self.error("native declarations require a linker symbol string")),
+            _ => return Err(self.error("extern declarations require a linker symbol string")),
         };
-        self.expect_simple(TokenKind::RightParen, "`)` after native linker symbol")?;
-        self.expect_simple(TokenKind::Def, "`def` after native linker symbol")?;
-        let name = self.expect_identifier("native function name")?;
+        self.expect_simple(TokenKind::RightParen, "`)` after extern linker symbol")?;
+        self.expect_simple(TokenKind::Def, "`def` after extern linker symbol")?;
+        let name = self.expect_identifier("extern function name")?;
         let generic_params = self.parse_generic_parameters()?;
         let params = self.parse_parameters()?;
         if let Some(parameter) = params.iter().find(|parameter| parameter.ty.is_none()) {
             return Err(ParseError {
                 span: parameter.name.span,
-                message: "native ABI parameters require explicit types".into(),
+                message: "extern ABI parameters require explicit types".into(),
             });
         }
         let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
@@ -86,7 +85,7 @@ impl Parser<'_> {
             None
         };
         let end = self
-            .expect_simple(TokenKind::Newline, "newline after native declaration")?
+            .expect_simple(TokenKind::Newline, "newline after extern declaration")?
             .span
             .end;
         let mut tests = Vec::new();

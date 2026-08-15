@@ -26,7 +26,7 @@ fn temporary_package(name: &str, targets: &str, provider: &str) -> (PathBuf, Pat
     let source = root.join("src/lib.sev");
     std::fs::write(
         &source,
-        "unsafe:\n    native(\"sev_abi_v1_test_probe\") def probe(value: i32) -> i32\n\ndef main():\n    return\n",
+        "unsafe:\n    extern(\"sev_abi_v1_test_probe\") def probe(value: i32) -> i32\n\ndef main():\n    return\n",
     )
     .unwrap();
     std::fs::write(root.join("native/provider.c"), provider).unwrap();

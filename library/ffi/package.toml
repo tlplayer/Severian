@@ -1,0 +1,13 @@
+[package]
+name = "ffi"
+version = "0.1.0"
+edition = "2026"
+description = "Stable foreign-function interface types"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "runtime"
+implementation = "source"
+status = "experimental"

@@ -12,6 +12,7 @@ sources = ["src/ffi.sev"]
 path = "src/lib.sev"
 
 [dependencies]
+ffi = { path = "../ffi", version = "0.1.0" }
 io = { path = "../io", version = "0.1.0" }
 
 [[ffi.c]]

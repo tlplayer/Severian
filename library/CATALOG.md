@@ -12,6 +12,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
 | Data formats | `json`, `csv`, `yaml`, `base64`, `binary` | format packages own codecs and documents; `file.read()` provides extension dispatch |
 | Files and I/O | `io`, `file`, `path`, `os` | typed contents in `file`; namespace operations and metadata in `os` |
+| Foreign interfaces | `ffi` | stable C ABI views, handles, and output parameters experimental |
 | Time and environment | `time`, `environment`, `process` | clock, environment, and process APIs experimental |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
@@ -41,7 +42,7 @@ Packages move through explicit stages:
 Package names use complete words. Acronyms remain acceptable when they are the
 established name of a domain rather than a shortened ordinary word.
 
-Native capabilities use typed `native(\"symbol\") def ...` declarations inside explicit `unsafe:` blocks
-in the `platform` package. Standard-library source imports that package instead of
-relying on a compiler-invented namespace. Package acceptance requires native
-compilation, execution, and exact output validation.
+Foreign capabilities use typed `extern(\"symbol\") def ...` declarations inside
+explicit `unsafe:` blocks. ABI vocabulary comes from `ffi`; each domain package
+owns its declarations and providers. Package acceptance requires native compilation,
+execution, and exact output validation.

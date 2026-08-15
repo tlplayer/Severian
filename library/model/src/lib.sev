@@ -27,15 +27,15 @@ import "src/types.sev" as types
 import "src/weights.sev" as weight_runtime
 
 unsafe:
-    native("__sev_model_graph_input") def graph_input(value: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_relu") def graph_relu(value: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_add") def graph_add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_matmul") def graph_matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_transpose") def graph_transpose(value: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_scale") def graph_scale(value: Tensor[f64], factor: float) -> Tensor[f64]
-    native("__sev_model_graph_softmax_rows") def graph_softmax(value: Tensor[f64]) -> Tensor[f64]
-    native("__sev_model_graph_layer_norm") def graph_layer_norm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
-    native("__sev_model_graph_run") def run_graph(value: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_input") def graph_input(value: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_relu") def graph_relu(value: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_add") def graph_add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_matmul") def graph_matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_transpose") def graph_transpose(value: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_scale") def graph_scale(value: Tensor[f64], factor: float) -> Tensor[f64]
+    extern("__sev_model_graph_softmax_rows") def graph_softmax(value: Tensor[f64]) -> Tensor[f64]
+    extern("__sev_model_graph_layer_norm") def graph_layer_norm(value: Tensor[f64], epsilon: float = 0.00001) -> Tensor[f64]
+    extern("__sev_model_graph_run") def run_graph(value: Tensor[f64]) -> Tensor[f64]
 
 # Public model types stay in this facade so user code never needs to import an
 # implementation submodule just to declare a field.

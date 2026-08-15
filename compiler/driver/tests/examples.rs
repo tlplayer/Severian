@@ -28,7 +28,7 @@ fn checks_all_concurrency_examples_through_the_frontend() {
 fn native_calls_require_an_explicit_declaration_and_lower_to_its_abi_symbol() {
     let compilation = compile_source(concat!(
         "unsafe:\n",
-        "    native(\"__sev_regex_matches\") def matches(\n",
+        "    extern(\"__sev_regex_matches\") def matches(\n",
         "        value: string,\n",
         "        pattern: string,\n",
         "    ) -> bool\n",

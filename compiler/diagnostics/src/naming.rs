@@ -600,7 +600,7 @@ impl Checker<'_> {
                     self.report.diagnostics.push(
                         Diagnostic::error(
                             "N012",
-                            "adjacent native declarations must share one cohesive `unsafe:` block",
+                            "adjacent extern declarations must share one cohesive `unsafe:` block",
                         )
                         .with_help("move this declaration into the preceding `unsafe:` block")
                         .at(self.range(tokens[index].span)),

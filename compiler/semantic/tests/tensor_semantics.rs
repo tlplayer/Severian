@@ -13,7 +13,7 @@ fn analyze_source(source: &str) -> Result<severian_hir::Program, severian_semant
 fn incompatible_broadcast_is_a_semantic_error() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_tensor_add\") def tensor_add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
+        "    extern(\"__sev_tensor_add\") def tensor_add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "def combine(left: Tensor[f32, 2, 3], right: Tensor[f32, 4, 3]) -> Tensor[f32]:\n",
         "    return tensor_add(left, right)\n",
@@ -27,7 +27,7 @@ fn incompatible_broadcast_is_a_semantic_error() {
 fn matmul_result_shape_is_resolved_before_mir() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_tensor_matmul\") def tensor_matmul[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
+        "    extern(\"__sev_tensor_matmul\") def tensor_matmul[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]\n",
         "\n",
         "def project(left: Tensor[f32, 2, 4, 16], right: Tensor[f32, 16, 8]) -> Tensor[f32, 2, 4, 8]:\n",
         "    return tensor_matmul(left, right)\n",
@@ -98,7 +98,7 @@ fn tensor_operator_resolves_to_the_same_intrinsic_and_shape_rules() {
 fn runtime_reshape_shape_preserves_dtype_with_dynamic_rank() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: list[int]) -> Tensor[T]\n",
+        "    extern(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: list[int]) -> Tensor[T]\n",
         "\n",
         "def reshape_dynamic(input: Tensor[f32, 2, 8], shape: list[int]) -> Tensor[f32]:\n",
         "    return tensor_reshape(input, shape)\n",
@@ -124,7 +124,7 @@ fn runtime_reshape_shape_preserves_dtype_with_dynamic_rank() {
 fn reshape_rejects_a_non_list_shape() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: int) -> Tensor[T]\n",
+        "    extern(\"__sev_tensor_reshape\") def tensor_reshape[T: Numeric](input: Tensor[T], shape: int) -> Tensor[T]\n",
         "\n",
         "def reshape_invalid(input: Tensor[f32, 2, 8]) -> Tensor[f32]:\n",
         "    return tensor_reshape(input, 16)\n",
@@ -138,7 +138,7 @@ fn reshape_rejects_a_non_list_shape() {
 fn runtime_transpose_permutation_preserves_dtype_and_rank() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_tensor_transpose\") def tensor_transpose[T: Numeric](input: Tensor[T], axes: list[int]) -> Tensor[T]\n",
+        "    extern(\"__sev_tensor_transpose\") def tensor_transpose[T: Numeric](input: Tensor[T], axes: list[int]) -> Tensor[T]\n",
         "\n",
         "def permute_dynamic(input: Tensor[f32, 2, 4, 8], axes: list[int]) -> Tensor[f32]:\n",
         "    return tensor_transpose(input, axes)\n",

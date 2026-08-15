@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn declaration_only_native_functions_are_not_executable_regions() {
         let compilation = crate::compile_source(
-            "unsafe:\n    native(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
+            "unsafe:\n    extern(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
         )
         .unwrap();
         let (_, regions) = instrument(&compilation).unwrap();

@@ -35,7 +35,7 @@ fn native_abi_cannot_be_exempted_for_an_application_binary() {
     .unwrap();
     std::fs::write(
         root.join("src/main.sev"),
-        "unsafe:\n    native(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
+        "unsafe:\n    extern(\"host_value\") def hostValue() -> int\n\ndef main():\n    print(hostValue())\n",
     )
     .unwrap();
 
@@ -59,7 +59,7 @@ fn libraries_must_explicitly_opt_in_to_unsafe_code() {
     .unwrap();
     std::fs::write(
         &source,
-        "unsafe:\n    native(\"host_value\") def hostValue() -> int\n",
+        "unsafe:\n    extern(\"host_value\") def hostValue() -> int\n",
     )
     .unwrap();
 
@@ -127,7 +127,7 @@ fn qwen_packages_use_safe_tensor_and_platform_apis() {
         let source = std::fs::read_to_string(workspace.join(relative)).unwrap();
         assert!(!source.contains("unsafe:"), "{relative} must remain safe");
         assert!(
-            !source.contains("native("),
+            !source.contains("extern("),
             "{relative} must use library APIs"
         );
     }

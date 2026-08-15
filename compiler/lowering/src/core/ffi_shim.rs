@@ -83,7 +83,11 @@ fn append_parameters(source: &mut String, function: &severian_abi::ExternalFunct
 fn append_parameter_conversions(source: &mut String, function: &severian_abi::ExternalFunction) {
     for (index, parameter) in function.parameters.iter().enumerate() {
         match parameter.ty {
-            AbiType::StringView => writeln!(source, "  sev_string_view_v1 abi_{index} = {{ .data = (const uint8_t *)arg_{index}, .length = arg_{index} ? strlen(arg_{index}) : 0 }};").unwrap(),
+            AbiType::StringView => {
+                writeln!(source, "  void *boxed_string_{index} = __sev_object_get(arg_{index}, \"data\");").unwrap();
+                writeln!(source, "  char *string_{index} = __sev_unbox_string(boxed_string_{index});").unwrap();
+                writeln!(source, "  sev_string_view_v1 abi_{index} = {{ .data = (const uint8_t *)string_{index}, .length = string_{index} ? strlen(string_{index}) : 0 }};").unwrap();
+            }
             AbiType::BytesView => {
                 writeln!(source, "  void *boxed_bytes_{index} = __sev_object_get(arg_{index}, \"data\");").unwrap();
                 writeln!(source, "  sev_collection *collection_{index} = __sev_unbox_ptr(boxed_bytes_{index});").unwrap();

@@ -3,7 +3,7 @@ use severian_hir::{FunctionId, TypeKind};
 #[test]
 fn compilation_carries_structural_metadata_without_executing_it() {
     let source = concat!(
-        "unsafe:\n    native(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
+        "unsafe:\n    extern(\"load_values\") def loadValues(values: list[int]) -> Result[list[int], string]\n",
         "\n",
         "def main():\n",
         "    print(\"wired\")\n",

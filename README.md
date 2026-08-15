@@ -8,7 +8,7 @@ The repository is being built piece by piece around a checked, native CPU core:
 - `compiler/ast`: source-level syntax tree nodes.
 - `library`: official Severian packages, manifests, documentation, and
   language-native tests.
-- `library/platform`: typed declarations for native services used beneath public packages.
+- `library/ffi`: stable types used by package-owned foreign interfaces.
 - `docs/language`: living language notes.
 - `docs/examples`: example `.sev` programs that should become compiler fixtures.
 - `docs/examples/14-packages`: Cargo-like package and workspace examples.
@@ -652,13 +652,13 @@ path = "src/lib.sev"
 
 ```sev
 unsafe:
-    native("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
+    extern("__sev_file_read") def fileRead(path: string) -> Result[string, IOError]
 ```
 
 Unsafe code is denied unless both its capability and exact source file appear in
 `[package.unsafe]`. `native-abi` applies only to library targets; a binary cannot
 use it even if listed. This prevents examples and applications from skipping an
-API implementation with direct `native(...)` declarations. Genuine low-level
+API implementation with direct `extern(...)` declarations. Genuine low-level
 examples can instead request a narrow capability such as `pointers` or
 `runtime-owned-tasks` for one named source file. `test` bodies reject `unsafe:`
 unconditionally. Application code imports the safe public package (`file` in
@@ -807,7 +807,7 @@ owned = move copy
 
 Parameter declarations contain names and optional types, not ownership modes.
 An omitted type defaults to `Any` unless package type-resolution policy rejects
-inference fallback; native ABI parameters always require explicit types.
+inference fallback; extern ABI parameters always require explicit types.
 Parameters are viewed by default.
 A call may use `view`, `borrow`, `clone`, or `move` on an
 argument when the ownership operation must be explicit.

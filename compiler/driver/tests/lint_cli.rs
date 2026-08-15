@@ -56,10 +56,10 @@ fn lint_rejects_adjacent_module_unsafe_blocks() {
         &source,
         concat!(
             "unsafe:\n",
-            "    native(\"first\") def first() -> int\n",
+            "    extern(\"first\") def first() -> int\n",
             "\n",
             "unsafe:\n",
-            "    native(\"second\") def second() -> int\n",
+            "    extern(\"second\") def second() -> int\n",
         ),
     )
     .unwrap();

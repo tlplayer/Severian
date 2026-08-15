@@ -186,16 +186,16 @@ fn keeps_result_capture_distinct_from_assignment() {
 }
 
 #[test]
-fn parses_an_explicit_native_abi_declaration() {
+fn parses_an_explicit_extern_abi_declaration() {
     let source = concat!(
         "unsafe:\n",
-        "    native(\"__sev_file_read\") def fileRead(\n",
+        "    extern(\"__sev_file_read\") def fileRead(\n",
         "        path: string,\n",
         "    ) -> Result[string, IOError]\n",
     );
     let module = parse(&lex(source).unwrap()).unwrap();
     let Item::Function(function) = &module.items[0] else {
-        panic!("expected native function declaration");
+        panic!("expected extern function declaration");
     };
 
     assert_eq!(function.name.name, "fileRead");
@@ -224,28 +224,28 @@ fn permits_dynamic_fields_when_they_have_defaults() {
 }
 
 #[test]
-fn native_abi_parameters_must_remain_explicitly_typed() {
-    let source = "unsafe:\n    native(\"host_value\") def hostValue(value) -> int\n";
+fn extern_abi_parameters_must_remain_explicitly_typed() {
+    let source = "unsafe:\n    extern(\"host_value\") def hostValue(value) -> int\n";
     let error = parse(&lex(source).unwrap()).unwrap_err();
     assert_eq!(
         error.message,
-        "native ABI parameters require explicit types"
+        "extern ABI parameters require explicit types"
     );
 }
 
 #[test]
-fn rejects_a_native_abi_declaration_without_unsafe() {
-    let error = parse(&lex("native(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
+fn rejects_an_extern_abi_declaration_without_unsafe() {
+    let error = parse(&lex("extern(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
 
     assert_eq!(
         error.message,
-        "native declarations cross the host ABI and require an `unsafe:` block"
+        "extern declarations cross the host ABI and require an `unsafe:` block"
     );
 }
 
 #[test]
-fn rejects_an_inline_unsafe_native_declaration() {
-    let error = parse(&lex("unsafe native(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
+fn rejects_an_inline_unsafe_extern_declaration() {
+    let error = parse(&lex("unsafe extern(\"host_call\") def hostCall()\n").unwrap()).unwrap_err();
 
     assert_eq!(error.message, "expected `:` after unsafe");
 }

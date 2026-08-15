@@ -49,12 +49,14 @@ Every public operation has one implementation owner:
 | --- | --- | --- |
 | compiler | Language primitives, type checking, ownership, and intrinsics | `int`, `string`, `Result`, borrowing, `size` |
 | library | Public APIs and portable Severian algorithms | `boolean`, JSON values |
-| platform | typed native ABI used underneath library APIs | sockets, files, clocks, entropy |
+| ffi | stable foreign ABI vocabulary and compiler-generated conversions | handles, byte views, output parameters |
+| domain package | unsafe extern declarations and package-owned providers | sockets, files, clocks, entropy |
 
 The compiler must not silently invent a package API. Native-backed packages use
-typed Severian `native(\"symbol\")` declarations inside explicit `unsafe:` blocks in the `platform`
-package; the explicit marker acknowledges the host ABI boundary.
-There is no implicit source-level native namespace. A package is considered
+typed Severian `extern(\"symbol\")` declarations inside explicit `unsafe:` blocks;
+the explicit marker acknowledges the host ABI boundary, and their signatures use
+the shared `ffi` vocabulary. There is no implicit source-level native namespace.
+A package is considered
 implemented only when its native test executable links, runs, and matches its
 expected stdout and stderr.
 

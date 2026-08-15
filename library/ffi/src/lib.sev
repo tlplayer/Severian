@@ -1,0 +1,18 @@
+class Handle:
+    opaque: isize
+
+class StringView:
+    data: string
+
+class BytesView:
+    data: list[int]
+
+class OutHandle:
+    value: isize
+
+class OutError:
+    code: i32
+    message: string
+
+class OutUsize:
+    value: usize

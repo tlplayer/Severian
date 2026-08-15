@@ -146,9 +146,10 @@ fn abi_type(ty: &Type, returning: bool) -> Result<AbiType, SemanticError> {
         "f64" => AbiType::F64,
         "usize" => AbiType::Usize,
         "isize" => AbiType::Isize,
-        // Source strings are borrowed string views on input and copied out of
-        // a provider-owned view on return.
-        "string" | "StringView" => AbiType::StringView,
+        // Inputs use the explicit FFI wrapper. Provider-owned views returned
+        // from C are copied into ordinary Severian strings.
+        "StringView" if !returning => AbiType::StringView,
+        "string" if returning => AbiType::StringView,
         "BytesView" if !returning => AbiType::BytesView,
         "Handle" => AbiType::Handle,
         "OutHandle" if !returning => AbiType::OutHandle,
@@ -225,7 +226,7 @@ mod tests {
 
     #[test]
     fn rejects_dynamic_values_at_c_v1_boundaries() {
-        let source = "unsafe:\n    native(\"sev_abi_v1_bad\") def bad(value: Any) -> Any\n";
+        let source = "unsafe:\n    extern(\"sev_abi_v1_bad\") def bad(value: Any) -> Any\n";
         let error = validate_native_abi(&interface(source)).unwrap_err();
         assert!(error.message.contains("`Any` is not C-ABI-safe"));
         assert!(error.message.contains("ffi.Handle"));
@@ -233,7 +234,7 @@ mod tests {
 
     #[test]
     fn records_real_out_parameter_signature() {
-        let source = "class OutHandle:\n    value: Any\n\nclass OutError:\n    code: int\n    message: string\n\nunsafe:\n    native(\"sev_abi_v1_network_connect\") def connect_raw(host: string, port: u16, connection: OutHandle, error: OutError) -> i32\n";
+        let source = "import ffi\n\nunsafe:\n    extern(\"sev_abi_v1_network_connect\") def connect_raw(host: ffi.StringView, port: u16, connection: ffi.OutHandle, error: ffi.OutError) -> i32\n";
         let functions = validate_native_abi(&interface(source)).unwrap();
         assert_eq!(functions[0].parameters[0].ty, AbiType::StringView);
         assert_eq!(functions[0].parameters[2].ty, AbiType::OutHandle);

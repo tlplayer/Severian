@@ -6,7 +6,7 @@ impl Parser<'_> {
         let mut items = Vec::new();
         while !self.at(&TokenKind::Eof) {
             if self.at(&TokenKind::Unsafe) {
-                items.extend(self.parse_unsafe_native_block()?);
+                items.extend(self.parse_unsafe_extern_block()?);
                 continue;
             }
             let item = if self.at(&TokenKind::At) {
@@ -18,9 +18,9 @@ impl Parser<'_> {
                 } else {
                     return Err(self.error("decorators require a function or class"));
                 }
-            } else if self.at(&TokenKind::Native) {
+            } else if self.at(&TokenKind::Extern) {
                 return Err(self.error(
-                    "native declarations cross the host ABI and require an `unsafe:` block",
+                    "extern declarations cross the host ABI and require an `unsafe:` block",
                 ));
             } else if self.at(&TokenKind::Def) {
                 Item::Function(self.parse_function()?)
