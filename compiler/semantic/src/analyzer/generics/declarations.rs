@@ -112,7 +112,8 @@ impl Specializer {
                 self.rewrite_test(test, &context)?;
             }
         }
-        for method in &mut class.methods {
+        let mut retained_methods = Vec::new();
+        for mut method in std::mem::take(&mut class.methods) {
             if method
                 .params
                 .first()
@@ -120,9 +121,119 @@ impl Specializer {
             {
                 method.params.remove(0);
             }
-            self.rewrite_function(method, &context)?;
+            if !self.retain_typestate_method(&mut method, &context) {
+                continue;
+            }
+            self.rewrite_function(&mut method, &context)?;
+            retained_methods.push(method);
         }
+        class.methods = retained_methods;
         Ok(())
+    }
+
+    /// A contract predicate over a class type parameter and transition states
+    /// is a compile-time method availability clause. Specialization removes a
+    /// satisfied clause and omits the method when it is false.
+    fn retain_typestate_method(
+        &self,
+        method: &mut severian_ast::FunctionDecl,
+        context: &RewriteContext,
+    ) -> bool {
+        let Some(contract) = &mut method.contract else {
+            return true;
+        };
+        let mut available = true;
+        contract.clauses.retain(|clause| {
+            if let Some(satisfied) = self.typestate_condition(&clause.condition, context) {
+                available &= satisfied;
+                false
+            } else {
+                true
+            }
+        });
+        available
+    }
+
+    fn typestate_condition(&self, condition: &Expr, context: &RewriteContext) -> Option<bool> {
+        let Expr::Binary(binary) = condition else {
+            return None;
+        };
+        match binary.op {
+            severian_ast::BinaryOp::And => Some(
+                self.typestate_condition(&binary.left, context)?
+                    && self.typestate_condition(&binary.right, context)?,
+            ),
+            severian_ast::BinaryOp::Or => Some(
+                self.typestate_condition(&binary.left, context)?
+                    || self.typestate_condition(&binary.right, context)?,
+            ),
+            severian_ast::BinaryOp::Equal | severian_ast::BinaryOp::NotEqual => {
+                let equal = self.typestate_equality(&binary.left, &binary.right, context)?;
+                Some(if binary.op == severian_ast::BinaryOp::Equal {
+                    equal
+                } else {
+                    !equal
+                })
+            }
+            severian_ast::BinaryOp::In => {
+                let Expr::Identifier(parameter) = binary.left.as_ref() else {
+                    return None;
+                };
+                let Expr::List(states) = binary.right.as_ref() else {
+                    return None;
+                };
+                let actual = self.typestate_argument(parameter, context)?;
+                let owner = self.transition_states.get(&actual)?;
+                let mut matched = false;
+                for state in &states.elements {
+                    let Expr::Identifier(state) = state else {
+                        return None;
+                    };
+                    if self.transition_states.get(&state.name) != Some(owner) {
+                        return None;
+                    }
+                    matched |= state.name == actual;
+                }
+                Some(matched)
+            }
+            _ => None,
+        }
+    }
+
+    fn typestate_equality(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        context: &RewriteContext,
+    ) -> Option<bool> {
+        let (parameter, expected) = match (left, right) {
+            (Expr::Identifier(parameter), Expr::Identifier(expected))
+                if context.substitutions.contains_key(&parameter.name) =>
+            {
+                (parameter, expected)
+            }
+            (Expr::Identifier(expected), Expr::Identifier(parameter))
+                if context.substitutions.contains_key(&parameter.name) =>
+            {
+                (parameter, expected)
+            }
+            _ => return None,
+        };
+        let actual = self.typestate_argument(parameter, context)?;
+        let owner = self.transition_states.get(&actual)?;
+        (self.transition_states.get(&expected.name) == Some(owner)).then(|| actual == expected.name)
+    }
+
+    fn typestate_argument(
+        &self,
+        parameter: &severian_ast::Ident,
+        context: &RewriteContext,
+    ) -> Option<String> {
+        context
+            .substitutions
+            .get(&parameter.name)
+            .and_then(declaration_type_name)
+            .and_then(|name| name.rsplit('.').next().map(str::to_owned))
     }
 
     pub(super) fn rewrite_function(

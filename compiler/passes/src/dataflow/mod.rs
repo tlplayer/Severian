@@ -400,6 +400,10 @@ fn substitute_expression(
             substitute_expression(then_expression, facts, visiting);
             substitute_expression(else_expression, facts, visiting);
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            substitute_expression(key, facts, visiting);
+            substitute_expression(fallback, facts, visiting);
+        }
         Expression::Binary { left, right, .. } => {
             substitute_expression(left, facts, visiting);
             substitute_expression(right, facts, visiting);

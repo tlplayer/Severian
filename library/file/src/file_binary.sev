@@ -38,9 +38,7 @@ class Binary: file_interface.File
     def write() -> Result[unit, IOError]:
         return platform.file_write_bytes(source_path, data)
 
-class BinaryReader: file_interface.Reader
-    def extensions() -> list[string]:
-        return []
+class BinaryReader:
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
         handle = platform.file_open_binary(path)

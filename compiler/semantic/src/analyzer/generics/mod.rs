@@ -46,6 +46,7 @@ struct Specializer {
     classes: HashMap<String, severian_ast::ClassDecl>,
     traits: HashMap<String, severian_ast::TraitDecl>,
     aliases: HashMap<String, String>,
+    transition_states: HashMap<String, String>,
     pending: VecDeque<Specialization>,
     scheduled: HashSet<String>,
     required_imports: Vec<severian_ast::ImportDecl>,

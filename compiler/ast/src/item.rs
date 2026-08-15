@@ -247,6 +247,9 @@ pub struct EnumVariant {
     pub span: Span,
     pub name: Ident,
     pub fields: Vec<Parameter>,
+    /// Legal successor states for transition-aware enums. An empty list makes
+    /// the variant terminal unless the enum has no transition declarations.
+    pub transitions: Vec<Ident>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

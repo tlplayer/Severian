@@ -209,88 +209,6 @@ pub(super) fn native_bridge_source_for_target(
   return result;
 }
 "#,
-        r#"void *__sev_csv_parse(void *raw) {
-  const char *text = raw;
-  size_t input_size = strlen(text);
-  char *field = sev_allocate(input_size + 1);
-  size_t field_size = 0;
-  bool quoted = false;
-  sev_collection *rows = __sev_collection_new(0);
-  sev_collection *row = __sev_collection_new(0);
-  for (size_t index = 0; index <= input_size; ++index) {
-    bool at_end = index == input_size;
-    char character = at_end ? '\0' : text[index];
-    if (quoted && !at_end) {
-      if (character == '"') {
-        if (index + 1 < input_size && text[index + 1] == '"') {
-          field[field_size++] = '"';
-          index += 1;
-        } else {
-          quoted = false;
-        }
-      } else {
-        field[field_size++] = character;
-      }
-    } else if (!at_end && character == '"') {
-      quoted = true;
-    } else if (!at_end && character == ',') {
-      __sev_collection_push(row, __sev_box_string(sev_string_range(field, 0, (int64_t)field_size)));
-      field_size = 0;
-    } else if (at_end || character == '\n') {
-      if (!at_end || field_size > 0 || row->size > 0) {
-        __sev_collection_push(row, __sev_box_string(sev_string_range(field, 0, (int64_t)field_size)));
-        __sev_collection_push(rows, __sev_box_collection(row));
-        row = __sev_collection_new(0);
-        field_size = 0;
-      }
-    } else if (character != '\r') {
-      field[field_size++] = character;
-    }
-  }
-  free(field);
-  return rows;
-}
-"#,
-        r#"void *__sev_csv_encode(void *raw) {
-  sev_collection *rows = raw;
-  if (!rows) abort();
-  size_t output_size = 0;
-  for (int64_t row_index = 0; row_index < rows->size; ++row_index) {
-    sev_value *boxed_row = rows->items[row_index];
-    if (!boxed_row || boxed_row->kind != SEV_COLLECTION) abort();
-    sev_collection *row = boxed_row->as.pointer;
-    for (int64_t column = 0; column < row->size; ++column) {
-      sev_value *field = row->items[column];
-      if (!field || field->kind != SEV_STRING) abort();
-      const char *text = field->as.string;
-      bool quoted = strpbrk(text, ",\"\n\r") != NULL;
-      if (column) output_size += 1;
-      if (quoted) output_size += 2;
-      for (const char *cursor = text; *cursor; ++cursor) output_size += *cursor == '"' ? 2 : 1;
-    }
-    output_size += 1;
-  }
-  char *output = sev_allocate(output_size + 1);
-  char *cursor = output;
-  for (int64_t row_index = 0; row_index < rows->size; ++row_index) {
-    sev_collection *row = rows->items[row_index]->as.pointer;
-    for (int64_t column = 0; column < row->size; ++column) {
-      if (column) *cursor++ = ',';
-      const char *text = row->items[column]->as.string;
-      bool quoted = strpbrk(text, ",\"\n\r") != NULL;
-      if (quoted) *cursor++ = '"';
-      for (const char *source = text; *source; ++source) {
-        if (*source == '"') *cursor++ = '"';
-        *cursor++ = *source;
-      }
-      if (quoted) *cursor++ = '"';
-    }
-    *cursor++ = '\n';
-  }
-  *cursor = '\0';
-  return output;
-}
-"#,
         "void *__sev_collection_pop(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); return value->items[--value->size]; }\n",
         "void *__sev_collection_last(void *raw) { sev_collection *value = raw; if (!value || value->size == 0) abort(); return value->items[value->size - 1]; }\n",
         "void *__sev_collection_sorted(void *raw) { sev_collection *value = raw; if (!value) abort(); sev_collection *result = __sev_collection_new(value->kind); for (int64_t index = 0; index < value->size; ++index) __sev_collection_push(result, value->items[index]); for (int64_t index = 1; index < result->size; ++index) { sev_value *item = result->items[index]; int64_t cursor = index; while (cursor > 0 && __sev_value_less(item, result->items[cursor - 1])) { result->items[cursor] = result->items[cursor - 1]; cursor -= 1; } result->items[cursor] = item; } return result; }\n",
@@ -339,12 +257,6 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_path_basename(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); return strdup(slash ? slash + 1 : path); }\n",
         "void *__sev_path_dirname(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); if (!slash) return strdup(\".\"); if (slash == path) return strdup(\"/\"); return sev_string_range(path, 0, (int64_t)(slash - path)); }\n",
         "void *__sev_path_extension(void *raw) { const char *path = raw; const char *slash = strrchr(path, '/'); const char *dot = strrchr(path, '.'); if (!dot || (slash && dot < slash) || dot == (slash ? slash + 1 : path)) return strdup(\"\"); return strdup(dot); }\n",
-        "typedef struct { char *extension; void *reader; } sev_file_format_reader_entry;\n",
-        "static sev_file_format_reader_entry *sev_file_format_readers = NULL;\n",
-        "static int64_t sev_file_format_reader_count = 0;\n",
-        "static int64_t sev_file_format_reader_capacity = 0;\n",
-        "void __sev_file_format_register(void *extension_raw, void *reader) { const char *extension = extension_raw; for (int64_t index = 0; index < sev_file_format_reader_count; ++index) if (strcmp(sev_file_format_readers[index].extension, extension) == 0) { sev_file_format_readers[index].reader = reader; return; } if (sev_file_format_reader_count == sev_file_format_reader_capacity) { sev_file_format_reader_capacity = sev_file_format_reader_capacity ? sev_file_format_reader_capacity * 2 : 8; sev_file_format_readers = realloc(sev_file_format_readers, (size_t)sev_file_format_reader_capacity * sizeof(*sev_file_format_readers)); if (!sev_file_format_readers) abort(); } sev_file_format_readers[sev_file_format_reader_count].extension = strdup(extension); sev_file_format_readers[sev_file_format_reader_count].reader = reader; sev_file_format_reader_count += 1; }\n",
-        "void *__sev_file_format_reader(void *extension_raw, void *fallback) { const char *extension = extension_raw; for (int64_t index = sev_file_format_reader_count - 1; index >= 0; --index) if (strcmp(sev_file_format_readers[index].extension, extension) == 0) return sev_file_format_readers[index].reader; return fallback; }\n",
         "void *__sev_path_absolute(void *raw) { const char *path = raw; if (path[0] == '/') return strdup(path); char current[PATH_MAX]; if (!getcwd(current, sizeof(current))) abort(); return __sev_path_join(current, raw); }\n",
         "double __sev_time_seconds(void) { struct timespec value; if (clock_gettime(CLOCK_REALTIME, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
         "double __sev_time_monotonic(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
@@ -492,6 +404,36 @@ pub(super) fn native_bridge_source_for_target(
         "bool __sev_object_is(void *raw, void *class_name) { sev_object *value = raw; return value && value->magic == SEV_OBJECT_MAGIC && strcmp(value->class_name, class_name) == 0; }\n\n",
         "void *__sev_variant_new(void *tag, void *field) { sev_variant *value = sev_allocate(sizeof(*value)); value->magic = SEV_VARIANT_MAGIC; value->tag = tag; value->field = field; return value; }\n",
         "bool __sev_variant_is(void *raw, void *tag) { sev_variant *value = raw; return value && value->magic == SEV_VARIANT_MAGIC && strcmp(value->tag, tag) == 0; }\n",
+        r#"void *__sev_enum_transition(void *current_raw, void *next_raw, void *enum_raw, void *edges_raw) {
+  sev_variant *current = current_raw;
+  sev_variant *next = next_raw;
+  const char *enum_name = enum_raw;
+  const char *edges = edges_raw;
+  if (!current || current->magic != SEV_VARIANT_MAGIC || !next || next->magic != SEV_VARIANT_MAGIC) {
+    sev_runtime_fail("E000213", "enum transition requires state variants", enum_name);
+  }
+  size_t current_size = strlen(current->tag);
+  size_t next_size = strlen(next->tag);
+  const char *edge = edges;
+  while (edge && *edge) {
+    const char *separator = strchr(edge, '>');
+    const char *end = strchr(edge, ';');
+    if (!end) end = edge + strlen(edge);
+    if (separator && separator < end
+        && (size_t)(separator - edge) == current_size
+        && strncmp(edge, current->tag, current_size) == 0
+        && (size_t)(end - separator - 1) == next_size
+        && strncmp(separator + 1, next->tag, next_size) == 0) {
+      return next_raw;
+    }
+    edge = *end ? end + 1 : end;
+  }
+  char detail[256];
+  snprintf(detail, sizeof(detail), "%s.%s -> %s.%s", enum_name, current->tag, enum_name, next->tag);
+  sev_runtime_fail("E000213", "invalid enum state transition", detail);
+  return next_raw;
+}
+"#,
         "void *__sev_variant_field(void *raw) { sev_variant *value = raw; if (!value || value->magic != SEV_VARIANT_MAGIC) abort(); return value->field; }\n",
         "void __sev_print_variant(void *raw) { sev_variant *value = raw; if (!value || value->magic != SEV_VARIANT_MAGIC) abort(); fputs(value->tag, stdout); if (value->field) { fputc('(', stdout); __sev_print_value_inline(value->field); fputc(')', stdout); } fputc('\\n', stdout); }\n\n",
         "void *__sev_builtin_read(void *path) { (void)path; return __sev_variant_new(\"ok\", __sev_box_string(\"settings\")); }\n",
@@ -968,179 +910,7 @@ void *__sev_hash_sha256_bytes(void *value_raw) {
   return output;
 }
 
-typedef struct { char *data; size_t size; size_t capacity; } sev_json_buffer;
-
-static void sev_json_reserve(sev_json_buffer *buffer, size_t extra) {
-  size_t required = buffer->size + extra + 1;
-  if (required <= buffer->capacity) return;
-  size_t capacity = buffer->capacity ? buffer->capacity : 64;
-  while (capacity < required) capacity *= 2;
-  buffer->data = realloc(buffer->data, capacity);
-  if (!buffer->data) abort();
-  buffer->capacity = capacity;
-}
-
-static void sev_json_character(sev_json_buffer *buffer, char value) {
-  sev_json_reserve(buffer, 1);
-  buffer->data[buffer->size++] = value;
-  buffer->data[buffer->size] = '\0';
-}
-
-static void sev_json_text(sev_json_buffer *buffer, const char *value) {
-  size_t size = strlen(value);
-  sev_json_reserve(buffer, size);
-  memcpy(buffer->data + buffer->size, value, size + 1);
-  buffer->size += size;
-}
-
-static void sev_json_encode_value(sev_json_buffer *buffer, sev_value *value) {
-  if (!value) { sev_json_text(buffer, "null"); return; }
-  char number[64];
-  switch (value->kind) {
-    case SEV_INT:
-      snprintf(number, sizeof(number), "%ld", value->as.i64);
-      sev_json_text(buffer, number);
-      return;
-    case SEV_FLOAT:
-      snprintf(number, sizeof(number), "%.17g", value->as.f64);
-      sev_json_text(buffer, number);
-      return;
-    case SEV_BOOL:
-      sev_json_text(buffer, value->as.boolean ? "true" : "false");
-      return;
-    case SEV_STRING:
-      sev_json_character(buffer, '"');
-      for (const char *cursor = value->as.string; *cursor; ++cursor) {
-        if (*cursor == '"' || *cursor == '\\') sev_json_character(buffer, '\\');
-        if (*cursor == '\n') { sev_json_text(buffer, "\\n"); continue; }
-        sev_json_character(buffer, *cursor);
-      }
-      sev_json_character(buffer, '"');
-      return;
-    case SEV_COLLECTION: {
-      sev_collection *collection = value->as.pointer;
-      if (collection->kind == 3) {
-        sev_map *map = value->as.pointer;
-        sev_json_character(buffer, '{');
-        for (int64_t index = 0; index < map->size; ++index) {
-          if (index) sev_json_character(buffer, ',');
-          sev_json_encode_value(buffer, map->keys[index]);
-          sev_json_character(buffer, ':');
-          sev_json_encode_value(buffer, map->values[index]);
-        }
-        sev_json_character(buffer, '}');
-        return;
-      }
-      sev_json_character(buffer, '[');
-      for (int64_t index = 0; index < collection->size; ++index) {
-        if (index) sev_json_character(buffer, ',');
-        sev_json_encode_value(buffer, collection->items[index]);
-      }
-      sev_json_character(buffer, ']');
-      return;
-    }
-    case SEV_NULL:
-      sev_json_text(buffer, "null");
-      return;
-  }
-  abort();
-}
-
-void *__sev_json_encode(void *raw) {
-  sev_json_buffer buffer = {0};
-  sev_json_encode_value(&buffer, raw);
-  return buffer.data;
-}
-
-static void sev_json_space(const char **cursor) {
-  while (**cursor == ' ' || **cursor == '\n' || **cursor == '\r' || **cursor == '\t') ++*cursor;
-}
-
-static sev_value *sev_json_parse_value(const char **cursor) {
-  sev_json_space(cursor);
-  if (strncmp(*cursor, "null", 4) == 0) {
-    *cursor += 4;
-    return __sev_box_null();
-  }
-  if (**cursor == '"') {
-    ++*cursor;
-    sev_json_buffer buffer = {0};
-    while (**cursor && **cursor != '"') {
-      char value = *(*cursor)++;
-      if (value == '\\') {
-        value = *(*cursor)++;
-        if (value == 'n') value = '\n';
-      }
-      sev_json_character(&buffer, value);
-    }
-    if (**cursor != '"') { free(buffer.data); return NULL; }
-    ++*cursor;
-    if (!buffer.data) buffer.data = strcpy(sev_allocate(1), "");
-    return __sev_box_string(buffer.data);
-  }
-  if (**cursor == '[') {
-    ++*cursor;
-    sev_collection *values = __sev_collection_new(0);
-    sev_json_space(cursor);
-    if (**cursor != ']') {
-      while (true) {
-        sev_value *value = sev_json_parse_value(cursor);
-        if (!value) return NULL;
-        __sev_collection_push(values, value);
-        sev_json_space(cursor);
-        if (**cursor != ',') break;
-        ++*cursor;
-      }
-    }
-    if (**cursor != ']') return NULL;
-    ++*cursor;
-    return __sev_box_collection(values);
-  }
-  if (**cursor == '{') {
-    ++*cursor;
-    sev_map *object = __sev_map_new();
-    sev_json_space(cursor);
-    if (**cursor != '}') {
-      while (true) {
-        sev_value *key = sev_json_parse_value(cursor);
-        if (!key || key->kind != SEV_STRING) return NULL;
-        sev_json_space(cursor);
-        if (**cursor != ':') return NULL;
-        ++*cursor;
-        sev_value *value = sev_json_parse_value(cursor);
-        if (!value) return NULL;
-        __sev_map_insert(object, key, value);
-        sev_json_space(cursor);
-        if (**cursor != ',') break;
-        ++*cursor;
-      }
-    }
-    if (**cursor != '}') return NULL;
-    ++*cursor;
-    return __sev_box_collection(object);
-  }
-  if (strncmp(*cursor, "true", 4) == 0) { *cursor += 4; return __sev_box_bool(true); }
-  if (strncmp(*cursor, "false", 5) == 0) { *cursor += 5; return __sev_box_bool(false); }
-  char *end = NULL;
-  double number = strtod(*cursor, &end);
-  if (end == *cursor) return NULL;
-  bool integral = true;
-  for (const char *value = *cursor; value < end; ++value) {
-    if (*value == '.' || *value == 'e' || *value == 'E') integral = false;
-  }
-  *cursor = end;
-  return integral ? __sev_box_i64((int64_t)number) : __sev_box_f64(number);
-}
-
-void *__sev_json_decode(void *text_raw) {
-  const char *cursor = text_raw;
-  sev_value *value = sev_json_parse_value(&cursor);
-  sev_json_space(&cursor);
-  if (!value || *cursor) return sev_failure("invalid JSON");
-  return __sev_variant_new("ok", value);
-}
-
-void *__sev_json_object_get(void *value_raw, void *key_raw) {
+void *__sev_value_map_get(void *value_raw, void *key_raw) {
   sev_value *boxed = value_raw;
   if (!boxed) abort();
   sev_map *map = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
@@ -1148,7 +918,7 @@ void *__sev_json_object_get(void *value_raw, void *key_raw) {
   return __sev_map_get(map, __sev_box_string(key_raw));
 }
 
-void *__sev_json_object_keys(void *value_raw) {
+void *__sev_value_map_keys(void *value_raw) {
   sev_value *boxed = value_raw;
   if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer) abort();
   sev_map *map = boxed->as.pointer;
@@ -1161,7 +931,7 @@ void *__sev_json_object_keys(void *value_raw) {
   return keys;
 }
 
-void *__sev_json_object_values(void *value_raw) {
+void *__sev_value_map_values(void *value_raw) {
   sev_value *boxed = value_raw;
   if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer) abort();
   sev_map *map = boxed->as.pointer;
@@ -1171,7 +941,7 @@ void *__sev_json_object_values(void *value_raw) {
   return values;
 }
 
-void __sev_json_object_set(void *value_raw, void *key_raw, void *item_raw) {
+void __sev_value_map_set(void *value_raw, void *key_raw, void *item_raw) {
   sev_value *boxed = value_raw;
   if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer || !item_raw) abort();
   sev_map *map = boxed->as.pointer;
@@ -1179,19 +949,19 @@ void __sev_json_object_set(void *value_raw, void *key_raw, void *item_raw) {
   __sev_map_insert(map, __sev_box_string(key_raw), item_raw);
 }
 
-void *__sev_json_as_string(void *value_raw) {
+void *__sev_value_as_string(void *value_raw) {
   sev_value *value = value_raw;
   if (!value || value->kind != SEV_STRING) abort();
   return (void *)value->as.string;
 }
 
-int64_t __sev_json_as_int(void *value_raw) {
+int64_t __sev_value_as_int(void *value_raw) {
   sev_value *value = value_raw;
   if (!value || value->kind != SEV_INT) abort();
   return value->as.i64;
 }
 
-double __sev_json_as_float(void *value_raw) {
+double __sev_value_as_float(void *value_raw) {
   sev_value *value = value_raw;
   if (!value) abort();
   if (value->kind == SEV_FLOAT) return value->as.f64;
@@ -1199,18 +969,18 @@ double __sev_json_as_float(void *value_raw) {
   abort();
 }
 
-bool __sev_json_as_bool(void *value_raw) {
+bool __sev_value_as_bool(void *value_raw) {
   sev_value *value = value_raw;
   if (!value || value->kind != SEV_BOOL) abort();
   return value->as.boolean;
 }
 
-bool __sev_json_is_null(void *value_raw) {
+bool __sev_value_is_null(void *value_raw) {
   sev_value *value = value_raw;
   return value && value->kind == SEV_NULL;
 }
 
-void *__sev_json_kind(void *value_raw) {
+void *__sev_value_kind_name(void *value_raw) {
   sev_value *value = value_raw;
   if (!value) return "invalid";
   switch (value->kind) {
@@ -1227,7 +997,7 @@ void *__sev_json_kind(void *value_raw) {
   return "invalid";
 }
 
-void *__sev_json_as_int_list(void *value_raw) {
+void *__sev_value_as_int_list(void *value_raw) {
   sev_value *boxed = value_raw;
   if (!boxed) abort();
   sev_collection *values = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
@@ -1238,7 +1008,7 @@ void *__sev_json_as_int_list(void *value_raw) {
   return values;
 }
 
-void *__sev_json_as_string_list(void *value_raw) {
+void *__sev_value_as_string_list(void *value_raw) {
   sev_value *boxed = value_raw;
   if (!boxed) abort();
   sev_collection *values = boxed->kind == SEV_COLLECTION ? boxed->as.pointer : value_raw;
@@ -1249,7 +1019,7 @@ void *__sev_json_as_string_list(void *value_raw) {
   return values;
 }
 
-void *__sev_json_as_list(void *value_raw) {
+void *__sev_value_as_list(void *value_raw) {
   sev_value *boxed = value_raw;
   if (!boxed || boxed->kind != SEV_COLLECTION || !boxed->as.pointer) abort();
   sev_collection *values = boxed->as.pointer;

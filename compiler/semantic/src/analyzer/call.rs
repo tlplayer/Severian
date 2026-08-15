@@ -63,7 +63,7 @@ pub(super) fn lower_call(
                             type_id: TypeDefinitionId::from_name(&target_class),
                             class: target_class,
                             fields: Vec::new(),
-                            json_document: true,
+                            map_document: true,
                         },
                         ValueType::Any,
                     ));
@@ -76,7 +76,7 @@ pub(super) fn lower_call(
                         type_id: TypeDefinitionId::from_name(&target_class),
                         class: target_class,
                         fields: Vec::new(),
-                        json_document: false,
+                        map_document: false,
                     },
                     ValueType::Any,
                 ));
@@ -154,7 +154,7 @@ pub(super) fn lower_call(
                     type_id: TypeDefinitionId::from_name(&target_class),
                     class: target_class,
                     fields: Vec::new(),
-                    json_document: false,
+                    map_document: false,
                 },
                 ValueType::Any,
             ));
@@ -190,7 +190,7 @@ pub(super) fn lower_call(
                         type_id: TypeDefinitionId::from_name(&class),
                         class,
                         fields,
-                        json_document: false,
+                        map_document: false,
                     },
                     ValueType::Any,
                 ));
@@ -199,6 +199,9 @@ pub(super) fn lower_call(
     }
 
     if let Expr::Index(index) = call.callee.as_ref() {
+        if matches!(index.object.as_ref(), Expr::Identifier(name) if name.name == "registry") {
+            return lower_registry_lookup(call, &index.index, scope, signatures, aliases);
+        }
         if let Expr::Identifier(callee) = index.object.as_ref() {
             let imported = aliases
                 .get(&callee.name)
@@ -298,6 +301,20 @@ pub(super) fn lower_call(
         });
         let dynamic_object_access =
             matches!(member.member.name.as_str(), "get" | "set") && !known_class_method;
+        if object_class
+            .as_ref()
+            .is_some_and(|class| aliases.contains_key(&format!("__typestate_class.{class}")))
+            && !known_class_method
+        {
+            let class = object_class.as_deref().unwrap();
+            return Err(error(
+                call.span,
+                format!(
+                    "E000214: method `{}` is not available in typestate `{class}`",
+                    member.member.name
+                ),
+            ));
+        }
         let (object, object_type) = lower_expression(&member.object, scope, signatures, aliases)?;
         let lowered_args = call
             .args
@@ -642,6 +659,78 @@ pub(super) fn lower_call(
         callee.span,
         format!("unknown function `{}`", callee.name),
     ))
+}
+
+fn lower_registry_lookup(
+    call: &severian_ast::CallExpr,
+    trait_expression: &Expr,
+    scope: &HashMap<String, Binding>,
+    signatures: &HashMap<String, Signature>,
+    aliases: &HashMap<String, String>,
+) -> Result<(Expression, ValueType), SemanticError> {
+    if call.args.len() != 3 || call.args.iter().any(|argument| argument.name.is_some()) {
+        return Err(error(
+            call.span,
+            "`registry[T]` expects a property name, lookup key, and fallback provider",
+        ));
+    }
+    let raw_trait = declaration_expression_name(trait_expression).ok_or_else(|| {
+        error(
+            trait_expression.span(),
+            "`registry[T]` requires a named trait",
+        )
+    })?;
+    let registry = canonical_declared_type_name(&raw_trait, aliases);
+    if !aliases.contains_key(&format!("__trait_registry.{registry}")) {
+        return Err(error(
+            trait_expression.span(),
+            format!("trait `{raw_trait}` does not define registry properties"),
+        ));
+    }
+    let Expr::Literal(Literal::String {
+        value: property, ..
+    }) = &call.args[0].value
+    else {
+        return Err(error(
+            call.args[0].span,
+            "registry property name must be a string literal",
+        ));
+    };
+    if !aliases.contains_key(&format!("__trait_registry_property.{registry}.{property}")) {
+        return Err(error(
+            call.args[0].span,
+            format!("trait registry `{raw_trait}` has no property `{property}`"),
+        ));
+    }
+    let (key, key_type) = lower_expression(&call.args[1].value, scope, signatures, aliases)?;
+    if !matches!(key_type, ValueType::String | ValueType::Any) {
+        return Err(error(
+            call.args[1].span,
+            "registry lookup keys must currently be strings",
+        ));
+    }
+    let fallback = lower_expression(&call.args[2].value, scope, signatures, aliases)?.0;
+    Ok((
+        Expression::RegistryLookup {
+            registry: registry.clone(),
+            property: property.clone(),
+            key: Box::new(key),
+            fallback: Box::new(fallback),
+        },
+        ValueType::Interface(TypeDefinitionId::from_name(&registry)),
+    ))
+}
+
+fn declaration_expression_name(expression: &Expr) -> Option<String> {
+    match expression {
+        Expr::Identifier(name) => Some(name.name.clone()),
+        Expr::Member(member) => Some(format!(
+            "{}.{}",
+            declaration_expression_name(&member.object)?,
+            member.member.name
+        )),
+        _ => None,
+    }
 }
 
 pub(super) fn static_class_name(

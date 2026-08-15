@@ -74,7 +74,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         "check" if args.len() <= 2 => check_targets(args.get(1).map_or(Path::new("."), Path::new)),
         "architecture" => architecture_command::run(&args[1..]),
         "lint" => lint_command(&args[1..]),
-        "fmt" => fmt_command(&args[1..]),
+        "fmt" | "format" => fmt_command(&args[1..]),
         "build" => build_command(&args[1..]).map(|_| ()),
         "run" => run_command(&args[1..]),
         "test" => test_command(&args[1..]),
@@ -734,7 +734,6 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
 
     let policy = BuildPolicy::for_input(&input).map_err(|error| error.to_string())?;
     let targets = resolve_targets(&input)?;
-    let gate_cache = BuildGateCache::discover(&policy.root, &input)?;
     build_progress(
         message_format,
         &format!(
@@ -747,6 +746,28 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
                 .join(" -> ")
         ),
     );
+    let source_roots = build_source_roots(&targets);
+    for gate in policy.pipeline.iter().copied() {
+        match gate {
+            BuildGate::Format => {
+                build_progress(message_format, "[format] RUN (--apply)");
+                for root in &source_roots {
+                    fmt_command(&[root.display().to_string(), "--apply".into()])?;
+                }
+                build_progress(message_format, "[format] PASS");
+            }
+            BuildGate::Lint => {
+                build_progress(message_format, "[lint] RUN (--fix)");
+                for root in &source_roots {
+                    lint_command(&[root.display().to_string(), "--fix".into()])?;
+                }
+                build_progress(message_format, "[lint] PASS");
+            }
+            BuildGate::Compile => break,
+            _ => break,
+        }
+    }
+    let gate_cache = BuildGateCache::discover(&policy.root, &input)?;
     if gate_cache.is_fresh(BuildGate::Compile) {
         build_progress(message_format, "[compile] CACHED");
     } else {
@@ -767,7 +788,12 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
         build_progress(message_format, "[compile] PASS");
     }
 
-    for gate in policy.pipeline.iter().copied().skip(1) {
+    let compile_index = policy
+        .pipeline
+        .iter()
+        .position(|gate| *gate == BuildGate::Compile)
+        .expect("validated build policy includes compile");
+    for gate in policy.pipeline.iter().copied().skip(compile_index + 1) {
         if gate_cache.is_fresh(gate) {
             build_progress(message_format, &format!("[{}] CACHED", gate.name()));
             continue;
@@ -776,6 +802,9 @@ fn build_command(args: &[String]) -> Result<Vec<PathBuf>, String> {
         build_progress(message_format, &format!("[{}] RUN", gate.name()));
         match gate {
             BuildGate::Compile => unreachable!("compile is the first and unique gate"),
+            BuildGate::Format | BuildGate::Lint => {
+                unreachable!("source mutation gates run before compile")
+            }
             BuildGate::Architecture => architecture_command::enforce(&policy)?,
             BuildGate::Test => test_targets(&input, false)?,
             BuildGate::Profile => test_targets(&input, true)?,
@@ -1137,6 +1166,28 @@ fn resolve_targets(input: &Path) -> Result<Vec<BinaryTarget>, String> {
         .collect())
 }
 
+fn build_source_roots(targets: &[BinaryTarget]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for target in targets {
+        for directory in [
+            target.package_root.join("src"),
+            target.package_root.join("tests"),
+        ] {
+            if directory.is_dir() {
+                roots.push(directory);
+            }
+        }
+        if !target.source.starts_with(target.package_root.join("src"))
+            && !target.source.starts_with(target.package_root.join("tests"))
+        {
+            roots.push(target.source.clone());
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
 fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in fs::read_dir(directory)? {
         let path = entry?.path();
@@ -1158,10 +1209,12 @@ fn fmt_command(args: &[String]) -> Result<(), String> {
     for argument in args {
         if argument == "--check" {
             check = true;
+        } else if argument == "--apply" {
+            check = false;
         } else if input == Path::new(".") {
             input = PathBuf::from(argument);
         } else {
-            return Err("usage: sev fmt [path] [--check]".into());
+            return Err("usage: sev format [path] [--apply|--check]".into());
         }
     }
     let mut sources = if input.is_file() {
@@ -2633,7 +2686,7 @@ fn usage() -> String {
         "  check [path]                   parse, resolve, typecheck, and check ownership",
         "  architecture [path] [--graph] analyze package dependency and layer boundaries",
         "  lint [path] [--fix]            enforce source naming and compatibility style",
-        "  fmt [path] [--check]           format contracts and verify canonical layout",
+        "  format [path] [--apply|--check] apply formatting or verify canonical layout (alias: fmt)",
         "  build [path] [--emit KIND] [--target native|xla] [--diagnostics user|internal] [--verify-each] [--max-errors N] [--message-format text|json]",
         "  run [path] [--diagnostics user|internal] [-- args...] build and run native code with application arguments",
         "  test [path]                    build and run native Severian tests",

@@ -5,8 +5,8 @@ import json
 # JSON owns the document. This adapter only connects the .json extension to
 # file.read(); it introduces no second JSON type or JSON behavior.
 class JsonReader: file_interface.Reader
-    def extensions() -> list[string]:
-        return [".json"]
+    extensions = {".json"}
+    document_class = "Json"
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
         content = file_io.read_text(path)

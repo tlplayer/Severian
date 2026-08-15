@@ -27,6 +27,14 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     for function in &program.functions {
         collect_strings(&function.instructions, &mut strings);
     }
+    for registry in program.metadata.trait_registries.values() {
+        for implementation in &registry.implementations {
+            strings.push(implementation.name.clone());
+            for value in implementation.properties.values() {
+                collect_trait_property_strings(value, &mut strings);
+            }
+        }
+    }
     for file in program.metadata.sources.files() {
         let path = file.path.to_string_lossy().into_owned();
         if !strings.contains(&path) {
@@ -197,7 +205,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         "  llvm.func @__sev_object_declare(!llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_set(!llvm.ptr, !llvm.ptr, !llvm.ptr)\n",
         "  llvm.func @__sev_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
-        "  llvm.func @__sev_json_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        "  llvm.func @__sev_value_map_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_dynamic_object_get(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
         "  llvm.func @__sev_object_is(!llvm.ptr, !llvm.ptr) -> i1\n",
         "  llvm.func @__sev_dispatch_draw(!llvm.ptr)\n\n",
@@ -502,6 +510,7 @@ pub(super) fn lower_hir(program: &Program) -> Module {
         function_closures: &function_closures,
         native_symbols: &native_symbols,
         sources: &program.metadata.sources,
+        trait_registries: &program.metadata.trait_registries,
     };
     for class in &program.classes {
         for constructor in &class.constructors {
@@ -537,6 +546,31 @@ pub(super) fn lower_hir(program: &Program) -> Module {
     output.push_str(&closure_definitions.borrow());
     output.push_str("}\n");
     Module::new(output)
+}
+
+fn collect_trait_property_strings(
+    value: &severian_hir::TraitPropertyValue,
+    strings: &mut Vec<String>,
+) {
+    match value {
+        severian_hir::TraitPropertyValue::String(value)
+        | severian_hir::TraitPropertyValue::Symbol(value) => strings.push(value.clone()),
+        severian_hir::TraitPropertyValue::Constructor { arguments, .. }
+        | severian_hir::TraitPropertyValue::List(arguments)
+        | severian_hir::TraitPropertyValue::Set(arguments)
+        | severian_hir::TraitPropertyValue::Tuple(arguments) => {
+            for argument in arguments {
+                collect_trait_property_strings(argument, strings);
+            }
+        }
+        severian_hir::TraitPropertyValue::Map(entries) => {
+            for (key, value) in entries {
+                collect_trait_property_strings(key, strings);
+                collect_trait_property_strings(value, strings);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn resolve_external_symbols(program: &mut Program) {

@@ -300,6 +300,10 @@ pub(super) fn infer_expression_effect(
             infer_expression_effect(then_expression, access, parameters, effects);
             infer_expression_effect(else_expression, access, parameters, effects);
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            infer_expression_effect(key, Access::Read, parameters, effects);
+            infer_expression_effect(fallback, access, parameters, effects);
+        }
         Expression::Binary { left, right, .. } => {
             infer_expression_effect(left, Access::Read, parameters, effects);
             infer_expression_effect(right, Access::Read, parameters, effects);
@@ -607,6 +611,10 @@ pub(super) fn count_expression(expression: &Expression, counts: &mut HashMap<Bin
             count_expression(condition, counts);
             count_expression(then_expression, counts);
             count_expression(else_expression, counts);
+        }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            count_expression(key, counts);
+            count_expression(fallback, counts);
         }
         Expression::CallValue { callee, args, .. } => {
             count_expression(callee, counts);

@@ -1,0 +1,9 @@
+# E000213: transition-aware enums reject edges absent from their state graph.
+enum Download:
+    Pending -> Connecting
+    Connecting -> Complete
+    Complete
+
+def invalid():
+    state := Pending
+    state = Complete

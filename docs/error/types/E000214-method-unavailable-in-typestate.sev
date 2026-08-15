@@ -1,0 +1,11 @@
+# E000214: state contracts remove methods from incompatible specializations.
+enum SocketState:
+    Closed -> Connected
+    Connected
+
+class Socket[State]:
+    def send(data: string) with { State == Connected }:
+        return
+
+def invalid(socket: Socket[Closed]):
+    socket.send("too early")

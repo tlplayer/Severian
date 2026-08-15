@@ -3,6 +3,8 @@ members = ["library"]
 
 [build]
 pipeline = [
+    "format",
+    "lint",
     "compile",
     "architecture",
     "test",

@@ -453,6 +453,10 @@ fn inspect_expression(
                 inspect_expression(argument, used, config, bag, false);
             }
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            inspect_expression(key, used, config, bag, false);
+            inspect_expression(fallback, used, config, bag, false);
+        }
 
         Expression::Integer(_)
         | Expression::Float(_)

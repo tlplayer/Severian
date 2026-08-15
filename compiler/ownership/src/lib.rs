@@ -532,6 +532,10 @@ impl Checker {
                 self.merge_from(&then_checker);
                 self.merge_from(&else_checker);
             }
+            Expression::RegistryLookup { key, fallback, .. } => {
+                self.check_expression(key, Access::Read)?;
+                self.check_expression(fallback, access)?;
+            }
             Expression::Binary { left, right, .. } => {
                 self.check_expression(left, Access::Read)?;
                 self.check_expression(right, Access::Read)?;

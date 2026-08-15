@@ -240,8 +240,31 @@ impl Checker<'_> {
         }
     }
 
-    fn function(&mut self, function: &FunctionDecl, _method: bool) {
+    fn function(&mut self, function: &FunctionDecl, method: bool) {
         self.name(&function.name, Role::Function);
+        if method
+            && function
+                .params
+                .first()
+                .is_some_and(|parameter| parameter.name.name == "self")
+        {
+            let first = &function.params[0];
+            let removal = function.params.get(1).map_or(first.span, |second| {
+                Span::new(first.span.start, second.span.start)
+            });
+            self.report.diagnostics.push(
+                Diagnostic::warning(
+                    "N007",
+                    "class receivers are implicit; `self` must not be declared as a parameter",
+                )
+                .with_help("remove the leading `self` parameter")
+                .at(self.range(first.span)),
+            );
+            self.report.direct_edits.push(TextEdit {
+                span: removal,
+                replacement: String::new(),
+            });
+        }
         for decorator in &function.decorators {
             for segment in &decorator.name.segments {
                 self.name(segment, Role::Decorator);
@@ -591,9 +614,6 @@ impl Checker<'_> {
     fn compatibility_spellings(&mut self, tokens: &[Token]) {
         for (index, token) in tokens.iter().enumerate() {
             match &token.kind {
-                TokenKind::Elif => {
-                    self.deprecated(token.span, "`elif`", "`else <condition>:`", "else");
-                }
                 TokenKind::Else
                     if tokens
                         .get(index + 1)
@@ -603,9 +623,16 @@ impl Checker<'_> {
                     self.deprecated(
                         Span::new(token.span.start, next.span.end),
                         "`else if`",
-                        "`else <condition>:`",
-                        "else",
+                        "`elif`",
+                        "elif",
                     );
+                }
+                TokenKind::Else
+                    if tokens
+                        .get(index + 1)
+                        .is_some_and(|next| next.kind != TokenKind::Colon) =>
+                {
+                    self.deprecated(token.span, "`else <condition>:`", "`elif`", "elif");
                 }
                 TokenKind::Identifier(name) if name == "impl" => {
                     self.deprecated(token.span, "`impl`", "`implement`", "implement");
@@ -1026,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn fixes_python_elif_to_else_condition_syntax() {
+    fn keeps_elif_as_the_canonical_conditional_spelling() {
         let source = concat!(
             "def classify(value: int) -> int:\n",
             "    if value > 0:\n",
@@ -1037,13 +1064,42 @@ mod tests {
             "        return 0\n",
         );
         let (report, tokens) = lint(source);
-        assert!(report
+        assert!(!report
             .diagnostics
             .diagnostics()
             .iter()
             .any(|diagnostic| diagnostic.code.0 == "N007"));
         let fixed = apply_safe_fixes(source, &tokens, &report);
-        assert!(fixed.contains("else value < 0:"));
+        assert!(fixed.contains("elif value < 0:"));
+        parse(&lex(&fixed).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn fixes_compatibility_conditionals_to_elif() {
+        for source in [
+            "def classify(value: int) -> int:\n    if value > 0:\n        return 1\n    else if value < 0:\n        return -1\n    else:\n        return 0\n",
+            "def classify(value: int) -> int:\n    if value > 0:\n        return 1\n    else value < 0:\n        return -1\n    else:\n        return 0\n",
+        ] {
+            let (report, tokens) = lint(source);
+            let fixed = apply_safe_fixes(source, &tokens, &report);
+            assert!(fixed.contains("elif value < 0:"));
+            parse(&lex(&fixed).unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn removes_explicit_self_from_class_methods() {
+        let source = concat!(
+            "class Counter:\n",
+            "    value: int\n",
+            "\n",
+            "    def add(self, amount: int) -> int:\n",
+            "        return value + amount\n",
+        );
+        let (report, tokens) = lint(source);
+        let fixed = apply_safe_fixes(source, &tokens, &report);
+        assert!(fixed.contains("def add(amount: int)"));
+        assert!(!fixed.contains("self"));
         parse(&lex(&fixed).unwrap()).unwrap();
     }
 }

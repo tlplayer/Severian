@@ -7,6 +7,8 @@ pub use architecture::{ArchitecturePolicy, ArchitectureRule, LayerPolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildGate {
+    Format,
+    Lint,
     Compile,
     Architecture,
     Test,
@@ -19,6 +21,8 @@ pub enum BuildGate {
 impl BuildGate {
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Format => "format",
+            Self::Lint => "lint",
             Self::Compile => "compile",
             Self::Architecture => "architecture",
             Self::Test => "test",
@@ -31,6 +35,8 @@ impl BuildGate {
 
     fn parse(value: &str, manifest: &Path) -> Result<Self, PackageError> {
         match value {
+            "format" | "fmt" => Ok(Self::Format),
+            "lint" => Ok(Self::Lint),
             "compile" => Ok(Self::Compile),
             "architecture" => Ok(Self::Architecture),
             "test" | "unit" => Ok(Self::Test),
@@ -216,6 +222,8 @@ impl BuildPolicy {
 
 fn default_pipeline() -> Vec<BuildGate> {
     vec![
+        BuildGate::Format,
+        BuildGate::Lint,
         BuildGate::Compile,
         BuildGate::Architecture,
         BuildGate::Test,
@@ -254,14 +262,23 @@ fn parse_pipeline(value: &toml::Value, manifest: &Path) -> Result<Vec<BuildGate>
         }
         pipeline.push(gate);
     }
-    if pipeline.first() != Some(&BuildGate::Compile) {
+    let Some(compile_index) = pipeline.iter().position(|gate| *gate == BuildGate::Compile) else {
         return Err(policy_error(
             manifest,
-            "`build.pipeline` must begin with `compile`",
+            "`build.pipeline` must include `compile`",
+        ));
+    };
+    if pipeline[..compile_index]
+        .iter()
+        .any(|gate| !matches!(gate, BuildGate::Format | BuildGate::Lint))
+    {
+        return Err(policy_error(
+            manifest,
+            "only `format` and `lint` may run before `compile`",
         ));
     }
     let canonical = default_pipeline();
-    for required in &canonical {
+    for required in canonical.iter().skip(2) {
         if !pipeline.contains(required) {
             return Err(policy_error(
                 manifest,
@@ -281,7 +298,7 @@ fn parse_pipeline(value: &toml::Value, manifest: &Path) -> Result<Vec<BuildGate>
         if position < previous {
             return Err(policy_error(
                 manifest,
-                "build gates must follow compile -> architecture -> test -> profile -> coverage -> memory -> integration",
+                "build gates must follow format -> lint -> compile -> architecture -> test -> profile -> coverage -> memory -> integration",
             ));
         }
         previous = position;
@@ -659,6 +676,60 @@ mod tests {
 
         let error = BuildPolicy::for_input(&root).unwrap_err().to_string();
         assert!(error.contains("cannot omit mandatory `architecture` gate"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn default_pipeline_applies_format_and_lint_before_compilation() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "severian-default-build-policy-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(MANIFEST_FILE),
+            "[package]\nname = \"gate-test\"\n",
+        )
+        .unwrap();
+
+        let policy = BuildPolicy::for_input(&root).unwrap();
+        assert_eq!(policy.pipeline[0], BuildGate::Format);
+        assert_eq!(policy.pipeline[1], BuildGate::Lint);
+        assert_eq!(policy.pipeline[2], BuildGate::Compile);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn explicit_pipeline_can_disable_automatic_source_mutation() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "severian-explicit-build-policy-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(MANIFEST_FILE),
+            concat!(
+                "[package]\nname = \"gate-test\"\n\n",
+                "[build]\npipeline = [\n",
+                "  \"compile\", \"architecture\", \"test\", \"profile\",\n",
+                "  \"coverage\", \"memory\", \"integration\",\n",
+                "]\n",
+            ),
+        )
+        .unwrap();
+
+        let policy = BuildPolicy::for_input(&root).unwrap();
+        assert_eq!(policy.pipeline.first(), Some(&BuildGate::Compile));
+        assert!(!policy.pipeline.contains(&BuildGate::Format));
+        assert!(!policy.pipeline.contains(&BuildGate::Lint));
         let _ = std::fs::remove_dir_all(root);
     }
 }

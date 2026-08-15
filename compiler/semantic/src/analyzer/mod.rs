@@ -89,6 +89,9 @@ struct Binding {
     reference: BindingRef,
     ty: ValueType,
     class: Option<String>,
+    /// Statically known variant of a transition-aware enum, when flow analysis
+    /// can prove one.
+    enum_variant: Option<String>,
     function_return: Option<ValueType>,
     collection_len: Option<usize>,
     mutable: bool,

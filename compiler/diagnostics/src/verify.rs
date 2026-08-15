@@ -431,6 +431,10 @@ fn walk_expression(expression: &Expression, visitor: &mut impl FnMut(&Expression
                 walk_expression(argument, visitor);
             }
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            walk_expression(key, visitor);
+            walk_expression(fallback, visitor);
+        }
         Expression::Integer(_)
         | Expression::Float(_)
         | Expression::Boolean(_)

@@ -207,6 +207,24 @@ fn assignment_propagates_results_while_try_equal_captures_them() {
 }
 
 #[test]
+fn propagation_requires_the_enclosing_function_to_return_result() {
+    let source = concat!(
+        "def read() -> Result[int, string]:\n",
+        "    return 42\n",
+        "\n",
+        "def hidden_failure() -> int:\n",
+        "    value = read()\n",
+        "    return value\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("only from a function returning `Result`"));
+    assert!(error.message.contains("use `?=` to capture"));
+}
+
+#[test]
 fn numeric_parse_intrinsics_return_results() {
     let source = concat!(
         "def main():\n",
@@ -1342,11 +1360,23 @@ fn refines_literal_file_reads_to_the_extension_class() {
         "trait File:\n",
         "    kind() -> string\n",
         "\n",
+        "trait Reader:\n",
+        "    property extensions: set[string]\n",
+        "    property document_class: string\n",
+        "    read(path: string) -> Result[File, string]\n",
+        "\n",
         "class WAV: File\n",
         "    sample_rate: int\n",
         "\n",
         "    def kind() -> string:\n",
         "        return \"wav\"\n",
+        "\n",
+        "class WavReader: Reader\n",
+        "    extensions = {\".waveform\"}\n",
+        "    document_class = \"WAV\"\n",
+        "\n",
+        "    def read(path: string) -> Result[File, string]:\n",
+        "        return failure(\"unavailable\")\n",
         "\n",
         "def read(path: string) -> Result[File, string]:\n",
         "    return failure(\"unavailable\")\n",
@@ -1356,12 +1386,12 @@ fn refines_literal_file_reads_to_the_extension_class() {
     let literal_source = concat!(
         "import file\n",
         "\n",
-        "def sample_rate() -> int:\n",
-        "    audio = file.read(\"sound.WAV\")\n",
+        "def sample_rate() -> Result[int, string]:\n",
+        "    audio = file.read(\"sound.WAVEFORM\")\n",
         "    return audio.sample_rate\n",
         "\n",
         "def switched_sample_rate() -> int:\n",
-        "    switch file.read(\"sound.wav\"):\n",
+        "    switch file.read(\"sound.waveform\"):\n",
         "        ok audio:\n",
         "            return audio.sample_rate\n",
         "        failure error:\n",
@@ -1382,7 +1412,7 @@ fn refines_literal_file_reads_to_the_extension_class() {
     let dynamic_source = concat!(
         "import file\n",
         "\n",
-        "def sample_rate(path: string) -> int:\n",
+        "def sample_rate(path: string) -> Result[int, string]:\n",
         "    audio = file.read(path)\n",
         "    return audio.sample_rate\n",
     );
@@ -1469,6 +1499,49 @@ fn attaches_source_and_structural_type_metadata_without_changing_legacy_hir() {
         panic!("expected an enum variant")
     };
     assert_eq!(*type_id, Some(outcome_id));
+}
+
+#[test]
+fn transition_enums_reject_statically_known_invalid_edges() {
+    let source = concat!(
+        "enum Download:\n",
+        "    Pending -> Connecting\n",
+        "    Connecting -> Receiving | Failed\n",
+        "    Receiving -> Complete | Failed\n",
+        "    Complete\n",
+        "    Failed\n",
+        "\n",
+        "def invalid():\n",
+        "    state := Pending\n",
+        "    state = Complete\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("invalid enum transition"));
+}
+
+#[test]
+fn dynamic_transition_enum_edges_retain_a_runtime_check() {
+    let source = concat!(
+        "enum Download:\n",
+        "    Pending -> Connecting\n",
+        "    Connecting -> Complete\n",
+        "    Complete\n",
+        "\n",
+        "def advance(value: Download, next: Download) -> Download:\n",
+        "    state := value\n",
+        "    state = next\n",
+        "    return state\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    let hir = analyze(&ast).unwrap();
+    let Instruction::Assign { value, .. } = &hir.functions[0].instructions[1] else {
+        panic!("expected a checked enum assignment")
+    };
+    assert!(matches!(
+        value.kind(),
+        Expression::Call { target, .. } if target.native_symbol.as_deref() == Some("__sev_enum_transition")
+    ));
 }
 
 #[test]

@@ -364,6 +364,10 @@ fn collect_expression_calls(expression: &Expression, calls: &mut BTreeSet<String
                 collect_expression_calls(argument, calls);
             }
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            collect_expression_calls(key, calls);
+            collect_expression_calls(fallback, calls);
+        }
 
         Expression::Integer(_)
         | Expression::Float(_)

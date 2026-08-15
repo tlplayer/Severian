@@ -14,12 +14,22 @@ pub(super) fn expression_class(
                     .get(&identifier.name)
                     .and_then(|value| value.strip_prefix("__class."))
                     .map(str::to_owned)
+            })
+            .or_else(|| {
+                aliases
+                    .get(&format!("__enum_variant_owner.{}", identifier.name))
+                    .cloned()
             }),
         Expr::Call(call) => match call.callee.as_ref() {
             Expr::Identifier(identifier) => aliases
                 .get(&identifier.name)
                 .and_then(|value| value.strip_prefix("__class."))
                 .map(str::to_owned)
+                .or_else(|| {
+                    aliases
+                        .get(&format!("__enum_variant_owner.{}", identifier.name))
+                        .cloned()
+                })
                 .or_else(|| {
                     let function = aliases
                         .get(&identifier.name)
@@ -76,6 +86,32 @@ pub(super) fn expression_class(
     }
 }
 
+pub(super) fn expression_enum_variant(
+    expression: &Expr,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    match expression {
+        Expr::Identifier(identifier) => scope
+            .get(&identifier.name)
+            .and_then(|binding| binding.enum_variant.clone())
+            .or_else(|| {
+                aliases
+                    .contains_key(&format!("__enum_variant_owner.{}", identifier.name))
+                    .then(|| identifier.name.clone())
+            }),
+        Expr::Call(call) => match call.callee.as_ref() {
+            Expr::Identifier(identifier)
+                if aliases.contains_key(&format!("__enum_variant_owner.{}", identifier.name)) =>
+            {
+                Some(identifier.name.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub(super) fn file_read_result_class(
     expression: &Expr,
     aliases: &HashMap<String, String>,
@@ -99,14 +135,14 @@ pub(super) fn file_read_result_class(
         let Expr::Literal(Literal::String { value, .. }) = &argument.value else {
             return None;
         };
-        file_class_for_literal_path(value)
+        file_class_for_literal_path(value, aliases)
     });
     let local_file_read = called.as_deref() == Some("read")
         && (literal_class.is_some() || aliases.contains_key("__trait.File"));
     if called.as_deref() != Some("file.read") && !package_file_read && !local_file_read {
         return None;
     }
-    let class = literal_class.unwrap_or("File");
+    let class = literal_class.as_deref().unwrap_or("File");
     aliases
         .get(&format!("__module_class.file.{class}"))
         .cloned()
@@ -165,28 +201,39 @@ pub(super) fn called_function_name(
     }
 }
 
-pub(super) fn file_class_for_literal_path(path: &str) -> Option<&'static str> {
-    let extension = path.rsplit_once('.').map(|(_, extension)| extension)?;
-    if extension.eq_ignore_ascii_case("wav") {
-        Some("WAV")
-    } else if extension.eq_ignore_ascii_case("csv") {
-        Some("CSV")
-    } else if extension.eq_ignore_ascii_case("json") {
-        Some("Json")
-    } else if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
-        Some("Yaml")
-    } else if extension.eq_ignore_ascii_case("mp3") {
-        Some("MP3")
-    } else if [
-        "txt", "text", "md", "sev", "toml", "xml", "html", "log", "lua",
-    ]
-    .iter()
-    .any(|known| extension.eq_ignore_ascii_case(known))
-    {
-        Some("Text")
-    } else {
-        None
-    }
+pub(super) fn file_class_for_literal_path(
+    path: &str,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let extension = format!(
+        ".{}",
+        path.rsplit_once('.').map(|(_, extension)| extension)?
+    )
+    .to_lowercase();
+    let suffix = format!(".extensions.{extension}");
+    let mut providers = aliases
+        .iter()
+        .filter_map(|(key, provider)| {
+            let registry = key
+                .strip_prefix("__trait_registry_match.")?
+                .strip_suffix(&suffix)?;
+            registry
+                .rsplit_once('.')
+                .map_or(registry, |(_, name)| name)
+                .eq("Reader")
+                .then(|| provider.clone())
+        })
+        .collect::<Vec<_>>();
+    providers.sort();
+    providers.dedup();
+    let [provider] = providers.as_slice() else {
+        return None;
+    };
+    aliases
+        .get(&format!(
+            "__trait_registry_provider_property.{provider}.document_class"
+        ))
+        .cloned()
 }
 
 pub(super) fn refine_success_pattern_bindings(
@@ -274,6 +321,7 @@ pub(super) fn lower_class_function(
             reference: named_binding("self", format!("{class_name}.self")),
             ty: ValueType::Any,
             class: Some(class_name.into()),
+            enum_variant: None,
             function_return: None,
             collection_len: None,
             mutable: false,
@@ -296,6 +344,7 @@ pub(super) fn lower_class_function(
                 class: aliases
                     .get(&format!("__class_field_class.{class_name}.{field}"))
                     .cloned(),
+                enum_variant: None,
                 function_return: None,
                 collection_len: None,
                 mutable: true,
@@ -335,6 +384,7 @@ pub(super) fn lower_class_function(
                     .ty
                     .as_ref()
                     .and_then(|ty| resolved_class_type_name(ty, aliases)),
+                enum_variant: None,
                 function_return: function_return_type(param.ty.as_ref()),
                 collection_len: None,
                 mutable: false,

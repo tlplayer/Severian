@@ -1,11 +1,17 @@
 # Build policy
 
-`sev build` is the release-quality path. It always executes every mandatory
-gate before emitting artifacts:
+`sev build` is the release-quality path. By default it mutates source into its
+canonical form, then executes every mandatory verification gate before emitting
+artifacts:
 
 ```text
-compile -> architecture -> test -> profile -> coverage -> memory -> integration
+format --apply -> lint --fix -> compile -> architecture -> test -> profile -> coverage -> memory -> integration
 ```
+
+Formatting and safe lint fixes are language defaults, so a package does not
+need to declare them. An explicit pipeline may omit `format` or `lint` to
+disable that source mutation. The verification gates from `compile` onward
+remain mandatory and ordered.
 
 The CLI has no `--skip-*` or `--through` option. Individual commands such as
 `sev test`, `sev coverage`, and `sev memory` remain useful diagnostics, but are
@@ -30,6 +36,8 @@ The complete policy is declarative in `package.toml`:
 # compiler or backend failure; `--diagnostics` overrides this per invocation.
 diagnostics = "user"
 pipeline = [
+    "format",
+    "lint",
     "compile",
     "architecture",
     "test",

@@ -76,6 +76,116 @@ fn specializes_classes_with_multiple_type_arguments() {
 }
 
 #[test]
+fn transition_states_gate_typestate_methods_during_specialization() {
+    let source = concat!(
+        "enum SocketState:\n",
+        "    Closed -> Connected\n",
+        "    Connected -> Closed\n",
+        "\n",
+        "class Socket[State]:\n",
+        "    descriptor: int\n",
+        "\n",
+        "    def connect() -> Socket[Connected] with { State == Closed }:\n",
+        "        return Socket[Connected](descriptor)\n",
+        "\n",
+        "    def send(data: string) -> int with { State == Connected }:\n",
+        "        return size(data)\n",
+        "\n",
+        "def transmit(socket: Socket[Closed]) -> int:\n",
+        "    connected = socket.connect()\n",
+        "    return connected.send(\"hello\")\n",
+    );
+    let program = analyze_source(source).unwrap();
+    let closed = program
+        .classes
+        .iter()
+        .find(|class| class.name == "Socket__Closed")
+        .unwrap();
+    let connected = program
+        .classes
+        .iter()
+        .find(|class| class.name == "Socket__Connected")
+        .unwrap();
+    assert_eq!(
+        closed
+            .methods
+            .iter()
+            .map(|method| method.name.as_str())
+            .collect::<Vec<_>>(),
+        ["connect"]
+    );
+    assert_eq!(
+        connected
+            .methods
+            .iter()
+            .map(|method| method.name.as_str())
+            .collect::<Vec<_>>(),
+        ["send"]
+    );
+}
+
+#[test]
+fn rejects_a_method_unavailable_in_the_current_typestate() {
+    let source = concat!(
+        "enum SocketState:\n",
+        "    Closed -> Connected\n",
+        "    Connected\n",
+        "\n",
+        "class Socket[State]:\n",
+        "    def send(data: string) with { State == Connected }:\n",
+        "        return\n",
+        "\n",
+        "def invalid(socket: Socket[Closed]):\n",
+        "    socket.send(\"too early\")\n",
+    );
+    let error = analyze_source(source).unwrap_err();
+    assert!(error.message.contains("method `send` is not available"));
+}
+
+#[test]
+fn typestate_rebinding_advances_the_receiver_type() {
+    let source = concat!(
+        "enum SocketState:\n",
+        "    Closed -> Connected\n",
+        "    Connected -> Closed\n",
+        "\n",
+        "class Socket[State]:\n",
+        "    descriptor: int\n",
+        "\n",
+        "    def connect() -> Socket[Connected] with { State == Closed }:\n",
+        "        return Socket[Connected](descriptor)\n",
+        "\n",
+        "    def send(data: string) -> int with { State == Connected }:\n",
+        "        return size(data)\n",
+        "\n",
+        "def transmit(socket: Socket[Closed]) -> int:\n",
+        "    current := socket\n",
+        "    current = current.connect()\n",
+        "    return current.send(\"hello\")\n",
+    );
+    analyze_source(source).unwrap();
+}
+
+#[test]
+fn rejects_an_edge_missing_from_the_typestate_graph() {
+    let source = concat!(
+        "enum DownloadState:\n",
+        "    Pending -> Connecting\n",
+        "    Connecting -> Complete\n",
+        "    Complete\n",
+        "\n",
+        "class Download[State]:\n",
+        "    passcode: int\n",
+        "\n",
+        "def skip(download: Download[Pending]):\n",
+        "    current := download\n",
+        "    current = Download[Complete](0)\n",
+    );
+    let error = analyze_source(source).unwrap_err();
+    assert!(error.message.contains("invalid typestate transition"));
+}
+
+#[test]
 fn accepts_structural_generic_trait_conformance() {
     let source = format!(
         "{}{}",
@@ -110,7 +220,7 @@ fn preserves_generic_interface_identity_through_result_propagation() {
             "def load(weight: Tensor[f32]) -> Result[Module[f32], string]:\n",
             "    return Linear[f32](weight)\n",
             "\n",
-            "def apply(weight: Tensor[f32], x: Tensor[f32]) -> Tensor[f32]:\n",
+            "def apply(weight: Tensor[f32], x: Tensor[f32]) -> Result[Tensor[f32], string]:\n",
             "    module = load(weight)\n",
             "    return module.forward(x)\n",
         )

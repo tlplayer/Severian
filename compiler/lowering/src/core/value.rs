@@ -730,6 +730,7 @@ impl LowerContext<'_> {
             function_closures: Rc::clone(&self.function_closures),
             native_symbols: self.native_symbols,
             sources: self.sources,
+            trait_registries: self.trait_registries,
             classes: self.classes,
             field_object: None,
             field_names: HashSet::new(),

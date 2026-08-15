@@ -1,6 +1,55 @@
 import data
 import platform
 
+def parse_records(text: string) -> list[list[string]]:
+    rows: list[list[string]] := []
+    row: list[string] := []
+    field := ""
+    quoted := false
+    index := 0
+    while index < size(text):
+        character = text[index]
+        if quoted:
+            if character == "\"":
+                if index + 1 < size(text) and text[index + 1] == "\"":
+                    field += "\""
+                    index += 1
+                else:
+                    quoted = false
+            else:
+                field += character
+        elif character == "\"":
+            quoted = true
+        elif character == ",":
+            row.append(field)
+            field = ""
+        elif character == "\n":
+            row.append(field)
+            rows.append(row)
+            row = []
+            field = ""
+        elif character != "\r":
+            field += character
+        index += 1
+    if size(field) > 0 or size(row) > 0:
+        row.append(field)
+        rows.append(row)
+    return rows
+
+def encode_field(field: string) -> string:
+    quoted = field.contains(",") or field.contains("\"") or field.contains("\n") or field.contains("\r")
+    escaped = field.replace("\"", "\"\"")
+    return "\"" + escaped + "\"" if quoted else escaped
+
+def encode_records(rows: list[list[string]]) -> string:
+    output := ""
+    for row in rows:
+        fields: list[string] := []
+        for field in row:
+            fields.append(encode_field(field))
+        output += fields.join(",") + "\n"
+    return output
+
 class CsvError:
     message: string
 
@@ -55,16 +104,16 @@ class CSV: data.Source
         return "text/csv"
 
     def size() -> int:
-        return size(platform.string_encode(platform.csv_encode(records_data)))
+        return size(platform.string_encode(encode_records(records_data)))
 
     def bytes() -> int:
-        return size(platform.string_encode(platform.csv_encode(records_data)))
+        return size(platform.string_encode(encode_records(records_data)))
 
     def raw() -> list[int]:
-        return platform.string_encode(platform.csv_encode(records_data))
+        return platform.string_encode(encode_records(records_data))
 
     def text() -> Result[string, IOError]:
-        return platform.csv_encode(records_data)
+        return encode_records(records_data)
 
     def value() -> Any:
         return records_data
@@ -78,13 +127,13 @@ class CSV: data.Source
     def write() -> Result[unit, IOError]:
         if size(source_path) == 0:
             return failure(IOError("in-memory CSV has no path; use encode() or write_to(path)"))
-        return platform.file_write(source_path, platform.csv_encode(records_data))
+        return platform.file_write(source_path, encode_records(records_data))
 
     def write_to(path: string) -> Result[unit, IOError]:
-        return platform.file_write(path, platform.csv_encode(records_data))
+        return platform.file_write(path, encode_records(records_data))
 
     def encode() -> string:
-        return platform.csv_encode(records_data)
+        return encode_records(records_data)
 
     def headers() -> list[string]:
         return headers_of(records_data)
@@ -149,10 +198,10 @@ class CSV: data.Source
         return
 
 def document(text: string) -> CSV:
-    return CSV("", platform.csv_parse(text))
+    return CSV("", parse_records(text))
 
 def file_document(path: string, text: string) -> CSV:
-    return CSV(path, platform.csv_parse(text))
+    return CSV(path, parse_records(text))
 
 test "CSV documents support rows, quoting, and mutation":
     value := document("name,note\nAda,\"compiler, author\"\n")

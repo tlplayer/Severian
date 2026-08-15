@@ -18,6 +18,7 @@ pub(super) const COMPILER_FUNCTION_NAMES: &[&str] = &[
     "panic",
     "print",
     "range",
+    "registry",
     "size",
     "sqrt",
     "string",

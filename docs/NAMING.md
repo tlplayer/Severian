@@ -56,5 +56,6 @@ XLAGPUClient  -> xla_gpu_client
 Ordinary words are not clipped: use `statement`, `expression`, `platform`, and
 `configuration` instead of arbitrary abbreviations. The package is `system`,
 not `sys`; any future implementation-block syntax is reserved as `implement`,
-never `impl`. `elif` and legacy `else if` are compatibility spellings covered by `N007` during
+never `impl`. Conditional chains use `elif`; legacy `else if` and
+`else <condition>:` spellings are compatibility forms covered by `N007` during
 their migration windows. The sole package manifest name is `package.toml`.

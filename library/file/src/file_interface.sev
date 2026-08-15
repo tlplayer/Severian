@@ -15,5 +15,6 @@ class FormatError:
     message: string
 
 trait Reader:
-    extensions() -> list[string]
+    property extensions: set[string]
+    property document_class: string
     read(path: string) -> Result[File, IOError | FormatError]

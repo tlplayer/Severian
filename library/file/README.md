@@ -27,9 +27,9 @@ For JSON this is the parsed JSON value (an object, array, scalar, or null), not
 the source text. Use `file.read()` when document methods such as `write()`,
 `raw()`, or format-specific mutation are required.
 
-Literal paths refine statically: `.csv` is `csv.CSV`, `.json` is `json.JSON`,
-`.yaml` is `yaml.YAML`, and `.txt` is `file.Text`. Runtime paths retain the
-`file.File` interface and use dynamic trait dispatch for its common methods.
+Literal paths refine statically from the same reader registry metadata used at
+runtime. Dynamic paths retain the `file.File` interface and use trait dispatch
+for its common methods; the compiler contains no built-in extension catalog.
 
 ## Ownership
 
@@ -73,27 +73,30 @@ _saved = config.write()
 ## Extension readers
 
 A format package implements its document and a small `file.Reader` adapter.
-Readers advertise their extensions and can be registered together:
+Reachable readers contribute extensions to the closed trait registry:
 
 ```sev
 import file
 
 class PlaylistReader: file.Reader
-    def extensions() -> list[string]:
-        return [".m3u", ".m3u8"]
+    extensions = {".m3u", ".m3u8"}
+    document_class = "Playlist"
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
         content = file.source_text(path)
         return Playlist(path, content.split("\n"))
 
-def install():
-    file.register_reader(PlaylistReader())
 ```
 
 The `Playlist` document structurally implements `file.File`; its parsing and
 domain methods remain owned by the playlist package. `file.source_text()` goes
 directly to the package-owned text provider, preventing recursive
 `file.read()` calls.
+
+`extensions` drives generated runtime dispatch, while `document_class` lets a
+literal path retain the provider's concrete result type during semantic
+analysis. Both values are closed compile-time trait properties; no reader mutates
+a global table at startup.
 
 `read_text` and `parse_csv` remain compatibility shims. New code uses
 `file.load()` for decoded values, `file.read()` for path-backed documents, and

@@ -31,8 +31,6 @@ unsafe:
     extern("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> Result[float, IOError]
     extern("__sev_directory_list") def directory_list(path: string) -> Result[list[string], IOError]
     extern("__sev_directory_make_all") def directory_make_all(path: string) -> Result[unit, IOError]
-    extern("__sev_csv_parse") def csv_parse(contents: string) -> list[list[string]]
-    extern("__sev_csv_encode") def csv_encode(rows: list[list[string]]) -> string
     extern("__sev_path_join") def path_join(left: string, right: string) -> string
     extern("__sev_path_is_file") def path_is_file(path: string) -> bool
     extern("__sev_path_is_dir") def path_is_dir(path: string) -> bool
@@ -85,48 +83,21 @@ unsafe:
     extern("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
     extern("__sev_file_unlock") def file_unlock(handle: Any) -> Result[unit, IOError]
 
-    extern("__sev_file_format_register") def file_format_register(extension: string, reader: Any)
-
-    extern("__sev_file_format_reader") def file_format_reader(extension: string, fallback: Any) -> Any
-
 unsafe:
-    extern("__sev_json_decode") def jsondecode(text: string) -> Result[Any, JsonError]
-
-test "native JSON decode ABI":
-    switch jsondecode("42"):
-        ok value:
-            assert(value == 42)
-        failure error:
-            assert(false, error)
-
-unsafe:
-    extern("__sev_json_encode") def jsonencode(value: Any) -> string
-
-    extern("__sev_json_object_get") def jsonobject_get(value: Any, key: string) -> Any
-
-    extern("__sev_json_object_keys") def jsonobject_keys(value: Any) -> list[string]
-
-    extern("__sev_json_object_values") def jsonobject_values(value: Any) -> list[Any]
-
-    extern("__sev_json_object_set") def jsonobject_set(value: Any, key: string, item: Any)
-
-    extern("__sev_json_as_string") def jsonas_string(value: Any) -> string
-
-    extern("__sev_json_as_int") def jsonas_int(value: Any) -> int
-
-    extern("__sev_json_as_float") def jsonas_float(value: Any) -> float
-
-    extern("__sev_json_as_bool") def jsonas_bool(value: Any) -> bool
-
-    extern("__sev_json_as_int_list") def jsonas_int_list(value: Any) -> list[int]
-
-    extern("__sev_json_as_string_list") def jsonas_string_list(value: Any) -> list[string]
-    extern("__sev_json_as_list") def jsonas_list(value: Any) -> list[Any]
-    extern("__sev_json_is_null") def jsonis_null(value: Any) -> bool
-    extern("__sev_json_kind") def jsonkind(value: Any) -> string
-
-test "native JSON encode ABI":
-    assert(jsonencode([1, 2, 3]) == "[1,2,3]")
+    extern("__sev_value_map_get") def value_map_get(value: Any, key: string) -> Any
+    extern("__sev_value_map_keys") def value_map_keys(value: Any) -> list[string]
+    extern("__sev_value_map_values") def value_map_values(value: Any) -> list[Any]
+    extern("__sev_value_map_set") def value_map_set(value: Any, key: string, item: Any)
+    extern("__sev_value_as_string") def value_as_string(value: Any) -> string
+    extern("__sev_value_as_int") def value_as_int(value: Any) -> int
+    extern("__sev_value_as_float") def value_as_float(value: Any) -> float
+    extern("__sev_value_as_bool") def value_as_bool(value: Any) -> bool
+    extern("__sev_value_as_int_list") def value_as_int_list(value: Any) -> list[int]
+    extern("__sev_value_as_string_list") def value_as_string_list(value: Any) -> list[string]
+    extern("__sev_value_as_list") def value_as_list(value: Any) -> list[Any]
+    extern("__sev_value_is_null") def value_is_null(value: Any) -> bool
+    extern("__sev_value_kind_name") def value_kind_name(value: Any) -> string
+    extern("__sev_box_null") def value_null() -> Any
 
 unsafe:
     extern("__sev_log_info") def log_info(message: string)

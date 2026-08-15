@@ -156,7 +156,9 @@ HIR transformation, and MIR construction. `sev build --verify-each` prints the
 verified boundaries for compiler-development and pass-bisection logs; verifier
 failures name the transformation that first produced invalid IR.
 The staged refactor and its strong-ID migration order are documented in
-[compiler architecture](docs/COMPILER_ARCHITECTURE.md).
+[compiler architecture](docs/COMPILER_ARCHITECTURE.md). Transition-aware enums,
+typestate, junction reductions, and the generic alternative to module functors
+are specified in [state transitions and typestate](docs/STATE_TYPES.md).
 
 ### Naming lint
 
@@ -989,7 +991,10 @@ Assignment chooses how a `Result` is treated. `=` creates a stable binding and
 `:=` creates a changeable binding; either one takes the successful value or
 immediately propagates the failure from the current function. This keeps the
 risk visible at the point where the value is taken instead of adding a second
-error format to the function declaration.
+error format to the function declaration. `:=` controls mutability only; it is
+not a propagation operator. Propagation is legal only when the enclosing
+function returns `Result`, so an ordinary binding cannot silently widen a
+function's error behavior.
 
 Use `?=` to keep the complete `Result` without propagating it. The binding can
 then be handled safely with `switch`:
@@ -1037,8 +1042,9 @@ match extension:
 
 A declaration introduces an API contract with `with`. This rule is identical
 for functions and tests. The opening `{` and closing `}:` have their own lines,
-each clause has its own line, and every clause ends in a comma. `sev fmt` writes
-this canonical layout and `sev fmt --check` verifies it without changing files.
+each clause has its own line, and every clause ends in a comma. `sev format
+--apply` writes this canonical layout and `sev format --check` verifies it
+without changing files. `sev fmt` remains a short alias.
 
 ```sev
 def run_job(job_id: int, connection: network.TCPConnection) with

@@ -3,8 +3,8 @@ import "src/io.sev" as file_io
 import yaml
 
 class YamlReader: file_interface.Reader
-    def extensions() -> list[string]:
-        return [".yaml", ".yml"]
+    extensions = {".yaml", ".yml"}
+    document_class = "Yaml"
 
     def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
         content = file_io.read_text(path)

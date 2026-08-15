@@ -484,6 +484,10 @@ impl FunctionBuilder {
                 lower(then_expression)?;
                 lower(else_expression)
             }
+            Expression::RegistryLookup { key, fallback, .. } => {
+                lower(key)?;
+                lower(fallback)
+            }
             Expression::Binary { left, right, .. } => {
                 lower(left)?;
                 lower(right)

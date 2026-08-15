@@ -1,4 +1,5 @@
 import platform
+import json
 import "src/expression.sev" as expression
 import "src/query.sev" as query
 import "src/schema.sev" as schema_logic
@@ -68,13 +69,13 @@ def normalized_key(row: Row, columns: list[string], lowercase_columns: list[stri
         if column in lowercase_columns:
             value = value.lower()
         values.append(value)
-    return platform.jsonencode(values)
+    return json.encode(values)
 
 def callback_key(row: Row, columns: list[string], normalize: Function[string, Any, Any]) -> string:
     values := []
     for column in columns:
         values.append(normalize(column, row.get(column)))
-    return platform.jsonencode(values)
+    return json.encode(values)
 
 def project_records(source_columns: list[string], source_rows: list[list[Any]], columns: list[string]) -> Data:
     selected := []

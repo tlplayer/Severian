@@ -8,6 +8,7 @@ import "src/file_wav.sev" as file_wav
 import "src/file_mp3.sev" as file_mp3
 import "src/file_binary.sev" as file_binary
 import platform
+import json
 
 def source_text(path: string) -> Result[string, IOError]:
     return file_io.read_text(path)
@@ -80,37 +81,13 @@ def little_endian_u64(data: list[int]) -> int:
         multiplier *= 256
     return value
 
-def default_reader(extension: string) -> file_interface.Reader:
-    switch extension:
-        ".csv":
-            return file_csv.CsvReader()
-        ".json":
-            return file_json.JsonReader()
-        ".yaml" | ".yml":
-            return file_yaml.YamlReader()
-        ".wav":
-            return file_wav.WavReader()
-        ".mp3":
-            return file_mp3.Mp3Reader()
-        ".txt" | ".text" | ".md" | ".sev" | ".toml" | ".xml" | ".html" | ".log" | ".lua":
-            return file_text.TextReader()
-        _:
-            return file_binary.BinaryReader()
-
-def register(extension: string, reader: file_interface.Reader):
-    normalized := extension.lower()
-    if not normalized.starts_with("."):
-        normalized = "." + normalized
-    platform.file_format_register(normalized, reader)
-
-def register_reader(reader: file_interface.Reader):
-    for extension in reader.extensions():
-        register(extension, reader)
-
 def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
     extension = platform.path_extension(path).lower()
-    fallback = default_reader(extension)
-    reader: file_interface.Reader = platform.file_format_reader(extension, fallback)
+    reader: file_interface.Reader = registry[file_interface.Reader](
+        "extensions",
+        extension,
+        file_binary.BinaryReader(),
+    )
     document = reader.read(path)
     return document
 
@@ -173,11 +150,11 @@ test "read returns parsed JSON and YAML objects":
     yaml_file := loaded_yaml
     assert(json_file.kind() == "json")
     assert(json_file.keys() == ["name", "languages"])
-    assert(platform.jsonas_string(json_file.get("name")) == "Ada")
+    assert(json.as_string(json_file.get("name")) == "Ada")
     json_file.set("name", "Grace")
     _json_saved = json_file.write()
     changed_json = read("/tmp/severian-library-format.json")
-    assert(platform.jsonas_string(changed_json.get("name")) == "Grace")
+    assert(json.as_string(changed_json.get("name")) == "Grace")
     assert(yaml_file.kind() == "yaml")
     assert(yaml_file.values_for("engineers") == ["Ada", "Grace"])
     assert(yaml_file.scalar("status") == "ready")
@@ -193,7 +170,7 @@ test "load returns the decoded value selected by the file extension":
     _csv_written = write(csv_path, "name,note\nAda,compiler\n")
     json_value = load(json_path)
     csv_value: list[list[string]] = load(csv_path)
-    assert(platform.jsonas_string(platform.jsonobject_get(json_value, "name")) == "Ada")
+    assert(json.as_string(json.object_get(json_value, "name")) == "Ada")
     assert(csv_value == [["name", "note"], ["Ada", "compiler"]])
 
 test "binary extensions use typed audio and fallback objects":

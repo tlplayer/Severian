@@ -148,6 +148,16 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
             text: "A trait property is compile-time metadata required from every concrete implementation. Supply a constant value with the declared type, or give the property a trait default. Contributions used by more than one provider must not overlap, because the compiler closes the reachable implementation set and generates deterministic static dispatch metadata.",
         },
         Explanation {
+            code: "E000213",
+            title: "Invalid state transition",
+            text: "A transition-aware enum is a closed state graph. Add the intended successor to the source state's `->` list, or correct the assignment. Statically known invalid edges are rejected during semantic analysis; edges whose current variant is dynamic are checked at runtime with the same diagnostic.",
+        },
+        Explanation {
+            code: "E000214",
+            title: "Method unavailable in typestate",
+            text: "The method's state contract is false for this generic specialization. Call a legal transition method and rebind its returned value first, or change the method contract if the operation is valid in the current state.",
+        },
+        Explanation {
             code: "E000300",
             title: "Invalid ownership operation",
             text: "A read, mutation, move, view, or borrow conflicts with the value's current ownership state. More specific ownership failures use a narrower E0003xx code and identify the operation that established the conflicting state when available.",
@@ -190,7 +200,7 @@ fn explanations() -> BTreeMap<&'static str, Explanation> {
         Explanation {
             code: "E000801",
             title: "Unhandled recoverable result",
-            text: "A recoverable Result must be propagated, handled, or explicitly discarded with a reviewable reason.",
+            text: "A recoverable Result must be propagated, handled, or explicitly discarded with a reviewable reason. Ordinary `=` bindings propagate only when the enclosing function returns `Result`; `?=` captures the complete value for local handling.",
         },
         Explanation {
             code: "E000902",

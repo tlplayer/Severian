@@ -66,6 +66,45 @@ fn analyze_specialized(
         }
     }
     let trait_registries = validate_trait_implementations(module, interfaces, &aliases)?;
+    for (name, registry) in &trait_registries {
+        aliases.insert(format!("__trait_registry.{name}"), name.clone());
+        for property in &registry.properties {
+            aliases.insert(
+                format!("__trait_registry_property.{name}.{}", property.name),
+                property.ty.clone(),
+            );
+        }
+        for implementation in &registry.implementations {
+            for (property, value) in &implementation.properties {
+                if let TraitPropertyValue::String(value) = value {
+                    aliases.insert(
+                        format!(
+                            "__trait_registry_provider_property.{}.{}",
+                            implementation.name, property
+                        ),
+                        value.clone(),
+                    );
+                }
+                let values = match value {
+                    TraitPropertyValue::String(value) => vec![value],
+                    TraitPropertyValue::Set(values) => values
+                        .iter()
+                        .filter_map(|value| match value {
+                            TraitPropertyValue::String(value) => Some(value),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for value in values {
+                    aliases.insert(
+                        format!("__trait_registry_match.{name}.{property}.{value}"),
+                        implementation.name.clone(),
+                    );
+                }
+            }
+        }
+    }
     for item in &module.items {
         if let Item::Trait(declaration) = item {
             register_trait_aliases(&mut aliases, declaration);
@@ -79,44 +118,21 @@ fn analyze_specialized(
             }
         }
         if let Item::Enum(enumeration) = item {
-            if !is_upper_camel_case(&enumeration.name.name) {
-                return Err(error(
-                    enumeration.name.span,
-                    format!("enum `{}` must use PascalCase", enumeration.name.name),
-                ));
-            }
-            for variant in &enumeration.variants {
-                if !is_upper_camel_case(&variant.name.name) {
-                    return Err(error(
-                        variant.name.span,
-                        format!("enum variant `{}` must use PascalCase", variant.name.name),
-                    ));
-                }
-                aliases.insert(
-                    format!("__variant_fields.{}", variant.name.name),
-                    variant
-                        .fields
-                        .iter()
-                        .map(|field| field.name.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                );
-            }
-            aliases.insert(
-                format!("__enum_variants.{}", enumeration.name.name),
-                enumeration
-                    .variants
-                    .iter()
-                    .map(|variant| variant.name.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
+            register_enum_aliases(&mut aliases, enumeration, &enumeration.name.name)?;
         }
         if let Item::Class(class) = item {
             aliases.insert(
                 class.name.name.clone(),
                 format!("__class.{}", class.name.name),
             );
+            if class.name.name.rsplit_once("__").is_some_and(|(_, state)| {
+                aliases.contains_key(&format!("__transition_state.{state}"))
+            }) {
+                aliases.insert(
+                    format!("__typestate_class.{}", class.name.name),
+                    String::new(),
+                );
+            }
             aliases.insert(
                 format!("__class_fields.{}", class.name.name),
                 class
@@ -190,9 +206,22 @@ fn analyze_specialized(
                 }
                 continue;
             }
+            if let Item::Enum(enumeration) = item {
+                register_enum_aliases(
+                    &mut aliases,
+                    enumeration,
+                    &format!("{module_name}.{}", enumeration.name.name),
+                )?;
+                continue;
+            }
             if let Item::Class(class) = item {
                 let exported = format!("{module_name}.{}", class.name.name);
                 let class_identity = exported.clone();
+                if class.name.name.rsplit_once("__").is_some_and(|(_, state)| {
+                    aliases.contains_key(&format!("__transition_state.{state}"))
+                }) {
+                    aliases.insert(format!("__typestate_class.{class_identity}"), String::new());
+                }
                 aliases.insert(format!("__module_class.{exported}"), class_identity.clone());
                 if let Some(package) = &interface.export_package {
                     aliases.insert(
@@ -412,6 +441,7 @@ fn analyze_specialized(
                     reference: source_binding(&binding.name),
                     ty,
                     class: expression_class(source, &global_scope, &aliases),
+                    enum_variant: expression_enum_variant(source, &global_scope, &aliases),
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -466,6 +496,7 @@ fn analyze_specialized(
                         .get(index)
                         .and_then(|parameter| parameter.ty.as_ref())
                         .and_then(|ty| resolved_class_type_name(ty, &function_aliases)),
+                    enum_variant: None,
                     function_return: parameter.function_return,
                     collection_len: None,
                     mutable: false,
@@ -596,6 +627,7 @@ fn analyze_specialized(
                         .ty
                         .as_ref()
                         .and_then(|ty| resolved_class_type_name(ty, &aliases)),
+                    enum_variant: None,
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -745,6 +777,101 @@ fn validate_compiler_function_names(module: &Module) -> Result<(), SemanticError
                 ),
             ));
         }
+    }
+    Ok(())
+}
+
+fn register_enum_aliases(
+    aliases: &mut HashMap<String, String>,
+    enumeration: &severian_ast::EnumDecl,
+    canonical_name: &str,
+) -> Result<(), SemanticError> {
+    if !is_upper_camel_case(&enumeration.name.name) {
+        return Err(error(
+            enumeration.name.span,
+            format!("enum `{}` must use PascalCase", enumeration.name.name),
+        ));
+    }
+    let variants = enumeration
+        .variants
+        .iter()
+        .map(|variant| variant.name.name.as_str())
+        .collect::<HashSet<_>>();
+    let transition_aware = enumeration
+        .variants
+        .iter()
+        .any(|variant| !variant.transitions.is_empty());
+    let mut encoded_edges = Vec::new();
+    for variant in &enumeration.variants {
+        if !is_upper_camel_case(&variant.name.name) {
+            return Err(error(
+                variant.name.span,
+                format!("enum variant `{}` must use PascalCase", variant.name.name),
+            ));
+        }
+        let mut targets = HashSet::new();
+        for target in &variant.transitions {
+            if !variants.contains(target.name.as_str()) {
+                return Err(error(
+                    target.span,
+                    format!(
+                        "E000213: transition `{}` -> `{}` names no state in enum `{}`",
+                        variant.name.name, target.name, enumeration.name.name
+                    ),
+                ));
+            }
+            if !targets.insert(target.name.as_str()) {
+                return Err(error(
+                    target.span,
+                    format!(
+                        "E000213: duplicate transition `{}` -> `{}`",
+                        variant.name.name, target.name
+                    ),
+                ));
+            }
+            aliases.insert(
+                format!(
+                    "__enum_transition.{canonical_name}.{}.{}",
+                    variant.name.name, target.name
+                ),
+                String::new(),
+            );
+            encoded_edges.push(format!("{}>{}", variant.name.name, target.name));
+        }
+        aliases.insert(
+            format!("__variant_fields.{}", variant.name.name),
+            variant
+                .fields
+                .iter()
+                .map(|field| field.name.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        aliases.insert(
+            format!("__enum_variant_owner.{}", variant.name.name),
+            canonical_name.to_owned(),
+        );
+        if transition_aware {
+            aliases.insert(
+                format!("__transition_state.{}", variant.name.name),
+                canonical_name.to_owned(),
+            );
+        }
+    }
+    aliases.insert(
+        format!("__enum_variants.{canonical_name}"),
+        enumeration
+            .variants
+            .iter()
+            .map(|variant| variant.name.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    if transition_aware {
+        aliases.insert(
+            format!("__enum_transition_edges.{canonical_name}"),
+            encoded_edges.join(";"),
+        );
     }
     Ok(())
 }

@@ -229,6 +229,57 @@ impl LowerContext<'_> {
                 else_expression,
                 then_expression.ty().or_else(|| else_expression.ty()),
             ),
+            Expression::RegistryLookup {
+                registry,
+                property,
+                key,
+                fallback,
+            } => {
+                let lowered_key = self.lower_expression(key);
+                let key_binding = BindingRef::synthetic(format!(
+                    "__registry_key_{}_{}",
+                    self.next_value, self.next_block
+                ));
+                let previous_key = self.variables.insert(key_binding.id, lowered_key);
+                let definition = self
+                    .trait_registries
+                    .get(registry)
+                    .unwrap_or_else(|| panic!("missing closed trait registry `{registry}`"));
+                let mut entries = Vec::new();
+                for implementation in &definition.implementations {
+                    let Some(value) = implementation.properties.get(property) else {
+                        continue;
+                    };
+                    registry_string_values(value, &mut |lookup| {
+                        entries.push((lookup.to_owned(), implementation.name.clone()));
+                    });
+                }
+                entries.sort();
+                let mut dispatch = fallback.as_ref().clone();
+                for (lookup, provider) in entries.into_iter().rev() {
+                    dispatch = Expression::Conditional {
+                        condition: Box::new(Expression::Binary {
+                            left: Box::new(Expression::Variable(key_binding.clone())),
+                            op: BinaryOp::Equal,
+                            right: Box::new(Expression::String(lookup)),
+                        }),
+                        then_expression: Box::new(Expression::ConstructFields {
+                            type_id: TypeDefinitionId::from_name(&provider),
+                            class: provider,
+                            fields: Vec::new(),
+                            validate: true,
+                        }),
+                        else_expression: Box::new(dispatch),
+                    };
+                }
+                let result = self.lower_expression(&dispatch);
+                if let Some(previous_key) = previous_key {
+                    self.variables.insert(key_binding.id, previous_key);
+                } else {
+                    self.variables.remove(&key_binding.id);
+                }
+                result
+            }
             Expression::FusedPipeline {
                 input,
                 runtime_symbol,
@@ -383,7 +434,7 @@ impl LowerContext<'_> {
                 object,
                 class,
                 fields,
-                json_document,
+                map_document,
                 ..
             } => {
                 let source = self.lower_expression(object).0;
@@ -391,7 +442,7 @@ impl LowerContext<'_> {
                     .iter()
                     .map(|(name, value)| (name.as_str(), value))
                     .collect::<HashMap<_, _>>();
-                self.lower_field_construction(class, Some(&source), &explicit, *json_document, true)
+                self.lower_field_construction(class, Some(&source), &explicit, *map_document, true)
             }
             Expression::ObjectDocument { object, fields } => {
                 let source = self.lower_expression(object).0;
@@ -2972,7 +3023,7 @@ impl LowerContext<'_> {
         class: &str,
         source: Option<&str>,
         explicit: &HashMap<&str, &Expression>,
-        json_document: bool,
+        map_document: bool,
         validate: bool,
     ) -> (String, ValueType) {
         let class_name = self.string_address(class);
@@ -3009,20 +3060,20 @@ impl LowerContext<'_> {
                     let lowered = self.lower_expression(value);
                     Some(self.box_value(lowered))
                 } else if let Some(source) = source.filter(|_| {
-                    json_document
+                    map_document
                         || source_fields
                             .as_ref()
                             .map_or(true, |fields| fields.contains(field))
                 }) {
                     let field_name = self.string_address(field);
                     let mut copied = self.fresh_value();
-                    let getter = if json_document {
-                        "__sev_json_object_get"
+                    let getter = if map_document {
+                        "__sev_value_map_get"
                     } else {
                         "__sev_object_get"
                     };
                     writeln!(self.output, "    {copied} = llvm.call @{getter}({source}, {field_name}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr").unwrap();
-                    if !json_document {
+                    if !map_document {
                         let source_field_class = source_definition.as_ref().and_then(|source| {
                             source
                                 .fields
@@ -3247,5 +3298,22 @@ impl LowerContext<'_> {
         self.field_names = previous_names;
         self.field_types = previous_types;
         self.field_classes = previous_classes;
+    }
+}
+
+fn registry_string_values(
+    value: &severian_hir::TraitPropertyValue,
+    visitor: &mut impl FnMut(&str),
+) {
+    match value {
+        severian_hir::TraitPropertyValue::String(value) => visitor(value),
+        severian_hir::TraitPropertyValue::List(values)
+        | severian_hir::TraitPropertyValue::Set(values)
+        | severian_hir::TraitPropertyValue::Tuple(values) => {
+            for value in values {
+                registry_string_values(value, visitor);
+            }
+        }
+        _ => {}
     }
 }

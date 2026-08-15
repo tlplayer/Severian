@@ -8,6 +8,7 @@ description = "Format-independent tabular data and relational operations"
 path = "src/lib.sev"
 
 [dependencies]
+json = { path = "../json", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }
 
 [package.metadata.library]

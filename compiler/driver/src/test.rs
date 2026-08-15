@@ -208,6 +208,7 @@ fn native_test_compilation_selected(
 /// an unrelated CPU unit test. The full source program remains unchanged for
 /// diagnostics and coverage-region accounting.
 fn retain_test_reachable_items(program: &mut Program) {
+    let trait_registries = program.metadata.trait_registries.clone();
     let mut reachable_functions = HashSet::new();
     let mut reachable_classes = HashSet::new();
     let mut pending_functions = vec!["main".to_owned()];
@@ -218,6 +219,7 @@ fn retain_test_reachable_items(program: &mut Program) {
             std::slice::from_ref(&Instruction::Evaluate(global.value.clone())),
             &mut pending_functions,
             &mut pending_classes,
+            &trait_registries,
         );
     }
 
@@ -235,6 +237,7 @@ fn retain_test_reachable_items(program: &mut Program) {
                 &function.instructions,
                 &mut pending_functions,
                 &mut pending_classes,
+                &trait_registries,
             );
         }
 
@@ -254,6 +257,7 @@ fn retain_test_reachable_items(program: &mut Program) {
                 &function.instructions,
                 &mut pending_functions,
                 &mut pending_classes,
+                &trait_registries,
             );
         }
     }
@@ -270,6 +274,7 @@ fn collect_runtime_dependencies(
     instructions: &[Instruction],
     functions: &mut Vec<String>,
     classes: &mut Vec<String>,
+    trait_registries: &std::collections::BTreeMap<String, severian_hir::TraitRegistryDefinition>,
 ) {
     walk_instructions(instructions, &mut |expression| match expression {
         Expression::Call { target, .. } => {
@@ -287,6 +292,16 @@ fn collect_runtime_dependencies(
         Expression::Construct { class, .. }
         | Expression::ConstructFields { class, .. }
         | Expression::ObjectUpdate { class, .. } => classes.push(class.clone()),
+        Expression::RegistryLookup { registry, .. } => {
+            if let Some(registry) = trait_registries.get(registry) {
+                classes.extend(
+                    registry
+                        .implementations
+                        .iter()
+                        .map(|implementation| implementation.name.clone()),
+                );
+            }
+        }
         _ => {}
     });
 }
@@ -735,6 +750,10 @@ fn walk_expression<'expression>(
             walk_expression(condition, visit);
             walk_expression(then_expression, visit);
             walk_expression(else_expression, visit);
+        }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            walk_expression(key, visit);
+            walk_expression(fallback, visit);
         }
         Expression::FusedPipeline { input, .. } => walk_expression(input, visit),
         Expression::Ownership { value, .. } => walk_expression(value, visit),

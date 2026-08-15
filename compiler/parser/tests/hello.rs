@@ -276,6 +276,33 @@ fn parses_cross_field_class_invariants() {
 }
 
 #[test]
+fn parses_transition_aware_enum_states() {
+    let source = concat!(
+        "enum Download:\n",
+        "    Pending -> Connecting,\n",
+        "    Connecting -> Receiving | Failed,\n",
+        "    Receiving -> Complete | Failed,\n",
+        "    Complete,\n",
+        "    Failed,\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Enum(download) = &module.items[0] else {
+        panic!("expected an enum declaration")
+    };
+    assert_eq!(download.variants.len(), 5);
+    assert_eq!(download.variants[0].transitions[0].name, "Connecting");
+    assert_eq!(
+        download.variants[1]
+            .transitions
+            .iter()
+            .map(|target| target.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Receiving", "Failed"]
+    );
+    assert!(download.variants[3].transitions.is_empty());
+}
+
+#[test]
 fn rejects_a_missing_function_body() {
     let tokens = lex("def main():\n").unwrap();
     let error = parse(&tokens).unwrap_err();
@@ -578,7 +605,7 @@ fn parses_else_condition_as_an_ordinary_conditional_branch() {
 }
 
 #[test]
-fn keeps_elif_as_a_compatibility_spelling() {
+fn parses_canonical_elif_chains() {
     let source = concat!(
         "def classify(value: int) -> int:\n",
         "    if value > 0:\n",

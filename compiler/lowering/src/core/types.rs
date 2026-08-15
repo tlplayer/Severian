@@ -280,7 +280,7 @@ pub(super) fn foreign_result_type(ty: severian_abi::AbiType) -> ValueType {
 pub(super) fn is_predeclared_native_symbol(symbol: &str) -> bool {
     matches!(
         symbol,
-        "__sev_string_length" | "__sev_json_object_get" | "__sev_map_pop"
+        "__sev_string_length" | "__sev_value_map_get" | "__sev_map_pop"
     )
 }
 

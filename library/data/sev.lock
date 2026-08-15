@@ -1,6 +1,11 @@
 version = 1
 
 [[packages]]
+name = "json"
+version = "0.1.0"
+source = "path+/home/tplayer/Documents/Severian/library/data/../json"
+
+[[packages]]
 name = "platform"
 version = "0.1.0"
-source = "path+/home/tplayer/Documents/Severian/library/data/../platform"
+source = "path+/home/tplayer/Documents/Severian/library/json/../platform"

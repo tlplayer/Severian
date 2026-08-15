@@ -39,8 +39,8 @@ the compiler owns tensor IR, selection, legality, fusion, and lowering.
 | File text reads | Package-owned `c-v1` provider | Migrate writes, binary handles, mapping, locks, and directory operations separately |
 | Regex | Package-owned POSIX provider | Add an optional compiled-pattern handle without changing compiler lowering |
 | Math/random/environment/process/network | Package-owned providers | Preserve architecture guards while expanding platform coverage |
-| Data-format dispatch | Legacy mutable runtime registry | Generate closed dispatch tables from trait registry metadata |
-| JSON/CSV | Compiler bridge implementations | Move parsers/encoders and document accessors into their packages |
+| Data-format dispatch | Closed dispatch generated from reachable `Reader` trait metadata | Extend the same `registry[T]` primitive to image/audio/serializer/driver contracts |
+| JSON/CSV | Parsers and encoders are source-owned by `json` and `csv`; the runtime exposes only generic dynamic-value primitives | Grow codec coverage in packages without compiler lowering changes |
 | YAML/TOML/base64/compression | Library or incomplete | Keep all engines and codecs package-owned |
 | Hash/crypto/TLS | SHA/MD5 and OpenSSL details still in compiler/platform | Move algorithms/providers into `hash`, `crypto`, and `tls` packages |
 | Filesystem/path/directory | Many POSIX shims remain in the compiler bridge | Move one coherent handle/operation family at a time into `file`, `path`, and `os` |
@@ -66,14 +66,11 @@ the compiler owns tensor IR, selection, legality, fusion, and lowering.
 
 ## Recommended order
 
-1. Replace file-format runtime registration with trait-registry-generated
-   dispatch, eliminating extension switches and mutable registration.
-2. Move JSON and CSV engines out of the compiler bridge.
-3. Finish the remaining file/path/directory operation families.
-4. Move hash, TLS, HTTP, and codec implementations.
-5. Separate pthread execution from generic task/channel MIR.
-6. Move ROCm/CUDA/PJRT discovery into driver/XLA packages.
-7. Move checkpoint loaders and any model-branded lowering descriptions into
+1. Finish the remaining file/path/directory operation families.
+2. Move hash, TLS, HTTP, and codec implementations.
+3. Separate pthread execution from generic task/channel MIR.
+4. Move ROCm/CUDA/PJRT discovery into driver/XLA packages.
+5. Move checkpoint loaders and any model-branded lowering descriptions into
    model and storage packages.
-8. Audit string and collection helpers, retaining only representation-critical
+6. Audit string and collection helpers, retaining only representation-critical
    runtime primitives.

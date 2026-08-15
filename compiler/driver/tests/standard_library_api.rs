@@ -39,7 +39,7 @@ import tensor
 def combine_bits(left: int, right: int) -> int:
     return (left | right) ^ (left & right)
 
-def main():
+def main() -> Result[unit, Any]:
     numbers := [3, 1, 2]
     list.sort(numbers)
     assert(numbers == [1, 2, 3])
@@ -113,6 +113,7 @@ def main():
     assert(tensor.mean(value) == 1.0)
     assert(time.monotonic() > 0.0)
     assert(process.run("true") == 0)
+    return
 "#,
     )
     .unwrap();
@@ -256,15 +257,14 @@ class Playlist: file.File
         return platform.file_write(source_path, tracks.join("\n"))
 
 class PlaylistReader: file.Reader
-    def extensions() -> list[string]:
-        return [".m3u"]
+    extensions = {{".m3u"}}
+    document_class = "Playlist"
 
     def read(path: string) -> Result[file.File, IOError | file.FormatError]:
         content = file.source_text(path)
         return Playlist(path, content.split("\n"))
 
 def main():
-    file.register("m3u", PlaylistReader())
     switch file.read("{}"):
         ok document:
             assert(document.kind() == "text")
@@ -324,6 +324,22 @@ def main():
         String::from_utf8_lossy(&output.stderr)
     );
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_package_tests_keep_closed_registry_providers_reachable() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(env!("CARGO_BIN_EXE_sev"))
+        .arg("test")
+        .arg(workspace.join("library/file"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

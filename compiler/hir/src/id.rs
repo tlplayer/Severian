@@ -345,6 +345,7 @@ pub struct VariantDefinition {
     pub id: VariantId,
     pub name: String,
     pub fields: Vec<TypeId>,
+    pub transitions: Vec<VariantId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

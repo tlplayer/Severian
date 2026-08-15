@@ -80,6 +80,11 @@ fn expression_any_origin(
                 .into_iter()
                 .flatten(),
         ),
+        Expression::RegistryLookup { key, fallback, .. } => combine_any_origins(
+            [key.any_origin(), fallback.any_origin()]
+                .into_iter()
+                .flatten(),
+        ),
         Expression::Index { object, .. }
         | Expression::Slice { object, .. }
         | Expression::Member { object, .. } => object.any_origin(),
@@ -700,6 +705,7 @@ pub(super) fn lower_expression_kind(
                         reference: source_binding(&parameter.name),
                         ty,
                         class: None,
+                        enum_variant: None,
                         function_return: None,
                         collection_len: None,
                         mutable: false,
@@ -765,6 +771,7 @@ pub(super) fn add_test_bindings(
             reference: BindingRef::synthetic("chaos"),
             ty: ValueType::List,
             class: None,
+            enum_variant: None,
             function_return: None,
             collection_len: None,
             mutable: false,
@@ -782,6 +789,7 @@ pub(super) fn add_test_bindings(
                     reference: BindingRef::synthetic(name),
                     ty: ValueType::String,
                     class: None,
+                    enum_variant: None,
                     function_return: None,
                     collection_len: None,
                     mutable: false,
@@ -801,6 +809,7 @@ pub(super) fn add_test_bindings(
                     reference: BindingRef::synthetic(name),
                     ty: ValueType::Int,
                     class: None,
+                    enum_variant: None,
                     function_return: None,
                     collection_len: None,
                     mutable: false,

@@ -23,6 +23,7 @@ struct LoweringEnvironment<'a> {
     function_closures: &'a Rc<RefCell<HashMap<FunctionId, String>>>,
     native_symbols: &'a HashMap<FunctionId, String>,
     sources: &'a severian_hir::SourceMap,
+    trait_registries: &'a std::collections::BTreeMap<String, severian_hir::TraitRegistryDefinition>,
 }
 
 fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, output: &mut String) {
@@ -59,6 +60,7 @@ fn lower_function(function: &Function, environment: &LoweringEnvironment<'_>, ou
         function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
         sources: environment.sources,
+        trait_registries: environment.trait_registries,
         classes: environment.classes,
         field_object: None,
         field_names: HashSet::new(),
@@ -153,6 +155,7 @@ fn lower_class_function(
         function_closures: Rc::clone(environment.function_closures),
         native_symbols: environment.native_symbols,
         sources: environment.sources,
+        trait_registries: environment.trait_registries,
         classes: environment.classes,
         field_object: Some("%self".into()),
         field_names: class.fields.iter().cloned().collect(),
@@ -235,6 +238,7 @@ struct LowerContext<'a> {
     function_closures: Rc<RefCell<HashMap<FunctionId, String>>>,
     native_symbols: &'a HashMap<FunctionId, String>,
     sources: &'a severian_hir::SourceMap,
+    trait_registries: &'a std::collections::BTreeMap<String, severian_hir::TraitRegistryDefinition>,
     classes: &'a [Class],
     field_object: Option<String>,
     field_names: HashSet<String>,

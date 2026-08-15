@@ -230,6 +230,10 @@ pub(super) fn collect_expression_strings(expression: &Expression, strings: &mut 
             collect_expression_strings(then_expression, strings);
             collect_expression_strings(else_expression, strings);
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            collect_expression_strings(key, strings);
+            collect_expression_strings(fallback, strings);
+        }
         Expression::Unary { expression, .. } => collect_expression_strings(expression, strings),
         Expression::CallValue { callee, args, .. } => {
             collect_expression_strings(callee, strings);
@@ -526,6 +530,10 @@ pub(super) fn collect_task_names_expression(expression: &Expression, names: &mut
             collect_task_names_expression(condition, names);
             collect_task_names_expression(then_expression, names);
             collect_task_names_expression(else_expression, names);
+        }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            collect_task_names_expression(key, names);
+            collect_task_names_expression(fallback, names);
         }
         Expression::FusedPipeline { input, .. } => collect_task_names_expression(input, names),
         Expression::Ownership { value, .. } => collect_task_names_expression(value, names),

@@ -82,6 +82,16 @@ impl Parser<'_> {
                 }
                 self.expect_simple(TokenKind::RightParen, "`)` after enum variant")?;
             }
+            let mut transitions = Vec::new();
+            if self.take_simple(&TokenKind::Arrow).is_some() {
+                loop {
+                    transitions.push(self.expect_identifier("enum transition target")?);
+                    if self.take_simple(&TokenKind::Pipe).is_none() {
+                        break;
+                    }
+                }
+            }
+            self.take_simple(&TokenKind::Comma);
             let end = self
                 .expect_simple(TokenKind::Newline, "newline after enum variant")?
                 .span
@@ -90,6 +100,7 @@ impl Parser<'_> {
                 span: Span::new(variant_start, end),
                 name: variant,
                 fields,
+                transitions,
             });
         }
         let end = self

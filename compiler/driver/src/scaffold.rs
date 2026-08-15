@@ -44,16 +44,13 @@ verify_each = false
 # Artifact placement and parallelism are available to build-system clients.
 target_directory = "target"
 # jobs = 4
-# Every gate is mandatory and ordered; the list is explicit for discoverability.
-pipeline = [
-    "compile",
-    "architecture",
-    "test",
-    "profile",
-    "coverage",
-    "memory",
-    "integration",
-]
+# `sev build` implicitly applies formatting and lint fixes before the mandatory
+# verification gates. Declare `pipeline` only to disable a mutation stage or to
+# override the default policy; all verification gates remain mandatory.
+# pipeline = [
+#     "format", "lint", "compile", "architecture", "test", "profile",
+#     "coverage", "memory", "integration",
+# ]
 
 # New applications begin permissively. Raise these percentages as tests land.
 [coverage]

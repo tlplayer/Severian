@@ -120,16 +120,20 @@ fn link_package_hir(
     interfaces: &[PackageInterface],
 ) -> Result<(), CompileError> {
     for interface in interfaces {
+        let dependency_interfaces = interfaces
+            .iter()
+            .filter(|candidate| candidate.name != interface.name)
+            .cloned()
+            .collect::<Vec<_>>();
         let mut dependency =
-            severian_semantic::analyze_with_packages(&interface.module, interfaces).map_err(
-                |error| CompileError::Frontend {
+            severian_semantic::analyze_with_packages(&interface.module, &dependency_interfaces)
+                .map_err(|error| CompileError::Frontend {
                     stage: "semantic",
                     span: error.span,
                     message: format!("package `{}`: {}", interface.name, error.message),
                     source_path: interface.source_path.clone(),
                     source: interface.source.clone(),
-                },
-            )?;
+                })?;
         severian_ownership::check(&dependency).map_err(|error| {
             ownership_compile_error(
                 format!("package `{}`: {}", interface.name, error.message),

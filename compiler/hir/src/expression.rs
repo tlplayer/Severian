@@ -84,11 +84,11 @@ pub enum Expression {
         type_id: TypeDefinitionId,
         class: String,
         fields: Vec<(String, Expression)>,
-        /// Read inherited fields from a canonical JSON document instead of a
+        /// Read inherited fields from a dynamic string-keyed map instead of a
         /// Severian class object.
-        json_document: bool,
+        map_document: bool,
     },
-    /// Materialize the public fields of an object as a canonical JSON map.
+    /// Materialize the public fields of an object as a dynamic string-keyed map.
     ObjectDocument {
         object: Box<Expression>,
         fields: Vec<String>,
@@ -140,6 +140,15 @@ pub enum Expression {
         condition: Box<Expression>,
         then_expression: Box<Expression>,
         else_expression: Box<Expression>,
+    },
+    /// Select a provider from the statically closed implementation set for a
+    /// trait property. Final lowering expands this into deterministic dispatch
+    /// after every reachable package has contributed its implementations.
+    RegistryLookup {
+        registry: String,
+        property: String,
+        key: Box<Expression>,
+        fallback: Box<Expression>,
     },
     /// A package-declared elementwise pipeline implemented by one native ABI
     /// entry point. The HIR deliberately does not know model operation names.

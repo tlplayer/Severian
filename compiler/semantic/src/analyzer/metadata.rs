@@ -228,6 +228,11 @@ fn attach_specialized_module_metadata_to_with_packages(
                                     )
                                 })
                                 .collect(),
+                            transitions: variant
+                                .transitions
+                                .iter()
+                                .map(|target| VariantId::from_name(&target.name))
+                                .collect(),
                         }
                     })
                     .collect();

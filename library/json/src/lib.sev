@@ -1,5 +1,166 @@
 import platform
 
+class Parser:
+    source: string
+    position: int
+
+    def skip_whitespace():
+        while position < size(source) and (source[position] == " " or source[position] == "\n" or source[position] == "\r" or source[position] == "\t"):
+            position += 1
+
+    def parse() -> Result[Any, JsonError]:
+        value = self.parse_value()
+        self.skip_whitespace()
+        if position != size(source):
+            return failure(JsonError("unexpected content after JSON value"))
+        return value
+
+    def parse_value() -> Result[Any, JsonError]:
+        self.skip_whitespace()
+        if position >= size(source):
+            return failure(JsonError("unexpected end of JSON input"))
+        character = source[position]
+        if character == "\"":
+            return self.parse_string()
+        if character == "{":
+            return self.parse_object()
+        if character == "[":
+            return self.parse_array()
+        if source[position:position + 4] == "true":
+            position += 4
+            return true
+        if source[position:position + 5] == "false":
+            position += 5
+            return false
+        if source[position:position + 4] == "null":
+            position += 4
+            return platform.value_null()
+        return self.parse_number()
+
+    def parse_string() -> Result[string, JsonError]:
+        position += 1
+        value := ""
+        while position < size(source):
+            character = source[position]
+            position += 1
+            if character == "\"":
+                return value
+            if character != "\\":
+                value += character
+                continue
+            if position >= size(source):
+                return failure(JsonError("unterminated JSON escape"))
+            escaped = source[position]
+            position += 1
+            if escaped == "\"" or escaped == "\\" or escaped == "/":
+                value += escaped
+            elif escaped == "n":
+                value += "\n"
+            elif escaped == "r":
+                value += "\r"
+            elif escaped == "t":
+                value += "\t"
+            else:
+                return failure(JsonError("unsupported JSON escape: \\" + escaped))
+        return failure(JsonError("unterminated JSON string"))
+
+    def parse_array() -> Result[Any, JsonError]:
+        position += 1
+        values: list[Any] := []
+        self.skip_whitespace()
+        if position < size(source) and source[position] == "]":
+            position += 1
+            return values
+        while position < size(source):
+            value = self.parse_value()
+            values.append(value)
+            self.skip_whitespace()
+            if position < size(source) and source[position] == "]":
+                position += 1
+                return values
+            if position >= size(source) or source[position] != ",":
+                return failure(JsonError("JSON array requires `,` or `]`"))
+            position += 1
+        return failure(JsonError("unterminated JSON array"))
+
+    def parse_object() -> Result[Any, JsonError]:
+        position += 1
+        values: map[string, Any] := {}
+        self.skip_whitespace()
+        if position < size(source) and source[position] == "}":
+            position += 1
+            return values
+        while position < size(source):
+            self.skip_whitespace()
+            if position >= size(source) or source[position] != "\"":
+                return failure(JsonError("JSON object keys must be strings"))
+            key = self.parse_string()
+            self.skip_whitespace()
+            if position >= size(source) or source[position] != ":":
+                return failure(JsonError("JSON object key requires `:`"))
+            position += 1
+            value = self.parse_value()
+            values[key] = value
+            self.skip_whitespace()
+            if position < size(source) and source[position] == "}":
+                position += 1
+                return values
+            if position >= size(source) or source[position] != ",":
+                return failure(JsonError("JSON object requires `,` or `}`"))
+            position += 1
+        return failure(JsonError("unterminated JSON object"))
+
+    def parse_number() -> Result[Any, JsonError]:
+        start = position
+        while position < size(source) and "-+0123456789.eE".contains(source[position]):
+            position += 1
+        if start == position:
+            return failure(JsonError("invalid JSON value"))
+        token = source[start:position]
+        if token.contains(".") or token.contains("e") or token.contains("E"):
+            parsed ?= float.parse(token)
+            switch parsed:
+                ok value:
+                    return value
+                failure _error:
+                    return failure(JsonError("invalid JSON number: " + token))
+        parsed ?= int.parse(token)
+        switch parsed:
+            ok value:
+                return value
+            failure _error:
+                return failure(JsonError("invalid JSON number: " + token))
+
+def decode_value(text: string) -> Result[Any, JsonError]:
+    return Parser(text, 0).parse()
+
+def escaped_string(value: string) -> string:
+    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+def encode_value(value: Any) -> string:
+    value_kind = platform.value_kind_name(value)
+    if value_kind == "null":
+        return "null"
+    if value_kind == "boolean":
+        return "true" if platform.value_as_bool(value) else "false"
+    if value_kind == "integer":
+        return string(platform.value_as_int(value))
+    if value_kind == "float":
+        return string(platform.value_as_float(value))
+    if value_kind == "string":
+        return "\"" + escaped_string(platform.value_as_string(value)) + "\""
+    if value_kind == "array":
+        encoded: list[string] := []
+        for item in platform.value_as_list(value):
+            encoded.append(encode_value(item))
+        return "[" + encoded.join(",") + "]"
+    if value_kind == "object":
+        encoded: list[string] := []
+        for key in platform.value_map_keys(value):
+            encoded.append("\"" + escaped_string(key) + "\":" + encode_value(platform.value_map_get(value, key)))
+        return "{" + encoded.join(",") + "}"
+    return "null"
+
 trait Document:
     keys() -> list[string]
     get(key: string) -> Any
@@ -28,24 +189,24 @@ class Json: Document
         return "application/json"
 
     def size() -> int:
-        return size(platform.string_encode(platform.jsonencode(document)))
+        return size(platform.string_encode(encode_value(document)))
 
     def bytes() -> int:
-        return size(platform.string_encode(platform.jsonencode(document)))
+        return size(platform.string_encode(encode_value(document)))
 
     def raw() -> list[int]:
-        return platform.string_encode(platform.jsonencode(document))
+        return platform.string_encode(encode_value(document))
 
     def text() -> Result[string, IOError]:
-        return platform.jsonencode(document)
+        return encode_value(document)
 
     def write() -> Result[unit, IOError]:
         if size(source_path) == 0:
             return failure(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
-        return platform.file_write(source_path, platform.jsonencode(document))
+        return platform.file_write(source_path, encode_value(document))
 
     def write_to(path: string) -> Result[unit, IOError]:
-        return platform.file_write(path, platform.jsonencode(document))
+        return platform.file_write(path, encode_value(document))
 
     def keys() -> list[string]:
         return object_keys(document) if kind(document) == "object" else []
@@ -80,49 +241,49 @@ def dumps[type](value: type) -> string:
     return encode(value)
 
 def decode[type](text: string) -> Result[type, JsonError]:
-    return platform.jsondecode(text)
+    return decode_value(text)
 
 def encode[type](value: type) -> string:
-    return platform.jsonencode(value)
+    return encode_value(value)
 
 def object_get(value: Any, key: string) -> Any:
-    return platform.jsonobject_get(value, key)
+    return platform.value_map_get(value, key)
 
 def object_keys(value: Any) -> list[string]:
-    return platform.jsonobject_keys(value)
+    return platform.value_map_keys(value)
 
 def object_values(value: Any) -> list[Any]:
-    return platform.jsonobject_values(value)
+    return platform.value_map_values(value)
 
 def object_set(value: Any, key: string, item: Any):
-    platform.jsonobject_set(value, key, item)
+    platform.value_map_set(value, key, item)
 
 def as_string(value: Any) -> string:
-    return platform.jsonas_string(value)
+    return platform.value_as_string(value)
 
 def as_int(value: Any) -> int:
-    return platform.jsonas_int(value)
+    return platform.value_as_int(value)
 
 def as_float(value: Any) -> float:
-    return platform.jsonas_float(value)
+    return platform.value_as_float(value)
 
 def as_bool(value: Any) -> bool:
-    return platform.jsonas_bool(value)
+    return platform.value_as_bool(value)
 
 def as_int_list(value: Any) -> list[int]:
-    return platform.jsonas_int_list(value)
+    return platform.value_as_int_list(value)
 
 def as_string_list(value: Any) -> list[string]:
-    return platform.jsonas_string_list(value)
+    return platform.value_as_string_list(value)
 
 def as_list(value: Any) -> list[Any]:
-    return platform.jsonas_list(value)
+    return platform.value_as_list(value)
 
 def is_null(value: Any) -> bool:
-    return platform.jsonis_null(value)
+    return platform.value_is_null(value)
 
 def kind(value: Any) -> string:
-    return platform.jsonkind(value)
+    return platform.value_kind_name(value)
 
 test "JSON document supports memory and mutation":
     decoded = decode[Any]("{\"name\":\"Ada\",\"languages\":2}")

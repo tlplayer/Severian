@@ -126,6 +126,13 @@ that path. Binary handles, writes, directories, mapping, and locks remain on
 the legacy platform bridge until separately migrated. The old compiler-owned
 text-read implementation has been removed.
 
+File-format selection is now a closed `Reader` trait registry. Reachable reader
+implementations contribute `extensions` and `document_class` metadata; lowering
+generates runtime dispatch, and semantic analysis uses the same metadata for
+literal-path refinement. JSON and CSV parsing/encoding are ordinary source code
+in their owning packages. The compiler bridge retains only format-independent
+dynamic map/list/value representation primitives.
+
 Tensor operations are not modeled as ordinary foreign calls. Tensor HIR/MIR,
 shape and dtype analysis, fusion, legalization, and XLA/MLIR lowering remain
 compiler responsibilities; only a genuine external ABI call uses this path.

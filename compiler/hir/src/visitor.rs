@@ -247,6 +247,10 @@ pub(crate) fn visit_expression_mut(
             visit_expression_mut(then_expression, visitor);
             visit_expression_mut(else_expression, visitor);
         }
+        Expression::RegistryLookup { key, fallback, .. } => {
+            visit_expression_mut(key, visitor);
+            visit_expression_mut(fallback, visitor);
+        }
         Expression::Unary { expression, .. } => visit_expression_mut(expression, visitor),
         Expression::Binary { left, right, .. } => {
             visit_expression_mut(left, visitor);

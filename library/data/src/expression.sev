@@ -1,4 +1,4 @@
-import platform
+import json
 
 class Expression:
     operation: string
@@ -83,9 +83,9 @@ def evaluate(expression: Expression, row: map[string, Any]) -> bool:
     if expression.operation == "or":
         return evaluate(expression.operands[0], row) or evaluate(expression.operands[1], row)
     if expression.operation == "is null":
-        return platform.jsonis_null(value(expression.operands[0], row))
+        return json.is_null(value(expression.operands[0], row))
     if expression.operation == "is not null":
-        return not platform.jsonis_null(value(expression.operands[0], row))
+        return not json.is_null(value(expression.operands[0], row))
     left = value(expression.operands[0], row)
     right = value(expression.operands[1], row)
     if expression.operation == "=":

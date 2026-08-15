@@ -53,6 +53,7 @@ pub(super) fn lower_block(
                                 .ty
                                 .as_ref()
                                 .and_then(|ty| resolved_class_type_name(ty, aliases)),
+                            enum_variant: None,
                             function_return: function_return_type(parameter.ty.as_ref()),
                             collection_len: None,
                             mutable: false,
@@ -103,6 +104,7 @@ pub(super) fn lower_block(
                     reference: source_binding(&function.name),
                     ty: ValueType::Function,
                     class: None,
+                    enum_variant: None,
                     function_return: Some(return_type),
                     collection_len: None,
                     mutable: false,
@@ -159,8 +161,14 @@ pub(super) fn lower_block(
                         "E000501: Checked integer arithmetic cannot produce a value outside the destination type.",
                     ));
                 }
-                let (value, inferred) = lower_expression(source, scope, signatures, aliases)?;
+                let (mut value, inferred) = lower_expression(source, scope, signatures, aliases)?;
                 let propagates = inferred == ValueType::Result;
+                if propagates && return_type != ValueType::Result && !scope.contains_key("chaos") {
+                    return Err(error(
+                        source.span(),
+                        "E000801: `=` can propagate a fallible expression only from a function returning `Result`; use `?=` to capture and handle it",
+                    ));
+                }
                 let declared = binding
                     .ty
                     .as_ref()
@@ -168,10 +176,9 @@ pub(super) fn lower_block(
                 if let Some(declared) = declared.filter(|_| !propagates) {
                     compatible(binding.span, inferred, declared)?;
                 }
-                // `=` and `:=` are the propagation boundary for a Result. The
-                // binding receives the success payload; an explicit annotation
-                // therefore describes that payload rather than the Result
-                // carrier itself.
+                // Ordinary bindings evaluate a fallible RHS by propagating its
+                // failure and binding its success payload. `:=` only selects a
+                // changeable binding; it is not an error-handling operator.
                 let ty = if propagates {
                     declared
                         .or_else(|| result_payload_type(source, signatures, aliases))
@@ -207,6 +214,29 @@ pub(super) fn lower_block(
                     .get(&binding.name.name)
                     .is_some_and(|existing| existing.field || existing.mutable)
                 {
+                    let next_variant = expression_enum_variant(source, scope, aliases);
+                    value = checked_enum_transition(
+                        &binding.name.name,
+                        class.as_deref(),
+                        next_variant.as_deref(),
+                        value,
+                        inferred,
+                        binding.span,
+                        scope,
+                        aliases,
+                    )?;
+                    if let Some(next_class) = class.as_deref() {
+                        update_typestate_binding(
+                            &binding.name.name,
+                            next_class,
+                            binding.span,
+                            scope,
+                            aliases,
+                        )?;
+                    }
+                    if let Some(existing) = scope.get_mut(&binding.name.name) {
+                        existing.enum_variant = next_variant;
+                    }
                     let existing = scope[&binding.name.name].reference.clone();
                     if propagates {
                         instructions.push(Instruction::TryLet {
@@ -231,6 +261,7 @@ pub(super) fn lower_block(
                             reference: source_binding(&binding.name),
                             ty,
                             class,
+                            enum_variant: expression_enum_variant(source, scope, aliases),
                             function_return: None,
                             collection_len: binding.value.as_ref().and_then(collection_length),
                             mutable: binding.kind == LetKind::Changeable,
@@ -267,6 +298,12 @@ pub(super) fn lower_block(
                 let temporary = format!("__destructure_{}", binding.span.start);
                 let temporary = BindingRef::synthetic(temporary);
                 if value_type == ValueType::Result {
+                    if return_type != ValueType::Result && !scope.contains_key("chaos") {
+                        return Err(error(
+                            binding.value.span(),
+                            "E000801: `=` can propagate a fallible expression only from a function returning `Result`; use `?=` to capture and handle it",
+                        ));
+                    }
                     instructions.push(Instruction::TryLet {
                         name: temporary.clone(),
                         value,
@@ -287,6 +324,7 @@ pub(super) fn lower_block(
                             reference: reference.clone(),
                             ty: ValueType::Any,
                             class: None,
+                            enum_variant: None,
                             function_return: None,
                             collection_len: None,
                             mutable: false,
@@ -339,6 +377,12 @@ pub(super) fn lower_block(
                 let (mut value, mut value_type) =
                     lower_expression(&assignment.value, scope, signatures, aliases)?;
                 if value_type == ValueType::Result {
+                    if return_type != ValueType::Result && !scope.contains_key("chaos") {
+                        return Err(error(
+                            assignment.value.span(),
+                            "E000801: `=` can propagate a fallible expression only from a function returning `Result`; use `?=` to capture and handle it",
+                        ));
+                    }
                     let temporary = format!("__assignment_{}", assignment.span.start);
                     let temporary = BindingRef::synthetic(temporary);
                     instructions.push(Instruction::TryLet {
@@ -382,6 +426,7 @@ pub(super) fn lower_block(
                             reference: source_binding(&binding.name),
                             ty: ValueType::Result,
                             class: None,
+                            enum_variant: None,
                             function_return: None,
                             collection_len: None,
                             mutable: false,
@@ -490,26 +535,32 @@ pub(super) fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                let mut else_scope = scope.clone();
                 let else_instructions = match &statement.else_branch {
                     None => Vec::new(),
                     Some(ElseBranch::Block(block)) => {
-                        let mut else_scope = scope.clone();
                         lower_block(block, &mut else_scope, return_type, signatures, aliases)?
                     }
-                    Some(ElseBranch::If(branch)) => {
-                        let mut else_scope = scope.clone();
-                        lower_block(
-                            &Block {
-                                span: branch.span,
-                                statements: vec![Stmt::If((**branch).clone())],
-                            },
-                            &mut else_scope,
-                            return_type,
-                            signatures,
-                            aliases,
-                        )?
-                    }
+                    Some(ElseBranch::If(branch)) => lower_block(
+                        &Block {
+                            span: branch.span,
+                            statements: vec![Stmt::If((**branch).clone())],
+                        },
+                        &mut else_scope,
+                        return_type,
+                        signatures,
+                        aliases,
+                    )?,
                 };
+                merge_state_branches(
+                    scope,
+                    &then_scope,
+                    &else_scope,
+                    !always_returns(&then_instructions),
+                    !always_returns(&else_instructions),
+                    statement.span,
+                    aliases,
+                )?;
                 instructions.push(Instruction::If {
                     condition,
                     then_instructions,
@@ -546,6 +597,7 @@ pub(super) fn lower_block(
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut body_scope = scope.clone();
+                forget_transition_variants(&mut body_scope, aliases);
                 let body = lower_block(
                     &statement.body,
                     &mut body_scope,
@@ -553,6 +605,10 @@ pub(super) fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                if !always_returns(&body) {
+                    reject_loop_typestate_changes(scope, &body_scope, statement.span, aliases)?;
+                }
+                forget_transition_variants(scope, aliases);
                 propagate_unknown_collection_shapes(scope, &body_scope);
                 instructions.push(Instruction::While {
                     setup,
@@ -588,6 +644,7 @@ pub(super) fn lower_block(
                 let (iterable, _) =
                     lower_expression(&statement.iterable, scope, signatures, aliases)?;
                 let mut body_scope = scope.clone();
+                forget_transition_variants(&mut body_scope, aliases);
                 let pattern = lower_pattern(&statement.pattern, &mut body_scope, aliases)?;
                 let body = lower_block(
                     &statement.body,
@@ -596,6 +653,10 @@ pub(super) fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                if !always_returns(&body) {
+                    reject_loop_typestate_changes(scope, &body_scope, statement.span, aliases)?;
+                }
+                forget_transition_variants(scope, aliases);
                 propagate_unknown_collection_shapes(scope, &body_scope);
                 instructions.push(Instruction::For {
                     setup,
@@ -641,6 +702,7 @@ pub(super) fn lower_block(
                     })
                     .transpose()?;
                 let mut arms = Vec::new();
+                let mut arm_scopes = Vec::new();
                 for arm in &statement.arms {
                     let mut arm_scope = scope.clone();
                     let pattern = lower_pattern(&arm.pattern, &mut arm_scope, aliases)?;
@@ -669,6 +731,7 @@ pub(super) fn lower_block(
                         .transpose()?;
                     let arm_instructions =
                         lower_block(&arm.body, &mut arm_scope, return_type, signatures, aliases)?;
+                    let arm_continues = !always_returns(&arm_instructions);
                     arms.push(HirSwitchArm {
                         source,
                         pattern,
@@ -676,7 +739,12 @@ pub(super) fn lower_block(
                         instructions: arm_instructions,
                         receivers,
                     });
+                    if arm_continues {
+                        arm_scopes.push(arm_scope);
+                    }
                 }
+                reject_switch_typestate_changes(scope, &arm_scopes, statement.span, aliases)?;
+                forget_transition_variants(scope, aliases);
                 if statement.values.len() == 1
                     && statement.repeat_condition.is_none()
                     && statement.setup.is_none()
@@ -755,6 +823,7 @@ pub(super) fn lower_block(
                     signatures,
                     aliases,
                 )?;
+                propagate_single_scope_states(scope, &with_scope);
                 instructions.push(Instruction::With {
                     placement,
                     resources,
@@ -767,4 +836,255 @@ pub(super) fn lower_block(
         }
     }
     Ok(instructions)
+}
+
+fn update_typestate_binding(
+    binding_name: &str,
+    next_class: &str,
+    span: Span,
+    scope: &mut HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    let Some(binding) = scope.get_mut(binding_name) else {
+        return Ok(());
+    };
+    let Some(current_class) = binding.class.as_deref() else {
+        binding.class = Some(next_class.to_owned());
+        return Ok(());
+    };
+    if current_class == next_class {
+        return Ok(());
+    }
+    let Some((current_base, current_state)) = current_class.rsplit_once("__") else {
+        return Ok(());
+    };
+    let Some((next_base, next_state)) = next_class.rsplit_once("__") else {
+        return Ok(());
+    };
+    if current_base != next_base {
+        return Ok(());
+    }
+    let Some(owner) = aliases.get(&format!("__transition_state.{current_state}")) else {
+        return Ok(());
+    };
+    if aliases.get(&format!("__transition_state.{next_state}")) != Some(owner) {
+        return Ok(());
+    }
+    if !aliases.contains_key(&format!(
+        "__enum_transition.{owner}.{current_state}.{next_state}"
+    )) {
+        return Err(error(
+            span,
+            format!("E000213: invalid typestate transition `{current_class}` -> `{next_class}`"),
+        ));
+    }
+    binding.class = Some(next_class.to_owned());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn checked_enum_transition(
+    binding_name: &str,
+    next_class: Option<&str>,
+    next_variant: Option<&str>,
+    value: Expression,
+    value_type: ValueType,
+    span: Span,
+    scope: &HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) -> Result<Expression, SemanticError> {
+    let Some(current) = scope.get(binding_name) else {
+        return Ok(value);
+    };
+    let Some(owner) = current.class.as_deref() else {
+        return Ok(value);
+    };
+    let Some(edges) = aliases.get(&format!("__enum_transition_edges.{owner}")) else {
+        return Ok(value);
+    };
+    if next_class != Some(owner) {
+        return Ok(value);
+    }
+    if let (Some(current), Some(next)) = (current.enum_variant.as_deref(), next_variant) {
+        if aliases.contains_key(&format!("__enum_transition.{owner}.{current}.{next}")) {
+            return Ok(value);
+        }
+        return Err(error(
+            span,
+            format!("E000213: invalid enum transition `{owner}.{current}` -> `{owner}.{next}`"),
+        ));
+    }
+
+    let current_value = Expression::Typed {
+        id: HirId::from_source_range(span.start, span.end),
+        ty: ValueType::Any,
+        any_origin: None,
+        expression: Box::new(Expression::Variable(current.reference.clone())),
+    };
+    let string = |id, text: String| Expression::Typed {
+        id: HirId::synthetic(id),
+        ty: ValueType::String,
+        any_origin: None,
+        expression: Box::new(Expression::String(text)),
+    };
+    Ok(Expression::Typed {
+        id: HirId::from_source_range(span.start, span.end),
+        ty: value_type,
+        any_origin: value.any_origin(),
+        expression: Box::new(Expression::Call {
+            target: CallTarget::native("enum.transition", "__sev_enum_transition").with_signature(
+                [
+                    ValueType::Any,
+                    ValueType::Any,
+                    ValueType::String,
+                    ValueType::String,
+                ],
+                ValueType::Any,
+            ),
+            args: vec![
+                current_value,
+                value,
+                string(213, owner.to_owned()),
+                string(214, edges.clone()),
+            ],
+        }),
+    })
+}
+
+fn merge_state_branches(
+    scope: &mut HashMap<String, Binding>,
+    then_scope: &HashMap<String, Binding>,
+    else_scope: &HashMap<String, Binding>,
+    then_continues: bool,
+    else_continues: bool,
+    span: Span,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    for (name, binding) in scope.iter_mut() {
+        if !binding.mutable && !binding.field {
+            continue;
+        }
+        let Some(then_binding) = then_scope.get(name) else {
+            continue;
+        };
+        let Some(else_binding) = else_scope.get(name) else {
+            continue;
+        };
+        if !then_continues && else_continues {
+            binding.class = else_binding.class.clone();
+            binding.enum_variant = else_binding.enum_variant.clone();
+            continue;
+        }
+        if then_continues && !else_continues {
+            binding.class = then_binding.class.clone();
+            binding.enum_variant = then_binding.enum_variant.clone();
+            continue;
+        }
+        if !then_continues && !else_continues {
+            continue;
+        }
+        if then_binding.class == else_binding.class {
+            binding.class = then_binding.class.clone();
+        } else if then_binding
+            .class
+            .as_deref()
+            .is_some_and(|class| aliases.contains_key(&format!("__typestate_class.{class}")))
+            || else_binding
+                .class
+                .as_deref()
+                .is_some_and(|class| aliases.contains_key(&format!("__typestate_class.{class}")))
+        {
+            return Err(error(
+                span,
+                format!(
+                    "E000214: branches leave `{name}` in incompatible typestates; transition both paths to one state before continuing"
+                ),
+            ));
+        }
+        binding.enum_variant = (then_binding.enum_variant == else_binding.enum_variant)
+            .then(|| then_binding.enum_variant.clone())
+            .flatten();
+    }
+    Ok(())
+}
+
+fn forget_transition_variants(
+    scope: &mut HashMap<String, Binding>,
+    aliases: &HashMap<String, String>,
+) {
+    for binding in scope.values_mut() {
+        if binding
+            .class
+            .as_deref()
+            .is_some_and(|owner| aliases.contains_key(&format!("__enum_transition_edges.{owner}")))
+        {
+            binding.enum_variant = None;
+        }
+    }
+}
+
+fn reject_loop_typestate_changes(
+    outer: &HashMap<String, Binding>,
+    body: &HashMap<String, Binding>,
+    span: Span,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    for (name, before) in outer {
+        let Some(after) = body.get(name) else {
+            continue;
+        };
+        if before.class != after.class
+            && [before.class.as_deref(), after.class.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|class| aliases.contains_key(&format!("__typestate_class.{class}")))
+        {
+            return Err(error(
+                span,
+                format!(
+                    "E000214: loop changes typestate binding `{name}`; each iteration must preserve its entry typestate"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn reject_switch_typestate_changes(
+    outer: &HashMap<String, Binding>,
+    arms: &[HashMap<String, Binding>],
+    span: Span,
+    aliases: &HashMap<String, String>,
+) -> Result<(), SemanticError> {
+    for (name, before) in outer {
+        if arms.iter().any(|arm| {
+            arm.get(name).is_some_and(|after| {
+                before.class != after.class
+                    && [before.class.as_deref(), after.class.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|class| aliases.contains_key(&format!("__typestate_class.{class}")))
+            })
+        }) {
+            return Err(error(
+                span,
+                format!(
+                    "E000214: switch leaves typestate binding `{name}` in different states; converge before leaving each arm"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn propagate_single_scope_states(
+    outer: &mut HashMap<String, Binding>,
+    inner: &HashMap<String, Binding>,
+) {
+    for (name, binding) in outer.iter_mut() {
+        if let Some(inner) = inner.get(name) {
+            binding.class = inner.class.clone();
+            binding.enum_variant = inner.enum_variant.clone();
+        }
+    }
 }

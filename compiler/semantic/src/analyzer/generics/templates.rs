@@ -2,6 +2,21 @@ use super::*;
 
 impl Specializer {
     pub(super) fn new(module: &Module, interfaces: &[PackageInterface]) -> Self {
+        let mut transition_states = HashMap::new();
+        for item in &module.items {
+            if let Item::Enum(enumeration) = item {
+                if enumeration
+                    .variants
+                    .iter()
+                    .any(|variant| !variant.transitions.is_empty())
+                {
+                    for variant in &enumeration.variants {
+                        transition_states
+                            .insert(variant.name.name.clone(), enumeration.name.name.clone());
+                    }
+                }
+            }
+        }
         let mut classes = module
             .items
             .iter()
@@ -48,6 +63,19 @@ impl Specializer {
                 .collect::<Vec<_>>();
             for item in &interface.module.items {
                 match item {
+                    Item::Enum(enumeration)
+                        if enumeration
+                            .variants
+                            .iter()
+                            .any(|variant| !variant.transitions.is_empty()) =>
+                    {
+                        for variant in &enumeration.variants {
+                            transition_states.insert(
+                                variant.name.name.clone(),
+                                format!("{}.{}", interface.name, enumeration.name.name),
+                            );
+                        }
+                    }
                     Item::Class(class) => {
                         classes
                             .entry(class.name.name.clone())
@@ -92,6 +120,7 @@ impl Specializer {
             classes,
             traits,
             aliases,
+            transition_states,
             pending: VecDeque::new(),
             scheduled: HashSet::new(),
             required_imports: Vec::new(),
