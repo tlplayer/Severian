@@ -1,0 +1,11 @@
+from "src/file_interface.sev" import file_interface
+import "src/io.sev" as file_io
+import yaml
+
+class TextReader: file_interface.Reader
+    extensions = {".text", ".txt"}
+    document_class = "Text"
+
+    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+        content = file_io.read_text(path)
+        return yaml.file_document(path, content)

@@ -3,19 +3,11 @@ import file
 def main():
     distance = 9.0 ** .5
     path = "/tmp/severian-getting-started-imports.txt"
-    switch file.write(path, string(distance)):
-        ok:
-            switch file.read(path):
-                ok document:
-                    switch document.text():
-                        ok file_distance:
-                            print(file_distance)
-                        failure error:
-                            assert(false, error)
-                failure error:
-                    assert(false, error)
-        failure error:
-            assert(false, error)
+    file.write(path, string(distance))
+    file.read(path)
+    file_distance = document.text()
+    print(file_distance)
+
 
 test with integration "imported output":
     main()
