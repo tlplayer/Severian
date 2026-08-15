@@ -6,7 +6,7 @@ def main():
     done = true
     print(done)
 
-test with integration "while output":
+test with integ "while output":
     main()
     assert("0" in stdout)
     assert("1" in stdout)

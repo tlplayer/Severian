@@ -1,6 +1,0 @@
-shape [3, 2]
-tokens 3
-hidden 2
-checksum 0
-first 0.99999482524713124 -0.99999482524713124
-image severian/transformer:local

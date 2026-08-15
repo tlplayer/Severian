@@ -2,7 +2,7 @@
 name = "json"
 version = "0.1.0"
 edition = "2026"
-description = "JSON documents, typed codecs, and file-format integration"
+description = "JSON documents, typed codecs, and file-format integ"
 
 [lib]
 path = "src/lib.sev"

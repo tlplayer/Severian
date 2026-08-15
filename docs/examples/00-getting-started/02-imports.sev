@@ -9,6 +9,6 @@ def main():
     print(file_distance)
 
 
-test with integration "imported output":
+test with integ "imported output":
     main()
     assert("3" in stdout)

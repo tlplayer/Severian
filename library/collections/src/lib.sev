@@ -420,7 +420,7 @@ test with profile "heap and deque remain bounded under sustained use" -> TestRes
     assert(heap.is_empty())
     assert(deque.is_empty())
 
-test with integration "generic collections compose through their public APIs":
+test with integ "generic collections compose through their public APIs":
     pending = Queue[int](Deque[int]([]))
     empty_values: map[int, string] = {}
     cache = LruCache[int, string](3, empty_values, [])

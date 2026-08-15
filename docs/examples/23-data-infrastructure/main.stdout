@@ -1,2 +1,0 @@
-[api-0 -> node-a, api-1 -> node-b, api-2 -> node-a, rollout v1->v2, scale 2->3, repair 1]
-SELECT id, action FROM controller_events WHERE namespace = $1

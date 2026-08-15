@@ -1,6 +1,6 @@
 def main():
     print("hello, severian")
 
-test with integration "hello output":
+test with integ "hello output":
     main()
     assert("hello, severian" in stdout)

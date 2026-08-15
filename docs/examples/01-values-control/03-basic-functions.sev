@@ -15,6 +15,6 @@ def main():
     else:
         print("small")
 
-test with integration "function output":
+test with integ "function output":
     main()
     assert("large" in stdout)

@@ -33,7 +33,7 @@ status=ready
         score = 3.0 ** 2.0
         return size(values_view)
 
-    test with integration "native output":
+    test with integ "native output":
         assert(size([1, 2, 3]) == 3)
 
     test with property and chaos "ownership":

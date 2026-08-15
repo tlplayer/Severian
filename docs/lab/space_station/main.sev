@@ -251,7 +251,7 @@ test "graphics frame includes the station hazards crew and telemetry":
     assert(document.contains("<circle"))
     assert(document.contains("<line"))
 
-test with integration "two observers receive exact snapshots over real TCP loopback":
+test with integ "two observers receive exact snapshots over real TCP loopback":
     report = simulate_tick()
     snapshots = network_snapshots(report)
     assert(snapshots[0] == "observer-a|" + snapshot_packet(report))

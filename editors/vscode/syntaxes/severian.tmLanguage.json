@@ -214,7 +214,7 @@
           }
         },
         {
-          "match": "\\b(property|bench|chaos|integration|profile)\\b",
+          "match": "\\b(property|bench|chaos|integ|profile)\\b",
           "name": "storage.modifier.test.severian"
         }
       ]

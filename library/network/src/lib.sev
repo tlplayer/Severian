@@ -306,14 +306,14 @@ test "IP and address values distinguish IPv4 and IPv6":
     assert(ipv6.family == 6)
     assert(Address("::1", 443).display() == "[::1]:443")
 
-test with integration "native TCP loopback":
+test with integ "native TCP loopback":
     switch loopback_echo("severian network runtime"):
         ok echoed:
             assert(echoed == "severian network runtime")
         failure error:
             assert(false, error.message)
 
-test with integration "TCP handles partial reads writes addresses timeouts and cleanup":
+test with integ "TCP handles partial reads writes addresses timeouts and cleanup":
     listener = listen("127.0.0.1", 0)
     local = listener.local_address()
     server = async echo_once(listener) with self
@@ -330,7 +330,7 @@ test with integration "TCP handles partial reads writes addresses timeouts and c
     _closed = connection.close()
     await server
 
-test with integration "DNS failures remain typed":
+test with integ "DNS failures remain typed":
     switch resolve(""):
         ok _addresses:
             assert(false)

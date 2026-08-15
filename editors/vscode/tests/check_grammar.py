@@ -30,7 +30,7 @@ required_syntax = {
     "decorators": "@",
     "cross operator": "^",
     "address-of": "&",
-    "integration tests": "integration",
+    "integ tests": "integ",
 }
 missing_features = [name for name, marker in required_syntax.items() if marker not in grammar_text]
 

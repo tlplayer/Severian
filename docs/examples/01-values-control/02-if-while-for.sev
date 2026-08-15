@@ -9,7 +9,7 @@ def main():
         else:
             print("odd")
 
-test with integration "control flow output":
+test with integ "control flow output":
     main()
     assert("0" in stdout)
     assert("1" in stdout)

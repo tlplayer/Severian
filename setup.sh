@@ -30,7 +30,7 @@ dirs=(
     compiler/passes/src/iree/vectorization
     compiler/passes/src/iree/bufferization
 
-    # StableHLO / XLA integration
+    # StableHLO / XLA integ
     compiler/xla/src
     compiler/xla/src/stablehlo
     compiler/xla/src/pjrt
@@ -116,7 +116,7 @@ files=(
     compiler/passes/src/iree/bufferization/mod.rs
     compiler/passes/src/iree/bufferization/bufferize.rs
 
-    # XLA integration crate
+    # XLA integ crate
     compiler/xla/Cargo.toml
     compiler/xla/src/lib.rs
     compiler/xla/src/pipeline.rs
