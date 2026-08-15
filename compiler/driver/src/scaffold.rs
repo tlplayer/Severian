@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2026"
 # Optional package metadata used by registries and documentation.
 # description = ""
-# license = "MIT"
+# license = "Severian License"
 # repository = "https://example.com/owner/project"
 
 [[bin]]
