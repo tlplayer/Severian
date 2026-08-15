@@ -1,13 +1,14 @@
-import platform
+import ffi
+import "src/ffi.sev" as externs
 
 def get(name: string, fallback: string = "") -> string:
-    return platform.environment_get(name, fallback)
+    return externs.get(ffi.StringView(name), ffi.StringView(fallback))
 
 def set(name: string, value: string) -> bool:
-    return platform.environment_set(name, value)
+    return externs.set(ffi.StringView(name), ffi.StringView(value))
 
 def remove(name: string) -> bool:
-    return platform.environment_remove(name)
+    return externs.remove(ffi.StringView(name))
 
 test "environment values round-trip and removal restores fallback behavior":
     name = "SEVERIAN_STDLIB_ENVIRONMENT_COVERAGE_VALUE"

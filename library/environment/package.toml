@@ -4,8 +4,25 @@ version = "0.1.0"
 edition = "2026"
 description = "Process environment access"
 
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/ffi.sev"]
+
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+ffi = { path = "../ffi", version = "0.1.0" }
+
+[[ffi.c]]
+name = "environment-posix"
+abi = "c-v1"
+targets = ["linux", "macos"]
+sources = ["native/posix/environment.c"]
+include = ["native/include"]
+libraries = []
+
+[package.metadata.library]
+category = "runtime"
+implementation = "native-abi"
+status = "experimental"

@@ -8,4 +8,4 @@ description = "Core collection and scalar functions"
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+math = { path = "../math", version = "0.1.0" }

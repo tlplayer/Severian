@@ -21,26 +21,6 @@ unsafe:
     extern("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
     extern("__sev_string_casefold") def string_casefold(value: string) -> string
     extern("__sev_string_encode") def string_encode(value: string) -> list[int]
-    extern("__sev_math_sqrt") def math_sqrt(value: float) -> float
-    extern("__sev_math_pow") def math_pow(value: float, exponent: float) -> float
-    extern("__sev_math_exp") def math_exp(value: float) -> float
-    extern("__sev_math_log") def math_log(value: float) -> float
-    extern("__sev_math_log2") def math_log2(value: float) -> float
-    extern("__sev_math_log10") def math_log10(value: float) -> float
-    extern("__sev_math_sin") def math_sin(value: float) -> float
-    extern("__sev_math_cos") def math_cos(value: float) -> float
-    extern("__sev_math_tan") def math_tan(value: float) -> float
-    extern("__sev_math_floor") def math_floor(value: float) -> int
-    extern("__sev_math_ceil") def math_ceil(value: float) -> int
-    extern("__sev_math_isfinite") def math_isfinite(value: float) -> bool
-    extern("__sev_math_isnan") def math_isnan(value: float) -> bool
-    extern("__sev_math_round") def math_round(value: float, digits: int) -> float
-    extern("__sev_random_float") def random_float() -> float
-    extern("__sev_random_int") def random_int(start: int, stop: int) -> int
-    extern("__sev_random_seed") def random_seed(value: int)
-    extern("__sev_random_choice") def random_choice[type](values: list[type]) -> type
-    extern("__sev_random_shuffle") def random_shuffle[type](values: list[type])
-    extern("__sev_random_sample") def random_sample[type](values: list[type], count: int) -> list[type]
     extern("__sev_file_exists") def file_exists(path: string) -> bool
     extern("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
     extern("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
@@ -64,18 +44,9 @@ unsafe:
     extern("__sev_time_sleep") def time_sleep(seconds: float)
     extern("__sev_time_monotonic") def time_monotonic() -> float
     extern("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
-    extern("__sev_environment_get") def environment_get(name: string, fallback: string) -> string
-    extern("__sev_environment_set") def environment_set(name: string, value: string) -> bool
-    extern("__sev_environment_remove") def environment_remove(name: string) -> bool
     extern("__sev_regex_findall") def regex_findall(text: string, pattern: string) -> list[string]
     extern("__sev_regex_split") def regex_split(text: string, pattern: string) -> list[string]
     extern("__sev_regex_sub") def regex_sub(text: string, pattern: string, replacement: string) -> string
-    extern("__sev_process_run") def process_run(command: string) -> int
-    extern("__sev_process_spawn") def process_spawn(command: string) -> int
-    extern("__sev_process_wait") def process_wait(process: int) -> int
-    extern("__sev_process_kill") def process_kill(process: int) -> bool
-    extern("__sev_process_exit") def process_exit(status: int)
-    extern("__sev_process_arguments") def process_arguments() -> list[string]
     extern("__sev_hash_md5") def hash_md5(value: string) -> string
     extern("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
     extern("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]

@@ -1,43 +1,43 @@
-import platform
+import "src/ffi.sev" as externs
 
 def pow(value: float, exponent: float) -> float:
-    return platform.math_pow(value, exponent)
+    return externs.pow(value, exponent)
 
 def exp(value: float) -> float:
-    return platform.math_exp(value)
+    return externs.exp(value)
 
 def log(value: float) -> float:
-    return platform.math_log(value)
+    return externs.log(value)
 
 def log2(value: float) -> float:
-    return platform.math_log2(value)
+    return externs.log2(value)
 
 def log10(value: float) -> float:
-    return platform.math_log10(value)
+    return externs.log10(value)
 
 def sin(value: float) -> float:
-    return platform.math_sin(value)
+    return externs.sin(value)
 
 def cos(value: float) -> float:
-    return platform.math_cos(value)
+    return externs.cos(value)
 
 def tan(value: float) -> float:
-    return platform.math_tan(value)
+    return externs.tan(value)
 
 def floor(value: float) -> int:
-    return platform.math_floor(value)
+    return externs.floor(value)
 
 def ceil(value: float) -> int:
-    return platform.math_ceil(value)
+    return externs.ceil(value)
 
 def isfinite(value: float) -> bool:
-    return platform.math_isfinite(value)
+    return externs.isfinite(value)
 
 def isnan(value: float) -> bool:
-    return platform.math_isnan(value)
+    return externs.isnan(value)
 
 def round(value: float, digits: int = 0) -> float:
-    return platform.math_round(value, digits)
+    return externs.round(value, digits)
 
 test "decimal rounding uses the requested precision":
     assert(round(1.23456, 3) == 1.235)

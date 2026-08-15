@@ -1,25 +1,36 @@
-import platform
+import "src/ffi.sev" as externs
 
 def random() -> float:
-    return platform.random_float()
+    return externs.random()
 
 def randint(start: int, stop: int) -> int:
-    return platform.random_int(start, stop)
+    assert(stop >= start, "random integer stop must not precede start")
+    return externs.randint(start, stop)
 
 def uniform(start: float, stop: float) -> float:
     return start + (stop - start) * random()
 
 def choice[type](values: list[type]) -> type:
-    return platform.random_choice(values)
+    assert(size(values) > 0, "cannot choose from an empty list")
+    return values[randint(0, size(values) - 1)]
 
 def shuffle[type](values: list[type]):
-    platform.random_shuffle(values)
+    index := size(values) - 1
+    while index > 0:
+        other = randint(0, index)
+        temporary = values[index]
+        values[index] = values[other]
+        values[other] = temporary
+        index -= 1
 
 def sample[type](values: list[type], count: int) -> list[type]:
-    return platform.random_sample(values, count)
+    assert(count >= 0 and count <= size(values), "sample size is outside the list")
+    selected = values[0:size(values)]
+    shuffle(selected)
+    return selected[0:count]
 
 def seed(value: int):
-    platform.random_seed(value)
+    externs.seed(value)
 
 test "seeded random helpers respect bounds membership and sample size":
     seed(12345)

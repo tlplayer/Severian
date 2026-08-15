@@ -1,3 +1,4 @@
+import environment
 import file
 import hash
 import http
@@ -51,7 +52,7 @@ def safe_identifier(identifier: string) -> Result[string, types.ModelLoadError]:
     return identifier
 
 def cache_root() -> string:
-    return platform.environment_get("SEVERIAN_MODEL_CACHE", ".severian/models")
+    return environment.get("SEVERIAN_MODEL_CACHE", ".severian/models")
 
 def cache_path(identifier: string, revision: string) -> Result[string, types.ModelLoadError]:
     safe = safe_identifier(identifier)

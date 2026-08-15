@@ -13,6 +13,7 @@ path = "src/lib.sev"
 
 [dependencies]
 audio = { path = "../audio", version = "0.1.0" }
+environment = { path = "../environment", version = "0.1.0" }
 file = { path = "../file", version = "0.1.0" }
 hash = { path = "../hash", version = "0.1.0" }
 http = { path = "../http", version = "0.1.0" }

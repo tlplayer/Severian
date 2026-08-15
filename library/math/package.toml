@@ -2,15 +2,27 @@
 name = "math"
 version = "0.1.0"
 edition = "2026"
-description = "Portable mathematics and compiler-backed numeric intrinsics"
+description = "Portable mathematics with a package-owned native provider"
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/ffi.sev"]
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-platform = { path = "../platform", version = "0.1.0" }
+ffi = { path = "../ffi", version = "0.1.0" }
+
+[[ffi.c]]
+name = "math-c"
+abi = "c-v1"
+targets = ["linux", "macos"]
+sources = ["native/math.c"]
+include = ["native/include"]
+libraries = ["m"]
 
 [package.metadata.library]
 category = "numerics"
-implementation = "source-and-intrinsics"
+implementation = "native-abi"
 status = "experimental"

@@ -333,28 +333,6 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_string_rstrip(void *raw) { const char *text = raw; int64_t end = __sev_strlen(raw); while (end > 0 && isspace((unsigned char)text[end - 1])) end -= 1; return sev_string_range(text, 0, end); }\n",
         "void *__sev_string_encode(void *raw) { const unsigned char *text = raw; int64_t size = __sev_strlen(raw); sev_collection *result = __sev_collection_new(0); for (int64_t index = 0; index < size; ++index) __sev_collection_push(result, __sev_box_i64(text[index])); return result; }\n",
         "void *__sev_string_casefold(void *raw) { const char *text = raw; int64_t size = __sev_strlen(raw); char *result = sev_allocate((size_t)size + 1); for (int64_t index = 0; index < size; ++index) result[index] = (char)tolower((unsigned char)text[index]); return result; }\n",
-        "double __sev_math_sqrt(double value) { return sqrt(value); }\n",
-        "double __sev_math_pow(double value, double exponent) { return pow(value, exponent); }\n",
-        "double __sev_math_exp(double value) { return exp(value); }\n",
-        "double __sev_math_log(double value) { return log(value); }\n",
-        "double __sev_math_log2(double value) { return log2(value); }\n",
-        "double __sev_math_log10(double value) { return log10(value); }\n",
-        "double __sev_math_sin(double value) { return sin(value); }\n",
-        "double __sev_math_cos(double value) { return cos(value); }\n",
-        "double __sev_math_tan(double value) { return tan(value); }\n",
-        "int64_t __sev_math_floor(double value) { return (int64_t)floor(value); }\n",
-        "int64_t __sev_math_ceil(double value) { return (int64_t)ceil(value); }\n",
-        "bool __sev_math_isfinite(double value) { return isfinite(value); }\n",
-        "bool __sev_math_isnan(double value) { return isnan(value); }\n",
-        "double __sev_math_round(double value, int64_t digits) { double factor = pow(10.0, (double)digits); return round(value * factor) / factor; }\n",
-        "static uint64_t sev_random_state = UINT64_C(0x9e3779b97f4a7c15);\n",
-        "static uint64_t sev_random_next(void) { uint64_t value = sev_random_state; value ^= value >> 12; value ^= value << 25; value ^= value >> 27; sev_random_state = value; return value * UINT64_C(2685821657736338717); }\n",
-        "void __sev_random_seed(int64_t value) { sev_random_state = value ? (uint64_t)value : UINT64_C(0x9e3779b97f4a7c15); }\n",
-        "double __sev_random_float(void) { return (double)(sev_random_next() >> 11) * (1.0 / 9007199254740992.0); }\n",
-        "int64_t __sev_random_int(int64_t start, int64_t stop) { if (stop < start) abort(); uint64_t width = (uint64_t)(stop - start) + 1; return start + (int64_t)(sev_random_next() % width); }\n",
-        "void *__sev_random_choice(void *raw) { sev_collection *values = raw; if (!values || values->size == 0) abort(); return values->items[sev_random_next() % (uint64_t)values->size]; }\n",
-        "void __sev_random_shuffle(void *raw) { sev_collection *values = raw; if (!values) abort(); for (int64_t index = values->size - 1; index > 0; --index) { int64_t other = (int64_t)(sev_random_next() % (uint64_t)(index + 1)); sev_value *temporary = values->items[index]; values->items[index] = values->items[other]; values->items[other] = temporary; } }\n",
-        "void *__sev_random_sample(void *raw, int64_t count) { sev_collection *copy = __sev_collection_clone(raw); if (count < 0 || count > copy->size) abort(); __sev_random_shuffle(copy); copy->size = count; return copy; }\n",
         "bool __sev_file_exists(void *path) { return access(path, F_OK) == 0; }\n",
         "bool __sev_path_is_file(void *path) { struct stat status; return stat(path, &status) == 0 && S_ISREG(status.st_mode); }\n",
         "bool __sev_path_is_dir(void *path) { struct stat status; return stat(path, &status) == 0 && S_ISDIR(status.st_mode); }\n",
@@ -372,9 +350,6 @@ pub(super) fn native_bridge_source_for_target(
         "double __sev_time_seconds(void) { struct timespec value; if (clock_gettime(CLOCK_REALTIME, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
         "double __sev_time_monotonic(void) { struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) abort(); return (double)value.tv_sec + (double)value.tv_nsec / 1000000000.0; }\n",
         "void __sev_time_sleep(double seconds) { if (seconds < 0.0) abort(); struct timespec delay = {(time_t)seconds, (long)((seconds - floor(seconds)) * 1000000000.0)}; while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {} }\n",
-        "void *__sev_environment_get(void *name, void *fallback) { const char *value = getenv(name); return strdup(value ? value : fallback); }\n",
-        "bool __sev_environment_set(void *name, void *value) { return setenv(name, value, 1) == 0; }\n",
-        "bool __sev_environment_remove(void *name) { return unsetenv(name) == 0; }\n",
         "void *__sev_platform_range(int64_t start, int64_t stop, int64_t step) { return __sev_range(start, stop, step); }\n",
         "void *__sev_platform_enumerate(void *values) { return __sev_collection_enumerate(values); }\n",
         "void *__sev_platform_zip(void *left, void *right) { return __sev_collection_zip(left, right); }\n",
@@ -845,22 +820,6 @@ void *__sev_directory_make_all(void *path_raw) {
   return __sev_variant_new("ok", NULL);
 }
 
-void *__sev_process_arguments(void) {
-  FILE *file = fopen("/proc/self/cmdline", "rb");
-  sev_collection *arguments = __sev_collection_new(0);
-  if (!file) return arguments;
-  char *buffer = NULL;
-  size_t capacity = 0;
-  ssize_t count;
-  while ((count = getdelim(&buffer, &capacity, '\0', file)) >= 0) {
-    size_t length = count > 0 && buffer[count - 1] == '\0' ? (size_t)count - 1 : (size_t)count;
-    __sev_collection_push(arguments, __sev_box_string(sev_string_range(buffer, 0, (int64_t)length)));
-  }
-  sev_system_release(buffer);
-  fclose(file);
-  return arguments;
-}
-
 void *__sev_time_parse_date(void *value_raw) {
   const char *value = value_raw;
   int year = 0, month = 0, day = 0;
@@ -1323,12 +1282,6 @@ void __sev_log_error(void *message, void *cause) {
     fprintf(stderr, "ERROR %s\n", (const char *)message);
   }
 }
-
-int64_t __sev_process_run(void *command_raw) { int status = system(command_raw); return status < 0 ? -1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
-int64_t __sev_process_spawn(void *command_raw) { pid_t child = fork(); if (child == 0) { execl("/bin/sh", "sh", "-c", (char *)command_raw, NULL); _exit(127); } return (int64_t)child; }
-int64_t __sev_process_wait(int64_t process) { int status = 0; if (waitpid((pid_t)process, &status, 0) < 0) return -1; return WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
-bool __sev_process_kill(int64_t process) { return kill((pid_t)process, SIGTERM) == 0; }
-void __sev_process_exit(int64_t status) { exit((int)status); }
 
 bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
   regex_t expression;

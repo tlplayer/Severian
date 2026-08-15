@@ -1,22 +1,35 @@
-import platform
+import ffi
+import "src/ffi.sev" as externs
 
 def run(command: string) -> int:
-    return platform.process_run(command)
+    return externs.run(ffi.StringView(command))
 
 def spawn(command: string) -> int:
-    return platform.process_spawn(command)
+    return externs.spawn(ffi.StringView(command))
 
 def wait(process: int) -> int:
-    return platform.process_wait(process)
+    return externs.wait(process)
 
 def kill(process: int) -> bool:
-    return platform.process_kill(process)
+    return externs.kill(process)
 
 def exit(status: int = 0):
-    platform.process_exit(status)
+    externs.exit(status)
+
+def native_handle(value: isize) -> ffi.Handle:
+    return ffi.Handle(value)
 
 def arguments() -> list[string]:
-    return platform.process_arguments()
+    output = ffi.OutHandle(0)
+    if externs.arguments(output) != 0:
+        return []
+    values := []
+    handle = native_handle(output.value)
+    length = externs.arguments_length(handle)
+    for index in range(length):
+        values.append(externs.arguments_at(handle, index))
+    externs.arguments_release(handle)
+    return values
 
 test "exit propagates status through an isolated child process":
     current = arguments()

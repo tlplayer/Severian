@@ -1,0 +1,16 @@
+import ffi
+
+unsafe:
+    extern("sev_abi_v1_math_pow") def pow(value: f64, exponent: f64) -> f64
+    extern("sev_abi_v1_math_exp") def exp(value: f64) -> f64
+    extern("sev_abi_v1_math_log") def log(value: f64) -> f64
+    extern("sev_abi_v1_math_log2") def log2(value: f64) -> f64
+    extern("sev_abi_v1_math_log10") def log10(value: f64) -> f64
+    extern("sev_abi_v1_math_sin") def sin(value: f64) -> f64
+    extern("sev_abi_v1_math_cos") def cos(value: f64) -> f64
+    extern("sev_abi_v1_math_tan") def tan(value: f64) -> f64
+    extern("sev_abi_v1_math_floor") def floor(value: f64) -> i64
+    extern("sev_abi_v1_math_ceil") def ceil(value: f64) -> i64
+    extern("sev_abi_v1_math_isfinite") def isfinite(value: f64) -> bool
+    extern("sev_abi_v1_math_isnan") def isnan(value: f64) -> bool
+    extern("sev_abi_v1_math_round") def round(value: f64, digits: i64) -> f64

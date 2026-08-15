@@ -214,3 +214,35 @@ fn lowering_cannot_implement_the_network_service() {
         .is_file());
     assert!(!workspace.join("compiler/platform/src/network.rs").exists());
 }
+
+#[test]
+fn migrated_library_services_do_not_return_to_the_compiler_bridge() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut sources = Vec::new();
+    for relative in ["compiler/lowering/src", "compiler/platform/src"] {
+        source_files_below(&workspace.join(relative), &mut sources);
+    }
+    for path in sources {
+        let source = std::fs::read_to_string(&path).unwrap();
+        for forbidden in [
+            "__sev_math_",
+            "__sev_random_",
+            "__sev_environment_",
+            "__sev_process_",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} must leave `{forbidden}` to its owning library package",
+                path.display(),
+            );
+        }
+    }
+    for provider in [
+        "library/math/native/math.c",
+        "library/random/native/random.c",
+        "library/environment/native/posix/environment.c",
+        "library/process/native/posix/process.c",
+    ] {
+        assert!(workspace.join(provider).is_file(), "missing {provider}");
+    }
+}

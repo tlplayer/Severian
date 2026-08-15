@@ -1,10 +1,10 @@
-import platform
+import math
 
 def sum[type](values: list[type]) -> type:
     return values.sum()
 
 def round(value: float, digits: int = 0) -> float:
-    return platform.math_round(value, digits)
+    return math.round(value, digits)
 
 def sorted[type](values: list[type], reverse: bool = false) -> list[type]:
     if reverse:

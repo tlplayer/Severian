@@ -18,8 +18,8 @@ The initial general-purpose surface is available through flat imports such as
 `core`, `list`, `set`, `string`, `math`, `random`, `file`, `path`,
 `json`, `regex`, `time`, `process`, `environment`, `http`, `network`, `tls`,
 and `tensor`. Collection APIs are typed and mutating operations act
-on the supplied collection; OS-backed behavior is implemented behind the
-trusted `platform` boundary.
+on the supplied collection; native behavior is implemented by the package that
+owns the public API and linked through the shared `ffi` boundary.
 
 Visualization is split into two layers: `graphics` owns explicit rendering
 targets and drawing primitives, while `plot` builds charts from lists, `Data`,
@@ -66,9 +66,13 @@ Each package is independently testable and documented:
 
 ```text
 library/math/
+├── native/
+│   ├── include/math_abi.h
+│   └── math.c
 ├── package.toml
 ├── README.md
 ├── src/
+│   ├── ffi.sev
 │   └── lib.sev
 └── tests/
 ```
@@ -83,9 +87,10 @@ groups packages by subject.
    control/result types only.
 2. Prefer one obvious package for a concept. Do not create both `net` and
    `network`, or `fs` and `file`.
-3. Put algorithms in Severian source when practical; use `platform` only for
-   capabilities that require the OS, native code, or a compiler intrinsic.
-4. A platform-backed API must have a typed public declaration, tests, and a
+3. Put algorithms in Severian source when practical. When a package needs the
+   host, keep its `ffi` declarations and native provider beside its public API;
+   reserve compiler implementations for language/runtime intrinsics.
+4. A native-backed API must have a typed public declaration, tests, and a
    documented failure model before it is stable.
 5. Security-sensitive implementations such as cryptography and TLS must wrap
    reviewed native providers; they must never begin as toy implementations.

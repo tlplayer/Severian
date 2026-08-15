@@ -37,3 +37,39 @@ fn embedded_network_package_contains_its_native_provider_assets() {
     assert!(paths.contains(&"native/include/network_abi.h"));
     assert!(paths.contains(&"native/posix/network.c"));
 }
+
+#[test]
+fn migrated_packages_embed_their_owned_native_providers() {
+    for (name, expected) in [
+        ("math", ["native/include/math_abi.h", "native/math.c"]),
+        (
+            "random",
+            ["native/include/random_abi.h", "native/random.c"],
+        ),
+        (
+            "environment",
+            [
+                "native/include/environment_abi.h",
+                "native/posix/environment.c",
+            ],
+        ),
+        (
+            "process",
+            [
+                "native/include/process_abi.h",
+                "native/posix/process.c",
+            ],
+        ),
+    ] {
+        let package = EMBEDDED_OFFICIAL_PACKAGES
+            .iter()
+            .find(|package| package.name == name)
+            .unwrap();
+        for expected in expected {
+            assert!(package
+                .native_assets
+                .iter()
+                .any(|asset| asset.path == expected));
+        }
+    }
+}
