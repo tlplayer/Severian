@@ -1,0 +1,14 @@
+flag := false
+#divisor will throw an exception on entry before value is set to 0.  
+def divide(value: f64, divisor: f64) -> f64 with
+{
+    divisor != 0 -> throw DividByZeroException("Passed arguement to divide cannot be zero!"),
+}:
+    flag = true
+    return value / divisor
+
+test:
+    try:
+        assert(divide(10.0, 2.0) == 5.0)
+    catch e:
+        assert(flag == false)
