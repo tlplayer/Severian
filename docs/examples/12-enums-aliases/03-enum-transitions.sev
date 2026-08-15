@@ -1,0 +1,9 @@
+
+enum Status:
+    Connecting -> Received | Failed
+    Received 
+    Failed
+
+test "Connecting cannot go to Received":
+    state := Received
+    state := 

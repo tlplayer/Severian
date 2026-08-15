@@ -14,5 +14,7 @@ def name(color: Color) -> string:
         Blue:
             return "blue"
 
+
 test:
     assert(name(Red) == "red")
+    assert(name(Blue) == "blue")
