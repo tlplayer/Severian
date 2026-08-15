@@ -40,11 +40,11 @@ class ProtoReader:
     def skip(wire: int):
         if wire == 0:
             _value = self.varint()
-        else if wire == 1:
+        elif wire == 1:
             _value = self.take(8)
-        else if wire == 2:
+        elif wire == 2:
             _value = self.bytes()
-        else if wire == 5:
+        elif wire == 5:
             _value = self.take(4)
         else:
             assert(false, "unsupported protobuf wire type")
@@ -93,7 +93,7 @@ def parse_dimension(data: list[int]) -> int:
         field, wire = reader.key()
         if field == 1:
             dimension = reader.varint()
-        else if field == 2:
+        elif field == 2:
             _symbol = reader.bytes()
             dimension = -1
         else:
@@ -125,7 +125,7 @@ def parse_type(data: list[int]) -> tuple[string, list[int]]:
             tensor_field, tensor_wire = tensor_reader.key()
             if tensor_field == 1:
                 dtype = onnx_dtype(tensor_reader.varint())
-            else if tensor_field == 2:
+            elif tensor_field == 2:
                 shape = parse_shape(tensor_reader.bytes())
             else:
                 tensor_reader.skip(tensor_wire)
@@ -140,7 +140,7 @@ def parse_value_info(data: list[int]) -> types.TensorValue:
         field, wire = reader.key()
         if field == 1:
             name = utf8(reader.bytes())
-        else if field == 2:
+        elif field == 2:
             dtype, shape = parse_type(reader.bytes())
         else:
             reader.skip(wire)
@@ -167,22 +167,22 @@ def parse_tensor(data: list[int]) -> types.TensorValue:
                 dimensions.extend(packed_varints(reader.bytes()))
             else:
                 dimensions.append(reader.varint())
-        else if field == 2:
+        elif field == 2:
             dtype_code = reader.varint()
-        else if field == 4:
+        elif field == 4:
             bytes = reader.take(4) if wire == 5 else reader.bytes()
             for offset in range(0, size(bytes), 4):
                 float_values.append(ieee_float(bytes[offset:offset + 4], 8, 23))
-        else if field in [5, 7, 11]:
+        elif field in [5, 7, 11]:
             if wire == 2:
                 integer_values.extend(packed_varints(reader.bytes()))
             else:
                 integer_values.append(reader.varint())
-        else if field == 8:
+        elif field == 8:
             name = utf8(reader.bytes())
-        else if field == 9:
+        elif field == 9:
             raw = reader.bytes()
-        else if field == 10:
+        elif field == 10:
             bytes = reader.take(8) if wire == 1 else reader.bytes()
             for offset in range(0, size(bytes), 8):
                 double_values.append(ieee_float(bytes[offset:offset + 8], 11, 52))
@@ -197,7 +197,7 @@ def parse_tensor(data: list[int]) -> types.TensorValue:
         for offset in range(0, size(raw), width):
             if dtype == "f32":
                 values.append(ieee_float(raw[offset:offset + 4], 8, 23))
-            else if dtype == "f64":
+            elif dtype == "f64":
                 values.append(ieee_float(raw[offset:offset + 8], 11, 52))
             else:
                 values.append(float(unsigned_le(raw[offset:offset + width])))
@@ -213,20 +213,20 @@ def parse_attribute(data: list[int]) -> tuple[string, Any]:
         field, wire = reader.key()
         if field == 1:
             name = utf8(reader.bytes())
-        else if field == 2:
+        elif field == 2:
             value = ieee_float(reader.take(4), 8, 23)
-        else if field == 3:
+        elif field == 3:
             value = reader.varint()
-        else if field == 4:
+        elif field == 4:
             value = utf8(reader.bytes())
-        else if field == 5:
+        elif field == 5:
             value = parse_tensor(reader.bytes())
-        else if field == 7:
+        elif field == 7:
             bytes = reader.bytes()
             for offset in range(0, size(bytes), 4):
                 floats.append(ieee_float(bytes[offset:offset + 4], 8, 23))
             value = floats
-        else if field == 8:
+        elif field == 8:
             integers = packed_varints(reader.bytes()) if wire == 2 else integers + [reader.varint()]
             value = integers
         else:
@@ -256,15 +256,15 @@ def parse_node(data: list[int], index: int) -> types.GraphNode:
         if field == 1:
             input_name: string = utf8(reader.bytes())
             inputs.append(input_name)
-        else if field == 2:
+        elif field == 2:
             output_name: string = utf8(reader.bytes())
             outputs.append(output_name)
-        else if field == 3:
+        elif field == 3:
             name = utf8(reader.bytes())
-        else if field == 4:
+        elif field == 4:
             operation_name: string = utf8(reader.bytes())
             operation = normalize_operation(operation_name)
-        else if field == 5:
+        elif field == 5:
             attribute_name, value = parse_attribute(reader.bytes())
             json.object_set(attributes, attribute_name, value)
         else:
@@ -282,13 +282,13 @@ def parse_graph(data: list[int]) -> types.ModelGraph:
         field, wire = reader.key()
         if field == 1:
             nodes.append(parse_node(reader.bytes(), size(nodes)))
-        else if field == 2:
+        elif field == 2:
             name = utf8(reader.bytes())
-        else if field == 5:
+        elif field == 5:
             initializers.append(parse_tensor(reader.bytes()))
-        else if field == 11:
+        elif field == 11:
             inputs.append(parse_value_info(reader.bytes()))
-        else if field == 12:
+        elif field == 12:
             outputs.append(parse_value_info(reader.bytes()).name)
         else:
             reader.skip(wire)

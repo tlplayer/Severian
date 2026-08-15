@@ -255,7 +255,7 @@ class NeuralNet:
         incoming := []
         if format == "safetensors" or format == "huggingface-safetensors":
             incoming = safetensors_importer.load_parameters(source)
-        else if format == "pytorch-state-dict":
+        elif format == "pytorch-state-dict":
             incoming = pytorch_importer.import_model(source).initializers
         else:
             return failure(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
@@ -275,7 +275,7 @@ class NeuralNet:
         incoming := []
         if format == "safetensors" or format == "huggingface-safetensors":
             incoming = safetensors_importer.load_parameters(source)
-        else if format == "pytorch-state-dict":
+        elif format == "pytorch-state-dict":
             incoming = pytorch_importer.import_model(source).initializers
         else:
             return failure(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
@@ -312,11 +312,11 @@ def load_graph(
     graph := types.ModelGraph("", [], [], [], [])
     if resolved.format == "onnx":
         graph = onnx_importer.import_model(resolved.local_path)
-    else if resolved.format == "keras":
+    elif resolved.format == "keras":
         graph = keras_importer.import_model(resolved.local_path)
-    else if resolved.format == "pytorch-state-dict":
+    elif resolved.format == "pytorch-state-dict":
         graph = pytorch_importer.import_model(resolved.local_path)
-    else if resolved.format in ["safetensors", "huggingface-safetensors"]:
+    elif resolved.format in ["safetensors", "huggingface-safetensors"]:
         graph = safetensors_importer.import_model(resolved.local_path)
     else:
         return failure(types.ModelLoadError("unsupported model import format: " + resolved.format))

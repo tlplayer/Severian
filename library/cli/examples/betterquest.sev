@@ -32,9 +32,9 @@ def main():
         ok matches:
             if matches.action != "run":
                 print(cli.response(application, matches))
-            else if matches.command == "generate":
+            elif matches.command == "generate":
                 print("generate", cli.values(matches, "model")[0], cli.values(matches, "output")[0])
-            else if matches.command == "inspect":
+            elif matches.command == "inspect":
                 print("inspect", cli.values(matches, "model")[0])
         failure error:
             print(cli.render_error(error))

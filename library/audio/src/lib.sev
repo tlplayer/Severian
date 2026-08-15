@@ -76,7 +76,7 @@ def read_wav(path: string) -> Result[Audio, IOError | AudioError]:
             channels = little_u_16(file_data, payload + 2)
             sample_rate = little_u_32(file_data, payload + 4)
             bits_per_sample = little_u_16(file_data, payload + 14)
-        else if chunk == "100:97:116:97":
+        elif chunk == "100:97:116:97":
             data_start = payload
             data_bytes = chunk_size
         cursor = payload + chunk_size + (chunk_size % 2)

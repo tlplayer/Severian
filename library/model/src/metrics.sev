@@ -16,9 +16,9 @@ def class_counts(expected: list[int], predicted: list[int], positive: int = 1) -
     for index in indices(expected):
         if predicted[index] == positive and expected[index] == positive:
             true_positive += 1
-        else if predicted[index] == positive:
+        elif predicted[index] == positive:
             false_positive += 1
-        else if expected[index] == positive:
+        elif expected[index] == positive:
             false_negative += 1
         else:
             true_negative += 1
@@ -98,7 +98,7 @@ def roc_auc(expected: list[int], probabilities: list[float]) -> float:
             negatives += 1
             if probabilities[left] > probabilities[right]:
                 favorable += 1.0
-            else if probabilities[left] == probabilities[right]:
+            elif probabilities[left] == probabilities[right]:
                 favorable += 0.5
     return favorable / float([1, positives * negatives].maximum())
 

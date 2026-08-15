@@ -275,7 +275,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> R
                     specification, "CLI012", "invalid integer `" + value + "` for `--" + item.name + "`",
                     "provide a whole number",
                 ))
-    else if item.kind == "float":
+    elif item.kind == "float":
         switch float.parse(value):
             ok _decimal:
                 return
@@ -370,10 +370,10 @@ def parse(specification: Command, input: list[string]) -> Result[Matches, CliErr
         if item.multiple:
             collected_arguments[item.name].extend(raw_arguments[argument_cursor:size(raw_arguments)])
             argument_cursor = size(raw_arguments)
-        else if argument_cursor < size(raw_arguments):
+        elif argument_cursor < size(raw_arguments):
             collected_arguments[item.name].append(raw_arguments[argument_cursor])
             argument_cursor += 1
-        else if item.required and action == "run":
+        elif item.required and action == "run":
             return failure(parse_error(selected, "CLI003", "missing required argument `<" + item.name.upper() + ">`"))
     if argument_cursor < size(raw_arguments):
         return failure(parse_error(selected, "CLI008", "unexpected argument `" + raw_arguments[argument_cursor] + "`"))
@@ -491,7 +491,7 @@ def check(specification: Command) -> CheckReport:
     for diagnostic in diagnostics:
         if diagnostic.level == "error":
             errors += 1
-        else if diagnostic.level == "warning":
+        elif diagnostic.level == "warning":
             warnings += 1
     return CheckReport(diagnostics, errors, warnings)
 

@@ -456,7 +456,7 @@ for index in range(size(values) - 1, -1, -1):
 ```
 
 Conditions use `else condition:` branches and also support chained comparisons,
-`in`, and `not in`. The Python-compatible `elif` and legacy `else if` spellings
+`in`, and `not in`. The Python-compatible `elif` and legacy `elif` spellings
 remain accepted with lint warnings during migration.
 
 ## Collections And Expressive Iteration

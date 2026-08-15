@@ -43,11 +43,11 @@ class LinearEstimator:
                 if task == "poisson":
                     predicted = math.exp([20.0, raw].minimum())
                     error = predicted - target
-                else if task == "quantile":
+                elif task == "quantile":
                     error = -quantile if target > raw else 1.0 - quantile
-                else if task == "robust":
+                elif task == "robust":
                     error = [-1.0, [1.0, error].minimum()].maximum()
-                else if task == "svm":
+                elif task == "svm":
                     label = 1.0 if target > 0.0 else -1.0
                     error = -label if label * raw < 1.0 else 0.0
                 for column in indices(weights):
@@ -69,9 +69,9 @@ class LinearEstimator:
             raw = dot(row, weights) + bias
             if task == "logistic":
                 output.append(1.0 if sigmoid(raw) >= 0.5 else 0.0)
-            else if task == "svm":
+            elif task == "svm":
                 output.append(1.0 if raw >= 0.0 else 0.0)
-            else if task == "poisson":
+            elif task == "poisson":
                 output.append(math.exp([20.0, raw].minimum()))
             else:
                 output.append(raw)

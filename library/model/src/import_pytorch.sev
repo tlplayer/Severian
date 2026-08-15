@@ -90,93 +90,93 @@ class RestrictedUnpickler:
             opcode = reader.u8()
             if opcode == 128:
                 _protocol = reader.u8()
-            else if opcode == 149:
+            elif opcode == 149:
                 _frame = reader.take(8)
-            else if opcode == 46:
+            elif opcode == 46:
                 return self.pop()                  # STOP
-            else if opcode == 40:
+            elif opcode == 40:
                 marks.append(size(stack))          # MARK
-            else if opcode == 78:
+            elif opcode == 78:
                 self.push(PickleValue("none"))     # NONE
-            else if opcode == 136:
+            elif opcode == 136:
                 self.push(PickleValue("bool", "", 1))
-            else if opcode == 137:
+            elif opcode == 137:
                 self.push(PickleValue("bool", "", 0))
-            else if opcode == 75:
+            elif opcode == 75:
                 self.push(PickleValue("int", "", reader.u8()))
-            else if opcode == 77:
+            elif opcode == 77:
                 self.push(PickleValue("int", "", reader.u16()))
-            else if opcode == 74:
+            elif opcode == 74:
                 self.push(PickleValue("int", "", signed_i32(reader.take(4))))
-            else if opcode == 138:
+            elif opcode == 138:
                 count = reader.u8()
                 self.push(PickleValue("int", "", little_integer(reader.take(count))))
-            else if opcode == 88:
+            elif opcode == 88:
                 self.push(self.unicode(reader.u32()))
-            else if opcode == 140:
+            elif opcode == 140:
                 self.push(self.unicode(reader.u8()))
-            else if opcode == 141:
+            elif opcode == 141:
                 self.push(self.unicode(little_integer(reader.take(8))))
-            else if opcode == 99:
+            elif opcode == 99:
                 module = self.line()
                 name = self.line()
                 self.push(self.allowed_global(module, name))
-            else if opcode == 147:
+            elif opcode == 147:
                 name = self.pop()
                 module = self.pop()
                 self.push(self.allowed_global(module.text, name.text))
-            else if opcode == 41:
+            elif opcode == 41:
                 self.push(self.tuple_value([]))
-            else if opcode == 116:
+            elif opcode == 116:
                 self.push(self.tuple_value(self.marked_items()))
-            else if opcode == 133:
+            elif opcode == 133:
                 self.push(self.tuple_value([self.pop()]))
-            else if opcode == 134:
+            elif opcode == 134:
                 right = self.pop()
                 left = self.pop()
                 self.push(self.tuple_value([left, right]))
-            else if opcode == 135:
+            elif opcode == 135:
                 third = self.pop()
                 second = self.pop()
                 first = self.pop()
                 self.push(self.tuple_value([first, second, third]))
-            else if opcode == 93:
+            elif opcode == 93:
                 self.push(PickleValue("list"))
-            else if opcode == 125:
+            elif opcode == 125:
                 self.push(PickleValue("dict"))
-            else if opcode == 101:
+            elif opcode == 101:
                 items = self.marked_items()
                 stack[size(stack) - 1].items.extend(items)
-            else if opcode == 97:
+            elif opcode == 97:
                 stack[size(stack) - 1].items.append(self.pop())
-            else if opcode == 115:
+            elif opcode == 115:
                 value = self.pop()
                 key = self.pop()
                 stack[size(stack) - 1].items.extend([key, value])
-            else if opcode == 117:
+            elif opcode == 117:
                 items = self.marked_items()
                 stack[size(stack) - 1].items.extend(items)
-            else if opcode == 82:
+            elif opcode == 82:
                 arguments = self.pop()
                 callable = self.pop()
                 self.push(self.reduce(callable, arguments))
-            else if opcode == 81:
+            elif opcode == 81:
                 self.push(self.persistent(self.pop()))
-            else if opcode == 98:
+            elif opcode == 98:
                 _state = self.pop()               # BUILD metadata only
-            else if opcode == 113:
+            elif opcode == 113:
                 self.memo_set(reader.u8(), stack[size(stack) - 1])
-            else if opcode == 114:
+            elif opcode == 114:
                 self.memo_set(reader.u32(), stack[size(stack) - 1])
-            else if opcode == 104:
+            elif opcode == 104:
                 self.push(memo[reader.u8()])
-            else if opcode == 106:
+            elif opcode == 106:
                 self.push(memo[reader.u32()])
-            else if opcode == 148:
+            elif opcode == 148:
                 memo.append(stack[size(stack) - 1])
-            else if opcode == 48:
+            elif opcode == 48:
                 _discarded = self.pop()
-            else if opcode == 49:
+            elif opcode == 49:
                 start = marks.pop()
                 while size(stack) > start:
                     _discarded = self.pop()
@@ -211,11 +211,11 @@ def decode_storage(data: list[int], dtype: string, offset: int, count: int) -> l
         bytes = data[start + index * width:start + (index + 1) * width]
         if dtype == "f32":
             output.append(ieee_float(bytes, 8, 23))
-        else if dtype == "f64":
+        elif dtype == "f64":
             output.append(ieee_float(bytes, 11, 52))
-        else if dtype == "f16":
+        elif dtype == "f16":
             output.append(ieee_float(bytes, 5, 10))
-        else if dtype == "bf16":
+        elif dtype == "bf16":
             output.append(ieee_float(bytes + [0, 0], 8, 23))
         else:
             output.append(float(little_integer(bytes)))

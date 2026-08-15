@@ -195,13 +195,13 @@ class Scheduler:
         position = optimizer.current_step()
         if warmup_steps > 0 and position < warmup_steps:
             optimizer.set_learning_rate(initial_rate * float(position + 1) / float(warmup_steps))
-        else if kind == "linear":
+        elif kind == "linear":
             optimizer.set_learning_rate(initial_rate * [0.0, 1.0 - float(position) / float([1, total_steps].maximum())].maximum())
-        else if kind == "cosine":
+        elif kind == "cosine":
             optimizer.set_learning_rate(initial_rate * 0.5 * (1.0 + math.cos(3.141592653589793 * float(position) / float([1, total_steps].maximum()))))
-        else if kind == "exponential":
+        elif kind == "exponential":
             optimizer.set_learning_rate(initial_rate * math.pow(gamma, float(position)))
-        else if kind == "plateau":
+        elif kind == "plateau":
             if metric < best:
                 best = metric
                 stale_steps = 0
