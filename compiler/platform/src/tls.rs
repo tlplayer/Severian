@@ -35,7 +35,8 @@ void *__sev_tls_read(void *handle_raw, int64_t count) {
 
 void *__sev_tls_write(void *handle_raw, void *bytes_raw) {
   sev_tls_handle *handle = handle_raw; unsigned char *buffer = NULL; size_t size = 0;
-  if (!handle || handle->closed || size > INT_MAX || !sev_buffer_from_bytes(bytes_raw, &buffer, &size)) return sev_failure("invalid TLS write");
+  if (!handle || handle->closed || !sev_buffer_from_bytes(bytes_raw, &buffer, &size)) return sev_failure("invalid TLS write");
+  if (size > INT_MAX) { free(buffer); return sev_failure("TLS write is too large"); }
   size_t offset = 0; while (offset < size) { int written = SSL_write(handle->stream, buffer + offset, (int)(size - offset)); if (written <= 0) { free(buffer); return sev_failure("TLS write failed"); } offset += (size_t)written; }
   free(buffer); return __sev_variant_new("ok", __sev_box_i64((int64_t)size));
 }
@@ -47,4 +48,18 @@ void *__sev_tls_close(void *handle_raw) {
   handle->closed = true; return __sev_variant_new("ok", NULL);
 }
 "#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source;
+
+    #[test]
+    fn tls_provider_verifies_chain_and_hostname() {
+        let source = source();
+        assert!(source.contains("SSL_CTX_set_default_verify_paths"));
+        assert!(source.contains("SSL_VERIFY_PEER"));
+        assert!(source.contains("X509_VERIFY_PARAM_set1_host"));
+        assert!(source.contains("SSL_get_verify_result"));
+    }
 }

@@ -7,6 +7,15 @@ typedef struct { int socket; bool closed; } sev_tcp_handle;
 typedef struct { int socket; bool closed; } sev_tcp_listener;
 typedef struct { int socket; bool closed; } sev_udp_handle;
 
+static bool sev_socket_write_all(int socket_fd, const char *data, size_t size) {
+  while (size) { ssize_t written = send(socket_fd, data, size, 0); if (written < 0 && errno == EINTR) continue; if (written <= 0) return false; data += written; size -= (size_t)written; }
+  return true;
+}
+static bool sev_socket_read_all(int socket_fd, char *data, size_t size) {
+  while (size) { ssize_t received = recv(socket_fd, data, size, 0); if (received < 0 && errno == EINTR) continue; if (received <= 0) return false; data += received; size -= (size_t)received; }
+  return true;
+}
+
 static void *sev_bytes_from_buffer(const unsigned char *buffer, size_t size) {
   sev_collection *result = __sev_collection_new(0);
   for (size_t index = 0; index < size; ++index)
@@ -241,4 +250,19 @@ void *__sev_network_loopback_echo(void *message_raw) {
   return __sev_variant_new("ok", __sev_box_string(buffer));
 }
 "#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source;
+
+    #[test]
+    fn network_provider_uses_hostname_and_dual_stack_resolution() {
+        let source = source();
+        assert!(source.contains("getaddrinfo"));
+        assert!(source.contains("AF_UNSPEC"));
+        assert!(source.contains("SO_RCVTIMEO"));
+        assert!(source.contains("SOCK_DGRAM"));
+        assert!(!source.contains("inet_pton"));
+    }
 }

@@ -15,9 +15,9 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Time and environment | `time`, `environment`, `process` | clock, environment, and process APIs experimental |
 | Concurrency | `sync`, `task`, `channel` | language/runtime design |
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
-| Networking | `network`, `http`, `url` | network and HTTP/1 client APIs experimental |
+| Networking | `network`, `tls`, `http`, `url` | dual-stack byte streams, verified TLS, and streaming HTTP/1.1 clients experimental |
 | Observability | `log`, `trace`, `metrics` | logging sinks experimental |
-| Security | `hash`, `crypto`, `tls` | `hash` native baseline implemented; provider policy required for cryptography |
+| Security | `hash`, `crypto` | `hash` native baseline implemented; general cryptography provider policy remains planned |
 | Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and native MariaDB/MySQL clients experimental |
 | Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
 | Operating systems | `os`, `kernel` | host filesystem metadata plus a hosted kernel laboratory experimental |

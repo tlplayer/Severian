@@ -1,25 +1,220 @@
+import io
 import platform
 
-def listen(address: string) -> Result[TCPListener, IOError]:
-    return platform.network_listen(address)
+class NetworkError:
+    message: string
+    code: int = -1
 
-def connect(address: string) -> Result[Any, IOError]:
-    return platform.network_connect(address)
+class Ip:
+    value: string
+    family: int
 
-def accept(listener: TCPListener) -> Result[Any, IOError]:
-    return platform.network_accept(listener)
+    def string() -> string:
+        return value
 
-def send(socket: Any, message: string) -> Result[int, IOError]:
-    return platform.network_send(socket, message)
+class Address:
+    host: string
+    port: int
 
-def receive(socket: Any, count: int = 4096) -> Result[string, IOError]:
-    return platform.network_receive(socket, count)
+    def display() -> string:
+        return "[" + host + "]:" + string(port) if host.contains(":") else host + ":" + string(port)
 
-def close(socket: Any) -> Result[unit, IOError]:
-    return platform.network_close(socket)
+def stream_failure(error: IOError) -> io.StreamError:
+    return io.StreamError(string(error))
+
+def network_failure(error: IOError) -> NetworkError:
+    return NetworkError(string(error))
+
+def parse_ip(value: string) -> Result[Ip, NetworkError]:
+    switch platform.network_parse_ip(value):
+        ok parsed:
+            normalized, family = parsed
+            return Ip(normalized, family)
+        failure error:
+            return failure(network_failure(error))
+
+class TcpConnection:
+    handle: platform.TcpHandle
+
+    def read(count: int) -> Result[list[int], io.StreamError]:
+        switch platform.network_read(handle, count):
+            ok data:
+                return data
+            failure error:
+                return failure(stream_failure(error))
+
+    def write(data: list[int]) -> Result[int, io.StreamError]:
+        switch platform.network_write(handle, data):
+            ok count:
+                return count
+            failure error:
+                return failure(stream_failure(error))
+
+    def close() -> Result[unit, io.StreamError]:
+        switch platform.network_close(handle):
+            ok _value:
+                return
+            failure error:
+                return failure(stream_failure(error))
+
+    def local_address() -> Result[Address, NetworkError]:
+        switch platform.network_local_host(handle):
+            failure error:
+                return failure(network_failure(error))
+            ok host:
+                switch platform.network_local_port(handle):
+                    ok port:
+                        return Address(host, port)
+                    failure error:
+                        return failure(network_failure(error))
+
+    def remote_address() -> Result[Address, NetworkError]:
+        switch platform.network_remote_host(handle):
+            failure error:
+                return failure(network_failure(error))
+            ok host:
+                switch platform.network_remote_port(handle):
+                    ok port:
+                        return Address(host, port)
+                    failure error:
+                        return failure(network_failure(error))
+
+    def set_read_timeout(milliseconds: int) -> Result[unit, NetworkError]:
+        switch platform.network_set_read_timeout(handle, milliseconds):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+    def set_write_timeout(milliseconds: int) -> Result[unit, NetworkError]:
+        switch platform.network_set_write_timeout(handle, milliseconds):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+    def set_keep_alive(enabled: bool) -> Result[unit, NetworkError]:
+        switch platform.network_set_keep_alive(handle, enabled):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+    def shutdown_read() -> Result[unit, NetworkError]:
+        switch platform.network_shutdown(handle, 0):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+    def shutdown_write() -> Result[unit, NetworkError]:
+        switch platform.network_shutdown(handle, 1):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+    def native_handle() -> platform.TcpHandle:
+        return handle
+
+class TcpListener:
+    handle: platform.TcpListenerHandle
+
+    def accept() -> Result[TcpConnection, NetworkError]:
+        switch platform.network_accept(handle):
+            ok connection:
+                return TcpConnection(connection)
+            failure error:
+                return failure(network_failure(error))
+
+    def local_address() -> Result[Address, NetworkError]:
+        switch platform.network_listener_host(handle):
+            failure error:
+                return failure(network_failure(error))
+            ok host:
+                switch platform.network_listener_port(handle):
+                    ok port:
+                        return Address(host, port)
+                    failure error:
+                        return failure(network_failure(error))
+
+    def close() -> Result[unit, NetworkError]:
+        switch platform.network_listener_close(handle):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+class Datagram:
+    data: list[int]
+    address: Address
+
+class UdpConnection:
+    handle: platform.UdpHandle
+
+    def send_to(data: list[int], host: string, port: int) -> Result[int, NetworkError]:
+        switch platform.udp_send_to(handle, data, host, port):
+            ok count:
+                return count
+            failure error:
+                return failure(network_failure(error))
+
+    def receive_from(count: int) -> Result[Datagram, NetworkError]:
+        switch platform.udp_receive_from(handle, count):
+            ok packet:
+                data, host, port = packet
+                return Datagram(data, Address(host, port))
+            failure error:
+                return failure(network_failure(error))
+
+    def close() -> Result[unit, NetworkError]:
+        switch platform.udp_close(handle):
+            ok _value:
+                return
+            failure error:
+                return failure(network_failure(error))
+
+def connect(host: string, port: int) -> Result[TcpConnection, NetworkError]:
+    switch platform.network_connect(host, port):
+        ok connection:
+            return TcpConnection(connection)
+        failure error:
+            return failure(network_failure(error))
+
+def listen(host: string, port: int) -> Result[TcpListener, NetworkError]:
+    switch platform.network_listen(host, port):
+        ok listener:
+            return TcpListener(listener)
+        failure error:
+            return failure(network_failure(error))
+
+def resolve(host: string) -> Result[list[Ip], NetworkError]:
+    switch platform.network_resolve(host):
+        ok values:
+            addresses := []
+            for value in values:
+                parsed = parse_ip(value)
+                addresses.append(parsed)
+            return addresses
+        failure error:
+            return failure(network_failure(error))
+
+def udp_bind(host: string, port: int) -> Result[UdpConnection, NetworkError]:
+    switch platform.udp_bind(host, port):
+        ok socket:
+            return UdpConnection(socket)
+        failure error:
+            return failure(network_failure(error))
 
 def loopback_echo(message: string) -> Result[string, IOError]:
     return platform.network_loopback_echo(message)
+
+test "IP and address values distinguish IPv4 and IPv6":
+    ipv4 = parse_ip("127.0.0.1")
+    ipv6 = parse_ip("::1")
+    assert(ipv4.family == 4)
+    assert(ipv6.family == 6)
+    assert(Address("::1", 443).display() == "[::1]:443")
 
 test with integration "native TCP loopback":
     switch loopback_echo("severian network runtime"):

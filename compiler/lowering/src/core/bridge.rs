@@ -1317,201 +1317,11 @@ void __sev_log_error(void *message, void *cause) {
   }
 }
 
-typedef struct { int socket; } sev_tcp_listener;
-
-static bool sev_socket_write_all(int socket_fd, const char *data, size_t size) {
-  while (size) {
-    ssize_t written = send(socket_fd, data, size, 0);
-    if (written <= 0) return false;
-    data += written;
-    size -= (size_t)written;
-  }
-  return true;
-}
-
-static bool sev_socket_read_all(int socket_fd, char *data, size_t size) {
-  while (size) {
-    ssize_t received = recv(socket_fd, data, size, 0);
-    if (received <= 0) return false;
-    data += received;
-    size -= (size_t)received;
-  }
-  return true;
-}
-
-void *__sev_network_listen(void *address_raw) {
-  const char *address = address_raw;
-  const char *colon = strrchr(address, ':');
-  if (!colon) return sev_failure("network address requires a port");
-  char host[64];
-  size_t host_size = (size_t)(colon - address);
-  if (host_size == 0 || host_size >= sizeof(host)) return sev_failure("invalid network host");
-  memcpy(host, address, host_size);
-  host[host_size] = '\0';
-  char *port_end = NULL;
-  long port = strtol(colon + 1, &port_end, 10);
-  if (*port_end || port < 0 || port > 65535) return sev_failure("invalid network port");
-  int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (socket_fd < 0) return sev_failure("could not create listener");
-  int reuse = 1;
-  setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-  struct sockaddr_in endpoint = {0};
-  endpoint.sin_family = AF_INET;
-  endpoint.sin_port = htons((uint16_t)port);
-  if (inet_pton(AF_INET, host, &endpoint.sin_addr) != 1 ||
-      bind(socket_fd, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 ||
-      syscall(SYS_listen, socket_fd, 16) != 0) {
-    close(socket_fd);
-    return sev_failure("could not bind listener");
-  }
-  sev_tcp_listener *listener = sev_allocate(sizeof(*listener));
-  listener->socket = socket_fd;
-  return __sev_variant_new("ok", listener);
-}
-
-void *__sev_network_loopback_echo(void *message_raw) {
-  const char *message = message_raw;
-  int server = socket(AF_INET, SOCK_STREAM, 0);
-  if (server < 0) return sev_failure("could not create loopback server");
-  struct sockaddr_in endpoint = {0};
-  endpoint.sin_family = AF_INET;
-  endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(server, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0 || syscall(SYS_listen, server, 1) != 0) {
-    close(server);
-    return sev_failure("could not bind loopback server");
-  }
-  socklen_t endpoint_size = sizeof(endpoint);
-  if (getsockname(server, (struct sockaddr *)&endpoint, &endpoint_size) != 0) {
-    close(server);
-    return sev_failure("could not inspect loopback server");
-  }
-  int client = socket(AF_INET, SOCK_STREAM, 0);
-  if (client < 0 || connect(client, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0) {
-    if (client >= 0) close(client);
-    close(server);
-    return sev_failure("could not connect loopback client");
-  }
-  int peer = accept(server, NULL, NULL);
-  if (peer < 0) { close(client); close(server); return sev_failure("could not accept loopback client"); }
-  size_t size = strlen(message);
-  char *buffer = sev_allocate(size + 1);
-  bool success = sev_socket_write_all(client, message, size) &&
-                 sev_socket_read_all(peer, buffer, size) &&
-                 sev_socket_write_all(peer, buffer, size) &&
-                 sev_socket_read_all(client, buffer, size);
-  close(peer);
-  close(client);
-  close(server);
-  if (!success) return sev_failure("loopback transfer failed");
-  buffer[size] = '\0';
-  return __sev_variant_new("ok", __sev_box_string(buffer));
-}
-
-static bool sev_parse_endpoint(const char *address, struct sockaddr_in *endpoint) {
-  const char *colon = strrchr(address, ':');
-  if (!colon) return false;
-  char host[64]; size_t host_size = (size_t)(colon - address);
-  if (host_size == 0 || host_size >= sizeof(host)) return false;
-  memcpy(host, address, host_size); host[host_size] = '\0';
-  char *end = NULL; long port = strtol(colon + 1, &end, 10);
-  if (*end || port < 0 || port > 65535) return false;
-  memset(endpoint, 0, sizeof(*endpoint)); endpoint->sin_family = AF_INET; endpoint->sin_port = htons((uint16_t)port);
-  return inet_pton(AF_INET, host, &endpoint->sin_addr) == 1;
-}
-
-void *__sev_network_connect(void *address_raw) {
-  struct sockaddr_in endpoint; if (!sev_parse_endpoint(address_raw, &endpoint)) return sev_failure("invalid network address");
-  int descriptor = socket(AF_INET, SOCK_STREAM, 0);
-  if (descriptor < 0 || connect(descriptor, (struct sockaddr *)&endpoint, sizeof(endpoint)) != 0) { if (descriptor >= 0) close(descriptor); return sev_failure("could not connect"); }
-  int *handle = sev_allocate(sizeof(*handle)); *handle = descriptor; return __sev_variant_new("ok", handle);
-}
-
-void *__sev_network_accept(void *listener_raw) {
-  sev_tcp_listener *listener = listener_raw; if (!listener) return sev_failure("invalid listener");
-  int descriptor = accept(listener->socket, NULL, NULL); if (descriptor < 0) return sev_failure("could not accept connection");
-  int *handle = sev_allocate(sizeof(*handle)); *handle = descriptor; return __sev_variant_new("ok", handle);
-}
-
-void *__sev_network_send(void *socket_raw, void *message_raw) {
-  int *descriptor = socket_raw; if (!descriptor) return sev_failure("invalid socket");
-  size_t size = strlen(message_raw); if (!sev_socket_write_all(*descriptor, message_raw, size)) return sev_failure("could not send");
-  return __sev_variant_new("ok", __sev_box_i64((int64_t)size));
-}
-
-void *__sev_network_receive(void *socket_raw, int64_t count) {
-  int *descriptor = socket_raw; if (!descriptor || count < 0) return sev_failure("invalid receive");
-  char *buffer = sev_allocate((size_t)count + 1); ssize_t received = recv(*descriptor, buffer, (size_t)count, 0);
-  if (received < 0) return sev_failure("could not receive"); buffer[received] = '\0'; return __sev_variant_new("ok", __sev_box_string(buffer));
-}
-
-void *__sev_network_close(void *socket_raw) {
-  int *descriptor = socket_raw; if (!descriptor || close(*descriptor) != 0) return sev_failure("could not close socket"); return __sev_variant_new("ok", NULL);
-}
-
 int64_t __sev_process_run(void *command_raw) { int status = system(command_raw); return status < 0 ? -1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
 int64_t __sev_process_spawn(void *command_raw) { pid_t child = fork(); if (child == 0) { execl("/bin/sh", "sh", "-c", (char *)command_raw, NULL); _exit(127); } return (int64_t)child; }
 int64_t __sev_process_wait(int64_t process) { int status = 0; if (waitpid((pid_t)process, &status, 0) < 0) return -1; return WIFEXITED(status) ? WEXITSTATUS(status) : 128; }
 bool __sev_process_kill(int64_t process) { return kill((pid_t)process, SIGTERM) == 0; }
 void __sev_process_exit(int64_t status) { exit((int)status); }
-
-void *__sev_http_request(void *method_raw, void *url_raw, void *body_raw) {
-  (void)body_raw;
-  const char *method = method_raw; const char *requested_url = url_raw;
-  if (strncmp(requested_url, "https://", 8) == 0) {
-    if (strcmp(method, "GET") != 0) return sev_failure("HTTPS runtime currently supports GET requests");
-    int output[2]; if (pipe(output) != 0) return sev_failure("could not create HTTPS response pipe");
-    pid_t child = fork();
-    if (child == 0) {
-      close(output[0]);
-      if (dup2(output[1], STDOUT_FILENO) < 0) _exit(126);
-      close(output[1]);
-      execlp("curl", "curl", "--silent", "--show-error", "--fail", "--location",
-             "--proto", "=https", "--tlsv1.2", requested_url, (char *)NULL);
-      _exit(127);
-    }
-    close(output[1]);
-    if (child < 0) { close(output[0]); return sev_failure("could not start HTTPS client"); }
-    size_t capacity = 8192, used = 0; char *response = sev_allocate(capacity); ssize_t received;
-    while ((received = read(output[0], response + used, capacity - used - 1)) > 0) {
-      used += (size_t)received;
-      if (capacity - used < 2) { capacity *= 2; response = realloc(response, capacity); if (!response) abort(); }
-    }
-    close(output[0]);
-    int status = 0; if (waitpid(child, &status, 0) < 0 || received < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
-      return sev_failure("HTTPS request failed");
-    response[used] = '\0';
-    return __sev_variant_new("ok", __sev_box_string(response));
-  }
-  const char *url = url_raw; const char *prefix = "http://";
-  if (strncmp(url, prefix, strlen(prefix)) != 0) return sev_failure("only http:// URLs are supported");
-  const char *authority = url + strlen(prefix); const char *slash = strchr(authority, '/');
-  const char *path = slash ? slash : "/"; size_t authority_size = slash ? (size_t)(slash - authority) : strlen(authority);
-  char endpoint[320]; if (authority_size + 4 >= sizeof(endpoint)) return sev_failure("HTTP authority is too long");
-  memcpy(endpoint, authority, authority_size); endpoint[authority_size] = '\0'; if (!strchr(endpoint, ':')) strcat(endpoint, ":80");
-  void *connected = __sev_network_connect(endpoint); sev_variant *variant = connected; if (!variant || strcmp(variant->tag, "ok") != 0) return connected;
-  int *socket_handle = (int *)(void *)variant->field; char request[4096]; int request_size = snprintf(request, sizeof(request), "%s %s HTTP/1.0\r\nHost: %.*s\r\nConnection: close\r\n\r\n", (char *)method_raw, path, (int)authority_size, authority);
-  if (request_size <= 0 || !sev_socket_write_all(*socket_handle, request, (size_t)request_size)) { close(*socket_handle); return sev_failure("HTTP send failed"); }
-  size_t capacity = 8192, used = 0; char *response = sev_allocate(capacity); ssize_t received;
-  while ((received = recv(*socket_handle, response + used, capacity - used - 1, 0)) > 0) { used += (size_t)received; if (capacity - used < 2) { capacity *= 2; response = realloc(response, capacity); if (!response) abort(); } }
-  close(*socket_handle); if (received < 0) return sev_failure("HTTP receive failed"); response[used] = '\0'; char *body = strstr(response, "\r\n\r\n"); return __sev_variant_new("ok", __sev_box_string(body ? body + 4 : response));
-}
-
-void *__sev_https_download(void *url_raw, void *destination_raw) {
-  const char *url = url_raw; const char *destination = destination_raw;
-  if (strncmp(url, "https://", 8) != 0 || !destination || !*destination)
-    return sev_failure("downloads require an HTTPS URL and destination");
-  pid_t child = fork();
-  if (child == 0) {
-    execlp("curl", "curl", "--silent", "--show-error", "--fail", "--location",
-           "--proto", "=https", "--tlsv1.2", "--output", destination, url, (char *)NULL);
-    _exit(127);
-  }
-  if (child < 0) return sev_failure("could not start HTTPS download");
-  int status = 0;
-  if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
-    return sev_failure("HTTPS download failed");
-  return __sev_variant_new("ok", NULL);
-}
 
 bool __sev_regex_matches(void *text_raw, void *pattern_raw) {
   regex_t expression;
@@ -1615,6 +1425,34 @@ int64_t __sev_host_page_size(void) {
 
 "#,
     );
+    let uses_http = program.functions.iter().any(|function| {
+        function
+            .native_symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.starts_with("__sev_http_"))
+    });
+    let uses_tls = uses_http
+        || program.functions.iter().any(|function| {
+            function
+                .native_symbol
+                .as_deref()
+                .is_some_and(|symbol| symbol.starts_with("__sev_tls_"))
+        });
+    let uses_network = uses_tls
+        || program.functions.iter().any(|function| {
+            function.native_symbol.as_deref().is_some_and(|symbol| {
+                symbol.starts_with("__sev_network_") || symbol.starts_with("__sev_udp_")
+            })
+        });
+    if uses_network {
+        source.push_str(severian_platform::network_source());
+    }
+    if uses_tls {
+        source.push_str(severian_platform::tls_source());
+    }
+    if uses_http {
+        source.push_str(severian_platform::http_source());
+    }
     if program.functions.iter().any(|function| {
         function
             .native_symbol

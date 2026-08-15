@@ -1,11 +1,22 @@
-# network
+# Network
 
-The public networking package. The name is deliberately `network`, not `net`.
+`network` exposes typed, byte-oriented TCP and UDP connections. Hostnames are
+resolved with the host resolver across IPv4 and IPv6; operating-system socket
+descriptors remain opaque behind `platform` handles.
 
-This package owns connection, listener, address, and socket APIs while the
-explicit `platform` package owns OS handles and syscalls. Native binding and
-loopback echo are compile-link-execute tested. Rich connection handles,
-ownership, TLS, timeouts, and lifecycle APIs remain future work.
+```sev
+import network
 
-`loopback_echo(message)` is the canonical deterministic native transport probe.
-The older `loopbackEcho` spelling remains a temporary compatibility alias.
+connection = network.connect("example.com", 80)
+_written = connection.write([71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10])
+response = connection.read(4096)
+_closed = connection.close()
+```
+
+`TcpConnection.read`, `write`, and `close` match `io.Reader`, `io.Writer`, and
+`io.Closer`. `resolve` and `parse_ip` expose normalized addresses. Listeners,
+timeouts, keep-alive, half-close, UDP datagrams, and local/remote address
+inspection use the same typed error boundary.
+
+Networking transports bytes. Text encoding and protocol framing belong to
+higher layers such as `tls` and `http`.

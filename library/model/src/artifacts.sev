@@ -87,7 +87,7 @@ def download_verified(url: string, destination: string, expected_sha256: string)
         return verify(destination, expected_sha256)
     _directory = platform.directory_make_all(path.dirname(destination))
     temporary = destination + ".partial"
-    _downloaded = platform.https_download(url, temporary)
+    _downloaded = http.download(url, temporary)
     digest = sha256_file(temporary)
     if not expected_sha256.is_empty() and digest.lower() != expected_sha256.lower():
         return failure(types.ModelLoadError("downloaded artifact SHA-256 mismatch"))

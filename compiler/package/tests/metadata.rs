@@ -54,6 +54,7 @@ fn loads_only_reachable_official_interfaces() {
             "path",
             "platform",
             "regex",
+            "src.expression",
             "src.file_binary",
             "src.file_csv",
             "src.file_interface",
@@ -62,6 +63,9 @@ fn loads_only_reachable_official_interfaces() {
             "src.file_text",
             "src.file_wav",
             "src.file_yaml",
+            "src.query",
+            "src.schema",
+            "src.sql",
             "tensor",
             "yaml",
         ]

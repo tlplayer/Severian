@@ -1,14 +1,15 @@
 [package]
-name = "network"
+name = "tls"
 version = "0.1.0"
 edition = "2026"
-description = "Ownership-safe networking"
+description = "Certificate-verified TLS streams"
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
 io = { path = "../io", version = "0.1.0" }
+network = { path = "../network", version = "0.1.0" }
 platform = { path = "../platform", version = "0.1.0" }
 
 [package.metadata.library]

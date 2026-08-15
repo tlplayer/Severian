@@ -69,6 +69,11 @@ pub fn compile_native(
             .as_deref()
             .is_some_and(|symbol| symbol.starts_with("__sev_mysql_"))
     });
+    let uses_tls = program.functions.iter().any(|function| {
+        function.native_symbol.as_deref().is_some_and(|symbol| {
+            symbol.starts_with("__sev_tls_") || symbol.starts_with("__sev_http_")
+        })
+    });
     let uses_xla = program.uses_xla_runtime();
     let mut libraries = Vec::new();
     if uses_xla {
@@ -104,6 +109,10 @@ pub fn compile_native(
     ];
     if uses_mysql {
         additional_arguments.push(OsString::from("-lmariadb"));
+    }
+    if uses_tls {
+        additional_arguments.push(OsString::from("-lssl"));
+        additional_arguments.push(OsString::from("-lcrypto"));
     }
     if !sanitizer_names.is_empty() {
         additional_arguments.extend([

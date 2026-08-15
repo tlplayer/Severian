@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
 mod database;
+mod http;
 mod model_graph;
 mod mysql;
+mod network;
 mod safetensors;
 mod tensor;
+mod tls;
 
 pub mod cpu;
 pub mod gpu;
@@ -21,6 +24,18 @@ pub fn database_source() -> &'static str {
 
 pub fn mysql_source() -> &'static str {
     mysql::source()
+}
+
+pub fn network_source() -> &'static str {
+    network::source()
+}
+
+pub fn tls_source() -> &'static str {
+    tls::source()
+}
+
+pub fn http_source() -> &'static str {
+    http::source()
 }
 
 /// Existing platform runtime source surface.
