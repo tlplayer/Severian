@@ -55,7 +55,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_addition()?;
+        let mut left = self.parse_bit_or()?;
         let mut chain: Option<Expr> = None;
         loop {
             let negated_membership = self.at(&TokenKind::Not) && self.peek_kind(1, &TokenKind::In);
@@ -77,7 +77,7 @@ impl Parser<'_> {
                 None
             };
             let Some(op) = op else { break };
-            let right = self.parse_addition()?;
+            let right = self.parse_bit_or()?;
             let comparison = binary(left, op, right.clone());
             let comparison = if negated_membership {
                 let span = comparison.span();
@@ -96,6 +96,30 @@ impl Parser<'_> {
             left = right;
         }
         Ok(chain.unwrap_or(left))
+    }
+
+    pub(super) fn parse_bit_or(&mut self) -> Result<Expr, ParseError> {
+        let mut expression = self.parse_bit_xor()?;
+        while self.take_simple(&TokenKind::Pipe).is_some() {
+            expression = binary(expression, BinaryOp::BitOr, self.parse_bit_xor()?);
+        }
+        Ok(expression)
+    }
+
+    pub(super) fn parse_bit_xor(&mut self) -> Result<Expr, ParseError> {
+        let mut expression = self.parse_bit_and()?;
+        while self.take_simple(&TokenKind::Caret).is_some() {
+            expression = binary(expression, BinaryOp::BitXor, self.parse_bit_and()?);
+        }
+        Ok(expression)
+    }
+
+    pub(super) fn parse_bit_and(&mut self) -> Result<Expr, ParseError> {
+        let mut expression = self.parse_addition()?;
+        while self.take_simple(&TokenKind::Ampersand).is_some() {
+            expression = binary(expression, BinaryOp::BitAnd, self.parse_addition()?);
+        }
+        Ok(expression)
     }
 
     pub(super) fn parse_addition(&mut self) -> Result<Expr, ParseError> {
@@ -122,8 +146,6 @@ impl Parser<'_> {
             } else if matches!(&self.peek().kind, TokenKind::Identifier(name) if name == "X") {
                 self.advance();
                 Some(BinaryOp::MatMul)
-            } else if self.take_simple(&TokenKind::Caret).is_some() {
-                Some(BinaryOp::Cross)
             } else if self.take_simple(&TokenKind::Slash).is_some() {
                 Some(BinaryOp::Div)
             } else if self.take_simple(&TokenKind::Percent).is_some() {

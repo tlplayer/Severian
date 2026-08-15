@@ -119,6 +119,7 @@ fn collect_item_types(item: &Item, output: &mut Vec<Type>) {
             }
         }
         Item::Trait(declaration) => {
+            output.extend(declaration.composed_traits.iter().cloned());
             for method in &declaration.methods {
                 output.extend(
                     method
@@ -127,6 +128,15 @@ fn collect_item_types(item: &Item, output: &mut Vec<Type>) {
                         .filter_map(|parameter| parameter.ty.clone()),
                 );
                 output.extend(method.return_type.clone());
+            }
+            for operator in &declaration.operators {
+                output.extend(
+                    operator
+                        .params
+                        .iter()
+                        .filter_map(|parameter| parameter.ty.clone()),
+                );
+                output.extend(operator.return_type.clone());
             }
         }
         Item::Enum(enumeration) => {

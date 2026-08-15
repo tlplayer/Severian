@@ -317,6 +317,8 @@ impl Parser<'_> {
                         TokenKind::Identifier(value) => value,
                         TokenKind::Star => "*".into(),
                         TokenKind::Caret => "^".into(),
+                        TokenKind::Pipe => "|".into(),
+                        TokenKind::Ampersand => "&".into(),
                         TokenKind::Plus => "+".into(),
                         TokenKind::Minus => "-".into(),
                         TokenKind::Slash => "/".into(),

@@ -202,6 +202,42 @@ fn lowers_boolean_and_with_short_circuit_control_flow() {
 }
 
 #[test]
+fn lowers_integer_bit_algebra_to_eager_integer_instructions() {
+    let expression = |op| Expression::Binary {
+        left: Box::new(Expression::Integer(6)),
+        op,
+        right: Box::new(Expression::Integer(3)),
+    };
+    let program = Program {
+        metadata: Default::default(),
+        globals: vec![],
+        classes: vec![],
+        functions: vec![Function {
+            id: FunctionId::from_name("main"),
+            name: "main".into(),
+            native_symbol: None,
+            decorators: vec![],
+            contract: None,
+            params: vec![],
+            return_type: ValueType::Unit,
+            instructions: vec![
+                Instruction::Print(expression(BinaryOp::BitOr)),
+                Instruction::Print(expression(BinaryOp::BitXor)),
+                Instruction::Print(expression(BinaryOp::BitAnd)),
+            ],
+            tests: vec![],
+        }],
+    };
+
+    let lowered = severian_lowering::lower(&severian_mir::lower(&program).unwrap());
+    let text = lowered.as_str();
+    assert!(text.contains(" = llvm.or "));
+    assert!(text.contains(" = llvm.xor "));
+    assert!(text.contains(" = llvm.and "));
+    assert!(!text.contains("llvm.cond_br"));
+}
+
+#[test]
 fn lowers_conditional_expressions_to_lazy_control_flow() {
     let program = Program {
         metadata: Default::default(),

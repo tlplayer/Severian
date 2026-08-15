@@ -19,6 +19,7 @@ fn requested_standard_library_surface_executes_natively() {
     std::fs::write(
         &source,
         r#"import core
+import bits
 import list
 import collections
 import set
@@ -33,6 +34,10 @@ import time
 import process
 import environment
 import tensor
+
+@bits(|, &, ^)
+def combine_bits(left: int, right: int) -> int:
+    return (left | right) ^ (left & right)
 
 def main():
     numbers := [3, 1, 2]
@@ -64,6 +69,10 @@ def main():
     assert(numbers.bits() == numbers.bytes() * 8)
     assert(capacity(numbers) >= len(numbers))
     assert(core.sum(numbers) == 6)
+    assert(bits.bit_or(5, 3) == 7)
+    assert(bits.bit_and(6, 3) == 2)
+    assert(bits.bit_xor(5, 3) == 6)
+    assert(combine_bits(5, 3) == 6)
     assert(string.strip("  Severian  ") == "Severian")
     assert("severian".starts_with("sev"))
     assert("severian".ends_with("ian"))
@@ -323,6 +332,7 @@ fn all_requested_packages_are_workspace_members() {
     let manifest = std::fs::read_to_string(workspace).unwrap();
     for package in [
         "core",
+        "bits",
         "list",
         "collections",
         "set",

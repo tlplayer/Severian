@@ -174,11 +174,19 @@ fn first_inferred_declaration(module: &Module) -> Option<(Span, &str, &'static s
                 }
             }
             Item::Trait(declaration) => {
-                for method in &declaration.methods {
-                    if let Some(parameter) = method
-                        .params
-                        .iter()
-                        .find(|parameter| parameter.ty.is_none())
+                for parameters in declaration
+                    .methods
+                    .iter()
+                    .map(|method| &method.params)
+                    .chain(
+                        declaration
+                            .operators
+                            .iter()
+                            .map(|operator| &operator.params),
+                    )
+                {
+                    if let Some(parameter) =
+                        parameters.iter().find(|parameter| parameter.ty.is_none())
                     {
                         return Some((parameter.name.span, &parameter.name.name, "parameter"));
                     }

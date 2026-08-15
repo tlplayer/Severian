@@ -2,9 +2,10 @@ trait Named:
     name() -> string
 
 trait Drawable:
+    Named
     draw()
 
-class Button: Named, Drawable
+class Button: Drawable
     label: string
 
     def name() -> string:
@@ -14,6 +15,7 @@ class Button: Named, Drawable
         print(label)
 
 def render(item: Drawable):
+    print(item.name())
     item.draw()
 
 def main():

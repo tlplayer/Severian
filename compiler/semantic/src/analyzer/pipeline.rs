@@ -29,8 +29,9 @@ pub fn analyze_with_packages(
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
     validate_explicit_self_parameters(module)?;
-    let module = specialize_generic_classes_with_interfaces(module, interfaces)?;
-    analyze_specialized(&module, interfaces)
+    let (module, interfaces) = expand_trait_compositions(module, interfaces)?;
+    let module = specialize_generic_classes_with_interfaces(&module, &interfaces)?;
+    analyze_specialized(&module, &interfaces)
 }
 
 fn analyze_specialized(
@@ -735,6 +736,9 @@ fn validate_explicit_self_parameters(module: &Module) -> Result<(), SemanticErro
             Item::Trait(declaration) => {
                 for method in &declaration.methods {
                     validate_no_explicit_self_parameter(&method.params)?;
+                }
+                for operator in &declaration.operators {
+                    validate_no_explicit_self_parameter(&operator.params)?;
                 }
             }
             Item::Enum(_) | Item::Import(_) | Item::Statement(_) => {}

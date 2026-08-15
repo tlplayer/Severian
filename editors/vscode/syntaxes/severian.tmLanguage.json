@@ -154,7 +154,7 @@
               "name": "constant.other.decorator-symbol.severian"
             },
             {
-              "match": "[+\\-*/%^]",
+              "match": "[+\\-*/%^|&]",
               "name": "keyword.operator.decorator.severian"
             },
             { "include": "#punctuation" }
@@ -165,7 +165,7 @@
     "native-declarations": {
       "patterns": [
         {
-          "match": "\\b(native)\\b",
+          "match": "\\b(extern)\\b",
           "captures": {
             "1": { "name": "storage.modifier.native.severian" }
           }
@@ -236,7 +236,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(if|elif|else|while|for|in|switch|match|case|when|return|throw|break|continue|unsafe|defer)\\b",
+          "match": "\\b(if|elif|else|while|for|in|switch|match|case|when|return|throw|break|continue|unsafe|defer|operator)\\b",
           "name": "keyword.control.severian"
         },
         {

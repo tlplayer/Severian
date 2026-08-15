@@ -744,6 +744,177 @@ fn requires_classes_to_implement_their_declared_traits() {
 }
 
 #[test]
+fn composed_trait_contracts_are_implicit_generic_and_transitive() {
+    let source = concat!(
+        "trait Bits[T]:\n",
+        "    operator |(a: T, b: T) -> T\n",
+        "    operator &(a: T, b: T) -> T\n",
+        "    operator ^(a: T, b: T) -> T\n",
+        "\n",
+        "trait Flags[T]:\n",
+        "    Bits[T]\n",
+        "    def enabled(flag: T) -> bool\n",
+        "\n",
+        "trait Register[T]:\n",
+        "    Flags[T]\n",
+        "    def read() -> T\n",
+        "    def write(value: T)\n",
+        "\n",
+        "class IntegerRegister: Register[int]\n",
+        "    def enabled(flag: int) -> bool:\n",
+        "        return flag != 0\n",
+        "\n",
+        "    def read() -> int:\n",
+        "        return 0\n",
+        "\n",
+        "    def write(value: int):\n",
+        "        print(value)\n",
+        "\n",
+        "def is_enabled(register: Register[int], flag: int) -> bool:\n",
+        "    return register.enabled(flag)\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+
+    let missing = source.replace(
+        "    def enabled(flag: int) -> bool:\n        return flag != 0\n\n",
+        "",
+    );
+    let ast = parse(&lex(&missing).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains(
+        "class `IntegerRegister` does not implement `enabled` required by trait `Register`"
+    ));
+}
+
+#[test]
+fn trait_composition_rejects_cycles_unknown_traits_and_conflicts() {
+    let cycle = concat!(
+        "trait First:\n",
+        "    Second\n",
+        "    first()\n",
+        "\n",
+        "trait Second:\n",
+        "    First\n",
+        "    second()\n",
+    );
+    let ast = parse(&lex(cycle).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error.message.contains("trait composition cycle"));
+
+    let unknown = "trait Broken:\n    Missing\n    value() -> int\n";
+    let ast = parse(&lex(unknown).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("unknown trait `Missing` composed by `Broken`"));
+
+    let conflict = concat!(
+        "trait TextValue:\n",
+        "    value() -> string\n",
+        "\n",
+        "trait IntegerValue:\n",
+        "    value() -> int\n",
+        "\n",
+        "trait Broken:\n",
+        "    TextValue\n",
+        "    IntegerValue\n",
+    );
+    let ast = parse(&lex(conflict).unwrap()).unwrap();
+    let error = analyze(&ast).unwrap_err();
+    assert!(error
+        .message
+        .contains("composes conflicting requirements for `value`"));
+}
+
+#[test]
+fn integer_bits_resolve_automatically_and_decorators_limit_the_symbol_subset() {
+    let automatic = concat!(
+        "def combine(left: int, right: int) -> int:\n",
+        "    return (left | right) ^ (left & right)\n",
+        "\n",
+        "def logic(left: bool, right: bool) -> bool:\n",
+        "    return left and not right or right\n",
+    );
+    let ast = parse(&lex(automatic).unwrap()).unwrap();
+    let program = analyze(&ast).unwrap();
+    let Instruction::Return(Some(value)) = &program.functions[0].instructions[0] else {
+        panic!("expected bitwise return");
+    };
+    assert_eq!(value.ty(), Some(ValueType::Int));
+
+    let bits_interface = parse(
+        &lex(concat!(
+            "trait Bits[T]:\n",
+            "    operator |(a: T, b: T) -> T\n",
+            "    operator &(a: T, b: T) -> T\n",
+            "    operator ^(a: T, b: T) -> T\n",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let isolated = concat!(
+        "import bits\n",
+        "\n",
+        "@bits(|)\n",
+        "def combine(left: int, right: int) -> int:\n",
+        "    return left ^ right\n",
+    );
+    let ast = parse(&lex(isolated).unwrap()).unwrap();
+    let error = analyze_with_interfaces(&ast, &[("bits".into(), bits_interface)]).unwrap_err();
+    assert!(error
+        .message
+        .contains("operator `^` is not enabled by this function's `@bits(...)` decorator"));
+}
+
+#[test]
+fn local_traits_compose_imported_operator_contracts() {
+    let bits_interface = parse(
+        &lex(concat!(
+            "trait Bits[T]:\n",
+            "    operator |(a: T, b: T) -> T\n",
+            "    operator &(a: T, b: T) -> T\n",
+            "    operator ^(a: T, b: T) -> T\n",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let source = concat!(
+        "import bits\n",
+        "\n",
+        "trait Flags[T]:\n",
+        "    bits.Bits[T]\n",
+        "    def enabled(flag: T) -> bool\n",
+        "\n",
+        "class IntegerFlags: Flags[int]\n",
+        "    def enabled(flag: int) -> bool:\n",
+        "        return flag != 0\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze_with_interfaces(&ast, &[("bits".into(), bits_interface)]).unwrap();
+}
+
+#[test]
+fn tensor_style_traits_can_compose_named_symbolic_operator_contracts() {
+    let source = concat!(
+        "trait Arithmetic[T]:\n",
+        "    operator +(a: T, b: T) -> T\n",
+        "    operator -(a: T, b: T) -> T\n",
+        "    operator *(a: T, b: T) -> T\n",
+        "\n",
+        "trait Differentiable[T]:\n",
+        "    operator J(value: T) -> T\n",
+        "\n",
+        "trait TensorAlgebra[T]:\n",
+        "    Arithmetic[Tensor[T]]\n",
+        "    Differentiable[Tensor[T]]\n",
+        "    def shape() -> list[int]\n",
+    );
+    let ast = parse(&lex(source).unwrap()).unwrap();
+    analyze(&ast).unwrap();
+}
+
+#[test]
 fn validates_traits_imported_from_packages() {
     let interface_source = "trait File:\n    kind() -> string\n";
     let interface = parse(&lex(interface_source).unwrap()).unwrap();

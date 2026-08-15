@@ -84,6 +84,58 @@ fn preserves_bounded_generic_classes_and_traits() {
 }
 
 #[test]
+fn parses_composed_traits_and_operator_contracts_without_inheritance_keywords() {
+    let source = concat!(
+        "trait Bits[T]:\n",
+        "    operator |(a: T, b: T) -> T\n",
+        "    operator &(a: T, b: T) -> T\n",
+        "    operator ^(a: T, b: T) -> T\n",
+        "\n",
+        "trait Flags[T]:\n",
+        "    Bits[T]\n",
+        "    def enabled(flag: T) -> bool\n",
+    );
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Trait(bits) = &module.items[0] else {
+        panic!("expected Bits trait");
+    };
+    assert!(bits.composed_traits.is_empty());
+    assert_eq!(
+        bits.operators
+            .iter()
+            .map(|operator| operator.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["|", "&", "^"]
+    );
+    let Item::Trait(flags) = &module.items[1] else {
+        panic!("expected Flags trait");
+    };
+    assert_eq!(flags.composed_traits.len(), 1);
+    assert_eq!(flags.methods[0].name.name, "enabled");
+}
+
+#[test]
+fn parses_bitwise_precedence_below_comparisons_and_arithmetic() {
+    let source =
+        "def combine(a: int, b: int, c: int) -> bool:\n    return a + 1 & b ^ c | a == b\n";
+    let module = parse(&lex(source).unwrap()).unwrap();
+    let Item::Function(function) = &module.items[0] else {
+        panic!("expected function");
+    };
+    let Stmt::Return(return_) = &function.body.statements[0] else {
+        panic!("expected return");
+    };
+    let Some(Expr::Binary(equal)) = &return_.value else {
+        panic!("expected equality at the root");
+    };
+    assert_eq!(equal.op, severian_ast::BinaryOp::Equal);
+    let Expr::Binary(bit_or) = equal.left.as_ref() else {
+        panic!("expected bitwise-or below equality");
+    };
+    assert_eq!(bit_or.op, severian_ast::BinaryOp::BitOr);
+}
+
+#[test]
 fn parses_multiple_generic_class_arguments_as_a_type_tuple() {
     let source = concat!(
         "class Pair[Left, Right]:\n",

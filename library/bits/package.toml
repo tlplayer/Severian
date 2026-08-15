@@ -1,0 +1,13 @@
+[package]
+name = "bits"
+version = "0.1.0"
+edition = "2026"
+description = "Bitwise integer algebra and its capability contract"
+
+[lib]
+path = "src/lib.sev"
+
+[package.metadata.library]
+category = "core-data"
+implementation = "source-and-compiler-contracts"
+status = "experimental"

@@ -29,6 +29,9 @@ impl Specializer {
         context: &RewriteContext,
     ) -> Result<(), SemanticError> {
         let context = context.with_generics(&trait_.generic_params);
+        for composed in &mut trait_.composed_traits {
+            self.rewrite_type(composed, &context)?;
+        }
         for method in &mut trait_.methods {
             if method
                 .params
@@ -41,6 +44,14 @@ impl Specializer {
                 self.rewrite_parameter(parameter, &context)?;
             }
             if let Some(returns) = &mut method.return_type {
+                self.rewrite_type(returns, &context)?;
+            }
+        }
+        for operator in &mut trait_.operators {
+            for parameter in &mut operator.params {
+                self.rewrite_parameter(parameter, &context)?;
+            }
+            if let Some(returns) = &mut operator.return_type {
                 self.rewrite_type(returns, &context)?;
             }
         }

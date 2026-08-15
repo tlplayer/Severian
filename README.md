@@ -749,6 +749,31 @@ new instance. Methods and constructors access their current object's fields by
 name without an explicit receiver parameter. `self` names the current execution
 context, not a class instance.
 
+Traits compose implicitly and transitively when one trait is named directly in
+another trait's contract. There is no `extends` or `inherits` keyword.
+
+```sev
+trait Named:
+    name() -> string
+
+trait Drawable:
+    Named
+    draw()
+
+class Button: Drawable
+    label: string
+
+    def name() -> string:
+        return label
+
+    def draw():
+        print(label)
+```
+
+Implementing `Drawable` therefore satisfies both `Drawable` and `Named`.
+Composition is dependency syntax: merely calling an operation declared by
+another trait does not compose that trait.
+
 ## Counts, Bytes, And Midpoints
 
 `size(values)` returns the number of elements in a collection. `values.size()`
@@ -1144,6 +1169,21 @@ symbols, their type rules, and their lowering behavior.
 
 The decorator package must first be imported. Decorators are retained as typed
 compiler metadata; they are not runtime Python-style function wrappers.
+
+Integer bit operations use the `bits` capability. They resolve automatically
+from integer operands, or a decorator can isolate an explicit symbolic subset.
+
+```sev
+import bits
+
+@bits(|, &, ^)
+def combine(left: int, right: int) -> int:
+    return (left | right) ^ (left & right)
+```
+
+The `bits.Bits[T]` trait declares those operator contracts. Default Boolean
+algebra remains the short-circuiting language syntax `and`, `or`, and `not`, so
+ordinary Boolean expressions need neither an import nor a decorator.
 
 The same idea can reserve words for non-math domains.
 

@@ -285,8 +285,42 @@ pub(super) fn lower_expression_kind(
                         result_type,
                     ));
                 }
-                AstBinaryOp::Cross => {
-                    return Err(error(binary.span, "operator `^` is not supported"));
+                AstBinaryOp::BitOr | AstBinaryOp::BitXor | AstBinaryOp::BitAnd => {
+                    let (symbol, op) = match binary.op {
+                        AstBinaryOp::BitOr => ("|", BinaryOp::BitOr),
+                        AstBinaryOp::BitXor => ("^", BinaryOp::BitXor),
+                        AstBinaryOp::BitAnd => ("&", BinaryOp::BitAnd),
+                        _ => unreachable!(),
+                    };
+                    let selected = aliases
+                        .get(&format!("__symbol.{symbol}"))
+                        .map(String::as_str);
+                    if let Some(package) = selected {
+                        if package != "bits" {
+                            return Err(error(
+                                binary.span,
+                                format!(
+                                    "operator `{symbol}` is selected from `@{package}`, which does not apply to integer bit operations"
+                                ),
+                            ));
+                        }
+                    } else if aliases.contains_key("__capability.bits") {
+                        return Err(error(
+                            binary.span,
+                            format!(
+                                "operator `{symbol}` is not enabled by this function's `@bits(...)` decorator"
+                            ),
+                        ));
+                    }
+                    if left_type != ValueType::Int || right_type != ValueType::Int {
+                        return Err(error(
+                            binary.span,
+                            format!(
+                                "operator `{symbol}` requires two integer operands in the `bits` algebra"
+                            ),
+                        ));
+                    }
+                    (op, ValueType::Int)
                 }
                 AstBinaryOp::Equal => (BinaryOp::Equal, ValueType::Bool),
                 AstBinaryOp::NotEqual => (BinaryOp::NotEqual, ValueType::Bool),

@@ -2,6 +2,11 @@ import math
 import tensor
 from model import neuralnet as nn
 
+trait Bits[T]:
+    operator |(a: T, b: T) -> T
+    operator &(a: T, b: T) -> T
+    operator ^(a: T, b: T) -> T
+
 def native_print(value: i64):
     print(value)
 

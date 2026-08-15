@@ -157,6 +157,14 @@ impl Checker<'_> {
                             }
                         }
                     }
+                    for operator in &trait_.operators {
+                        for parameter in &operator.params {
+                            self.name(&parameter.name, Role::Variable);
+                            if let Some(default) = &parameter.default {
+                                self.expression(default);
+                            }
+                        }
+                    }
                 }
                 Item::Enum(enum_) => {
                     self.name(&enum_.name, Role::Type);

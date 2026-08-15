@@ -1,5 +1,317 @@
 use super::*;
 
+#[derive(Clone)]
+struct TraitEntry {
+    canonical: String,
+    namespace: Option<String>,
+    aliases: HashMap<String, String>,
+    declaration: severian_ast::TraitDecl,
+}
+
+pub(super) fn expand_trait_compositions(
+    module: &Module,
+    interfaces: &[PackageInterface],
+) -> Result<(Module, Vec<PackageInterface>), SemanticError> {
+    let mut registry = HashMap::<String, TraitEntry>::new();
+    let local_aliases = collect_imports(module);
+    for item in &module.items {
+        let Item::Trait(declaration) = item else {
+            continue;
+        };
+        let canonical = declaration.name.name.clone();
+        registry.insert(
+            canonical.clone(),
+            TraitEntry {
+                canonical,
+                namespace: None,
+                aliases: local_aliases.clone(),
+                declaration: declaration.clone(),
+            },
+        );
+    }
+    for interface in interfaces {
+        let aliases = collect_imports(&interface.module);
+        for item in &interface.module.items {
+            let Item::Trait(declaration) = item else {
+                continue;
+            };
+            let canonical = format!("{}.{}", interface.name, declaration.name.name);
+            let entry = TraitEntry {
+                canonical: canonical.clone(),
+                namespace: Some(interface.name.clone()),
+                aliases: aliases.clone(),
+                declaration: declaration.clone(),
+            };
+            registry.insert(canonical.clone(), entry.clone());
+            if let Some(package) = &interface.export_package {
+                registry.insert(format!("{package}.{}", declaration.name.name), entry);
+            }
+        }
+    }
+
+    let canonical_keys = registry
+        .values()
+        .map(|entry| entry.canonical.clone())
+        .collect::<HashSet<_>>();
+    let mut cache = HashMap::<String, severian_ast::TraitDecl>::new();
+    for key in canonical_keys {
+        expand_trait(&key, &registry, &mut cache, &mut Vec::new())?;
+    }
+
+    let mut expanded_module = module.clone();
+    for item in &mut expanded_module.items {
+        let Item::Trait(declaration) = item else {
+            continue;
+        };
+        *declaration = cache[&declaration.name.name].clone();
+    }
+    let mut expanded_interfaces = interfaces.to_vec();
+    for interface in &mut expanded_interfaces {
+        for item in &mut interface.module.items {
+            let Item::Trait(declaration) = item else {
+                continue;
+            };
+            let key = format!("{}.{}", interface.name, declaration.name.name);
+            *declaration = cache[&key].clone();
+        }
+    }
+    Ok((expanded_module, expanded_interfaces))
+}
+
+fn expand_trait(
+    key: &str,
+    registry: &HashMap<String, TraitEntry>,
+    cache: &mut HashMap<String, severian_ast::TraitDecl>,
+    active: &mut Vec<String>,
+) -> Result<severian_ast::TraitDecl, SemanticError> {
+    if let Some(expanded) = cache.get(key) {
+        return Ok(expanded.clone());
+    }
+    if let Some(index) = active.iter().position(|candidate| candidate == key) {
+        let mut cycle = active[index..].to_vec();
+        cycle.push(key.to_owned());
+        let declaration = &registry[key].declaration;
+        return Err(error(
+            declaration.name.span,
+            format!("trait composition cycle: {}", cycle.join(" -> ")),
+        ));
+    }
+    let entry = registry
+        .get(key)
+        .expect("trait expansion keys come from the registry");
+    active.push(key.to_owned());
+    let mut expanded = entry.declaration.clone();
+    let mut method_signatures = expanded
+        .methods
+        .iter()
+        .map(|method| (method.name.name.clone(), trait_method_signature(method)))
+        .collect::<HashMap<_, _>>();
+    let mut operator_signatures = expanded
+        .operators
+        .iter()
+        .map(|operator| {
+            (
+                (operator.symbol.clone(), operator.params.len()),
+                trait_operator_signature(operator),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    for composed in &entry.declaration.composed_traits {
+        let raw = declaration_type_name(composed).ok_or_else(|| {
+            error(
+                composed.span(),
+                "a composed trait requirement must be a named trait",
+            )
+        })?;
+        let composed_key = resolve_composed_trait(&raw, entry, registry).ok_or_else(|| {
+            error(
+                composed.span(),
+                format!(
+                    "unknown trait `{raw}` composed by `{}`",
+                    entry.declaration.name.name
+                ),
+            )
+        })?;
+        let inherited = expand_trait(&composed_key, registry, cache, active)?;
+        let substitutions = composition_substitutions(&inherited, composed)?;
+        for method in &inherited.methods {
+            let method = substitute_trait_method(method, &substitutions);
+            let signature = trait_method_signature(&method);
+            match method_signatures.get(&method.name.name) {
+                Some(existing) if existing == &signature => continue,
+                Some(existing) => {
+                    return Err(error(
+                        composed.span(),
+                        format!(
+                            "trait `{}` composes conflicting requirements for `{}`: `{existing}` and `{signature}`",
+                            entry.declaration.name.name, method.name.name
+                        ),
+                    ))
+                }
+                None => {
+                    method_signatures.insert(method.name.name.clone(), signature);
+                    expanded.methods.push(method);
+                }
+            }
+        }
+        for operator in &inherited.operators {
+            let operator = substitute_trait_operator(operator, &substitutions);
+            let identity = (operator.symbol.clone(), operator.params.len());
+            let signature = trait_operator_signature(&operator);
+            match operator_signatures.get(&identity) {
+                Some(existing) if existing == &signature => continue,
+                Some(existing) => {
+                    return Err(error(
+                        composed.span(),
+                        format!(
+                            "trait `{}` composes conflicting requirements for operator `{}`: `{existing}` and `{signature}`",
+                            entry.declaration.name.name, operator.symbol
+                        ),
+                    ))
+                }
+                None => {
+                    operator_signatures.insert(identity, signature);
+                    expanded.operators.push(operator);
+                }
+            }
+        }
+    }
+    active.pop();
+    cache.insert(key.to_owned(), expanded.clone());
+    Ok(expanded)
+}
+
+fn resolve_composed_trait(
+    raw: &str,
+    owner: &TraitEntry,
+    registry: &HashMap<String, TraitEntry>,
+) -> Option<String> {
+    if !raw.contains('.') {
+        if let Some(namespace) = &owner.namespace {
+            if let Some(entry) = registry.get(&format!("{namespace}.{raw}")) {
+                return Some(entry.canonical.clone());
+            }
+        } else if let Some(entry) = registry.get(raw) {
+            return Some(entry.canonical.clone());
+        }
+        if let Some(canonical) = owner.aliases.get(raw) {
+            if let Some(entry) = registry.get(canonical) {
+                return Some(entry.canonical.clone());
+            }
+        }
+        return registry.get(raw).map(|entry| entry.canonical.clone());
+    }
+    let canonical = canonical_declared_type_name(raw, &owner.aliases);
+    if let Some(entry) = registry.get(&canonical) {
+        return Some(entry.canonical.clone());
+    }
+    registry.get(raw).map(|entry| entry.canonical.clone())
+}
+
+fn composition_substitutions(
+    declaration: &severian_ast::TraitDecl,
+    composed: &Type,
+) -> Result<HashMap<String, Type>, SemanticError> {
+    let Type::Named(path) = composed else {
+        unreachable!()
+    };
+    if path.args.len() != declaration.generic_params.len() {
+        return Err(error(
+            composed.span(),
+            format!(
+                "trait `{}` expects {} type argument(s), received {}",
+                declaration.name.name,
+                declaration.generic_params.len(),
+                path.args.len()
+            ),
+        ));
+    }
+    declaration
+        .generic_params
+        .iter()
+        .zip(&path.args)
+        .map(|(parameter, argument)| {
+            let TypeArg::Type { ty, .. } = argument else {
+                return Err(error(
+                    argument.span(),
+                    format!("trait `{}` requires type arguments", declaration.name.name),
+                ));
+            };
+            Ok((parameter.name.name.clone(), ty.as_ref().clone()))
+        })
+        .collect()
+}
+
+fn substitute_trait_method(
+    method: &severian_ast::TraitMethod,
+    substitutions: &HashMap<String, Type>,
+) -> severian_ast::TraitMethod {
+    severian_ast::TraitMethod {
+        params: method
+            .params
+            .iter()
+            .map(|parameter| severian_ast::Parameter {
+                ty: parameter
+                    .ty
+                    .as_ref()
+                    .map(|ty| substitute_declared_type(ty, substitutions)),
+                ..parameter.clone()
+            })
+            .collect(),
+        return_type: method
+            .return_type
+            .as_ref()
+            .map(|ty| substitute_declared_type(ty, substitutions)),
+        ..method.clone()
+    }
+}
+
+fn substitute_trait_operator(
+    operator: &severian_ast::TraitOperator,
+    substitutions: &HashMap<String, Type>,
+) -> severian_ast::TraitOperator {
+    severian_ast::TraitOperator {
+        params: operator
+            .params
+            .iter()
+            .map(|parameter| severian_ast::Parameter {
+                ty: parameter
+                    .ty
+                    .as_ref()
+                    .map(|ty| substitute_declared_type(ty, substitutions)),
+                ..parameter.clone()
+            })
+            .collect(),
+        return_type: operator
+            .return_type
+            .as_ref()
+            .map(|ty| substitute_declared_type(ty, substitutions)),
+        ..operator.clone()
+    }
+}
+
+pub(super) fn trait_operator_signature(operator: &severian_ast::TraitOperator) -> String {
+    let params = operator
+        .params
+        .iter()
+        .map(|parameter| {
+            parameter
+                .ty
+                .as_ref()
+                .map(declaration_type_key)
+                .unwrap_or_else(|| "Any".into())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let returns = operator
+        .return_type
+        .as_ref()
+        .map(declaration_type_key)
+        .unwrap_or_else(|| "unit".into());
+    format!("operator {}({params}) -> {returns}", operator.symbol)
+}
+
 pub(super) fn validate_trait_implementations(
     module: &Module,
     interfaces: &[PackageInterface],
@@ -95,9 +407,56 @@ pub(super) fn validate_trait_implementations(
                     ));
                 }
             }
+            for required in &declaration.operators {
+                let required = substitute_trait_operator(required, &substitutions);
+                if !builtin_operator_satisfies(&required) {
+                    return Err(error(
+                        implemented.span(),
+                        format!(
+                            "class `{}` does not satisfy `{}` required by trait `{raw}`",
+                            class.name.name,
+                            trait_operator_signature(&required)
+                        ),
+                    ));
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn builtin_operator_satisfies(operator: &severian_ast::TraitOperator) -> bool {
+    let parameters = operator
+        .params
+        .iter()
+        .map(|parameter| parameter.ty.as_ref().map(declaration_type_key))
+        .collect::<Option<Vec<_>>>();
+    let returns = operator.return_type.as_ref().map(declaration_type_key);
+    let (Some(parameters), Some(returns)) = (parameters, returns) else {
+        return false;
+    };
+    match (operator.symbol.as_str(), parameters.as_slice()) {
+        ("|" | "&" | "^", [left, right]) => {
+            integer_type_name(left) && right == left && returns == *left
+        }
+        ("and" | "or", [left, right]) => left == "bool" && right == left && returns == *left,
+        ("not", [value]) => value == "bool" && returns == *value,
+        ("+" | "-" | "*" | "/", [left, right]) => {
+            left == right
+                && returns == *left
+                && (integer_type_name(left)
+                    || matches!(left.as_str(), "float" | "f32" | "f64")
+                    || left.starts_with("Tensor["))
+        }
+        _ => false,
+    }
+}
+
+fn integer_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize"
+    )
 }
 
 fn trait_substitutions(

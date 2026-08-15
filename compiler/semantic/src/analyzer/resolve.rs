@@ -528,6 +528,7 @@ pub(super) fn aliases_with_decorators(
             .map(|segment| segment.name.as_str())
             .collect::<Vec<_>>()
             .join(".");
+        aliases.insert(format!("__capability.{package}"), String::new());
         for symbol in &decorator.symbols {
             aliases.insert(format!("__symbol.{}", symbol.spelling), package.clone());
             if let Some(function) =
@@ -598,6 +599,25 @@ pub(super) fn lower_decorators(
                 decorator.name.span,
                 format!("decorator package `{root}` must be imported"),
             ));
+        }
+        if root == "bits" {
+            if decorator.symbols.is_empty() {
+                return Err(error(
+                    decorator.span,
+                    "`@bits` requires an explicit non-empty subset of `|`, `&`, and `^`",
+                ));
+            }
+            for symbol in &decorator.symbols {
+                if !matches!(symbol.spelling.as_str(), "|" | "&" | "^") {
+                    return Err(error(
+                        symbol.span,
+                        format!(
+                            "unknown `bits` capability member `{}`; expected `|`, `&`, or `^`",
+                            symbol.spelling
+                        ),
+                    ));
+                }
+            }
         }
         let mut seen = HashSet::new();
         for symbol in &decorator.symbols {

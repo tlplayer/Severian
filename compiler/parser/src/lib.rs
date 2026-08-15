@@ -9,8 +9,8 @@ use severian_ast::{
     IndexExpr, Item, LambdaBody, LetKind, LetStmt, ListComprehensionExpr, Literal,
     MapComprehensionExpr, MapEntry, MapExpr, MemberExpr, Module, OwnershipExpr, OwnershipOp,
     Parameter, Pattern, ReturnStmt, SetComprehensionExpr, SliceExpr, Span, Stmt, SwitchArm,
-    SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod, Type,
-    TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
+    SwitchStmt, TaskOwner, TaskPlacement, TestBlock, TestMode, TraitDecl, TraitMethod,
+    TraitOperator, Type, TypeArg, TypePath, UnaryExpr, UnaryOp, UnsafeBlock, WhileStmt, WithBlock,
 };
 use severian_lexer::{Token, TokenKind};
 use std::fmt;

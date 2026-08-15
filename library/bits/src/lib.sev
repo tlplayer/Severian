@@ -1,0 +1,18 @@
+trait Bits[T]:
+    operator |(a: T, b: T) -> T
+    operator &(a: T, b: T) -> T
+    operator ^(a: T, b: T) -> T
+
+def bit_or(left: int, right: int) -> int:
+    return left | right
+
+def bit_and(left: int, right: int) -> int:
+    return left & right
+
+def bit_xor(left: int, right: int) -> int:
+    return left ^ right
+
+test "integer bit algebra is available by type":
+    assert(bit_or(5, 3) == 7)
+    assert(bit_and(6, 3) == 2)
+    assert(bit_xor(5, 3) == 6)

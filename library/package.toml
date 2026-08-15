@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "core",
+    "bits",
     "list",
     "set",
     "string",

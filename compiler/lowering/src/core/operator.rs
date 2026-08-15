@@ -225,6 +225,20 @@ impl LowerContext<'_> {
             writeln!(self.output, "  ^bb{valid}:").unwrap();
         }
         let result = self.fresh_value();
+        if matches!(op, BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::BitAnd) {
+            let operation = match op {
+                BinaryOp::BitOr => "llvm.or",
+                BinaryOp::BitXor => "llvm.xor",
+                BinaryOp::BitAnd => "llvm.and",
+                _ => unreachable!(),
+            };
+            writeln!(
+                self.output,
+                "    {result} = {operation} {left}, {right} : i64"
+            )
+            .unwrap();
+            return (result, ValueType::Int);
+        }
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
             let operation = if op == BinaryOp::And {
                 "llvm.and"

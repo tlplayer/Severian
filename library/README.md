@@ -15,7 +15,7 @@ Package functions are ordinary `def` declarations with real bodies. There is
 no separate export header or `extern def` form.
 
 The initial general-purpose surface is available through flat imports such as
-`core`, `list`, `set`, `string`, `math`, `random`, `file`, `path`,
+`core`, `bits`, `list`, `set`, `string`, `math`, `random`, `file`, `path`,
 `json`, `regex`, `time`, `process`, `environment`, `http`, `network`, `tls`,
 and `tensor`. Collection APIs are typed and mutating operations act
 on the supplied collection; native behavior is implemented by the package that

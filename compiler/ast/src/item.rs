@@ -191,7 +191,12 @@ pub struct TraitDecl {
     pub span: Span,
     pub name: Ident,
     pub generic_params: Vec<GenericParameter>,
+    /// Traits named directly in this contract. Their requirements are part of
+    /// this trait transitively; Severian deliberately has no separate
+    /// `extends` or `inherits` syntax.
+    pub composed_traits: Vec<Type>,
     pub methods: Vec<TraitMethod>,
+    pub operators: Vec<TraitOperator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -242,6 +247,14 @@ pub enum TestMode {
 pub struct TraitMethod {
     pub span: Span,
     pub name: Ident,
+    pub params: Vec<Parameter>,
+    pub return_type: Option<Type>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitOperator {
+    pub span: Span,
+    pub symbol: String,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
 }

@@ -110,9 +110,61 @@ impl Parser<'_> {
         self.expect_simple(TokenKind::Colon, "`:` after trait name")?;
         self.expect_simple(TokenKind::Newline, "newline after trait header")?;
         self.expect_simple(TokenKind::Indent, "indented trait body")?;
+        let mut composed_traits = Vec::new();
         let mut methods = Vec::new();
+        let mut operators = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            self.take_simple(&TokenKind::Def);
+            if self.take_simple(&TokenKind::Operator).is_some() {
+                let operator_start = self.peek().span.start;
+                let token = self.advance().clone();
+                let symbol = match token.kind {
+                    TokenKind::Pipe => "|".into(),
+                    TokenKind::Ampersand => "&".into(),
+                    TokenKind::Caret => "^".into(),
+                    TokenKind::Plus => "+".into(),
+                    TokenKind::Minus => "-".into(),
+                    TokenKind::Star => "*".into(),
+                    TokenKind::Power => "**".into(),
+                    TokenKind::Slash => "/".into(),
+                    TokenKind::Percent => "%".into(),
+                    TokenKind::And => "and".into(),
+                    TokenKind::Or => "or".into(),
+                    TokenKind::Not => "not".into(),
+                    TokenKind::Identifier(symbol) => symbol,
+                    _ => {
+                        return Err(ParseError {
+                            span: token.span,
+                            message: "expected operator symbol in trait contract".into(),
+                        })
+                    }
+                };
+                let params = self.parse_parameters()?;
+                let return_type = if self.take_simple(&TokenKind::Arrow).is_some() {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                let end = self
+                    .expect_simple(TokenKind::Newline, "newline after trait operator")?
+                    .span
+                    .end;
+                operators.push(TraitOperator {
+                    span: Span::new(operator_start, end),
+                    symbol,
+                    params,
+                    return_type,
+                });
+                continue;
+            }
+            let explicit_method = self.take_simple(&TokenKind::Def).is_some();
+            if !explicit_method && !self.peek_kind(1, &TokenKind::LeftParen) {
+                composed_traits.push(self.parse_type()?);
+                self.expect_simple(
+                    TokenKind::Newline,
+                    "newline after composed trait requirement",
+                )?;
+                continue;
+            }
             let method_start = self.peek().span.start;
             let method_name = self.expect_identifier("trait method name")?;
             let params = self.parse_parameters()?;
@@ -140,7 +192,9 @@ impl Parser<'_> {
             span: Span::new(start, end),
             name,
             generic_params,
+            composed_traits,
             methods,
+            operators,
         })
     }
 

@@ -27,7 +27,8 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 ## Current Coverage
 
 - Modules, `import`, `from ... import ...`, functions, classes, constructors,
-  traits, fields, and trait methods.
+  traits, fields, trait methods, operator contracts, and direct trait
+  composition requirements.
 - Statements for stable `=` bindings, changeable `:=` bindings, safe `?=`
   result capture, assignment,
   assertions, returns, loops, `while condition with setup` clauses, ordinary
