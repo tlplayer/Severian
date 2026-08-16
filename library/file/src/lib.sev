@@ -102,7 +102,7 @@ test "native file round trip":
     assert(contents == "severian file runtime")
 
 test "missing source text reports an IO error":
-    switch source_text("/tmp/severian-library-file-does-not-exist.txt"):
+    match source_text("/tmp/severian-library-file-does-not-exist.txt"):
         ok contents:
             assert(false, contents)
         failure error:

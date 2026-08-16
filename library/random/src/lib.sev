@@ -10,11 +10,11 @@ def randint(start: int, stop: int) -> int:
 def uniform(start: float, stop: float) -> float:
     return start + (stop - start) * random()
 
-def choice[type](values: list[type]) -> type:
+def choice[T](values: list[T]) -> T:
     assert(size(values) > 0, "cannot choose from an empty list")
     return values[randint(0, size(values) - 1)]
 
-def shuffle[type](values: list[type]):
+def shuffle[T](values: list[T]):
     index := size(values) - 1
     while index > 0:
         other = randint(0, index)
@@ -23,7 +23,7 @@ def shuffle[type](values: list[type]):
         values[other] = temporary
         index -= 1
 
-def sample[type](values: list[type], count: int) -> list[type]:
+def sample[T](values: list[T], count: int) -> list[T]:
     assert(count >= 0 and count <= size(values), "sample size is outside the list")
     selected = values[0:size(values)]
     shuffle(selected)

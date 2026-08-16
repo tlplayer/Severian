@@ -12,7 +12,7 @@ def respond(connection: network.TCPConnection) -> Result[unit, IOError]:
     return await connection.write_line(greeting(request))
 
 def serve(connection: network.TCPConnection):
-    switch await respond(borrow connection) with connection:
+    match await respond(borrow connection) with connection:
             ok _:
                 log.info("request completed")
 

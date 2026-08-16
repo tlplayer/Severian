@@ -267,7 +267,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> R
             "choose one of: " + item.choices.join(", "),
         ))
     if item.kind == "int":
-        switch int.parse(value):
+        match int.parse(value):
             ok _integer:
                 return
             failure _error:
@@ -276,7 +276,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> R
                     "provide a whole number",
                 ))
     elif item.kind == "float":
-        switch float.parse(value):
+        match float.parse(value):
             ok _decimal:
                 return
             failure _error:
@@ -422,7 +422,7 @@ def text(matches: Matches, name: string) -> Result[string, CliError]:
 
 def integer(matches: Matches, name: string) -> Result[int, CliError]:
     raw = text(matches, name)
-    switch int.parse(raw):
+    match int.parse(raw):
         ok value:
             return value
         failure _error:
@@ -430,7 +430,7 @@ def integer(matches: Matches, name: string) -> Result[int, CliError]:
 
 def decimal(matches: Matches, name: string) -> Result[float, CliError]:
     raw = text(matches, name)
-    switch float.parse(raw):
+    match float.parse(raw):
         ok value:
             return value
         failure _error:
@@ -469,7 +469,7 @@ def check(specification: Command) -> CheckReport:
                 diagnostics.append(Diagnostic("error", "CLI105", "duplicate short option `-" + item.short + "`", "short options must be unique within a command"))
             shorts.append(item.short)
         if item.help == "" and not item.hidden:
-            diagnostics.append(Diagnostic("warning", "CLI106", "option `--" + item.name + "` has no help text", "describe its effect, not only its value type"))
+            diagnostics.append(Diagnostic("warning", "CLI106", "option `--" + item.name + "` has no help text", "describe its effect, not only its value T"))
         if item.required and item.default_value != "":
             diagnostics.append(Diagnostic("error", "CLI107", "required option `--" + item.name + "` also has a default", "make it required or give it a default, but not both"))
         if item.kind not in ["bool", "string", "int", "float", "path"]:
@@ -532,12 +532,12 @@ test "declarative parsing and generated diagnostics":
     assert(present(parsed, "text"))
     assert(values(parsed, "text") == ["For the Alliance"])
     verbose = boolean(parsed, "verbose")
-    switch text(parsed, "text"):
+    match text(parsed, "text"):
         ok parsed_text:
             assert(parsed_text == "For the Alliance")
         failure error:
             assert(false, error.message)
-    switch text(parsed, "output"):
+    match text(parsed, "output"):
         ok output_path:
             assert(output_path == "speech.wav")
         failure error:

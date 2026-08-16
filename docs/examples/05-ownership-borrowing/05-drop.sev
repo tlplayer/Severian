@@ -1,0 +1,15 @@
+
+def test_drop():
+    numbers = [0*100]
+
+    drop numbers
+    
+    numbers_two = [0*100]
+
+    
+#Dropping should remove the memory overhead of the first 100x bytes allocation 
+test with memory "After drop memory should be free" with
+{
+    memory < 150b -> print(""),
+}:
+    test_drop()

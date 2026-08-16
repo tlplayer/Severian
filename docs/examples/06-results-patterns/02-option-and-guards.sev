@@ -5,7 +5,7 @@ def find_name(id: int) -> Option[string]:
     return absent
 
 test:
-    switch find_name(1):
+    match find_name(1):
         present value:
             assert(value == "ada")
 
@@ -13,7 +13,7 @@ test:
             assert(false, "expected a name")
 
 test "missing name":
-    switch find_name(2):
+    match find_name(2):
         present _:
             assert(false, "expected missing")
 
@@ -23,7 +23,7 @@ test "missing name":
 def main():
     name = find_name(1)
 
-    switch name:
+    match name:
         present value if value != "":
             print(value)
 

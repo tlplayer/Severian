@@ -165,11 +165,11 @@ test "rollouts include promotion and rollback policy":
 
 test "controller history executes against the database":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
-    switch database.memory():
+    match database.memory():
         ok connection:
             initialize_controller_history(connection)
             assert(record_controller_event(connection, workload, "stable") == 1)
-            switch controller_history(connection):
+            match controller_history(connection):
                 ok rows:
                     assert(rows[0][0] == "prod")
                     assert(rows[0][1] == "api")

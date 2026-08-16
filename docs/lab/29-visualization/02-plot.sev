@@ -10,7 +10,7 @@ def training_results() -> Data:
 
 def loss_chart() -> plot.Chart:
     chart := plot.Chart(800, 500)
-    switch chart.line_data_labeled(training_results(), "step", "loss", "training loss"):
+    match chart.line_data_labeled(training_results(), "step", "loss", "training loss"):
         ok _:
             assert(true)
         failure error:
@@ -32,7 +32,7 @@ def main():
     chart = loss_chart()
     target: graphics.Canvas = chart.render()
     path = "/tmp/severian-plot-example.svg"
-    switch target.save(path):
+    match target.save(path):
         ok _:
             print("plot", target.width(), target.height())
             print(path)

@@ -10,7 +10,7 @@ test with property and chaos "first is safe for generated lists":
     values = [10, 20, 30]
     result ?= first(values)
 
-    switch result:
+    match result:
         ok value:
             assert(value == values[0])
 

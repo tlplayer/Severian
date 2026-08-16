@@ -1,5 +1,5 @@
-# E000202: incompatible argument type
-# Calls must satisfy the declared parameter type.
+# E000202: incompatible argument T
+# Calls must satisfy the declared parameter T.
 # Convert the value or correct the function signature.
 
 def double(value: int) -> int:

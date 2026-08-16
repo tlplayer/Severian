@@ -1,17 +1,17 @@
 import math
 
-def sum[type](values: list[type]) -> type:
+def sum[T](values: list[T]) -> T:
     return values.sum()
 
 def round(value: float, digits: int = 0) -> float:
     return math.round(value, digits)
 
-def sorted[type](values: list[type], reverse: bool = false) -> list[type]:
+def sorted[T](values: list[T], reverse: bool = false) -> list[T]:
     if reverse:
         return values.sorted(true)
     return values.sorted()
 
-def reversed[type](values: list[type]) -> list[type]:
+def reversed[T](values: list[T]) -> list[T]:
     return values.reversed()
 
 test "generic collection helpers preserve values and ordering":

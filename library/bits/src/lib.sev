@@ -12,7 +12,7 @@ def bit_and(left: int, right: int) -> int:
 def bit_xor(left: int, right: int) -> int:
     return left ^ right
 
-test "integer bit algebra is available by type":
+test "integer bit algebra is available by T":
     assert(bit_or(5, 3) == 7)
     assert(bit_and(6, 3) == 2)
     assert(bit_xor(5, 3) == 6)

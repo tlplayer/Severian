@@ -9,28 +9,28 @@ class TlsConnection:
     handle: platform.TlsHandle
 
     def read(count: int) -> Result[list[int], io.StreamError]:
-        switch platform.tls_read(handle, count):
+        match platform.tls_read(handle, count):
             ok data:
                 return data
             failure error:
                 return failure(io.StreamError(string(error)))
 
     def write(data: list[int]) -> Result[int, io.StreamError]:
-        switch platform.tls_write(handle, data):
+        match platform.tls_write(handle, data):
             ok count:
                 return count
             failure error:
                 return failure(io.StreamError(string(error)))
 
     def close() -> Result[unit, io.StreamError]:
-        switch platform.tls_close(handle):
+        match platform.tls_close(handle):
             ok _value:
                 return
             failure error:
                 return failure(io.StreamError(string(error)))
 
 def connect(connection: network.TcpConnection, server_name: string) -> Result[TlsConnection, TlsError]:
-    switch platform.tls_connect(connection.native_handle(), server_name):
+    match platform.tls_connect(connection.native_handle(), server_name):
         ok secure:
             return TlsConnection(secure)
         failure error:

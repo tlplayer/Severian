@@ -128,7 +128,7 @@ def open_safetensors(model_directory: string) -> Result[SafeTensorStore, IOError
 unsafe:
     # Backend handle construction and lifetime live at the tensor boundary.
     # Consumers use these typed APIs and never redeclare XLA symbols.
-    extern("__sev_xla_release") def release[type](value: Tensor[type])
+    extern("__sev_xla_release") def release[T](value: Tensor[T])
 
     extern("__sev_tensor_from_list") def ranked(values: list[float], shape: list[int]) -> Tensor[f64]
 
@@ -136,81 +136,81 @@ unsafe:
 
     extern("__sev_tensor_to_list") def values(value: Tensor[f64]) -> list[float]
 
-    extern("__sev_tensor_shape") def ranked_shape[type](value: Tensor[type]) -> list[int]
+    extern("__sev_tensor_shape") def ranked_shape[T](value: Tensor[T]) -> list[int]
 
-    extern("__sev_tensor_strides") def ranked_strides[type](value: Tensor[type]) -> list[int]
+    extern("__sev_tensor_strides") def ranked_strides[T](value: Tensor[T]) -> list[int]
 
-    extern("__sev_tensor_slice") def ranked_slice[type](value: Tensor[type], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[type]
+    extern("__sev_tensor_slice") def ranked_slice[T](value: Tensor[T], starts: list[int], ends: list[int], steps: list[int]) -> Tensor[T]
 
-    extern("__sev_tensor_materialize") def ranked_materialize[type](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_materialize") def ranked_materialize[T](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_sum") def ranked_sum[type: Numeric](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_sum") def ranked_sum[T: Numeric](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_relu") def ranked_relu[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_relu") def ranked_relu[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_add") def ranked_add[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_add") def ranked_add[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_subtract") def ranked_subtract[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_subtract") def ranked_subtract[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_multiply") def ranked_multiply[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_multiply") def ranked_multiply[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_divide") def ranked_divide[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_divide") def ranked_divide[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_matmul") def ranked_matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_matmul") def ranked_matmul[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_transpose") def ranked_transpose[type](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_transpose") def ranked_transpose[T](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_transpose") def ranked_permute[type](value: Tensor[type], axes: list[int]) -> Tensor[type]
+    extern("__sev_tensor_transpose") def ranked_permute[T](value: Tensor[T], axes: list[int]) -> Tensor[T]
 
-    extern("__sev_tensor_scale") def ranked_scale[type: Float](value: Tensor[type], scale: float) -> Tensor[type]
+    extern("__sev_tensor_scale") def ranked_scale[T: Float](value: Tensor[T], scale: float) -> Tensor[T]
 
-    extern("__sev_tensor_softmax_rows") def ranked_softmax_rows[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_softmax_rows") def ranked_softmax_rows[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_exp") def ranked_exp[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_exp") def ranked_exp[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_rsqrt") def ranked_rsqrt[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_rsqrt") def ranked_rsqrt[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_mean_last") def mean_last[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_mean_last") def mean_last[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_add_scalar") def add_scalar[type: Float](value: Tensor[type], scalar: f32) -> Tensor[type]
+    extern("__sev_tensor_add_scalar") def add_scalar[T: Float](value: Tensor[T], scalar: f32) -> Tensor[T]
 
-    extern("__sev_tensor_broadcast_like") def broadcast_like[type](value: Tensor[type], target: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_broadcast_like") def broadcast_like[T](value: Tensor[T], target: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_sigmoid") def ranked_sigmoid[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_sigmoid") def ranked_sigmoid[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_gelu") def ranked_gelu[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_gelu") def ranked_gelu[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_silu") def ranked_silu[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_silu") def ranked_silu[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_tanh") def ranked_tanh[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_tanh") def ranked_tanh[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_gather") def ranked_gather[type, index: Integer](value: Tensor[type], indices: Tensor[index]) -> Tensor[type]
+    extern("__sev_tensor_gather") def ranked_gather[T, index: Integer](value: Tensor[T], indices: Tensor[index]) -> Tensor[T]
 
     # Storage and compute dtype changes are explicit. Model code can keep FP8
     # weights while promoting arithmetic to f16/f32 accumulation.
-    extern("__sev_tensor_to_f8e4m3fn") def to_f8_e4_m3_fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]
-    extern("__sev_tensor_to_f8e5m2") def to_f8_e5_m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]
-    extern("__sev_tensor_to_f16") def to_f_16[type: Numeric](value: Tensor[type]) -> Tensor[f16]
-    extern("__sev_tensor_to_bf16") def to_bf_16[type: Numeric](value: Tensor[type]) -> Tensor[bf16]
-    extern("__sev_tensor_to_f32") def to_f_32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
-    extern("__sev_tensor_to_f64") def to_f_64[type: Numeric](value: Tensor[type]) -> Tensor[f64]
-    extern("__sev_tensor_to_i64") def to_i_64[type: Numeric](value: Tensor[type]) -> Tensor[i64]
+    extern("__sev_tensor_to_f8e4m3fn") def to_f8_e4_m3_fn[T: Numeric](value: Tensor[T]) -> Tensor[f8e4m3fn]
+    extern("__sev_tensor_to_f8e5m2") def to_f8_e5_m2[T: Numeric](value: Tensor[T]) -> Tensor[f8e5m2]
+    extern("__sev_tensor_to_f16") def to_f_16[T: Numeric](value: Tensor[T]) -> Tensor[f16]
+    extern("__sev_tensor_to_bf16") def to_bf_16[T: Numeric](value: Tensor[T]) -> Tensor[bf16]
+    extern("__sev_tensor_to_f32") def to_f_32[T: Numeric](value: Tensor[T]) -> Tensor[f32]
+    extern("__sev_tensor_to_f64") def to_f_64[T: Numeric](value: Tensor[T]) -> Tensor[f64]
+    extern("__sev_tensor_to_i64") def to_i_64[T: Numeric](value: Tensor[T]) -> Tensor[i64]
 
     extern("__sev_tensor_convert_like") def convert_like[source: Numeric, target: Numeric](value: Tensor[source], target_value: Tensor[target]) -> Tensor[target]
 
-    extern("__sev_tensor_layer_norm") def ranked_layer_norm[type: Float](value: Tensor[type], epsilon: float = 0.00001) -> Tensor[type]
+    extern("__sev_tensor_layer_norm") def ranked_layer_norm[T: Float](value: Tensor[T], epsilon: float = 0.00001) -> Tensor[T]
 
-    extern("__sev_tensor_relu_backward") def ranked_relu_backward[type: Float](input: Tensor[type], upstream: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_relu_backward") def ranked_relu_backward[T: Float](input: Tensor[T], upstream: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_softmax_backward") def ranked_softmax_backward[type: Float](output: Tensor[type], upstream: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_softmax_backward") def ranked_softmax_backward[T: Float](output: Tensor[T], upstream: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_layer_norm_backward") def ranked_layer_norm_backward[type: Float](input: Tensor[type], upstream: Tensor[type], epsilon: float = 0.00001) -> Tensor[type]
+    extern("__sev_tensor_layer_norm_backward") def ranked_layer_norm_backward[T: Float](input: Tensor[T], upstream: Tensor[T], epsilon: float = 0.00001) -> Tensor[T]
 
     extern("__sev_tensor_backward_mse") def ranked_backward_mse(output: Tensor[f64])
 
-    extern("__sev_tensor_gradient") def ranked_gradient[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_gradient") def ranked_gradient[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_sgd") def ranked_sgd[type: Float](value: Tensor[type], learning_rate: float) -> Tensor[type]
+    extern("__sev_tensor_sgd") def ranked_sgd[T: Float](value: Tensor[T], learning_rate: float) -> Tensor[T]
 
     extern("__sev_safetensor_bf16_view") def mapped_bf_16(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[bf16]
 
@@ -220,7 +220,7 @@ unsafe:
     extern("__sev_safetensor_f16_view") def mapped_f_16(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f16]
     extern("__sev_safetensor_f8e4m3fn_view") def mapped_f8_e4_m3_fn(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f8e4m3fn]
     extern("__sev_safetensor_f8e5m2_view") def mapped_f8_e5_m2(mapping: Any, byte_offset: int, shape: list[int]) -> Tensor[f8e5m2]
-    extern("__sev_safetensor_shape") def mapped_shape[type](value: Tensor[type]) -> list[int]
+    extern("__sev_safetensor_shape") def mapped_shape[T](value: Tensor[T]) -> list[int]
     extern("__sev_tensor_bf16_shape") def shape_bf_16(value: Tensor[bf16]) -> list[int]
 
 # These are compiler-recognized tensor primitives. On the XLA target they are
@@ -263,18 +263,18 @@ unsafe:
     extern("__sev_tensor_ones") def ones(shape: list[int]) -> Tensor[f64]
     extern("__sev_tensor_empty") def empty(shape: list[int]) -> Tensor[f64]
     extern("__sev_tensor_arange") def arange(stop: int) -> Tensor[f64]
-    extern("__sev_tensor_reshape") def reshape[type](value: Tensor[type], shape: list[int]) -> Tensor[type]
-    extern("__sev_tensor_transpose") def transpose[type](value: Tensor[type]) -> Tensor[type]
-    extern("__sev_tensor_matmul") def matmul[type: Numeric](left: Tensor[type], right: Tensor[type]) -> Tensor[type]
-    extern("__sev_tensor_sum") def sum[type: Numeric](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_reshape") def reshape[T](value: Tensor[T], shape: list[int]) -> Tensor[T]
+    extern("__sev_tensor_transpose") def transpose[T](value: Tensor[T]) -> Tensor[T]
+    extern("__sev_tensor_matmul") def matmul[T: Numeric](left: Tensor[T], right: Tensor[T]) -> Tensor[T]
+    extern("__sev_tensor_sum") def sum[T: Numeric](value: Tensor[T]) -> Tensor[T]
     extern("__sev_tensor_mean") def mean(value: Tensor[f64]) -> float
     extern("__sev_tensor_max") def maximum(value: Tensor[f64]) -> float
     extern("__sev_tensor_min") def minimum(value: Tensor[f64]) -> float
-    extern("__sev_tensor_softmax_rows") def softmax[type: Float](value: Tensor[type]) -> Tensor[type]
+    extern("__sev_tensor_softmax_rows") def softmax[T: Float](value: Tensor[T]) -> Tensor[T]
 
-    extern("__sev_tensor_to_f32") def compute_as_f32[type: Numeric](value: Tensor[type]) -> Tensor[f32]
-    extern("__sev_tensor_to_f8e4m3fn") def store_as_f8e4m3fn[type: Numeric](value: Tensor[type]) -> Tensor[f8e4m3fn]
-    extern("__sev_tensor_to_f8e5m2") def store_as_f8e5m2[type: Numeric](value: Tensor[type]) -> Tensor[f8e5m2]
+    extern("__sev_tensor_to_f32") def compute_as_f32[T: Numeric](value: Tensor[T]) -> Tensor[f32]
+    extern("__sev_tensor_to_f8e4m3fn") def store_as_f8e4m3fn[T: Numeric](value: Tensor[T]) -> Tensor[f8e4m3fn]
+    extern("__sev_tensor_to_f8e5m2") def store_as_f8e5m2[T: Numeric](value: Tensor[T]) -> Tensor[f8e5m2]
 
 test "ranked tensors retain contiguous values and shape":
     value = ranked([1.0, 2.0, 3.0, 4.0], [2, 2])

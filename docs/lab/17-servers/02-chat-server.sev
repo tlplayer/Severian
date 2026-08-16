@@ -19,7 +19,7 @@ def broadcast(clients: map[int, Channel[string]], text: string):
 def run_hub(events: Channel[ChatEvent]):
     clients := {}
 
-    switch events while running with running := true:
+    match events while running with running := true:
         Join from events:
             clients[client_id] = move outbound
             broadcast(view clients, join_message(client_id))
@@ -36,9 +36,9 @@ def run_hub(events: Channel[ChatEvent]):
             running = false
 
 def write_client(writer: network.TCPWriter, outbound: Channel[string]):
-    switch outbound while connected with connected := true:
+    match outbound while connected with connected := true:
         message from outbound:
-            switch await writer.write_line(message):
+            match await writer.write_line(message):
                 ok _:
                     log.info("chat message delivered")
 
@@ -53,7 +53,7 @@ def read_client(
     reader: network.TCPReader,
     events: Channel[ChatEvent],
 ):
-    switch await reader.read_line() while true:
+    match await reader.read_line() while true:
         ok message:
             await send Say(client_id, move message) with events
 

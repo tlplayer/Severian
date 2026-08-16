@@ -31,7 +31,7 @@ def schema_errors(schema: Schema) -> list[string]:
     if schema.relation == "":
         errors.append("schema relation is empty")
     if size(schema.columns) != size(schema.types):
-        errors.append("column/type arity mismatch")
+        errors.append("column/T arity mismatch")
     if size(schema.columns) != size(schema.nullable):
         errors.append("column/nullability arity mismatch")
     if schema.primary_key != "" and field_index(schema, schema.primary_key) < 0:
@@ -61,7 +61,7 @@ def query_errors(schema: Schema, query: Query) -> list[string]:
             errors.append("unknown filter field: " + query.filter_field)
         else:
             if schema.types[filter_index] != query.parameter_type:
-                errors.append("filter parameter type mismatch")
+                errors.append("filter parameter T mismatch")
     for group_field in query.group_fields:
         if field_index(schema, group_field) < 0:
             errors.append("unknown group field: " + string(group_field))
@@ -84,7 +84,7 @@ def join_errors(left: Schema, right: Schema, left_field: string, right_field: st
         errors.append("unknown right join field")
     if left_index >= 0 and right_index >= 0:
         if left.types[left_index] != right.types[right_index]:
-            errors.append("join field type mismatch")
+            errors.append("join field T mismatch")
     return errors
 
 def result_fields(query: Query) -> list[string]:
@@ -155,7 +155,7 @@ test "schema and query validation":
 test "invalid fields and parameter types are rejected before SQL":
     users = Schema("users", ["id", "tenantId"], ["int", "int"], [false, false], "id")
     query = Query("users", ["missing"], ["missing"], [false], "tenantId", "string", [])
-    assert(query_errors(users, query) == ["unknown projected field: missing", "filter parameter type mismatch"])
+    assert(query_errors(users, query) == ["unknown projected field: missing", "filter parameter T mismatch"])
 
 test "grouping and joins are checked":
     users = Schema("users", ["id", "tenantId"], ["int", "int"], [false, false], "id")

@@ -1,4 +1,4 @@
-# E000206: the switch handles Ready and Failed, but not Waiting.
+# E000206: the match handles Ready and Failed, but not Waiting.
 # Add a Waiting arm or use `_` when a deliberate fallback is appropriate.
 enum Status:
     Ready
@@ -6,7 +6,7 @@ enum Status:
     Waiting
 
 def run(status: Status):
-    switch status:
+    match status:
         Ready:
             print("ready")
         Failed:

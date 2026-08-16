@@ -119,13 +119,13 @@ class Parser:
         token = source[start:position]
         if token.contains(".") or token.contains("e") or token.contains("E"):
             parsed ?= float.parse(token)
-            switch parsed:
+            match parsed:
                 ok value:
                     return value
                 failure _error:
                     return failure(JsonError("invalid JSON number: " + token))
         parsed ?= int.parse(token)
-        switch parsed:
+        match parsed:
             ok value:
                 return value
             failure _error:
@@ -234,16 +234,16 @@ def file_document(path: string, text: string) -> Result[Json, JsonError]:
     value = decode[Any](text)
     return Json(path, value)
 
-def loads[type](text: string) -> Result[type, JsonError]:
-    return decode[type](text)
+def loads[T](text: string) -> Result[T, JsonError]:
+    return decode[T](text)
 
-def dumps[type](value: type) -> string:
+def dumps[T](value: T) -> string:
     return encode(value)
 
-def decode[type](text: string) -> Result[type, JsonError]:
+def decode[T](text: string) -> Result[T, JsonError]:
     return decode_value(text)
 
-def encode[type](value: type) -> string:
+def encode[T](value: T) -> string:
     return encode_value(value)
 
 def object_get(value: Any, key: string) -> Any:
@@ -308,7 +308,7 @@ test "JSON scalar and collection adapters preserve runtime types":
     assert(as_string("text") == "text")
     object_set(object, "added", 9)
     assert(as_int(object_get(object, "added")) == 9)
-    switch loads[int]("42"):
+    match loads[int]("42"):
         ok loaded:
             assert(loaded == 42)
         failure error:
@@ -316,7 +316,7 @@ test "JSON scalar and collection adapters preserve runtime types":
     assert(dumps([1, 2]) == "[1,2]")
 
 test "JSON documents expose metadata and typed write failures":
-    switch document("[1,2,3]"):
+    match document("[1,2,3]"):
         ok array_document:
             assert(array_document.path().is_empty())
             assert(array_document.name().is_empty())
@@ -325,7 +325,7 @@ test "JSON documents expose metadata and typed write failures":
             assert(array_document.media_type() == "application/json")
             assert(array_document.size() == array_document.bytes())
             assert(array_document.raw() == platform.string_encode("[1,2,3]"))
-            switch array_document.text():
+            match array_document.text():
                 ok text_value:
                     assert(text_value == "[1,2,3]")
                 failure error:
@@ -333,7 +333,7 @@ test "JSON documents expose metadata and typed write failures":
             assert(array_document.keys().is_empty())
             assert(array_document.values().is_empty())
             assert(array_document.value() == [1, 2, 3])
-            switch array_document.write():
+            match array_document.write():
                 ok:
                     assert(false, "an in-memory document unexpectedly wrote without a path")
                 failure error:
@@ -342,7 +342,7 @@ test "JSON documents expose metadata and typed write failures":
             assert(false, error)
     destination = "/tmp/severian-json-write-to.json"
     attached_path = "/tmp/severian-json-attached.JSON"
-    switch file_document(attached_path, "{\"ready\":true}"):
+    match file_document(attached_path, "{\"ready\":true}"):
         ok attached:
             assert(attached.name() == "severian-json-attached.JSON")
             assert(attached.extension() == ".json")
@@ -353,7 +353,7 @@ test "JSON documents expose metadata and typed write failures":
             assert(false, error)
 
 test "invalid JSON remains a typed parse failure":
-    switch decode[Any]("{"):
+    match decode[Any]("{"):
         ok _value:
             assert(false, "invalid JSON unexpectedly decoded")
         failure _error:

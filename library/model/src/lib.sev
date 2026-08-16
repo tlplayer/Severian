@@ -294,7 +294,7 @@ def identify_format(source: string) -> Result[string, types.ModelLoadError]:
     return artifacts.identify_format(source)
 
 def validate_imported_graph(graph: types.ModelGraph) -> Result[unit, types.ModelLoadError]:
-    switch graph.validate():
+    match graph.validate():
         ok _value:
             return
         failure invalid:
@@ -618,9 +618,9 @@ def detach(value: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.tensor(tensor_ops.values(value), tensor_ops.shape(value))
 def requires_grad(value: Tensor[f64], required: bool = true) -> optimizers.Parameter:
     return optimizers.Parameter(value, tensor_ops.zeros(tensor_ops.shape(value)), required)
-def no_grad[type](value: type) -> type:
+def no_grad[T](value: T) -> T:
     return value
-def inference[type](value: type) -> type:
+def inference[T](value: T) -> T:
     return value
 def jacobian(operation: layers.Module, input: Tensor[f64], epsilon: float = 0.000001) -> Tensor[f64]:
     return finite_jacobian(operation, input, epsilon)

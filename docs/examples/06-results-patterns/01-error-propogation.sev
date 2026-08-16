@@ -1,0 +1,27 @@
+# 1. Declared failure propagates automatically.
+def load(path: Path) -> string ! IOError:
+    data = read(path)
+    return data
+
+
+# 2. Handle locally only when you actually have a fallback.
+def load_or_default(path: Path) -> string:
+    data = read(path) else "default"
+    return data
+
+
+# 3. Capture the error only when you need it.
+def load_or_report(path: Path) -> string:
+    data = read(path) else error:
+        print(error)
+        return "default"
+
+    return data
+
+# 4. Wrap result for later processing 
+def load_result(path: Path) -> Result[string,IOError]:
+    data ?= read(path) 
+
+    return data
+
+

@@ -1,0 +1,17 @@
+def transfer(
+    source: i64,
+    destination: i64,
+    amount: i64,
+) -> (i64, i64) with
+{
+    amount > 0,
+    amount <= source,
+    defer source >= 0,
+    defer source + destination == original_total,
+}:
+    original_total = source + destination
+
+    source -= amount
+    destination += amount
+
+    return (source, destination)

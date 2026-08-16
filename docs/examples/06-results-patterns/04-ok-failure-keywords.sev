@@ -6,7 +6,7 @@ def parse_count(text: string) -> Result[int, ParseError]:
     return value
 
 test "valid count":
-    switch parse_count("42"):
+    match parse_count("42"):
         ok count:
             assert(count == 42)
 
@@ -14,7 +14,7 @@ test "valid count":
             assert(false, error)
 
 test "empty count":
-    switch parse_count(""):
+    match parse_count(""):
         ok _:
             assert(false, "expected failure")
 
@@ -24,7 +24,7 @@ test "empty count":
 def main():
     result ?= parse_count("42")
 
-    switch result:
+    match result:
         ok count:
             print(count)
 

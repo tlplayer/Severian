@@ -1,4 +1,4 @@
-# E000207: unresolved type escaped semantic analysis
+# E000207: unresolved T escaped semantic analysis
 # Strict packages reject an untyped parameter before MIR construction.
 # Add a concrete annotation, or write `Any` explicitly when dynamic typing is
 # intentional.

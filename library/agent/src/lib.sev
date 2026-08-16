@@ -152,16 +152,16 @@ def save_state(path: string, state: AgentState) -> Result[int, string]:
     return write_file(path, compact_state(state))
 
 def persist_state(path: string, state: AgentState):
-    switch save_state(path, state):
+    match save_state(path, state):
         ok bytesWritten:
             return
         failure error:
             print("warning: could not persist agent state: " + error)
 
 def load_state(path: string, goal: string) -> AgentState:
-    switch read_file(path):
+    match read_file(path):
         ok content:
-            switch json.decode[AgentState](content):
+            match json.decode[AgentState](content):
                 ok state:
                     return state
                 failure error:
@@ -237,9 +237,9 @@ def execute_tool(
             false,
         )
 
-    switch json.decode[string](call.arguments):
+    match json.decode[string](call.arguments):
         ok command:
-            switch execute_command(
+            match execute_command(
                 workspace,
                 command,
                 limits.command_timeout_millis,
@@ -283,7 +283,7 @@ def verify(
     command: string,
     limits: AgentLimits,
 ) -> CommandResult:
-    switch execute_command(
+    match execute_command(
         workspace,
         command,
         limits.command_timeout_millis,
@@ -319,7 +319,7 @@ def run_agent(
         )
         prompt = state_prompt(state)
 
-        switch model_request(
+        match model_request(
             config.endpoint,
             config.model,
             system_prompt() + "\n\n" + command_tool_description(),
@@ -350,7 +350,7 @@ def run_agent(
                     for call in reply.tool_calls:
                         result = execute_tool(workspace, call, limits)
 
-                        switch model_request(
+                        match model_request(
                             config.endpoint,
                             config.model,
                             system_prompt(),
@@ -369,7 +369,7 @@ def run_agent(
                             failure error:
                                 state = append_failure(state, error)
 
-                    switch git_status(workspace):
+                    match git_status(workspace):
                         ok files:
                             state = replace_state(
                                 state,

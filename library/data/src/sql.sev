@@ -20,7 +20,7 @@ def invalid(message: string) -> SqlQuery:
 def literal(text: string) -> Any:
     if size(text) >= 2 and text.starts_with("'") and text.ends_with("'"):
         return text[1:-1]
-    switch json.decode[Any](text):
+    match json.decode[Any](text):
         ok value:
             return value
         failure _:

@@ -15,10 +15,10 @@ unsafe:
 
     extern("__sev_map_items") def map_items[key, value](values: map[key, value]) -> list[tuple[key, value]]
     extern("__sev_map_update") def map_update[key, value](values: map[key, value], additions: map[key, value])
-    extern("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: key, fallback: value) -> value
+    extern("__sev_map_pop") def map_pop[key, value](values: map[key, value], key: K, fallback: value) -> value
     extern("__sev_map_clear") def map_clear[key, value](values: map[key, value])
-    extern("__sev_platform_set_add") def set_add[type](values: set[type], value: type)
-    extern("__sev_platform_set_remove") def set_remove[type](values: set[type], value: type) -> bool
+    extern("__sev_platform_set_add") def set_add[T](values: set[T], value: T)
+    extern("__sev_platform_set_remove") def set_remove[T](values: set[T], value: T) -> bool
     extern("__sev_string_casefold") def string_casefold(value: string) -> string
     extern("__sev_string_encode") def string_encode(value: string) -> list[int]
     extern("__sev_file_exists") def file_exists(path: string) -> bool
@@ -51,11 +51,11 @@ unsafe:
     extern("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
     extern("__sev_http_download") def http_download(url: string, destination: string) -> Result[unit, IOError]
     extern("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
-    extern("__sev_platform_enumerate") def core_enumerate[type](values: list[type]) -> list[tuple[int, type]]
+    extern("__sev_platform_enumerate") def core_enumerate[T](values: list[T]) -> list[tuple[int, T]]
     extern("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]
     extern("__sev_platform_all") def core_all(values: list[bool]) -> bool
     extern("__sev_platform_any") def core_any(values: list[bool]) -> bool
-    extern("__sev_platform_abs") def core_abs[type](value: type) -> type
+    extern("__sev_platform_abs") def core_abs[T](value: T) -> T
 
     extern("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
 

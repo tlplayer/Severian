@@ -181,12 +181,12 @@ test "YAML documents expose metadata and file persistence":
     assert(value.media_type() == "application/yaml")
     assert(value.size() == value.bytes())
     assert(value.raw() == platform.string_encode(value.encode()))
-    switch value.text():
+    match value.text():
         ok text_value:
             assert(text_value == value.encode())
         failure error:
             assert(false, error)
-    switch value.write():
+    match value.write():
         ok:
             assert(false, "an in-memory document unexpectedly wrote without a path")
         failure error:

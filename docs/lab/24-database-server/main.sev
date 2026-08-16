@@ -5,7 +5,7 @@ def run_client(connection: DatabaseConnection):
     database.must_remote_execute(connection, "INSERT INTO people(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
     result ?= database.remote_query(connection, "SELECT id, name FROM people ORDER BY id")
     database.must_disconnect(connection)
-    switch result:
+    match result:
         ok rows:
             print(size(rows))
             for row in rows:
@@ -18,7 +18,7 @@ def run_client_and_stop(server: DatabaseServer, connection: DatabaseConnection):
     database.must_stop(server)
 
 def run_server(server: DatabaseServer):
-    switch database.connect(database.address(server)):
+    match database.connect(database.address(server)):
         ok connection:
             run_client_and_stop(server, connection)
         failure error:
@@ -26,7 +26,7 @@ def run_server(server: DatabaseServer):
             database.must_stop(server)
 
 def main():
-    switch database.start(":memory:"):
+    match database.start(":memory:"):
         ok server:
             run_server(server)
         failure error:

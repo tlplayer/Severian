@@ -9,14 +9,14 @@ def exists(value: string) -> bool:
     return os.exists(value)
 
 def is_file(value: string) -> bool:
-    switch os.stat(value):
+    match os.stat(value):
         ok information:
             return information.is_file
         failure _error:
             return false
 
 def is_dir(value: string) -> bool:
-    switch os.stat(value):
+    match os.stat(value):
         ok information:
             return information.is_directory
         failure _error:
@@ -48,7 +48,7 @@ test "path names are safe and stable":
 
 test "path inspection handles files, directories, and missing paths":
     file_path = "/tmp/severian-library-path.txt"
-    switch platform.file_write(file_path, "path coverage"):
+    match platform.file_write(file_path, "path coverage"):
         ok:
             assert(exists(file_path))
             assert(is_file(file_path))

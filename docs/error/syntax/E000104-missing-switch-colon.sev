@@ -1,5 +1,5 @@
-# E000104: a switch arm pattern must end with a colon.
+# E000104: a match arm pattern must end with a colon.
 def main():
-    switch ".yaml":
+    match ".yaml":
         ".yaml" | ".yml"
             print("configuration")

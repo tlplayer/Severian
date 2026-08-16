@@ -4,14 +4,14 @@ enum Color:
     Blue
 
 def name(color: Color) -> string:
-    switch color:
-        Red:
+    match color:
+        case Red:
             return "red"
 
-        Green:
+        case Green:
             return "green"
 
-        Blue:
+        case Blue:
             return "blue"
 
 

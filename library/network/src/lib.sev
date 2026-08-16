@@ -273,16 +273,16 @@ def loopback_echo(message: string) -> Result[string, IOError]:
     return echoed
 
 def echo_once(listener: TcpListener) -> Result[unit, Any]:
-    switch listener.accept():
+    match listener.accept():
         ok connection:
-            switch connection.read_exact(2):
+            match connection.read_exact(2):
                 ok first:
-                    switch connection.read_exact(3):
+                    match connection.read_exact(3):
                         ok second:
-                            switch connection.write_all(first):
+                            match connection.write_all(first):
                                 ok first_written:
                                     assert(first_written == 2)
-                                    switch connection.write_all(second):
+                                    match connection.write_all(second):
                                         ok second_written:
                                             assert(second_written == 3)
                                             _closed = connection.close()
@@ -307,7 +307,7 @@ test "IP and address values distinguish IPv4 and IPv6":
     assert(Address("::1", 443).display() == "[::1]:443")
 
 test with integ "native TCP loopback":
-    switch loopback_echo("severian network runtime"):
+    match loopback_echo("severian network runtime"):
         ok echoed:
             assert(echoed == "severian network runtime")
         failure error:
@@ -331,7 +331,7 @@ test with integ "TCP handles partial reads writes addresses timeouts and cleanup
     await server
 
 test with integ "DNS failures remain typed":
-    switch resolve(""):
+    match resolve(""):
         ok _addresses:
             assert(false)
         failure error:

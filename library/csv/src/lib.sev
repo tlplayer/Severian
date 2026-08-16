@@ -225,7 +225,7 @@ test "CSV metadata and row views handle sparse records":
     assert(value.media_type() == "text/csv")
     assert(value.size() == value.bytes())
     assert(value.raw() == platform.string_encode(value.encode()))
-    switch value.text():
+    match value.text():
         ok text_value:
             assert(text_value == value.encode())
         failure error:
@@ -254,29 +254,29 @@ test "CSV cell access and mutation report every boundary":
     assert(value.get(-1, "left").is_empty())
     assert(value.get(4, "left").is_empty())
     assert(value.get(0, "missing").is_empty())
-    switch value.cell(0, "right"):
+    match value.cell(0, "right"):
         ok cell_value:
             assert(cell_value.is_empty())
         failure error:
             assert(false, error)
-    switch value.cell(0, "missing"):
+    match value.cell(0, "missing"):
         ok _cell_value:
             assert(false, "missing column unexpectedly succeeded")
         failure error:
             assert(error.message.contains("does not exist"))
-    switch value.cell(4, "left"):
+    match value.cell(4, "left"):
         ok _cell_value:
             assert(false, "missing row unexpectedly succeeded")
         failure error:
             assert(error.message.contains("outside"))
     _extended = value.set(0, "right", "extended")
     assert(value.get(0, "right") == "extended")
-    switch value.set(0, "missing", "value"):
+    match value.set(0, "missing", "value"):
         ok:
             assert(false, "missing column unexpectedly succeeded")
         failure error:
             assert(error.message.contains("does not exist"))
-    switch value.set(4, "left", "value"):
+    match value.set(4, "left", "value"):
         ok:
             assert(false, "missing row unexpectedly succeeded")
         failure error:
@@ -286,7 +286,7 @@ test "CSV data replacement and file writes preserve encoded content":
     in_memory := document("old\nvalue\n")
     in_memory.set_data(data.Data(["id", "name"], [["1", "Ada"], ["2", "Grace"]]))
     assert(in_memory.encode() == "id,name\n1,Ada\n2,Grace\n")
-    switch in_memory.write():
+    match in_memory.write():
         ok:
             assert(false, "an in-memory document unexpectedly wrote without a path")
         failure error:

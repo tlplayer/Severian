@@ -19,7 +19,7 @@ def close(connection: Database) -> Result[unit, DatabaseError]:
     return platform.mysql_close(connection)
 
 test "connection errors remain typed failures":
-    switch connect("127.0.0.1", "invalid", "invalid", "invalid", 1):
+    match connect("127.0.0.1", "invalid", "invalid", "invalid", 1):
         ok connection:
             _closed = close(connection)
             assert(false, "unexpected MySQL server on test port")

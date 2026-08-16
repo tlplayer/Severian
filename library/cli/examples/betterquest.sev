@@ -28,7 +28,7 @@ def interface() -> cli.Command:
 
 def main():
     application = interface()
-    switch cli.parse_process(application):
+    match cli.parse_process(application):
         ok matches:
             if matches.action != "run":
                 print(cli.response(application, matches))

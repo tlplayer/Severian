@@ -187,7 +187,7 @@ def inflate(data: list[int], expected_size: int = 0) -> list[int]:
             output.extend(reader.data[reader.byte_position:reader.byte_position + length])
             reader.byte_position += length
             continue
-        assert(block_type != 3, "reserved deflate block type")
+        assert(block_type != 3, "reserved deflate block T")
         literal_codes, distance_codes = fixed_codes() if block_type == 1 else dynamic_codes(reader)
         while true:
             symbol = decode_symbol(reader, literal_codes)

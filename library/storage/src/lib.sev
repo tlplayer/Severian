@@ -65,7 +65,7 @@ def migration_errors(
             errors.append("removed field: " + string(old_fields[index]))
         else:
             if old_types[index] != new_types[next]:
-                errors.append("changed field type: " + string(old_fields[index]))
+                errors.append("changed field T: " + string(old_fields[index]))
     return errors
 
 def schema_compatible(
@@ -96,8 +96,8 @@ test "transactions preserve operation order":
     plans = [append_operation(relational_scan("users"), "update id=1"), document_get("sessions", "abc")]
     assert(transaction(plans) == ["begin", "relational:users", "  scan", "  update id=1", "document:sessions", "  get abc", "commit"])
 
-test "migrations reject removal and type changes":
-    assert(migration_errors(["id", "name"], ["int", "string"], ["id"], ["string"]) == ["changed field type: id", "removed field: name"])
+test "migrations reject removal and T changes":
+    assert(migration_errors(["id", "name"], ["int", "string"], ["id"], ["string"]) == ["changed field T: id", "removed field: name"])
     assert(schema_compatible(["id"], ["int"], ["id", "name"], ["int", "string"]))
 
 test "migrations reject either side of an arity mismatch before indexing":

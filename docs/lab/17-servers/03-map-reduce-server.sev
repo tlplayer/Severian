@@ -28,7 +28,7 @@ def map_worker(
     tasks: Channel[MapTask],
     partials: Channel[Partial],
 ):
-    switch tasks while running with running := true:
+    match tasks while running with running := true:
         MapTask from tasks:
             total = map_values(view values)
             await send Partial(job_id, total) with partials
@@ -42,7 +42,7 @@ def coordinate(
     tasks: Channel[MapTask],
     partials: Channel[Partial],
 ):
-    switch jobs while running with running := true:
+    match jobs while running with running := true:
         Job from jobs:
             chunks = values.chunks(1024)
             part_count = size(chunks)
@@ -86,7 +86,7 @@ def serve_job(
     connection: network.TCPConnection,
     jobs: Channel[Job],
 ):
-    switch await run_job(job_id, connection, clone jobs) with connection:
+    match await run_job(job_id, connection, clone jobs) with connection:
         ok _:
             log.info("map/reduce job completed")
 

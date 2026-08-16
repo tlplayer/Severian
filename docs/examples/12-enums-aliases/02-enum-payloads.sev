@@ -5,7 +5,7 @@ enum Shape:
     Rectangle(width: float, height: float)
 
 def area(shape: Shape) -> float:
-    switch shape:
+    match shape:
         Circle:
             return 3.1415926 * radius ** 2
 

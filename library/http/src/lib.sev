@@ -32,27 +32,27 @@ def download(url: string, destination: string) -> Result[unit, IOError]:
     return platform.http_download(url, destination)
 
 test "HTTP verb helpers preserve typed failures for invalid URLs":
-    switch request("PATCH", "invalid"):
+    match request("PATCH", "invalid"):
         ok _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
-    switch get("invalid"):
+    match get("invalid"):
         ok _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
-    switch post("invalid", "payload"):
+    match post("invalid", "payload"):
         ok _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
-    switch put("invalid", "payload"):
+    match put("invalid", "payload"):
         ok _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
-    switch delete("invalid"):
+    match delete("invalid"):
         ok _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:

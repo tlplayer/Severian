@@ -1,17 +1,11 @@
 def fetch(url: string) -> Result[string, IOError]:
-    body = http.get(url)
-    return body
+    wait(0.1s)
+    return true
 
-test:
+test with profile with 
+{
+    0.1s < time -> exception("Await didn't actually wait ")
+}:
     task = async fetch("https://example.test") with self
-    result ?= await task
-
-    switch result:
-        ok body:
-            assert(body != "")
-
-        failure error:
-            assert(false, error)
-
-def main() -> Result[string, IOError]:
-    return async fetch("https://example.test") with self
+    result = await task
+    assert(result)

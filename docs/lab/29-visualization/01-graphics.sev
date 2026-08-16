@@ -18,7 +18,7 @@ test "graphics example produces a complete SVG document":
     assert(document.contains("Severian graphics"))
 
 def save_drawing(target: graphics.Canvas, path: string):
-    switch target.save(path):
+    match target.save(path):
         ok _:
             print("graphics", target.width(), target.height())
             print(path)
@@ -27,7 +27,7 @@ def save_drawing(target: graphics.Canvas, path: string):
 
 def main():
     path = "/tmp/severian-graphics-example.svg"
-    switch drawing():
+    match drawing():
         ok target:
             save_drawing(target, path)
         failure error:

@@ -121,7 +121,7 @@ def sample_requests() -> list[InferenceRequest]:
     return [InferenceRequest(1, [2.0, 3.0]), InferenceRequest(2, [-1.0, 0.0]), InferenceRequest(3, [4.0, -3.0]), InferenceRequest(4, [1.0, 1.0]), InferenceRequest(5, [0.0, 2.0]), InferenceRequest(6, [5.0, 5.0])]
 
 def transport_probe(message: string) -> string:
-    switch network.loopback_echo(message):
+    match network.loopback_echo(message):
         ok echoed:
             return "transport " + echoed
         failure _:

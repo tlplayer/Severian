@@ -1,24 +1,24 @@
 import platform
 
-def add[type](values: set[type], value: type):
+def add[T](values: set[T], value: T):
     platform.set_add(values, value)
 
-def remove[type](values: set[type], value: type):
+def remove[T](values: set[T], value: T):
     assert(platform.set_remove(values, value), "set element does not exist")
 
-def discard[type](values: set[type], value: type):
+def discard[T](values: set[T], value: T):
     platform.set_remove(values, value)
 
-def union[type](left: set[type], right: set[type]) -> set[type]:
+def union[T](left: set[T], right: set[T]) -> set[T]:
     return left.union(right)
 
-def intersection[type](left: set[type], right: set[type]) -> set[type]:
+def intersection[T](left: set[T], right: set[T]) -> set[T]:
     return left.intersection(right)
 
-def difference[type](left: set[type], right: set[type]) -> set[type]:
+def difference[T](left: set[T], right: set[T]) -> set[T]:
     return left.difference(right)
 
-def symmetric_difference[type](left: set[type], right: set[type]) -> set[type]:
+def symmetric_difference[T](left: set[T], right: set[T]) -> set[T]:
     return left.symmetric_difference(right)
 
 test "set facade covers mutation and all algebra operations":

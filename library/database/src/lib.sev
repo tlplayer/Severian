@@ -52,7 +52,7 @@ def stop(server: DatabaseServer) -> Result[unit, DatabaseError]:
     return platform.database_server_stop(server)
 
 def must_execute(database: Database, statement: string) -> int:
-    switch execute(database, statement):
+    match execute(database, statement):
         ok changed:
             return changed
         failure error:
@@ -60,14 +60,14 @@ def must_execute(database: Database, statement: string) -> int:
             return -1
 
 def must_close(database: Database):
-    switch close(database):
+    match close(database):
         ok:
             return
         failure error:
             assert(false, error)
 
 def must_remote_execute(connection: DatabaseConnection, statement: string) -> int:
-    switch remote_execute(connection, statement):
+    match remote_execute(connection, statement):
         ok changed:
             return changed
         failure error:
@@ -75,28 +75,28 @@ def must_remote_execute(connection: DatabaseConnection, statement: string) -> in
             return -1
 
 def must_disconnect(connection: DatabaseConnection):
-    switch disconnect(connection):
+    match disconnect(connection):
         ok:
             return
         failure error:
             assert(false, error)
 
 def must_stop(server: DatabaseServer):
-    switch stop(server):
+    match stop(server):
         ok:
             return
         failure error:
             assert(false, error)
 
 test "executes SQL and iterates real result rows":
-    switch memory():
+    match memory():
         ok database:
-            switch execute(database, "CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT NOT NULL)"):
+            match execute(database, "CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT NOT NULL)"):
                 ok _:
-                    switch execute(database, "INSERT INTO people(id, name) VALUES (1, 'Ada'), (2, 'Grace'), (3, 'Linus')"):
+                    match execute(database, "INSERT INTO people(id, name) VALUES (1, 'Ada'), (2, 'Grace'), (3, 'Linus')"):
                         ok changed:
                             assert(changed == 3)
-                            switch query(database, "SELECT id, name FROM people ORDER BY id"):
+                            match query(database, "SELECT id, name FROM people ORDER BY id"):
                                 ok rows:
                                     names := []
                                     for row in rows:
@@ -114,14 +114,14 @@ test "executes SQL and iterates real result rows":
             assert(false, error)
 
 test "transactions roll back mutations":
-    switch memory():
+    match memory():
         ok database:
-            switch execute(database, "CREATE TABLE events(id INTEGER PRIMARY KEY, name TEXT)"):
+            match execute(database, "CREATE TABLE events(id INTEGER PRIMARY KEY, name TEXT)"):
                 ok _:
                     must_execute(database, "BEGIN")
                     must_execute(database, "INSERT INTO events(id, name) VALUES (1, 'temporary')")
                     must_execute(database, "ROLLBACK")
-                    switch query(database, "SELECT COUNT(*) FROM events"):
+                    match query(database, "SELECT COUNT(*) FROM events"):
                         ok rows:
                             assert(rows[0][0] == "0")
                         failure error:
@@ -132,13 +132,13 @@ test "transactions roll back mutations":
             assert(false, error)
 
 test "PQL validation feeds executable SQL":
-    switch memory():
+    match memory():
         ok database:
             must_execute(database, "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)")
             must_execute(database, "INSERT INTO users(id, name) VALUES (1, 'Ada'), (2, 'Grace')")
             schema = pql.Schema("users", ["id", "name"], ["int", "string"], [false, true], "id")
             statement = pql.Query("users", ["id", "name"], ["id", "name"], [false, false], "", "", [])
-            switch query_pql(database, schema, statement):
+            match query_pql(database, schema, statement):
                 ok rows:
                     assert(size(rows) == 2)
                     assert(rows[0][0] == "1")
@@ -152,7 +152,7 @@ test "PQL validation feeds executable SQL":
 
 test "persistent databases survive reconnect":
     path = "/tmp/severian-database-persistence.sqlite"
-    switch open(path):
+    match open(path):
         ok database:
             must_execute(database, "CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY, value TEXT)")
             must_execute(database, "DELETE FROM settings")
@@ -160,9 +160,9 @@ test "persistent databases survive reconnect":
             must_close(database)
         failure error:
             assert(false, error)
-    switch open(path):
+    match open(path):
         ok database:
-            switch query(database, "SELECT id, value FROM settings ORDER BY id"):
+            match query(database, "SELECT id, value FROM settings ORDER BY id"):
                 ok rows:
                     assert(size(rows) == 1)
                     assert(rows[0][0] == "1")
@@ -174,13 +174,13 @@ test "persistent databases survive reconnect":
             assert(false, error)
 
 test with integ "database server accepts remote execute and query clients":
-    switch start(":memory:"):
+    match start(":memory:"):
         ok server:
-            switch connect(address(server)):
+            match connect(address(server)):
                 ok connection:
                     must_remote_execute(connection, "CREATE TABLE jobs(id INTEGER PRIMARY KEY, state TEXT)")
                     must_remote_execute(connection, "INSERT INTO jobs(id, state) VALUES (1, 'queued'), (2, 'running')")
-                    switch remote_query(connection, "SELECT id, state FROM jobs ORDER BY id"):
+                    match remote_query(connection, "SELECT id, state FROM jobs ORDER BY id"):
                         ok rows:
                             assert(size(rows) == 2)
                             assert(rows[0][0] == "1")

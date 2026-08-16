@@ -64,7 +64,7 @@ class MemoryStream:
 
     def seek(offset: int, origin: SeekOrigin) -> Result[int, StreamError]:
         target := 0
-        switch origin:
+        match origin:
             Start:
                 target = offset
             Current:
@@ -156,19 +156,19 @@ test "memory streams read seek overwrite and zero-fill gaps":
 
 test "stream failures are atomic and EOF is explicit":
     stream = MemoryStream([1, 2, 3])
-    switch stream.read_exact(4):
+    match stream.read_exact(4):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "stream ended before the requested byte count")
     assert(stream.tell() == 0)
-    switch stream.write([4, 256, 5]):
+    match stream.write([4, 256, 5]):
         ok _count:
             assert(false)
         failure error:
             assert(error.message == "byte values must be between 0 and 255")
     assert(stream.snapshot() == [1, 2, 3])
-    switch stream.seek(-1, Start):
+    match stream.seek(-1, Start):
         ok _position:
             assert(false)
         failure error:
@@ -189,13 +189,13 @@ test "structural stream traits compose copy and read all":
     assert(start == 0)
     all = read_all(destination, 3)
     assert(all == [1, 2, 3, 4, 5])
-    switch destination.truncate(3):
+    match destination.truncate(3):
         ok _value:
             assert(true)
         failure _error:
             assert(false)
     assert(destination.snapshot() == [1, 2, 3])
-    switch destination.truncate(5):
+    match destination.truncate(5):
         ok _value:
             assert(true)
         failure _error:
@@ -204,27 +204,27 @@ test "structural stream traits compose copy and read all":
 
 test "closed streams reject I/O consistently":
     stream = MemoryStream([1])
-    switch stream.close():
+    match stream.close():
         ok _value:
             assert(true)
         failure _error:
             assert(false)
-    switch stream.read(1):
+    match stream.read(1):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "stream is closed")
-    switch stream.read_exact(1):
+    match stream.read_exact(1):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "stream is closed")
-    switch stream.write([2]):
+    match stream.write([2]):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "stream is closed")
-    switch stream.truncate(0):
+    match stream.truncate(0):
         ok _value:
             assert(false)
         failure error:
@@ -232,12 +232,12 @@ test "closed streams reject I/O consistently":
 
 test "stream boundary errors and exact reads are explicit":
     stream = MemoryStream([1, 2, 3, 4])
-    switch stream.read(-1):
+    match stream.read(-1):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "read count cannot be negative")
-    switch stream.read_exact(-1):
+    match stream.read_exact(-1):
         ok _value:
             assert(false)
         failure error:
@@ -246,23 +246,23 @@ test "stream boundary errors and exact reads are explicit":
     assert(exact == [1, 2])
     current = stream.seek(1, Current)
     assert(current == 3)
-    switch stream.truncate(-1):
+    match stream.truncate(-1):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "stream length cannot be negative")
-    switch read_all(stream, 0):
+    match read_all(stream, 0):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "chunk size must be positive")
-    switch copy(stream, MemoryStream([]), 0):
+    match copy(stream, MemoryStream([]), 0):
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "chunk size must be positive")
     limited = LimitedWriter(MemoryStream([]), 1)
-    switch copy(MemoryStream([1, 2]), limited, 2):
+    match copy(MemoryStream([1, 2]), limited, 2):
         ok _value:
             assert(false)
         failure error:

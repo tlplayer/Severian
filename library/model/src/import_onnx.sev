@@ -47,7 +47,7 @@ class ProtoReader:
         elif wire == 5:
             _value = self.take(4)
         else:
-            assert(false, "unsupported protobuf wire type")
+            assert(false, "unsupported protobuf wire T")
 
 def utf8(data: list[int]) -> Result[string, IOError]:
     return file.utf8(data)

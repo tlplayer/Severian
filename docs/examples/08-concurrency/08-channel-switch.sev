@@ -11,7 +11,7 @@ def main():
     message_producer = async send "hello" with messages
     command_producer = async send "refresh" with commands
 
-    switch messages and commands while received < 2 with received := 0:
+    match messages and commands while received < 2 with received := 0:
         command from commands:
             await handle(command) with runtime and lock
             received += 1

@@ -245,13 +245,13 @@ test "deque queue and stack preserve their ordering contracts":
 
 test "empty collections return structured failures":
     deque = Deque[int]([])
-    switch deque.pop_left():
+    match deque.pop_left():
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "cannot pop from an empty deque")
     heap = MinHeap[int]([])
-    switch heap.peek():
+    match heap.peek():
         ok _value:
             assert(false)
         failure error:
@@ -311,7 +311,7 @@ test "deque compaction and LRU updates preserve logical state":
     assert(updated == 10)
     cache.put("c", 3)
     assert(cache.keys() == ["a", "c"])
-    switch cache.get("b"):
+    match cache.get("b"):
         ok _value:
             assert(false)
         failure error:
@@ -326,17 +326,17 @@ test "deque compaction and LRU updates preserve logical state":
 
 test "collection accessors cover populated and empty states":
     deque = Deque[int]([])
-    switch deque.pop():
+    match deque.pop():
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "cannot pop from an empty deque")
-    switch deque.peek():
+    match deque.peek():
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "cannot peek at an empty deque")
-    switch deque.peek_left():
+    match deque.peek_left():
         ok _value:
             assert(false)
         failure error:
@@ -358,12 +358,12 @@ test "collection accessors cover populated and empty states":
     stack = Stack[int]([])
     assert(stack.length() == 0)
     assert(stack.is_empty())
-    switch stack.pop():
+    match stack.pop():
         ok _value:
             assert(false)
         failure error:
             assert(error.message == "cannot pop from an empty stack")
-    switch stack.peek():
+    match stack.peek():
         ok _value:
             assert(false)
         failure error:
@@ -380,7 +380,7 @@ test "collection accessors cover populated and empty states":
     assert(minimum == 41)
     drained = heap.pop()
     assert(drained == 41)
-    switch heap.pop():
+    match heap.pop():
         ok _value:
             assert(false)
         failure error:

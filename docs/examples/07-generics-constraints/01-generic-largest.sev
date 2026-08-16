@@ -2,7 +2,7 @@ trait Ordered:
     less_than(other: Self) -> bool
 
     
-def largest[type: Ordered](values: list[type]) -> Option[type]:
+def largest[T: Ordered](values: list[T]) -> Option[T]:
     if size(values) == 0:
         return absent
 
@@ -15,7 +15,7 @@ def largest[type: Ordered](values: list[type]) -> Option[type]:
     return present(best)
 
 test:
-    switch largest([3, 9, 2]):
+    match largest([3, 9, 2]):
         present value:
             assert(value == 9)
 

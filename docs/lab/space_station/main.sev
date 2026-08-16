@@ -203,7 +203,7 @@ def snapshot_packet(report: StationReport) -> string:
     )
 
 def observer_worker(observer: string, packet: string, snapshots: Channel[string]):
-    switch network.loopback_echo(observer + "|" + packet):
+    match network.loopback_echo(observer + "|" + packet):
         ok echoed:
             delivered = async send echoed with snapshots
             await delivered
@@ -258,7 +258,7 @@ test with integ "two observers receive exact snapshots over real TCP loopback":
     assert(snapshots[1] == "observer-b|" + snapshot_packet(report))
 
 def write_frame(target: graphics.Canvas, path: string):
-    switch target.save(path):
+    match target.save(path):
         ok _:
             print("frame", path)
         failure error:
