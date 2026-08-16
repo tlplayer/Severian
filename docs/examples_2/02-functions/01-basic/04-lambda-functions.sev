@@ -1,13 +1,13 @@
 def add(a: int, b: int) -> int:
     return a + b
 
-def apply(op: Function[int, int, int], left: int, right: int) -> int:
+def apply(op: (int,int) -> int, left: int, right: int) -> int:
     return op(left, right)
 
 test:
     assert(apply(add, 20, 22) == 42)
     offset := 3
-    operation = |value, unused| value + offset + unused
+    operation = lambda value, unused: value + offset + unused
     offset = 10
     assert(apply(operation, 4, 0) == 7)
 
