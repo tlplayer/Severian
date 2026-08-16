@@ -16,10 +16,10 @@ def largest[T: Ordered](values: list[T]) -> Option[T]:
 
 test:
     match largest([3, 9, 2]):
-        present value:
+        case value:
             assert(value == 9)
 
-        absent:
+        case _:
             assert(false, "expected largest value")
 
 def main():

@@ -14,6 +14,7 @@ test with compiler:
     assert(error.message.contains("expected int"))
 
 test with compiler:
+    #borrow check will error on this
     reject error:
         value := Thing()
         moved := move value
