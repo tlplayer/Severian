@@ -11,16 +11,16 @@ def main():
     message_producer = async messages.send("hello")
     command_producer = async commands.send("refresh")
 
-    match {messages , commands} while received < 2 with received := 0:
-        case command from commands:
-            await handle(command) with runtime and lock
+    select with limit=2:
+        command from commands:
+            await handle(command) with { runtime, lock}
             received += 1
 
-        case message from messages:
+        message from messages:
             process(message)
             received += 1
 
-        case error:
+        fail error:
             panic("Channels collapsed", error)
 
     await message_producer, command_producer

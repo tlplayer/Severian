@@ -14,7 +14,7 @@ class LuaFile: File
     def read(path: string) -> string:
         return "lua"
 
-class LuaFile: File
+class JsonFile: File
     file_type = FileType("json")
     extensions = {".json"}
 
