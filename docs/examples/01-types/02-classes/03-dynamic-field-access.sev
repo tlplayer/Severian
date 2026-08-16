@@ -1,3 +1,7 @@
+'''
+To avoid having getX() setX() etc. which is a big reason for camelcases existence imo,
+we have the set, and get properties on objects. This allows Point.set("x",0)
+'''
 class Point:
     x: int
     y: int
@@ -11,3 +15,6 @@ def main():
     print(point.x)
     point.y = 20
     print(point.y)
+
+test with integ:
+    
