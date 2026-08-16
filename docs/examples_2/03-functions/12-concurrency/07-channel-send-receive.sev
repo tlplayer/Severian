@@ -1,0 +1,7 @@
+def main():
+    messages = channel[string](buffer=10)
+
+    producer = async messages.send("hello") with self
+    message = await messages
+
+    print(message)

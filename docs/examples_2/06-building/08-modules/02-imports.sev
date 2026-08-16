@@ -5,6 +5,7 @@ def main():
     path = "/tmp/severian-getting-started-imports.txt"
     file.write(path, string(distance))
     file.read(path)
+    file.remove(path)
     file_distance = document.text()
     print(file_distance)
 
@@ -12,3 +13,4 @@ def main():
 test with integ "imported output":
     main()
     assert("3" in stdout)
+    assert(file.exists(path) == false)

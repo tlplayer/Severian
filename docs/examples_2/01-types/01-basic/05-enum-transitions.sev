@@ -6,4 +6,4 @@ enum Status:
 
 test "Connecting cannot go to Received":
     state := Received
-    state := 
+    throws(state := Connecting) 

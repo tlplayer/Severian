@@ -1,0 +1,22 @@
+def foo(x: int) -> int:
+    return x + 1
+
+test with compiler:
+    #Should not compile foo get the error
+    reject error:
+        foo("bar")
+    #Should accept 1 get result
+    accept:
+        value = foo(1)
+    assert(value == 1)
+    assert(error.code == "E0012")
+    assert(error.severity == Error)
+    assert(error.message.contains("expected int"))
+
+test with compiler:
+    reject error:
+        value := Thing()
+        moved := move value
+        print(value)
+    #TODO: change the error code to match also error codes should look like E001001 not E000101 3 and 3 
+    assert(error.code == "E000")

@@ -1,0 +1,10 @@
+
+def main():
+    array = (1,2,3,4)
+    print(array[2])
+    print(array[::-1])
+
+test with integ "":
+    main()
+    assert("3" in stdout)
+    assert("(4,3,2,1)" in stdout)

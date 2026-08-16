@@ -1,0 +1,10 @@
+def main():
+    count = 10
+    ratio = 0.5
+    enabled = true
+    name = "severian"
+
+    print(f"{count}:{type(count)}")
+    print(f"{ratio}:{type(ratio)}")
+    print(f"{enabled}:{type(enabled)}")
+    print(f"{name}:{type(name)}")

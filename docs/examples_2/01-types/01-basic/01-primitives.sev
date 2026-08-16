@@ -1,0 +1,12 @@
+def main():
+    count: i32 = 10
+    large: i64 = 1_000_000
+    ratio: f64 = 0.5
+    enabled: bool = true
+    letter: char = 'a'
+
+    print(count)
+    print(large)
+    print(ratio)
+    print(enabled)
+    print(letter)

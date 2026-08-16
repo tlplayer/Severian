@@ -1,0 +1,23 @@
+def main():
+    count = 10
+    ratio = 0.5
+    enabled = true
+    name = "severian"
+    combined: string = count + ratio
+
+    print(count)
+    print(ratio)
+    print(ratio + float(count))
+    print(enabled)
+    print(name)
+    print(combined)
+
+
+test "type conversion":
+    count := 10
+    ratio := .5
+    name := "severian"
+    assert(float(count) + ratio == 10.5)
+    #Cannot convert string to name but we can convert 
+    throws(name + ratio)
+    assert()

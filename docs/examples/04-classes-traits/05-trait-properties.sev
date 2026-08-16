@@ -1,8 +1,7 @@
 class FileType:
-    name: string
+    name: string 
 
 trait File:
-    @file
     property file_type: FileType
     property extensions: set[string]
     def read(path: string) -> string

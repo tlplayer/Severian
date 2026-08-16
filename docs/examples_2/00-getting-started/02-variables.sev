@@ -1,0 +1,11 @@
+
+CONSTANT_VARIABLE = "Hello"
+
+def main():
+    mutable_variable := ","
+    mutable_variable += " World!"
+    print(CONSTANT_VARIABLE+mutable_variable)
+
+test:
+    main()
+    assert("Hello, Wolrd!" in stdout)

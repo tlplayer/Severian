@@ -1,0 +1,1 @@
+Goes over started types, list, deque, heap, queue, set, map, dict

@@ -1,17 +1,13 @@
 # Tags: concurrency, channel, queue, fan-in
 
-def channel_suite():
-    pass = 0
-
 test "two producers":
-    messages = Channel[string] with Buffer(2)
-    first = async send "alpha" with messages
-    second = async send "beta" with messages
+    messages = Channel[string](2)
+    first = async messages.send("alpha") with self
+    second = async messages.send("beta") with self
     left = await messages
     right = await messages
     received = [left, right].sorted()
     assert(received == ["alpha", "beta"])
-    await first, second
 
 test "integer channel":
     values = Channel[int] with Buffer(3)

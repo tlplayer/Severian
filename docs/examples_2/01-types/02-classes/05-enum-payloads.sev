@@ -1,5 +1,3 @@
-import math
-
 enum Shape:
     Circle(radius: float)
     Rectangle(width: float, height: float)

@@ -14,7 +14,6 @@ class FileData:
     bytes: list[int]
 
 trait File:
-    @file
     property file_type: FileType
     property extensions: set[string]
     def read(path: string) -> FileData

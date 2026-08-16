@@ -1,8 +1,0 @@
-def main():
-    messages = Channel[string]
-
-    producer = messages.send("hello")
-    message = await messages
-
-    print(message)
-    await producer

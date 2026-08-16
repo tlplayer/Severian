@@ -1,0 +1,26 @@
+def find_name(found: bool) -> Option[string]:
+    if found:
+        return "Severian"
+
+    return none
+
+def main():
+    #Sometimes values may be present so we wrap them in an optional
+    optional_name ?= find_name(false)    
+    #Other times, there is a 99.99% probability of being present (os.ls() for example)
+    #so there's no question just take the value or throw an error
+    known_name: string = find_name(true)
+
+    handled_name: string = find_name(false) else "default name"
+
+
+    if not name:
+        print("No name found")
+    else:
+        throw exception("name is not to be found")
+    print(known_name)
+
+test with integ:
+    main()
+    assert("No name found" in stdout)
+    assert("Severian" in stdout)

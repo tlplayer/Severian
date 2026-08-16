@@ -1,0 +1,13 @@
+print("You can print in global scope before main starts.")
+
+def main():
+    print("Or inside main")
+
+test with integ:
+    main()
+    print("or in tests")
+    assert("""
+    You can print in global scope before main starts,
+    or inside main
+    or in tests
+    """ in stdout)

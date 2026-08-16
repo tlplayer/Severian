@@ -1,0 +1,13 @@
+def main():
+    name: string = "Severian"
+
+    print(name)
+    print(name.length())
+    print(name.upper())
+    print(name.contains("ver"))
+    print(f"Hello, {name}!")
+    print(name[:5])
+
+test with integration:
+    main()
+    assert("Hello, Severian!" in stdout)

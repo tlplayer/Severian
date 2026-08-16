@@ -5,22 +5,22 @@ def handle(command: string):
     print("command:", command)
 
 def main():
-    messages = Channel[string] with Buffer(16)
-    commands = Channel[string] with Buffer(16)
+    messages = channel[string](16) #buffer size 16
+    commands = channel[string] #unbounded channnel
 
-    message_producer = async send "hello" with messages
-    command_producer = async send "refresh" with commands
+    message_producer = async messages.send("hello")
+    command_producer = async commands.send("refresh")
 
-    match messages and commands while received < 2 with received := 0:
-        command from commands:
+    match {messages , commands} while received < 2 with received := 0:
+        case command from commands:
             await handle(command) with runtime and lock
             received += 1
 
-        message from messages:
+        case message from messages:
             process(message)
             received += 1
 
-        fail error:
+        case error:
             panic("Channels collapsed", error)
 
     await message_producer, command_producer
