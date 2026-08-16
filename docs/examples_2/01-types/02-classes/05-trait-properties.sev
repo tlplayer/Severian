@@ -1,0 +1,31 @@
+class FileType:
+    name: string 
+
+trait File:
+    property file_type: FileType
+    property extensions: set[string]
+    def read(path: string) -> string
+
+#LuaFile implements the filetype for .lua so when read takes place 
+class LuaFile: File
+    file_type = FileType("lua")
+    extensions = {".lua"}
+
+    def read(path: string) -> string:
+        return "lua"
+
+class LuaFile: File
+    file_type = FileType("json")
+    extensions = {".json"}
+
+    def read(path: string) -> string:
+        return "json"
+
+def main():
+    print("File registry: JSON, text, YAML, Lua")
+
+test:
+    lua_path = file.read("test.lua")
+    json_path = file.read("test.lua")
+    assert(lua_path == "lua")
+    assert(json_path == "json")

@@ -10,9 +10,9 @@ test "two producers":
     assert(received == ["alpha", "beta"])
 
 test "integer channel":
-    values = Channel[int] with Buffer(3)
-    one = async send 3 with values
-    two = async send 5 with values
-    three = async send 8 with values
+    values = Channel[int](3)
+    one = async values.send(3)
+    two = async values.send(5)
+    three = async values.send(8)
     assert(await values + await values + await values == 16)
     await one, two, three
