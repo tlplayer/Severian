@@ -1,0 +1,6 @@
+def main():
+    print("hello, severian")
+
+test with integ "entrypoint":
+    main()
+    assert("hello, severian" in stdout)

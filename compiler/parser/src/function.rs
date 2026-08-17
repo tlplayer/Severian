@@ -436,7 +436,7 @@ impl Parser<'_> {
                     "property" => TestMode::Property,
                     "bench" => TestMode::Bench,
                     "chaos" => TestMode::Chaos,
-                    "integration" => TestMode::Integration,
+                    "integ" => TestMode::Integration,
                     "profile" => TestMode::Profile,
                     _ => {
                         return Err(ParseError {
@@ -492,7 +492,7 @@ impl Parser<'_> {
             TokenKind::Identifier(name)
                 if matches!(
                     name.as_str(),
-                    "property" | "bench" | "chaos" | "integration" | "profile"
+                    "property" | "bench" | "chaos" | "integ" | "profile"
                 )
         )
     }

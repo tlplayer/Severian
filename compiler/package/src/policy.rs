@@ -29,7 +29,7 @@ impl BuildGate {
             Self::Profile => "profile",
             Self::Coverage => "coverage",
             Self::Memory => "memory",
-            Self::Integration => "integration",
+            Self::Integration => "integ",
         }
     }
 
@@ -43,7 +43,7 @@ impl BuildGate {
             "profile" | "speed" => Ok(Self::Profile),
             "coverage" => Ok(Self::Coverage),
             "memory" => Ok(Self::Memory),
-            "integration" => Ok(Self::Integration),
+            "integ" => Ok(Self::Integration),
             _ => Err(policy_error(
                 manifest,
                 format!("unknown build pipeline gate `{value}`"),

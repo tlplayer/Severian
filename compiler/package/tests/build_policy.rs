@@ -21,7 +21,7 @@ fn complete_pipeline_and_architecture_limits_load_from_manifest() {
 name = "policy"
 
 [build]
-pipeline = ["compile", "architecture", "test", "profile", "coverage", "memory", "integration"]
+pipeline = ["compile", "architecture", "test", "profile", "coverage", "memory", "integ"]
 
 [coverage]
 minimum = 99

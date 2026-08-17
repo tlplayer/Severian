@@ -27,7 +27,7 @@ fn lexes_the_hello_fixture() {
             TokenKind::Dedent,
             TokenKind::Test,
             TokenKind::With,
-            TokenKind::Identifier("integration".into()),
+            TokenKind::Identifier("integ".into()),
             TokenKind::String("hello output".into()),
             TokenKind::Colon,
             TokenKind::Newline,
