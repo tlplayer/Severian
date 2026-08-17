@@ -42,10 +42,7 @@ print(add(1, 2))
 The compiler's mandatory acceptance suite currently takes every valid source
 under `docs/examples` through parsing, semantic analysis, ownership checking,
 MLIR, native linking, execution, and exact stdout verification. Expected-invalid
-programs must match diagnostic fixtures. The generated
-[`docs/NATIVE_STATUS.md`](docs/NATIVE_STATUS.md) is the single inventory of that
-evidence; specialized examples are a host-native baseline, not a claim that
-their external service, accelerator, or freestanding target is production-ready.
+programs must match diagnostic fixtures.
 
 ```sh
 cargo run -p severian-driver --bin sev -- check docs/examples/00-getting-started/01-hello.sev

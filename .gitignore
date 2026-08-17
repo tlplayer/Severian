@@ -15,7 +15,7 @@ __pycache__/
 *.stderr
 *.stdout
 *ev.lock
-tmp/*
+tmp*
 ./tmp
 !library/*/src/lib.stderr
 !library/*/src/lib.stdout

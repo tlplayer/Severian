@@ -3,24 +3,17 @@ def byte_at(bytes: list[u8], index: int) -> u8 | BoundsError:
         return failure(BoundsError(index))
 
     unsafe:
-        ptr = &bytes
+        ptr:*list[u8] = &bytes
+        #You cannot do *ptr you must ptr[0] to keep symantics coherent
         return ptr[index]
 
 test "in bounds":
-    match byte_at([65, 66, 67], 1):
-        ok byte:
-            assert(byte == 66)
-
-        failure error:
-            assert(false, error)
+    byte_at([65, 66, 67], 1):
+    assert(byte == 66)
 
 test "out of bounds":
-    match byte_at([65], 4):
-        ok _:
-            assert(false, "expected bounds failure")
-
-        failure _:
-            assert(true)
+    throws(byte_at([65], 4)):
+        
 
 def main():
     result ?= byte_at([65, 66, 67], 1)
