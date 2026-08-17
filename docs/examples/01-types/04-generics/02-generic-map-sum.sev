@@ -2,11 +2,11 @@ trait Number:
     zero() -> Self
     add(other: Self) -> Self
 
-def sum_values[key: Hash + Equal, value: Number](values: map[key, value]) -> value:
-    total := value.zero()
+def sum_values[K: Hash + Equal, V: Number](Vs: map[K, V]) -> V:
+    total := V.zero()
 
-    for _, value in values:
-        total = total.add(value)
+    for _, V in Vs:
+        total = total.add(V)
 
     return total
 

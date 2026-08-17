@@ -12,7 +12,7 @@ class Counter:
     def inc():
         _value += 1
 
-    # Class-private behavior.
+    # Hidden behavior, cannot call outside the class.
     def __reset():
         _value = 0
         __secret = 42

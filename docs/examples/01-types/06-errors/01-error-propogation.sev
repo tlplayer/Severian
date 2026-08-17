@@ -1,5 +1,5 @@
 # 1. Declared failure propagates automatically.
-def load(path: Path) -> string ! IOError:
+def load(path: Path) -> string | IOError:
     data = read(path)
     return data
 
@@ -16,10 +16,12 @@ def load_or_report(path: Path) -> string:
         print(error)
         return "default"
 
+    data_defaulted = read(path).default("default")
+
     return data
 
 # 4. Wrap result for later processing 
-def load_result(path: Path) -> Result[string,IOError]:
+def load_result(path: Path) ->string|IOError:
     data ?= read(path) 
 
     return data

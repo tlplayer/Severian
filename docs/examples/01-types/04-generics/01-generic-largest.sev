@@ -19,7 +19,7 @@ test:
         case value:
             assert(value == 9)
 
-        case _:
+        case absent:
             assert(false, "expected largest value")
 
 def main():

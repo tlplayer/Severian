@@ -1,0 +1,7 @@
+test:
+    a = [1,2,3]
+    b = copy a
+    #Copies aren't eachother
+    assert(!(a is b))
+    #They are equivalent though
+    assert(a == b)
