@@ -1,20 +1,39 @@
-def foo() -> Error:
-    throw Error("Give me a callstack")
+class InvalidValue: Error:
+    value: int
 
-'''
-relaxed [compiler.error.handling] allows types to not specify Error 
-in the function in strict it would cause an error without int | Error 
-'''
-def wrapper() -> int:
-    foo()
-    return 1
+    def InvalidValue(input: int):
+        value := input
 
 
-def main():
+def validate(value: int) -> int | InvalidValue:
+    if value < 0:
+        throw InvalidValue(value)
+
+    return value
+
+
+def recover(value: int) -> int:
     try:
-        wrapper()
-    catch error:
-        print(error.call_stack)
+        return validate(value)
+    catch error: InvalidValue:
+        return 0
 
-test with integ:
-    assert("foo" in stderr)
+
+test "catch handles an error":
+    assert(recover(-10) == 0)
+    assert(recover(10) == 10)
+
+
+def log_and_rethrow(value: int) -> int | InvalidValue:
+    try:
+        return validate(value)
+    catch InvalidValue error:
+        print("invalid:", error.value)
+        throw error
+
+
+test "rethrow preserves the error":
+    result ?= log_and_rethrow(-10)
+
+    assert(result is InvalidValue)
+    assert(result.value == -10)

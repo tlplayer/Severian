@@ -1,0 +1,17 @@
+def require_positive(value: int) -> int:
+    if value <= 0:
+        panic("require_positive received an impossible value")
+
+    return value
+
+
+test:
+    assert(require_positive(10) == 10)
+
+test with integ:
+    throws(impossible_state_wrapper -> error)
+    assert(error.message == "compiler invariant violated")
+
+
+def impossible_state():
+    panic("compiler invariant violated")

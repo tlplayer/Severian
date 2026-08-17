@@ -1,0 +1,28 @@
+class ValidationError: Error
+    field: string
+
+    def ValidationError(field_name: string):
+        field := field_name
+
+
+def require_positive(value: int) -> int | ValidationError:
+    if value <= 0:
+        throw ValidationError("value")
+
+    return value
+
+
+test:
+    value = require_positive(10)
+    assert(value == 10)
+
+
+test "errors are part of the return type":
+    result ?= require_positive(-1)
+
+    #result wraps the union of error and values for handling
+    assert(result is ValidationError)
+    assert(result.field == "value")
+    throws(require_positive(-1) -> ValidationError)
+    #the default call unwraps or throws the error
+    assert(require_positive(1) == 1)

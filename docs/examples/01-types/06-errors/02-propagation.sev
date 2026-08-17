@@ -1,0 +1,27 @@
+def fail() -> Error:
+    throw Error("failure at origin")
+
+
+def inner() -> int | Error:
+    fail()
+    return 1
+
+
+def outer() -> int | Error:
+    value = inner()
+    return value + 1
+
+
+test "errors propagate through calls":
+    result ?= outer()
+
+    assert(result is Error)
+    assert(result.message == "failure at origin")
+
+
+def main():
+    try:
+        outer()
+    catch error:
+        print(error.message)
+        print(error.call_stack)

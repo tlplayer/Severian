@@ -1,0 +1,26 @@
+def load_port(found: bool) -> int | Error:
+    if not found:
+        throw Error("port not configured")
+
+    return 8080
+
+
+test "success ignores default":
+    result ?= load_port(true)
+    port = result.default(3000)
+
+    assert(port == 8080)
+
+
+test "failure uses default":
+    result ?= load_port(false)
+    port = result.default(3000)
+
+    assert(port == 3000)
+
+
+test "default consumes the error":
+    result ?= load_port(false)
+    port = result.default(3000)
+
+    assert(port == 3000)

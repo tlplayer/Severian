@@ -1,0 +1,24 @@
+def divide(left: int, right: int) -> int | Error:
+    if right == 0:
+        throw Error("division by zero")
+
+    return left / right
+
+
+test "normal assignment propagates":
+    value = divide(20, 4)
+
+    assert(value == 5)
+
+
+test "question assignment preserves success":
+    result ?= divide(20, 4)
+
+    assert(result == 5)
+
+
+test "question assignment preserves failure":
+    result ?= divide(20, 0)
+
+    assert(result is Error)
+    assert(result.message == "division by zero")

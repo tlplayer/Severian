@@ -1,0 +1,25 @@
+def lookup(found: bool) -> string | Error:
+    if not found:
+        throw Error("not found")
+
+    return "severian"
+
+
+test "result is a preserved union":
+    result ?= lookup(true)
+
+    assert(result == "severian")
+
+
+test "errors remain ordinary union members":
+    result ?= lookup(false)
+
+    assert(result is Error)
+
+
+test "a preserved error can propagate later":
+    result ?= lookup(true)
+
+    value = result
+
+    assert(value == "severian")
