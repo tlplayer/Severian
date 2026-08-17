@@ -1,0 +1,10 @@
+class Update:
+    name: string | None | absent
+
+test "not name specified it is not provided": 
+    update = Update()
+    assert(update.name is absent)
+
+test "The user gave none as the name":
+    update.name = None
+    assert(update.name is None)

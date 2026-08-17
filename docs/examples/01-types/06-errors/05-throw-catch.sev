@@ -1,0 +1,20 @@
+def foo() -> Error:
+    throw Error("Give me a callstack")
+
+'''
+relaxed [compiler.error.handling] allows types to not specify Error 
+in the function in strict it would cause an error without int | Error 
+'''
+def wrapper() -> int:
+    foo()
+    return 1
+
+
+def main():
+    try:
+        wrapper()
+    catch error:
+        print(error.call_stack)
+
+test with integ:
+    assert("foo" in stderr)

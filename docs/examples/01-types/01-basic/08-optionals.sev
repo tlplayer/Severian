@@ -1,4 +1,4 @@
-def find_name(found: bool) -> Option[string]:
+def find_name(found: bool) -> string | None:
     if found:
         return "Severian"
 
@@ -11,6 +11,7 @@ def main():
     #so there's no question just take the value or throw an error
     known_name: string = find_name(true)
 
+    #find_name(false).default("default name") works here too
     handled_name: string = find_name(false) else "default name"
 
 
