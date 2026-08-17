@@ -1,0 +1,113 @@
+'''
+Compiler-defined hook context.
+The important semantic distinction is:
+
+@monitor_time
+@monitor_error
+search()
+
+executes as nested hooks:
+
+monitor_time.with
+    monitor_error.with
+        search
+    monitor_error.without
+monitor_time.without
+
+
+For a successful call:
+
+context.result   = 10
+context.error    = None
+context.duration = ...
+
+For a throw:
+
+context.result   = None
+context.error    = Error(...)
+context.duration = ...
+
+Then the error continues propagating after all without hooks have run.
+
+For panic, no such guarantee:
+
+with hooks
+    function
+    PANIC
+
+
+# without hooks are not guaranteed
+def ... with context declares a hook implementation.
+Such a function may contain with context: and without context: phases.
+with executes before the decorated function.
+without executes on return or throw.
+without does not execute reliably on panic.
+Multiple hooks enter top-to-bottom and exit bottom-to-top.
+context.result and context.error are unavailable/None during with.
+context.duration becomes final before without begins.
+
+The last point makes this much more than decorators. It is compiler-supported structured interception with guaranteed error unwinding.
+'''
+class HookContext:
+    function: string
+    args: tuple
+    result: Any | None
+    error: Error | None
+    duration: Duration
+
+
+trait Monitor:
+    # Namespace / composed hook.
+    @monitor
+
+    # Individual hooks.
+    @monitor_error
+    def monitor_error(context: HookContext) -> None with context
+
+    @monitor_time
+    def monitor_time(context: HookContext) -> None with context
+
+
+class Metric: Monitor
+    def monitor_error(context: HookContext) -> None with context:
+        with context:
+            print("start:", context.function)
+
+        without context:
+            if context.error:
+                print("error:", context.error)
+
+
+    def monitor_time(context: HookContext) -> None with context:
+        with context:
+            print("timer start:", context.function)
+
+        without context:
+            print("duration:", context.duration)
+
+
+# Hooks compose top to bottom.
+@monitor_time
+@monitor_error
+def search(items: list[T], item: T) -> T | Error:
+    for value in items:
+        if value == item:
+            return value
+
+    throw Error("Failed to find item in items")
+
+
+def main():
+    items = [10, 20, 30]
+    result = search(items, 10)
+    print(result)
+
+
+test:
+    result = search([10, 20, 30], 10)
+    assert(result == 10)
+
+
+test:
+    result ?= search([10, 20, 30], 40)
+    assert(result is Error)
