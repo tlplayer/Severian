@@ -111,6 +111,8 @@ coverage = true
 # registry-package = "1.2.3"
 # local-package = { path = "../local-package", version = "0.1.0" }
 # git-package = { git = "https://example.com/owner/repo", branch = "main" }
+# URL packages require permission or --force
+# url-package = { git = "https://example.com/file.zip", branch = "main" }
 # Optional dependency fields: package, registry, rev, tag, optional, features,
 # and default_features.
 
