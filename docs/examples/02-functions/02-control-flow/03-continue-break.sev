@@ -1,18 +1,27 @@
 def main():
-    while count < 3 with count := 0:
+    #Only print odds
+    while count < 5 with count := 0:
+        if count == 3:
+            break
+        if count % 2 == 0:
+            count += 1
+            continue
         print(count)
         count += 1
 
     for value in range(0, 4):
-        if value % 2 == 0:
-            print("even")
+        if value % 2 == 0 and value > 1:
+            break
         else:
+            continue
+            #This is dead code, that's fine
             print("odd")
 
 test with integ "control flow output":
     main()
-    assert("0" in stdout)
+    assert("0" not in stdout)
     assert("1" in stdout)
-    assert("2" in stdout)
+    assert("2" not in stdout)
+    assert("3" not in stdout)
     assert("even" in stdout)
-    assert("odd" in stdout)
+    assert("odd" not in stdout)

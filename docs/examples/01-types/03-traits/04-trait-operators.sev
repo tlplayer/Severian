@@ -1,0 +1,57 @@
+import bits
+import regex
+
+# Apply bit operations directly to binary strings without converting them
+# into an integer representation first.
+@bits(|, &, ^)
+def combine(left: string, right: string) -> string with
+{
+    len(left) != len(right) ->
+        Error("bit strings must have equal length"),
+
+    !bits.valid(left) ->
+        Error("left must contain only 0 or 1"),
+
+    !bits.valid(right) ->
+        Error("right must contain only 0 or 1"),
+}:
+    return (left | right) ^ (left & right)
+
+@regex(|)
+def regex_or(left: string, right: string) -> string:
+    return left | right
+
+
+test with integ "1000-bit string XOR":
+    left = char(1b) * 500
+    right = char(2b) * 500
+
+    result = combine(left, right)
+
+    assert(len(result) == 1000)
+    assert(result == "1" * 1000)
+
+test "operator namespace isolation":
+    assert(bit_or("1010", "0101") == "1111")
+
+    pattern = regex_or("cat", "dog")
+    assert(regex.match(pattern, "cat"))
+    assert(regex.match(pattern, "dog"))
+
+    files = glob_union("*.sev", "*.toml")
+    assert(glob.match(files, "main.sev"))
+    assert(glob.match(files, "package.toml"))
+
+test with compiler "string operator requires a namespace":
+    reject:
+        left: string = "1010"
+        right: string = "0101"
+
+        result = left | right
+
+test with compiler "operator namespace cannot be ambiguous":
+    reject:
+        @bits(|)
+        @regex(|)
+        def ambiguous(left: string, right: string) -> string:
+            return left | right
