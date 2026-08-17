@@ -2,7 +2,7 @@ def find_name(found: bool) -> string | None:
     if found:
         return "Severian"
 
-    return none
+    return None
 
 def main():
     #Sometimes values may be present so we wrap them in an optional
@@ -18,7 +18,7 @@ def main():
     if not name:
         print("No name found")
     else:
-        throw exception("name is not to be found")
+        throw Error("name is not to be found")
     print(known_name)
 
 test with integ:

@@ -4,7 +4,7 @@ def fetch(url: string) -> string | IOError:
 
 test with profile with 
 {
-    0.1s < time -> exception("Await didn't actually wait ")
+    0.1s < time -> Error("Await didn't actually wait ")
 }:
     task = async fetch("https://example.test") with self
     result = await task

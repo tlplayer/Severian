@@ -1,7 +1,7 @@
 def update_temperature() -> i64 with
 {
-    defer temperature >= 0 -> exception("temperature below minimum"),
-    defer temperature <= 100 -> exception("temperature above maximum"),
+    defer temperature >= 0 -> Error("temperature below minimum"),
+    defer temperature <= 100 -> Error("temperature above maximum"),
 }:
     temperature := 50
 
