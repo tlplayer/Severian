@@ -1,0 +1,21 @@
+class Stack[T]:
+    values: list[T]
+
+    def length() -> int:
+        return size(values)
+
+    def is_empty() -> bool:
+        return size(values) == 0
+
+    def push(value: T):
+        values.append(value)
+
+    def pop() -> T | CollectionError:
+        if size(values) == 0:
+            return failure(CollectionError("cannot pop from an empty stack"))
+        return values.pop()
+
+    def peek() -> T | CollectionError:
+        if size(values) == 0:
+            return failure(CollectionError("cannot peek at an empty stack"))
+        return values[size(values) - 1]

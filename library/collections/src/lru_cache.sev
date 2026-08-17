@@ -1,0 +1,37 @@
+
+class LRUCache[K, V]:
+    capacity: int with { capacity > 0 }
+    values: map[K, V]
+    order: list[K]
+
+    def validate() -> bool:
+        return is_valid_capacity(capacity) and size(values) == size(order) and size(order) <= capacity
+
+    def length() -> int:
+        return size(order)
+
+    def contains(key: K) -> bool:
+        return key in values
+
+    def get(key: K) -> V | CollectionError:
+        if key not in values:
+            return failure(CollectionError("cache key does not exist"))
+        order.remove(key)
+        order.append(key)
+        return values[key]
+
+    def put(key: K, value: V):
+        assert(is_valid_capacity(capacity), "LRU capacity must be positive")
+        if key in values:
+            previous = values[key]
+            _removed = values.pop(key, previous)
+            order.remove(key)
+        else size(order) == capacity:
+            expired = order.pop(0)
+            _removed = values.pop(expired, value)
+        values[key] = value
+        order.append(key)
+        assert(is_valid_capacity(capacity) and size(values) == size(order) and size(order) <= capacity)
+
+    def keys() -> list[K]:
+        return order[0:size(order)]

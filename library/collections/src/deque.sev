@@ -1,0 +1,52 @@
+
+class Deque[T]:
+    values: list[T]
+    front: int = 0
+
+    def length() -> int:
+        return size(values) - front
+
+    def is_empty() -> bool:
+        return size(values) == front
+
+    def append(value: T):
+        values.append(value)
+
+    def append_left(value: T):
+        if front > 0:
+            front -= 1
+            values[front] = value
+        else:
+            values.insert(0, value)
+
+    def pop() -> T | CollectionError:
+        if size(values) == front:
+            return failure(CollectionError("cannot pop from an empty deque"))
+        return values.pop()
+
+    def pop_left() -> T | CollectionError:
+        if size(values) == front:
+            return failure(CollectionError("cannot pop from an empty deque"))
+        value = values[front]
+        front += 1
+        if front >= 64 and front * 2 >= size(values):
+            values = values[front:size(values)]
+            front = 0
+        return value
+
+    def peek() -> T | CollectionError:
+        if size(values) == front:
+            return failure(CollectionError("cannot peek at an empty deque"))
+        return values[size(values) - 1]
+
+    def peek_left() -> T | CollectionError:
+        if size(values) == front:
+            return failure(CollectionError("cannot peek at an empty deque"))
+        return values[front]
+
+    def clear():
+        values = []
+        front = 0
+
+    def to_list() -> list[T]:
+        return values[front:size(values)]

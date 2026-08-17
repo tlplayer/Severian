@@ -1,0 +1,55 @@
+
+class MinHeap[T]:
+    values: list[T]
+
+    def length() -> int:
+        return size(values)
+
+    def is_empty() -> bool:
+        return size(values) == 0
+
+    def push(value: T):
+        values.append(value)
+        index := size(values) - 1
+        while index > 0:
+            parent = (index - 1) / 2
+            if values[parent] <= values[index]:
+                return
+            temporary = values[parent]
+            values[parent] = values[index]
+            values[index] = temporary
+            index = parent
+
+    def pop() -> T | CollectionError:
+        if size(values) == 0:
+            return failure(CollectionError("cannot pop from an empty heap"))
+        root = values[0]
+        last = values.pop()
+        if size(values) > 0:
+            values[0] = last
+            index := 0
+            while true:
+                left = index * 2 + 1
+                if left >= size(values):
+                    break
+                right = left + 1
+                smallest := left
+                if right < size(values) and values[right] < values[left]:
+                    smallest = right
+                if values[index] <= values[smallest]:
+                    break
+                temporary = values[index]
+                values[index] = values[smallest]
+                values[smallest] = temporary
+                index = smallest
+        return root
+
+    def peek() -> T | CollectionError:
+        if size(values) == 0:
+            return failure(CollectionError("cannot peek at an empty heap"))
+        return values[0]
+
+    def drain() -> list[T]:
+        ordered = values.sorted()
+        values = []
+        return ordered

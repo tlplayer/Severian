@@ -1,0 +1,29 @@
+class Counter[T]:
+    counts: map[T, int]
+    total_count: int = 0
+
+    def add(value: T, amount: int = 1):
+        assert(amount >= 0, "counter increments must be non-negative")
+        counts[value] = counts.get(value, 0) + amount
+        total_count += amount
+
+    def count(value: T) -> int:
+        return counts.get(value, 0)
+
+    def total() -> int:
+        return total_count
+
+    def unique() -> int:
+        return size(counts)
+
+    def most_common() -> list[tuple[T, int]]:
+        remaining := counts.keys()
+        ordered := []
+        while size(remaining) > 0:
+            best := remaining[0]
+            for candidate in remaining:
+                if counts.get(candidate, 0) > counts.get(best, 0):
+                    best = candidate
+            ordered.append((best, counts.get(best, 0)))
+            remaining.remove(best)
+        return ordered
