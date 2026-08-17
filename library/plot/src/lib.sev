@@ -52,7 +52,7 @@ def numeric_column(table: data.Data, name: string) -> Result[list[float], PlotEr
         result.append(float(value))
     return result
 
-def add_series(series: list[Series], kind: string, x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+def add_series(series: list[Series], kind: string, x: list[float], y: list[float], label: string) -> int | PlotError:
     if size(x) == 0:
         return failure(PlotError("plot series cannot be empty"))
     if size(x) != size(y):
@@ -60,7 +60,7 @@ def add_series(series: list[Series], kind: string, x: list[float], y: list[float
     series.append(Series(kind, x, y, label, palette(size(series))))
     return size(series)
 
-def histogram_series(series: list[Series], values: list[float], bins: int, label: string) -> Result[int, PlotError]:
+def histogram_series(series: list[Series], values: list[float], bins: int, label: string) -> int | PlotError:
     if size(values) == 0:
         return failure(PlotError("histogram values cannot be empty"))
     if bins <= 0:
@@ -119,53 +119,53 @@ class Chart:
     def y_label(value: string):
         y_label_text = value
 
-    def add(kind: string, x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+    def add(kind: string, x: list[float], y: list[float], label: string) -> int | PlotError:
         return add_series(series_data, kind, x, y, label)
 
-    def line(x: list[float], y: list[float]) -> Result[int, PlotError]:
+    def line(x: list[float], y: list[float]) -> int | PlotError:
         return add_series(series_data, "line", x, y, "")
 
-    def line_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+    def line_labeled(x: list[float], y: list[float], label: string) -> int | PlotError:
         return add_series(series_data, "line", x, y, label)
 
-    def scatter(x: list[float], y: list[float]) -> Result[int, PlotError]:
+    def scatter(x: list[float], y: list[float]) -> int | PlotError:
         return add_series(series_data, "scatter", x, y, "")
 
-    def scatter_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+    def scatter_labeled(x: list[float], y: list[float], label: string) -> int | PlotError:
         return add_series(series_data, "scatter", x, y, label)
 
-    def bar(x: list[float], y: list[float]) -> Result[int, PlotError]:
+    def bar(x: list[float], y: list[float]) -> int | PlotError:
         return add_series(series_data, "bar", x, y, "")
 
-    def bar_labeled(x: list[float], y: list[float], label: string) -> Result[int, PlotError]:
+    def bar_labeled(x: list[float], y: list[float], label: string) -> int | PlotError:
         return add_series(series_data, "bar", x, y, label)
 
-    def histogram(values: list[float], bins: int) -> Result[int, PlotError]:
+    def histogram(values: list[float], bins: int) -> int | PlotError:
         return histogram_series(series_data, values, bins, "")
 
-    def histogram_labeled(values: list[float], bins: int, label: string) -> Result[int, PlotError]:
+    def histogram_labeled(values: list[float], bins: int, label: string) -> int | PlotError:
         return histogram_series(series_data, values, bins, label)
 
-    def line_data(table: data.Data, x: string, y: string) -> Result[int, PlotError]:
+    def line_data(table: data.Data, x: string, y: string) -> int | PlotError:
         x_values = numeric_column(table, x)
         y_values = numeric_column(table, y)
         return add_series(series_data, "line", x_values, y_values, "")
 
-    def line_data_labeled(table: data.Data, x: string, y: string, label: string) -> Result[int, PlotError]:
+    def line_data_labeled(table: data.Data, x: string, y: string, label: string) -> int | PlotError:
         x_values = numeric_column(table, x)
         y_values = numeric_column(table, y)
         return add_series(series_data, "line", x_values, y_values, label)
 
-    def line_tensor(x: Tensor[f64], y: Tensor[f64]) -> Result[int, PlotError]:
+    def line_tensor(x: Tensor[f64], y: Tensor[f64]) -> int | PlotError:
         return add_series(series_data, "line", tensor.values(x), tensor.values(y), "")
 
-    def line_tensor_labeled(x: Tensor[f64], y: Tensor[f64], label: string) -> Result[int, PlotError]:
+    def line_tensor_labeled(x: Tensor[f64], y: Tensor[f64], label: string) -> int | PlotError:
         return add_series(series_data, "line", tensor.values(x), tensor.values(y), label)
 
     def render() -> graphics.Canvas:
         return render_chart(width_data, height_data, title_text, x_label_text, y_label_text, series_data)
 
-    def save(path: string) -> Result[unit, IOError]:
+    def save(path: string) -> unit | IOError:
         return render_chart(width_data, height_data, title_text, x_label_text, y_label_text, series_data).save(path)
 
 def render_chart(

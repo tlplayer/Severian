@@ -10,23 +10,23 @@ import "src/file_binary.sev" as file_binary
 import platform
 import json
 
-def source_text(path: string) -> Result[string, IOError]:
+def source_text(path: string) -> string | IOError:
     return file_io.read_text(path)
 
-def read_text(path: string) -> Result[string, IOError | file_interface.FormatError]:
+def read_text(path: string) -> string | IOError | file_interface.FormatError:
     document = read(path)
     return document.text()
 
-def write(path: string, contents: string) -> Result[unit, IOError]:
+def write(path: string, contents: string) -> unit | IOError:
     return platform.file_write(path, contents)
 
-def write_text(path: string, contents: string) -> Result[unit, IOError]:
+def write_text(path: string, contents: string) -> unit | IOError:
     return write(path, contents)
 
-def append_text(path: string, contents: string) -> Result[unit, IOError]:
+def append_text(path: string, contents: string) -> unit | IOError:
     return platform.file_append(path, contents)
 
-def write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]:
+def write_bytes(path: string, contents: list[int]) -> unit | IOError:
     return platform.file_write_bytes(path, contents)
 
 def parse_csv(path: string) -> Result[list[list[string]], IOError | file_interface.FormatError]:
@@ -34,7 +34,7 @@ def parse_csv(path: string) -> Result[list[list[string]], IOError | file_interfa
     rows: list[list[string]] = document.value()
     return rows
 
-def open(path: string, mode: string = "rb") -> Result[Any, IOError]:
+def open(path: string, mode: string = "rb") -> Any | IOError:
     if mode != "rb":
         return failure(IOError("binary file mode must be rb"))
     return platform.file_open_binary(path)
@@ -45,31 +45,31 @@ def read_bytes_from(handle: Any, count: int) -> Result[list[int], IOError]:
 def read_exact(handle: Any, count: int) -> Result[list[int], IOError]:
     return platform.file_read_exact(handle, count)
 
-def utf8(data: list[int]) -> Result[string, IOError]:
+def utf8(data: list[int]) -> string | IOError:
     return platform.decode_utf8(data)
 
-def seek(handle: Any, offset: int) -> Result[unit, IOError]:
+def seek(handle: Any, offset: int) -> unit | IOError:
     return platform.file_seek(handle, offset)
 
-def byte_length(handle: Any) -> Result[int, IOError]:
+def byte_length(handle: Any) -> int | IOError:
     return platform.file_size(handle)
 
-def close(handle: Any) -> Result[unit, IOError]:
+def close(handle: Any) -> unit | IOError:
     return platform.file_close(handle)
 
-def map(path: string) -> Result[Any, IOError]:
+def map(path: string) -> Any | IOError:
     return platform.file_map(path)
 
 def mapped_bytes(mapping: Any) -> int:
     return platform.file_mapped_size(mapping)
 
-def unmap(mapping: Any) -> Result[unit, IOError]:
+def unmap(mapping: Any) -> unit | IOError:
     return platform.file_unmap(mapping)
 
-def lock(path: string) -> Result[Any, IOError]:
+def lock(path: string) -> Any | IOError:
     return platform.file_lock(path)
 
-def unlock(handle: Any) -> Result[unit, IOError]:
+def unlock(handle: Any) -> unit | IOError:
     return platform.file_unlock(handle)
 
 def little_endian_u64(data: list[int]) -> int:
@@ -81,7 +81,7 @@ def little_endian_u64(data: list[int]) -> int:
         multiplier *= 256
     return value
 
-def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+def read(path: string) -> file_interface.File | IOError | file_interface.FormatError:
     extension = platform.path_extension(path).lower()
     reader: file_interface.Reader = registry[file_interface.Reader](
         "extensions",
@@ -91,7 +91,7 @@ def read(path: string) -> Result[file_interface.File, IOError | file_interface.F
     document = reader.read(path)
     return document
 
-def load(path: string) -> Result[Any, IOError | file_interface.FormatError]:
+def load(path: string) -> Any | IOError | file_interface.FormatError:
     document = read(path)
     return document.value()
 

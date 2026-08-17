@@ -11,7 +11,7 @@ class CapabilitySet:
                 return true
         return false
 
-    def require(name: string, minimum_version: int = 1) -> Result[unit, CapabilityError]:
+    def require(name: string, minimum_version: int = 1) -> unit | CapabilityError:
         for capability in values:
             if capability.name == name and capability.version >= minimum_version:
                 return

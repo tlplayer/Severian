@@ -1,4 +1,4 @@
-def first(values: list[int]) -> Result[int, BoundsError]:
+def first(values: list[int]) -> int | BoundsError:
     if size(values) == 0:
         return failure(BoundsError(0))
 

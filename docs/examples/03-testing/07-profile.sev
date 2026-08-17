@@ -21,12 +21,12 @@ class Deque[T]:
         else:
             values.insert(0, value)
 
-    def pop() -> Result[T, CollectionError]:
+    def pop() -> T | CollectionError:
         if size(values) == front:
             return failure(CollectionError("cannot pop from an empty deque"))
         return values.pop()
 
-    def pop_left() -> Result[T, CollectionError]:
+    def pop_left() -> T | CollectionError:
         if size(values) == front:
             return failure(CollectionError("cannot pop from an empty deque"))
         value = values[front]
@@ -36,12 +36,12 @@ class Deque[T]:
             front = 0
         return value
 
-    def peek() -> Result[T, CollectionError]:
+    def peek() -> T | CollectionError:
         if size(values) == front:
             return failure(CollectionError("cannot peek at an empty deque"))
         return values[size(values) - 1]
 
-    def peek_left() -> Result[T, CollectionError]:
+    def peek_left() -> T | CollectionError:
         if size(values) == front:
             return failure(CollectionError("cannot peek at an empty deque"))
         return values[front]
@@ -65,10 +65,10 @@ class Queue[T]:
     def push(value: T):
         deque.append(value)
 
-    def pop() -> Result[T, CollectionError]:
+    def pop() -> T | CollectionError:
         return deque.pop_left()
 
-    def peek() -> Result[T, CollectionError]:
+    def peek() -> T | CollectionError:
         return deque.peek_left()
 
 class Stack[T]:
@@ -83,12 +83,12 @@ class Stack[T]:
     def push(value: T):
         values.append(value)
 
-    def pop() -> Result[T, CollectionError]:
+    def pop() -> T | CollectionError:
         if size(values) == 0:
             return failure(CollectionError("cannot pop from an empty stack"))
         return values.pop()
 
-    def peek() -> Result[T, CollectionError]:
+    def peek() -> T | CollectionError:
         if size(values) == 0:
             return failure(CollectionError("cannot peek at an empty stack"))
         return values[size(values) - 1]
@@ -114,7 +114,7 @@ class MinHeap[T]:
             values[index] = temporary
             index = parent
 
-    def pop() -> Result[T, CollectionError]:
+    def pop() -> T | CollectionError:
         if size(values) == 0:
             return failure(CollectionError("cannot pop from an empty heap"))
         root = values[0]
@@ -138,7 +138,7 @@ class MinHeap[T]:
                 index = smallest
         return root
 
-    def peek() -> Result[T, CollectionError]:
+    def peek() -> T | CollectionError:
         if size(values) == 0:
             return failure(CollectionError("cannot peek at an empty heap"))
         return values[0]
@@ -192,7 +192,7 @@ class LruCache[K, V]:
     def contains(key: K) -> bool:
         return key in values
 
-    def get(key: K) -> Result[V, CollectionError]:
+    def get(key: K) -> V | CollectionError:
         if key not in values:
             return failure(CollectionError("cache key does not exist"))
         order.remove(key)

@@ -17,7 +17,7 @@ def graph_document(value: types.ModelGraph) -> map[string, Any]:
         "initializers": value.initializers.map(|item| tensor_document(item)),
     }
 
-def save_artifact(artifact: types.ModelArtifact, destination: string) -> Result[unit, IOError]:
+def save_artifact(artifact: types.ModelArtifact, destination: string) -> unit | IOError:
     document = {
         "format": "severian",
         "version": 1,
@@ -58,7 +58,7 @@ def graph_from_document(document: Any) -> types.ModelGraph:
         initializers,
     )
 
-def load_artifact(source: string) -> Result[types.ModelArtifact, IOError | JsonError]:
+def load_artifact(source: string) -> types.ModelArtifact | IOError | JsonError:
     text = file.read_text(source)
     document: Any = json.decode[Any](text)
     assert(json.as_string(json.object_get(document, "format")) == "severian")

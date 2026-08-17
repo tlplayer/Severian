@@ -13,7 +13,7 @@ class ResolvedArtifact:
     format: string
     content_sha256: string
 
-def identify_format(source: string) -> Result[string, types.ModelLoadError]:
+def identify_format(source: string) -> string | types.ModelLoadError:
     normalized = source.lower()
     if normalized.starts_with("hf://"):
         return "huggingface-safetensors"
@@ -43,7 +43,7 @@ def identify_format(source: string) -> Result[string, types.ModelLoadError]:
         return "huggingface-safetensors"
     return failure(types.ModelLoadError("could not identify model format: " + source))
 
-def safe_identifier(identifier: string) -> Result[string, types.ModelLoadError]:
+def safe_identifier(identifier: string) -> string | types.ModelLoadError:
     if identifier.is_empty() or ".." in identifier or ":" in identifier:
         return failure(types.ModelLoadError("invalid model identifier"))
     for character in identifier.characters():
@@ -54,7 +54,7 @@ def safe_identifier(identifier: string) -> Result[string, types.ModelLoadError]:
 def cache_root() -> string:
     return environment.get("SEVERIAN_MODEL_CACHE", ".severian/models")
 
-def cache_path(identifier: string, revision: string) -> Result[string, types.ModelLoadError]:
+def cache_path(identifier: string, revision: string) -> string | types.ModelLoadError:
     safe = safe_identifier(identifier)
     pinned = safe_identifier(revision)
     return path.join(cache_root(), safe.replace("/", "--") + "--" + pinned)
@@ -66,13 +66,13 @@ def read_bytes(path_name: string) -> Result[list[int], IOError]:
     _closed = file.close(handle)
     return bytes
 
-def sha256_file(path_name: string) -> Result[string, IOError]:
+def sha256_file(path_name: string) -> string | IOError:
     # The platform hash consumes the exact byte collection; unlike Python
     # pickle loading this never evaluates artifact content.
     contents = read_bytes(path_name)
     return platform.hash_sha256_bytes(contents)
 
-def verify(path_name: string, expected_sha256: string) -> Result[string, types.ModelLoadError | IOError]:
+def verify(path_name: string, expected_sha256: string) -> string | types.ModelLoadError | IOError:
     actual = sha256_file(path_name)
     if actual.lower() != expected_sha256.lower():
         return failure(types.ModelLoadError(
@@ -80,7 +80,7 @@ def verify(path_name: string, expected_sha256: string) -> Result[string, types.M
         ))
     return actual
 
-def download_verified(url: string, destination: string, expected_sha256: string) -> Result[string, types.ModelLoadError | IOError]:
+def download_verified(url: string, destination: string, expected_sha256: string) -> string | types.ModelLoadError | IOError:
     assert(url.starts_with("https://"), "remote model downloads require HTTPS")
     if path.exists(destination):
         if expected_sha256.is_empty():
@@ -108,7 +108,7 @@ def required_huggingface_file(name: string) -> bool:
         ]
     )
 
-def resolve_huggingface(source: string) -> Result[ResolvedArtifact, types.ModelLoadError | IOError | JsonError]:
+def resolve_huggingface(source: string) -> ResolvedArtifact | types.ModelLoadError | IOError | JsonError:
     specification = safe_identifier(source[5:])
     revision := "main"
     identifier := specification
@@ -138,7 +138,7 @@ def resolve_huggingface(source: string) -> Result[ResolvedArtifact, types.ModelL
             _verified = download_verified(url, path.join(destination, name), digest)
     return ResolvedArtifact(source, destination, "huggingface-safetensors", commit)
 
-def resolve(source: string, expected_sha256: string = "") -> Result[ResolvedArtifact, types.ModelLoadError | IOError | JsonError]:
+def resolve(source: string, expected_sha256: string = "") -> ResolvedArtifact | types.ModelLoadError | IOError | JsonError:
     format = identify_format(source)
     if source.starts_with("hf://"):
         return resolve_huggingface(source)

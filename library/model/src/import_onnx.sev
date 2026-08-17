@@ -49,7 +49,7 @@ class ProtoReader:
         else:
             assert(false, "unsupported protobuf wire T")
 
-def utf8(data: list[int]) -> Result[string, IOError]:
+def utf8(data: list[int]) -> string | IOError:
     return file.utf8(data)
 
 def unsigned_le(data: list[int]) -> int:
@@ -298,7 +298,7 @@ def parse_graph(data: list[int]) -> types.ModelGraph:
     _valid = graph.validate()
     return graph
 
-def import_model(path: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError]:
+def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOError:
     bytes = artifacts.read_bytes(path)
     reader = ProtoReader(bytes)
     graph: types.ModelGraph := types.ModelGraph("", [], [], [], [])

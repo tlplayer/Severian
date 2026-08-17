@@ -80,7 +80,7 @@ def weight_container(entry: archive.ZipEntry) -> types.TensorValue:
     assert(signature == [137, 72, 68, 70, 13, 10, 26, 10], "Keras weight member is not HDF5")
     return types.TensorValue("__keras_hdf5_weights__", "u8", [size(entry.data)], entry.data.map(|byte| float(byte)))
 
-def import_model(path: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError | JsonError]:
+def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOError | JsonError:
     entries = archive.zip_entries(path)
     config_entry = archive.zip_entry(entries, "config.json")
     weights_entry = archive.zip_entry(entries, "model.weights.h5")

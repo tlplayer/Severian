@@ -247,10 +247,10 @@ class NeuralNet:
         artifact.device = device
         return
 
-    def save(destination: string) -> Result[unit, IOError]:
+    def save(destination: string) -> unit | IOError:
         return serialization.save_artifact(artifact, destination)
 
-    def load(source: string) -> Result[unit, types.ModelLoadError | IOError | JsonError]:
+    def load(source: string) -> unit | types.ModelLoadError | IOError | JsonError:
         format = artifacts.identify_format(source)
         incoming := []
         if format == "safetensors" or format == "huggingface-safetensors":
@@ -270,7 +270,7 @@ class NeuralNet:
                     artifact.graph.initializers[index] = parameter
         return
 
-    def load_state(source: string) -> Result[unit, types.ModelLoadError | IOError | JsonError]:
+    def load_state(source: string) -> unit | types.ModelLoadError | IOError | JsonError:
         format = artifacts.identify_format(source)
         incoming := []
         if format == "safetensors" or format == "huggingface-safetensors":
@@ -290,10 +290,10 @@ class NeuralNet:
                     artifact.graph.initializers[index] = parameter
         return
 
-def identify_format(source: string) -> Result[string, types.ModelLoadError]:
+def identify_format(source: string) -> string | types.ModelLoadError:
     return artifacts.identify_format(source)
 
-def validate_imported_graph(graph: types.ModelGraph) -> Result[unit, types.ModelLoadError]:
+def validate_imported_graph(graph: types.ModelGraph) -> unit | types.ModelLoadError:
     match graph.validate():
         ok _value:
             return
@@ -305,7 +305,7 @@ def load_graph(
     device: string = "auto",
     dtype: string = "auto",
     sha256: string = "",
-) -> Result[NeuralNet, types.ModelLoadError | IOError | JsonError]:
+) -> NeuralNet | types.ModelLoadError | IOError | JsonError:
     resolved = artifacts.resolve(source, sha256)
     if resolved.format == "severian":
         return NeuralNet(serialization.load_artifact(resolved.local_path))

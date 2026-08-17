@@ -7,7 +7,7 @@ def greeting(request: string) -> string:
 test "server greeting is deterministic":
     assert(greeting("ping") == "hello from severian: ping")
 
-def respond(connection: network.TCPConnection) -> Result[unit, IOError]:
+def respond(connection: network.TCPConnection) -> unit | IOError:
     request = await connection.read_line()
     return await connection.write_line(greeting(request))
 
@@ -19,7 +19,7 @@ def serve(connection: network.TCPConnection):
             failure error:
                 log.error("request failed", error)
 
-def run_server() -> Result[unit, IOError]:
+def run_server() -> unit | IOError:
     listener = network.listen("127.0.0.1:8080")
 
     while true with listener:

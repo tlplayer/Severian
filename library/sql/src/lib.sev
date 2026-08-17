@@ -6,16 +6,16 @@ def connect(
     password: string,
     database: string,
     port: int = 3306,
-) -> Result[Database, DatabaseError]:
+) -> Database | DatabaseError:
     return platform.mysql_connect(host, user, password, database, port)
 
 def query(connection: Database, statement: string) -> Result[list[list[string]], DatabaseError]:
     return platform.mysql_query(connection, statement)
 
-def execute(connection: Database, statement: string) -> Result[int, DatabaseError]:
+def execute(connection: Database, statement: string) -> int | DatabaseError:
     return platform.mysql_execute(connection, statement)
 
-def close(connection: Database) -> Result[unit, DatabaseError]:
+def close(connection: Database) -> unit | DatabaseError:
     return platform.mysql_close(connection)
 
 test "connection errors remain typed failures":

@@ -4,7 +4,7 @@ import "src/ffi.sev" as externs
 def native_handle(value: isize) -> abi.Handle:
     return abi.Handle(value)
 
-def read_text(path: string) -> Result[string, IOError]:
+def read_text(path: string) -> string | IOError:
     content = abi.OutHandle(0)
     error = abi.OutError(0, "")
     if externs.read_text(abi.StringView(path), content, error) != 0:

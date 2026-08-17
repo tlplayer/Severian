@@ -61,19 +61,19 @@ class ModelPlan:
     capabilities: capability_api.CapabilitySet
     components: list[ComponentPlan]
 
-    def program(id: string) -> Result[Program, PlanError]:
+    def program(id: string) -> Program | PlanError:
         for candidate in programs:
             if candidate.id == id:
                 return candidate
         return failure(PlanError("model plan has no program `" + id + "`"))
 
-    def program_for(role: string) -> Result[Program, PlanError]:
+    def program_for(role: string) -> Program | PlanError:
         for candidate in programs:
             if candidate.role == role:
                 return candidate
         return failure(PlanError("model plan has no `" + role + "` program"))
 
-    def validate() -> Result[unit, PlanError]:
+    def validate() -> unit | PlanError:
         program_ids := []
         weight_ids := []
         state_ids := []

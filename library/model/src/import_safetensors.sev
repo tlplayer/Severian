@@ -5,7 +5,7 @@ import "src/artifacts.sev" as artifacts
 import "src/registry.sev" as registry
 import "src/types.sev" as types
 
-def dtype_width(dtype: string) -> Result[int, types.ModelLoadError]:
+def dtype_width(dtype: string) -> int | types.ModelLoadError:
     if dtype in ["bool", "i8", "u8", "f8_e4m3", "f8_e4m3fn", "f8_e5m2"]:
         return 1
     if dtype in ["i16", "u16", "f16", "bf16"]:
@@ -72,13 +72,13 @@ def load_parameters(source: string) -> Result[list[types.TensorValue], types.Mod
 def attribute() -> Any:
     return json.decode[Any]("{}")
 
-def parameter(parameters: list[types.TensorValue], name: string) -> Result[types.TensorValue, types.ModelLoadError]:
+def parameter(parameters: list[types.TensorValue], name: string) -> types.TensorValue | types.ModelLoadError:
     for value in parameters:
         if value.name == name:
             return value
     return failure(types.ModelLoadError("checkpoint is missing required weight `" + name + "`"))
 
-def validate_qwen_weights(config: Any, parameters: list[types.TensorValue], prefix: string) -> Result[unit, types.ModelLoadError]:
+def validate_qwen_weights(config: Any, parameters: list[types.TensorValue], prefix: string) -> unit | types.ModelLoadError:
     hidden = json.as_int(json.object_get(config, "hidden_size"))
     layers = json.as_int(json.object_get(config, "num_hidden_layers"))
     embedding = parameter(parameters, prefix + "model.embed_tokens.weight")
@@ -153,7 +153,7 @@ def qwen_graph(config: Any, parameters: list[types.TensorValue], prefix: string 
     nodes.append(types.GraphNode("lm_head", "matmul", [normalized, output_weight], [logits], attribute()))
     return types.ModelGraph("qwen", [types.TensorValue("input_ids", "i64", [-1, -1], [])], [logits], nodes, parameters)
 
-def inferred_linear_graph(parameters: list[types.TensorValue]) -> Result[types.ModelGraph, types.ModelLoadError]:
+def inferred_linear_graph(parameters: list[types.TensorValue]) -> types.ModelGraph | types.ModelLoadError:
     nodes := []
     current := "input"
     input_width := -1
@@ -173,7 +173,7 @@ def inferred_linear_graph(parameters: list[types.TensorValue]) -> Result[types.M
         return failure(types.ModelLoadError("safetensors file has no inferable architecture; load it into a declared network"))
     return types.ModelGraph("safetensors_linear", [types.TensorValue("input", "f32", [-1, input_width], [])], [current], nodes, parameters)
 
-def import_model(source: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError | JsonError]:
+def import_model(source: string) -> types.ModelGraph | types.ModelLoadError | IOError | JsonError:
     parameters = load_parameters(source)
     directory = source if path.is_dir(source) else path.dirname(source)
     config_path = path.join(directory, "config.json")

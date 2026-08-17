@@ -149,10 +149,10 @@ class Canvas:
     def svg() -> string:
         return svg_document(width_data, height_data, background, elements)
 
-    def save(path: string) -> Result[unit, IOError]:
+    def save(path: string) -> unit | IOError:
         return platform.file_write(path, svg_document(width_data, height_data, background, elements))
 
-def canvas(width: int, height: int, background: Color) -> Result[Canvas, GraphicsError]:
+def canvas(width: int, height: int, background: Color) -> Canvas | GraphicsError:
     if width <= 0 or height <= 0:
         return failure(GraphicsError("canvas dimensions must be positive"))
     return Canvas(width, height, background)

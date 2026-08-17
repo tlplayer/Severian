@@ -6,6 +6,6 @@ class YamlReader: file_interface.Reader
     extensions = {".yaml", ".yml"}
     document_class = "Yaml"
 
-    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+    def read(path: string) -> file_interface.File | IOError | file_interface.FormatError:
         content = file_io.read_text(path)
         return yaml.file_document(path, content)

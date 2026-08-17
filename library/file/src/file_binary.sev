@@ -29,18 +29,18 @@ class Binary: file_interface.File
     def raw() -> list[int]:
         return data
 
-    def text() -> Result[string, file_interface.FormatError]:
+    def text() -> string | file_interface.FormatError:
         return failure(file_interface.FormatError("binary files do not have text content"))
 
     def value() -> Any:
         return data
 
-    def write() -> Result[unit, IOError]:
+    def write() -> unit | IOError:
         return platform.file_write_bytes(source_path, data)
 
 class BinaryReader:
 
-    def read(path: string) -> Result[file_interface.File, IOError | file_interface.FormatError]:
+    def read(path: string) -> file_interface.File | IOError | file_interface.FormatError:
         handle = platform.file_open_binary(path)
         length = platform.file_size(handle)
         loaded = platform.file_read_exact(handle, length)

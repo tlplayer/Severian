@@ -10,13 +10,13 @@ trait Reader:
     read(count: int) -> Result[list[int], StreamError]
 
 trait Writer:
-    write(data: list[int]) -> Result[int, StreamError]
+    write(data: list[int]) -> int | StreamError
 
 trait Seeker:
-    seek(offset: int, origin: SeekOrigin) -> Result[int, StreamError]
+    seek(offset: int, origin: SeekOrigin) -> int | StreamError
 
 trait Closer:
-    close() -> Result[unit, StreamError]
+    close() -> unit | StreamError
 
 class MemoryStream:
     data: list[int]
@@ -46,7 +46,7 @@ class MemoryStream:
         position += count
         return output
 
-    def write(input: list[int]) -> Result[int, StreamError]:
+    def write(input: list[int]) -> int | StreamError:
         if closed:
             return failure(StreamError("stream is closed"))
         for byte in input:
@@ -62,7 +62,7 @@ class MemoryStream:
             position += 1
         return size(input)
 
-    def seek(offset: int, origin: SeekOrigin) -> Result[int, StreamError]:
+    def seek(offset: int, origin: SeekOrigin) -> int | StreamError:
         target := 0
         match origin:
             Start:
@@ -85,7 +85,7 @@ class MemoryStream:
     def remaining() -> int:
         return [0, size(data) - position].maximum()
 
-    def truncate(length: int) -> Result[unit, StreamError]:
+    def truncate(length: int) -> unit | StreamError:
         if closed:
             return failure(StreamError("stream is closed"))
         if length < 0:
@@ -102,7 +102,7 @@ class MemoryStream:
     def snapshot() -> list[int]:
         return data[0:size(data)]
 
-    def close() -> Result[unit, StreamError]:
+    def close() -> unit | StreamError:
         closed = true
         return
 
@@ -110,7 +110,7 @@ class LimitedWriter:
     destination: Writer
     maximum_bytes_per_write: int
 
-    def write(input: list[int]) -> Result[int, StreamError]:
+    def write(input: list[int]) -> int | StreamError:
         count = [size(input), maximum_bytes_per_write].minimum()
         return destination.write(input[0:count])
 
@@ -124,7 +124,7 @@ def read_all(reader: Reader, chunk_size: int = 4096) -> Result[list[int], Stream
             return output
         output.extend(chunk)
 
-def copy(source: Reader, destination: Writer, chunk_size: int = 4096) -> Result[int, StreamError]:
+def copy(source: Reader, destination: Writer, chunk_size: int = 4096) -> int | StreamError:
     if chunk_size < 1:
         return failure(StreamError("chunk size must be positive"))
     copied := 0

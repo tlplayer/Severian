@@ -17,7 +17,7 @@ class HttpServer:
     def HttpServer(initial_port: int):
         port = initial_port
 
-    def run_server(input_tensor: Tensor[f32, dynamic, 768]) -> Result[int, IoError]:
+    def run_server(input_tensor: Tensor[f32, dynamic, 768]) -> int | IoError:
         values := [1, 2, 3]
         values_view = view values
         mutable_values := [1, 2, 3]

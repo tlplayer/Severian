@@ -41,13 +41,13 @@ class ModelGraph:
     nodes: list[GraphNode]
     initializers: list[TensorValue]
 
-    def initializer(name: string) -> Result[TensorValue, ModelValidationError]:
+    def initializer(name: string) -> TensorValue | ModelValidationError:
         for value in initializers:
             if value.name == name:
                 return value
         return failure(ModelValidationError("missing initializer: " + name))
 
-    def validate() -> Result[unit, ModelValidationError]:
+    def validate() -> unit | ModelValidationError:
         available := []
         for input in inputs:
             assert(size(input.shape) > 0, "model inputs must have a shape")

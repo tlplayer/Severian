@@ -7,9 +7,9 @@ trait File:
     size() -> int
     bytes() -> int
     raw() -> list[int]
-    text() -> Result[string, FormatError]
+    text() -> string | FormatError
     value() -> Any
-    write() -> Result[unit, IOError]
+    write() -> unit | IOError
 
 class FormatError:
     message: string
@@ -17,4 +17,4 @@ class FormatError:
 trait Reader:
     property extensions: set[string]
     property document_class: string
-    read(path: string) -> Result[File, IOError | FormatError]
+    read(path: string) -> File | IOError | FormatError

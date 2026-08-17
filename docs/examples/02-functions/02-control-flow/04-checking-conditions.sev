@@ -1,4 +1,4 @@
-class DividByZeroException:
+class DividByZeroError:
     message: string
 
 #divisor will throw an exception on entry before value is set to 0.  

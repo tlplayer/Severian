@@ -75,7 +75,7 @@ def serve_client(
 
     await reading, writing
 
-def run_server() -> Result[unit, IOError]:
+def run_server() -> unit | IOError:
     listener = network.listen("127.0.0.1:7000")
     events = Channel[ChatEvent] with Buffer(256)
     hub = async run_hub(clone events) with self

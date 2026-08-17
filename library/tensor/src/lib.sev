@@ -68,7 +68,7 @@ class SafeTensorStore:
     def keys() -> list[string]:
         return json.object_keys(weight_map)
 
-    def get(name: string) -> Result[SafeTensorEntry, IOError]:
+    def get(name: string) -> SafeTensorEntry | IOError:
         shard = json.as_string(json.object_get(weight_map, name))
         shard_index := -1
         for index in indices(loaded_shard_names):
@@ -104,7 +104,7 @@ class SafeTensorStore:
         assert(byte_end <= file.mapped_bytes(mapping))
         return SafeTensorEntry(name, dtype, shape, byte_start, byte_end, shard, mapping)
 
-def open_safetensors(model_directory: string) -> Result[SafeTensorStore, IOError]:
+def open_safetensors(model_directory: string) -> SafeTensorStore | IOError:
     index_path = model_directory + "/model.safetensors.index.json"
     if path.exists(index_path):
         index_file = file.read(index_path)

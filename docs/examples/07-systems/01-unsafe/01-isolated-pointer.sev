@@ -1,4 +1,4 @@
-def byte_at(bytes: list[u8], index: int) -> Result[u8, BoundsError]:
+def byte_at(bytes: list[u8], index: int) -> u8 | BoundsError:
     if index < 0 or index >= size(bytes):
         return failure(BoundsError(index))
 

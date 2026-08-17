@@ -277,7 +277,7 @@ def infer_graph(parameters: list[types.TensorValue]) -> types.ModelGraph:
         return failure(types.ModelLoadError("PyTorch state_dict has weights but no inferable linear architecture; load it into a declared Severian network"))
     return types.ModelGraph("pytorch_state_dict", [types.TensorValue("input", "f32", [-1, input_width], [])], [current], nodes, parameters)
 
-def import_model(path: string) -> Result[types.ModelGraph, types.ModelLoadError | IOError]:
+def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOError:
     entries = archive.zip_entries(path)
     pickle_entry: archive.ZipEntry := archive.ZipEntry("", [])
     found := false

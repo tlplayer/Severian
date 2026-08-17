@@ -8,14 +8,14 @@ class Parser:
         while position < size(source) and (source[position] == " " or source[position] == "\n" or source[position] == "\r" or source[position] == "\t"):
             position += 1
 
-    def parse() -> Result[Any, JsonError]:
+    def parse() -> Any | JsonError:
         value = self.parse_value()
         self.skip_whitespace()
         if position != size(source):
             return failure(JsonError("unexpected content after JSON value"))
         return value
 
-    def parse_value() -> Result[Any, JsonError]:
+    def parse_value() -> Any | JsonError:
         self.skip_whitespace()
         if position >= size(source):
             return failure(JsonError("unexpected end of JSON input"))
@@ -37,7 +37,7 @@ class Parser:
             return platform.value_null()
         return self.parse_number()
 
-    def parse_string() -> Result[string, JsonError]:
+    def parse_string() -> string | JsonError:
         position += 1
         value := ""
         while position < size(source):
@@ -64,7 +64,7 @@ class Parser:
                 return failure(JsonError("unsupported JSON escape: \\" + escaped))
         return failure(JsonError("unterminated JSON string"))
 
-    def parse_array() -> Result[Any, JsonError]:
+    def parse_array() -> Any | JsonError:
         position += 1
         values: list[Any] := []
         self.skip_whitespace()
@@ -83,7 +83,7 @@ class Parser:
             position += 1
         return failure(JsonError("unterminated JSON array"))
 
-    def parse_object() -> Result[Any, JsonError]:
+    def parse_object() -> Any | JsonError:
         position += 1
         values: map[string, Any] := {}
         self.skip_whitespace()
@@ -110,7 +110,7 @@ class Parser:
             position += 1
         return failure(JsonError("unterminated JSON object"))
 
-    def parse_number() -> Result[Any, JsonError]:
+    def parse_number() -> Any | JsonError:
         start = position
         while position < size(source) and "-+0123456789.eE".contains(source[position]):
             position += 1
@@ -131,7 +131,7 @@ class Parser:
             failure _error:
                 return failure(JsonError("invalid JSON number: " + token))
 
-def decode_value(text: string) -> Result[Any, JsonError]:
+def decode_value(text: string) -> Any | JsonError:
     return Parser(text, 0).parse()
 
 def escaped_string(value: string) -> string:
@@ -197,15 +197,15 @@ class Json: Document
     def raw() -> list[int]:
         return platform.string_encode(encode_value(document))
 
-    def text() -> Result[string, IOError]:
+    def text() -> string | IOError:
         return encode_value(document)
 
-    def write() -> Result[unit, IOError]:
+    def write() -> unit | IOError:
         if size(source_path) == 0:
             return failure(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
         return platform.file_write(source_path, encode_value(document))
 
-    def write_to(path: string) -> Result[unit, IOError]:
+    def write_to(path: string) -> unit | IOError:
         return platform.file_write(path, encode_value(document))
 
     def keys() -> list[string]:
@@ -226,21 +226,21 @@ class Json: Document
     def encode() -> string:
         return encode(document)
 
-def document(text: string) -> Result[Json, JsonError]:
+def document(text: string) -> Json | JsonError:
     value = decode[Any](text)
     return Json("", value)
 
-def file_document(path: string, text: string) -> Result[Json, JsonError]:
+def file_document(path: string, text: string) -> Json | JsonError:
     value = decode[Any](text)
     return Json(path, value)
 
-def loads[T](text: string) -> Result[T, JsonError]:
+def loads[T](text: string) -> T | JsonError:
     return decode[T](text)
 
 def dumps[T](value: T) -> string:
     return encode(value)
 
-def decode[T](text: string) -> Result[T, JsonError]:
+def decode[T](text: string) -> T | JsonError:
     return decode_value(text)
 
 def encode[T](value: T) -> string:

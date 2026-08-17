@@ -71,7 +71,7 @@ class Application:
         tokenizer = loaded_tokenizer
         executable = loaded_executable
 
-    def complete(prompt: string, max_tokens: int) -> Result[string, exception]:
+    def complete(prompt: string, max_tokens: int) -> string | exception:
         assert(size(prompt) > 0)
         assert(max_tokens > 0)
         assert(max_tokens <= max_max_tokens)
@@ -101,7 +101,7 @@ class Application:
         return tokenizer.decode(generated)
 
 
-def download_if_missing(url: string, destination: string) -> Result[unit, exception]:
+def download_if_missing(url: string, destination: string) -> unit | exception:
     if os.exists(destination):
         information = os.stat(destination)
         assert(information.size > 0)
@@ -118,7 +118,7 @@ def download_if_missing(url: string, destination: string) -> Result[unit, except
     assert(information.size > 0)
 
 
-def prepare_model_files() -> Result[ModelFiles, exception]:
+def prepare_model_files() -> ModelFiles | exception:
     created = os.mkdir(model_root)
 
     config_download = download_if_missing(config_url, config_path)
@@ -137,7 +137,7 @@ def prepare_model_files() -> Result[ModelFiles, exception]:
     )
 
 
-def load_application() -> Result[Application, exception]:
+def load_application() -> Application | exception:
     files = prepare_model_files()
 
     config_file = file.read(files.config)
@@ -190,7 +190,7 @@ def load_application() -> Result[Application, exception]:
 def handle_request(
     request: http.Request,
     app: Application,
-) -> Result[http.Response, exception]:
+) -> http.Response | exception:
     if request.method == "GET" and request.path == "/health":
         return http.Response.json(
             200,
@@ -228,7 +228,7 @@ def handle_request(
     )
 
 
-def main() -> Result[unit, exception]:
+def main() -> unit | exception:
     app = load_application()
 
     print("model", model_id)

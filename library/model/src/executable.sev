@@ -18,13 +18,13 @@ class ExecutableBundle:
     plan: plan_api.ModelPlan
     programs: list[Executable]
 
-    def executable(id: string) -> Result[Executable, ExecutableError]:
+    def executable(id: string) -> Executable | ExecutableError:
         for candidate in programs:
             if candidate.program.id == id:
                 return candidate
         return failure(ExecutableError("model has no compiled program `" + id + "`"))
 
-    def executable_for(role: string) -> Result[Executable, ExecutableError]:
+    def executable_for(role: string) -> Executable | ExecutableError:
         for candidate in programs:
             if candidate.program.role == role:
                 return candidate

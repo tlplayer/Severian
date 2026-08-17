@@ -248,7 +248,7 @@ def append_option(
     collected: map[string, list[string]],
     item: OptionSpec,
     value: string,
-) -> Result[unit, CliError]:
+) -> unit | CliError:
     if item.name in collected and not item.multiple:
         return failure(CliError(
             "CLI004", "option `--" + item.name + "` may only be used once", "",
@@ -259,7 +259,7 @@ def append_option(
     collected[item.name] = values
     return
 
-def validate_value(specification: Command, item: OptionSpec, value: string) -> Result[unit, CliError]:
+def validate_value(specification: Command, item: OptionSpec, value: string) -> unit | CliError:
     if size(item.choices) > 0 and value not in item.choices:
         return failure(parse_error(
             specification, "CLI005",
@@ -286,7 +286,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> R
                 ))
     return
 
-def parse(specification: Command, input: list[string]) -> Result[Matches, CliError]:
+def parse(specification: Command, input: list[string]) -> Matches | CliError:
     selected := specification
     command_path := [specification.name]
     cursor := 0
@@ -400,7 +400,7 @@ def parse(specification: Command, input: list[string]) -> Result[Matches, CliErr
                         ))
     return Matches(selected.name, command_path, collected_options, collected_arguments, action)
 
-def parse_process(specification: Command) -> Result[Matches, CliError]:
+def parse_process(specification: Command) -> Matches | CliError:
     input = process.arguments()
     return parse(specification, input[1:size(input)] if size(input) > 0 else [])
 
@@ -414,13 +414,13 @@ def values(matches: Matches, name: string) -> list[string]:
         return matches.arguments[name]
     return []
 
-def text(matches: Matches, name: string) -> Result[string, CliError]:
+def text(matches: Matches, name: string) -> string | CliError:
     items = values(matches, name)
     if size(items) == 0:
         return failure(CliError("CLI011", "no parsed value named `" + name + "`", "", "declare the option or argument before reading it"))
     return items[0]
 
-def integer(matches: Matches, name: string) -> Result[int, CliError]:
+def integer(matches: Matches, name: string) -> int | CliError:
     raw = text(matches, name)
     match int.parse(raw):
         ok value:
@@ -428,7 +428,7 @@ def integer(matches: Matches, name: string) -> Result[int, CliError]:
         failure _error:
             return failure(CliError("CLI012", "parsed value `" + name + "` is not an integer", "", "declare it with kind=\"int\" to validate during parsing"))
 
-def decimal(matches: Matches, name: string) -> Result[float, CliError]:
+def decimal(matches: Matches, name: string) -> float | CliError:
     raw = text(matches, name)
     match float.parse(raw):
         ok value:

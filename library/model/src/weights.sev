@@ -19,7 +19,7 @@ class WeightRef:
     def bytes() -> int:
         return entry.bytes()
 
-    def require(expected_dtype: string) -> Result[unit, types.ModelLoadError]:
+    def require(expected_dtype: string) -> unit | types.ModelLoadError:
         if entry.dtype != expected_dtype:
             return failure(types.ModelLoadError(
                 "weight `" + entry.name + "` has dtype " + entry.dtype + ", expected " + expected_dtype,
@@ -50,7 +50,7 @@ class WeightRef:
 class WeightStore:
     model_directory: string
 
-    def tensor_store() -> Result[tensor.SafeTensorStore, types.ModelLoadError | IOError | JsonError]:
+    def tensor_store() -> tensor.SafeTensorStore | types.ModelLoadError | IOError | JsonError:
         if model_directory.is_empty():
             return failure(types.ModelLoadError("this model has no mapped checkpoint"))
         return tensor.open_safetensors(model_directory)
@@ -59,11 +59,11 @@ class WeightStore:
         store = self.tensor_store()
         return store.keys()
 
-    def contains(name: string) -> Result[bool, types.ModelLoadError | IOError | JsonError]:
+    def contains(name: string) -> bool | types.ModelLoadError | IOError | JsonError:
         names = self.keys()
         return name in names
 
-    def get(name: string) -> Result[WeightRef, types.ModelLoadError | IOError | JsonError]:
+    def get(name: string) -> WeightRef | types.ModelLoadError | IOError | JsonError:
         store = self.tensor_store()
         if name not in store.keys():
             return failure(types.ModelLoadError("checkpoint has no weight `" + name + "`"))

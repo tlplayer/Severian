@@ -12,17 +12,17 @@ class Architecture:
     tokenizer: string
     audio_tokenizer: string
 
-def object_member(value: Any, name: string) -> Result[Any, types.ModelLoadError]:
+def object_member(value: Any, name: string) -> Any | types.ModelLoadError:
     if name not in json.object_keys(value):
         return failure(types.ModelLoadError("model config is missing `" + name + "`"))
     return json.object_get(value, name)
 
-def model_type(config: Any) -> Result[string, types.ModelLoadError]:
+def model_type(config: Any) -> string | types.ModelLoadError:
     if "model_type" not in json.object_keys(config):
         return failure(types.ModelLoadError("model config does not declare `model_type`"))
     return json.as_string(json.object_get(config, "model_type")).lower()
 
-def resolve(config: Any) -> Result[Architecture, types.ModelLoadError]:
+def resolve(config: Any) -> Architecture | types.ModelLoadError:
     kind = model_type(config)
     if kind == "omnivoice":
         llm_config = object_member(config, "llm_config")
@@ -47,7 +47,7 @@ def resolve(config: Any) -> Result[Architecture, types.ModelLoadError]:
         "no registered Severian architecture for model_type `" + kind + "`",
     ))
 
-def infer_weight_prefix(parameters: list[types.TensorValue], suffix: string) -> Result[string, types.ModelLoadError]:
+def infer_weight_prefix(parameters: list[types.TensorValue], suffix: string) -> string | types.ModelLoadError:
     for parameter in parameters:
         if parameter.name.ends_with(suffix):
             return parameter.name[0:size(parameter.name) - size(suffix)]

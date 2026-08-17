@@ -1,4 +1,4 @@
-def fetch(url: string) -> Result[string, IOError]:
+def fetch(url: string) -> string | IOError:
     wait(0.1s)
     return true
 

@@ -84,18 +84,18 @@ class Yaml: json.Document
     def raw() -> list[int]:
         return platform.string_encode(encode_mapping(mapping))
 
-    def text() -> Result[string, IOError]:
+    def text() -> string | IOError:
         return encode_mapping(mapping)
 
     def value() -> Any:
         return mapping
 
-    def write() -> Result[unit, IOError]:
+    def write() -> unit | IOError:
         if size(source_path) == 0:
             return failure(IOError("in-memory YAML has no path; use encode() or write_to(path)"))
         return platform.file_write(source_path, encode_mapping(mapping))
 
-    def write_to(path: string) -> Result[unit, IOError]:
+    def write_to(path: string) -> unit | IOError:
         return platform.file_write(path, encode_mapping(mapping))
 
     def encode() -> string:

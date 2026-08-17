@@ -247,7 +247,7 @@ def zip_entries(path: string) -> Result[list[ZipEntry], IOError]:
         entries.append(ZipEntry(name, content))
     return entries
 
-def zip_entry(entries: list[ZipEntry], suffix: string) -> Result[ZipEntry, IOError]:
+def zip_entry(entries: list[ZipEntry], suffix: string) -> ZipEntry | IOError:
     for entry in entries:
         if entry.name == suffix or entry.name.ends_with("/" + suffix):
             return entry

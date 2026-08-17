@@ -66,7 +66,7 @@ def run_job(
     job_id: int,
     connection: network.TCPConnection,
     jobs: Channel[Job],
-) -> Result[unit, IOError | JsonError] with
+) -> unit | IOError | JsonError with
 {
     0 <= job_id <= 1000,
     connection != invalid,
@@ -93,7 +93,7 @@ def serve_job(
         failure error:
             log.error("map/reduce job failed", error)
 
-def run_server() -> Result[unit, IOError]:
+def run_server() -> unit | IOError:
     listener = network.listen("127.0.0.1:9000")
     jobs = Channel[Job] with Buffer(128)
     tasks = Channel[MapTask] with Buffer(256)

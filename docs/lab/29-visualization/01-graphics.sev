@@ -1,6 +1,6 @@
 import graphics
 
-def drawing() -> Result[graphics.Canvas, graphics.GraphicsError]:
+def drawing() -> graphics.Canvas | graphics.GraphicsError:
     target = graphics.canvas(640, 360, graphics.white())
     target.rectangle(40, 40, 180, 80, graphics.blue())
     target.rectangle_outline(280, 40, 180, 80, graphics.gray(), 2)

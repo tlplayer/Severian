@@ -48,7 +48,7 @@ def little_u_32(data: list[int], offset: int) -> int:
 def four_cc(data: list[int], offset: int) -> string:
     return string(data[offset]) + ":" + string(data[offset + 1]) + ":" + string(data[offset + 2]) + ":" + string(data[offset + 3])
 
-def read_wav(path: string) -> Result[Audio, IOError | AudioError]:
+def read_wav(path: string) -> Audio | IOError | AudioError:
     handle = file.open(path)
     length = file.byte_length(handle)
     file_data = file.read_exact(handle, length)
@@ -114,7 +114,7 @@ def append_ascii(output_bytes: list[int], values: list[int]):
 def clamp_sample(value: float) -> float:
     return max(-1.0, min(1.0, value))
 
-def write_wav(path: string, audio: Audio) -> Result[unit, IOError | AudioError]:
+def write_wav(path: string, audio: Audio) -> unit | IOError | AudioError:
     if audio.sample_rate <= 0 or audio.channels <= 0:
         return failure(AudioError("audio metadata must have a positive rate and channel count"))
     samples = audio.values()
@@ -161,12 +161,12 @@ def resample(input: Audio, target_rate: int) -> Audio:
             output.append(left + (right - left) * fraction)
     return from_samples(output, target_rate, input.channels)
 
-def read(path: string) -> Result[Audio, IOError | AudioError]:
+def read(path: string) -> Audio | IOError | AudioError:
     if not path.lower().ends_with(".wav"):
         return failure(AudioError("audio.read currently supports WAV input"))
     return read_wav(path)
 
-def write(path: string, value: Audio) -> Result[unit, IOError | AudioError]:
+def write(path: string, value: Audio) -> unit | IOError | AudioError:
     if not path.lower().ends_with(".wav"):
         return failure(AudioError("audio.write currently supports WAV output"))
     return write_wav(path, value)

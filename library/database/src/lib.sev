@@ -2,53 +2,53 @@ import platform
 import pql
 import storage
 
-def open(path: string) -> Result[Database, DatabaseError]:
+def open(path: string) -> Database | DatabaseError:
     return platform.database_open(path)
 
-def memory() -> Result[Database, DatabaseError]:
+def memory() -> Database | DatabaseError:
     return open(":memory:")
 
-def execute(database: Database, statement: string) -> Result[int, DatabaseError]:
+def execute(database: Database, statement: string) -> int | DatabaseError:
     return platform.database_execute(database, statement)
 
 def query(database: Database, statement: string) -> Result[list[list[string]], DatabaseError]:
     return platform.database_query(database, statement)
 
-def close(database: Database) -> Result[unit, DatabaseError]:
+def close(database: Database) -> unit | DatabaseError:
     return platform.database_close(database)
 
-def begin(database: Database) -> Result[int, DatabaseError]:
+def begin(database: Database) -> int | DatabaseError:
     return execute(database, "BEGIN")
 
-def commit(database: Database) -> Result[int, DatabaseError]:
+def commit(database: Database) -> int | DatabaseError:
     return execute(database, "COMMIT")
 
-def rollback(database: Database) -> Result[int, DatabaseError]:
+def rollback(database: Database) -> int | DatabaseError:
     return execute(database, "ROLLBACK")
 
 def query_pql(database: Database, schema: pql.Schema, statement: pql.Query) -> Result[list[list[string]], DatabaseError]:
     assert(pql.valid(schema, statement))
     return query(database, pql.sql(schema, statement, "sqlite"))
 
-def start(path: string) -> Result[DatabaseServer, DatabaseError]:
+def start(path: string) -> DatabaseServer | DatabaseError:
     return platform.database_server_start(path)
 
 def address(server: DatabaseServer) -> string:
     return platform.database_server_address(server)
 
-def connect(server_address: string) -> Result[DatabaseConnection, DatabaseError]:
+def connect(server_address: string) -> DatabaseConnection | DatabaseError:
     return platform.database_server_connect(server_address)
 
-def remote_execute(connection: DatabaseConnection, statement: string) -> Result[int, DatabaseError]:
+def remote_execute(connection: DatabaseConnection, statement: string) -> int | DatabaseError:
     return platform.database_server_execute(connection, statement)
 
 def remote_query(connection: DatabaseConnection, statement: string) -> Result[list[list[string]], DatabaseError]:
     return platform.database_server_query(connection, statement)
 
-def disconnect(connection: DatabaseConnection) -> Result[unit, DatabaseError]:
+def disconnect(connection: DatabaseConnection) -> unit | DatabaseError:
     return platform.database_server_close(connection)
 
-def stop(server: DatabaseServer) -> Result[unit, DatabaseError]:
+def stop(server: DatabaseServer) -> unit | DatabaseError:
     return platform.database_server_stop(server)
 
 def must_execute(database: Database, statement: string) -> int:

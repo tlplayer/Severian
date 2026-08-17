@@ -13,22 +13,22 @@ class Response:
 class Server:
     address: string
 
-def request(method: string, url: string, body: string = "") -> Result[string, IOError]:
+def request(method: string, url: string, body: string = "") -> string | IOError:
     return platform.http_request(method, url, body)
 
-def get(url: string) -> Result[string, IOError]:
+def get(url: string) -> string | IOError:
     return request("GET", url)
 
-def post(url: string, body: string = "") -> Result[string, IOError]:
+def post(url: string, body: string = "") -> string | IOError:
     return request("POST", url, body)
 
-def put(url: string, body: string = "") -> Result[string, IOError]:
+def put(url: string, body: string = "") -> string | IOError:
     return request("PUT", url, body)
 
-def delete(url: string) -> Result[string, IOError]:
+def delete(url: string) -> string | IOError:
     return request("DELETE", url)
 
-def download(url: string, destination: string) -> Result[unit, IOError]:
+def download(url: string, destination: string) -> unit | IOError:
     return platform.http_download(url, destination)
 
 test "HTTP verb helpers preserve typed failures for invalid URLs":

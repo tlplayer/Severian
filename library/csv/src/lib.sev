@@ -112,7 +112,7 @@ class CSV: data.Source
     def raw() -> list[int]:
         return platform.string_encode(encode_records(records_data))
 
-    def text() -> Result[string, IOError]:
+    def text() -> string | IOError:
         return encode_records(records_data)
 
     def value() -> Any:
@@ -124,12 +124,12 @@ class CSV: data.Source
     def set_data(value: data.Data):
         records_data = value.records()
 
-    def write() -> Result[unit, IOError]:
+    def write() -> unit | IOError:
         if size(source_path) == 0:
             return failure(IOError("in-memory CSV has no path; use encode() or write_to(path)"))
         return platform.file_write(source_path, encode_records(records_data))
 
-    def write_to(path: string) -> Result[unit, IOError]:
+    def write_to(path: string) -> unit | IOError:
         return platform.file_write(path, encode_records(records_data))
 
     def encode() -> string:
@@ -176,7 +176,7 @@ class CSV: data.Source
             return ""
         return values[row][position]
 
-    def cell(row: int, column: string) -> Result[string, CsvError]:
+    def cell(row: int, column: string) -> string | CsvError:
         position = column_index_of(records_data, column)
         values = records_of(records_data)
         if position < 0:
@@ -185,7 +185,7 @@ class CSV: data.Source
             return failure(CsvError("CSV row is outside the document"))
         return values[row][position] if position < size(values[row]) else ""
 
-    def set(row: int, column: string, value: string) -> Result[unit, CsvError]:
+    def set(row: int, column: string, value: string) -> unit | CsvError:
         position = column_index_of(records_data, column)
         record = row + 1
         if position < 0:

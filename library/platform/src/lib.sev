@@ -22,15 +22,15 @@ unsafe:
     extern("__sev_string_casefold") def string_casefold(value: string) -> string
     extern("__sev_string_encode") def string_encode(value: string) -> list[int]
     extern("__sev_file_exists") def file_exists(path: string) -> bool
-    extern("__sev_file_remove") def file_remove(path: string) -> Result[unit, IOError]
-    extern("__sev_file_rename") def file_rename(source: string, destination: string) -> Result[unit, IOError]
-    extern("__sev_file_copy") def file_copy(source: string, destination: string) -> Result[unit, IOError]
-    extern("__sev_file_append") def file_append(path: string, contents: string) -> Result[unit, IOError]
-    extern("__sev_file_write_bytes") def file_write_bytes(path: string, contents: list[int]) -> Result[unit, IOError]
-    extern("__sev_file_size_path") def file_size_path(path: string) -> Result[int, IOError]
-    extern("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> Result[float, IOError]
+    extern("__sev_file_remove") def file_remove(path: string) -> unit | IOError
+    extern("__sev_file_rename") def file_rename(source: string, destination: string) -> unit | IOError
+    extern("__sev_file_copy") def file_copy(source: string, destination: string) -> unit | IOError
+    extern("__sev_file_append") def file_append(path: string, contents: string) -> unit | IOError
+    extern("__sev_file_write_bytes") def file_write_bytes(path: string, contents: list[int]) -> unit | IOError
+    extern("__sev_file_size_path") def file_size_path(path: string) -> int | IOError
+    extern("__sev_file_modified_seconds") def file_modified_seconds(path: string) -> float | IOError
     extern("__sev_directory_list") def directory_list(path: string) -> Result[list[string], IOError]
-    extern("__sev_directory_make_all") def directory_make_all(path: string) -> Result[unit, IOError]
+    extern("__sev_directory_make_all") def directory_make_all(path: string) -> unit | IOError
     extern("__sev_path_join") def path_join(left: string, right: string) -> string
     extern("__sev_path_is_file") def path_is_file(path: string) -> bool
     extern("__sev_path_is_dir") def path_is_dir(path: string) -> bool
@@ -41,15 +41,15 @@ unsafe:
     extern("__sev_time_seconds") def time_seconds() -> float
     extern("__sev_time_sleep") def time_sleep(seconds: float)
     extern("__sev_time_monotonic") def time_monotonic() -> float
-    extern("__sev_time_parse_date") def time_parse_date(value: string) -> Result[float, IOError]
+    extern("__sev_time_parse_date") def time_parse_date(value: string) -> float | IOError
     extern("__sev_hash_md5") def hash_md5(value: string) -> string
     extern("__sev_hash_sha256_bytes") def hash_sha256_bytes(value: list[int]) -> string
-    extern("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> Result[TlsHandle, IOError]
+    extern("__sev_tls_connect") def tls_connect(connection: Any, server_name: string) -> TlsHandle | IOError
     extern("__sev_tls_read") def tls_read(connection: TlsHandle, count: int) -> Result[list[int], IOError]
-    extern("__sev_tls_write") def tls_write(connection: TlsHandle, data: list[int]) -> Result[int, IOError]
-    extern("__sev_tls_close") def tls_close(connection: TlsHandle) -> Result[unit, IOError]
-    extern("__sev_http_request") def http_request(method: string, url: string, body: string) -> Result[string, IOError]
-    extern("__sev_http_download") def http_download(url: string, destination: string) -> Result[unit, IOError]
+    extern("__sev_tls_write") def tls_write(connection: TlsHandle, data: list[int]) -> int | IOError
+    extern("__sev_tls_close") def tls_close(connection: TlsHandle) -> unit | IOError
+    extern("__sev_http_request") def http_request(method: string, url: string, body: string) -> string | IOError
+    extern("__sev_http_download") def http_download(url: string, destination: string) -> unit | IOError
     extern("__sev_platform_range") def core_range(start: int, stop: int, step: int) -> list[int]
     extern("__sev_platform_enumerate") def core_enumerate[T](values: list[T]) -> list[tuple[int, T]]
     extern("__sev_platform_zip") def core_zip[left, right](left_values: list[left], right_values: list[right]) -> list[tuple[left, right]]
@@ -57,31 +57,31 @@ unsafe:
     extern("__sev_platform_any") def core_any(values: list[bool]) -> bool
     extern("__sev_platform_abs") def core_abs[T](value: T) -> T
 
-    extern("__sev_file_write") def file_write(path: string, contents: string) -> Result[unit, IOError]
+    extern("__sev_file_write") def file_write(path: string, contents: string) -> unit | IOError
 
-    extern("__sev_file_open_binary") def file_open_binary(path: string) -> Result[Any, IOError]
+    extern("__sev_file_open_binary") def file_open_binary(path: string) -> Any | IOError
 
     extern("__sev_file_read_bytes") def file_read_bytes(handle: Any, count: int) -> Result[list[int], IOError]
 
     extern("__sev_file_read_exact") def file_read_exact(handle: Any, count: int) -> Result[list[int], IOError]
 
-    extern("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> Result[string, IOError]
-    extern("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> Result[string, IOError]
+    extern("__sev_bytes_utf8") def bytes_utf_8(bytes: list[int]) -> string | IOError
+    extern("__sev_bytes_utf8") def decode_utf8(data: list[int]) -> string | IOError
 
-    extern("__sev_file_seek") def file_seek(handle: Any, offset: int) -> Result[unit, IOError]
+    extern("__sev_file_seek") def file_seek(handle: Any, offset: int) -> unit | IOError
 
-    extern("__sev_file_size") def file_size(handle: Any) -> Result[int, IOError]
+    extern("__sev_file_size") def file_size(handle: Any) -> int | IOError
 
-    extern("__sev_file_close") def file_close(handle: Any) -> Result[unit, IOError]
+    extern("__sev_file_close") def file_close(handle: Any) -> unit | IOError
 
-    extern("__sev_file_map") def file_map(path: string) -> Result[Any, IOError]
+    extern("__sev_file_map") def file_map(path: string) -> Any | IOError
 
     extern("__sev_file_mapped_size") def file_mapped_size(mapping: Any) -> int
 
-    extern("__sev_file_unmap") def file_unmap(mapping: Any) -> Result[unit, IOError]
+    extern("__sev_file_unmap") def file_unmap(mapping: Any) -> unit | IOError
 
-    extern("__sev_file_lock") def file_lock(path: string) -> Result[Any, IOError]
-    extern("__sev_file_unlock") def file_unlock(handle: Any) -> Result[unit, IOError]
+    extern("__sev_file_lock") def file_lock(path: string) -> Any | IOError
+    extern("__sev_file_unlock") def file_unlock(handle: Any) -> unit | IOError
 
 unsafe:
     extern("__sev_value_map_get") def value_map_get(value: Any, key: string) -> Any
@@ -117,29 +117,29 @@ unsafe:
 
     extern("__sev_host_page_size") def host_page_size() -> int
 
-    extern("__sev_database_open") def database_open(path: string) -> Result[Database, DatabaseError]
+    extern("__sev_database_open") def database_open(path: string) -> Database | DatabaseError
 
-    extern("__sev_database_execute") def database_execute(database: Database, sql: string) -> Result[int, DatabaseError]
+    extern("__sev_database_execute") def database_execute(database: Database, sql: string) -> int | DatabaseError
 
     extern("__sev_database_query") def database_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    extern("__sev_database_close") def database_close(database: Database) -> Result[unit, DatabaseError]
+    extern("__sev_database_close") def database_close(database: Database) -> unit | DatabaseError
 
-    extern("__sev_database_server_start") def database_server_start(path: string) -> Result[DatabaseServer, DatabaseError]
+    extern("__sev_database_server_start") def database_server_start(path: string) -> DatabaseServer | DatabaseError
 
     extern("__sev_database_server_address") def database_server_address(server: DatabaseServer) -> string
 
-    extern("__sev_database_server_connect") def database_server_connect(address: string) -> Result[DatabaseConnection, DatabaseError]
+    extern("__sev_database_server_connect") def database_server_connect(address: string) -> DatabaseConnection | DatabaseError
 
-    extern("__sev_database_server_execute") def database_server_execute(connection: DatabaseConnection, sql: string) -> Result[int, DatabaseError]
+    extern("__sev_database_server_execute") def database_server_execute(connection: DatabaseConnection, sql: string) -> int | DatabaseError
 
     extern("__sev_database_server_query") def database_server_query(connection: DatabaseConnection, sql: string) -> Result[list[list[string]], DatabaseError]
 
-    extern("__sev_database_server_close") def database_server_close(connection: DatabaseConnection) -> Result[unit, DatabaseError]
+    extern("__sev_database_server_close") def database_server_close(connection: DatabaseConnection) -> unit | DatabaseError
 
-    extern("__sev_database_server_stop") def database_server_stop(server: DatabaseServer) -> Result[unit, DatabaseError]
+    extern("__sev_database_server_stop") def database_server_stop(server: DatabaseServer) -> unit | DatabaseError
 
-    extern("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Result[Database, DatabaseError]
+    extern("__sev_mysql_connect") def mysql_connect(host: string, user: string, password: string, database: string, port: int) -> Database | DatabaseError
     extern("__sev_mysql_query") def mysql_query(database: Database, sql: string) -> Result[list[list[string]], DatabaseError]
-    extern("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> Result[int, DatabaseError]
-    extern("__sev_mysql_close") def mysql_close(database: Database) -> Result[unit, DatabaseError]
+    extern("__sev_mysql_execute") def mysql_execute(database: Database, sql: string) -> int | DatabaseError
+    extern("__sev_mysql_close") def mysql_close(database: Database) -> unit | DatabaseError

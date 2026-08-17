@@ -26,7 +26,7 @@ test with chaos "read exceptions":
 
     assert(events_seen == 2)
 
-def wrapper() -> Result[int, IOError | BoundsError]:
+def wrapper() -> int | IOError | BoundsError:
     buffer = read()
     return buffer[0]
 
