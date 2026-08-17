@@ -1,7 +1,8 @@
 class Counter:
-    #readable and not writable externally
+    # External: read yes, write no.
     _value: int
-    #Not readable and not writable externally
+
+    # External: read no, write no.
     __secret: int
 
     def Counter():
@@ -11,13 +12,22 @@ class Counter:
     def inc():
         _value += 1
 
+    # Class-private behavior.
+    def __reset():
+        _value = 0
+        __secret = 42
+
+    def reset():
+        __reset()
+
 
 test:
     counter := Counter()
     counter.inc()
 
-    # Read-only externally.
     assert(counter._value == 1)
+    counter.reset()
+    assert(counter._value == 0)
 
 
 test with compiler:
@@ -31,3 +41,6 @@ test with compiler:
 
     reject:
         counter.__secret = 10
+
+    reject:
+        counter.__reset()
