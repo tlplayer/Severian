@@ -1,24 +1,22 @@
-class FileType:
-    name: string 
-
 trait File:
-    property file_type: FileType
-    property extensions: set[string]
-    def read(path: string) -> string
+    def read(path: string) -> string with 
+    {
+        (path) -> bool 
+    }
 
 #LuaFile implements the filetype for .lua so when read takes place 
 class LuaFile: File
-    file_type = FileType("lua")
-    extensions = {".lua"}
-
-    def read(path: string) -> string:
+    def read(path: string) -> string with 
+    {
+        ".lua" in path
+    }:
         return "lua"
 
 class JsonFile: File
-    file_type = FileType("json")
-    extensions = {".json"}
-
-    def read(path: string) -> string:
+    def read(path: string) -> string with 
+    {
+        ".json" in path
+    }:
         return "json"
 
 def main():
