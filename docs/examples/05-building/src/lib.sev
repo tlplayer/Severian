@@ -1,0 +1,8 @@
+from "src/math" import add
+
+def calculate() -> int:
+    return add(20, 22)
+
+
+test "Add 2+2 == 4":
+    assert(add(2,2) ==4)

@@ -1,0 +1,5 @@
+def main():
+    print("hello, severian")
+
+test "entrypoint":
+    main()
