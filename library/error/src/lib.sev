@@ -1,0 +1,18 @@
+enum DiagnosticType:
+    E
+    C
+    U
+    W
+    N
+
+
+trait Diagnostic:
+    type: DiagnosticType
+    category: int {0 <= category <= 999}
+    code: int {0 <= code <= 999}
+    note: string {10 <= len(note) <= 200}
+    help: string {10 <= len(help) <= 200}
+    prefix: string | absent
+
+
+trait Error: Diagnostic

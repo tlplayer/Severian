@@ -3,18 +3,18 @@
 # discoverable here. Tighten the lenient starting values as the project matures.
 
 [package]
-name = "01-build-executable"
+name = "error"
 version = "0.1.0"
 edition = "2026"
 # When true, declarations that silently infer `Any` are rejected.
 type-safe = false
 # Optional package metadata used by registries and documentation.
 # description = ""
-# license = "Severian License"
+# license = "MIT"
 # repository = "https://example.com/owner/project"
 
 [[bin]]
-name = "01-build-executable"
+name = "error"
 path = "src/main.sev"
 
 # For a library target, create src/lib.sev and enable this table.
