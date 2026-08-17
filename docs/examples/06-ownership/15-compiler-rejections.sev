@@ -1,0 +1,21 @@
+test with compiler:
+    reject:
+        # use after move
+
+    reject:
+        # mutable + shared alias
+
+    reject:
+        # two mutable aliases
+
+    reject:
+        # returning borrow to local
+
+    reject:
+        # mutation invalidating collection borrow
+
+    reject:
+        # borrowing object after drop
+
+    reject:
+        # unsafe async escape

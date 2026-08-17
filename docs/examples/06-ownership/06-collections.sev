@@ -1,0 +1,12 @@
+values.append(move value)
+value := move values[0]
+borrowed := borrow values[0]
+copied := clone values[0]
+
+test with compiler:
+    values := ["a", "b", "c"]
+
+    first := borrow values[0]
+
+    reject:
+        values.append("d")

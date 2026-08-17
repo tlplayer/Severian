@@ -1,0 +1,11 @@
+class User:
+    name: string
+    metadata: list[string]
+
+
+test:
+    user := User("alice", ["admin"])
+
+    name := borrow user.name
+    assert(name == "alice")
+

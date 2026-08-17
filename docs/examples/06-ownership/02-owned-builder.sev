@@ -1,16 +1,17 @@
-class Buffer:
-    bytes: list[u8]
+class Server:
+    host: string
+    port: int
 
-    def push(byte: u8):
-        bytes.append(byte)
 
-def freeze(buffer: Buffer) -> Buffer:
-    owned = move buffer
-    return owned
+def server(host: string, port: int) -> Server:
+    result := Server()
+    result.host = host
+    result.port = port
+    return result
 
-def main():
-    buffer := Buffer([])
-    buffer.push(65)
 
-    frozen = freeze(buffer)
-    print(frozen.bytes)
+test:
+    server := server("localhost", 8080)
+
+    assert(server.host == "localhost")
+    assert(server.port == 8080)

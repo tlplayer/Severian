@@ -1,0 +1,19 @@
+test with compiler:
+    value := "hello"
+    condition := true
+
+    if condition:
+        consumed := move value
+
+    reject:
+        print(value)
+
+test:
+    value := "hello"
+
+    if true:
+        print(borrow value)
+    else:
+        print(borrow value)
+
+    print(value)

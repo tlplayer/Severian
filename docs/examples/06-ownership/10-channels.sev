@@ -1,0 +1,13 @@
+test:
+    messages := channel[string](16)
+
+    message := "hello"
+
+    messages.send(move message)
+
+    received := messages.receive()
+
+    assert(received == "hello")
+
+    reject:
+        print(message)

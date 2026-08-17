@@ -1,0 +1,7 @@
+test:
+    values := ["a", "b", "c"]
+
+    for value in borrow values:
+        print(value)
+
+    assert(values.length() == 3)

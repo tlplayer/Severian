@@ -1,0 +1,8 @@
+def process(value: string):
+    print(value)
+
+
+test:
+    value := "request"
+
+    task := async process(move value) with self

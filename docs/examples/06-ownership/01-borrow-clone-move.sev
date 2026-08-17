@@ -1,20 +1,26 @@
-def sum(values: list[int]) -> int:
-    total := 0
+def inspect(value: borrow string):
+    print(value)
 
-    for value in values:
-        total += value
 
-    return total
+def consume(value: move string):
+    print(value)
+
 
 test:
-    assert(sum([1, 2, 3, 4]) == 10)
+    name := "severian"
 
-def main():
-    numbers = [1, 2, 3, 4]
+    inspect(borrow name)
+    inspect(borrow name)
 
-    numbers_view = view numbers
-    copied = clone numbers
-    owned = move copied
+    copied := clone name
+    assert(copied == "severian")
 
-    print(sum(numbers_view))
-    print(sum(owned))
+    consume(move name)
+
+
+test with compiler:
+    value := "severian"
+    consume(move value)
+
+    reject:
+        print(value)

@@ -1,0 +1,24 @@
+def identity(value: string) -> string:
+    return value
+
+
+def view(value: borrow string) -> borrow string:
+    return value
+
+
+def duplicate(value: borrow string) -> string:
+    return clone value
+
+test:
+    offset := 3
+
+    add := lambda value: value + offset
+
+    assert(add(4) == 7)
+    assert(offset == 3)
+
+test with compiler:
+    reject:
+        def broken() -> borrow string:
+            value := "temporary"
+            return borrow value
