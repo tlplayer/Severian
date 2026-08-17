@@ -18,7 +18,7 @@ boundary removes ambiguity. Short conventional names remain valid for
 coordinates, indices, and generic types: `x`, `y`, `z`, `i`, `j`, `k`, `T`,
 `K`, and `V`.
 
-There are no coordinate-accessor exceptions. Fixed fields use ordinary member
+Fixed fields use ordinary member
 access, while a variable selects a field through the dynamic object API:
 
 ```sev
@@ -30,32 +30,30 @@ value = point.get(axis)
 point.set(axis, 10)
 ```
 
-`getX`, `setX`, and other camelCase spellings may remain callable for external
-compatibility, but `sev lint` reports them in Severian source. `get` and `set`
+`sev lint` reports them in Severian source. `get` and `set`
 are not reflection escape hatches: field names must be strings, `set` requires
 a changeable receiver, and compile-time-known fields retain their declared
 types.
 
-Named scientific constructs use their canonical spellings: `ReLU`, `GELU`,
+Named scientific constructs use their canonical spellings or whatever the popular python chose for porting: `ReLU`, `GELU`,
 `SiLU`, `LSTM`, `GRU`, `RMSNorm`, `LayerNorm`, `Softmax`, and `Conv2D`.
 Functional forms remain lowercase: `relu`, `gelu`, `softmax`, and
 `cross_entropy`.
 
 The technical registry is deliberately small: `BERT`, `GPT`, `CUDA`, `ROCm`,
-`MLIR`, `XLA`, `StableHLO`, and `PJRT`. PascalCase types use readable title-case
-acronyms, such as `HttpServer`. In ordinary snake-case names, one leading
-acronym may fuse with the following semantic word, while adjacent acronym
-concepts require explicit boundaries:
+`MLIR`, `XLA`, `StableHLO`, and `PJRT`.
 
 ```text
-HTTPServer    -> httpserver
+HTTPServer    -> http_server
 HTTPTPSServer -> http_tps_server
 XLAGPUClient  -> xla_gpu_client
 ```
 
 Ordinary words are not clipped: use `statement`, `expression`, `platform`, and
-`configuration` instead of arbitrary abbreviations. The package is `system`,
+`config` instead of arbitrary abbreviations. The package is `system`,
 not `sys`; any future implementation-block syntax is reserved as `implement`,
 never `impl`. Conditional chains use `elif`; legacy `elif` and
 `else <condition>:` spellings are compatibility forms covered by `N007` during
 their migration windows. The sole package manifest name is `package.toml`.
+
+Exception to the above is config which is it's own word. 

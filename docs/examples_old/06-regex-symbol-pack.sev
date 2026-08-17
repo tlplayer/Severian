@@ -1,9 +1,0 @@
-import regex
-
-@regex(match)
-def has_slug(text: string) -> bool:
-    return regex.matches(text, "[a-z]+-[0-9]+")
-
-test:
-    assert(has_slug("release-42"))
-    assert(not has_slug("release"))

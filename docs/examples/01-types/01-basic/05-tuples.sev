@@ -1,7 +1,10 @@
 
 def main():
+    #Init
     array = (1,2,3,4)
+    #Index
     print(array[2])
+    #Reverse tuple
     print(array[::-1])
 
 test with integ "":

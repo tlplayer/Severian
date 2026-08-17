@@ -3,6 +3,7 @@ def main():
     ratio = 0.5
     enabled = true
     name = "severian"
+    # convert all non strings to string when we have a string
     combined: string = count + ratio
 
     print(count)
@@ -21,3 +22,10 @@ test "type conversion":
     #Cannot convert string to name but we can convert 
     throws(name + ratio)
     assert()
+
+
+test with compiler "Compiler rejects ":
+    #Compiler rejects 
+    reject:
+        number: int = "h"+1
+    

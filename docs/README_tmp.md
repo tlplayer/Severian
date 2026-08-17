@@ -12,7 +12,6 @@ The repository is being built piece by piece around a checked, native CPU core:
 - `library/ffi`: foreign library and symbol identities used by packages.
 - `docs/language`: living language notes.
 - `docs/examples`: example `.sev` programs that should become compiler fixtures.
-- `docs/examples/14-packages`: Cargo-like package and workspace examples.
 
 ## Design Center
 
@@ -242,6 +241,7 @@ sev --emit mlir source.sev
 sev --emit llvm source.sev
 sev --emit asm source.sev
 sev --emit stablehlo xla_tensor_source.sev
+TODO: sev --emit triton source.sev
 ```
 
 StableHLO is emitted only for tensor functions supported by the XLA path.
