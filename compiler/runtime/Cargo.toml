@@ -1,6 +1,0 @@
-[package]
-name = "severian-runtime"
-version.workspace = true
-edition.workspace = true
-license-file.workspace = true
-repository.workspace = true
