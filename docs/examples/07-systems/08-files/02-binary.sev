@@ -1,0 +1,15 @@
+import file
+import os
+
+
+test with integ "binary file round trip":
+    path = "/tmp/severian-binary.bin"
+
+    file.write(path, [0x01, 0x02, 0xFE, 0xFF])
+
+    with file.open(path) as fp:
+        data = file.read(fp, 4B)
+
+        assert(data == [0x01, 0x02, 0xFE, 0xFF])
+
+    os.remove(path)

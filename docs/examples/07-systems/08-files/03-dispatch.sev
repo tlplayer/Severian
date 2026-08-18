@@ -1,0 +1,24 @@
+import file
+import os
+
+
+test with integ "reader selected by extension":
+    text_path = "/tmp/severian-example.txt"
+    json_path = "/tmp/severian-example.json"
+
+    #text implements how text should be written/read
+    file.write(text_path, "hello")
+    #same with json if the write is invalid we can get error before write/while writing
+    file.write(json_path, "{\"enabled\": true}")
+
+    #text returns string
+    text = file.read(text_path)
+    #json returns json object
+    json = file.read(json_path)
+
+    assert("hello" == text)
+    assert(json["enabled"] == true)
+
+
+    os.remove(text_path)
+    os.remove(json_path)

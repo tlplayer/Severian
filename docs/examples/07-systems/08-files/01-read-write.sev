@@ -1,0 +1,14 @@
+import file
+import os
+
+
+test with integ "text file round trip":
+    path = "/tmp/severian-file.txt"
+
+    file.write(path, "hello severian")
+
+    contents = file.read(path)
+
+    assert(contents == "hello severian")
+
+    os.remove(path)

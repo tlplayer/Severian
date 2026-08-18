@@ -1,0 +1,15 @@
+import file
+import os
+
+
+test with integ "file lock":
+    path = "/tmp/severian-lock.txt"
+
+    file.write(path, "shared state")
+
+    lock = file.lock(path)
+
+    assert(lock != None)
+
+    file.unlock(lock)
+    os.remove(path)

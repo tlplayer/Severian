@@ -1,0 +1,24 @@
+def fix():
+    print("fix")
+
+
+def break_thing():
+    print("break")
+
+    defer fix()
+
+    print("work")
+test:
+    break_thing()
+
+def foo():
+    defer print("first")
+    defer print("second")
+    defer print("third")
+test with integ:
+    #lifo stack
+    assert("""
+    third
+    second
+    first
+    """ in stdout)

@@ -1,0 +1,18 @@
+import file
+import os
+
+
+test with integ "memory mapped file":
+    path = "/tmp/severian-map.bin"
+
+    file.write(path, [1, 2, 3, 4])
+
+    with file.map(path) as mapping:
+        assert(bytes(mapping) == 4B)
+
+        assert(mapping[0] == 1)
+        assert(mapping[1] == 2)
+        assert(mapping[2] == 3)
+        assert(mapping[3] == 4)
+
+    os.remove(path)

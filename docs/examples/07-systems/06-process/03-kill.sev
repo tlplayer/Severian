@@ -1,0 +1,9 @@
+import process
+
+
+test with integ "kill terminates a process":
+    child = process.spawn("exec sleep 30")
+
+    assert(child > 0)
+    assert(process.kill(child))
+    assert(process.wait(child) == 128)

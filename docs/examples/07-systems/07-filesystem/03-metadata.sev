@@ -1,0 +1,15 @@
+import file
+import os
+
+
+test with integ "file metadata":
+    path = "/tmp/severian-metadata.txt"
+
+    file.write(path, "severian")
+
+    information = os.stat(path)
+
+    assert(information.path == path)
+    assert(information.is_file)
+    assert(not information.is_directory)
+    assert(information.size == 8)

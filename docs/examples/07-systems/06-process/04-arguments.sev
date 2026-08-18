@@ -1,0 +1,13 @@
+import process
+
+
+test "process arguments":
+    #args is also ok. kwargs is ok for compatibility with python but not hidden. Must be caller transparent
+    arguments = process.arguments()
+
+    assert(size(arguments) > 0)
+
+
+def main():
+    for argument in process.arguments():
+        print(argument)

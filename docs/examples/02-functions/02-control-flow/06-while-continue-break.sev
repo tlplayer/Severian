@@ -1,0 +1,40 @@
+def find_goal(grid: list[list[int]]) -> tuple[int, int] | None:
+    queue := [(0, 0)]
+    visited := set()
+
+    while queue with
+    {
+        defer 0 <= i < len(grid) -> continue,
+        defer 0 <= j < len(grid[i]) -> continue,
+    }:
+        i, j := queue.pop()
+
+        if (i, j) in visited:
+            continue
+
+        visited.add((i, j))
+
+        if grid[i][j] == 1:
+            break
+
+        queue.append((i + 1, j))
+        queue.append((i - 1, j))
+        queue.append((i, j + 1))
+        queue.append((i, j - 1))
+
+    if grid[i][j] == 1:
+        return (i, j)
+
+    return None
+
+
+test:
+    grid := [
+        [0, 0, 0],
+        [0, 0, 1],
+        [0, 0, 0],
+    ]
+
+    result := find_goal(grid)
+
+    assert(result == (1, 2))

@@ -1,0 +1,14 @@
+import os
+import path
+
+
+test with integ "create and list directory":
+    directory = "/tmp/severian-directory-example"
+
+    os.make_directories(directory)
+
+    assert(path.exists(directory))
+    assert(path.is_dir(directory))
+
+    entries = os.list(directory)
+    assert(size(entries) >= 0)

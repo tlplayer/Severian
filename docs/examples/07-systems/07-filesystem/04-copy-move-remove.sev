@@ -1,0 +1,23 @@
+import file
+import os
+
+
+test with integ "copy move and remove":
+    source = "/tmp/severian-source.txt"
+    copied = "/tmp/severian-copy.txt"
+    moved = "/tmp/severian-moved.txt"
+
+    file.write(source, "data")
+
+    os.copy(source, copied)
+    assert(os.exists(copied))
+
+    os.rename(copied, moved)
+    assert(not os.exists(copied))
+    assert(os.exists(moved))
+
+    os.remove(source)
+    os.remove(moved)
+
+    assert(not os.exists(source))
+    assert(not os.exists(moved))

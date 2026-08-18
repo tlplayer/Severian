@@ -1,0 +1,10 @@
+import path
+
+
+test "path operations":
+    value = path.join("/tmp", "example.txt")
+
+    assert(value == "/tmp/example.txt")
+    assert(path.basename(value) == "example.txt")
+    assert(path.dirname(value) == "/tmp")
+    assert(path.extension(value) == ".txt")
