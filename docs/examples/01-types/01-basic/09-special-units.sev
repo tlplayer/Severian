@@ -1,0 +1,84 @@
+
+
+# Data
+test "data units":
+    assert(1B == 8b)
+
+    assert(1KB == 1000B)
+    assert(1MB == 1000KB)
+    assert(1GB == 1000MB)
+    assert(1TB == 1000GB)
+
+    assert(1KiB == 1024B)
+    assert(1MiB == 1024KiB)
+    assert(1GiB == 1024MiB)
+    assert(1TiB == 1024GiB)
+
+test "percent literals":
+    assert(80pct == 0.8)
+    assert(100pct == 1.0)
+    assert(1pct == 0.01)
+
+    utilization := 92pct
+
+    assert(utilization > 80pct)
+
+# Time
+test "time units":
+    assert(1000ns == 1us)
+    assert(1000us == 1ms)
+    assert(1000ms == 1s)
+
+    assert(60s == 1min)
+    assert(60min == 1hr)
+    assert(24hr == 1day)
+
+
+# Units can be converted naturally.
+test "unit conversion":
+    duration := 2s
+
+    assert(duration / 1ms == 2000)
+    assert(4096B / 1KiB == 4)
+
+
+# Units compose.
+test "derived units":
+    transferred := 100MB
+    elapsed := 2s
+
+    throughput := transferred / elapsed
+
+    assert(throughput == 50MB / 1s)
+
+
+# Frequency is inverse time.
+test "frequency":
+    assert(1Hz == 1 / 1s)
+    assert(1kHz == 1000Hz)
+    assert(1MHz == 1000kHz)
+    assert(1GHz == 1000MHz)
+
+
+# Unit values work naturally in contracts.
+def process(data: bytes)
+{
+    defer bytes(data) < 64MiB -> exception("memory limit exceeded"),
+}:
+    print(len(data))
+
+
+test with profile "latency"
+{
+    defer time < 10ms -> exception("operation took too long"),
+}:
+    process(bytes())
+
+
+# Different dimensions cannot be compared.
+test with compiler:
+    reject:
+        assert(10ms < 20MB)
+
+    reject:
+        value := 1s + 4B

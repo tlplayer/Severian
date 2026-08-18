@@ -1,0 +1,22 @@
+test:
+    unsafe:
+        values := allocate[int](4)
+
+        values[0] = 10
+        values[1] = 20
+        values[2] = 30
+        values[3] = 40
+
+        pointer := &values
+
+        assert(pointer[0] == 10)
+        assert((pointer + 1)[int] == 20)
+        assert((pointer)[3] == 40)
+
+        free(values)
+
+test with compiler:
+    values := [10, 20, 30]
+
+    reject:
+        pointer := &values + 1
