@@ -12,13 +12,13 @@ class Parser:
         value = self.parse_value()
         self.skip_whitespace()
         if position != size(source):
-            return failure(JsonError("unexpected content after JSON value"))
+            return error(JsonError("unexpected content after JSON value"))
         return value
 
     def parse_value() -> Any | JsonError:
         self.skip_whitespace()
         if position >= size(source):
-            return failure(JsonError("unexpected end of JSON input"))
+            return error(JsonError("unexpected end of JSON input"))
         character = source[position]
         if character == "\"":
             return self.parse_string()
@@ -49,7 +49,7 @@ class Parser:
                 value += character
                 continue
             if position >= size(source):
-                return failure(JsonError("unterminated JSON escape"))
+                return error(JsonError("unterminated JSON escape"))
             escaped = source[position]
             position += 1
             if escaped == "\"" or escaped == "\\" or escaped == "/":
@@ -61,8 +61,8 @@ class Parser:
             elif escaped == "t":
                 value += "\t"
             else:
-                return failure(JsonError("unsupported JSON escape: \\" + escaped))
-        return failure(JsonError("unterminated JSON string"))
+                return error(JsonError("unsupported JSON escape: \\" + escaped))
+        return error(JsonError("unterminated JSON string"))
 
     def parse_array() -> Any | JsonError:
         position += 1
@@ -79,9 +79,9 @@ class Parser:
                 position += 1
                 return values
             if position >= size(source) or source[position] != ",":
-                return failure(JsonError("JSON array requires `,` or `]`"))
+                return error(JsonError("JSON array requires `,` or `]`"))
             position += 1
-        return failure(JsonError("unterminated JSON array"))
+        return error(JsonError("unterminated JSON array"))
 
     def parse_object() -> Any | JsonError:
         position += 1
@@ -93,11 +93,11 @@ class Parser:
         while position < size(source):
             self.skip_whitespace()
             if position >= size(source) or source[position] != "\"":
-                return failure(JsonError("JSON object keys must be strings"))
+                return error(JsonError("JSON object keys must be strings"))
             key = self.parse_string()
             self.skip_whitespace()
             if position >= size(source) or source[position] != ":":
-                return failure(JsonError("JSON object key requires `:`"))
+                return error(JsonError("JSON object key requires `:`"))
             position += 1
             value = self.parse_value()
             values[key] = value
@@ -106,16 +106,16 @@ class Parser:
                 position += 1
                 return values
             if position >= size(source) or source[position] != ",":
-                return failure(JsonError("JSON object requires `,` or `}`"))
+                return error(JsonError("JSON object requires `,` or `}`"))
             position += 1
-        return failure(JsonError("unterminated JSON object"))
+        return error(JsonError("unterminated JSON object"))
 
     def parse_number() -> Any | JsonError:
         start = position
         while position < size(source) and "-+0123456789.eE".contains(source[position]):
             position += 1
         if start == position:
-            return failure(JsonError("invalid JSON value"))
+            return error(JsonError("invalid JSON value"))
         token = source[start:position]
         if token.contains(".") or token.contains("e") or token.contains("E"):
             parsed ?= float.parse(token)
@@ -123,13 +123,13 @@ class Parser:
                 ok value:
                     return value
                 failure _error:
-                    return failure(JsonError("invalid JSON number: " + token))
+                    return error(JsonError("invalid JSON number: " + token))
         parsed ?= int.parse(token)
         match parsed:
             ok value:
                 return value
             failure _error:
-                return failure(JsonError("invalid JSON number: " + token))
+                return error(JsonError("invalid JSON number: " + token))
 
 def decode_value(text: string) -> Any | JsonError:
     return Parser(text, 0).parse()
@@ -202,7 +202,7 @@ class Json: Document
 
     def write() -> unit | IOError:
         if size(source_path) == 0:
-            return failure(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
+            return error(IOError("in-memory JSON has no path; use encode() or write_to(path)"))
         return platform.file_write(source_path, encode_value(document))
 
     def write_to(path: string) -> unit | IOError:

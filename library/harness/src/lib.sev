@@ -80,7 +80,7 @@ def failed(
 def verification_passed(result: agent.CommandResult) -> bool:
     return result.exit_code == 0 and not result.timed_out
 
-def verification_failure(result: agent.CommandResult) -> string:
+def verification_error(result: agent.CommandResult) -> string:
     message := "verification failed"
 
     if result.timed_out:
@@ -167,7 +167,7 @@ def run(
             0,
             "initial verification",
             false,
-            verification_failure(initial),
+            verification_error(initial),
         )
     )
 
@@ -204,7 +204,7 @@ def run(
                 iteration,
                 "verification",
                 false,
-                verification_failure(verification),
+                verification_error(verification),
             )
         )
 

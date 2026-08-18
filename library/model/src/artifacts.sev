@@ -41,14 +41,14 @@ def identify_format(source: string) -> string | types.ModelLoadError:
     if not path.exists(source) and size(source.split("/")) == 2 and "." not in path.basename(source):
         _safe = safe_identifier(source)
         return "huggingface-safetensors"
-    return failure(types.ModelLoadError("could not identify model format: " + source))
+    return error(types.ModelLoadError("could not identify model format: " + source))
 
 def safe_identifier(identifier: string) -> string | types.ModelLoadError:
     if identifier.is_empty() or ".." in identifier or ":" in identifier:
-        return failure(types.ModelLoadError("invalid model identifier"))
+        return error(types.ModelLoadError("invalid model identifier"))
     for character in identifier.characters():
         if not character.is_ascii_alnum() and character not in ["-", "_", ".", "/", "@"]:
-            return failure(types.ModelLoadError("invalid model identifier"))
+            return error(types.ModelLoadError("invalid model identifier"))
     return identifier
 
 def cache_root() -> string:
@@ -75,7 +75,7 @@ def sha256_file(path_name: string) -> string | IOError:
 def verify(path_name: string, expected_sha256: string) -> string | types.ModelLoadError | IOError:
     actual = sha256_file(path_name)
     if actual.lower() != expected_sha256.lower():
-        return failure(types.ModelLoadError(
+        return error(types.ModelLoadError(
             "SHA-256 mismatch for " + path_name + ": expected " + expected_sha256 + ", received " + actual,
         ))
     return actual
@@ -91,7 +91,7 @@ def download_verified(url: string, destination: string, expected_sha256: string)
     _downloaded = http.download(url, temporary)
     digest = sha256_file(temporary)
     if not expected_sha256.is_empty() and digest.lower() != expected_sha256.lower():
-        return failure(types.ModelLoadError("downloaded artifact SHA-256 mismatch"))
+        return error(types.ModelLoadError("downloaded artifact SHA-256 mismatch"))
     _renamed = platform.file_rename(temporary, destination)
     return digest
 
@@ -146,14 +146,14 @@ def resolve(source: string, expected_sha256: string = "") -> ResolvedArtifact | 
         return resolve_huggingface("hf://" + source)
     if source.starts_with("https://"):
         if expected_sha256.is_empty():
-            return failure(types.ModelLoadError("direct HTTPS model loads require sha256"))
+            return error(types.ModelLoadError("direct HTTPS model loads require sha256"))
         extension = path.extension(source)
         destination = path.join(cache_root(), expected_sha256 + extension)
         digest = download_verified(source, destination, expected_sha256)
         destination_format = identify_format(destination)
         return ResolvedArtifact(source, destination, destination_format, digest)
     if not path.exists(source):
-        return failure(types.ModelLoadError("model source does not exist: " + source))
+        return error(types.ModelLoadError("model source does not exist: " + source))
     digest := ""
     if not path.is_dir(source):
         digest = sha256_file(source)

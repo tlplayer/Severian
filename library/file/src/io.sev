@@ -8,7 +8,7 @@ def read_text(path: string) -> string | IOError:
     content = abi.OutHandle(0)
     error = abi.OutError(0, "")
     if externs.read_text(abi.StringView(path), content, error) != 0:
-        return failure(IOError(error.message))
+        return error(IOError(error.message))
     handle = native_handle(content.value)
     value = externs.text_value(handle)
     externs.text_release(handle)

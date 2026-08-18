@@ -23,10 +23,10 @@ class Address:
 def new_error() -> ffi.OutError:
     return ffi.OutError(0, "")
 
-def network_failure(error: ffi.OutError) -> NetworkError:
+def network_error(error: ffi.OutError) -> NetworkError:
     return NetworkError(error.message, error.code)
 
-def stream_failure(error: ffi.OutError) -> io.StreamError:
+def stream_error(error: ffi.OutError) -> io.StreamError:
     return io.StreamError(error.message)
 
 def valid_port(port: int) -> bool:
@@ -52,7 +52,7 @@ def parse_ip(value: string) -> Ip | NetworkError:
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.parse_ip_raw(ffi.StringView(value), output, error) != 0:
-        return failure(network_failure(error))
+        return error(network_error(error))
     parsed = Ip(externs.address_host(native_handle(output.value)), externs.address_family(native_handle(output.value)))
     externs.address_release(native_handle(output.value))
     return parsed
@@ -62,31 +62,31 @@ class TcpConnection:
 
     def read(count: int) -> Result[list[int], io.StreamError]:
         if count < 0:
-            return failure(io.StreamError("read count cannot be negative"))
+            return error(io.StreamError("read count cannot be negative"))
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.read(native_handle(handle), count, output, error) != 0:
-            return failure(stream_failure(error))
+            return error(stream_error(error))
         return bytes_from(output.value)
 
     def write(data: list[int]) -> int | io.StreamError:
         for value in data:
             if value < 0 or value > 255:
-                return failure(io.StreamError("network bytes must be between 0 and 255"))
+                return error(io.StreamError("network bytes must be between 0 and 255"))
         written = ffi.OutUsize(0)
         error = new_error()
         if externs.write(native_handle(handle), ffi.BytesView(data), written, error) != 0:
-            return failure(stream_failure(error))
+            return error(stream_error(error))
         return written.value
 
     def read_exact(count: int) -> Result[list[int], io.StreamError]:
         if count < 0:
-            return failure(io.StreamError("read count cannot be negative"))
+            return error(io.StreamError("read count cannot be negative"))
         output := []
         while size(output) < count:
             chunk = self.read(count - size(output))
             if size(chunk) == 0:
-                return failure(io.StreamError("stream ended before the requested byte count"))
+                return error(io.StreamError("stream ended before the requested byte count"))
             output.extend(chunk)
         return output
 
@@ -95,14 +95,14 @@ class TcpConnection:
         while offset < size(data):
             written = self.write(data[offset:size(data)])
             if written <= 0:
-                return failure(io.StreamError("stream accepted no bytes"))
+                return error(io.StreamError("stream accepted no bytes"))
             offset += written
         return offset
 
     def close() -> unit | io.StreamError:
         error = new_error()
         if externs.close(native_handle(handle), error) != 0:
-            return failure(stream_failure(error))
+            return error(stream_error(error))
         handle = 0
         return
 
@@ -110,48 +110,48 @@ class TcpConnection:
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.local_address(native_handle(handle), output, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return address_from(output.value)
 
     def remote_address() -> Address | NetworkError:
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.remote_address(native_handle(handle), output, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return address_from(output.value)
 
     def set_read_timeout(milliseconds: int) -> unit | NetworkError:
         if milliseconds < 0:
-            return failure(NetworkError("timeout cannot be negative"))
+            return error(NetworkError("timeout cannot be negative"))
         error = new_error()
         if externs.set_read_timeout(native_handle(handle), milliseconds, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return
 
     def set_write_timeout(milliseconds: int) -> unit | NetworkError:
         if milliseconds < 0:
-            return failure(NetworkError("timeout cannot be negative"))
+            return error(NetworkError("timeout cannot be negative"))
         error = new_error()
         if externs.set_write_timeout(native_handle(handle), milliseconds, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return
 
     def set_keep_alive(enabled: bool) -> unit | NetworkError:
         error = new_error()
         if externs.set_keep_alive(native_handle(handle), enabled, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return
 
     def shutdown_read() -> unit | NetworkError:
         error = new_error()
         if externs.shutdown(native_handle(handle), 0, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return
 
     def shutdown_write() -> unit | NetworkError:
         error = new_error()
         if externs.shutdown(native_handle(handle), 1, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return
 
     def native_handle() -> isize:
@@ -164,20 +164,20 @@ class TcpListener:
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.accept(native_handle(handle), output, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return TcpConnection(output.value)
 
     def local_address() -> Address | NetworkError:
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.listener_address(native_handle(handle), output, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return address_from(output.value)
 
     def close() -> unit | NetworkError:
         error = new_error()
         if externs.listener_close(native_handle(handle), error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         handle = 0
         return
 
@@ -190,23 +190,23 @@ class UdpConnection:
 
     def send_to(data: list[int], host: string, port: int) -> int | NetworkError:
         if not valid_port(port):
-            return failure(NetworkError("invalid network port"))
+            return error(NetworkError("invalid network port"))
         for value in data:
             if value < 0 or value > 255:
-                return failure(NetworkError("network bytes must be between 0 and 255"))
+                return error(NetworkError("network bytes must be between 0 and 255"))
         sent = ffi.OutUsize(0)
         error = new_error()
         if externs.udp_send_to(native_handle(handle), ffi.BytesView(data), ffi.StringView(host), port, sent, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         return sent.value
 
     def receive_from(count: int) -> Datagram | NetworkError:
         if count < 0:
-            return failure(NetworkError("receive count cannot be negative"))
+            return error(NetworkError("receive count cannot be negative"))
         output = ffi.OutHandle(0)
         error = new_error()
         if externs.udp_receive_from(native_handle(handle), count, output, error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         data := []
         length = externs.packet_length(native_handle(output.value))
         for index in range(length):
@@ -218,33 +218,33 @@ class UdpConnection:
     def close() -> unit | NetworkError:
         error = new_error()
         if externs.udp_close(native_handle(handle), error) != 0:
-            return failure(network_failure(error))
+            return error(network_error(error))
         handle = 0
         return
 
 def connect(host: string, port: int) -> TcpConnection | NetworkError:
     if not valid_port(port):
-        return failure(NetworkError("invalid network port"))
+        return error(NetworkError("invalid network port"))
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.connect_raw(ffi.StringView(host), port, output, error) != 0:
-        return failure(network_failure(error))
+        return error(network_error(error))
     return TcpConnection(output.value)
 
 def listen(host: string, port: int) -> TcpListener | NetworkError:
     if not valid_port(port):
-        return failure(NetworkError("invalid network port"))
+        return error(NetworkError("invalid network port"))
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.listen_raw(ffi.StringView(host), port, output, error) != 0:
-        return failure(network_failure(error))
+        return error(network_error(error))
     return TcpListener(output.value)
 
 def resolve(host: string) -> Result[list[Ip], NetworkError]:
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.resolve_raw(ffi.StringView(host), output, error) != 0:
-        return failure(network_failure(error))
+        return error(network_error(error))
     values := []
     length = externs.address_list_length(native_handle(output.value))
     for index in range(length):
@@ -256,18 +256,18 @@ def resolve(host: string) -> Result[list[Ip], NetworkError]:
 
 def udp_bind(host: string, port: int) -> UdpConnection | NetworkError:
     if not valid_port(port):
-        return failure(NetworkError("invalid network port"))
+        return error(NetworkError("invalid network port"))
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.udp_bind_raw(ffi.StringView(host), port, output, error) != 0:
-        return failure(network_failure(error))
+        return error(network_error(error))
     return UdpConnection(output.value)
 
 def loopback_echo(message: string) -> string | IOError:
     output = ffi.OutHandle(0)
     error = new_error()
     if externs.loopback_echo_raw(ffi.StringView(message), output, error) != 0:
-        return failure(IOError(error.message))
+        return error(IOError(error.message))
     echoed = externs.text_value(native_handle(output.value))
     externs.text_release(native_handle(output.value))
     return echoed
@@ -289,15 +289,15 @@ def echo_once(listener: TcpListener) -> unit | Any:
                                             _listener_closed = listener.close()
                                             return
                                         failure error:
-                                            return failure(error)
+                                            return error(error)
                                 failure error:
-                                    return failure(error)
+                                    return error(error)
                         failure error:
-                            return failure(error)
+                            return error(error)
                 failure error:
-                    return failure(error)
+                    return error(error)
         failure error:
-            return failure(error)
+            return error(error)
 
 test "IP and address values distinguish IPv4 and IPv6":
     ipv4 = parse_ip("127.0.0.1")

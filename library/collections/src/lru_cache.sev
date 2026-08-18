@@ -15,7 +15,7 @@ class LRUCache[K, V]:
 
     def get(key: K) -> V | CollectionError:
         if key not in values:
-            return failure(CollectionError("cache key does not exist"))
+            return error(CollectionError("cache key does not exist"))
         order.remove(key)
         order.append(key)
         return values[key]

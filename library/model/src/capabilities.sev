@@ -15,7 +15,7 @@ class CapabilitySet:
         for capability in values:
             if capability.name == name and capability.version >= minimum_version:
                 return
-        return failure(CapabilityError(
+        return error(CapabilityError(
             f"model does not provide capability `{name}` version {minimum_version}",
         ))
 

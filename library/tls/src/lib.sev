@@ -13,25 +13,25 @@ class TlsConnection:
             ok data:
                 return data
             failure error:
-                return failure(io.StreamError(string(error)))
+                return error(io.StreamError(string(error)))
 
     def write(data: list[int]) -> int | io.StreamError:
         match platform.tls_write(handle, data):
             ok count:
                 return count
             failure error:
-                return failure(io.StreamError(string(error)))
+                return error(io.StreamError(string(error)))
 
     def close() -> unit | io.StreamError:
         match platform.tls_close(handle):
             ok _value:
                 return
             failure error:
-                return failure(io.StreamError(string(error)))
+                return error(io.StreamError(string(error)))
 
 def connect(connection: network.TcpConnection, server_name: string) -> TlsConnection | TlsError:
     match platform.tls_connect(connection.native_handle(), server_name):
         ok secure:
             return TlsConnection(secure)
         failure error:
-            return failure(TlsError(string(error)))
+            return error(TlsError(string(error)))

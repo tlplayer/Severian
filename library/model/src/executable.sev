@@ -22,13 +22,13 @@ class ExecutableBundle:
         for candidate in programs:
             if candidate.program.id == id:
                 return candidate
-        return failure(ExecutableError("model has no compiled program `" + id + "`"))
+        return error(ExecutableError("model has no compiled program `" + id + "`"))
 
     def executable_for(role: string) -> Executable | ExecutableError:
         for candidate in programs:
             if candidate.program.role == role:
                 return candidate
-        return failure(ExecutableError("model has no compiled `" + role + "` program"))
+        return error(ExecutableError("model has no compiled `" + role + "` program"))
 
 class ExecutableError:
     message: string

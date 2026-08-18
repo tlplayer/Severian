@@ -36,7 +36,7 @@ def parse_csv(path: string) -> Result[list[list[string]], IOError | file_interfa
 
 def open(path: string, mode: string = "rb") -> Any | IOError:
     if mode != "rb":
-        return failure(IOError("binary file mode must be rb"))
+        return error(IOError("binary file mode must be rb"))
     return platform.file_open_binary(path)
 
 def read_bytes_from(handle: Any, count: int) -> Result[list[int], IOError]:

@@ -25,9 +25,9 @@ class MemoryStream:
 
     def read(count: int) -> Result[list[int], StreamError]:
         if closed:
-            return failure(StreamError("stream is closed"))
+            return error(StreamError("stream is closed"))
         if count < 0:
-            return failure(StreamError("read count cannot be negative"))
+            return error(StreamError("read count cannot be negative"))
         if position >= size(data) or count == 0:
             return []
         stop = [position + count, size(data)].minimum()
@@ -37,21 +37,21 @@ class MemoryStream:
 
     def read_exact(count: int) -> Result[list[int], StreamError]:
         if closed:
-            return failure(StreamError("stream is closed"))
+            return error(StreamError("stream is closed"))
         if count < 0:
-            return failure(StreamError("read count cannot be negative"))
+            return error(StreamError("read count cannot be negative"))
         if position + count > size(data):
-            return failure(StreamError("stream ended before the requested byte count"))
+            return error(StreamError("stream ended before the requested byte count"))
         output = data[position:position + count]
         position += count
         return output
 
     def write(input: list[int]) -> int | StreamError:
         if closed:
-            return failure(StreamError("stream is closed"))
+            return error(StreamError("stream is closed"))
         for byte in input:
             if byte < 0 or byte > 255:
-                return failure(StreamError("byte values must be between 0 and 255"))
+                return error(StreamError("byte values must be between 0 and 255"))
         while size(data) < position:
             data.append(0)
         for byte in input:
@@ -72,7 +72,7 @@ class MemoryStream:
             End:
                 target = size(data) + offset
         if target < 0:
-            return failure(StreamError("seek position cannot be negative"))
+            return error(StreamError("seek position cannot be negative"))
         position = target
         return position
 
@@ -87,9 +87,9 @@ class MemoryStream:
 
     def truncate(length: int) -> unit | StreamError:
         if closed:
-            return failure(StreamError("stream is closed"))
+            return error(StreamError("stream is closed"))
         if length < 0:
-            return failure(StreamError("stream length cannot be negative"))
+            return error(StreamError("stream length cannot be negative"))
         if length < size(data):
             data = data[0:length]
         else:
@@ -116,7 +116,7 @@ class LimitedWriter:
 
 def read_all(reader: Reader, chunk_size: int = 4096) -> Result[list[int], StreamError]:
     if chunk_size < 1:
-        return failure(StreamError("chunk size must be positive"))
+        return error(StreamError("chunk size must be positive"))
     output := []
     while true:
         chunk = reader.read(chunk_size)
@@ -126,7 +126,7 @@ def read_all(reader: Reader, chunk_size: int = 4096) -> Result[list[int], Stream
 
 def copy(source: Reader, destination: Writer, chunk_size: int = 4096) -> int | StreamError:
     if chunk_size < 1:
-        return failure(StreamError("chunk size must be positive"))
+        return error(StreamError("chunk size must be positive"))
     copied := 0
     while true:
         chunk = source.read(chunk_size)
@@ -134,7 +134,7 @@ def copy(source: Reader, destination: Writer, chunk_size: int = 4096) -> int | S
             return copied
         written = destination.write(chunk)
         if written != size(chunk):
-            return failure(StreamError("writer accepted only part of a stream chunk"))
+            return error(StreamError("writer accepted only part of a stream chunk"))
         copied += written
 
 test "memory streams read seek overwrite and zero-fill gaps":

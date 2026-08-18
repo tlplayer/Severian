@@ -22,7 +22,7 @@ class MinHeap[T]:
 
     def pop() -> T | CollectionError:
         if size(values) == 0:
-            return failure(CollectionError("cannot pop from an empty heap"))
+            return error(CollectionError("cannot pop from an empty heap"))
         root = values[0]
         last = values.pop()
         if size(values) > 0:
@@ -46,7 +46,7 @@ class MinHeap[T]:
 
     def peek() -> T | CollectionError:
         if size(values) == 0:
-            return failure(CollectionError("cannot peek at an empty heap"))
+            return error(CollectionError("cannot peek at an empty heap"))
         return values[0]
 
     def drain() -> list[T]:

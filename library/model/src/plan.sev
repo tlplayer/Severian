@@ -65,13 +65,13 @@ class ModelPlan:
         for candidate in programs:
             if candidate.id == id:
                 return candidate
-        return failure(PlanError("model plan has no program `" + id + "`"))
+        return error(PlanError("model plan has no program `" + id + "`"))
 
     def program_for(role: string) -> Program | PlanError:
         for candidate in programs:
             if candidate.role == role:
                 return candidate
-        return failure(PlanError("model plan has no `" + role + "` program"))
+        return error(PlanError("model plan has no `" + role + "` program"))
 
     def validate() -> unit | PlanError:
         program_ids := []
@@ -79,22 +79,22 @@ class ModelPlan:
         state_ids := []
         for weight in weights:
             if weight.id in weight_ids:
-                return failure(PlanError("duplicate weight id `" + weight.id + "`"))
+                return error(PlanError("duplicate weight id `" + weight.id + "`"))
             weight_ids.append(weight.id)
         for state_value in state:
             if state_value.id in state_ids:
-                return failure(PlanError("duplicate state id `" + state_value.id + "`"))
+                return error(PlanError("duplicate state id `" + state_value.id + "`"))
             state_ids.append(state_value.id)
         for executable in programs:
             if executable.id in program_ids:
-                return failure(PlanError("duplicate program id `" + executable.id + "`"))
+                return error(PlanError("duplicate program id `" + executable.id + "`"))
             program_ids.append(executable.id)
             for weight in executable.weights:
                 if weight not in weight_ids:
-                    return failure(PlanError("program `" + executable.id + "` references unknown weight `" + weight + "`"))
+                    return error(PlanError("program `" + executable.id + "` references unknown weight `" + weight + "`"))
             for port in executable.ports:
                 if port.role in ["state_input", "state_output"] and port.state not in state_ids:
-                    return failure(PlanError("program `" + executable.id + "` references unknown state `" + port.state + "`"))
+                    return error(PlanError("program `" + executable.id + "` references unknown state `" + port.state + "`"))
         return
 
 class PlanError:

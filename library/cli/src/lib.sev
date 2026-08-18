@@ -250,7 +250,7 @@ def append_option(
     value: string,
 ) -> unit | CliError:
     if item.name in collected and not item.multiple:
-        return failure(CliError(
+        return error(CliError(
             "CLI004", "option `--" + item.name + "` may only be used once", "",
             "remove the duplicate option",
         ))
@@ -261,7 +261,7 @@ def append_option(
 
 def validate_value(specification: Command, item: OptionSpec, value: string) -> unit | CliError:
     if size(item.choices) > 0 and value not in item.choices:
-        return failure(parse_error(
+        return error(parse_error(
             specification, "CLI005",
             "invalid value `" + value + "` for `--" + item.name + "`",
             "choose one of: " + item.choices.join(", "),
@@ -271,7 +271,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> u
             ok _integer:
                 return
             failure _error:
-                return failure(parse_error(
+                return error(parse_error(
                     specification, "CLI012", "invalid integer `" + value + "` for `--" + item.name + "`",
                     "provide a whole number",
                 ))
@@ -280,7 +280,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> u
             ok _decimal:
                 return
             failure _error:
-                return failure(parse_error(
+                return error(parse_error(
                     specification, "CLI012", "invalid decimal `" + value + "` for `--" + item.name + "`",
                     "provide a decimal number",
                 ))
@@ -296,7 +296,7 @@ def parse(specification: Command, input: list[string]) -> Matches | CliError:
             if size(selected.commands) > 0:
                 proposed = suggestion(selected, input[cursor])
                 hint = "did you mean `" + proposed + "`?" if proposed != "" else "use `--help` to list available commands"
-                return failure(parse_error(selected, "CLI013", "unexpected command `" + input[cursor] + "`", hint))
+                return error(parse_error(selected, "CLI013", "unexpected command `" + input[cursor] + "`", hint))
             break
         selected = selected.commands[nested_index]
         command_path.append(selected.name)
@@ -322,7 +322,7 @@ def parse(specification: Command, input: list[string]) -> Matches | CliError:
             continue
         if token in ["--version", "-V"]:
             if selected.version == "":
-                return failure(parse_error(selected, "CLI006", "this command has no version information"))
+                return error(parse_error(selected, "CLI006", "this command has no version information"))
             action = "version"
             cursor += 1
             continue
@@ -343,18 +343,18 @@ def parse(specification: Command, input: list[string]) -> Matches | CliError:
         if selected_index < 0:
             proposed = suggestion(selected, option_token)
             hint = "did you mean `" + proposed + "`?" if proposed != "" else "use `--help` to list available options"
-            return failure(parse_error(selected, "CLI001", "unexpected option `" + option_token + "`", hint))
+            return error(parse_error(selected, "CLI001", "unexpected option `" + option_token + "`", hint))
         item = selected.options[selected_index]
         if item.kind == "bool":
             if has_inline:
-                return failure(parse_error(selected, "CLI007", "flag `--" + item.name + "` does not accept a value"))
+                return error(parse_error(selected, "CLI007", "flag `--" + item.name + "` does not accept a value"))
             _added = append_option(collected_options, item, "true")
         else:
             value := inline_value
             if not has_inline:
                 cursor += 1
                 if cursor >= size(input):
-                    return failure(parse_error(
+                    return error(parse_error(
                         selected, "CLI002", "option `--" + item.name + "` requires a value",
                         "provide `--" + item.name + " <" + item.value_name + ">`",
                     ))
@@ -374,28 +374,28 @@ def parse(specification: Command, input: list[string]) -> Matches | CliError:
             collected_arguments[item.name].append(raw_arguments[argument_cursor])
             argument_cursor += 1
         elif item.required and action == "run":
-            return failure(parse_error(selected, "CLI003", "missing required argument `<" + item.name.upper() + ">`"))
+            return error(parse_error(selected, "CLI003", "missing required argument `<" + item.name.upper() + ">`"))
     if argument_cursor < size(raw_arguments):
-        return failure(parse_error(selected, "CLI008", "unexpected argument `" + raw_arguments[argument_cursor] + "`"))
+        return error(parse_error(selected, "CLI008", "unexpected argument `" + raw_arguments[argument_cursor] + "`"))
 
     if action == "run":
         if size(selected.commands) > 0:
-            return failure(parse_error(selected, "CLI003", "a command is required", "use `--help` to list available commands"))
+            return error(parse_error(selected, "CLI003", "a command is required", "use `--help` to list available commands"))
         for item in selected.options:
             if item.kind != "bool" and item.name not in collected_options and item.default_value != "":
                 collected_options[item.name] = [item.default_value]
             if item.required and item.name not in collected_options:
-                return failure(parse_error(selected, "CLI003", "missing required option `--" + item.name + "`"))
+                return error(parse_error(selected, "CLI003", "missing required option `--" + item.name + "`"))
         for item in selected.options:
             if item.name in collected_options:
                 for conflicting in item.conflicts:
                     if conflicting in collected_options:
-                        return failure(parse_error(
+                        return error(parse_error(
                             selected, "CLI009", "option `--" + item.name + "` conflicts with `--" + conflicting + "`",
                         ))
                 for dependency in item.requires:
                     if dependency not in collected_options:
-                        return failure(parse_error(
+                        return error(parse_error(
                             selected, "CLI010", "option `--" + item.name + "` requires `--" + dependency + "`",
                         ))
     return Matches(selected.name, command_path, collected_options, collected_arguments, action)
@@ -417,7 +417,7 @@ def values(matches: Matches, name: string) -> list[string]:
 def text(matches: Matches, name: string) -> string | CliError:
     items = values(matches, name)
     if size(items) == 0:
-        return failure(CliError("CLI011", "no parsed value named `" + name + "`", "", "declare the option or argument before reading it"))
+        return error(CliError("CLI011", "no parsed value named `" + name + "`", "", "declare the option or argument before reading it"))
     return items[0]
 
 def integer(matches: Matches, name: string) -> int | CliError:
@@ -426,7 +426,7 @@ def integer(matches: Matches, name: string) -> int | CliError:
         ok value:
             return value
         failure _error:
-            return failure(CliError("CLI012", "parsed value `" + name + "` is not an integer", "", "declare it with kind=\"int\" to validate during parsing"))
+            return error(CliError("CLI012", "parsed value `" + name + "` is not an integer", "", "declare it with kind=\"int\" to validate during parsing"))
 
 def decimal(matches: Matches, name: string) -> float | CliError:
     raw = text(matches, name)
@@ -434,7 +434,7 @@ def decimal(matches: Matches, name: string) -> float | CliError:
         ok value:
             return value
         failure _error:
-            return failure(CliError("CLI012", "parsed value `" + name + "` is not a decimal", "", "declare it with kind=\"float\" to validate during parsing"))
+            return error(CliError("CLI012", "parsed value `" + name + "` is not a decimal", "", "declare it with kind=\"float\" to validate during parsing"))
 
 def boolean(matches: Matches, name: string) -> bool:
     items = values(matches, name)

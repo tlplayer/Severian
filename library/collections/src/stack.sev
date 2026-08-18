@@ -12,10 +12,10 @@ class Stack[T]:
 
     def pop() -> T | CollectionError:
         if size(values) == 0:
-            return failure(CollectionError("cannot pop from an empty stack"))
+            return error(CollectionError("cannot pop from an empty stack"))
         return values.pop()
 
     def peek() -> T | CollectionError:
         if size(values) == 0:
-            return failure(CollectionError("cannot peek at an empty stack"))
+            return error(CollectionError("cannot peek at an empty stack"))
         return values[size(values) - 1]

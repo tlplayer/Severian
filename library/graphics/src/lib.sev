@@ -154,7 +154,7 @@ class Canvas:
 
 def canvas(width: int, height: int, background: Color) -> Canvas | GraphicsError:
     if width <= 0 or height <= 0:
-        return failure(GraphicsError("canvas dimensions must be positive"))
+        return error(GraphicsError("canvas dimensions must be positive"))
     return Canvas(width, height, background)
 
 test "headless canvas records explicit drawing commands":

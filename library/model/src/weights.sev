@@ -21,14 +21,14 @@ class WeightRef:
 
     def require(expected_dtype: string) -> unit | types.ModelLoadError:
         if entry.dtype != expected_dtype:
-            return failure(types.ModelLoadError(
+            return error(types.ModelLoadError(
                 "weight `" + entry.name + "` has dtype " + entry.dtype + ", expected " + expected_dtype,
             ))
         return
 
     def f8e4m3fn() -> Result[Tensor[f8e4m3fn], types.ModelLoadError]:
         if entry.dtype not in ["F8_E4M3", "F8_E4M3FN"]:
-            return failure(types.ModelLoadError("weight `" + entry.name + "` is not F8_E4M3FN"))
+            return error(types.ModelLoadError("weight `" + entry.name + "` is not F8_E4M3FN"))
         return entry.f8e4m3fn()
 
     def f8e5m2() -> Result[Tensor[f8e5m2], types.ModelLoadError]:
@@ -52,7 +52,7 @@ class WeightStore:
 
     def tensor_store() -> tensor.SafeTensorStore | types.ModelLoadError | IOError | JsonError:
         if model_directory.is_empty():
-            return failure(types.ModelLoadError("this model has no mapped checkpoint"))
+            return error(types.ModelLoadError("this model has no mapped checkpoint"))
         return tensor.open_safetensors(model_directory)
 
     def keys() -> Result[list[string], types.ModelLoadError | IOError | JsonError]:
@@ -66,7 +66,7 @@ class WeightStore:
     def get(name: string) -> WeightRef | types.ModelLoadError | IOError | JsonError:
         store = self.tensor_store()
         if name not in store.keys():
-            return failure(types.ModelLoadError("checkpoint has no weight `" + name + "`"))
+            return error(types.ModelLoadError("checkpoint has no weight `" + name + "`"))
         return WeightRef(store.get(name))
 
     def f8e4m3fn(name: string) -> Result[Tensor[f8e4m3fn], types.ModelLoadError | IOError | JsonError]:

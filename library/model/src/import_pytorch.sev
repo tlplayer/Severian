@@ -274,7 +274,7 @@ def infer_graph(parameters: list[types.TensorValue]) -> types.ModelGraph:
                 input_width = parameter.shape[1]
             output_width = parameter.shape[0]
     if size(nodes) == 0:
-        return failure(types.ModelLoadError("PyTorch state_dict has weights but no inferable linear architecture; load it into a declared Severian network"))
+        return error(types.ModelLoadError("PyTorch state_dict has weights but no inferable linear architecture; load it into a declared Severian network"))
     return types.ModelGraph("pytorch_state_dict", [types.TensorValue("input", "f32", [-1, input_width], [])], [current], nodes, parameters)
 
 def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOError:
@@ -286,7 +286,7 @@ def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOEr
             pickle_entry = entry
             found = true
     if not found:
-        return failure(types.ModelLoadError("PyTorch archive contains no data.pkl state dictionary"))
+        return error(types.ModelLoadError("PyTorch archive contains no data.pkl state dictionary"))
     root = RestrictedUnpickler(archive.ByteReader(pickle_entry.data)).load()
     parameters = state_tensors(root, entries)
     return infer_graph(parameters)

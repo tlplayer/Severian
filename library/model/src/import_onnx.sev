@@ -311,5 +311,5 @@ def import_model(path: string) -> types.ModelGraph | types.ModelLoadError | IOEr
         else:
             reader.skip(wire)
     if not found:
-        return failure(types.ModelLoadError("ONNX ModelProto contains no graph"))
+        return error(types.ModelLoadError("ONNX ModelProto contains no graph"))
     return graph

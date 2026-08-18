@@ -14,4 +14,4 @@ class JsonReader: file_interface.Reader
             ok document:
                 return document
             failure error:
-                return failure(file_interface.FormatError(error.message))
+                return error(file_interface.FormatError(error.message))

@@ -33,7 +33,7 @@ class WAV: file_interface.File
         return data
 
     def text() -> string | file_interface.FormatError:
-        return failure(file_interface.FormatError("WAV files do not have text content"))
+        return error(file_interface.FormatError("WAV files do not have text content"))
 
     def value() -> Any:
         return data
@@ -52,9 +52,9 @@ class WavReader: file_interface.Reader
         data: list[int] = loaded
         _closed = platform.file_close(handle)
         if size(data) < 44:
-            return failure(file_interface.FormatError("WAV file is shorter than its required header"))
+            return error(file_interface.FormatError("WAV file is shorter than its required header"))
         if data[0:4] != [82, 73, 70, 70] or data[8:12] != [87, 65, 86, 69]:
-            return failure(file_interface.FormatError("WAV file must contain RIFF and WAVE signatures"))
+            return error(file_interface.FormatError("WAV file must contain RIFF and WAVE signatures"))
         channels = data[22] + data[23] * 256
         sample_rate = data[24] + data[25] * 256 + data[26] * 65536 + data[27] * 16777216
         bits_per_sample = data[34] + data[35] * 256

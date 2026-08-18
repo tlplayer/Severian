@@ -30,7 +30,7 @@ class Binary: file_interface.File
         return data
 
     def text() -> string | file_interface.FormatError:
-        return failure(file_interface.FormatError("binary files do not have text content"))
+        return error(file_interface.FormatError("binary files do not have text content"))
 
     def value() -> Any:
         return data

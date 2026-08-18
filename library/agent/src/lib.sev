@@ -169,7 +169,7 @@ def load_state(path: string, goal: string) -> AgentState:
         failure error:
             return empty_state(goal)
 
-def append_failure(state: AgentState, failure: string) -> AgentState:
+def append_error(state: AgentState, failure: string) -> AgentState:
     failures := []
 
     for previous in state.failures:
@@ -330,12 +330,12 @@ def run_agent(
             config.timeout_millis,
         ):
             failure error:
-                state = append_failure(state, error)
+                state = append_error(state, error)
                 persist_state(state_path, state)
 
             ok reply:
                 if size(reply.tool_calls) == 0:
-                    state = append_failure(
+                    state = append_error(
                         state,
                         "model stopped without using a tool: " + reply.content,
                     )
@@ -362,12 +362,12 @@ def run_agent(
                         ):
                             ok followup:
                                 if result.exit_code != 0 or result.timed_out:
-                                    state = append_failure(
+                                    state = append_error(
                                         state,
                                         result.stderr,
                                     )
                             failure error:
-                                state = append_failure(state, error)
+                                state = append_error(state, error)
 
                     match git_status(workspace):
                         ok files:
@@ -378,7 +378,7 @@ def run_agent(
                                 state.next_action,
                             )
                         failure error:
-                            state = append_failure(state, error)
+                            state = append_error(state, error)
 
                     verification = verify(
                         workspace,
@@ -402,7 +402,7 @@ def run_agent(
                             state,
                         )
 
-                    state = append_failure(
+                    state = append_error(
                         state,
                         tool_result_prompt(verification),
                     )

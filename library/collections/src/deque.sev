@@ -21,12 +21,12 @@ class Deque[T]:
 
     def pop() -> T | CollectionError:
         if size(values) == front:
-            return failure(CollectionError("cannot pop from an empty deque"))
+            return error(CollectionError("cannot pop from an empty deque"))
         return values.pop()
 
     def pop_left() -> T | CollectionError:
         if size(values) == front:
-            return failure(CollectionError("cannot pop from an empty deque"))
+            return error(CollectionError("cannot pop from an empty deque"))
         value = values[front]
         front += 1
         if front >= 64 and front * 2 >= size(values):
@@ -36,12 +36,12 @@ class Deque[T]:
 
     def peek() -> T | CollectionError:
         if size(values) == front:
-            return failure(CollectionError("cannot peek at an empty deque"))
+            return error(CollectionError("cannot peek at an empty deque"))
         return values[size(values) - 1]
 
     def peek_left() -> T | CollectionError:
         if size(values) == front:
-            return failure(CollectionError("cannot peek at an empty deque"))
+            return error(CollectionError("cannot peek at an empty deque"))
         return values[front]
 
     def clear():

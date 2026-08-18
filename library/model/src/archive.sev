@@ -251,4 +251,4 @@ def zip_entry(entries: list[ZipEntry], suffix: string) -> ZipEntry | IOError:
     for entry in entries:
         if entry.name == suffix or entry.name.ends_with("/" + suffix):
             return entry
-    return failure(IOError("archive does not contain " + suffix))
+    return error(IOError("archive does not contain " + suffix))

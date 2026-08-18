@@ -1,6 +1,6 @@
 def first(values: list[int]) -> int | BoundsError:
     if size(values) == 0:
-        return failure(BoundsError(0))
+        return error(BoundsError(0))
 
     return values[0]
 

@@ -46,7 +46,7 @@ def maximum(values: list[float]) -> float:
 
 def numeric_column(table: data.Data, name: string) -> Result[list[float], PlotError]:
     if not table.has_column(name):
-        return failure(PlotError("missing data column: " + name))
+        return error(PlotError("missing data column: " + name))
     result: list[float] = []
     for value in table.column(name):
         result.append(float(value))
@@ -54,17 +54,17 @@ def numeric_column(table: data.Data, name: string) -> Result[list[float], PlotEr
 
 def add_series(series: list[Series], kind: string, x: list[float], y: list[float], label: string) -> int | PlotError:
     if size(x) == 0:
-        return failure(PlotError("plot series cannot be empty"))
+        return error(PlotError("plot series cannot be empty"))
     if size(x) != size(y):
-        return failure(PlotError("plot x and y series must have equal length"))
+        return error(PlotError("plot x and y series must have equal length"))
     series.append(Series(kind, x, y, label, palette(size(series))))
     return size(series)
 
 def histogram_series(series: list[Series], values: list[float], bins: int, label: string) -> int | PlotError:
     if size(values) == 0:
-        return failure(PlotError("histogram values cannot be empty"))
+        return error(PlotError("histogram values cannot be empty"))
     if bins <= 0:
-        return failure(PlotError("histogram bins must be positive"))
+        return error(PlotError("histogram bins must be positive"))
     low = minimum(values)
     high = maximum(values)
     span := high - low

@@ -126,7 +126,7 @@ class CSV: data.Source
 
     def write() -> unit | IOError:
         if size(source_path) == 0:
-            return failure(IOError("in-memory CSV has no path; use encode() or write_to(path)"))
+            return error(IOError("in-memory CSV has no path; use encode() or write_to(path)"))
         return platform.file_write(source_path, encode_records(records_data))
 
     def write_to(path: string) -> unit | IOError:
@@ -180,18 +180,18 @@ class CSV: data.Source
         position = column_index_of(records_data, column)
         values = records_of(records_data)
         if position < 0:
-            return failure(CsvError("CSV column does not exist: " + column))
+            return error(CsvError("CSV column does not exist: " + column))
         if row < 0 or row >= size(values):
-            return failure(CsvError("CSV row is outside the document"))
+            return error(CsvError("CSV row is outside the document"))
         return values[row][position] if position < size(values[row]) else ""
 
     def set(row: int, column: string, value: string) -> unit | CsvError:
         position = column_index_of(records_data, column)
         record = row + 1
         if position < 0:
-            return failure(CsvError("CSV column does not exist: " + column))
+            return error(CsvError("CSV column does not exist: " + column))
         if record < 1 or record >= size(records_data):
-            return failure(CsvError("CSV row is outside the document"))
+            return error(CsvError("CSV row is outside the document"))
         while size(records_data[record]) <= position:
             records_data[record].append("")
         records_data[record][position] = value

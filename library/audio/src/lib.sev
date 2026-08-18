@@ -54,7 +54,7 @@ def read_wav(path: string) -> Audio | IOError | AudioError:
     file_data = file.read_exact(handle, length)
     _closed = file.close(handle)
     if length < 12 or four_cc(file_data, 0) != "82:73:70:70" or four_cc(file_data, 8) != "87:65:86:69":
-        return failure(AudioError("audio.read_wav expected a RIFF/WAVE file"))
+        return error(AudioError("audio.read_wav expected a RIFF/WAVE file"))
 
     format := 0
     channels := 0
@@ -68,10 +68,10 @@ def read_wav(path: string) -> Audio | IOError | AudioError:
         chunk_size = little_u_32(file_data, cursor + 4)
         payload = cursor + 8
         if payload + chunk_size > length:
-            return failure(AudioError("WAV chunk extends beyond the input file"))
+            return error(AudioError("WAV chunk extends beyond the input file"))
         if chunk == "102:109:116:32":
             if chunk_size < 16:
-                return failure(AudioError("WAV fmt chunk is too short"))
+                return error(AudioError("WAV fmt chunk is too short"))
             format = little_u_16(file_data, payload)
             channels = little_u_16(file_data, payload + 2)
             sample_rate = little_u_32(file_data, payload + 4)
@@ -82,11 +82,11 @@ def read_wav(path: string) -> Audio | IOError | AudioError:
         cursor = payload + chunk_size + (chunk_size % 2)
 
     if format != 1 or bits_per_sample != 16:
-        return failure(AudioError("WAV reader currently accepts signed PCM16 input"))
+        return error(AudioError("WAV reader currently accepts signed PCM16 input"))
     if channels <= 0 or sample_rate <= 0 or data_start < 0:
-        return failure(AudioError("WAV file is missing typed format or sample data"))
+        return error(AudioError("WAV file is missing typed format or sample data"))
     if data_bytes % (channels * 2) != 0:
-        return failure(AudioError("WAV sample data is not frame aligned"))
+        return error(AudioError("WAV sample data is not frame aligned"))
 
     decoded_samples: list[float] = []
     cursor = data_start
@@ -116,10 +116,10 @@ def clamp_sample(value: float) -> float:
 
 def write_wav(path: string, audio: Audio) -> unit | IOError | AudioError:
     if audio.sample_rate <= 0 or audio.channels <= 0:
-        return failure(AudioError("audio metadata must have a positive rate and channel count"))
+        return error(AudioError("audio metadata must have a positive rate and channel count"))
     samples = audio.values()
     if size(samples) % audio.channels != 0:
-        return failure(AudioError("audio sample count is not frame aligned"))
+        return error(AudioError("audio sample count is not frame aligned"))
     data_size = size(samples) * 2
     output_bytes: list[int] = []
     append_ascii(output_bytes, [82, 73, 70, 70])
@@ -163,10 +163,10 @@ def resample(input: Audio, target_rate: int) -> Audio:
 
 def read(path: string) -> Audio | IOError | AudioError:
     if not path.lower().ends_with(".wav"):
-        return failure(AudioError("audio.read currently supports WAV input"))
+        return error(AudioError("audio.read currently supports WAV input"))
     return read_wav(path)
 
 def write(path: string, value: Audio) -> unit | IOError | AudioError:
     if not path.lower().ends_with(".wav"):
-        return failure(AudioError("audio.write currently supports WAV output"))
+        return error(AudioError("audio.write currently supports WAV output"))
     return write_wav(path, value)

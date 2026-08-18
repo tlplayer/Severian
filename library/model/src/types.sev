@@ -45,7 +45,7 @@ class ModelGraph:
         for value in initializers:
             if value.name == name:
                 return value
-        return failure(ModelValidationError("missing initializer: " + name))
+        return error(ModelValidationError("missing initializer: " + name))
 
     def validate() -> unit | ModelValidationError:
         available := []
@@ -65,17 +65,17 @@ class ModelGraph:
         ]
         for node in nodes:
             if node.operation not in supported:
-                return failure(ModelValidationError("unsupported imported operator: " + node.operation))
+                return error(ModelValidationError("unsupported imported operator: " + node.operation))
             for input_name in node.inputs:
                 if not input_name.is_empty() and input_name not in available:
-                    return failure(ModelValidationError(
+                    return error(ModelValidationError(
                         "node " + node.name + " reads unavailable value " + input_name,
                     ))
             for output_name in node.outputs:
                 available.append(output_name)
         for output_name in outputs:
             if output_name not in available:
-                return failure(ModelValidationError("graph output is unavailable: " + output_name))
+                return error(ModelValidationError("graph output is unavailable: " + output_name))
         return
 
 class ModelArtifact:

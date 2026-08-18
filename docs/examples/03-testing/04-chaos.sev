@@ -4,7 +4,7 @@ def read() -> Result[list[int], IOError]:
 
 test with chaos "read results":
     chaos.add(when read return None)
-    chaos.add(when read return Failure(PermissionDenied))
+    chaos.add(when read return error(PermissionDenied))
     events_seen := 0
 
     for event in chaos:

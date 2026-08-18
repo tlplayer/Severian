@@ -71,7 +71,7 @@ def import_layer(layer: Any, input_name: string) -> tuple[list[types.GraphNode],
     if class_name in ["Add", "Subtract", "Multiply", "Concatenate"]:
         operation = "add" if class_name == "Add" else "subtract" if class_name == "Subtract" else "multiply" if class_name == "Multiply" else "concat"
         return ([types.GraphNode(name, operation, [input_name], [name], attributes)], name)
-    return failure(types.ModelLoadError("unsupported Keras layer: " + class_name))
+    return error(types.ModelLoadError("unsupported Keras layer: " + class_name))
 
 def weight_container(entry: archive.ZipEntry) -> types.TensorValue:
     # HDF5 stays inert data. Dataset binding is performed from Keras layer paths;

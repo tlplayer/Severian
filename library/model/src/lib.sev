@@ -258,15 +258,15 @@ class NeuralNet:
         elif format == "pytorch-state-dict":
             incoming = pytorch_importer.import_model(source).initializers
         else:
-            return failure(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
+            return error(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
         existing_names = artifact.graph.initializers.map(|value| value.name)
         for parameter in incoming:
             if parameter.name not in existing_names:
-                return failure(types.ModelLoadError("checkpoint contains unknown parameter: " + parameter.name))
+                return error(types.ModelLoadError("checkpoint contains unknown parameter: " + parameter.name))
             for index, existing in enumerate(artifact.graph.initializers):
                 if existing.name == parameter.name:
                     if existing.shape != parameter.shape:
-                        return failure(types.ModelLoadError("checkpoint shape mismatch for " + parameter.name))
+                        return error(types.ModelLoadError("checkpoint shape mismatch for " + parameter.name))
                     artifact.graph.initializers[index] = parameter
         return
 
@@ -278,15 +278,15 @@ class NeuralNet:
         elif format == "pytorch-state-dict":
             incoming = pytorch_importer.import_model(source).initializers
         else:
-            return failure(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
+            return error(types.ModelLoadError("state loading accepts safetensors or restricted PyTorch state_dict files"))
         existing_names = artifact.graph.initializers.map(|value| value.name)
         for parameter in incoming:
             if parameter.name not in existing_names:
-                return failure(types.ModelLoadError("checkpoint contains unknown parameter: " + parameter.name))
+                return error(types.ModelLoadError("checkpoint contains unknown parameter: " + parameter.name))
             for index, existing in enumerate(artifact.graph.initializers):
                 if existing.name == parameter.name:
                     if existing.shape != parameter.shape:
-                        return failure(types.ModelLoadError("checkpoint shape mismatch for " + parameter.name))
+                        return error(types.ModelLoadError("checkpoint shape mismatch for " + parameter.name))
                     artifact.graph.initializers[index] = parameter
         return
 
@@ -298,7 +298,7 @@ def validate_imported_graph(graph: types.ModelGraph) -> unit | types.ModelLoadEr
         ok _value:
             return
         failure invalid:
-            return failure(types.ModelLoadError(invalid.message))
+            return error(types.ModelLoadError(invalid.message))
 
 def load_graph(
     source: string,
@@ -319,7 +319,7 @@ def load_graph(
     elif resolved.format in ["safetensors", "huggingface-safetensors"]:
         graph = safetensors_importer.import_model(resolved.local_path)
     else:
-        return failure(types.ModelLoadError("unsupported model import format: " + resolved.format))
+        return error(types.ModelLoadError("unsupported model import format: " + resolved.format))
     _valid = validate_imported_graph(graph)
     config := json.decode[Any]("{}")
     config_path = path.join(resolved.local_path if path.is_dir(resolved.local_path) else path.dirname(resolved.local_path), "config.json")

@@ -16,7 +16,7 @@ def dtype_width(dtype: string) -> int | types.ModelLoadError:
         return 8
     if dtype == "c128":
         return 16
-    return failure(types.ModelLoadError("unsupported safetensors dtype `" + dtype + "`"))
+    return error(types.ModelLoadError("unsupported safetensors dtype `" + dtype + "`"))
 
 def header_tensors(shard_path: string) -> Result[list[types.TensorValue], types.ModelLoadError | IOError | JsonError]:
     handle = file.open(shard_path)
@@ -76,16 +76,16 @@ def parameter(parameters: list[types.TensorValue], name: string) -> types.Tensor
     for value in parameters:
         if value.name == name:
             return value
-    return failure(types.ModelLoadError("checkpoint is missing required weight `" + name + "`"))
+    return error(types.ModelLoadError("checkpoint is missing required weight `" + name + "`"))
 
 def validate_qwen_weights(config: Any, parameters: list[types.TensorValue], prefix: string) -> unit | types.ModelLoadError:
     hidden = json.as_int(json.object_get(config, "hidden_size"))
     layers = json.as_int(json.object_get(config, "num_hidden_layers"))
     embedding = parameter(parameters, prefix + "model.embed_tokens.weight")
     if size(embedding.shape) != 2 or embedding.shape[1] != hidden:
-        return failure(types.ModelLoadError("Qwen embedding shape does not match hidden_size"))
+        return error(types.ModelLoadError("Qwen embedding shape does not match hidden_size"))
     if embedding.dtype not in ["f8_e4m3", "f8_e4m3fn", "f8_e5m2", "f16", "bf16", "f32", "f64"]:
-        return failure(types.ModelLoadError("Qwen weights require a floating-point dtype"))
+        return error(types.ModelLoadError("Qwen weights require a floating-point dtype"))
     _norm = parameter(parameters, prefix + "model.norm.weight")
     for layer in range(0, layers):
         base = prefix + "model.layers." + string(layer)
@@ -170,7 +170,7 @@ def inferred_linear_graph(parameters: list[types.TensorValue]) -> types.ModelGra
             if input_width < 0:
                 input_width = parameter.shape[1]
     if size(nodes) == 0:
-        return failure(types.ModelLoadError("safetensors file has no inferable architecture; load it into a declared network"))
+        return error(types.ModelLoadError("safetensors file has no inferable architecture; load it into a declared network"))
     return types.ModelGraph("safetensors_linear", [types.TensorValue("input", "f32", [-1, input_width], [])], [current], nodes, parameters)
 
 def import_model(source: string) -> types.ModelGraph | types.ModelLoadError | IOError | JsonError:
