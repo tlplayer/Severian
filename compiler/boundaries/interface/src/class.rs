@@ -1,4 +1,4 @@
-use crate::{GenericParameter, InterfaceType, SymbolId, TypeId};
+use crate::{CompileTypeId, GenericParameter, InterfaceType, SymbolId, TypeId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassInterface {
@@ -7,6 +7,9 @@ pub struct ClassInterface {
     pub methods: Vec<SymbolId>,
     pub traits: Vec<TypeId>,
     pub generics: Vec<GenericParameter>,
+
+    /// Compiler domain for this class. `None` means ordinary core compilation.
+    pub compile_type: Option<CompileTypeId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

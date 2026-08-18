@@ -75,6 +75,18 @@ impl ExternalId {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CompileTypeId {
+    pub package: PackageId,
+    pub local: u32,
+}
+
+impl CompileTypeId {
+    pub fn new(package: PackageId, local: u32) -> Self {
+        Self { package, local }
+    }
+}
+
 macro_rules! string_id {
     ($name:ident) => {
         #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

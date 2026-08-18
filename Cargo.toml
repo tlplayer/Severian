@@ -1,27 +1,27 @@
 [workspace]
 members = [
-    "compiler/abi",
-    "compiler/ast",
-    "compiler/backend",
-    "compiler/build",
-    "compiler/coverage",
+    # Boundaries
+    "compiler/boundaries/abi",
+    "compiler/boundaries/backend",
+    "compiler/boundaries/driver",
+    "compiler/boundaries/interface",
+
+    # Cross-cutting
     "compiler/diagnostics",
-    "compiler/dtype",
-    "compiler/driver",
-    "compiler/hir",
-    "compiler/lexer",
-    "compiler/lowering",
-    "compiler/mir",
-    "compiler/mlir",
-    "compiler/model-ir",
-    "compiler/ownership",
-    "compiler/package",
-    "compiler/parser",
-    "compiler/passes",
-    "compiler/platform",
-    "compiler/runtime",
-    "compiler/semantic",
-    "compiler/source",
+
+    # Frontend
+    "compiler/frontend/ast",
+    "compiler/frontend/hir",
+    "compiler/frontend/lexer",
+    "compiler/frontend/ownership",
+    "compiler/frontend/parser",
+    "compiler/frontend/semantic",
+    "compiler/frontend/source",
+
+    # Transforms
+    "compiler/transforms/lowering",
+    "compiler/transforms/mir",
+    "compiler/transforms/mlir",
 ]
 resolver = "2"
 

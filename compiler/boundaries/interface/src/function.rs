@@ -1,4 +1,4 @@
-use crate::{Constraint, ExternalId, GenericParameter, InterfaceType, IntrinsicId};
+use crate::{CompileTypeId, Constraint, ExternalId, GenericParameter, InterfaceType, IntrinsicId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionInterface {
@@ -8,6 +8,13 @@ pub struct FunctionInterface {
     pub constraints: Vec<Constraint>,
     pub implementation: FunctionImplementation,
     pub safety: Safety,
+
+    /// Compiler domain that owns lowering of this operation.
+    ///
+    /// This is explicit on functions because domain operations can return core
+    /// values (for example a tensor reduction returning a scalar). Methods may
+    /// inherit the enclosing class compile type when the interface is emitted.
+    pub compile_type: Option<CompileTypeId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

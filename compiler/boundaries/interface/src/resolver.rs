@@ -3,8 +3,8 @@ use std::error::Error;
 use std::fmt;
 
 use crate::{
-    ExternalDeclaration, ExternalId, Implementation, Interface, ModuleId, ModuleInterface,
-    ModulePath, PackageId, Symbol, SymbolId, TypeId,
+    CompileType, CompileTypeId, ExternalDeclaration, ExternalId, Implementation, Interface,
+    ModuleId, ModuleInterface, ModulePath, PackageId, Symbol, SymbolId, SymbolKind, TypeId,
 };
 
 #[derive(Debug)]
@@ -17,6 +17,8 @@ pub struct InterfaceResolver {
     symbols_by_name: HashMap<(ModuleId, String), SymbolId>,
     externals: HashMap<ExternalId, (usize, usize)>,
     implementations_by_trait: HashMap<TypeId, Vec<(usize, usize)>>,
+    compile_types: HashMap<CompileTypeId, (usize, usize)>,
+    compile_types_by_name: HashMap<(PackageId, String), CompileTypeId>,
 }
 
 impl InterfaceResolver {
@@ -30,6 +32,8 @@ impl InterfaceResolver {
             symbols_by_name: HashMap::new(),
             externals: HashMap::new(),
             implementations_by_trait: HashMap::new(),
+            compile_types: HashMap::new(),
+            compile_types_by_name: HashMap::new(),
         };
         resolver.index()?;
         Ok(resolver)
@@ -77,6 +81,23 @@ impl InterfaceResolver {
         Some(&self.interfaces[interface_index].externals[external_index])
     }
 
+    pub fn compile_type(&self, id: &CompileTypeId) -> Option<&CompileType> {
+        let (interface_index, compile_type_index) = *self.compile_types.get(id)?;
+        Some(&self.interfaces[interface_index].compile_types[compile_type_index])
+    }
+
+    pub fn resolve_compile_type(&self, package: &PackageId, name: &str) -> Option<&CompileType> {
+        let id = self
+            .compile_types_by_name
+            .get(&(package.clone(), name.to_owned()))?;
+        self.compile_type(id)
+    }
+
+    pub fn compile_handler(&self, id: &CompileTypeId) -> Option<&Symbol> {
+        let compile_type = self.compile_type(id)?;
+        self.symbol(&compile_type.handler)
+    }
+
     pub fn implementations_for_trait(&self, trait_id: &TypeId) -> Vec<&Implementation> {
         self.implementations_by_trait
             .get(trait_id)
@@ -93,6 +114,8 @@ impl InterfaceResolver {
     }
 
     fn index(&mut self) -> Result<(), ResolveError> {
+        // First pass: packages, modules and symbols. Compile handlers are symbols,
+        // so all symbol identities must exist before compile types are validated.
         for interface_index in 0..self.interfaces.len() {
             let interface = &self.interfaces[interface_index];
             let package = interface.id.clone();
@@ -187,6 +210,84 @@ impl InterfaceResolver {
                     root: interface.root.clone(),
                 });
             }
+        }
+
+        // Second pass: compile domains. This permits the handler symbol to live
+        // anywhere in its owning package without depending on module ordering.
+        for interface_index in 0..self.interfaces.len() {
+            let interface = &self.interfaces[interface_index];
+            let package = interface.id.clone();
+
+            for compile_type_index in 0..interface.compile_types.len() {
+                let compile_type = &interface.compile_types[compile_type_index];
+
+                if compile_type.id.package != package {
+                    return Err(ResolveError::ForeignCompileTypeId {
+                        package: package.clone(),
+                        compile_type: compile_type.id.clone(),
+                    });
+                }
+
+                if compile_type.handler.module.package != package
+                    || !self.symbols.contains_key(&compile_type.handler)
+                {
+                    return Err(ResolveError::UnknownCompileHandler {
+                        compile_type: compile_type.id.clone(),
+                        handler: compile_type.handler.clone(),
+                    });
+                }
+
+                if self
+                    .compile_types
+                    .insert(
+                        compile_type.id.clone(),
+                        (interface_index, compile_type_index),
+                    )
+                    .is_some()
+                {
+                    return Err(ResolveError::DuplicateCompileTypeId(
+                        compile_type.id.clone(),
+                    ));
+                }
+
+                let name_key = (package.clone(), compile_type.name.clone());
+                if self
+                    .compile_types_by_name
+                    .insert(name_key, compile_type.id.clone())
+                    .is_some()
+                {
+                    return Err(ResolveError::DuplicateCompileTypeName {
+                        package: package.clone(),
+                        name: compile_type.name.clone(),
+                    });
+                }
+            }
+        }
+
+        // Third pass: validate references to compile domains and index the
+        // remaining package-level interface data.
+        for interface_index in 0..self.interfaces.len() {
+            let interface = &self.interfaces[interface_index];
+            let package = interface.id.clone();
+
+            for module in &interface.modules {
+                for symbol in &module.symbols {
+                    let compile_type = match &symbol.kind {
+                        SymbolKind::Class(class) => class.compile_type.as_ref(),
+                        SymbolKind::Function(function) => function.compile_type.as_ref(),
+                        _ => None,
+                    };
+
+                    if let Some(compile_type) = compile_type {
+                        if !self.compile_types.contains_key(compile_type) {
+                            return Err(ResolveError::UnknownCompileType {
+                                symbol: symbol.id.clone(),
+                                compile_type: compile_type.clone(),
+                            });
+                        }
+                    }
+                }
+            }
 
             for external_index in 0..interface.externals.len() {
                 let external = &interface.externals[external_index];
@@ -242,6 +343,11 @@ pub enum ResolveError {
         name: String,
     },
     DuplicateExternalId(ExternalId),
+    DuplicateCompileTypeId(CompileTypeId),
+    DuplicateCompileTypeName {
+        package: PackageId,
+        name: String,
+    },
     ForeignModuleId {
         package: PackageId,
         module: ModuleId,
@@ -254,6 +360,10 @@ pub enum ResolveError {
         package: PackageId,
         external: ExternalId,
     },
+    ForeignCompileTypeId {
+        package: PackageId,
+        compile_type: CompileTypeId,
+    },
     ForeignImplementationId {
         package: PackageId,
         implementation: crate::ImplementationId,
@@ -265,6 +375,14 @@ pub enum ResolveError {
     UnknownExport {
         module: ModuleId,
         symbol: SymbolId,
+    },
+    UnknownCompileHandler {
+        compile_type: CompileTypeId,
+        handler: SymbolId,
+    },
+    UnknownCompileType {
+        symbol: SymbolId,
+        compile_type: CompileTypeId,
     },
 }
 
@@ -293,6 +411,14 @@ impl fmt::Display for ResolveError {
                 "duplicate external id `{}:{}`",
                 external.package, external.local
             ),
+            Self::DuplicateCompileTypeId(compile_type) => write!(
+                f,
+                "duplicate compile type id `{}:{}`",
+                compile_type.package, compile_type.local
+            ),
+            Self::DuplicateCompileTypeName { package, name } => {
+                write!(f, "duplicate compile type `{name}` in package `{package}`")
+            }
             Self::ForeignModuleId { package, module } => write!(
                 f,
                 "module `{}:{}` does not belong to package `{package}`",
@@ -312,6 +438,14 @@ impl fmt::Display for ResolveError {
                 "external `{}:{}` does not belong to package `{package}`",
                 external.package, external.local
             ),
+            Self::ForeignCompileTypeId {
+                package,
+                compile_type,
+            } => write!(
+                f,
+                "compile type `{}:{}` does not belong to package `{package}`",
+                compile_type.package, compile_type.local
+            ),
             Self::ForeignImplementationId {
                 package,
                 implementation,
@@ -322,7 +456,7 @@ impl fmt::Display for ResolveError {
             ),
             Self::MissingRootModule { package, root } => write!(
                 f,
-                "interface `{package}` is missing root module `{}:{}`",
+                "root module `{}:{}` is missing from package `{package}`",
                 root.package, root.local
             ),
             Self::UnknownExport { module, symbol } => write!(
@@ -333,6 +467,30 @@ impl fmt::Display for ResolveError {
                 symbol.module.package,
                 symbol.module.local,
                 symbol.local
+            ),
+            Self::UnknownCompileHandler {
+                compile_type,
+                handler,
+            } => write!(
+                f,
+                "compile type `{}:{}` references unknown handler `{}:{}:{}`",
+                compile_type.package,
+                compile_type.local,
+                handler.module.package,
+                handler.module.local,
+                handler.local
+            ),
+            Self::UnknownCompileType {
+                symbol,
+                compile_type,
+            } => write!(
+                f,
+                "symbol `{}:{}:{}` references unknown compile type `{}:{}`",
+                symbol.module.package,
+                symbol.module.local,
+                symbol.local,
+                compile_type.package,
+                compile_type.local
             ),
         }
     }
