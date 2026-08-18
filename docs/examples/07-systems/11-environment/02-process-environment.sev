@@ -1,4 +1,4 @@
-import environment
+import environment as env
 
 
 test "environment variable lifecycle":
@@ -6,8 +6,8 @@ test "environment variable lifecycle":
 
     environment.remove(name)
 
-    assert(environment.set(name, "hello"))
-    assert(environment.get(name) == "hello")
+    assert(env.set(name, "hello"))
+    assert(env.get(name) == "hello")
 
-    assert(environment.remove(name))
-    assert(environment.get(name, "missing") == "missing")
+    assert(env.remove(name))
+    assert(env.get(name, "missing") == "missing")
