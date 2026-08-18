@@ -39,7 +39,7 @@ def write_client(writer: network.TCPWriter, outbound: Channel[string]):
     match outbound while connected with connected := true:
         message from outbound:
             match await writer.write_line(message):
-                ok _:
+                case _:
                     log.info("chat message delivered")
 
                 failure _:
@@ -54,7 +54,7 @@ def read_client(
     events: Channel[ChatEvent],
 ):
     match await reader.read_line() while true:
-        ok message:
+        case message:
             await send Say(client_id, move message) with events
 
         failure _:

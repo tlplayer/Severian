@@ -33,27 +33,27 @@ def download(url: string, destination: string) -> unit | IOError:
 
 test "HTTP verb helpers preserve typed failures for invalid URLs":
     match request("PATCH", "invalid"):
-        ok _response:
+        case _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
     match get("invalid"):
-        ok _response:
+        case _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
     match post("invalid", "payload"):
-        ok _response:
+        case _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
     match put("invalid", "payload"):
-        ok _response:
+        case _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)
     match delete("invalid"):
-        ok _response:
+        case _response:
             assert(false, "an invalid URL unexpectedly succeeded")
         failure _error:
             assert(true)

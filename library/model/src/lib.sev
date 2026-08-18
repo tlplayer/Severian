@@ -295,7 +295,7 @@ def identify_format(source: string) -> string | types.ModelLoadError:
 
 def validate_imported_graph(graph: types.ModelGraph) -> unit | types.ModelLoadError:
     match graph.validate():
-        ok _value:
+        case _value:
             return
         failure invalid:
             return error(types.ModelLoadError(invalid.message))

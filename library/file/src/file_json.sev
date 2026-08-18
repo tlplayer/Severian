@@ -11,7 +11,7 @@ class JsonReader: file_interface.Reader
     def read(path: string) -> file_interface.File | IOError | file_interface.FormatError:
         content = file_io.read_text(path)
         match json.file_document(path, content):
-            ok document:
+            case document:
                 return document
-            failure error:
+            case error:
                 return error(file_interface.FormatError(error.message))

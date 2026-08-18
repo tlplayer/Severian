@@ -274,29 +274,29 @@ def loopback_echo(message: string) -> string | IOError:
 
 def echo_once(listener: TcpListener) -> unit | Any:
     match listener.accept():
-        ok connection:
+        case connection:
             match connection.read_exact(2):
-                ok first:
+                case first:
                     match connection.read_exact(3):
-                        ok second:
+                        case second:
                             match connection.write_all(first):
-                                ok first_written:
+                                case first_written:
                                     assert(first_written == 2)
                                     match connection.write_all(second):
-                                        ok second_written:
+                                        case second_written:
                                             assert(second_written == 3)
                                             _closed = connection.close()
                                             _listener_closed = listener.close()
                                             return
-                                        failure error:
+                                        case error:
                                             return error(error)
-                                failure error:
+                                case error:
                                     return error(error)
-                        failure error:
+                        case error:
                             return error(error)
-                failure error:
+                case error:
                     return error(error)
-        failure error:
+        case error:
             return error(error)
 
 test "IP and address values distinguish IPv4 and IPv6":
@@ -308,9 +308,9 @@ test "IP and address values distinguish IPv4 and IPv6":
 
 test with integ "native TCP loopback":
     match loopback_echo("severian network runtime"):
-        ok echoed:
+        case echoed:
             assert(echoed == "severian network runtime")
-        failure error:
+        case error:
             assert(false, error.message)
 
 test with integ "TCP handles partial reads writes addresses timeouts and cleanup":
@@ -332,7 +332,7 @@ test with integ "TCP handles partial reads writes addresses timeouts and cleanup
 
 test with integ "DNS failures remain typed":
     match resolve(""):
-        ok _addresses:
+        case _addresses:
             assert(false)
-        failure error:
+        case error:
             assert(error.code != 0)

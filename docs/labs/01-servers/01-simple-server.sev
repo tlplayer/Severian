@@ -13,10 +13,10 @@ def respond(connection: network.TCPConnection) -> unit | IOError:
 
 def serve(connection: network.TCPConnection):
     match await respond(borrow connection) with connection:
-            ok _:
+            case _:
                 log.info("request completed")
 
-            failure error:
+            case error:
                 log.error("request failed", error)
 
 def run_server() -> unit | IOError:

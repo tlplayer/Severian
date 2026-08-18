@@ -87,10 +87,10 @@ def serve_job(
     jobs: Channel[Job],
 ):
     match await run_job(job_id, connection, clone jobs) with connection:
-        ok _:
+        case _:
             log.info("map/reduce job completed")
 
-        failure error:
+        case error:
             log.error("map/reduce job failed", error)
 
 def run_server() -> unit | IOError:

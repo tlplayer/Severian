@@ -20,7 +20,7 @@ def close(connection: Database) -> unit | DatabaseError:
 
 test "connection errors remain typed failures":
     match connect("127.0.0.1", "invalid", "invalid", "invalid", 1):
-        ok connection:
+        case connection:
             _closed = close(connection)
             assert(false, "unexpected MySQL server on test port")
         failure _error:

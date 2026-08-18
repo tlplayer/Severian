@@ -268,7 +268,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> u
         ))
     if item.kind == "int":
         match int.parse(value):
-            ok _integer:
+            case _integer:
                 return
             failure _error:
                 return error(parse_error(
@@ -277,7 +277,7 @@ def validate_value(specification: Command, item: OptionSpec, value: string) -> u
                 ))
     elif item.kind == "float":
         match float.parse(value):
-            ok _decimal:
+            case _decimal:
                 return
             failure _error:
                 return error(parse_error(
@@ -423,7 +423,7 @@ def text(matches: Matches, name: string) -> string | CliError:
 def integer(matches: Matches, name: string) -> int | CliError:
     raw = text(matches, name)
     match int.parse(raw):
-        ok value:
+        case value:
             return value
         failure _error:
             return error(CliError("CLI012", "parsed value `" + name + "` is not an integer", "", "declare it with kind=\"int\" to validate during parsing"))
@@ -431,7 +431,7 @@ def integer(matches: Matches, name: string) -> int | CliError:
 def decimal(matches: Matches, name: string) -> float | CliError:
     raw = text(matches, name)
     match float.parse(raw):
-        ok value:
+        case value:
             return value
         failure _error:
             return error(CliError("CLI012", "parsed value `" + name + "` is not a decimal", "", "declare it with kind=\"float\" to validate during parsing"))
@@ -533,14 +533,14 @@ test "declarative parsing and generated diagnostics":
     assert(values(parsed, "text") == ["For the Alliance"])
     verbose = boolean(parsed, "verbose")
     match text(parsed, "text"):
-        ok parsed_text:
+        case parsed_text:
             assert(parsed_text == "For the Alliance")
-        failure error:
+        case error:
             assert(false, error.message)
     match text(parsed, "output"):
-        ok output_path:
+        case output_path:
             assert(output_path == "speech.wav")
-        failure error:
+        case error:
             assert(false, error.message)
     assert(verbose)
     assert(check(application).errors == 0)

@@ -153,20 +153,20 @@ def save_state(path: string, state: AgentState) -> int | string:
 
 def persist_state(path: string, state: AgentState):
     match save_state(path, state):
-        ok bytesWritten:
+        case bytesWritten:
             return
-        failure error:
+        case error:
             print("warning: could not persist agent state: " + error)
 
 def load_state(path: string, goal: string) -> AgentState:
     match read_file(path):
-        ok content:
+        case content:
             match json.decode[AgentState](content):
-                ok state:
+                case state:
                     return state
-                failure error:
+                case error:
                     return empty_state(goal)
-        failure error:
+        case error:
             return empty_state(goal)
 
 def append_error(state: AgentState, failure: string) -> AgentState:
@@ -238,16 +238,16 @@ def execute_tool(
         )
 
     match json.decode[string](call.arguments):
-        ok command:
+        case command:
             match execute_command(
                 workspace,
                 command,
                 limits.command_timeout_millis,
                 limits.max_output_bytes,
             ):
-                ok result:
+                case result:
                     return result
-                failure error:
+                case error:
                     return CommandResult(
                         command,
                         1,
@@ -255,7 +255,7 @@ def execute_tool(
                         error,
                         false,
                     )
-        failure error:
+        case error:
             return CommandResult(
                 "",
                 1,
@@ -289,9 +289,9 @@ def verify(
         limits.command_timeout_millis,
         limits.max_output_bytes,
     ):
-        ok result:
+        case result:
             return result
-        failure error:
+        case error:
             return CommandResult(
                 command,
                 1,
@@ -329,11 +329,11 @@ def run_agent(
             config.temperature,
             config.timeout_millis,
         ):
-            failure error:
+            case error:
                 state = append_error(state, error)
                 persist_state(state_path, state)
 
-            ok reply:
+            case reply:
                 if size(reply.tool_calls) == 0:
                     state = append_error(
                         state,
@@ -360,24 +360,24 @@ def run_agent(
                             config.temperature,
                             config.timeout_millis,
                         ):
-                            ok followup:
+                            case followup:
                                 if result.exit_code != 0 or result.timed_out:
                                     state = append_error(
                                         state,
                                         result.stderr,
                                     )
-                            failure error:
+                            case error:
                                 state = append_error(state, error)
 
                     match git_status(workspace):
-                        ok files:
+                        case files:
                             state = replace_state(
                                 state,
                                 state.iteration,
                                 files,
                                 state.next_action,
                             )
-                        failure error:
+                        case error:
                             state = append_error(state, error)
 
                     verification = verify(

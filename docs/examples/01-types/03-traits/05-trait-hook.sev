@@ -1,5 +1,5 @@
 '''
-Compiler-defined hook context.
+Compiler-defined hocase context.
 The important semantic distinction is:
 
 @monitor_time
@@ -37,7 +37,7 @@ with hooks
 
 
 # without hooks are not guaranteed
-def ... with context declares a hook implementation.
+def ... with context declares a hocase implementation.
 Such a function may contain with context: and without context: phases.
 with executes before the decorated function.
 without executes on return or throw.

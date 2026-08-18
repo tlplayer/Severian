@@ -6,11 +6,11 @@ def run_client(connection: DatabaseConnection):
     result ?= database.remote_query(connection, "SELECT id, name FROM people ORDER BY id")
     database.must_disconnect(connection)
     match result:
-        ok rows:
+        case rows:
             print(size(rows))
             for row in rows:
                 print(row[0], row[1])
-        failure error:
+        case error:
             print(error)
 
 def run_client_and_stop(server: DatabaseServer, connection: DatabaseConnection):
@@ -19,15 +19,15 @@ def run_client_and_stop(server: DatabaseServer, connection: DatabaseConnection):
 
 def run_server(server: DatabaseServer):
     match database.connect(database.address(server)):
-        ok connection:
+        case connection:
             run_client_and_stop(server, connection)
-        failure error:
+        case error:
             print(error)
             database.must_stop(server)
 
 def main():
     match database.start(":memory:"):
-        ok server:
+        case server:
             run_server(server)
-        failure error:
+        case error:
             print(error)

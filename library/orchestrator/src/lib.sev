@@ -166,17 +166,17 @@ test "rollouts include promotion and rollback policy":
 test "controller history executes against the database":
     workload = Workload("prod", "api", "sev://images/api:v2", 2, 250, 128, 8080, "api-state", "v2")
     match database.memory():
-        ok connection:
+        case connection:
             initialize_controller_history(connection)
             assert(record_controller_event(connection, workload, "stable") == 1)
             match controller_history(connection):
-                ok rows:
+                case rows:
                     assert(rows[0][0] == "prod")
                     assert(rows[0][1] == "api")
                     assert(rows[0][2] == "stable")
-                failure error:
+                case error:
                     assert(false, error)
-        failure error:
+        case error:
             assert(false, error)
 
 test "controller queries are PQL validated before emission":

@@ -10,28 +10,28 @@ class TlsConnection:
 
     def read(count: int) -> Result[list[int], io.StreamError]:
         match platform.tls_read(handle, count):
-            ok data:
+            case data:
                 return data
-            failure error:
+            case error:
                 return error(io.StreamError(string(error)))
 
     def write(data: list[int]) -> int | io.StreamError:
         match platform.tls_write(handle, data):
-            ok count:
+            case count:
                 return count
-            failure error:
+            case error:
                 return error(io.StreamError(string(error)))
 
     def close() -> unit | io.StreamError:
         match platform.tls_close(handle):
-            ok _value:
+            case _value:
                 return
-            failure error:
+            case error:
                 return error(io.StreamError(string(error)))
 
 def connect(connection: network.TcpConnection, server_name: string) -> TlsConnection | TlsError:
     match platform.tls_connect(connection.native_handle(), server_name):
-        ok secure:
+        case secure:
             return TlsConnection(secure)
-        failure error:
+        case error:
             return error(TlsError(string(error)))

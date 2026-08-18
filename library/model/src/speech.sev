@@ -25,7 +25,7 @@ class AudioLogits:
     vocabulary: int
 
     def at(codebook: int, frame: int, token: int) -> float:
-        return values[(codebook * frames + frame) * vocabulary + token]
+        return values[(codebocase * frames + frame) * vocabulary + token]
 
 class TokenPrediction:
     tokens: list[int]
@@ -109,7 +109,7 @@ def predict_tokens(
     assert(mask_token >= 0 and mask_token < conditional.vocabulary)
     predicted := []
     confidence := []
-    for codebook in range(0, conditional.codebooks):
+    for codebocase in range(0, conditional.codebooks):
         for frame in range(0, conditional.frames):
             conditional_row: list[float] = []
             unconditional_row: list[float] = []
@@ -185,15 +185,15 @@ def estimate_audio_tokens(
 
 def flatten_tokens(tokens: list[list[int]]) -> list[int]:
     output := []
-    for codebook in tokens:
+    for codebocase in tokens:
         output.extend(codebook)
     return output
 
 def token_matrix(tokens: list[int], codebooks: int, frames: int) -> list[list[int]]:
     assert(size(tokens) == codebooks * frames)
     output := []
-    for codebook in range(0, codebooks):
-        output.append(tokens[codebook * frames:(codebook + 1) * frames])
+    for codebocase in range(0, codebooks):
+        output.append(tokens[codebocase * frames:(codebocase + 1) * frames])
     return output
 
 def masked_iterative_generate(

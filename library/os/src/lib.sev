@@ -85,5 +85,5 @@ test "filesystem aliases copy, move, inspect, and remove files":
             _removed_moved = remove(moved)
             assert(not exists(source))
             assert(not exists(moved))
-        failure error:
+        case error:
             assert(false, error)

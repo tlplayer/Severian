@@ -79,7 +79,7 @@ def process(data: bytes)
 
 test with profile "latency"
 {
-    defer time < 10ms -> exception("operation took too long"),
+    defer time < 10ms -> exception("operation tocase too long"),
 }:
     process(bytes())
 

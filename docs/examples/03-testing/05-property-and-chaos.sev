@@ -11,7 +11,7 @@ test with property and chaos "first is safe for generated lists":
     result ?= first(values)
 
     match result:
-        ok value:
+        case value:
             assert(value == values[0])
 
         failure _:

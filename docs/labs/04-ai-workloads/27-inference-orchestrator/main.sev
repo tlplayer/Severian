@@ -122,7 +122,7 @@ def sample_requests() -> list[InferenceRequest]:
 
 def transport_probe(message: string) -> string:
     match network.loopback_echo(message):
-        ok echoed:
+        case echoed:
             return "transport " + echoed
         failure _:
             return "transport unavailable"

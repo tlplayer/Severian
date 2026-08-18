@@ -10,14 +10,14 @@ def exists(value: string) -> bool:
 
 def is_file(value: string) -> bool:
     match os.stat(value):
-        ok information:
+        case information:
             return information.is_file
         failure _error:
             return false
 
 def is_dir(value: string) -> bool:
     match os.stat(value):
-        ok information:
+        case information:
             return information.is_directory
         failure _error:
             return false
@@ -57,7 +57,7 @@ test "path inspection handles files, directories, and missing paths":
             assert(dirname(file_path) == "/tmp")
             assert(extension(file_path) == ".txt")
             assert(absolute(file_path) == file_path)
-        failure error:
+        case error:
             assert(false, error)
     assert(join("/tmp", "child") == "/tmp/child")
     assert(is_dir("/tmp"))

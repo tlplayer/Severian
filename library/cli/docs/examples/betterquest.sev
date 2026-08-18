@@ -29,12 +29,12 @@ def interface() -> cli.Command:
 def main():
     application = interface()
     match cli.parse_process(application):
-        ok matches:
+        case matches:
             if matches.action != "run":
                 print(cli.response(application, matches))
             elif matches.command == "generate":
                 print("generate", cli.values(matches, "model")[0], cli.values(matches, "output")[0])
             elif matches.command == "inspect":
                 print("inspect", cli.values(matches, "model")[0])
-        failure error:
+        case error:
             print(cli.render_error(error))

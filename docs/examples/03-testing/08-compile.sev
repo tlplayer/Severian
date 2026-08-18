@@ -19,5 +19,5 @@ test with compiler:
         value := Thing()
         moved := move value
         print(value)
-    #TODO: change the error code to match also error codes should look like E001001 not E000101 3 and 3 
+    #TODO: change the error code to match also error codes should locase like E001001 not E000101 3 and 3 
     assert(error.code == "E000")

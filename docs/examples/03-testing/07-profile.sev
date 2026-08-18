@@ -246,15 +246,15 @@ test "deque queue and stack preserve their ordering contracts":
 test "empty collections return structured failures":
     deque = Deque[int]([])
     match deque.pop_left():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot pop from an empty deque")
     heap = MinHeap[int]([])
     match heap.peek():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot peek at an empty heap")
 
 test "heap counter and LRU cover duplicates and eviction":
@@ -311,11 +311,8 @@ test "deque compaction and LRU updates preserve logical state":
     assert(updated == 10)
     cache.put("c", 3)
     assert(cache.keys() == ["a", "c"])
-    match cache.get("b"):
-        ok _value:
-            assert(false)
-        failure error:
-            assert(error.message == "cache key does not exist")
+    cache.get("b") else error:
+         assert(error.message == "cache key does not exist")
 
     single_values: map[int, string] = {}
     single = LruCache[int, string](1, single_values, [])
@@ -327,19 +324,19 @@ test "deque compaction and LRU updates preserve logical state":
 test "collection accessors cover populated and empty states":
     deque = Deque[int]([])
     match deque.pop():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot pop from an empty deque")
     match deque.peek():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot peek at an empty deque")
     match deque.peek_left():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot peek at an empty deque")
     deque.append(11)
     left = deque.peek_left()
@@ -359,14 +356,14 @@ test "collection accessors cover populated and empty states":
     assert(stack.length() == 0)
     assert(stack.is_empty())
     match stack.pop():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot pop from an empty stack")
     match stack.peek():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot peek at an empty stack")
     stack.push(31)
     assert(stack.length() == 1)
@@ -381,9 +378,9 @@ test "collection accessors cover populated and empty states":
     drained = heap.pop()
     assert(drained == 41)
     match heap.pop():
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "cannot pop from an empty heap")
 
     ordered_counts: map[string, int] = {}

@@ -19,16 +19,16 @@ test "graphics example produces a complete SVG document":
 
 def save_drawing(target: graphics.Canvas, path: string):
     match target.save(path):
-        ok _:
+        case _:
             print("graphics", target.width(), target.height())
             print(path)
-        failure error:
+        case error:
             assert(false, error)
 
 def main():
     path = "/tmp/severian-graphics-example.svg"
     match drawing():
-        ok target:
+        case target:
             save_drawing(target, path)
-        failure error:
+        case error:
             assert(false, error)

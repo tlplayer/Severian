@@ -182,14 +182,14 @@ test "YAML documents expose metadata and file persistence":
     assert(value.size() == value.bytes())
     assert(value.raw() == platform.string_encode(value.encode()))
     match value.text():
-        ok text_value:
+        case text_value:
             assert(text_value == value.encode())
-        failure error:
+        case error:
             assert(false, error)
     match value.write():
         ok:
             assert(false, "an in-memory document unexpectedly wrote without a path")
-        failure error:
+        case error:
             assert(error.message.contains("no path"))
     destination = "/tmp/severian-yaml-write-to.yaml"
     _written_to = value.write_to(destination)

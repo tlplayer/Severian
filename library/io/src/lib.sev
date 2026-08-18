@@ -157,21 +157,21 @@ test "memory streams read seek overwrite and zero-fill gaps":
 test "stream failures are atomic and EOF is explicit":
     stream = MemoryStream([1, 2, 3])
     match stream.read_exact(4):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream ended before the requested byte count")
     assert(stream.tell() == 0)
     match stream.write([4, 256, 5]):
-        ok _count:
+        case _count:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "byte values must be between 0 and 255")
     assert(stream.snapshot() == [1, 2, 3])
     match stream.seek(-1, Start):
-        ok _position:
+        case _position:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "seek position cannot be negative")
     empty = stream.read(0)
     assert(empty == [])
@@ -190,13 +190,13 @@ test "structural stream traits compose copy and read all":
     all = read_all(destination, 3)
     assert(all == [1, 2, 3, 4, 5])
     match destination.truncate(3):
-        ok _value:
+        case _value:
             assert(true)
         failure _error:
             assert(false)
     assert(destination.snapshot() == [1, 2, 3])
     match destination.truncate(5):
-        ok _value:
+        case _value:
             assert(true)
         failure _error:
             assert(false)
@@ -205,67 +205,67 @@ test "structural stream traits compose copy and read all":
 test "closed streams reject I/O consistently":
     stream = MemoryStream([1])
     match stream.close():
-        ok _value:
+        case _value:
             assert(true)
         failure _error:
             assert(false)
     match stream.read(1):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream is closed")
     match stream.read_exact(1):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream is closed")
     match stream.write([2]):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream is closed")
     match stream.truncate(0):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream is closed")
 
 test "stream boundary errors and exact reads are explicit":
     stream = MemoryStream([1, 2, 3, 4])
     match stream.read(-1):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "read count cannot be negative")
     match stream.read_exact(-1):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "read count cannot be negative")
     exact = stream.read_exact(2)
     assert(exact == [1, 2])
     current = stream.seek(1, Current)
     assert(current == 3)
     match stream.truncate(-1):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "stream length cannot be negative")
     match read_all(stream, 0):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "chunk size must be positive")
     match copy(stream, MemoryStream([]), 0):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "chunk size must be positive")
     limited = LimitedWriter(MemoryStream([]), 1)
     match copy(MemoryStream([1, 2]), limited, 2):
-        ok _value:
+        case _value:
             assert(false)
-        failure error:
+        case error:
             assert(error.message == "writer accepted only part of a stream chunk")
 
 test with profile "memory stream copying remains bounded" -> TestResult with

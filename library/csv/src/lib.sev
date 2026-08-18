@@ -226,9 +226,9 @@ test "CSV metadata and row views handle sparse records":
     assert(value.size() == value.bytes())
     assert(value.raw() == platform.string_encode(value.encode()))
     match value.text():
-        ok text_value:
+        case text_value:
             assert(text_value == value.encode())
-        failure error:
+        case error:
             assert(false, error)
     assert(value.value() == [["name", "score", "note"], ["Ada", "10"], ["Grace", "20", "compiler"]])
     assert(value.headers() == value.header())
@@ -255,31 +255,31 @@ test "CSV cell access and mutation report every boundary":
     assert(value.get(4, "left").is_empty())
     assert(value.get(0, "missing").is_empty())
     match value.cell(0, "right"):
-        ok cell_value:
+        case cell_value:
             assert(cell_value.is_empty())
-        failure error:
+        case error:
             assert(false, error)
     match value.cell(0, "missing"):
-        ok _cell_value:
+        case _cell_value:
             assert(false, "missing column unexpectedly succeeded")
-        failure error:
+        case error:
             assert(error.message.contains("does not exist"))
     match value.cell(4, "left"):
-        ok _cell_value:
+        case _cell_value:
             assert(false, "missing row unexpectedly succeeded")
-        failure error:
+        case error:
             assert(error.message.contains("outside"))
     _extended = value.set(0, "right", "extended")
     assert(value.get(0, "right") == "extended")
     match value.set(0, "missing", "value"):
         ok:
             assert(false, "missing column unexpectedly succeeded")
-        failure error:
+        case error:
             assert(error.message.contains("does not exist"))
     match value.set(4, "left", "value"):
         ok:
             assert(false, "missing row unexpectedly succeeded")
-        failure error:
+        case error:
             assert(error.message.contains("outside"))
 
 test "CSV data replacement and file writes preserve encoded content":
@@ -289,7 +289,7 @@ test "CSV data replacement and file writes preserve encoded content":
     match in_memory.write():
         ok:
             assert(false, "an in-memory document unexpectedly wrote without a path")
-        failure error:
+        case error:
             assert(error.message.contains("no path"))
     destination = "/tmp/severian-csv-write-to.csv"
     _written = in_memory.write_to(destination)

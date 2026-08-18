@@ -103,9 +103,9 @@ test "native file round trip":
 
 test "missing source text reports an IO error":
     match source_text("/tmp/severian-library-file-does-not-exist.txt"):
-        ok contents:
+        case contents:
             assert(false, contents)
-        failure error:
+        case error:
             assert(error.message != "")
 
 test "read dispatches text and csv formats":
