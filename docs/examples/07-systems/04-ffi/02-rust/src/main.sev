@@ -1,0 +1,14 @@
+from ffi import rust
+
+@rust
+def multiply(left: i32, right: i32) -> i32
+
+
+test:
+    unsafe:
+        assert(multiply(6, 7) == 42)
+
+
+def main():
+    unsafe:
+        print(multiply(6, 7))

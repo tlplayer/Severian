@@ -1,0 +1,17 @@
+from ffi import c
+
+
+@c
+def add(left: i32, right: i32) -> i32
+
+
+def main():
+    unsafe:
+        result := add(20, 22)
+
+    print(result)
+
+
+test:
+    unsafe:
+        assert(add(20, 22) == 42)

@@ -1,5 +1,3 @@
-
-
 # Data
 test "data units":
     assert(1B == 8b)
@@ -13,6 +11,17 @@ test "data units":
     assert(1MiB == 1024KiB)
     assert(1GiB == 1024MiB)
     assert(1TiB == 1024GiB)
+
+test "hex literals":
+    assert(0xFF == 255)
+    assert(0xFE00_0000 == 4261412864)
+
+    mask := 0xFF00_FF00
+    register := 0x0000_0001
+    register := memory.read[u32](address, endian=little)
+    register := memory.read[u32](address, endian=big)
+
+
 
 test "percent literals":
     assert(80pct == 0.8)
@@ -73,6 +82,36 @@ test with profile "latency"
     defer time < 10ms -> exception("operation took too long"),
 }:
     process(bytes())
+
+from temperature import C, F, K
+
+test "temperature":
+    gpu_idle := 42C
+    gpu_load := 78C
+
+    assert(gpu_idle < gpu_load)
+    assert(gpu_load < 90C)
+
+    assert(32F == 0C)
+    assert(273.15K == 0C)
+
+
+```
+Custom units can be created 
+trait Unit[Dimension]:
+    symbol: string
+    scale: f64
+    offset: f64 = 0.0
+
+class Volt: Unit
+    symbol: string = "V"
+    scale: f64
+    offset: f64
+```
+from electrical import V, mV, A, mA, W
+
+core_voltage := 950mV
+power := 220W
 
 
 # Different dimensions cannot be compared.

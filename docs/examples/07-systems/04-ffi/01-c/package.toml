@@ -1,0 +1,11 @@
+[package]
+name = "ffi-c"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "ffi-c"
+path = "src/main.sev"
+
+[ffi.c]
+sources = ["native.c"]
