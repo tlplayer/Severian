@@ -1,6 +1,18 @@
-def add(left: int, right: int) -> int:
-    return left + right
+from ffi import python
+
+@python
+def add(left: int, right: int) -> int
 
 
-def greeting(name: str) -> str:
-    return f"hello {name}"
+@python
+def greeting(name: string) -> string
+
+
+test:
+    assert(add(20, 22) == 42)
+    assert(greeting("severian") == "hello severian")
+
+
+def main():
+    print(add(20, 22))
+    print(greeting("severian"))

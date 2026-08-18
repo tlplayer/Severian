@@ -1,0 +1,23 @@
+from ffi import c
+
+
+@c
+class Point:
+    x: f32
+    y: f32
+
+
+@c
+class Rectangle:
+    top_left: Point
+    bottom_right: Point
+
+
+test:
+    assert(bytes[Point]() == 8)
+    assert(alignment[Point]() == 4)
+
+    assert(offset[Point]("x") == 0)
+    assert(offset[Point]("y") == 4)
+
+    assert(bytes[Rectangle]() == 16)
