@@ -9,7 +9,7 @@ class Linear[T: TensorDType + Float]:
     def forward(input: Tensor[T]) -> Tensor[T]:
         compute_input = tensor.compute_as_f32(input)
         compute_weight = tensor.compute_as_f32(weight)
-        projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
+        projected = tensor.matmul(compute_input, tensor.transpose(compute_weight))
         return tensor.convert_like(projected, input)
 
 class LinearWithBias[T: TensorDType + Float]:
@@ -19,9 +19,9 @@ class LinearWithBias[T: TensorDType + Float]:
     def forward(input: Tensor[T]) -> Tensor[T]:
         compute_input = tensor.compute_as_f32(input)
         compute_weight = tensor.compute_as_f32(weight)
-        projected = tensor.ranked_matmul(compute_input, tensor.ranked_transpose(compute_weight))
+        projected = tensor.matmul(compute_input, tensor.transpose(compute_weight))
         compute_bias = tensor.compute_as_f32(bias)
-        biased = tensor.ranked_add(projected, tensor.broadcast_like(compute_bias, projected))
+        biased = tensor.add(projected, tensor.broadcast_like(compute_bias, projected))
         return tensor.convert_like(biased, input)
 
 class RMSNorm[T: TensorDType + Float]:
@@ -30,12 +30,12 @@ class RMSNorm[T: TensorDType + Float]:
 
     def forward(input: Tensor[T]) -> Tensor[T]:
         input_f_32 = tensor.compute_as_f32(input)
-        square = tensor.ranked_multiply(input_f_32, input_f_32)
+        square = tensor.multiply(input_f_32, input_f_32)
         variance = tensor.mean_last(square)
         stabilized = tensor.add_scalar(variance, epsilon)
-        inverse_rms = tensor.ranked_rsqrt(stabilized)
+        inverse_rms = tensor.rsqrt(stabilized)
         scale = tensor.broadcast_like(inverse_rms, input_f_32)
-        normalized_f_32 = tensor.ranked_multiply(input_f_32, scale)
+        normalized_f_32 = tensor.multiply(input_f_32, scale)
         normalized = tensor.convert_like(normalized_f_32, input)
         weighted = tensor.broadcast_like(weight, normalized)
-        return tensor.ranked_multiply(normalized, weighted)
+        return tensor.multiply(normalized, weighted)

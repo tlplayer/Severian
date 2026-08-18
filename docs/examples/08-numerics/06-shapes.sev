@@ -1,0 +1,21 @@
+import tensor
+
+
+test "shape":
+    value = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    assert(value.shape == [2, 3])
+
+
+test "contiguous strides":
+    value = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    assert(value.strides() == [3, 1])

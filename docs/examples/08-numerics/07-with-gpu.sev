@@ -1,0 +1,23 @@
+
+
+def multiply(values: list[float], factor: float) -> list[float]:
+    output := []
+
+    for value in values with gpu:
+        output.append(value * factor)
+
+    return output
+
+
+test with profile "gpu placement preserves numerical result":
+    result = multiply([1.0, 2.0, 3.0], 4.0)
+
+    assert(result == [4.0, 8.0, 12.0])
+
+    # Proves `with gpu` actually reached a GPU backend.
+    assert(profile.gpu.kernels > 0)
+    assert(profile.gpu.time > 0)
+
+    # Proves device memory was actually consumed.
+    assert(profile.gpu.memory.peak > 0)
+    assert(profile.gpu.memory.allocations > 0)

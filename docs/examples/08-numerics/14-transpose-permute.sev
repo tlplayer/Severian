@@ -1,0 +1,18 @@
+import tensor
+
+
+test "transpose":
+    value = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    result = tensor.transpose(value)
+
+    assert(tensor.shape(result) == [3, 2])
+    assert(tensor.values(result) == [
+        1.0, 4.0,
+        2.0, 5.0,
+        3.0, 6.0,
+    ])

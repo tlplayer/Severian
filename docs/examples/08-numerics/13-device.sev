@@ -1,0 +1,15 @@
+import tensor
+
+
+test "tensor is independent of execution placement":
+    value = tensor(
+        [1.0, 2.0,
+         3.0, 4.0],
+        [2, 2],
+    )
+
+    assert(tensor.shape(value) == [2, 2])
+    assert(tensor.values(value) == [
+        1.0, 2.0,
+        3.0, 4.0,
+    ])

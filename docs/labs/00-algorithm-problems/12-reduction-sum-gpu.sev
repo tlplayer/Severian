@@ -3,17 +3,17 @@ import tensor
 
 def reduction_sum(value: Tensor[f64]) -> Tensor[f64]:
     with gpu:
-        return tensor.ranked_sum(value)
+        return tensor.sum(value)
 
 test "gpu reduction handles multiple rows":
-    value = tensor.ranked(
+    value = tensor(
         [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         [2, 3],
     )
     result = reduction_sum(value)
-    assert(tensor.ranked_values(result) == [21.0])
+    assert(tensor.values(result) == [21.0])
 
 test "gpu reduction handles cancellation":
-    value = tensor.ranked([4.0, -4.0, 2.0, -2.0], [4])
+    value = tensor([4.0, -4.0, 2.0, -2.0], [4])
     result = reduction_sum(value)
-    assert(tensor.ranked_values(result) == [0.0])
+    assert(tensor.values(result) == [0.0])

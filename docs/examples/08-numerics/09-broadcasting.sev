@@ -1,0 +1,22 @@
+import tensor
+
+
+test "broadcast trailing dimension":
+    matrix = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    bias = tensor(
+        [10.0, 20.0, 30.0],
+        [3],
+    )
+
+    result = tensor.add(matrix, bias)
+
+    assert(result.shape == [2, 3])
+    assert(result.values == [
+        11.0, 22.0, 33.0,
+        14.0, 25.0, 36.0,
+    ])

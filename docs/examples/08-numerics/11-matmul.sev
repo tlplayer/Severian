@@ -1,0 +1,23 @@
+from tensor import matmul
+
+
+test "matrix multiplication":
+    left = tensor(
+        [1.0, 2.0,
+         3.0, 4.0],
+        [2, 2],
+    )
+
+    right = tensor(
+        [5.0, 6.0,
+         7.0, 8.0],
+        [2, 2],
+    )
+
+    result = matmul(left, right)
+
+    assert(tensor.shape(result) == [2, 2])
+    assert(tensor.values(result) == [
+        19.0, 22.0,
+        43.0, 50.0,
+    ])

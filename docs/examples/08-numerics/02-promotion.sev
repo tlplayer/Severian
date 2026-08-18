@@ -1,0 +1,21 @@
+def main():
+    count: i32 = 4
+    ratio: f64 = 0.5
+
+    value = float(count) + ratio
+
+    print(value)
+
+
+test "integer to float conversion is explicit":
+    count: i32 = 4
+    ratio: f64 = 0.5
+
+    assert(float(count) + ratio == 4.5)
+
+test with compiler:
+    count: i32 = 4
+    ratio: f64 = 0.5
+
+    reject:
+        value = count + ratio

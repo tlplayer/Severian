@@ -3,14 +3,14 @@ import tensor
 
 def row_softmax(value: Tensor[f64]) -> Tensor[f64]:
     with gpu:
-        return tensor.ranked_softmax_rows(value)
+        return tensor.softmax_rows(value)
 
 test "constant rows become uniform probabilities":
-    value = tensor.ranked([0.0, 0.0, 0.0, 0.0], [2, 2])
+    value = tensor([0.0, 0.0, 0.0, 0.0], [2, 2])
     result = row_softmax(value)
-    assert(tensor.ranked_values(result) == [0.5, 0.5, 0.5, 0.5])
+    assert(tensor.values(result) == [0.5, 0.5, 0.5, 0.5])
 
 test "large equal logits stay normalized":
-    value = tensor.ranked([1000.0, 1000.0], [1, 2])
+    value = tensor([1000.0, 1000.0], [1, 2])
     result = row_softmax(value)
-    assert(tensor.ranked_values(result) == [0.5, 0.5])
+    assert(tensor.values(result) == [0.5, 0.5])

@@ -1,0 +1,36 @@
+import tenso
+
+
+test "tensor slice":
+    value = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    view = tensor.slice(
+        value,
+        [0, 0],
+        [2, 3],
+        [1, 2],
+    )
+
+    assert(view.shape == [2, 2])
+    assert(view.strides == [3, 2])
+    assert(view.values == [
+        1.0, 3.0,
+        4.0, 6.0,
+    ])
+
+
+test "materialize strided view":
+    value = tensor(
+        [1.0, 2.0, 3.0,
+         4.0, 5.0, 6.0],
+        [2, 3],
+    )
+
+    view = value.slice([0, 0], [2, 3], [1, 2])
+    contiguous = view.materialize()
+
+    assert(contiguous.strides == [2, 1])

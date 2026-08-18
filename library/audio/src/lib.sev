@@ -14,17 +14,17 @@ class Audio:
     channels: int
 
     def frames() -> int:
-        shape = tensor.ranked_shape(samples)
+        shape = tensor.shape(samples)
         assert(size(shape) == 2)
         return shape[0]
 
     def duration_seconds() -> float:
-        shape = tensor.ranked_shape(samples)
+        shape = tensor.shape(samples)
         assert(size(shape) == 2)
         return float(shape[0]) / float(sample_rate)
 
     def values() -> list[float]:
-        return tensor.ranked_values(tensor.to_f_64(samples))
+        return tensor.values(tensor.to_f_64(samples))
 
 class AudioTokens:
     codes: Tensor[i32]
@@ -36,7 +36,7 @@ def from_samples(values: list[float], sample_rate: int, channels: int = 1) -> Au
     assert(sample_rate > 0)
     assert(channels > 0)
     assert(size(values) % channels == 0)
-    shaped = tensor.ranked(values, [size(values) / channels, channels])
+    shaped = tensor(values, [size(values) / channels, channels])
     return Audio(tensor.to_f_32(shaped), sample_rate, channels)
 
 def little_u_16(data: list[int], offset: int) -> int:

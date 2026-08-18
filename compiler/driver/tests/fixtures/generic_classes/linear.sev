@@ -5,8 +5,8 @@ class Linear[T: Float]:
     weight: Tensor[T, 8, 16]
 
     def forward(x: Tensor[T, 4, 16]) -> Tensor[T, 4, 8]:
-        transposed = tensor.ranked_transpose(weight)
-        return tensor.ranked_matmul(x, transposed)
+        transposed = tensor.transpose(weight)
+        return tensor.matmul(x, transposed)
 
 class Qwen3MLP[T: TensorDType + Float]:
     gate_proj: layers.Linear[T]
@@ -14,9 +14,9 @@ class Qwen3MLP[T: TensorDType + Float]:
     down_proj: layers.Linear[T]
 
     def forward( x: Tensor[T]) -> Tensor[T]:
-        gate = tensor.ranked_silu(gate_proj.forward(x))
+        gate = tensor.silu(gate_proj.forward(x))
         up = up_proj.forward(x)
-        return down_proj.forward(tensor.ranked_multiply(gate, up))
+        return down_proj.forward(tensor.multiply(gate, up))
 
 @tensor
 def project_f32(

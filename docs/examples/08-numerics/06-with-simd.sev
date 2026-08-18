@@ -1,0 +1,19 @@
+import parallel
+
+
+def scale(values: list[float], factor: float) -> list[float]:
+    output := []
+
+    for value in values:
+        output.append(value * factor)
+
+    return output
+
+
+test "simd placement preserves result":
+    with self and simd:
+        result = async scale([1.0, 2.0, 3.0, 4.0], 2.0)
+
+    values = await result
+
+    assert(values == [2.0, 4.0, 6.0, 8.0])

@@ -1,13 +1,13 @@
 import tensor
 
 def forward() -> list[float]:
-    weights = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
-    input = tensor.ranked([1.0, 2.0], [2, 1])
-    bias = tensor.ranked([-6.0, 1.0], [2, 1])
+    weights = tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    input = tensor([1.0, 2.0], [2, 1])
+    bias = tensor([-6.0, 1.0], [2, 1])
 
-    projected = tensor.ranked_matmul(weights, input)
-    activated = tensor.ranked_relu(tensor.ranked_add(projected, bias))
-    return tensor.ranked_values(activated)
+    projected = tensor.matmul(weights, input)
+    activated = tensor.relu(tensor.add(projected, bias))
+    return tensor.values(activated)
 
 test "dense ranked forward pass":
     assert(forward() == [0.0, 12.0])

@@ -6,18 +6,18 @@ def add_row_bias(
     bias: Tensor[f64],
 ) -> Tensor[f64]:
     with gpu:
-        return tensor.ranked_add(matrix, bias)
+        return tensor.add(matrix, bias)
 
 test "gpu add follows trailing axis broadcasting":
-    matrix = tensor.ranked(
+    matrix = tensor(
         [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         [2, 3],
     )
-    bias = tensor.ranked([10.0, 20.0, 30.0], [3])
+    bias = tensor([10.0, 20.0, 30.0], [3])
     result = add_row_bias(matrix, bias)
 
-    assert(tensor.ranked_shape(result) == [2, 3])
+    assert(tensor.shape(result) == [2, 3])
     assert(
-        tensor.ranked_values(result)
+        tensor.values(result)
         == [11.0, 22.0, 33.0, 14.0, 25.0, 36.0]
     )

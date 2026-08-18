@@ -1,0 +1,37 @@
+import tensor
+
+'''
+A tensor looks something like this:
+Tensor[T]
+    dtype: T
+    shape: list[int]
+    strides: list[int]
+    type: TensorType (RANKED, UNRANKED...)
+    values: ...
+    operations:...
+'''
+
+test "rank one tensor is a vector":
+    vector = tensor([1.0, 2.0, 3.0], [3])
+
+    assert(tensor.shape(vector) == [3])
+    assert(tensor.values(vector) == [1.0, 2.0, 3.0])
+
+
+test "vector addition":
+    left = tensor([1.0, 2.0, 3.0], [3])
+    right = tensor([4.0, 5.0, 6.0], [3])
+
+    result = left + right
+
+    assert(result.values == [5.0, 7.0, 9.0])
+
+
+test "dot product":
+    left = tensor([1.0, 2.0, 3.0], [3])
+    right = tensor([4.0, 5.0, 6.0], [3])
+
+    products = left * right 
+    result = sum(products)
+
+    assert(result.values == [32.0])

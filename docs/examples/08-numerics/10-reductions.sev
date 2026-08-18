@@ -1,0 +1,13 @@
+import tensor
+
+
+test "sum tensor":
+    value = tensor(
+        [1.0, 2.0,
+         3.0, 4.0],
+        [2, 2],
+    )
+
+    result = sum(value)
+
+    assert(result.values == [10.0])

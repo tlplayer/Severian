@@ -1,10 +1,27 @@
 import tensor
 
+
 @tensor(X)
-def contract(left: Tensor[f64, dynamic, dynamic], right: Tensor[f64, dynamic, dynamic]) -> Tensor[f64, dynamic, dynamic]:
+def contract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return left X right
 
+
 test:
-    left = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    right = tensor.ranked([2.0, 3.0, 4.0, 5.0], [2, 2])
-    assert(tensor.ranked_values(contract(left, right)) == [2.0, 3.0, 4.0, 5.0])
+    left = tensor(
+        [1.0, 0.0,
+         0.0, 1.0],
+        [2, 2],
+    )
+
+    right = tensor(
+        [2.0, 3.0,
+         4.0, 5.0],
+        [2, 2],
+    )
+
+    result = contract(left, right)
+
+    assert(tensor.values(result) == [
+        2.0, 3.0,
+        4.0, 5.0,
+    ])

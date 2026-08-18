@@ -1,0 +1,28 @@
+import tensor
+
+
+test "convert tensor dtype":
+    original = tensor(
+        [1.0, 2.0, 3.0, 4.0],
+        [2, 2],
+    )
+
+    single = tensor.f32(original)
+
+    assert(tensor.shape(single) == [2, 2])
+
+    round_trip = tensor.f64(single)
+
+    assert(tensor.values(round_trip) == [
+        1.0, 2.0,
+        3.0, 4.0,
+    ])
+
+
+test "bf16 storage can return to f64":
+    original = tensor([1.0, 2.0], [2])
+
+    compact = tensor.bf16(original)
+    restored = tensor.f64(compact)
+
+    assert(tensor.values(restored) == [1.0, 2.0])

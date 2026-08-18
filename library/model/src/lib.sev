@@ -611,9 +611,9 @@ def reduce_lr_on_plateau(optimizer: optimizers.Optimizer, factor: float = 0.1, p
 def warmup(optimizer: optimizers.Optimizer, steps: int) -> optimizers.Scheduler:
     return optimizers.warmup(optimizer, steps)
 def backward(loss: Tensor[f64]):
-    tensor_runtime.ranked_backward_mse(loss)
+    tensor_runtime.backward_mse(loss)
 def grad(value: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_gradient(value)
+    return tensor_runtime.gradient(value)
 def detach(value: Tensor[f64]) -> Tensor[f64]:
     return tensor_ops.tensor(tensor_ops.values(value), tensor_ops.shape(value))
 def requires_grad(value: Tensor[f64], required: bool = true) -> optimizers.Parameter:

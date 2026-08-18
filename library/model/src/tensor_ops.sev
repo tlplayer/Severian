@@ -17,7 +17,7 @@ def values(input: Tensor[f64]) -> list[float]:
     return tensor_runtime.values(input)
 
 def shape(input: Tensor[f64]) -> list[int]:
-    return tensor_runtime.ranked_shape(input)
+    return tensor_runtime.shape(input)
 
 def size_of(input: Tensor[f64]) -> int:
     return product(shape(input))
@@ -162,10 +162,10 @@ def unsqueeze(input: Tensor[f64], dimension: int) -> Tensor[f64]:
 def transpose(input: Tensor[f64], first: int = -2, second: int = -1) -> Tensor[f64]:
     dimensions = shape(input)
     assert(size(dimensions) == 2, "current transpose implementation requires a matrix")
-    return tensor_runtime.ranked_transpose(input)
+    return tensor_runtime.transpose(input)
 
 def permute(input: Tensor[f64], dimensions: list[int]) -> Tensor[f64]:
-    return tensor_runtime.ranked_permute(input, dimensions)
+    return tensor_runtime.permute(input, dimensions)
 
 def concat(inputs: list[Tensor[f64]], dimension: int = 0) -> Tensor[f64]:
     assert(size(inputs) > 0)
@@ -271,19 +271,19 @@ def matmul(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
     return tensor_runtime.matmul(left, right)
 
 def add(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_add(left, right)
+    return tensor_runtime.add(left, right)
 
 def subtract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_subtract(left, right)
+    return tensor_runtime.subtract(left, right)
 
 def multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_multiply(left, right)
+    return tensor_runtime.multiply(left, right)
 
 def divide(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_divide(left, right)
+    return tensor_runtime.divide(left, right)
 
 def scale(input: Tensor[f64], factor: float) -> Tensor[f64]:
-    return tensor_runtime.ranked_scale(input, factor)
+    return tensor_runtime.scale(input, factor)
 
 def dot(left: Tensor[f64], right: Tensor[f64]) -> float:
     left_values = values(left)
@@ -357,7 +357,7 @@ def map_values(input: Tensor[f64], operation: Function) -> Tensor[f64]:
     return tensor(output, shape(input))
 
 def exp(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_exp(input)
+    return tensor_runtime.exp(input)
 
 def log(input: Tensor[f64]) -> Tensor[f64]:
     return map_values(input, |value| math.log(value))
@@ -378,23 +378,23 @@ def pow(input: Tensor[f64], exponent: float) -> Tensor[f64]:
     return map_values(input, |value| math.pow(value, exponent))
 
 def sigmoid(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_sigmoid(input)
+    return tensor_runtime.sigmoid(input)
 
 def scalar_tanh(value: float) -> float:
     positive = math.exp(2.0 * value)
     return (positive - 1.0) / (positive + 1.0)
 
 def relu(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_relu(input)
+    return tensor_runtime.relu(input)
 
 def gelu(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_gelu(input)
+    return tensor_runtime.gelu(input)
 
 def silu(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_silu(input)
+    return tensor_runtime.silu(input)
 
 def tanh(input: Tensor[f64]) -> Tensor[f64]:
-    return tensor_runtime.ranked_tanh(input)
+    return tensor_runtime.tanh(input)
 
 def softmax(input: Tensor[f64], dimension: int = -1) -> Tensor[f64]:
     assert(dimension == -1 or dimension == size(shape(input)) - 1)

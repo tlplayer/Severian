@@ -198,9 +198,9 @@ class Qwen3MLP[T: TensorDType + Float]:
     down_proj: model_layers.Linear[T]
 
     def forward(hidden_states: Tensor[T]) -> Tensor[T]:
-        gate = tensor.ranked_silu(gate_proj.forward(hidden_states))
+        gate = tensor.silu(gate_proj.forward(hidden_states))
         up = up_proj.forward(hidden_states)
-        return down_proj.forward(tensor.ranked_multiply(gate, up))
+        return down_proj.forward(tensor.multiply(gate, up))
 
 class Qwen3DecoderLayer:
     input_norm: model_layers.RMSNorm[bf16]
@@ -218,10 +218,10 @@ class Qwen3DecoderLayer:
         attended = attention.attend(
             input_norm.forward(hidden_states), position_ids, mask, cache, cache_position,
         )
-        attention_residual = tensor.ranked_add(hidden_states, attended.hidden)
+        attention_residual = tensor.add(hidden_states, attended.hidden)
         feed_forward = mlp.forward(post_attention_norm.forward(attention_residual))
         return DecoderLayerOutput[bf16](
-            tensor.ranked_add(attention_residual, feed_forward),
+            tensor.add(attention_residual, feed_forward),
             attended.cache,
         )
 
@@ -354,9 +354,9 @@ class Qwen2MLP[T: TensorDType + Float]:
     down_proj: model_layers.Linear[T]
 
     def forward(hidden_states: Tensor[T]) -> Tensor[T]:
-        gate = tensor.ranked_silu(gate_proj.forward(hidden_states))
+        gate = tensor.silu(gate_proj.forward(hidden_states))
         up = up_proj.forward(hidden_states)
-        return down_proj.forward(tensor.ranked_multiply(gate, up))
+        return down_proj.forward(tensor.multiply(gate, up))
 
 class Qwen2DecoderLayer:
     input_norm: model_layers.RMSNorm[bf16]
@@ -374,10 +374,10 @@ class Qwen2DecoderLayer:
         attended = attention.attend(
             input_norm.forward(hidden_states), position_ids, mask, cache, cache_position,
         )
-        attention_residual = tensor.ranked_add(hidden_states, attended.hidden)
+        attention_residual = tensor.add(hidden_states, attended.hidden)
         feed_forward = mlp.forward(post_attention_norm.forward(attention_residual))
         return DecoderLayerOutput[bf16](
-            tensor.ranked_add(attention_residual, feed_forward),
+            tensor.add(attention_residual, feed_forward),
             attended.cache,
         )
 

@@ -1,0 +1,39 @@
+'''
+A tensor looks something like this:
+Tensor[T]
+    dtype: T
+    shape: list[int]
+    strides: list[int]
+    values: ...
+    operations:...
+'''
+
+
+
+def main():
+    small: i8 = 8
+    count: i32 = 42
+    large: i64 = 1_000_000
+
+    ratio: f32 = 0.5
+    precise: f64 = 0.125
+
+    print(small)
+    print(count)
+    print(large)
+    print(ratio)
+    print(precise)
+
+
+test "integer arithmetic":
+    left: i32 = 20
+    right: i32 = 22
+
+    assert(left + right == 42)
+
+
+test "floating point arithmetic":
+    left: f64 = 1.5
+    right: f64 = 2.5
+
+    assert(left + right == 4.0)

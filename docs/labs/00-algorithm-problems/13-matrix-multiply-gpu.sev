@@ -6,18 +6,18 @@ def matrix_multiply(
     right: Tensor[f64],
 ) -> Tensor[f64]:
     with gpu:
-        return tensor.ranked_matmul(left, right)
+        return tensor.matmul(left, right)
 
 test "gpu two by two matrix multiplication":
-    left = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
-    right = tensor.ranked([5.0, 6.0, 7.0, 8.0], [2, 2])
+    left = tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    right = tensor([5.0, 6.0, 7.0, 8.0], [2, 2])
     result = matrix_multiply(left, right)
-    assert(tensor.ranked_shape(result) == [2, 2])
-    assert(tensor.ranked_values(result) == [19.0, 22.0, 43.0, 50.0])
+    assert(tensor.shape(result) == [2, 2])
+    assert(tensor.values(result) == [19.0, 22.0, 43.0, 50.0])
 
 test "gpu rectangular matrix multiplication":
-    left = tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
-    right = tensor.ranked([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [3, 2])
+    left = tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])
+    right = tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [3, 2])
     result = matrix_multiply(left, right)
-    assert(tensor.ranked_shape(result) == [2, 2])
-    assert(tensor.ranked_values(result) == [22.0, 28.0, 49.0, 64.0])
+    assert(tensor.shape(result) == [2, 2])
+    assert(tensor.values(result) == [22.0, 28.0, 49.0, 64.0])

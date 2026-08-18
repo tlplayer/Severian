@@ -16,15 +16,15 @@ def rms_norm_f32_stablehlo(
     weight: Tensor[f32, 8],
 ) -> Tensor[f32, 2, 4, 8]:
     compute = tensor.compute_as_f32(value)
-    square = tensor.ranked_multiply(compute, compute)
+    square = tensor.multiply(compute, compute)
     variance = tensor.mean_last(square)
     stabilized = tensor.add_scalar(variance, 0.000001)
-    inverse_rms = tensor.ranked_rsqrt(stabilized)
+    inverse_rms = tensor.rsqrt(stabilized)
     scale = tensor.broadcast_like(inverse_rms, compute)
-    normalized = tensor.ranked_multiply(compute, scale)
+    normalized = tensor.multiply(compute, scale)
     stored = tensor.convert_like(normalized, value)
     broadcast_weight = tensor.broadcast_like(weight, stored)
-    return tensor.ranked_multiply(stored, broadcast_weight)
+    return tensor.multiply(stored, broadcast_weight)
 
 @tensor
 def rms_norm_bf16_stablehlo(
@@ -32,15 +32,15 @@ def rms_norm_bf16_stablehlo(
     weight: Tensor[bf16, 8],
 ) -> Tensor[bf16, 2, 4, 8]:
     compute = tensor.compute_as_f32(value)
-    square = tensor.ranked_multiply(compute, compute)
+    square = tensor.multiply(compute, compute)
     variance = tensor.mean_last(square)
     stabilized = tensor.add_scalar(variance, 0.000001)
-    inverse_rms = tensor.ranked_rsqrt(stabilized)
+    inverse_rms = tensor.rsqrt(stabilized)
     scale = tensor.broadcast_like(inverse_rms, compute)
-    normalized = tensor.ranked_multiply(compute, scale)
+    normalized = tensor.multiply(compute, scale)
     stored = tensor.convert_like(normalized, value)
     broadcast_weight = tensor.broadcast_like(weight, stored)
-    return tensor.ranked_multiply(stored, broadcast_weight)
+    return tensor.multiply(stored, broadcast_weight)
 
 @tensor
 def mlp_f32_stablehlo(
@@ -53,14 +53,14 @@ def mlp_f32_stablehlo(
     gate_compute = tensor.compute_as_f32(gate_weight)
     up_compute = tensor.compute_as_f32(up_weight)
     down_compute = tensor.compute_as_f32(down_weight)
-    gate_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(gate_compute))
+    gate_projection = tensor.matmul(compute, tensor.transpose(gate_compute))
     gate = tensor.convert_like(gate_projection, value)
-    activated = tensor.ranked_silu(gate)
-    up_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(up_compute))
+    activated = tensor.silu(gate)
+    up_projection = tensor.matmul(compute, tensor.transpose(up_compute))
     up = tensor.convert_like(up_projection, value)
-    hidden = tensor.ranked_multiply(activated, up)
+    hidden = tensor.multiply(activated, up)
     hidden_compute = tensor.compute_as_f32(hidden)
-    output = tensor.ranked_matmul(hidden_compute, tensor.ranked_transpose(down_compute))
+    output = tensor.matmul(hidden_compute, tensor.transpose(down_compute))
     return tensor.convert_like(output, value)
 
 @tensor
@@ -74,14 +74,14 @@ def mlp_bf16_stablehlo(
     gate_compute = tensor.compute_as_f32(gate_weight)
     up_compute = tensor.compute_as_f32(up_weight)
     down_compute = tensor.compute_as_f32(down_weight)
-    gate_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(gate_compute))
+    gate_projection = tensor.matmul(compute, tensor.transpose(gate_compute))
     gate = tensor.convert_like(gate_projection, value)
-    activated = tensor.ranked_silu(gate)
-    up_projection = tensor.ranked_matmul(compute, tensor.ranked_transpose(up_compute))
+    activated = tensor.silu(gate)
+    up_projection = tensor.matmul(compute, tensor.transpose(up_compute))
     up = tensor.convert_like(up_projection, value)
-    hidden = tensor.ranked_multiply(activated, up)
+    hidden = tensor.multiply(activated, up)
     hidden_compute = tensor.compute_as_f32(hidden)
-    output = tensor.ranked_matmul(hidden_compute, tensor.ranked_transpose(down_compute))
+    output = tensor.matmul(hidden_compute, tensor.transpose(down_compute))
     return tensor.convert_like(output, value)
 
 @tensor
@@ -91,6 +91,6 @@ def generic_tensor_ops(
     fallback: Tensor[f32, 2, 3, 4],
 ) -> Tensor[f32, 2, 3, 4]:
     reshaped = tensor.reshape(value, [2, 3, 4])
-    combined = tensor.ranked_add(reshaped, fallback)
+    combined = tensor.add(reshaped, fallback)
     probabilities = softmax_middle(combined)
     return select_values(condition, probabilities, fallback)

@@ -267,8 +267,8 @@ test "scatter bar and histogram share one explicit chart":
 
 test "tensor values are accepted without caller conversion":
     chart := Chart()
-    x = tensor.ranked([0.0, 1.0, 2.0], [3])
-    y = tensor.ranked([0.0, 1.0, 4.0], [3])
+    x = tensor([0.0, 1.0, 2.0], [3])
+    y = tensor([0.0, 1.0, 4.0], [3])
     count = chart.line_tensor(x, y)
     assert(count == 1)
 

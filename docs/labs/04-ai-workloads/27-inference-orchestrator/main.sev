@@ -33,14 +33,14 @@ class NodeReport:
     responses: list[InferenceResponse]
 
 def predict(features: list[float]) -> list[float]:
-    input = tensor.ranked(features, [1, 2])
-    weights = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    bias = tensor.ranked([-1.0, 1.0], [1, 2])
+    input = tensor(features, [1, 2])
+    weights = tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    bias = tensor([-1.0, 1.0], [1, 2])
     x = model.graph_input(input)
     w = model.graph_input(weights)
     b = model.graph_input(bias)
     output = model.run_graph(model.graph_relu(model.graph_add(model.graph_matmul(x, w), b)))
-    return tensor.ranked_values(output)
+    return tensor.values(output)
 
 def make_batches(requests: list[InferenceRequest], batch_size: int, failure_batch: int) -> list[InferenceBatch]:
     assert(batch_size > 0)

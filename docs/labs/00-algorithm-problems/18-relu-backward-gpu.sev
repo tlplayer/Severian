@@ -6,10 +6,10 @@ def relu_backward(
     upstream: Tensor[f64],
 ) -> Tensor[f64]:
     with gpu:
-        return tensor.ranked_relu_backward(input, upstream)
+        return tensor.relu_backward(input, upstream)
 
 test "gpu relu backward masks inactive values":
-    input = tensor.ranked([-2.0, 0.0, 3.0, 4.0], [4])
-    upstream = tensor.ranked([10.0, 20.0, 30.0, 40.0], [4])
+    input = tensor([-2.0, 0.0, 3.0, 4.0], [4])
+    upstream = tensor([10.0, 20.0, 30.0, 40.0], [4])
     result = relu_backward(input, upstream)
-    assert(tensor.ranked_values(result) == [0.0, 0.0, 30.0, 40.0])
+    assert(tensor.values(result) == [0.0, 0.0, 30.0, 40.0])

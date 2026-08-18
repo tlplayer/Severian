@@ -8,13 +8,13 @@ class Linear: Module
     bias: Tensor[f64]
 
     def forward(input: Tensor[f64]) -> Tensor[f64]:
-        return tensor.ranked_add(tensor.ranked_matmul(input, weight), bias)
+        return tensor.add(tensor.matmul(input, weight), bias)
 
 class LayerNorm: Module
     epsilon: float = 0.00001
 
     def forward(input: Tensor[f64]) -> Tensor[f64]:
-        return tensor.ranked_layer_norm(input, epsilon)
+        return tensor.layer_norm(input, epsilon)
 
 class MultiheadAttention: Module
     query_weight: Tensor[f64]
@@ -24,12 +24,12 @@ class MultiheadAttention: Module
     attention_scale: float
 
     def forward(input: Tensor[f64]) -> Tensor[f64]:
-        query = tensor.ranked_matmul(input, query_weight)
-        key = tensor.ranked_matmul(input, key_weight)
-        value = tensor.ranked_matmul(input, value_weight)
-        scores = tensor.ranked_scale(tensor.ranked_matmul(query, tensor.ranked_transpose(key)), attention_scale)
-        context = tensor.ranked_matmul(tensor.ranked_softmax_rows(scores), value)
-        return tensor.ranked_matmul(context, output_weight)
+        query = tensor.matmul(input, query_weight)
+        key = tensor.matmul(input, key_weight)
+        value = tensor.matmul(input, value_weight)
+        scores = tensor.scale(tensor.matmul(query, tensor.transpose(key)), attention_scale)
+        context = tensor.matmul(tensor.softmax_rows(scores), value)
+        return tensor.matmul(context, output_weight)
 
 class TransformerEncoderLayer: Module
     attention: MultiheadAttention
@@ -40,11 +40,11 @@ class TransformerEncoderLayer: Module
 
     def forward(input: Tensor[f64]) -> Tensor[f64]:
         attended = attention.forward(input)
-        attention_residual = tensor.ranked_add(input, attended)
+        attention_residual = tensor.add(input, attended)
         residual = norm1.forward(attention_residual)
-        hidden = tensor.ranked_relu(linear1.forward(residual))
+        hidden = tensor.relu(linear1.forward(residual))
         projected = linear2.forward(hidden)
-        combined = tensor.ranked_add(residual, projected)
+        combined = tensor.add(residual, projected)
         return norm2.forward(combined)
 
 # The BF16 transformer path below is the extracted, compiler-visible kernel set
@@ -116,7 +116,7 @@ def apply_rotary(value: Tensor[bf16], rope: RopeValues, half_dimension: int) -> 
     sine = tensor.broadcast_like_f_32(rope.sine, value_f_32)
     direct = tensor.multiply_f_32(value_f_32, cosine)
     rotated = tensor.multiply_f_32(rotate_half(value_f_32, half_dimension), sine)
-    return tensor.f32_to_bf_16(tensor.ranked_add(direct, rotated))
+    return tensor.f32_to_bf_16(tensor.add(direct, rotated))
 
 def stable_softmax(scores: Tensor[f32]) -> Tensor[f32]:
     maximum := tensor.max_last_f_32(scores)
@@ -152,75 +152,75 @@ def grouped_query_attention(
     transposed_key = tensor.transpose_bf_16(repeated_key, [0, 1, 3, 2])
     scores := tensor.batched_matmul_f_32(tensor.bf16_to_f_32(query), tensor.bf16_to_f_32(transposed_key))
     scores = tensor.scale_f_32(scores, 1.0 / (float(head_dimension) ** 0.5))
-    scores = tensor.ranked_add(scores, causal_mask)
+    scores = tensor.add(scores, causal_mask)
     probabilities = stable_softmax(scores)
     context = tensor.batched_matmul_f_32(probabilities, tensor.bf16_to_f_32(repeated_value))
     return tensor.f32_to_bf_16(context)
 
 test "Linear follows the conventional input weight bias order":
-    x = tensor.ranked([1.0, 2.0, 3.0, 4.0], [2, 2])
-    weight = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
-    bias = tensor.ranked([10.0, 20.0], [2])
+    x = tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+    weight = tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
+    bias = tensor([10.0, 20.0], [2])
     layer = Linear(weight, bias)
-    assert(tensor.ranked_values(layer.forward(x)) == [11.0, 22.0, 13.0, 24.0])
+    assert(tensor.values(layer.forward(x)) == [11.0, 22.0, 13.0, 24.0])
 
 test "TransformerEncoderLayer composes attention residuals and FFN":
-    x = tensor.ranked([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
-    identity = tensor.ranked([1.0, 0.0, 0.0, 1.0], [2, 2])
+    x = tensor([0.2, -0.4, 0.7, 0.1, -0.3, 0.8], [3, 2])
+    identity = tensor([1.0, 0.0, 0.0, 1.0], [2, 2])
     attention = MultiheadAttention(identity, identity, identity, identity, 0.7071067811865476)
-    linear1 = Linear(tensor.ranked([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4]), tensor.ranked([0.01, -0.02, 0.03, 0.04], [4]))
-    linear2 = Linear(tensor.ranked([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2]), tensor.ranked([0.0, 0.0], [2]))
+    linear1 = Linear(tensor([0.5, -0.25, 0.75, 0.1, -0.4, 0.6, 0.2, 0.3], [2, 4]), tensor([0.01, -0.02, 0.03, 0.04], [4]))
+    linear2 = Linear(tensor([0.4, -0.2, 0.1, 0.5, -0.3, 0.7, 0.6, 0.2], [4, 2]), tensor([0.0, 0.0], [2]))
     layer = TransformerEncoderLayer(attention, linear1, linear2, LayerNorm(), LayerNorm())
     output = layer.forward(x)
-    assert(tensor.ranked_shape(output) == [3, 2])
-    assert(tensor.ranked_values(output)[0] > 0.99)
+    assert(tensor.shape(output) == [3, 2])
+    assert(tensor.values(output)[0] > 0.99)
 
 test "rotary primitives preserve shape and apply quarter turns":
-    frequencies = tensor.to_f_32(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 1, 1, 4]))
+    frequencies = tensor.to_f_32(tensor([0.0, 0.0, 0.0, 0.0], [1, 1, 1, 4]))
     rope = rotary_values(frequencies)
-    assert(tensor.ranked_values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0, 1.0, 1.0])
-    assert(tensor.ranked_values(tensor.to_f_64(rope.sine)) == [0.0, 0.0, 0.0, 0.0])
-    rotated = rotate_half(tensor.to_f_32(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4])), 2)
-    assert(tensor.ranked_values(tensor.to_f_64(rotated)) == [-3.0, -4.0, 1.0, 2.0])
-    value = tensor.to_bf_16(tensor.ranked([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4]))
+    assert(tensor.values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0, 1.0, 1.0])
+    assert(tensor.values(tensor.to_f_64(rope.sine)) == [0.0, 0.0, 0.0, 0.0])
+    rotated = rotate_half(tensor.to_f_32(tensor([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4])), 2)
+    assert(tensor.values(tensor.to_f_64(rotated)) == [-3.0, -4.0, 1.0, 2.0])
+    value = tensor.to_bf_16(tensor([1.0, 2.0, 3.0, 4.0], [1, 1, 1, 4]))
     applied = apply_rotary(value, rope, 2)
-    assert(tensor.ranked_values(tensor.to_f_64(applied)) == [1.0, 2.0, 3.0, 4.0])
+    assert(tensor.values(tensor.to_f_64(applied)) == [1.0, 2.0, 3.0, 4.0])
 
 test "rotary embeddings derive and apply position frequencies":
-    inverse_frequency = tensor.to_f_32(tensor.ranked([1.0], [1]))
-    position_ids = tensor.to_i_64(tensor.ranked([0.0], [1]))
-    query = tensor.to_bf_16(tensor.ranked([1.0, 2.0], [1, 1, 1, 2]))
+    inverse_frequency = tensor.to_f_32(tensor([1.0], [1]))
+    position_ids = tensor.to_i_64(tensor([0.0], [1]))
+    query = tensor.to_bf_16(tensor([1.0, 2.0], [1, 1, 1, 2]))
     embedding = RotaryEmbedding(inverse_frequency, 10000.0, 2)
     rope = embedding.rope_values_at(position_ids, query)
-    assert(tensor.ranked_values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0])
-    assert(tensor.ranked_values(tensor.to_f_64(rope.sine)) == [0.0, 0.0])
+    assert(tensor.values(tensor.to_f_64(rope.cosine)) == [1.0, 1.0])
+    assert(tensor.values(tensor.to_f_64(rope.sine)) == [0.0, 0.0])
     rotated = embedding.apply(query, query, position_ids)
-    assert(tensor.ranked_values(tensor.to_f_64(rotated.query)) == [1.0, 2.0])
-    assert(tensor.ranked_values(tensor.to_f_64(rotated.key)) == [1.0, 2.0])
+    assert(tensor.values(tensor.to_f_64(rotated.query)) == [1.0, 2.0])
+    assert(tensor.values(tensor.to_f_64(rotated.key)) == [1.0, 2.0])
 
 test "attention helpers normalize repeat cache and attend":
-    scores = tensor.to_f_32(tensor.ranked([0.0, 0.0], [1, 2]))
+    scores = tensor.to_f_32(tensor([0.0, 0.0], [1, 2]))
     normalized = stable_softmax(scores)
-    assert(tensor.ranked_values(tensor.to_f_64(normalized)) == [0.5, 0.5])
+    assert(tensor.values(tensor.to_f_64(normalized)) == [0.5, 0.5])
 
-    value = tensor.to_bf_16(tensor.ranked([1.0, 2.0], [1, 1, 1, 2]))
+    value = tensor.to_bf_16(tensor([1.0, 2.0], [1, 1, 1, 2]))
     repeated = repeat_key_value(value, 2)
-    assert(tensor.ranked_shape(repeated) == [1, 2, 1, 2])
-    assert(tensor.ranked_values(tensor.to_f_64(repeated)) == [1.0, 2.0, 1.0, 2.0])
+    assert(tensor.shape(repeated) == [1, 2, 1, 2])
+    assert(tensor.values(tensor.to_f_64(repeated)) == [1.0, 2.0, 1.0, 2.0])
 
-    empty = tensor.to_bf_16(tensor.ranked([0.0, 0.0, 0.0, 0.0], [1, 1, 2, 2]))
-    update = tensor.to_bf_16(tensor.ranked([3.0, 4.0], [1, 1, 1, 2]))
+    empty = tensor.to_bf_16(tensor([0.0, 0.0, 0.0, 0.0], [1, 1, 2, 2]))
+    update = tensor.to_bf_16(tensor([3.0, 4.0], [1, 1, 1, 2]))
     cache = append_cache(KvCache(empty, empty), update, value, 1)
-    assert(tensor.ranked_values(tensor.to_f_64(cache.keys)) == [0.0, 0.0, 3.0, 4.0])
-    assert(tensor.ranked_values(tensor.to_f_64(cache.values)) == [0.0, 0.0, 1.0, 2.0])
+    assert(tensor.values(tensor.to_f_64(cache.keys)) == [0.0, 0.0, 3.0, 4.0])
+    assert(tensor.values(tensor.to_f_64(cache.values)) == [0.0, 0.0, 1.0, 2.0])
 
-    query = tensor.to_bf_16(tensor.ranked([1.0, 0.0], [1, 1, 1, 2]))
+    query = tensor.to_bf_16(tensor([1.0, 0.0], [1, 1, 1, 2]))
     attended = grouped_query_attention(
         query,
         query,
         update,
-        tensor.to_f_32(tensor.ranked([0.0], [1, 1, 1, 1])),
+        tensor.to_f_32(tensor([0.0], [1, 1, 1, 1])),
         1,
         2,
     )
-    assert(tensor.ranked_values(tensor.to_f_64(attended)) == [3.0, 4.0])
+    assert(tensor.values(tensor.to_f_64(attended)) == [3.0, 4.0])
