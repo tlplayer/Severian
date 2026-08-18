@@ -47,3 +47,40 @@ file.pkg
     native-aarch64
     xla
     ...
+
+Later:
+server.pkg
+
+provides:
+    library:
+        Server
+        Server.start(...)
+        Server.stop(...)
+
+    commands:
+        serve(port: int = 8080)
+        migrate()
+        status()
+
+requires:
+    network
+    filesystem:/data
+
+artifacts:
+    native linux/x86_64
+    native linux/aarch64
+    OCI linux/x86_64
+
+does-not-provide:
+    windows native
+
+Severian package semantics
+        ↓
+.pkg
+        ↓
+artifact selection
+   ↙      ↓       ↘
+native    VM       OCI
+                   ↓
+           Docker / Podman /
+           containerd / etc.
