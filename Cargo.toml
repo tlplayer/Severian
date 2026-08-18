@@ -22,7 +22,6 @@ members = [
     "compiler/runtime",
     "compiler/semantic",
     "compiler/source",
-    "compiler/xla",
 ]
 resolver = "2"
 

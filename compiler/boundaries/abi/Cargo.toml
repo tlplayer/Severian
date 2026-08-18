@@ -1,7 +1,6 @@
 [package]
 name = "severian-abi"
-version.workspace = true
-edition.workspace = true
-license-file.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2024"
 
+[dependencies]
