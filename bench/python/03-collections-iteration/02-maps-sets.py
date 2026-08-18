@@ -1,5 +1,0 @@
-counts = {"red": 2, "blue": 3}
-seen = {"red", "green"}
-counts["red"] += 1
-if "green" in seen:
-    print(counts["red"])

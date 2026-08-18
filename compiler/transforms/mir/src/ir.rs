@@ -1,4 +1,3 @@
-use crate::{TensorOp, TensorOpId};
 use severian_hir::{
     BindingRef, Decorator, FunctionId, HirId, MatchPattern, ScopedBehavior, ValueType,
 };

@@ -3,7 +3,6 @@
 mod builder;
 mod error;
 mod ir;
-mod tensor;
 mod verify;
 
 pub use builder::lower;
