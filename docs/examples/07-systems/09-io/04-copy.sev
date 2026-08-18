@@ -1,0 +1,14 @@
+import io
+
+
+test "stream copy":
+    source = io.MemoryStream([1, 2, 3, 4, 5])
+    destination = io.MemoryStream([])
+
+    copied = io.copy(source, destination, 2)
+
+    assert(copied == 5)
+
+    destination.seek(0, io.Start)
+
+    assert(io.read_all(destination) == [1, 2, 3, 4, 5])

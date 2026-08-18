@@ -1,0 +1,9 @@
+import environment
+
+
+test "missing variable uses fallback":
+    name = "SEVERIAN_EXAMPLE_MISSING"
+
+    environment.remove(name)
+
+    assert(environment.get(name, "default") == "default")

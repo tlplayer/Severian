@@ -1,0 +1,13 @@
+import environment
+
+
+test "environment variable lifecycle":
+    name = "SEVERIAN_EXAMPLE_VALUE"
+
+    environment.remove(name)
+
+    assert(environment.set(name, "hello"))
+    assert(environment.get(name) == "hello")
+
+    assert(environment.remove(name))
+    assert(environment.get(name, "missing") == "missing")

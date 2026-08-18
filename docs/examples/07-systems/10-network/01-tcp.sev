@@ -1,0 +1,7 @@
+import network
+
+
+test with integ "TCP loopback":
+    echoed = network.loopback_echo("hello")
+
+    assert(echoed == "hello")

@@ -1,0 +1,11 @@
+import http
+
+
+test "invalid HTTP URL produces an error":
+    throws(http.get("invalid")):
+
+
+def main():
+    body ?= http.get("https://example.com")
+
+    print(body)

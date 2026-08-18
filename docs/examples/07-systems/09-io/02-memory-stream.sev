@@ -1,0 +1,11 @@
+import io
+
+
+test "memory stream":
+    stream = io.MemoryStream([10, 20, 30, 40])
+
+    first = stream.read(2)
+
+    assert(first == [10, 20])
+    assert(stream.tell() == 2)
+    assert(stream.remaining() == 2)

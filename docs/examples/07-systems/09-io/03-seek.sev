@@ -1,0 +1,14 @@
+import io
+
+
+test "seek":
+    stream = io.MemoryStream([1, 2, 3, 4])
+
+    stream.seek(-1, io.End)
+
+    assert(stream.tell() == 3)
+    assert(stream.read(1) == [4])
+
+    stream.seek(0, io.Start)
+
+    assert(stream.read(2) == [1, 2])

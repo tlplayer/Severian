@@ -1,0 +1,15 @@
+import network
+
+
+test with integ "resolve localhost":
+    addresses = network.resolve("localhost")
+
+    assert(size(addresses) > 0)
+
+
+test "IP parsing":
+    ipv4 = network.parse_ip("127.0.0.1")
+    ipv6 = network.parse_ip("::1")
+
+    assert(ipv4.family == 4)
+    assert(ipv6.family == 6)

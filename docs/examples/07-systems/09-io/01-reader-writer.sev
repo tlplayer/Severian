@@ -1,0 +1,15 @@
+import io
+
+
+def duplicate(source: io.Reader, destination: io.Writer) -> int | io.StreamError:
+    return io.copy(source, destination)
+
+
+test:
+    source = io.MemoryStream([1, 2, 3])
+    destination = io.MemoryStream([])
+
+    copied = duplicate(source, destination)
+
+    assert(copied == 3)
+    assert(destination.snapshot() == [1, 2, 3])
