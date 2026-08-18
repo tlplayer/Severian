@@ -1,0 +1,28 @@
+class Resource:
+    name: string
+
+    def Resource(name: string):
+        this.name := name
+        print("open:", name)
+
+    def drop():
+        print("close:", name)
+
+
+def use_resource():
+    resource := Resource("database")
+
+    print(resource.name)
+
+
+def main():
+    use_resource()
+    print("finished")
+
+test:
+    resource := Resource("temporary")
+
+    drop resource
+
+    reject:
+        print(resource.name)

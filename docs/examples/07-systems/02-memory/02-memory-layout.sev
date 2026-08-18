@@ -1,0 +1,15 @@
+class Header:
+    kind: u8
+    flags: u8
+    length: u32
+
+
+test:
+    assert(bytes[u8]() == 1B)
+    assert(bytes[u32]() == 4B)
+
+    assert(alignment[u8]() == 1B)
+    assert(alignment[u32]() == 4B)
+
+    print(bytes[Header]())
+    print(bytes[Header]())

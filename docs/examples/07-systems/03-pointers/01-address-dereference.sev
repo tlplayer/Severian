@@ -1,0 +1,12 @@
+test:
+    value := 42
+
+    unsafe:
+        pointer: *[int] := &value
+
+        #You cannot dereference using * [0] or [] forces common syntax and explains what we're doing better
+        assert(pointer[0] == 42)
+
+        pointer[0] = 100
+
+    assert(value == 100)

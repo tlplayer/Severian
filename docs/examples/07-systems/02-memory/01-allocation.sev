@@ -1,0 +1,27 @@
+class Point:
+    x: int
+    y: int
+
+
+test "managed memory allocation":
+    point := Point(10, 20)
+
+    assert(point.x == 10)
+    assert(point.y == 20)
+
+test "raw memory allocation":
+    unsafe:
+        memory := allocate[int](4)
+
+        memory[0] = 10
+        memory[1] = 20
+        memory[2] = 30
+        memory[3] = 40
+
+        assert(memory[2] == 30)
+
+        free(memory)
+
+test with compiler "compiler rejects safe memory allocation calles":
+    reject:
+        memory := allocate[int](4)
