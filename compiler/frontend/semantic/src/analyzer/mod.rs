@@ -168,6 +168,7 @@ mod tensor;
 mod traits;
 mod type_resolution;
 mod types;
+mod primitives;
 
 use call::*;
 use contract::*;
@@ -184,3 +185,4 @@ use switch::*;
 use traits::*;
 pub use type_resolution::enforce_type_resolution_policy;
 use types::*;
+use primitives::*;

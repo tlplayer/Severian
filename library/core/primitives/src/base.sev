@@ -1,0 +1,9 @@
+# Compiler bootstrap contract.
+#
+# A Primitive is a source-level Severian type with a compiler representation.
+# The compiler owns the representation.
+# This package owns the type's identity and contract.
+
+trait Primitive:
+    property kind: string
+    property default: bool = false

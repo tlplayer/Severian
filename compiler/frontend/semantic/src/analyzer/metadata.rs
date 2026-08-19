@@ -13,6 +13,17 @@ pub fn attach_module_metadata(
     attach_module_metadata_with_packages(module, program, path, source, namespace, &[]);
 }
 
+'''
+TODO: thread primitives through:
+
+intern_optional_type
+register_function_metadata
+register_constructor_metadata
+register_class_field_aliases
+register_method_return_alias
+attach_module_metadata...
+'''
+
 pub fn attach_module_metadata_with_packages(
     module: &Module,
     program: &mut Program,
@@ -348,6 +359,7 @@ pub(super) fn register_function_metadata(
 pub(super) fn intern_optional_type(
     ty: Option<&Type>,
     known_types: &HashMap<String, TypeDefinitionId>,
+    primitives: &PrimitiveCatalog,
     types: &mut TypeTable,
 ) -> TypeId {
     match ty {
@@ -359,6 +371,7 @@ pub(super) fn intern_optional_type(
 pub(super) fn intern_type(
     ty: &Type,
     known_types: &HashMap<String, TypeDefinitionId>,
+    primitives: &PrimitiveCatalog,
     types: &mut TypeTable,
 ) -> TypeId {
     match ty {
@@ -369,6 +382,16 @@ pub(super) fn intern_type(
                 .map(|segment| segment.name.as_str())
                 .collect::<Vec<_>>()
                 .join(".");
+
+            let leaf = path
+                .segments
+                .last()
+                .map(|segment| segment.name.as_str())
+                .unwrap_or("");
+
+            if let Some(kind) = primitives.type_kind(leaf) {
+                return types.intern(kind);
+            }
             let arguments = path
                 .args
                 .iter()
@@ -376,12 +399,7 @@ pub(super) fn intern_type(
                 .map(|argument| intern_type(argument, known_types, types))
                 .collect::<Vec<_>>();
             match name.as_str() {
-                "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
                 | "usize" => types.intern(TypeKind::Int),
-                "float" | "f32" | "f64" => types.intern(TypeKind::Float),
-                "bool" => types.intern(TypeKind::Bool),
-                "string" => types.intern(TypeKind::String),
-                "unit" => types.intern(TypeKind::Unit),
                 "Any" | "any" => types.intern(TypeKind::Any),
                 "list" => {
                     let element = arguments

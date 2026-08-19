@@ -1,0 +1,5 @@
+trait string: Primitive:
+    property kind: string = "string"
+    property default: bool = true
+
+    operator +(right: string) -> string

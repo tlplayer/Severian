@@ -43,46 +43,37 @@ pub(super) fn validate_no_explicit_self_parameter(
         "E000209: `self` is an implicit class receiver and must not be declared as a parameter",
     ))
 }
+pub(super) fn class_type_name(
+    ty: &Type,
+    primitives: &PrimitiveCatalog,
+) -> Option<String> {
+    let Type::Named(path) = ty else {
+        return None;
+    };
 
-pub(super) fn class_type_name(ty: &Type) -> Option<String> {
-    let Type::Named(path) = ty else { return None };
     let name = path.segments.last()?.name.as_str();
+
+    if primitives.contains(name) {
+        return None;
+    }
+
     if matches!(
         name,
-        "int"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "usize"
-            | "float"
-            | "f32"
-            | "f64"
-            | "bool"
-            | "string"
-            | "unit"
-            | "list"
+        "list"
             | "map"
             | "set"
             | "Tensor"
             | "Channel"
             | "Function"
-            | "Result"
-            | "Option"
     ) {
-        None
-    } else {
-        Some(if path.args.is_empty() {
-            name.to_owned()
-        } else {
-            declaration_type_key(ty)
-        })
+        return None;
     }
+
+    Some(if path.args.is_empty() {
+        name.to_owned()
+    } else {
+        declaration_type_key(ty)
+    })
 }
 
 pub(super) fn resolved_class_type_name(
@@ -124,59 +115,64 @@ pub(super) fn resolved_class_type_name(
         })
         .or_else(|| class_type_name(ty))
 }
-
-pub(super) fn lower_type(ty: &Type) -> Result<ValueType, SemanticError> {
+pub(super) fn lower_type(
+    ty: &Type,
+    primitives: &PrimitiveCatalog,
+) -> Result<ValueType, SemanticError> {
     match ty {
         Type::Union { .. } => Ok(ValueType::Any),
+
         Type::Named(path) => {
             let name = path
                 .segments
-                .first()
+                .last()
                 .map(|segment| segment.name.as_str())
                 .unwrap_or("");
+
+            if let Some(ty) = primitives.value_type(name) {
+                return Ok(ty);
+            }
+
             match name {
-                "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-                | "usize" => Ok(ValueType::Int),
-                "float" | "f32" | "f64" => Ok(ValueType::Float),
-                "bool" => Ok(ValueType::Bool),
-                "string" => Ok(ValueType::String),
-                "unit" => Ok(ValueType::Unit),
                 "list" => Ok(ValueType::List),
                 "map" => Ok(ValueType::Map),
                 "set" => Ok(ValueType::Set),
-                "Tensor"
-                    if matches!(
-                        path.args.first().and_then(TypeArg::as_type),
-                        Some(Type::Named(element))
-                            if element.segments.first().is_some_and(|part| {
-                                is_conventional_type_variable(&part.name)
-                            })
-                    ) =>
-                {
-                    Ok(ValueType::TensorAny)
-                }
-                "Tensor" => Ok(ValueType::Tensor(lower_tensor_type(path)?)),
+                "Tensor" => Ok(ValueType::Tensor(
+                    lower_tensor_type(path)?
+                )),
                 "Channel" => Ok(ValueType::Channel),
                 "Function" => Ok(ValueType::Function),
-                "Result" => Ok(ValueType::Result),
-                "Option" => Ok(ValueType::Option),
+
                 _ => Ok(ValueType::Any),
             }
         }
-        _ => Err(error(ty.span(), "type is not supported yet")),
+
+        _ => Err(error(
+            ty.span(),
+            "type is not supported yet",
+        )),
     }
 }
 
-pub(super) fn declared_value_type(ty: &Type, aliases: &HashMap<String, String>) -> ValueType {
-    let Some(name) = class_type_name(ty) else {
-        return lower_type(ty).unwrap_or(ValueType::Any);
+pub(super) fn declared_value_type(
+    ty: &Type,
+    aliases: &HashMap<String, String>,
+    primitives: &PrimitiveCatalog,
+) -> ValueType {
+    let Some(name) = class_type_name(ty, primitives) else {
+        return lower_type(ty, primitives)
+            .unwrap_or(ValueType::Any);
     };
+
     if aliases.contains_key(&format!("__trait.{name}")) {
-        ValueType::Interface(TypeDefinitionId::from_name(&canonical_type_identity(
-            ty, aliases,
-        )))
+        ValueType::Interface(
+            TypeDefinitionId::from_name(
+                &canonical_type_identity(ty, aliases),
+            ),
+        )
     } else {
-        lower_type(ty).unwrap_or(ValueType::Any)
+        lower_type(ty, primitives)
+            .unwrap_or(ValueType::Any)
     }
 }
 

@@ -1,0 +1,1 @@
+Define: bool, int, float, string and none types

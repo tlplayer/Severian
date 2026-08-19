@@ -6,6 +6,7 @@ pub(super) fn lower_block(
     return_type: ValueType,
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
+    primitives: &PrimitiveCatalog,
 ) -> Result<Vec<Instruction>, SemanticError> {
     let mut instructions = Vec::new();
     for statement in &block.statements {

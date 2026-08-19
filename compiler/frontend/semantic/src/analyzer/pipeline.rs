@@ -28,16 +28,29 @@ pub fn analyze_with_packages(
     module: &Module,
     interfaces: &[PackageInterface],
 ) -> Result<Program, SemanticError> {
+    let primitives = PrimitiveCatalog::from_interfaces(interfaces)?;
+
     validate_explicit_self_parameters(module)?;
-    let (module, interfaces, trait_semantics) = expand_trait_compositions(module, interfaces)?;
-    let module = specialize_generic_classes_with_interfaces(&module, &interfaces)?;
-    analyze_specialized(&module, &interfaces, &trait_semantics)
+
+    let (module, interfaces, trait_semantics) =
+        expand_trait_compositions(module, interfaces)?;
+
+    let module =
+        specialize_generic_classes_with_interfaces(&module, &interfaces)?;
+
+    analyze_specialized(
+        &module,
+        &interfaces,
+        &trait_semantics,
+        &primitives,
+    )
 }
 
 fn analyze_specialized(
     module: &Module,
     interfaces: &[PackageInterface],
     trait_semantics: &TraitSemantics,
+    primitives: &PrimitiveCatalog,
 ) -> Result<Program, SemanticError> {
     validate_compiler_function_names(module)?;
     let mut aliases = collect_imports(module);

@@ -1,0 +1,7 @@
+trait bool: Primitive:
+    property kind: string = "bool"
+    property default: bool = true
+
+    operator and(right: bool) -> bool
+    operator or(right: bool) -> bool
+    operator not() -> bool
