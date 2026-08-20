@@ -1,6 +1,0 @@
-import ffi
-
-unsafe:
-    extern("sev_abi_v1_environment_get") def get(name: ffi.StringView, fallback: ffi.StringView) -> string
-    extern("sev_abi_v1_environment_set") def set(name: ffi.StringView, value: ffi.StringView) -> bool
-    extern("sev_abi_v1_environment_remove") def remove(name: ffi.StringView) -> bool
