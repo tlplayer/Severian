@@ -1,311 +1,553 @@
-diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 0586a5b..87699ab 100644
---- a/.github/workflows/ci.yml
-+++ b/.github/workflows/ci.yml
-@@ -18,6 +18,9 @@ jobs:
-         with:
-           components: llvm-tools-preview
+diff --git a/.gitignore b/.gitignore
+index 0ede38c..48a9a4e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -25,4 +25,5 @@ tmp*
  
-+      - name: Enforce compiler dependency layers
-+        run: python3 tools/quality/check_architecture.py
-+
-       - uses: taiki-e/install-action@cargo-llvm-cov
- 
-       - name: Measure line and branch coverage
+ *.CLEANUP.md
+ docs/examples/setup.bash
+-*.*.md
+\ No newline at end of file
++*.*.md
++*review.diff
+\ No newline at end of file
 diff --git a/Cargo.lock b/Cargo.lock
-index 4b5b698..5d0904c 100644
+index 5d0904c..70d9182 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -17,7 +17,21 @@ dependencies = [
- name = "severian-backend"
+@@ -18,7 +18,6 @@ name = "severian-backend"
  version = "0.1.0"
  dependencies = [
-- "severian-abi",
-+ "severian-lir",
-+ "severian-universal",
-+]
-+
-+[[package]]
-+name = "severian-bootstrap"
-+version = "0.1.0"
-+dependencies = [
-+ "severian-ast",
-+ "severian-diagnostics",
-+ "severian-lexer",
-+ "severian-parser",
-+ "severian-primitives",
-+ "severian-source",
-+ "severian-universal",
+  "severian-lir",
+- "severian-universal",
  ]
  
  [[package]]
-@@ -32,6 +46,7 @@ name = "severian-driver"
- version = "0.1.0"
- dependencies = [
-  "severian-backend",
-+ "severian-bootstrap",
-  "severian-diagnostics",
-  "severian-lexer",
-  "severian-lowering",
-@@ -40,19 +55,23 @@ dependencies = [
-  "severian-parser",
-  "severian-semantic",
-  "severian-source",
-+ "severian-universal",
- ]
- 
+@@ -84,9 +83,6 @@ dependencies = [
  [[package]]
- name = "severian-hir"
- version = "0.1.0"
- dependencies = [
-- "severian-interface",
-  "severian-source",
-+ "severian-universal",
- ]
- 
- [[package]]
- name = "severian-interface"
- version = "0.1.0"
-+dependencies = [
-+ "severian-universal",
-+]
- 
- [[package]]
- name = "severian-lexer"
-@@ -62,14 +81,20 @@ dependencies = [
-  "severian-source",
- ]
- 
-+[[package]]
-+name = "severian-lir"
-+version = "0.1.0"
-+dependencies = [
-+ "severian-universal",
-+]
-+
- [[package]]
- name = "severian-lowering"
- version = "0.1.0"
- dependencies = [
-- "severian-backend",
-- "severian-hir",
-+ "severian-lir",
-  "severian-mir",
-- "severian-primitives",
-+ "severian-universal",
- ]
- 
- [[package]]
-@@ -77,15 +102,15 @@ name = "severian-mir"
- version = "0.1.0"
- dependencies = [
-  "severian-hir",
-- "severian-interface",
-- "severian-source",
-+ "severian-universal",
- ]
- 
- [[package]]
- name = "severian-mlir"
- version = "0.1.0"
- dependencies = [
-- "severian-backend",
-+ "severian-lir",
-+ "severian-universal",
- ]
- 
- [[package]]
-@@ -109,22 +134,25 @@ dependencies = [
- [[package]]
- name = "severian-primitives"
+ name = "severian-lir"
  version = "0.1.0"
 -dependencies = [
-- "severian-interface",
+- "severian-universal",
 -]
  
  [[package]]
- name = "severian-semantic"
+ name = "severian-lowering"
+@@ -110,7 +106,6 @@ name = "severian-mlir"
  version = "0.1.0"
  dependencies = [
-  "severian-ast",
-+ "severian-bootstrap",
-  "severian-diagnostics",
-  "severian-hir",
-- "severian-interface",
-- "severian-primitives",
-+ "severian-lexer",
-+ "severian-parser",
-  "severian-source",
-+ "severian-universal",
+  "severian-lir",
+- "severian-universal",
  ]
  
  [[package]]
- name = "severian-source"
- version = "0.1.0"
-+
-+[[package]]
-+name = "severian-universal"
-+version = "0.1.0"
 diff --git a/Cargo.toml b/Cargo.toml
-index 84c5ec2..b445b8d 100644
+index b445b8d..c40e24c 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -1,6 +1,10 @@
- [workspace]
- members = [
-+    # Universal semantic authority
-+    "compiler/universal",
-+
-     # Language bootstrap
-+    "compiler/bootstrap",
-     "library/core/primitives",
- 
-     # Boundaries
-@@ -22,6 +26,7 @@ members = [
-     "compiler/source",
- 
-     # Transforms
-+    "compiler/transforms/lir",
-     "compiler/transforms/lowering",
-     "compiler/transforms/mir",
-     "compiler/transforms/mlir",
-@@ -33,3 +38,64 @@ edition = "2021"
- license-file = "LICENSE.md"
+@@ -39,30 +39,8 @@ license-file = "LICENSE.md"
  repository = "https://github.com/tlplayer/Severian"
  version = "0.1.0"
-+
-+# Fail-closed dependency layers, enforced by tools/quality/check_architecture.py.
-+[workspace.metadata.architecture.layers]
-+source = []
-+diagnostics = ["source"]
-+syntax = ["source", "diagnostics", "syntax"]
-+universal = []
-+primitive_source = []
-+semantic = ["source", "diagnostics", "syntax", "universal", "semantic"]
-+bootstrap = ["source", "diagnostics", "syntax", "universal", "primitive_source"]
-+transform = ["universal", "semantic", "transform"]
-+boundary = ["universal", "transform", "boundary"]
-+driver = [
-+    "source",
-+    "diagnostics",
-+    "syntax",
-+    "universal",
-+    "primitive_source",
-+    "semantic",
-+    "bootstrap",
-+    "transform",
-+    "boundary",
-+    "driver",
+ 
+-# Fail-closed dependency layers, enforced by tools/quality/check_architecture.py.
+-[workspace.metadata.architecture.layers]
+-source = []
+-diagnostics = ["source"]
+-syntax = ["source", "diagnostics", "syntax"]
+-universal = []
+-primitive_source = []
+-semantic = ["source", "diagnostics", "syntax", "universal", "semantic"]
+-bootstrap = ["source", "diagnostics", "syntax", "universal", "primitive_source"]
+-transform = ["universal", "semantic", "transform"]
+-boundary = ["universal", "transform", "boundary"]
+-driver = [
+-    "source",
+-    "diagnostics",
+-    "syntax",
+-    "universal",
+-    "primitive_source",
+-    "semantic",
+-    "bootstrap",
+-    "transform",
+-    "boundary",
+-    "driver",
+-]
+-
++# Package classifications are descriptive. Exact package allowlists below are
++# authoritative and fail closed for every new production dependency.
+ [workspace.metadata.architecture.packages]
+ severian-source = "source"
+ severian-diagnostics = "diagnostics"
+@@ -84,6 +62,58 @@ severian-backend = "boundary"
+ severian-mlir = "boundary"
+ severian-driver = "driver"
+ 
++[workspace.metadata.architecture.allow]
++severian-source = []
++severian-diagnostics = ["severian-source"]
++severian-lexer = ["severian-diagnostics", "severian-source"]
++severian-ast = ["severian-source"]
++severian-parser = [
++    "severian-ast",
++    "severian-diagnostics",
++    "severian-lexer",
++    "severian-source",
++]
++severian-universal = []
++severian-primitives = []
++severian-hir = ["severian-source", "severian-universal"]
++severian-semantic = [
++    "severian-ast",
++    "severian-diagnostics",
++    "severian-hir",
++    "severian-source",
++    "severian-universal",
++]
++severian-ownership = ["severian-diagnostics", "severian-hir"]
++severian-bootstrap = [
++    "severian-ast",
++    "severian-diagnostics",
++    "severian-lexer",
++    "severian-parser",
++    "severian-primitives",
++    "severian-source",
++    "severian-universal",
++]
++severian-mir = ["severian-hir", "severian-universal"]
++severian-lir = []
++severian-lowering = ["severian-lir", "severian-mir", "severian-universal"]
++severian-abi = []
++severian-interface = ["severian-universal"]
++severian-backend = ["severian-lir"]
++severian-mlir = ["severian-lir"]
++severian-driver = [
++    "severian-backend",
++    "severian-bootstrap",
++    "severian-diagnostics",
++    "severian-lexer",
++    "severian-lowering",
++    "severian-mir",
++    "severian-ownership",
++    "severian-parser",
++    "severian-semantic",
++    "severian-source",
++    "severian-universal",
 +]
 +
-+[workspace.metadata.architecture.packages]
-+severian-source = "source"
-+severian-diagnostics = "diagnostics"
-+severian-lexer = "syntax"
-+severian-ast = "syntax"
-+severian-parser = "syntax"
-+severian-universal = "universal"
-+severian-primitives = "primitive_source"
-+severian-hir = "semantic"
-+severian-semantic = "semantic"
-+severian-ownership = "semantic"
-+severian-bootstrap = "bootstrap"
-+severian-mir = "transform"
-+severian-lir = "transform"
-+severian-lowering = "transform"
-+severian-abi = "boundary"
-+severian-interface = "boundary"
-+severian-backend = "boundary"
-+severian-mlir = "boundary"
-+severian-driver = "driver"
-+
-+[[workspace.metadata.architecture.reject]]
-+from = "severian-ast"
-+to = "severian-universal"
-+
-+[[workspace.metadata.architecture.reject]]
-+from = "severian-parser"
-+to = "severian-universal"
-+
-+[[workspace.metadata.architecture.reject]]
-+from = "severian-universal"
-+to = "severian-ast"
-+
-+[[workspace.metadata.architecture.reject]]
-+from = "severian-backend"
-+to = "severian-semantic"
-diff --git a/compiler/boundaries/abi/src/lib.rs b/compiler/boundaries/abi/src/lib.rs
-index 9930ac5..1c3287b 100644
---- a/compiler/boundaries/abi/src/lib.rs
-+++ b/compiler/boundaries/abi/src/lib.rs
-@@ -4,11 +4,3 @@
- pub enum NativeType {
-     I64,
- }
--
--impl NativeType {
--    pub const fn c_spelling(self) -> &'static str {
--        match self {
--            Self::I64 => "int64_t",
+ [[workspace.metadata.architecture.reject]]
+ from = "severian-ast"
+ to = "severian-universal"
+diff --git a/compiler/bootstrap/src/lib.rs b/compiler/bootstrap/src/lib.rs
+index dd466a3..94f18b5 100644
+--- a/compiler/bootstrap/src/lib.rs
++++ b/compiler/bootstrap/src/lib.rs
+@@ -36,7 +36,10 @@ fn build_from_sources<'a>(
+         };
+         let tokens = severian_lexer::scan(&source).map_err(BootstrapError::Parse)?;
+         let module = severian_parser::parse(&tokens).map_err(BootstrapError::Parse)?;
+-        for declaration in module.traits {
++        for declaration in module.items.into_iter().filter_map(|item| match item {
++            severian_ast::Item::Trait(declaration) => Some(declaration),
++            _ => None,
++        }) {
+             let name = declaration.name.clone();
+             if declarations.insert(name.clone(), declaration).is_some() {
+                 return Err(BootstrapError::DuplicateDeclaration(name));
+@@ -144,10 +147,7 @@ fn collect_operators(
+             .iter()
+             .zip(arguments)
+             .map(|(parameter, argument)| {
+-                (
+-                    parameter.clone(),
+-                    substitute_type(argument, substitutions),
+-                )
++                (parameter.clone(), substitute_type(argument, substitutions))
+             })
+             .collect();
+         collect_operators(inherited, &inherited_substitutions, declarations, output)?;
+@@ -315,15 +315,13 @@ fn integer_property(
+         Some(Expression {
+             kind: ExpressionKind::Literal(AstLiteral::Integer(value)),
+             ..
+-        }) => {
+-            value
+-                .parse()
+-                .map(Some)
+-                .map_err(|_| BootstrapError::InvalidProperty {
+-                    declaration: declaration.name.clone(),
+-                    property: name.into(),
+-                })
 -        }
--    }
--}
++        }) => value
++            .parse()
++            .map(Some)
++            .map_err(|_| BootstrapError::InvalidProperty {
++                declaration: declaration.name.clone(),
++                property: name.into(),
++            }),
+         None => Ok(None),
+         _ => Err(BootstrapError::InvalidProperty {
+             declaration: declaration.name.clone(),
 diff --git a/compiler/boundaries/backend/Cargo.toml b/compiler/boundaries/backend/Cargo.toml
-index 24173c8..0388d34 100644
+index 0388d34..6eaaa2b 100644
 --- a/compiler/boundaries/backend/Cargo.toml
 +++ b/compiler/boundaries/backend/Cargo.toml
-@@ -6,7 +6,8 @@ license-file.workspace = true
- repository.workspace = true
+@@ -7,7 +7,6 @@ repository.workspace = true
  
  [dependencies]
--severian-abi = { path = "../abi" }
-+severian-lir = { path = "../../transforms/lir" }
-+severian-universal = { path = "../../universal" }
+ severian-lir = { path = "../../transforms/lir" }
+-severian-universal = { path = "../../universal" }
  
  [lib]
  path = "src/lib.rs"
-diff --git a/compiler/boundaries/driver/Cargo.toml b/compiler/boundaries/driver/Cargo.toml
-index 322c956..7508855 100644
---- a/compiler/boundaries/driver/Cargo.toml
-+++ b/compiler/boundaries/driver/Cargo.toml
-@@ -7,6 +7,7 @@ repository.workspace = true
+diff --git a/compiler/boundaries/backend/src/lib.rs b/compiler/boundaries/backend/src/lib.rs
+index 3bd37d6..c8794e7 100644
+--- a/compiler/boundaries/backend/src/lib.rs
++++ b/compiler/boundaries/backend/src/lib.rs
+@@ -1,8 +1,10 @@
+ #![forbid(unsafe_code)]
  
- [dependencies]
- severian-backend = { path = "../backend" }
-+severian-bootstrap = { path = "../../bootstrap" }
- severian-diagnostics = { path = "../../diagnostics" }
- severian-lexer = { path = "../../frontend/lexer" }
- severian-lowering = { path = "../../transforms/lowering" }
-@@ -15,6 +16,7 @@ severian-ownership = { path = "../../frontend/ownership" }
- severian-parser = { path = "../../frontend/parser" }
- severian-semantic = { path = "../../frontend/semantic" }
- severian-source = { path = "../../source" }
-+severian-universal = { path = "../../universal" }
+ use severian_lir::LoweredFloatFormat;
+-pub use severian_lir::{LoweredType, Module as LoweredModule, Operation, ValueId};
+-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
++pub use severian_lir::{
++    BinaryOperation, Constant, LoweredType, Module as LoweredModule, Operation, UnaryOperation,
++    ValueId,
++};
+ use std::fmt;
+ use std::io::Write;
+ use std::path::{Path, PathBuf};
+@@ -159,11 +161,11 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
+     }
+ }
  
- [lib]
- path = "src/lib.rs"
-diff --git a/compiler/boundaries/interface/Cargo.toml b/compiler/boundaries/interface/Cargo.toml
-index 616fecd..aade729 100644
---- a/compiler/boundaries/interface/Cargo.toml
-+++ b/compiler/boundaries/interface/Cargo.toml
-@@ -5,5 +5,8 @@ edition.workspace = true
+-fn c_literal(value: &LiteralValue, ty: LoweredType) -> Result<String, BackendError> {
++fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> {
+     match (value, ty) {
+-        (LiteralValue::Integer(spelling), LoweredType::Integer { .. })
+-        | (LiteralValue::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
+-        (LiteralValue::Boolean(value), LoweredType::Boolean) => {
++        (Constant::Integer(spelling), LoweredType::Integer { .. })
++        | (Constant::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
++        (Constant::Boolean(value), LoweredType::Boolean) => {
+             Ok(if *value { "1" } else { "0" }.into())
+         }
+         _ => Err(BackendError::UnsupportedOperation(format!(
+@@ -172,34 +174,34 @@ fn c_literal(value: &LiteralValue, ty: LoweredType) -> Result<String, BackendErr
+     }
+ }
+ 
+-fn c_unary(operator: UnaryOperator) -> &'static str {
++fn c_unary(operator: UnaryOperation) -> &'static str {
+     match operator {
+-        UnaryOperator::Positive => "+",
+-        UnaryOperator::Negative => "-",
+-        UnaryOperator::Not => "!",
++        UnaryOperation::Positive => "+",
++        UnaryOperation::Negative => "-",
++        UnaryOperation::Not => "!",
+     }
+ }
+ 
+-fn c_binary(operator: BinaryOperator) -> Result<&'static str, BackendError> {
++fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
+     Ok(match operator {
+-        BinaryOperator::Add => "+",
+-        BinaryOperator::Subtract => "-",
+-        BinaryOperator::Multiply => "*",
+-        BinaryOperator::Divide => "/",
+-        BinaryOperator::Remainder => "%",
+-        BinaryOperator::Power => {
++        BinaryOperation::Add => "+",
++        BinaryOperation::Subtract => "-",
++        BinaryOperation::Multiply => "*",
++        BinaryOperation::Divide => "/",
++        BinaryOperation::Remainder => "%",
++        BinaryOperation::Power => {
+             return Err(BackendError::UnsupportedOperation(
+                 "power requires a lowered runtime or target operation".into(),
+             ))
+         }
+-        BinaryOperator::Equal => "==",
+-        BinaryOperator::NotEqual => "!=",
+-        BinaryOperator::Less => "<",
+-        BinaryOperator::LessEqual => "<=",
+-        BinaryOperator::Greater => ">",
+-        BinaryOperator::GreaterEqual => ">=",
+-        BinaryOperator::And => "&&",
+-        BinaryOperator::Or => "||",
++        BinaryOperation::Equal => "==",
++        BinaryOperation::NotEqual => "!=",
++        BinaryOperation::Less => "<",
++        BinaryOperation::LessEqual => "<=",
++        BinaryOperation::Greater => ">",
++        BinaryOperation::GreaterEqual => ">=",
++        BinaryOperation::And => "&&",
++        BinaryOperation::Or => "||",
+     })
+ }
+ 
+@@ -246,7 +248,7 @@ mod tests {
+                 },
+             }],
+             operations: vec![Operation::Constant {
+-                value: LiteralValue::Integer("10".into()),
++                value: Constant::Integer("10".into()),
+                 result: ValueId(0),
+             }],
+             last_binding: Some(ValueId(0)),
+diff --git a/compiler/frontend/ast/src/lib.rs b/compiler/frontend/ast/src/lib.rs
+index f77ddea..1f59ba9 100644
+--- a/compiler/frontend/ast/src/lib.rs
++++ b/compiler/frontend/ast/src/lib.rs
+@@ -13,7 +13,12 @@ pub use types::{
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Default)]
+ pub struct Module {
+-    pub bindings: Vec<Binding>,
+-    pub traits: Vec<TraitDeclaration>,
+-    pub imports: Vec<ImportDeclaration>,
++    pub items: Vec<Item>,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Item {
++    Import(ImportDeclaration),
++    Trait(TraitDeclaration),
++    Binding(Binding),
+ }
+diff --git a/compiler/frontend/lexer/src/scanner/mod.rs b/compiler/frontend/lexer/src/scanner/mod.rs
+index 3d8e696..cc79ef9 100644
+--- a/compiler/frontend/lexer/src/scanner/mod.rs
++++ b/compiler/frontend/lexer/src/scanner/mod.rs
+@@ -64,11 +64,15 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+                 cursor += 1;
+                 continue;
+             }
+-            b'\n' | b';' => {
++            b'\n' => {
+                 cursor += 1;
+                 line_start = true;
+                 TokenKind::Newline
+             }
++            b';' => {
++                cursor += 1;
++                TokenKind::Newline
++            }
+             b',' => one(&mut cursor, TokenKind::Comma),
+             b':' => one(&mut cursor, TokenKind::Colon),
+             b'(' => one(&mut cursor, TokenKind::LeftParen),
+diff --git a/compiler/frontend/parser/src/lib.rs b/compiler/frontend/parser/src/lib.rs
+index 0174518..e93df0e 100644
+--- a/compiler/frontend/parser/src/lib.rs
++++ b/compiler/frontend/parser/src/lib.rs
+@@ -13,7 +13,37 @@ mod tests {
+     fn parses_two_bindings() {
+         let source = SourceFile::virtual_source("test.sev", "b = 2, a = 1 + b");
+         let module = parse(&scan(&source).unwrap()).unwrap();
+-        assert_eq!(module.bindings.len(), 2);
++        assert_eq!(module.items.len(), 2);
++        assert!(module
++            .items
++            .iter()
++            .all(|item| matches!(item, severian_ast::Item::Binding(_))));
++    }
++
++    #[test]
++    fn semicolon_separates_without_starting_a_physical_line() {
++        let source = SourceFile::virtual_source("test.sev", "x = 1; y = 2");
++        let module = parse(&scan(&source).unwrap()).unwrap();
++        assert_eq!(module.items.len(), 2);
++    }
++
++    #[test]
++    fn power_is_right_associative() {
++        let source = SourceFile::virtual_source("test.sev", "x = 2 ** 3 ** 2");
++        let module = parse(&scan(&source).unwrap()).unwrap();
++        let severian_ast::Item::Binding(binding) = &module.items[0] else {
++            unreachable!()
++        };
++        let severian_ast::ExpressionKind::Binary { right, .. } = &binding.value.kind else {
++            unreachable!()
++        };
++        assert!(matches!(
++            right.kind,
++            severian_ast::ExpressionKind::Binary {
++                operator: severian_ast::BinaryOperator::Power,
++                ..
++            }
++        ));
+     }
+ 
+     #[test]
+@@ -23,10 +53,18 @@ mod tests {
+             "trait i32: Primitive + Integer[i32]:\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
+         );
+         let module = parse(&scan(&source).unwrap()).unwrap();
+-        assert_eq!(module.traits[0].name, "i32");
+-        assert_eq!(module.traits[0].bases.len(), 2);
++        let declaration = module
++            .items
++            .iter()
++            .find_map(|item| match item {
++                severian_ast::Item::Trait(declaration) => Some(declaration),
++                _ => None,
++            })
++            .unwrap();
++        assert_eq!(declaration.name, "i32");
++        assert_eq!(declaration.bases.len(), 2);
+         assert_eq!(
+-            module.traits[0].operators[0].operator,
++            declaration.operators[0].operator,
+             severian_ast::OperatorSyntax::Plus
+         );
+     }
+@@ -38,15 +76,35 @@ mod tests {
+             "trait Example: Base[Tensor[f32]]:\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
+         );
+         let module = parse(&scan(&source).unwrap()).unwrap();
+-        let base = &module.traits[0].bases[0];
+-        let property = &module.traits[0].properties[0].annotation;
+-        let parameter = &module.traits[0].operators[0].parameters[0].annotation;
+-        let result = &module.traits[0].operators[0].result;
+-        let binding = module.bindings[0].annotation.as_ref().unwrap();
+-        assert!(matches!(base.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-        assert!(matches!(property.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-        assert!(matches!(parameter.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-        assert!(matches!(result.kind, severian_ast::TypeAnnotationKind::Union(_)));
++        assert!(matches!(module.items[0], severian_ast::Item::Trait(_)));
++        assert!(matches!(module.items[1], severian_ast::Item::Binding(_)));
++        let severian_ast::Item::Trait(declaration) = &module.items[0] else {
++            unreachable!()
++        };
++        let severian_ast::Item::Binding(binding) = &module.items[1] else {
++            unreachable!()
++        };
++        let base = &declaration.bases[0];
++        let property = &declaration.properties[0].annotation;
++        let parameter = &declaration.operators[0].parameters[0].annotation;
++        let result = &declaration.operators[0].result;
++        let binding = binding.annotation.as_ref().unwrap();
++        assert!(matches!(
++            base.kind,
++            severian_ast::TypeAnnotationKind::Named { .. }
++        ));
++        assert!(matches!(
++            property.kind,
++            severian_ast::TypeAnnotationKind::Named { .. }
++        ));
++        assert!(matches!(
++            parameter.kind,
++            severian_ast::TypeAnnotationKind::Named { .. }
++        ));
++        assert!(matches!(
++            result.kind,
++            severian_ast::TypeAnnotationKind::Union(_)
++        ));
+         assert_eq!(binding.named_parts().unwrap().0, "list");
+         assert_eq!(property.named_parts().unwrap().0, "list");
+         assert_eq!(binding.named_parts().unwrap().1.len(), 1);
+diff --git a/compiler/frontend/parser/src/statement/mod.rs b/compiler/frontend/parser/src/statement/mod.rs
+index 75a641d..b84a46c 100644
+--- a/compiler/frontend/parser/src/statement/mod.rs
++++ b/compiler/frontend/parser/src/statement/mod.rs
+@@ -1,5 +1,5 @@
+ use severian_ast::{
+-    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Literal, Module,
++    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Item, Literal, Module,
+     OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, TraitDeclaration,
+     TypeAnnotation, TypeAnnotationKind, UnaryOperator,
+ };
+@@ -22,13 +22,13 @@ impl Parser<'_> {
+         self.separators();
+         while !self.at(&TokenKind::Eof) {
+             if self.at_identifier("trait") {
+-                module.traits.push(self.trait_declaration()?);
++                module.items.push(Item::Trait(self.trait_declaration()?));
+                 self.separators();
+                 continue;
+             } else if self.at_identifier("import") {
+-                module.imports.push(self.import_declaration()?);
++                module.items.push(Item::Import(self.import_declaration()?));
+             } else {
+-                module.bindings.push(self.binding()?);
++                module.items.push(Item::Binding(self.binding()?));
+             }
+             if !self.at(&TokenKind::Newline)
+                 && !self.at(&TokenKind::Comma)
+@@ -206,7 +206,12 @@ impl Parser<'_> {
+                 break;
+             }
+             self.next();
+-            let right = self.expression(precedence + 1)?;
++            let right_precedence = if operator == BinaryOperator::Power {
++                precedence
++            } else {
++                precedence + 1
++            };
++            let right = self.expression(right_precedence)?;
+             let span = Span::new(
+                 expression.span.source,
+                 expression.span.start,
+@@ -314,7 +319,10 @@ impl Parser<'_> {
+                 }
+             }
+             end = self
+-                .expect(&TokenKind::RightBracket, "expected `]` after type arguments")?
++                .expect(
++                    &TokenKind::RightBracket,
++                    "expected `]` after type arguments",
++                )?
+                 .span
+                 .end;
+         }
+diff --git a/compiler/frontend/semantic/src/lib.rs b/compiler/frontend/semantic/src/lib.rs
+index 59cb715..509dd33 100644
+--- a/compiler/frontend/semantic/src/lib.rs
++++ b/compiler/frontend/semantic/src/lib.rs
+@@ -22,7 +22,10 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
+         next_binding: 0,
+     };
+     let mut bindings = Vec::new();
+-    for ast_binding in &ast.bindings {
++    for ast_binding in ast.items.iter().filter_map(|item| match item {
++        severian_ast::Item::Binding(binding) => Some(binding),
++        _ => None,
++    }) {
+         if analyzer.names.contains_key(&ast_binding.name) {
+             return Err(Diagnostic::new(
+                 "E000203",
+diff --git a/compiler/transforms/lir/Cargo.toml b/compiler/transforms/lir/Cargo.toml
+index 4f1b946..1c642d2 100644
+--- a/compiler/transforms/lir/Cargo.toml
++++ b/compiler/transforms/lir/Cargo.toml
+@@ -5,8 +5,5 @@ edition.workspace = true
  license-file.workspace = true
  repository.workspace = true
  
-+[dependencies]
-+severian-universal = { path = "../../universal" }
-+
+-[dependencies]
+-severian-universal = { path = "../../universal" }
+-
  [lib]
  path = "src/lib.rs"
-diff --git a/compiler/frontend/ast/src/expression/mod.rs b/compiler/frontend/ast/src/expression/mod.rs
-index 21c817e..4647340 100644
---- a/compiler/frontend/ast/src/expression/mod.rs
-+++ b/compiler/frontend/ast/src/expression/mod.rs
-@@ -1,5 +1,41 @@
- use severian_source::Span;
+diff --git a/compiler/transforms/lir/src/lib.rs b/compiler/transforms/lir/src/lib.rs
+index cfe5647..605ca6b 100644
+--- a/compiler/transforms/lir/src/lib.rs
++++ b/compiler/transforms/lir/src/lib.rs
+@@ -1,7 +1,5 @@
+ #![forbid(unsafe_code)]
+ 
+-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
+-
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum LoweredFloatFormat {
+     Ieee(u16),
+@@ -28,19 +26,55 @@ pub struct Value {
+     pub ty: LoweredType,
+ }
  
 +#[derive(Debug, Clone, PartialEq, Eq)]
-+pub enum Literal {
++pub enum Constant {
 +    Integer(String),
 +    Float(String),
 +    Boolean(bool),
@@ -316,14 +558,14 @@ index 21c817e..4647340 100644
 +}
 +
 +#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+pub enum UnaryOperator {
++pub enum UnaryOperation {
 +    Positive,
 +    Negative,
 +    Not,
 +}
 +
 +#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+pub enum BinaryOperator {
++pub enum BinaryOperation {
 +    Add,
 +    Subtract,
 +    Multiply,
@@ -341,1453 +583,2085 @@ index 21c817e..4647340 100644
 +}
 +
  #[derive(Debug, Clone, PartialEq, Eq)]
- pub struct Expression {
-     pub kind: ExpressionKind,
-@@ -8,9 +44,14 @@ pub struct Expression {
- 
- #[derive(Debug, Clone, PartialEq, Eq)]
- pub enum ExpressionKind {
--    Integer(i64),
-+    Literal(Literal),
-     Name(String),
--    Add {
-+    Unary {
-+        operator: UnaryOperator,
-+        operand: Box<Expression>,
-+    },
-+    Binary {
-+        operator: BinaryOperator,
-         left: Box<Expression>,
-         right: Box<Expression>,
+ pub enum Operation {
+     Constant {
+-        value: LiteralValue,
++        value: Constant,
+         result: ValueId,
      },
-diff --git a/compiler/frontend/ast/src/lib.rs b/compiler/frontend/ast/src/lib.rs
-index 9b266f8..f77ddea 100644
---- a/compiler/frontend/ast/src/lib.rs
-+++ b/compiler/frontend/ast/src/lib.rs
-@@ -4,11 +4,16 @@ mod expression;
- mod statement;
- mod types;
- 
--pub use expression::{Expression, ExpressionKind};
-+pub use expression::{BinaryOperator, Expression, ExpressionKind, Literal, UnaryOperator};
- pub use statement::Binding;
--pub use types::TypeAnnotation;
-+pub use types::{
-+    ImportDeclaration, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
-+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
-+};
- 
- #[derive(Debug, Clone, PartialEq, Eq, Default)]
- pub struct Module {
-     pub bindings: Vec<Binding>,
-+    pub traits: Vec<TraitDeclaration>,
-+    pub imports: Vec<ImportDeclaration>,
- }
-diff --git a/compiler/frontend/ast/src/types/mod.rs b/compiler/frontend/ast/src/types/mod.rs
-index bc9023f..b6dedce 100644
---- a/compiler/frontend/ast/src/types/mod.rs
-+++ b/compiler/frontend/ast/src/types/mod.rs
-@@ -1,7 +1,103 @@
-+use crate::Expression;
- use severian_source::Span;
- 
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub struct ImportDeclaration {
-+    pub path: String,
-+    pub alias: String,
-+    pub span: Span,
-+}
-+
-+/// The one source-level type node used in every annotation position.
- #[derive(Debug, Clone, PartialEq, Eq)]
- pub struct TypeAnnotation {
-+    pub kind: TypeAnnotationKind,
-+    pub span: Span,
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub enum TypeAnnotationKind {
-+    Named {
-+        name: String,
-+        arguments: Vec<TypeAnnotation>,
-+    },
-+    Union(Vec<TypeAnnotation>),
-+}
-+
-+impl TypeAnnotation {
-+    pub fn named(name: impl Into<String>, arguments: Vec<Self>, span: Span) -> Self {
-+        Self {
-+            kind: TypeAnnotationKind::Named {
-+                name: name.into(),
-+                arguments,
-+            },
-+            span,
-+        }
-+    }
-+
-+    pub fn simple_name(&self) -> Option<&str> {
-+        match &self.kind {
-+            TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => Some(name),
-+            _ => None,
-+        }
-+    }
-+
-+    pub fn named_parts(&self) -> Option<(&str, &[Self])> {
-+        match &self.kind {
-+            TypeAnnotationKind::Named { name, arguments } => Some((name, arguments)),
-+            TypeAnnotationKind::Union(_) => None,
-+        }
-+    }
-+}
-+
-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+pub enum OperatorSyntax {
-+    Plus,
-+    Minus,
-+    Multiply,
-+    Divide,
-+    Remainder,
-+    Power,
-+    Equal,
-+    NotEqual,
-+    Less,
-+    LessEqual,
-+    Greater,
-+    GreaterEqual,
-+    And,
-+    Or,
-+    Not,
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub struct PropertyDeclaration {
-+    pub name: String,
-+    pub annotation: TypeAnnotation,
-+    pub default: Option<Expression>,
-+    pub span: Span,
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub struct OperatorParameter {
-+    pub name: String,
-+    pub annotation: TypeAnnotation,
-+    pub span: Span,
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub struct OperatorDeclaration {
-+    pub operator: OperatorSyntax,
-+    pub parameters: Vec<OperatorParameter>,
-+    pub result: TypeAnnotation,
-+    pub span: Span,
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Eq)]
-+pub struct TraitDeclaration {
-     pub name: String,
-+    pub type_parameters: Vec<String>,
-+    pub bases: Vec<TypeAnnotation>,
-+    pub properties: Vec<PropertyDeclaration>,
-+    pub operators: Vec<OperatorDeclaration>,
-     pub span: Span,
- }
-diff --git a/compiler/frontend/hir/Cargo.toml b/compiler/frontend/hir/Cargo.toml
-index 7c82e53..0e3a68b 100644
---- a/compiler/frontend/hir/Cargo.toml
-+++ b/compiler/frontend/hir/Cargo.toml
-@@ -6,8 +6,8 @@ license-file.workspace = true
- repository.workspace = true
- 
- [dependencies]
--severian-interface = { path = "../../boundaries/interface" }
- severian-source = { path = "../../source" }
-+severian-universal = { path = "../../universal" }
- 
- [lib]
- path = "src/lib.rs"
-diff --git a/compiler/frontend/lexer/src/lib.rs b/compiler/frontend/lexer/src/lib.rs
-index 42f28ff..870347e 100644
---- a/compiler/frontend/lexer/src/lib.rs
-+++ b/compiler/frontend/lexer/src/lib.rs
-@@ -18,6 +18,18 @@ mod tests {
-         assert!(tokens.iter().any(|token| token.kind == TokenKind::Plus));
-         assert!(tokens
-             .iter()
--            .any(|token| token.kind == TokenKind::Integer(2)));
-+            .any(|token| token.kind == TokenKind::Integer("2".into())));
-+    }
-+
-+    #[test]
-+    fn scans_indented_trait_members_and_typed_operators() {
-+        let source = SourceFile::virtual_source(
-+            "primitive.sev",
-+            "trait i32: Primitive:\n    property bits: int = 32\n    operator +(right: i32) -> i32\n",
-+        );
-+        let tokens = scan(&source).unwrap();
-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Indent));
-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Arrow));
-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Dedent));
-     }
- }
-diff --git a/compiler/frontend/lexer/src/scanner/mod.rs b/compiler/frontend/lexer/src/scanner/mod.rs
-index 5335aef..3d8e696 100644
---- a/compiler/frontend/lexer/src/scanner/mod.rs
-+++ b/compiler/frontend/lexer/src/scanner/mod.rs
-@@ -5,32 +5,134 @@ use severian_source::{SourceFile, Span};
- pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
-     let bytes = source.text.as_bytes();
-     let mut cursor = 0usize;
-+    let mut line_start = true;
-+    let mut indents = vec![0usize];
-     let mut tokens = Vec::new();
-+
-     while cursor < bytes.len() {
-+        if line_start {
-+            let start = cursor;
-+            while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
-+                cursor += 1;
-+            }
-+            if cursor >= bytes.len() {
-+                break;
-+            }
-+            if bytes[cursor] == b'\n' || bytes[cursor] == b'#' {
-+                if bytes[cursor] == b'#' {
-+                    while cursor < bytes.len() && bytes[cursor] != b'\n' {
-+                        cursor += 1;
-+                    }
-+                }
-+                if cursor < bytes.len() {
-+                    cursor += 1;
-+                    tokens.push(token(source, TokenKind::Newline, cursor - 1, cursor));
-+                }
-+                line_start = true;
-+                continue;
-+            }
-+            let width: usize = source.text[start..cursor]
-+                .chars()
-+                .map(|character| if character == '\t' { 4 } else { 1 })
-+                .sum();
-+            match width.cmp(indents.last().expect("indent stack is nonempty")) {
-+                std::cmp::Ordering::Greater => {
-+                    indents.push(width);
-+                    tokens.push(token(source, TokenKind::Indent, start, cursor));
-+                }
-+                std::cmp::Ordering::Less => {
-+                    while width < *indents.last().expect("indent stack is nonempty") {
-+                        indents.pop();
-+                        tokens.push(token(source, TokenKind::Dedent, start, cursor));
-+                    }
-+                    if width != *indents.last().expect("indent stack is nonempty") {
-+                        return Err(Diagnostic::new(
-+                            "E000102",
-+                            "inconsistent indentation",
-+                            Some(Span::new(source.id, start as u32, cursor as u32)),
-+                        ));
-+                    }
-+                }
-+                std::cmp::Ordering::Equal => {}
-+            }
-+            line_start = false;
-+        }
-+
-         let start = cursor;
-         let kind = match bytes[cursor] {
-             b' ' | b'\t' | b'\r' => {
-                 cursor += 1;
-                 continue;
-             }
--            b'\n' | b',' | b';' => {
-+            b'\n' | b';' => {
-                 cursor += 1;
--                TokenKind::Separator
-+                line_start = true;
-+                TokenKind::Newline
-             }
--            b'=' => {
--                cursor += 1;
--                TokenKind::Equal
-+            b',' => one(&mut cursor, TokenKind::Comma),
-+            b':' => one(&mut cursor, TokenKind::Colon),
-+            b'(' => one(&mut cursor, TokenKind::LeftParen),
-+            b')' => one(&mut cursor, TokenKind::RightParen),
-+            b'[' => one(&mut cursor, TokenKind::LeftBracket),
-+            b']' => one(&mut cursor, TokenKind::RightBracket),
-+            b'|' => one(&mut cursor, TokenKind::Pipe),
-+            b'+' => one(&mut cursor, TokenKind::Plus),
-+            b'%' => one(&mut cursor, TokenKind::Percent),
-+            b'*' if bytes.get(cursor + 1) == Some(&b'*') => {
-+                cursor += 2;
-+                TokenKind::Power
-             }
--            b':' => {
--                cursor += 1;
--                TokenKind::Colon
-+            b'*' => one(&mut cursor, TokenKind::Star),
-+            b'/' => one(&mut cursor, TokenKind::Slash),
-+            b'-' if bytes.get(cursor + 1) == Some(&b'>') => {
-+                cursor += 2;
-+                TokenKind::Arrow
-+            }
-+            b'-' => one(&mut cursor, TokenKind::Minus),
-+            b'=' if bytes.get(cursor + 1) == Some(&b'=') => {
-+                cursor += 2;
-+                TokenKind::EqualEqual
-+            }
-+            b'=' => one(&mut cursor, TokenKind::Equal),
-+            b'!' if bytes.get(cursor + 1) == Some(&b'=') => {
-+                cursor += 2;
-+                TokenKind::NotEqual
-+            }
-+            b'<' if bytes.get(cursor + 1) == Some(&b'=') => {
-+                cursor += 2;
-+                TokenKind::LessEqual
-             }
--            b'+' => {
-+            b'<' => one(&mut cursor, TokenKind::Less),
-+            b'>' if bytes.get(cursor + 1) == Some(&b'=') => {
-+                cursor += 2;
-+                TokenKind::GreaterEqual
-+            }
-+            b'>' => one(&mut cursor, TokenKind::Greater),
-+            b'"' => {
-                 cursor += 1;
--                TokenKind::Plus
-+                let content_start = cursor;
-+                while cursor < bytes.len() && bytes[cursor] != b'"' {
-+                    if bytes[cursor] == b'\n' {
-+                        return Err(Diagnostic::new(
-+                            "E000101",
-+                            "unterminated string literal",
-+                            Some(Span::new(source.id, start as u32, cursor as u32)),
-+                        ));
-+                    }
-+                    cursor += 1;
-+                }
-+                if cursor == bytes.len() {
-+                    return Err(Diagnostic::new(
-+                        "E000101",
-+                        "unterminated string literal",
-+                        Some(Span::new(source.id, start as u32, cursor as u32)),
-+                    ));
-+                }
-+                let value = source.text[content_start..cursor].to_owned();
-+                cursor += 1;
-+                TokenKind::String(value)
-             }
-             b'#' => {
--                cursor += 1;
-                 while cursor < bytes.len() && bytes[cursor] != b'\n' {
-                     cursor += 1;
-                 }
-@@ -41,15 +143,17 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
-                 while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                     cursor += 1;
-                 }
--                let spelling = &source.text[start..cursor];
--                let value = spelling.parse::<i64>().map_err(|_| {
--                    Diagnostic::new(
--                        "E000105",
--                        format!("integer literal `{spelling}` is outside the supported int range"),
--                        Some(Span::new(source.id, start as u32, cursor as u32)),
--                    )
--                })?;
--                TokenKind::Integer(value)
-+                if bytes.get(cursor) == Some(&b'.')
-+                    && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)
-+                {
-+                    cursor += 1;
-+                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-+                        cursor += 1;
-+                    }
-+                    TokenKind::Float(source.text[start..cursor].to_owned())
-+                } else {
-+                    TokenKind::Integer(source.text[start..cursor].to_owned())
-+                }
-             }
-             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
-                 cursor += 1;
-@@ -68,15 +172,24 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
-                 ))
-             }
-         };
--        tokens.push(Token {
--            kind,
--            span: Span::new(source.id, start as u32, cursor as u32),
--        });
-+        tokens.push(token(source, kind, start, cursor));
-     }
--    let end = source.text.len() as u32;
--    tokens.push(Token {
--        kind: TokenKind::Eof,
--        span: Span::new(source.id, end, end),
--    });
-+    while indents.len() > 1 {
-+        indents.pop();
-+        tokens.push(token(source, TokenKind::Dedent, cursor, cursor));
-+    }
-+    tokens.push(token(source, TokenKind::Eof, cursor, cursor));
-     Ok(tokens)
- }
-+
-+fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {
-+    *cursor += 1;
-+    kind
-+}
-+
-+fn token(source: &SourceFile, kind: TokenKind, start: usize, end: usize) -> Token {
-+    Token {
-+        kind,
-+        span: Span::new(source.id, start as u32, end as u32),
-+    }
-+}
-diff --git a/compiler/frontend/lexer/src/token/mod.rs b/compiler/frontend/lexer/src/token/mod.rs
-index d6e945d..83a9dfd 100644
---- a/compiler/frontend/lexer/src/token/mod.rs
-+++ b/compiler/frontend/lexer/src/token/mod.rs
-@@ -3,11 +3,33 @@ use severian_source::Span;
- #[derive(Debug, Clone, PartialEq, Eq)]
- pub enum TokenKind {
-     Identifier(String),
--    Integer(i64),
-+    Integer(String),
-+    Float(String),
-+    String(String),
-     Colon,
-     Equal,
-     Plus,
--    Separator,
-+    Minus,
-+    Star,
-+    Slash,
-+    Percent,
-+    Power,
-+    EqualEqual,
-+    NotEqual,
-+    Less,
-+    LessEqual,
-+    Greater,
-+    GreaterEqual,
-+    Arrow,
-+    LeftParen,
-+    RightParen,
-+    LeftBracket,
-+    RightBracket,
-+    Pipe,
-+    Comma,
-+    Newline,
-+    Indent,
-+    Dedent,
-     Eof,
- }
- 
-diff --git a/compiler/frontend/parser/src/lib.rs b/compiler/frontend/parser/src/lib.rs
-index 0fac7e4..0174518 100644
---- a/compiler/frontend/parser/src/lib.rs
-+++ b/compiler/frontend/parser/src/lib.rs
-@@ -15,4 +15,41 @@ mod tests {
-         let module = parse(&scan(&source).unwrap()).unwrap();
-         assert_eq!(module.bindings.len(), 2);
-     }
-+
-+    #[test]
-+    fn parses_primitive_trait_contract() {
-+        let source = SourceFile::virtual_source(
-+            "i32.sev",
-+            "trait i32: Primitive + Integer[i32]:\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
-+        );
-+        let module = parse(&scan(&source).unwrap()).unwrap();
-+        assert_eq!(module.traits[0].name, "i32");
-+        assert_eq!(module.traits[0].bases.len(), 2);
-+        assert_eq!(
-+            module.traits[0].operators[0].operator,
-+            severian_ast::OperatorSyntax::Plus
-+        );
-+    }
-+
-+    #[test]
-+    fn one_recursive_type_parser_serves_every_annotation_position() {
-+        let source = SourceFile::virtual_source(
-+            "types.sev",
-+            "trait Example: Base[Tensor[f32]]:\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
-+        );
-+        let module = parse(&scan(&source).unwrap()).unwrap();
-+        let base = &module.traits[0].bases[0];
-+        let property = &module.traits[0].properties[0].annotation;
-+        let parameter = &module.traits[0].operators[0].parameters[0].annotation;
-+        let result = &module.traits[0].operators[0].result;
-+        let binding = module.bindings[0].annotation.as_ref().unwrap();
-+        assert!(matches!(base.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-+        assert!(matches!(property.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-+        assert!(matches!(parameter.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-+        assert!(matches!(result.kind, severian_ast::TypeAnnotationKind::Union(_)));
-+        assert_eq!(binding.named_parts().unwrap().0, "list");
-+        assert_eq!(property.named_parts().unwrap().0, "list");
-+        assert_eq!(binding.named_parts().unwrap().1.len(), 1);
-+        assert_eq!(property.named_parts().unwrap().1.len(), 1);
-+    }
- }
-diff --git a/compiler/frontend/parser/src/statement/mod.rs b/compiler/frontend/parser/src/statement/mod.rs
-index cd796aa..75a641d 100644
---- a/compiler/frontend/parser/src/statement/mod.rs
-+++ b/compiler/frontend/parser/src/statement/mod.rs
-@@ -1,4 +1,8 @@
--use severian_ast::{Binding, Expression, ExpressionKind, Module, TypeAnnotation};
-+use severian_ast::{
-+    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Literal, Module,
-+    OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, TraitDeclaration,
-+    TypeAnnotation, TypeAnnotationKind, UnaryOperator,
-+};
- use severian_diagnostics::Diagnostic;
- use severian_lexer::{Token, TokenKind};
- use severian_source::Span;
-@@ -14,71 +18,203 @@ struct Parser<'a> {
- 
- impl Parser<'_> {
-     fn module(mut self) -> Result<Module, Diagnostic> {
--        let mut bindings = Vec::new();
-+        let mut module = Module::default();
-         self.separators();
--        while !matches!(self.peek().kind, TokenKind::Eof) {
--            bindings.push(self.binding()?);
--            if !matches!(self.peek().kind, TokenKind::Separator | TokenKind::Eof) {
--                return Err(self.error("expected a newline or comma after binding"));
-+        while !self.at(&TokenKind::Eof) {
-+            if self.at_identifier("trait") {
-+                module.traits.push(self.trait_declaration()?);
-+                self.separators();
-+                continue;
-+            } else if self.at_identifier("import") {
-+                module.imports.push(self.import_declaration()?);
-+            } else {
-+                module.bindings.push(self.binding()?);
-+            }
-+            if !self.at(&TokenKind::Newline)
-+                && !self.at(&TokenKind::Comma)
-+                && !self.at(&TokenKind::Eof)
-+            {
-+                return Err(self.error("expected a newline or comma after declaration"));
-             }
-             self.separators();
-         }
--        Ok(Module { bindings })
-+        Ok(module)
-     }
- 
--    fn binding(&mut self) -> Result<Binding, Diagnostic> {
--        let name_token = self.next();
--        let TokenKind::Identifier(name) = &name_token.kind else {
-+    fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
-+        let start = self.next().span;
-+        let path_token = self.next();
-+        let TokenKind::String(path) = path_token.kind else {
-             return Err(Diagnostic::new(
--                "E000110",
--                "expected a binding name",
--                Some(name_token.span),
-+                "E000118",
-+                "expected an import path string",
-+                Some(path_token.span),
-             ));
-         };
--        let name = name.clone();
--        let annotation = if matches!(self.peek().kind, TokenKind::Colon) {
--            self.next();
--            let type_token = self.next();
--            let TokenKind::Identifier(name) = type_token.kind else {
--                return Err(Diagnostic::new(
--                    "E000113",
--                    "expected a type name after `:`",
--                    Some(type_token.span),
--                ));
--            };
--            Some(TypeAnnotation {
--                name,
--                span: type_token.span,
--            })
-+        if !self.at_identifier("as") {
-+            return Err(self.error("expected `as` after import path"));
-+        }
-+        self.next();
-+        let (alias, end) = self.identifier("expected an import alias")?;
-+        Ok(ImportDeclaration {
-+            path,
-+            alias,
-+            span: Span::new(start.source, start.start, end.end),
-+        })
-+    }
-+
-+    fn trait_declaration(&mut self) -> Result<TraitDeclaration, Diagnostic> {
-+        let start = self.next().span;
-+        let (name, _) = self.identifier("expected a trait name")?;
-+        let mut type_parameters = Vec::new();
-+        if self.take(&TokenKind::LeftBracket).is_some() {
-+            loop {
-+                type_parameters.push(self.identifier("expected a type parameter")?.0);
-+                if self.take(&TokenKind::Comma).is_none() {
-+                    break;
-+                }
-+            }
-+            self.expect(
-+                &TokenKind::RightBracket,
-+                "expected `]` after type parameters",
-+            )?;
-+        }
-+        self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
-+        let mut bases = Vec::new();
-+        if !self.at(&TokenKind::Newline) {
-+            loop {
-+                bases.push(self.type_annotation()?);
-+                if self.take(&TokenKind::Plus).is_none() {
-+                    break;
-+                }
-+            }
-+            self.expect(&TokenKind::Colon, "expected `:` after base traits")?;
-+        }
-+        self.expect(&TokenKind::Newline, "expected a newline after trait header")?;
-+        while self.take(&TokenKind::Newline).is_some() {}
-+        self.expect(&TokenKind::Indent, "expected an indented trait body")?;
-+        let mut properties = Vec::new();
-+        let mut operators = Vec::new();
-+        self.separators();
-+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-+            if self.at_identifier("property") {
-+                properties.push(self.property()?);
-+            } else if self.at_identifier("operator") {
-+                operators.push(self.operator()?);
-+            } else {
-+                return Err(self.error("expected `property` or `operator` in trait body"));
-+            }
-+            if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
-+                return Err(self.error("expected a newline after trait member"));
-+            }
-+            self.separators();
-+        }
-+        let end = self
-+            .expect(&TokenKind::Dedent, "expected end of trait body")?
-+            .span;
-+        Ok(TraitDeclaration {
-+            name,
-+            type_parameters,
-+            bases,
-+            properties,
-+            operators,
-+            span: Span::new(start.source, start.start, end.end),
-+        })
-+    }
-+
-+    fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
-+        let start = self.next().span;
-+        let (name, _) = self.identifier("expected a property name")?;
-+        self.expect(&TokenKind::Colon, "expected `:` after property name")?;
-+        let annotation = self.type_annotation()?;
-+        let default = if self.take(&TokenKind::Equal).is_some() {
-+            Some(self.expression(0)?)
-+        } else {
-+            None
-+        };
-+        let end = default
-+            .as_ref()
-+            .map_or(annotation.span.end, |expression| expression.span.end);
-+        Ok(PropertyDeclaration {
-+            name,
-+            annotation,
-+            default,
-+            span: Span::new(start.source, start.start, end),
-+        })
-+    }
-+
-+    fn operator(&mut self) -> Result<OperatorDeclaration, Diagnostic> {
-+        let start = self.next().span;
-+        let operator_token = self.next();
-+        let operator = operator_syntax(&operator_token.kind).ok_or_else(|| {
-+            Diagnostic::new(
-+                "E000117",
-+                "expected an operator name",
-+                Some(operator_token.span),
-+            )
-+        })?;
-+        self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
-+        let mut parameters = Vec::new();
-+        if !self.at(&TokenKind::RightParen) {
-+            loop {
-+                let (name, span) = self.identifier("expected an operator parameter")?;
-+                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
-+                let annotation = self.type_annotation()?;
-+                parameters.push(OperatorParameter {
-+                    name,
-+                    annotation,
-+                    span,
-+                });
-+                if self.take(&TokenKind::Comma).is_none() {
-+                    break;
-+                }
-+            }
-+        }
-+        self.expect(&TokenKind::RightParen, "expected `)` after parameters")?;
-+        self.expect(&TokenKind::Arrow, "expected `->` after operator parameters")?;
-+        let result = self.type_annotation()?;
-+        Ok(OperatorDeclaration {
-+            operator,
-+            parameters,
-+            span: Span::new(start.source, start.start, result.span.end),
-+            result,
-+        })
-+    }
-+
-+    fn binding(&mut self) -> Result<Binding, Diagnostic> {
-+        let (name, name_span) = self.identifier("expected a binding name")?;
-+        let annotation = if self.take(&TokenKind::Colon).is_some() {
-+            Some(self.type_annotation()?)
-         } else {
-             None
-         };
--        self.expect(TokenKind::Equal, "expected `=` after binding name")?;
--        let value = self.expression()?;
-+        self.expect(&TokenKind::Equal, "expected `=` after binding name")?;
-+        let value = self.expression(0)?;
-         Ok(Binding {
-             name,
-             annotation,
--            span: Span::new(
--                name_token.span.source,
--                name_token.span.start,
--                value.span.end,
--            ),
-+            span: Span::new(name_span.source, name_span.start, value.span.end),
-             value,
-         })
-     }
- 
--    fn expression(&mut self) -> Result<Expression, Diagnostic> {
--        let mut expression = self.primary()?;
--        while matches!(self.peek().kind, TokenKind::Plus) {
-+    fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
-+        let mut expression = self.unary()?;
-+        while let Some(operator) = binary_operator(&self.peek().kind) {
-+            let precedence = precedence(operator);
-+            if precedence < minimum_precedence {
-+                break;
-+            }
-             self.next();
--            let right = self.primary()?;
-+            let right = self.expression(precedence + 1)?;
-             let span = Span::new(
-                 expression.span.source,
-                 expression.span.start,
-                 right.span.end,
-             );
-             expression = Expression {
--                kind: ExpressionKind::Add {
-+                kind: ExpressionKind::Binary {
-+                    operator,
-                     left: Box::new(expression),
-                     right: Box::new(right),
-                 },
-@@ -88,15 +224,52 @@ impl Parser<'_> {
-         Ok(expression)
-     }
- 
-+    fn unary(&mut self) -> Result<Expression, Diagnostic> {
-+        let operator = match &self.peek().kind {
-+            TokenKind::Plus => Some(UnaryOperator::Positive),
-+            TokenKind::Minus => Some(UnaryOperator::Negative),
-+            TokenKind::Identifier(value) if value == "not" => Some(UnaryOperator::Not),
-+            _ => None,
-+        };
-+        if let Some(operator) = operator {
-+            let start = self.next().span;
-+            let operand = self.unary()?;
-+            return Ok(Expression {
-+                span: Span::new(start.source, start.start, operand.span.end),
-+                kind: ExpressionKind::Unary {
-+                    operator,
-+                    operand: Box::new(operand),
-+                },
-+            });
-+        }
-+        self.primary()
-+    }
-+
-     fn primary(&mut self) -> Result<Expression, Diagnostic> {
-         let token = self.next();
--        let kind = match &token.kind {
--            TokenKind::Integer(value) => ExpressionKind::Integer(*value),
--            TokenKind::Identifier(name) => ExpressionKind::Name(name.clone()),
-+        let kind = match token.kind {
-+            TokenKind::Integer(value) => ExpressionKind::Literal(Literal::Integer(value)),
-+            TokenKind::Float(value) => ExpressionKind::Literal(Literal::Float(value)),
-+            TokenKind::String(value) => ExpressionKind::Literal(Literal::String(value)),
-+            TokenKind::Identifier(value) if value == "true" => {
-+                ExpressionKind::Literal(Literal::Boolean(true))
-+            }
-+            TokenKind::Identifier(value) if value == "false" => {
-+                ExpressionKind::Literal(Literal::Boolean(false))
-+            }
-+            TokenKind::Identifier(value) if value == "None" => {
-+                ExpressionKind::Literal(Literal::None)
-+            }
-+            TokenKind::Identifier(name) => ExpressionKind::Name(name),
-+            TokenKind::LeftParen => {
-+                let expression = self.expression(0)?;
-+                self.expect(&TokenKind::RightParen, "expected `)`")?;
-+                return Ok(expression);
-+            }
-             _ => {
-                 return Err(Diagnostic::new(
-                     "E000111",
--                    "expected an integer or binding name",
-+                    "expected a literal or binding name",
-                     Some(token.span),
-                 ))
-             }
-@@ -107,28 +280,153 @@ impl Parser<'_> {
-         })
-     }
- 
-+    fn type_annotation(&mut self) -> Result<TypeAnnotation, Diagnostic> {
-+        let first = self.type_primary()?;
-+        if self.take(&TokenKind::Pipe).is_none() {
-+            return Ok(first);
-+        }
-+        let start = first.span;
-+        let mut members = vec![first];
-+        loop {
-+            members.push(self.type_primary()?);
-+            if self.take(&TokenKind::Pipe).is_none() {
-+                break;
-+            }
-+        }
-+        let end = members.last().expect("union has members").span.end;
-+        Ok(TypeAnnotation {
-+            kind: TypeAnnotationKind::Union(members),
-+            span: Span::new(start.source, start.start, end),
-+        })
-+    }
-+
-+    fn type_primary(&mut self) -> Result<TypeAnnotation, Diagnostic> {
-+        let (name, start) = self.identifier("expected a type")?;
-+        let mut arguments = Vec::new();
-+        let mut end = start.end;
-+        if self.take(&TokenKind::LeftBracket).is_some() {
-+            if !self.at(&TokenKind::RightBracket) {
-+                loop {
-+                    arguments.push(self.type_annotation()?);
-+                    if self.take(&TokenKind::Comma).is_none() {
-+                        break;
-+                    }
-+                }
-+            }
-+            end = self
-+                .expect(&TokenKind::RightBracket, "expected `]` after type arguments")?
-+                .span
-+                .end;
-+        }
-+        Ok(TypeAnnotation::named(
-+            name,
-+            arguments,
-+            Span::new(start.source, start.start, end),
-+        ))
-+    }
-+
-     fn separators(&mut self) {
--        while matches!(self.peek().kind, TokenKind::Separator) {
-+        while self.at(&TokenKind::Newline) || self.at(&TokenKind::Comma) {
-             self.cursor += 1;
-         }
-     }
-+
-+    fn identifier(&mut self, message: &str) -> Result<(String, Span), Diagnostic> {
-+        let token = self.next();
-+        match token.kind {
-+            TokenKind::Identifier(name) => Ok((name, token.span)),
-+            _ => Err(Diagnostic::new("E000110", message, Some(token.span))),
-+        }
-+    }
-+
-+    fn at_identifier(&self, expected: &str) -> bool {
-+        matches!(&self.peek().kind, TokenKind::Identifier(value) if value == expected)
-+    }
-+
-+    fn at(&self, expected: &TokenKind) -> bool {
-+        std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(expected)
-+    }
-+
-+    fn take(&mut self, expected: &TokenKind) -> Option<Token> {
-+        self.at(expected).then(|| self.next())
-+    }
-+
-     fn peek(&self) -> &Token {
-         &self.tokens[self.cursor]
-     }
-+
-     fn next(&mut self) -> Token {
-         let token = self.tokens[self.cursor].clone();
-         self.cursor += 1;
-         token
-     }
--    fn expect(&mut self, expected: TokenKind, message: &str) -> Result<(), Diagnostic> {
--        if std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(&expected) {
--            self.cursor += 1;
--            Ok(())
-+
-+    fn expect(&mut self, expected: &TokenKind, message: &str) -> Result<Token, Diagnostic> {
-+        if self.at(expected) {
-+            Ok(self.next())
-         } else {
-             Err(self.error(message))
-         }
-     }
-+
-     fn error(&self, message: &str) -> Diagnostic {
-         Diagnostic::new("E000112", message, Some(self.peek().span))
-     }
- }
-+
-+fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
-+    Some(match kind {
-+        TokenKind::Identifier(value) if value == "and" => OperatorSyntax::And,
-+        TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
-+        TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
-+        TokenKind::Plus => OperatorSyntax::Plus,
-+        TokenKind::Minus => OperatorSyntax::Minus,
-+        TokenKind::Star => OperatorSyntax::Multiply,
-+        TokenKind::Slash => OperatorSyntax::Divide,
-+        TokenKind::Percent => OperatorSyntax::Remainder,
-+        TokenKind::Power => OperatorSyntax::Power,
-+        TokenKind::EqualEqual => OperatorSyntax::Equal,
-+        TokenKind::NotEqual => OperatorSyntax::NotEqual,
-+        TokenKind::Less => OperatorSyntax::Less,
-+        TokenKind::LessEqual => OperatorSyntax::LessEqual,
-+        TokenKind::Greater => OperatorSyntax::Greater,
-+        TokenKind::GreaterEqual => OperatorSyntax::GreaterEqual,
-+        _ => return None,
-+    })
-+}
-+
-+fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
-+    Some(match operator_syntax(kind)? {
-+        OperatorSyntax::Plus => BinaryOperator::Add,
-+        OperatorSyntax::Minus => BinaryOperator::Subtract,
-+        OperatorSyntax::Multiply => BinaryOperator::Multiply,
-+        OperatorSyntax::Divide => BinaryOperator::Divide,
-+        OperatorSyntax::Remainder => BinaryOperator::Remainder,
-+        OperatorSyntax::Power => BinaryOperator::Power,
-+        OperatorSyntax::Equal => BinaryOperator::Equal,
-+        OperatorSyntax::NotEqual => BinaryOperator::NotEqual,
-+        OperatorSyntax::Less => BinaryOperator::Less,
-+        OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
-+        OperatorSyntax::Greater => BinaryOperator::Greater,
-+        OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
-+        OperatorSyntax::And => BinaryOperator::And,
-+        OperatorSyntax::Or => BinaryOperator::Or,
-+        OperatorSyntax::Not => return None,
-+    })
-+}
-+
-+fn precedence(operator: BinaryOperator) -> u8 {
-+    match operator {
-+        BinaryOperator::Or => 1,
-+        BinaryOperator::And => 2,
-+        BinaryOperator::Equal
-+        | BinaryOperator::NotEqual
-+        | BinaryOperator::Less
-+        | BinaryOperator::LessEqual
-+        | BinaryOperator::Greater
-+        | BinaryOperator::GreaterEqual => 3,
-+        BinaryOperator::Add | BinaryOperator::Subtract => 4,
-+        BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 5,
-+        BinaryOperator::Power => 6,
-+    }
-+}
-diff --git a/compiler/frontend/semantic/Cargo.toml b/compiler/frontend/semantic/Cargo.toml
-index d0bb63c..5a044f9 100644
---- a/compiler/frontend/semantic/Cargo.toml
-+++ b/compiler/frontend/semantic/Cargo.toml
-@@ -9,11 +9,14 @@ repository.workspace = true
- severian-ast = { path = "../ast" }
- severian-diagnostics = { path = "../../diagnostics" }
- severian-hir = { path = "../hir" }
--severian-interface = { path = "../../boundaries/interface" }
--severian-primitives = { path = "../../../library/core/primitives" }
-+severian-universal = { path = "../../universal" }
-+severian-source = { path = "../../source" }
- 
- [lib]
- path = "src/lib.rs"
- 
- [dev-dependencies]
- severian-source = { path = "../../source" }
-+severian-bootstrap = { path = "../../bootstrap" }
-+severian-lexer = { path = "../lexer" }
-+severian-parser = { path = "../parser" }
-diff --git a/compiler/transforms/lowering/Cargo.toml b/compiler/transforms/lowering/Cargo.toml
-index ebe506f..cd7e5e8 100644
---- a/compiler/transforms/lowering/Cargo.toml
-+++ b/compiler/transforms/lowering/Cargo.toml
-@@ -6,10 +6,9 @@ license-file.workspace = true
- repository.workspace = true
- 
- [dependencies]
--severian-backend = { path = "../../boundaries/backend" }
--severian-hir = { path = "../../frontend/hir" }
-+severian-lir = { path = "../lir" }
- severian-mir = { path = "../mir" }
--severian-primitives = { path = "../../../library/core/primitives" }
-+severian-universal = { path = "../../universal" }
- 
- [lib]
- path = "src/lib.rs"
-diff --git a/compiler/transforms/mir/Cargo.toml b/compiler/transforms/mir/Cargo.toml
-index 1b3ea6b..3e26911 100644
---- a/compiler/transforms/mir/Cargo.toml
-+++ b/compiler/transforms/mir/Cargo.toml
-@@ -7,10 +7,7 @@ repository.workspace = true
- 
- [dependencies]
- severian-hir = { path = "../../frontend/hir" }
--severian-interface = { path = "../../boundaries/interface" }
-+severian-universal = { path = "../../universal" }
- 
- [lib]
- path = "src/lib.rs"
--
--[dev-dependencies]
--severian-source = { path = "../../source" }
-diff --git a/compiler/transforms/mlir/Cargo.toml b/compiler/transforms/mlir/Cargo.toml
-index afcb268..4fcd19c 100644
---- a/compiler/transforms/mlir/Cargo.toml
-+++ b/compiler/transforms/mlir/Cargo.toml
-@@ -6,7 +6,8 @@ license-file.workspace = true
- repository.workspace = true
- 
- [dependencies]
--severian-backend = { path = "../../boundaries/backend" }
-+severian-lir = { path = "../lir" }
-+severian-universal = { path = "../../universal" }
- 
- [lib]
- path = "src/lib.rs"
-diff --git a/library/core/primitives/Cargo.toml b/library/core/primitives/Cargo.toml
-index c893ed1..0d256a2 100644
---- a/library/core/primitives/Cargo.toml
-+++ b/library/core/primitives/Cargo.toml
-@@ -6,7 +6,4 @@ license-file.workspace = true
- repository.workspace = true
- 
- [lib]
--path = "src/lib.rs"
--
--[dependencies]
--severian-interface = { path = "../../../compiler/boundaries/interface" }
-+path = "interop/rust/lib.rs"
-diff --git a/library/core/primitives/interop/rust/lib.rs b/library/core/primitives/interop/rust/lib.rs
-index a3fdddb..eba055c 100644
---- a/library/core/primitives/interop/rust/lib.rs
-+++ b/library/core/primitives/interop/rust/lib.rs
-@@ -1,342 +1,46 @@
+     Unary {
+-        operator: UnaryOperator,
++        operator: UnaryOperation,
+         operand: ValueId,
+         result: ValueId,
+     },
+     Binary {
+-        operator: BinaryOperator,
++        operator: BinaryOperation,
+         left: ValueId,
+         right: ValueId,
+         result: ValueId,
+diff --git a/compiler/transforms/lowering/src/lib.rs b/compiler/transforms/lowering/src/lib.rs
+index 6a62281..3abb3d5 100644
+--- a/compiler/transforms/lowering/src/lib.rs
++++ b/compiler/transforms/lowering/src/lib.rs
+@@ -1,11 +1,13 @@
  #![forbid(unsafe_code)]
  
--use std::collections::{BTreeMap, HashMap};
--use std::fmt;
--
- pub const PACKAGE_NAME: &str = "core.primitives";
+ use severian_lir::{
+-    LoweredFloatFormat, LoweredType, Module as LirModule, Operation as LirOperation, Value, ValueId,
++    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module as LirModule,
++    Operation as LirOperation, UnaryOperation, Value, ValueId,
+ };
+ use severian_mir::{Module as MirModule, Operation as MirOperation};
+ use severian_universal::{
+-    FloatFormat, IntegerWidth, PrimitiveRepresentation, TargetSpec, TypeContext, TypeId,
++    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TargetSpec,
++    TypeContext, TypeId, UnaryOperator,
+ };
+ use std::fmt;
  
--/// Stable identity of a declaration in the primitive bootstrap package.
--#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
--pub struct PrimitiveId(pub u64);
--
--impl PrimitiveId {
--    pub const fn from_declaration_id(id: u64) -> Self {
--        Self(id)
--    }
--}
--
--#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
--pub enum PrimitiveCategory {
--    Boolean,
--    Integer,
--    Float,
--    Text,
--    Bytes,
--    Absence,
--    Unit,
--}
--
--impl PrimitiveCategory {
--    pub fn from_contract(value: &str) -> Result<Self, PrimitiveError> {
--        match value {
--            "boolean" => Ok(Self::Boolean),
--            "integer" => Ok(Self::Integer),
--            "float" => Ok(Self::Float),
--            "text" => Ok(Self::Text),
--            "bytes" => Ok(Self::Bytes),
--            "absence" => Ok(Self::Absence),
--            "unit" => Ok(Self::Unit),
--            other => Err(PrimitiveError::UnknownCategory(other.to_owned())),
--        }
--    }
--}
--
--/// Raw metadata mechanically extracted from a declaration by the compiler's
--/// source adapter. Interpretation and validation belong to this crate.
--#[derive(Debug, Clone, PartialEq, Eq)]
--pub struct PrimitiveMetadata {
--    /// Canonical declaration identity assigned by the compiler resolver.
--    pub id: PrimitiveId,
--    pub name: String,
--    pub category: Option<String>,
--    pub representation: Option<String>,
--    pub bits: Option<i64>,
--    pub signed: Option<bool>,
--    pub default_literal: Option<bool>,
--}
--
--#[derive(Debug, Clone, PartialEq, Eq)]
--pub struct PrimitiveDefinition {
--    pub id: PrimitiveId,
--    pub name: String,
--    pub category: PrimitiveCategory,
--    pub representation: String,
--    pub bit_width: Option<u16>,
--    pub signed: Option<bool>,
--    pub default_literal: bool,
--}
--
--impl PrimitiveDefinition {
--    fn interpret(metadata: PrimitiveMetadata) -> Result<Self, PrimitiveError> {
--        let category_name = metadata
--            .category
--            .ok_or_else(|| PrimitiveError::MissingCategory(metadata.name.clone()))?;
--        let category = PrimitiveCategory::from_contract(&category_name)?;
--        let representation = metadata
--            .representation
--            .filter(|representation| !representation.is_empty())
--            .ok_or_else(|| PrimitiveError::MissingRepresentation(metadata.name.clone()))?;
--        let bit_width = match metadata.bits {
--            None | Some(0) => None,
--            Some(bits) => Some(
--                u16::try_from(bits)
--                    .map_err(|_| PrimitiveError::InvalidBitWidth(metadata.name.clone(), bits))?,
--            ),
--        };
--        let signed = match category {
--            PrimitiveCategory::Integer => Some(metadata.signed.unwrap_or(false)),
--            _ if metadata.signed.is_some() => {
--                return Err(PrimitiveError::SignedNonInteger(metadata.name))
--            }
--            _ => None,
--        };
--        Ok(Self {
--            id: metadata.id,
--            name: metadata.name,
--            category,
--            representation,
--            bit_width,
--            signed,
--            default_literal: metadata.default_literal.unwrap_or(false),
--        })
--    }
--
--    pub const fn is_numeric(&self) -> bool {
--        matches!(self.category, PrimitiveCategory::Integer | PrimitiveCategory::Float)
--    }
--
--    pub const fn supports_equality(&self) -> bool {
--        true
--    }
--
--    pub const fn supports_ordering(&self) -> bool {
--        matches!(
--            self.category,
--            PrimitiveCategory::Integer
--                | PrimitiveCategory::Float
--                | PrimitiveCategory::Text
--                | PrimitiveCategory::Bytes
--        )
--    }
--}
--
--#[derive(Debug, Clone, PartialEq, Eq)]
--pub struct PrimitiveCatalog {
--    by_name: HashMap<String, PrimitiveId>,
--    definitions: BTreeMap<PrimitiveId, PrimitiveDefinition>,
--    defaults: HashMap<PrimitiveCategory, PrimitiveId>,
--}
--
--impl PrimitiveCatalog {
--    pub fn from_metadata(
--        metadata: impl IntoIterator<Item = PrimitiveMetadata>,
--    ) -> Result<Self, PrimitiveError> {
--        let mut catalog = Self {
--            by_name: HashMap::new(),
--            definitions: BTreeMap::new(),
--            defaults: HashMap::new(),
--        };
--        for metadata in metadata {
--            let definition = PrimitiveDefinition::interpret(metadata)?;
--            if catalog.by_name.contains_key(&definition.name) {
--                return Err(PrimitiveError::DuplicateName(definition.name));
--            }
--            if definition.default_literal
--                && catalog
--                    .defaults
--                    .insert(definition.category, definition.id)
--                    .is_some()
--            {
--                return Err(PrimitiveError::DuplicateDefault(definition.category));
--            }
--            catalog.by_name.insert(definition.name.clone(), definition.id);
--            catalog.definitions.insert(definition.id, definition);
--        }
--        if catalog.definitions.is_empty() {
--            return Err(PrimitiveError::EmptyCatalog);
--        }
--        Ok(catalog)
--    }
--
--    pub fn contains(&self, name: &str) -> bool {
--        self.by_name.contains_key(name)
--    }
--
--    pub fn resolve(&self, name: &str) -> Option<PrimitiveId> {
--        self.by_name.get(name).copied()
--    }
--
--    pub fn definition(&self, id: PrimitiveId) -> Option<&PrimitiveDefinition> {
--        self.definitions.get(&id)
--    }
--
--    pub fn definitions(&self) -> impl Iterator<Item = &PrimitiveDefinition> {
--        self.definitions.values()
--    }
--
--    pub fn default_for(&self, category: PrimitiveCategory) -> Option<PrimitiveId> {
--        self.defaults.get(&category).copied()
--    }
--}
--
--pub fn assignable(actual: &PrimitiveDefinition, expected: &PrimitiveDefinition) -> bool {
--    if actual.id == expected.id {
--        return true;
--    }
--    match (actual.category, expected.category) {
--        (PrimitiveCategory::Integer, PrimitiveCategory::Integer) => {
--            actual.signed == expected.signed && width_fits(actual.bit_width, expected.bit_width)
--        }
--        (PrimitiveCategory::Float, PrimitiveCategory::Float) => {
--            width_fits(actual.bit_width, expected.bit_width)
--        }
--        _ => false,
--    }
--}
--
--pub fn arithmetic_result(
--    left: &PrimitiveDefinition,
--    right: &PrimitiveDefinition,
--) -> Option<PrimitiveId> {
--    (left.id == right.id && left.is_numeric()).then_some(left.id)
--}
--
--pub fn equality_allowed(left: &PrimitiveDefinition, right: &PrimitiveDefinition) -> bool {
--    left.id == right.id && left.supports_equality()
--}
--
--pub fn ordering_allowed(left: &PrimitiveDefinition, right: &PrimitiveDefinition) -> bool {
--    left.id == right.id && left.supports_ordering()
--}
--
--fn width_fits(actual: Option<u16>, expected: Option<u16>) -> bool {
--    match (actual, expected) {
--        (Some(actual), Some(expected)) => actual <= expected,
--        (None, None) => true,
--        _ => false,
--    }
--}
--
--#[derive(Debug, Clone, PartialEq, Eq)]
--pub enum PrimitiveError {
--    EmptyCatalog,
--    DuplicateName(String),
--    DuplicateDefault(PrimitiveCategory),
--    UnknownCategory(String),
--    MissingCategory(String),
--    MissingRepresentation(String),
--    InvalidBitWidth(String, i64),
--    SignedNonInteger(String),
--}
--
--impl fmt::Display for PrimitiveError {
--    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
--        match self {
--            Self::EmptyCatalog => formatter.write_str("core primitive catalog is empty"),
--            Self::DuplicateName(name) => write!(formatter, "duplicate primitive `{name}`"),
--            Self::DuplicateDefault(category) => {
--                write!(formatter, "multiple default literal primitives for `{category:?}`")
--            }
--            Self::UnknownCategory(category) => {
--                write!(formatter, "unknown primitive category `{category}`")
--            }
--            Self::MissingCategory(name) => {
--                write!(formatter, "primitive `{name}` has no category")
--            }
--            Self::MissingRepresentation(name) => {
--                write!(formatter, "primitive `{name}` has no representation")
--            }
--            Self::InvalidBitWidth(name, bits) => {
--                write!(formatter, "primitive `{name}` has invalid bit width `{bits}`")
--            }
--            Self::SignedNonInteger(name) => {
--                write!(formatter, "non-integer primitive `{name}` declares signedness")
--            }
--        }
--    }
--}
--
--impl std::error::Error for PrimitiveError {}
--
--#[cfg(test)]
--mod tests {
--    use super::*;
--
--    fn metadata(
--        id: u64,
--        name: &str,
--        category: &str,
--        representation: &str,
--        bit_width: Option<u16>,
--        default_literal: bool,
--    ) -> PrimitiveMetadata {
--        PrimitiveMetadata {
--            id: PrimitiveId::from_declaration_id(id),
--            name: name.into(),
--            category: Some(category.into()),
--            representation: Some(representation.into()),
--            bits: bit_width.map(i64::from),
--            signed: (category == "integer").then_some(true),
--            default_literal: Some(default_literal),
--        }
--    }
--
--    #[test]
--    fn annotation_and_inference_use_the_registered_identity() {
--        let catalog = PrimitiveCatalog::from_metadata([metadata(
--            32,
--            "i32",
--            "integer",
--            "fixed-integer",
--            Some(32),
--            true,
--        )])
--        .unwrap();
--        assert_eq!(
--            catalog.resolve("i32"),
--            catalog.default_for(PrimitiveCategory::Integer)
--        );
--    }
--
--    #[test]
--    fn arbitrary_new_declarations_need_no_model_enum_variant() {
--        let catalog = PrimitiveCatalog::from_metadata([metadata(
--            128,
--            "f128",
--            "float",
--            "ieee-float",
--            Some(128),
--            false,
--        )])
--        .unwrap();
--        assert_eq!(
--            catalog.definition(PrimitiveId(128)).unwrap().bit_width,
--            Some(128)
--        );
--    }
--
--    #[test]
--    fn bytes_remains_a_distinct_registered_primitive() {
--        let catalog = PrimitiveCatalog::from_metadata([metadata(
--            7,
--            "bytes",
--            "bytes",
--            "byte-string",
--            None,
--            false,
--        )])
--        .unwrap();
--        let bytes = catalog
--            .definition(catalog.resolve("bytes").unwrap())
--            .unwrap();
--        assert_eq!(bytes.category, PrimitiveCategory::Bytes);
--    }
--
--    #[test]
--    fn missing_bootstrap_catalog_is_a_hard_error() {
--        assert_eq!(
--            PrimitiveCatalog::from_metadata([]),
--            Err(PrimitiveError::EmptyCatalog)
--        );
--    }
--}
-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+pub struct PrimitiveSource {
-+    pub path: &'static str,
-+    pub source: &'static str,
+@@ -29,7 +31,7 @@ pub fn lower(
+         .iter()
+         .map(|operation| match operation {
+             MirOperation::Constant { value, result } => LirOperation::Constant {
+-                value: value.clone(),
++                value: lower_constant(value),
+                 result: ValueId(result.0),
+             },
+             MirOperation::Unary {
+@@ -37,7 +39,7 @@ pub fn lower(
+                 operand,
+                 result,
+             } => LirOperation::Unary {
+-                operator: *operator,
++                operator: lower_unary(*operator),
+                 operand: ValueId(operand.0),
+                 result: ValueId(result.0),
+             },
+@@ -47,7 +49,7 @@ pub fn lower(
+                 right,
+                 result,
+             } => LirOperation::Binary {
+-                operator: *operator,
++                operator: lower_binary(*operator),
+                 left: ValueId(left.0),
+                 right: ValueId(right.0),
+                 result: ValueId(result.0),
+@@ -61,6 +63,45 @@ pub fn lower(
+     })
+ }
+ 
++fn lower_constant(value: &LiteralValue) -> Constant {
++    match value {
++        LiteralValue::Integer(value) => Constant::Integer(value.clone()),
++        LiteralValue::Float(value) => Constant::Float(value.clone()),
++        LiteralValue::Boolean(value) => Constant::Boolean(*value),
++        LiteralValue::String(value) => Constant::String(value.clone()),
++        LiteralValue::Bytes(value) => Constant::Bytes(value.clone()),
++        LiteralValue::None => Constant::None,
++        LiteralValue::Unit => Constant::Unit,
++    }
 +}
 +
-+/// Authoritative Severian sources. This wrapper intentionally performs no
-+/// parsing, ID allocation, metadata interpretation, or semantic resolution.
-+pub const SOURCES: &[PrimitiveSource] = &[
-+    PrimitiveSource {
-+        path: "src/mod.sev",
-+        source: include_str!("../../src/mod.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/bool.sev",
-+        source: include_str!("../../src/bool.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/bytes.sev",
-+        source: include_str!("../../src/bytes.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/floats.sev",
-+        source: include_str!("../../src/floats.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/integers.sev",
-+        source: include_str!("../../src/integers.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/none.sev",
-+        source: include_str!("../../src/none.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/string.sev",
-+        source: include_str!("../../src/string.sev"),
-+    },
-+    PrimitiveSource {
-+        path: "src/unit.sev",
-+        source: include_str!("../../src/unit.sev"),
-+    },
-+];
-diff --git a/library/core/primitives/src/floats.sev b/library/core/primitives/src/floats.sev
-index 0a08359..e85a036 100644
---- a/library/core/primitives/src/floats.sev
-+++ b/library/core/primitives/src/floats.sev
-@@ -1,4 +1,6 @@
- trait Floating[T]:
-+    operator +() -> T
-+    operator -() -> T
-     operator +(right: T) -> T
-     operator -(right: T) -> T
-     operator *(right: T) -> T
-diff --git a/library/core/primitives/src/integers.sev b/library/core/primitives/src/integers.sev
-index ff2ef05..27eaf24 100644
---- a/library/core/primitives/src/integers.sev
-+++ b/library/core/primitives/src/integers.sev
-@@ -1,4 +1,6 @@
- trait Integer[T]:
-+    operator +() -> T
-+    operator -() -> T
-     operator +(right: T) -> T
-     operator -(right: T) -> T
-     operator *(right: T) -> T
++fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
++    match operator {
++        UnaryOperator::Positive => UnaryOperation::Positive,
++        UnaryOperator::Negative => UnaryOperation::Negative,
++        UnaryOperator::Not => UnaryOperation::Not,
++    }
++}
++
++fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
++    match operator {
++        BinaryOperator::Add => BinaryOperation::Add,
++        BinaryOperator::Subtract => BinaryOperation::Subtract,
++        BinaryOperator::Multiply => BinaryOperation::Multiply,
++        BinaryOperator::Divide => BinaryOperation::Divide,
++        BinaryOperator::Remainder => BinaryOperation::Remainder,
++        BinaryOperator::Power => BinaryOperation::Power,
++        BinaryOperator::Equal => BinaryOperation::Equal,
++        BinaryOperator::NotEqual => BinaryOperation::NotEqual,
++        BinaryOperator::Less => BinaryOperation::Less,
++        BinaryOperator::LessEqual => BinaryOperation::LessEqual,
++        BinaryOperator::Greater => BinaryOperation::Greater,
++        BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
++        BinaryOperator::And => BinaryOperation::And,
++        BinaryOperator::Or => BinaryOperation::Or,
++    }
++}
++
+ fn lower_type(
+     id: TypeId,
+     types: &TypeContext,
+diff --git a/compiler/transforms/mlir/Cargo.toml b/compiler/transforms/mlir/Cargo.toml
+index 4fcd19c..8f5278d 100644
+--- a/compiler/transforms/mlir/Cargo.toml
++++ b/compiler/transforms/mlir/Cargo.toml
+@@ -7,7 +7,6 @@ repository.workspace = true
+ 
+ [dependencies]
+ severian-lir = { path = "../lir" }
+-severian-universal = { path = "../../universal" }
+ 
+ [lib]
+ path = "src/lib.rs"
+diff --git a/compiler/transforms/mlir/src/emit/mod.rs b/compiler/transforms/mlir/src/emit/mod.rs
+index c46ff08..842de4b 100644
+--- a/compiler/transforms/mlir/src/emit/mod.rs
++++ b/compiler/transforms/mlir/src/emit/mod.rs
+@@ -1,5 +1,7 @@
+-use severian_lir::{LoweredFloatFormat, LoweredType, Module, Operation, ValueId};
+-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
++use severian_lir::{
++    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module, Operation, UnaryOperation,
++    ValueId,
++};
+ use std::fmt;
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+@@ -25,9 +27,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
+                 let ty = value_type(module, *result)?;
+                 let spelling = mlir_type(ty)?;
+                 let literal = match value {
+-                    LiteralValue::Integer(value) | LiteralValue::Float(value) => value,
+-                    LiteralValue::Boolean(true) => "1",
+-                    LiteralValue::Boolean(false) => "0",
++                    Constant::Integer(value) | Constant::Float(value) => value,
++                    Constant::Boolean(true) => "1",
++                    Constant::Boolean(false) => "0",
+                     other => {
+                         return Err(MlirError::UnsupportedOperation(format!(
+                             "MLIR constant lowering is unavailable for {other:?}"
+@@ -99,22 +101,22 @@ fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
+     })
+ }
+ 
+-fn mlir_binary(operator: BinaryOperator, ty: LoweredType) -> Result<&'static str, MlirError> {
++fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static str, MlirError> {
+     let float = matches!(ty, LoweredType::Float { .. });
+     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
+     Ok(match (operator, float) {
+-        (BinaryOperator::Add, false) => "arith.addi",
+-        (BinaryOperator::Subtract, false) => "arith.subi",
+-        (BinaryOperator::Multiply, false) => "arith.muli",
+-        (BinaryOperator::Divide, false) if signed => "arith.divsi",
+-        (BinaryOperator::Divide, false) => "arith.divui",
+-        (BinaryOperator::Remainder, false) if signed => "arith.remsi",
+-        (BinaryOperator::Remainder, false) => "arith.remui",
+-        (BinaryOperator::Add, true) => "arith.addf",
+-        (BinaryOperator::Subtract, true) => "arith.subf",
+-        (BinaryOperator::Multiply, true) => "arith.mulf",
+-        (BinaryOperator::Divide, true) => "arith.divf",
+-        (BinaryOperator::Remainder, true) => "arith.remf",
++        (BinaryOperation::Add, false) => "arith.addi",
++        (BinaryOperation::Subtract, false) => "arith.subi",
++        (BinaryOperation::Multiply, false) => "arith.muli",
++        (BinaryOperation::Divide, false) if signed => "arith.divsi",
++        (BinaryOperation::Divide, false) => "arith.divui",
++        (BinaryOperation::Remainder, false) if signed => "arith.remsi",
++        (BinaryOperation::Remainder, false) => "arith.remui",
++        (BinaryOperation::Add, true) => "arith.addf",
++        (BinaryOperation::Subtract, true) => "arith.subf",
++        (BinaryOperation::Multiply, true) => "arith.mulf",
++        (BinaryOperation::Divide, true) => "arith.divf",
++        (BinaryOperation::Remainder, true) => "arith.remf",
+         _ => {
+             return Err(MlirError::UnsupportedOperation(format!(
+                 "MLIR binary lowering is unavailable for {operator:?} on {ty:?}"
+@@ -124,7 +126,7 @@ fn mlir_binary(operator: BinaryOperator, ty: LoweredType) -> Result<&'static str
+ }
+ 
+ #[allow(dead_code)]
+-fn _unary_is_universal(_: UnaryOperator) {}
++fn _unary_is_lir(_: UnaryOperation) {}
+ 
+ #[cfg(test)]
+ mod tests {
+diff --git a/review.diff b/review.diff
+index 76af0d6..cbabe7e 100644
+--- a/review.diff
++++ b/review.diff
+@@ -1,1793 +0,0 @@
+-diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+-index 0586a5b..87699ab 100644
+---- a/.github/workflows/ci.yml
+-+++ b/.github/workflows/ci.yml
+-@@ -18,6 +18,9 @@ jobs:
+-         with:
+-           components: llvm-tools-preview
+- 
+-+      - name: Enforce compiler dependency layers
+-+        run: python3 tools/quality/check_architecture.py
+-+
+-       - uses: taiki-e/install-action@cargo-llvm-cov
+- 
+-       - name: Measure line and branch coverage
+-diff --git a/Cargo.lock b/Cargo.lock
+-index 4b5b698..5d0904c 100644
+---- a/Cargo.lock
+-+++ b/Cargo.lock
+-@@ -17,7 +17,21 @@ dependencies = [
+- name = "severian-backend"
+- version = "0.1.0"
+- dependencies = [
+-- "severian-abi",
+-+ "severian-lir",
+-+ "severian-universal",
+-+]
+-+
+-+[[package]]
+-+name = "severian-bootstrap"
+-+version = "0.1.0"
+-+dependencies = [
+-+ "severian-ast",
+-+ "severian-diagnostics",
+-+ "severian-lexer",
+-+ "severian-parser",
+-+ "severian-primitives",
+-+ "severian-source",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+-@@ -32,6 +46,7 @@ name = "severian-driver"
+- version = "0.1.0"
+- dependencies = [
+-  "severian-backend",
+-+ "severian-bootstrap",
+-  "severian-diagnostics",
+-  "severian-lexer",
+-  "severian-lowering",
+-@@ -40,19 +55,23 @@ dependencies = [
+-  "severian-parser",
+-  "severian-semantic",
+-  "severian-source",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+- name = "severian-hir"
+- version = "0.1.0"
+- dependencies = [
+-- "severian-interface",
+-  "severian-source",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+- name = "severian-interface"
+- version = "0.1.0"
+-+dependencies = [
+-+ "severian-universal",
+-+]
+- 
+- [[package]]
+- name = "severian-lexer"
+-@@ -62,14 +81,20 @@ dependencies = [
+-  "severian-source",
+- ]
+- 
+-+[[package]]
+-+name = "severian-lir"
+-+version = "0.1.0"
+-+dependencies = [
+-+ "severian-universal",
+-+]
+-+
+- [[package]]
+- name = "severian-lowering"
+- version = "0.1.0"
+- dependencies = [
+-- "severian-backend",
+-- "severian-hir",
+-+ "severian-lir",
+-  "severian-mir",
+-- "severian-primitives",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+-@@ -77,15 +102,15 @@ name = "severian-mir"
+- version = "0.1.0"
+- dependencies = [
+-  "severian-hir",
+-- "severian-interface",
+-- "severian-source",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+- name = "severian-mlir"
+- version = "0.1.0"
+- dependencies = [
+-- "severian-backend",
+-+ "severian-lir",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+-@@ -109,22 +134,25 @@ dependencies = [
+- [[package]]
+- name = "severian-primitives"
+- version = "0.1.0"
+--dependencies = [
+-- "severian-interface",
+--]
+- 
+- [[package]]
+- name = "severian-semantic"
+- version = "0.1.0"
+- dependencies = [
+-  "severian-ast",
+-+ "severian-bootstrap",
+-  "severian-diagnostics",
+-  "severian-hir",
+-- "severian-interface",
+-- "severian-primitives",
+-+ "severian-lexer",
+-+ "severian-parser",
+-  "severian-source",
+-+ "severian-universal",
+- ]
+- 
+- [[package]]
+- name = "severian-source"
+- version = "0.1.0"
+-+
+-+[[package]]
+-+name = "severian-universal"
+-+version = "0.1.0"
+-diff --git a/Cargo.toml b/Cargo.toml
+-index 84c5ec2..b445b8d 100644
+---- a/Cargo.toml
+-+++ b/Cargo.toml
+-@@ -1,6 +1,10 @@
+- [workspace]
+- members = [
+-+    # Universal semantic authority
+-+    "compiler/universal",
+-+
+-     # Language bootstrap
+-+    "compiler/bootstrap",
+-     "library/core/primitives",
+- 
+-     # Boundaries
+-@@ -22,6 +26,7 @@ members = [
+-     "compiler/source",
+- 
+-     # Transforms
+-+    "compiler/transforms/lir",
+-     "compiler/transforms/lowering",
+-     "compiler/transforms/mir",
+-     "compiler/transforms/mlir",
+-@@ -33,3 +38,64 @@ edition = "2021"
+- license-file = "LICENSE.md"
+- repository = "https://github.com/tlplayer/Severian"
+- version = "0.1.0"
+-+
+-+# Fail-closed dependency layers, enforced by tools/quality/check_architecture.py.
+-+[workspace.metadata.architecture.layers]
+-+source = []
+-+diagnostics = ["source"]
+-+syntax = ["source", "diagnostics", "syntax"]
+-+universal = []
+-+primitive_source = []
+-+semantic = ["source", "diagnostics", "syntax", "universal", "semantic"]
+-+bootstrap = ["source", "diagnostics", "syntax", "universal", "primitive_source"]
+-+transform = ["universal", "semantic", "transform"]
+-+boundary = ["universal", "transform", "boundary"]
+-+driver = [
+-+    "source",
+-+    "diagnostics",
+-+    "syntax",
+-+    "universal",
+-+    "primitive_source",
+-+    "semantic",
+-+    "bootstrap",
+-+    "transform",
+-+    "boundary",
+-+    "driver",
+-+]
+-+
+-+[workspace.metadata.architecture.packages]
+-+severian-source = "source"
+-+severian-diagnostics = "diagnostics"
+-+severian-lexer = "syntax"
+-+severian-ast = "syntax"
+-+severian-parser = "syntax"
+-+severian-universal = "universal"
+-+severian-primitives = "primitive_source"
+-+severian-hir = "semantic"
+-+severian-semantic = "semantic"
+-+severian-ownership = "semantic"
+-+severian-bootstrap = "bootstrap"
+-+severian-mir = "transform"
+-+severian-lir = "transform"
+-+severian-lowering = "transform"
+-+severian-abi = "boundary"
+-+severian-interface = "boundary"
+-+severian-backend = "boundary"
+-+severian-mlir = "boundary"
+-+severian-driver = "driver"
+-+
+-+[[workspace.metadata.architecture.reject]]
+-+from = "severian-ast"
+-+to = "severian-universal"
+-+
+-+[[workspace.metadata.architecture.reject]]
+-+from = "severian-parser"
+-+to = "severian-universal"
+-+
+-+[[workspace.metadata.architecture.reject]]
+-+from = "severian-universal"
+-+to = "severian-ast"
+-+
+-+[[workspace.metadata.architecture.reject]]
+-+from = "severian-backend"
+-+to = "severian-semantic"
+-diff --git a/compiler/boundaries/abi/src/lib.rs b/compiler/boundaries/abi/src/lib.rs
+-index 9930ac5..1c3287b 100644
+---- a/compiler/boundaries/abi/src/lib.rs
+-+++ b/compiler/boundaries/abi/src/lib.rs
+-@@ -4,11 +4,3 @@
+- pub enum NativeType {
+-     I64,
+- }
+--
+--impl NativeType {
+--    pub const fn c_spelling(self) -> &'static str {
+--        match self {
+--            Self::I64 => "int64_t",
+--        }
+--    }
+--}
+-diff --git a/compiler/boundaries/backend/Cargo.toml b/compiler/boundaries/backend/Cargo.toml
+-index 24173c8..0388d34 100644
+---- a/compiler/boundaries/backend/Cargo.toml
+-+++ b/compiler/boundaries/backend/Cargo.toml
+-@@ -6,7 +6,8 @@ license-file.workspace = true
+- repository.workspace = true
+- 
+- [dependencies]
+--severian-abi = { path = "../abi" }
+-+severian-lir = { path = "../../transforms/lir" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/compiler/boundaries/driver/Cargo.toml b/compiler/boundaries/driver/Cargo.toml
+-index 322c956..7508855 100644
+---- a/compiler/boundaries/driver/Cargo.toml
+-+++ b/compiler/boundaries/driver/Cargo.toml
+-@@ -7,6 +7,7 @@ repository.workspace = true
+- 
+- [dependencies]
+- severian-backend = { path = "../backend" }
+-+severian-bootstrap = { path = "../../bootstrap" }
+- severian-diagnostics = { path = "../../diagnostics" }
+- severian-lexer = { path = "../../frontend/lexer" }
+- severian-lowering = { path = "../../transforms/lowering" }
+-@@ -15,6 +16,7 @@ severian-ownership = { path = "../../frontend/ownership" }
+- severian-parser = { path = "../../frontend/parser" }
+- severian-semantic = { path = "../../frontend/semantic" }
+- severian-source = { path = "../../source" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/compiler/boundaries/interface/Cargo.toml b/compiler/boundaries/interface/Cargo.toml
+-index 616fecd..aade729 100644
+---- a/compiler/boundaries/interface/Cargo.toml
+-+++ b/compiler/boundaries/interface/Cargo.toml
+-@@ -5,5 +5,8 @@ edition.workspace = true
+- license-file.workspace = true
+- repository.workspace = true
+- 
+-+[dependencies]
+-+severian-universal = { path = "../../universal" }
+-+
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/compiler/frontend/ast/src/expression/mod.rs b/compiler/frontend/ast/src/expression/mod.rs
+-index 21c817e..4647340 100644
+---- a/compiler/frontend/ast/src/expression/mod.rs
+-+++ b/compiler/frontend/ast/src/expression/mod.rs
+-@@ -1,5 +1,41 @@
+- use severian_source::Span;
+- 
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub enum Literal {
+-+    Integer(String),
+-+    Float(String),
+-+    Boolean(bool),
+-+    String(String),
+-+    Bytes(Vec<u8>),
+-+    None,
+-+    Unit,
+-+}
+-+
+-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-+pub enum UnaryOperator {
+-+    Positive,
+-+    Negative,
+-+    Not,
+-+}
+-+
+-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-+pub enum BinaryOperator {
+-+    Add,
+-+    Subtract,
+-+    Multiply,
+-+    Divide,
+-+    Remainder,
+-+    Power,
+-+    Equal,
+-+    NotEqual,
+-+    Less,
+-+    LessEqual,
+-+    Greater,
+-+    GreaterEqual,
+-+    And,
+-+    Or,
+-+}
+-+
+- #[derive(Debug, Clone, PartialEq, Eq)]
+- pub struct Expression {
+-     pub kind: ExpressionKind,
+-@@ -8,9 +44,14 @@ pub struct Expression {
+- 
+- #[derive(Debug, Clone, PartialEq, Eq)]
+- pub enum ExpressionKind {
+--    Integer(i64),
+-+    Literal(Literal),
+-     Name(String),
+--    Add {
+-+    Unary {
+-+        operator: UnaryOperator,
+-+        operand: Box<Expression>,
+-+    },
+-+    Binary {
+-+        operator: BinaryOperator,
+-         left: Box<Expression>,
+-         right: Box<Expression>,
+-     },
+-diff --git a/compiler/frontend/ast/src/lib.rs b/compiler/frontend/ast/src/lib.rs
+-index 9b266f8..f77ddea 100644
+---- a/compiler/frontend/ast/src/lib.rs
+-+++ b/compiler/frontend/ast/src/lib.rs
+-@@ -4,11 +4,16 @@ mod expression;
+- mod statement;
+- mod types;
+- 
+--pub use expression::{Expression, ExpressionKind};
+-+pub use expression::{BinaryOperator, Expression, ExpressionKind, Literal, UnaryOperator};
+- pub use statement::Binding;
+--pub use types::TypeAnnotation;
+-+pub use types::{
+-+    ImportDeclaration, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
+-+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+-+};
+- 
+- #[derive(Debug, Clone, PartialEq, Eq, Default)]
+- pub struct Module {
+-     pub bindings: Vec<Binding>,
+-+    pub traits: Vec<TraitDeclaration>,
+-+    pub imports: Vec<ImportDeclaration>,
+- }
+-diff --git a/compiler/frontend/ast/src/types/mod.rs b/compiler/frontend/ast/src/types/mod.rs
+-index bc9023f..b6dedce 100644
+---- a/compiler/frontend/ast/src/types/mod.rs
+-+++ b/compiler/frontend/ast/src/types/mod.rs
+-@@ -1,7 +1,103 @@
+-+use crate::Expression;
+- use severian_source::Span;
+- 
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub struct ImportDeclaration {
+-+    pub path: String,
+-+    pub alias: String,
+-+    pub span: Span,
+-+}
+-+
+-+/// The one source-level type node used in every annotation position.
+- #[derive(Debug, Clone, PartialEq, Eq)]
+- pub struct TypeAnnotation {
+-+    pub kind: TypeAnnotationKind,
+-+    pub span: Span,
+-+}
+-+
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub enum TypeAnnotationKind {
+-+    Named {
+-+        name: String,
+-+        arguments: Vec<TypeAnnotation>,
+-+    },
+-+    Union(Vec<TypeAnnotation>),
+-+}
+-+
+-+impl TypeAnnotation {
+-+    pub fn named(name: impl Into<String>, arguments: Vec<Self>, span: Span) -> Self {
+-+        Self {
+-+            kind: TypeAnnotationKind::Named {
+-+                name: name.into(),
+-+                arguments,
+-+            },
+-+            span,
+-+        }
+-+    }
+-+
+-+    pub fn simple_name(&self) -> Option<&str> {
+-+        match &self.kind {
+-+            TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => Some(name),
+-+            _ => None,
+-+        }
+-+    }
+-+
+-+    pub fn named_parts(&self) -> Option<(&str, &[Self])> {
+-+        match &self.kind {
+-+            TypeAnnotationKind::Named { name, arguments } => Some((name, arguments)),
+-+            TypeAnnotationKind::Union(_) => None,
+-+        }
+-+    }
+-+}
+-+
+-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-+pub enum OperatorSyntax {
+-+    Plus,
+-+    Minus,
+-+    Multiply,
+-+    Divide,
+-+    Remainder,
+-+    Power,
+-+    Equal,
+-+    NotEqual,
+-+    Less,
+-+    LessEqual,
+-+    Greater,
+-+    GreaterEqual,
+-+    And,
+-+    Or,
+-+    Not,
+-+}
+-+
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub struct PropertyDeclaration {
+-+    pub name: String,
+-+    pub annotation: TypeAnnotation,
+-+    pub default: Option<Expression>,
+-+    pub span: Span,
+-+}
+-+
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub struct OperatorParameter {
+-+    pub name: String,
+-+    pub annotation: TypeAnnotation,
+-+    pub span: Span,
+-+}
+-+
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub struct OperatorDeclaration {
+-+    pub operator: OperatorSyntax,
+-+    pub parameters: Vec<OperatorParameter>,
+-+    pub result: TypeAnnotation,
+-+    pub span: Span,
+-+}
+-+
+-+#[derive(Debug, Clone, PartialEq, Eq)]
+-+pub struct TraitDeclaration {
+-     pub name: String,
+-+    pub type_parameters: Vec<String>,
+-+    pub bases: Vec<TypeAnnotation>,
+-+    pub properties: Vec<PropertyDeclaration>,
+-+    pub operators: Vec<OperatorDeclaration>,
+-     pub span: Span,
+- }
+-diff --git a/compiler/frontend/hir/Cargo.toml b/compiler/frontend/hir/Cargo.toml
+-index 7c82e53..0e3a68b 100644
+---- a/compiler/frontend/hir/Cargo.toml
+-+++ b/compiler/frontend/hir/Cargo.toml
+-@@ -6,8 +6,8 @@ license-file.workspace = true
+- repository.workspace = true
+- 
+- [dependencies]
+--severian-interface = { path = "../../boundaries/interface" }
+- severian-source = { path = "../../source" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/compiler/frontend/lexer/src/lib.rs b/compiler/frontend/lexer/src/lib.rs
+-index 42f28ff..870347e 100644
+---- a/compiler/frontend/lexer/src/lib.rs
+-+++ b/compiler/frontend/lexer/src/lib.rs
+-@@ -18,6 +18,18 @@ mod tests {
+-         assert!(tokens.iter().any(|token| token.kind == TokenKind::Plus));
+-         assert!(tokens
+-             .iter()
+--            .any(|token| token.kind == TokenKind::Integer(2)));
+-+            .any(|token| token.kind == TokenKind::Integer("2".into())));
+-+    }
+-+
+-+    #[test]
+-+    fn scans_indented_trait_members_and_typed_operators() {
+-+        let source = SourceFile::virtual_source(
+-+            "primitive.sev",
+-+            "trait i32: Primitive:\n    property bits: int = 32\n    operator +(right: i32) -> i32\n",
+-+        );
+-+        let tokens = scan(&source).unwrap();
+-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Indent));
+-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Arrow));
+-+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Dedent));
+-     }
+- }
+-diff --git a/compiler/frontend/lexer/src/scanner/mod.rs b/compiler/frontend/lexer/src/scanner/mod.rs
+-index 5335aef..3d8e696 100644
+---- a/compiler/frontend/lexer/src/scanner/mod.rs
+-+++ b/compiler/frontend/lexer/src/scanner/mod.rs
+-@@ -5,32 +5,134 @@ use severian_source::{SourceFile, Span};
+- pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+-     let bytes = source.text.as_bytes();
+-     let mut cursor = 0usize;
+-+    let mut line_start = true;
+-+    let mut indents = vec![0usize];
+-     let mut tokens = Vec::new();
+-+
+-     while cursor < bytes.len() {
+-+        if line_start {
+-+            let start = cursor;
+-+            while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+-+                cursor += 1;
+-+            }
+-+            if cursor >= bytes.len() {
+-+                break;
+-+            }
+-+            if bytes[cursor] == b'\n' || bytes[cursor] == b'#' {
+-+                if bytes[cursor] == b'#' {
+-+                    while cursor < bytes.len() && bytes[cursor] != b'\n' {
+-+                        cursor += 1;
+-+                    }
+-+                }
+-+                if cursor < bytes.len() {
+-+                    cursor += 1;
+-+                    tokens.push(token(source, TokenKind::Newline, cursor - 1, cursor));
+-+                }
+-+                line_start = true;
+-+                continue;
+-+            }
+-+            let width: usize = source.text[start..cursor]
+-+                .chars()
+-+                .map(|character| if character == '\t' { 4 } else { 1 })
+-+                .sum();
+-+            match width.cmp(indents.last().expect("indent stack is nonempty")) {
+-+                std::cmp::Ordering::Greater => {
+-+                    indents.push(width);
+-+                    tokens.push(token(source, TokenKind::Indent, start, cursor));
+-+                }
+-+                std::cmp::Ordering::Less => {
+-+                    while width < *indents.last().expect("indent stack is nonempty") {
+-+                        indents.pop();
+-+                        tokens.push(token(source, TokenKind::Dedent, start, cursor));
+-+                    }
+-+                    if width != *indents.last().expect("indent stack is nonempty") {
+-+                        return Err(Diagnostic::new(
+-+                            "E000102",
+-+                            "inconsistent indentation",
+-+                            Some(Span::new(source.id, start as u32, cursor as u32)),
+-+                        ));
+-+                    }
+-+                }
+-+                std::cmp::Ordering::Equal => {}
+-+            }
+-+            line_start = false;
+-+        }
+-+
+-         let start = cursor;
+-         let kind = match bytes[cursor] {
+-             b' ' | b'\t' | b'\r' => {
+-                 cursor += 1;
+-                 continue;
+-             }
+--            b'\n' | b',' | b';' => {
+-+            b'\n' | b';' => {
+-                 cursor += 1;
+--                TokenKind::Separator
+-+                line_start = true;
+-+                TokenKind::Newline
+-             }
+--            b'=' => {
+--                cursor += 1;
+--                TokenKind::Equal
+-+            b',' => one(&mut cursor, TokenKind::Comma),
+-+            b':' => one(&mut cursor, TokenKind::Colon),
+-+            b'(' => one(&mut cursor, TokenKind::LeftParen),
+-+            b')' => one(&mut cursor, TokenKind::RightParen),
+-+            b'[' => one(&mut cursor, TokenKind::LeftBracket),
+-+            b']' => one(&mut cursor, TokenKind::RightBracket),
+-+            b'|' => one(&mut cursor, TokenKind::Pipe),
+-+            b'+' => one(&mut cursor, TokenKind::Plus),
+-+            b'%' => one(&mut cursor, TokenKind::Percent),
+-+            b'*' if bytes.get(cursor + 1) == Some(&b'*') => {
+-+                cursor += 2;
+-+                TokenKind::Power
+-             }
+--            b':' => {
+--                cursor += 1;
+--                TokenKind::Colon
+-+            b'*' => one(&mut cursor, TokenKind::Star),
+-+            b'/' => one(&mut cursor, TokenKind::Slash),
+-+            b'-' if bytes.get(cursor + 1) == Some(&b'>') => {
+-+                cursor += 2;
+-+                TokenKind::Arrow
+-+            }
+-+            b'-' => one(&mut cursor, TokenKind::Minus),
+-+            b'=' if bytes.get(cursor + 1) == Some(&b'=') => {
+-+                cursor += 2;
+-+                TokenKind::EqualEqual
+-+            }
+-+            b'=' => one(&mut cursor, TokenKind::Equal),
+-+            b'!' if bytes.get(cursor + 1) == Some(&b'=') => {
+-+                cursor += 2;
+-+                TokenKind::NotEqual
+-+            }
+-+            b'<' if bytes.get(cursor + 1) == Some(&b'=') => {
+-+                cursor += 2;
+-+                TokenKind::LessEqual
+-             }
+--            b'+' => {
+-+            b'<' => one(&mut cursor, TokenKind::Less),
+-+            b'>' if bytes.get(cursor + 1) == Some(&b'=') => {
+-+                cursor += 2;
+-+                TokenKind::GreaterEqual
+-+            }
+-+            b'>' => one(&mut cursor, TokenKind::Greater),
+-+            b'"' => {
+-                 cursor += 1;
+--                TokenKind::Plus
+-+                let content_start = cursor;
+-+                while cursor < bytes.len() && bytes[cursor] != b'"' {
+-+                    if bytes[cursor] == b'\n' {
+-+                        return Err(Diagnostic::new(
+-+                            "E000101",
+-+                            "unterminated string literal",
+-+                            Some(Span::new(source.id, start as u32, cursor as u32)),
+-+                        ));
+-+                    }
+-+                    cursor += 1;
+-+                }
+-+                if cursor == bytes.len() {
+-+                    return Err(Diagnostic::new(
+-+                        "E000101",
+-+                        "unterminated string literal",
+-+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+-+                    ));
+-+                }
+-+                let value = source.text[content_start..cursor].to_owned();
+-+                cursor += 1;
+-+                TokenKind::String(value)
+-             }
+-             b'#' => {
+--                cursor += 1;
+-                 while cursor < bytes.len() && bytes[cursor] != b'\n' {
+-                     cursor += 1;
+-                 }
+-@@ -41,15 +143,17 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+-                 while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+-                     cursor += 1;
+-                 }
+--                let spelling = &source.text[start..cursor];
+--                let value = spelling.parse::<i64>().map_err(|_| {
+--                    Diagnostic::new(
+--                        "E000105",
+--                        format!("integer literal `{spelling}` is outside the supported int range"),
+--                        Some(Span::new(source.id, start as u32, cursor as u32)),
+--                    )
+--                })?;
+--                TokenKind::Integer(value)
+-+                if bytes.get(cursor) == Some(&b'.')
+-+                    && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)
+-+                {
+-+                    cursor += 1;
+-+                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+-+                        cursor += 1;
+-+                    }
+-+                    TokenKind::Float(source.text[start..cursor].to_owned())
+-+                } else {
+-+                    TokenKind::Integer(source.text[start..cursor].to_owned())
+-+                }
+-             }
+-             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
+-                 cursor += 1;
+-@@ -68,15 +172,24 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+-                 ))
+-             }
+-         };
+--        tokens.push(Token {
+--            kind,
+--            span: Span::new(source.id, start as u32, cursor as u32),
+--        });
+-+        tokens.push(token(source, kind, start, cursor));
+-     }
+--    let end = source.text.len() as u32;
+--    tokens.push(Token {
+--        kind: TokenKind::Eof,
+--        span: Span::new(source.id, end, end),
+--    });
+-+    while indents.len() > 1 {
+-+        indents.pop();
+-+        tokens.push(token(source, TokenKind::Dedent, cursor, cursor));
+-+    }
+-+    tokens.push(token(source, TokenKind::Eof, cursor, cursor));
+-     Ok(tokens)
+- }
+-+
+-+fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {
+-+    *cursor += 1;
+-+    kind
+-+}
+-+
+-+fn token(source: &SourceFile, kind: TokenKind, start: usize, end: usize) -> Token {
+-+    Token {
+-+        kind,
+-+        span: Span::new(source.id, start as u32, end as u32),
+-+    }
+-+}
+-diff --git a/compiler/frontend/lexer/src/token/mod.rs b/compiler/frontend/lexer/src/token/mod.rs
+-index d6e945d..83a9dfd 100644
+---- a/compiler/frontend/lexer/src/token/mod.rs
+-+++ b/compiler/frontend/lexer/src/token/mod.rs
+-@@ -3,11 +3,33 @@ use severian_source::Span;
+- #[derive(Debug, Clone, PartialEq, Eq)]
+- pub enum TokenKind {
+-     Identifier(String),
+--    Integer(i64),
+-+    Integer(String),
+-+    Float(String),
+-+    String(String),
+-     Colon,
+-     Equal,
+-     Plus,
+--    Separator,
+-+    Minus,
+-+    Star,
+-+    Slash,
+-+    Percent,
+-+    Power,
+-+    EqualEqual,
+-+    NotEqual,
+-+    Less,
+-+    LessEqual,
+-+    Greater,
+-+    GreaterEqual,
+-+    Arrow,
+-+    LeftParen,
+-+    RightParen,
+-+    LeftBracket,
+-+    RightBracket,
+-+    Pipe,
+-+    Comma,
+-+    Newline,
+-+    Indent,
+-+    Dedent,
+-     Eof,
+- }
+- 
+-diff --git a/compiler/frontend/parser/src/lib.rs b/compiler/frontend/parser/src/lib.rs
+-index 0fac7e4..0174518 100644
+---- a/compiler/frontend/parser/src/lib.rs
+-+++ b/compiler/frontend/parser/src/lib.rs
+-@@ -15,4 +15,41 @@ mod tests {
+-         let module = parse(&scan(&source).unwrap()).unwrap();
+-         assert_eq!(module.bindings.len(), 2);
+-     }
+-+
+-+    #[test]
+-+    fn parses_primitive_trait_contract() {
+-+        let source = SourceFile::virtual_source(
+-+            "i32.sev",
+-+            "trait i32: Primitive + Integer[i32]:\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
+-+        );
+-+        let module = parse(&scan(&source).unwrap()).unwrap();
+-+        assert_eq!(module.traits[0].name, "i32");
+-+        assert_eq!(module.traits[0].bases.len(), 2);
+-+        assert_eq!(
+-+            module.traits[0].operators[0].operator,
+-+            severian_ast::OperatorSyntax::Plus
+-+        );
+-+    }
+-+
+-+    #[test]
+-+    fn one_recursive_type_parser_serves_every_annotation_position() {
+-+        let source = SourceFile::virtual_source(
+-+            "types.sev",
+-+            "trait Example: Base[Tensor[f32]]:\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
+-+        );
+-+        let module = parse(&scan(&source).unwrap()).unwrap();
+-+        let base = &module.traits[0].bases[0];
+-+        let property = &module.traits[0].properties[0].annotation;
+-+        let parameter = &module.traits[0].operators[0].parameters[0].annotation;
+-+        let result = &module.traits[0].operators[0].result;
+-+        let binding = module.bindings[0].annotation.as_ref().unwrap();
+-+        assert!(matches!(base.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-+        assert!(matches!(property.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-+        assert!(matches!(parameter.kind, severian_ast::TypeAnnotationKind::Named { .. }));
+-+        assert!(matches!(result.kind, severian_ast::TypeAnnotationKind::Union(_)));
+-+        assert_eq!(binding.named_parts().unwrap().0, "list");
+-+        assert_eq!(property.named_parts().unwrap().0, "list");
+-+        assert_eq!(binding.named_parts().unwrap().1.len(), 1);
+-+        assert_eq!(property.named_parts().unwrap().1.len(), 1);
+-+    }
+- }
+-diff --git a/compiler/frontend/parser/src/statement/mod.rs b/compiler/frontend/parser/src/statement/mod.rs
+-index cd796aa..75a641d 100644
+---- a/compiler/frontend/parser/src/statement/mod.rs
+-+++ b/compiler/frontend/parser/src/statement/mod.rs
+-@@ -1,4 +1,8 @@
+--use severian_ast::{Binding, Expression, ExpressionKind, Module, TypeAnnotation};
+-+use severian_ast::{
+-+    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Literal, Module,
+-+    OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, TraitDeclaration,
+-+    TypeAnnotation, TypeAnnotationKind, UnaryOperator,
+-+};
+- use severian_diagnostics::Diagnostic;
+- use severian_lexer::{Token, TokenKind};
+- use severian_source::Span;
+-@@ -14,71 +18,203 @@ struct Parser<'a> {
+- 
+- impl Parser<'_> {
+-     fn module(mut self) -> Result<Module, Diagnostic> {
+--        let mut bindings = Vec::new();
+-+        let mut module = Module::default();
+-         self.separators();
+--        while !matches!(self.peek().kind, TokenKind::Eof) {
+--            bindings.push(self.binding()?);
+--            if !matches!(self.peek().kind, TokenKind::Separator | TokenKind::Eof) {
+--                return Err(self.error("expected a newline or comma after binding"));
+-+        while !self.at(&TokenKind::Eof) {
+-+            if self.at_identifier("trait") {
+-+                module.traits.push(self.trait_declaration()?);
+-+                self.separators();
+-+                continue;
+-+            } else if self.at_identifier("import") {
+-+                module.imports.push(self.import_declaration()?);
+-+            } else {
+-+                module.bindings.push(self.binding()?);
+-+            }
+-+            if !self.at(&TokenKind::Newline)
+-+                && !self.at(&TokenKind::Comma)
+-+                && !self.at(&TokenKind::Eof)
+-+            {
+-+                return Err(self.error("expected a newline or comma after declaration"));
+-             }
+-             self.separators();
+-         }
+--        Ok(Module { bindings })
+-+        Ok(module)
+-     }
+- 
+--    fn binding(&mut self) -> Result<Binding, Diagnostic> {
+--        let name_token = self.next();
+--        let TokenKind::Identifier(name) = &name_token.kind else {
+-+    fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
+-+        let start = self.next().span;
+-+        let path_token = self.next();
+-+        let TokenKind::String(path) = path_token.kind else {
+-             return Err(Diagnostic::new(
+--                "E000110",
+--                "expected a binding name",
+--                Some(name_token.span),
+-+                "E000118",
+-+                "expected an import path string",
+-+                Some(path_token.span),
+-             ));
+-         };
+--        let name = name.clone();
+--        let annotation = if matches!(self.peek().kind, TokenKind::Colon) {
+--            self.next();
+--            let type_token = self.next();
+--            let TokenKind::Identifier(name) = type_token.kind else {
+--                return Err(Diagnostic::new(
+--                    "E000113",
+--                    "expected a type name after `:`",
+--                    Some(type_token.span),
+--                ));
+--            };
+--            Some(TypeAnnotation {
+--                name,
+--                span: type_token.span,
+--            })
+-+        if !self.at_identifier("as") {
+-+            return Err(self.error("expected `as` after import path"));
+-+        }
+-+        self.next();
+-+        let (alias, end) = self.identifier("expected an import alias")?;
+-+        Ok(ImportDeclaration {
+-+            path,
+-+            alias,
+-+            span: Span::new(start.source, start.start, end.end),
+-+        })
+-+    }
+-+
+-+    fn trait_declaration(&mut self) -> Result<TraitDeclaration, Diagnostic> {
+-+        let start = self.next().span;
+-+        let (name, _) = self.identifier("expected a trait name")?;
+-+        let mut type_parameters = Vec::new();
+-+        if self.take(&TokenKind::LeftBracket).is_some() {
+-+            loop {
+-+                type_parameters.push(self.identifier("expected a type parameter")?.0);
+-+                if self.take(&TokenKind::Comma).is_none() {
+-+                    break;
+-+                }
+-+            }
+-+            self.expect(
+-+                &TokenKind::RightBracket,
+-+                "expected `]` after type parameters",
+-+            )?;
+-+        }
+-+        self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
+-+        let mut bases = Vec::new();
+-+        if !self.at(&TokenKind::Newline) {
+-+            loop {
+-+                bases.push(self.type_annotation()?);
+-+                if self.take(&TokenKind::Plus).is_none() {
+-+                    break;
+-+                }
+-+            }
+-+            self.expect(&TokenKind::Colon, "expected `:` after base traits")?;
+-+        }
+-+        self.expect(&TokenKind::Newline, "expected a newline after trait header")?;
+-+        while self.take(&TokenKind::Newline).is_some() {}
+-+        self.expect(&TokenKind::Indent, "expected an indented trait body")?;
+-+        let mut properties = Vec::new();
+-+        let mut operators = Vec::new();
+-+        self.separators();
+-+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+-+            if self.at_identifier("property") {
+-+                properties.push(self.property()?);
+-+            } else if self.at_identifier("operator") {
+-+                operators.push(self.operator()?);
+-+            } else {
+-+                return Err(self.error("expected `property` or `operator` in trait body"));
+-+            }
+-+            if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+-+                return Err(self.error("expected a newline after trait member"));
+-+            }
+-+            self.separators();
+-+        }
+-+        let end = self
+-+            .expect(&TokenKind::Dedent, "expected end of trait body")?
+-+            .span;
+-+        Ok(TraitDeclaration {
+-+            name,
+-+            type_parameters,
+-+            bases,
+-+            properties,
+-+            operators,
+-+            span: Span::new(start.source, start.start, end.end),
+-+        })
+-+    }
+-+
+-+    fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
+-+        let start = self.next().span;
+-+        let (name, _) = self.identifier("expected a property name")?;
+-+        self.expect(&TokenKind::Colon, "expected `:` after property name")?;
+-+        let annotation = self.type_annotation()?;
+-+        let default = if self.take(&TokenKind::Equal).is_some() {
+-+            Some(self.expression(0)?)
+-+        } else {
+-+            None
+-+        };
+-+        let end = default
+-+            .as_ref()
+-+            .map_or(annotation.span.end, |expression| expression.span.end);
+-+        Ok(PropertyDeclaration {
+-+            name,
+-+            annotation,
+-+            default,
+-+            span: Span::new(start.source, start.start, end),
+-+        })
+-+    }
+-+
+-+    fn operator(&mut self) -> Result<OperatorDeclaration, Diagnostic> {
+-+        let start = self.next().span;
+-+        let operator_token = self.next();
+-+        let operator = operator_syntax(&operator_token.kind).ok_or_else(|| {
+-+            Diagnostic::new(
+-+                "E000117",
+-+                "expected an operator name",
+-+                Some(operator_token.span),
+-+            )
+-+        })?;
+-+        self.expect(&TokenKind::LeftParen, "expected `(` after operator")?;
+-+        let mut parameters = Vec::new();
+-+        if !self.at(&TokenKind::RightParen) {
+-+            loop {
+-+                let (name, span) = self.identifier("expected an operator parameter")?;
+-+                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
+-+                let annotation = self.type_annotation()?;
+-+                parameters.push(OperatorParameter {
+-+                    name,
+-+                    annotation,
+-+                    span,
+-+                });
+-+                if self.take(&TokenKind::Comma).is_none() {
+-+                    break;
+-+                }
+-+            }
+-+        }
+-+        self.expect(&TokenKind::RightParen, "expected `)` after parameters")?;
+-+        self.expect(&TokenKind::Arrow, "expected `->` after operator parameters")?;
+-+        let result = self.type_annotation()?;
+-+        Ok(OperatorDeclaration {
+-+            operator,
+-+            parameters,
+-+            span: Span::new(start.source, start.start, result.span.end),
+-+            result,
+-+        })
+-+    }
+-+
+-+    fn binding(&mut self) -> Result<Binding, Diagnostic> {
+-+        let (name, name_span) = self.identifier("expected a binding name")?;
+-+        let annotation = if self.take(&TokenKind::Colon).is_some() {
+-+            Some(self.type_annotation()?)
+-         } else {
+-             None
+-         };
+--        self.expect(TokenKind::Equal, "expected `=` after binding name")?;
+--        let value = self.expression()?;
+-+        self.expect(&TokenKind::Equal, "expected `=` after binding name")?;
+-+        let value = self.expression(0)?;
+-         Ok(Binding {
+-             name,
+-             annotation,
+--            span: Span::new(
+--                name_token.span.source,
+--                name_token.span.start,
+--                value.span.end,
+--            ),
+-+            span: Span::new(name_span.source, name_span.start, value.span.end),
+-             value,
+-         })
+-     }
+- 
+--    fn expression(&mut self) -> Result<Expression, Diagnostic> {
+--        let mut expression = self.primary()?;
+--        while matches!(self.peek().kind, TokenKind::Plus) {
+-+    fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
+-+        let mut expression = self.unary()?;
+-+        while let Some(operator) = binary_operator(&self.peek().kind) {
+-+            let precedence = precedence(operator);
+-+            if precedence < minimum_precedence {
+-+                break;
+-+            }
+-             self.next();
+--            let right = self.primary()?;
+-+            let right = self.expression(precedence + 1)?;
+-             let span = Span::new(
+-                 expression.span.source,
+-                 expression.span.start,
+-                 right.span.end,
+-             );
+-             expression = Expression {
+--                kind: ExpressionKind::Add {
+-+                kind: ExpressionKind::Binary {
+-+                    operator,
+-                     left: Box::new(expression),
+-                     right: Box::new(right),
+-                 },
+-@@ -88,15 +224,52 @@ impl Parser<'_> {
+-         Ok(expression)
+-     }
+- 
+-+    fn unary(&mut self) -> Result<Expression, Diagnostic> {
+-+        let operator = match &self.peek().kind {
+-+            TokenKind::Plus => Some(UnaryOperator::Positive),
+-+            TokenKind::Minus => Some(UnaryOperator::Negative),
+-+            TokenKind::Identifier(value) if value == "not" => Some(UnaryOperator::Not),
+-+            _ => None,
+-+        };
+-+        if let Some(operator) = operator {
+-+            let start = self.next().span;
+-+            let operand = self.unary()?;
+-+            return Ok(Expression {
+-+                span: Span::new(start.source, start.start, operand.span.end),
+-+                kind: ExpressionKind::Unary {
+-+                    operator,
+-+                    operand: Box::new(operand),
+-+                },
+-+            });
+-+        }
+-+        self.primary()
+-+    }
+-+
+-     fn primary(&mut self) -> Result<Expression, Diagnostic> {
+-         let token = self.next();
+--        let kind = match &token.kind {
+--            TokenKind::Integer(value) => ExpressionKind::Integer(*value),
+--            TokenKind::Identifier(name) => ExpressionKind::Name(name.clone()),
+-+        let kind = match token.kind {
+-+            TokenKind::Integer(value) => ExpressionKind::Literal(Literal::Integer(value)),
+-+            TokenKind::Float(value) => ExpressionKind::Literal(Literal::Float(value)),
+-+            TokenKind::String(value) => ExpressionKind::Literal(Literal::String(value)),
+-+            TokenKind::Identifier(value) if value == "true" => {
+-+                ExpressionKind::Literal(Literal::Boolean(true))
+-+            }
+-+            TokenKind::Identifier(value) if value == "false" => {
+-+                ExpressionKind::Literal(Literal::Boolean(false))
+-+            }
+-+            TokenKind::Identifier(value) if value == "None" => {
+-+                ExpressionKind::Literal(Literal::None)
+-+            }
+-+            TokenKind::Identifier(name) => ExpressionKind::Name(name),
+-+            TokenKind::LeftParen => {
+-+                let expression = self.expression(0)?;
+-+                self.expect(&TokenKind::RightParen, "expected `)`")?;
+-+                return Ok(expression);
+-+            }
+-             _ => {
+-                 return Err(Diagnostic::new(
+-                     "E000111",
+--                    "expected an integer or binding name",
+-+                    "expected a literal or binding name",
+-                     Some(token.span),
+-                 ))
+-             }
+-@@ -107,28 +280,153 @@ impl Parser<'_> {
+-         })
+-     }
+- 
+-+    fn type_annotation(&mut self) -> Result<TypeAnnotation, Diagnostic> {
+-+        let first = self.type_primary()?;
+-+        if self.take(&TokenKind::Pipe).is_none() {
+-+            return Ok(first);
+-+        }
+-+        let start = first.span;
+-+        let mut members = vec![first];
+-+        loop {
+-+            members.push(self.type_primary()?);
+-+            if self.take(&TokenKind::Pipe).is_none() {
+-+                break;
+-+            }
+-+        }
+-+        let end = members.last().expect("union has members").span.end;
+-+        Ok(TypeAnnotation {
+-+            kind: TypeAnnotationKind::Union(members),
+-+            span: Span::new(start.source, start.start, end),
+-+        })
+-+    }
+-+
+-+    fn type_primary(&mut self) -> Result<TypeAnnotation, Diagnostic> {
+-+        let (name, start) = self.identifier("expected a type")?;
+-+        let mut arguments = Vec::new();
+-+        let mut end = start.end;
+-+        if self.take(&TokenKind::LeftBracket).is_some() {
+-+            if !self.at(&TokenKind::RightBracket) {
+-+                loop {
+-+                    arguments.push(self.type_annotation()?);
+-+                    if self.take(&TokenKind::Comma).is_none() {
+-+                        break;
+-+                    }
+-+                }
+-+            }
+-+            end = self
+-+                .expect(&TokenKind::RightBracket, "expected `]` after type arguments")?
+-+                .span
+-+                .end;
+-+        }
+-+        Ok(TypeAnnotation::named(
+-+            name,
+-+            arguments,
+-+            Span::new(start.source, start.start, end),
+-+        ))
+-+    }
+-+
+-     fn separators(&mut self) {
+--        while matches!(self.peek().kind, TokenKind::Separator) {
+-+        while self.at(&TokenKind::Newline) || self.at(&TokenKind::Comma) {
+-             self.cursor += 1;
+-         }
+-     }
+-+
+-+    fn identifier(&mut self, message: &str) -> Result<(String, Span), Diagnostic> {
+-+        let token = self.next();
+-+        match token.kind {
+-+            TokenKind::Identifier(name) => Ok((name, token.span)),
+-+            _ => Err(Diagnostic::new("E000110", message, Some(token.span))),
+-+        }
+-+    }
+-+
+-+    fn at_identifier(&self, expected: &str) -> bool {
+-+        matches!(&self.peek().kind, TokenKind::Identifier(value) if value == expected)
+-+    }
+-+
+-+    fn at(&self, expected: &TokenKind) -> bool {
+-+        std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(expected)
+-+    }
+-+
+-+    fn take(&mut self, expected: &TokenKind) -> Option<Token> {
+-+        self.at(expected).then(|| self.next())
+-+    }
+-+
+-     fn peek(&self) -> &Token {
+-         &self.tokens[self.cursor]
+-     }
+-+
+-     fn next(&mut self) -> Token {
+-         let token = self.tokens[self.cursor].clone();
+-         self.cursor += 1;
+-         token
+-     }
+--    fn expect(&mut self, expected: TokenKind, message: &str) -> Result<(), Diagnostic> {
+--        if std::mem::discriminant(&self.peek().kind) == std::mem::discriminant(&expected) {
+--            self.cursor += 1;
+--            Ok(())
+-+
+-+    fn expect(&mut self, expected: &TokenKind, message: &str) -> Result<Token, Diagnostic> {
+-+        if self.at(expected) {
+-+            Ok(self.next())
+-         } else {
+-             Err(self.error(message))
+-         }
+-     }
+-+
+-     fn error(&self, message: &str) -> Diagnostic {
+-         Diagnostic::new("E000112", message, Some(self.peek().span))
+-     }
+- }
+-+
+-+fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
+-+    Some(match kind {
+-+        TokenKind::Identifier(value) if value == "and" => OperatorSyntax::And,
+-+        TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
+-+        TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
+-+        TokenKind::Plus => OperatorSyntax::Plus,
+-+        TokenKind::Minus => OperatorSyntax::Minus,
+-+        TokenKind::Star => OperatorSyntax::Multiply,
+-+        TokenKind::Slash => OperatorSyntax::Divide,
+-+        TokenKind::Percent => OperatorSyntax::Remainder,
+-+        TokenKind::Power => OperatorSyntax::Power,
+-+        TokenKind::EqualEqual => OperatorSyntax::Equal,
+-+        TokenKind::NotEqual => OperatorSyntax::NotEqual,
+-+        TokenKind::Less => OperatorSyntax::Less,
+-+        TokenKind::LessEqual => OperatorSyntax::LessEqual,
+-+        TokenKind::Greater => OperatorSyntax::Greater,
+-+        TokenKind::GreaterEqual => OperatorSyntax::GreaterEqual,
+-+        _ => return None,
+-+    })
+-+}
+-+
+-+fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
+-+    Some(match operator_syntax(kind)? {
+-+        OperatorSyntax::Plus => BinaryOperator::Add,
+-+        OperatorSyntax::Minus => BinaryOperator::Subtract,
+-+        OperatorSyntax::Multiply => BinaryOperator::Multiply,
+-+        OperatorSyntax::Divide => BinaryOperator::Divide,
+-+        OperatorSyntax::Remainder => BinaryOperator::Remainder,
+-+        OperatorSyntax::Power => BinaryOperator::Power,
+-+        OperatorSyntax::Equal => BinaryOperator::Equal,
+-+        OperatorSyntax::NotEqual => BinaryOperator::NotEqual,
+-+        OperatorSyntax::Less => BinaryOperator::Less,
+-+        OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
+-+        OperatorSyntax::Greater => BinaryOperator::Greater,
+-+        OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
+-+        OperatorSyntax::And => BinaryOperator::And,
+-+        OperatorSyntax::Or => BinaryOperator::Or,
+-+        OperatorSyntax::Not => return None,
+-+    })
+-+}
+-+
+-+fn precedence(operator: BinaryOperator) -> u8 {
+-+    match operator {
+-+        BinaryOperator::Or => 1,
+-+        BinaryOperator::And => 2,
+-+        BinaryOperator::Equal
+-+        | BinaryOperator::NotEqual
+-+        | BinaryOperator::Less
+-+        | BinaryOperator::LessEqual
+-+        | BinaryOperator::Greater
+-+        | BinaryOperator::GreaterEqual => 3,
+-+        BinaryOperator::Add | BinaryOperator::Subtract => 4,
+-+        BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 5,
+-+        BinaryOperator::Power => 6,
+-+    }
+-+}
+-diff --git a/compiler/frontend/semantic/Cargo.toml b/compiler/frontend/semantic/Cargo.toml
+-index d0bb63c..5a044f9 100644
+---- a/compiler/frontend/semantic/Cargo.toml
+-+++ b/compiler/frontend/semantic/Cargo.toml
+-@@ -9,11 +9,14 @@ repository.workspace = true
+- severian-ast = { path = "../ast" }
+- severian-diagnostics = { path = "../../diagnostics" }
+- severian-hir = { path = "../hir" }
+--severian-interface = { path = "../../boundaries/interface" }
+--severian-primitives = { path = "../../../library/core/primitives" }
+-+severian-universal = { path = "../../universal" }
+-+severian-source = { path = "../../source" }
+- 
+- [lib]
+- path = "src/lib.rs"
+- 
+- [dev-dependencies]
+- severian-source = { path = "../../source" }
+-+severian-bootstrap = { path = "../../bootstrap" }
+-+severian-lexer = { path = "../lexer" }
+-+severian-parser = { path = "../parser" }
+-diff --git a/compiler/transforms/lowering/Cargo.toml b/compiler/transforms/lowering/Cargo.toml
+-index ebe506f..cd7e5e8 100644
+---- a/compiler/transforms/lowering/Cargo.toml
+-+++ b/compiler/transforms/lowering/Cargo.toml
+-@@ -6,10 +6,9 @@ license-file.workspace = true
+- repository.workspace = true
+- 
+- [dependencies]
+--severian-backend = { path = "../../boundaries/backend" }
+--severian-hir = { path = "../../frontend/hir" }
+-+severian-lir = { path = "../lir" }
+- severian-mir = { path = "../mir" }
+--severian-primitives = { path = "../../../library/core/primitives" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/compiler/transforms/mir/Cargo.toml b/compiler/transforms/mir/Cargo.toml
+-index 1b3ea6b..3e26911 100644
+---- a/compiler/transforms/mir/Cargo.toml
+-+++ b/compiler/transforms/mir/Cargo.toml
+-@@ -7,10 +7,7 @@ repository.workspace = true
+- 
+- [dependencies]
+- severian-hir = { path = "../../frontend/hir" }
+--severian-interface = { path = "../../boundaries/interface" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+--
+--[dev-dependencies]
+--severian-source = { path = "../../source" }
+-diff --git a/compiler/transforms/mlir/Cargo.toml b/compiler/transforms/mlir/Cargo.toml
+-index afcb268..4fcd19c 100644
+---- a/compiler/transforms/mlir/Cargo.toml
+-+++ b/compiler/transforms/mlir/Cargo.toml
+-@@ -6,7 +6,8 @@ license-file.workspace = true
+- repository.workspace = true
+- 
+- [dependencies]
+--severian-backend = { path = "../../boundaries/backend" }
+-+severian-lir = { path = "../lir" }
+-+severian-universal = { path = "../../universal" }
+- 
+- [lib]
+- path = "src/lib.rs"
+-diff --git a/library/core/primitives/Cargo.toml b/library/core/primitives/Cargo.toml
+-index c893ed1..0d256a2 100644
+---- a/library/core/primitives/Cargo.toml
+-+++ b/library/core/primitives/Cargo.toml
+-@@ -6,7 +6,4 @@ license-file.workspace = true
+- repository.workspace = true
+- 
+- [lib]
+--path = "src/lib.rs"
+--
+--[dependencies]
+--severian-interface = { path = "../../../compiler/boundaries/interface" }
+-+path = "interop/rust/lib.rs"
+-diff --git a/library/core/primitives/interop/rust/lib.rs b/library/core/primitives/interop/rust/lib.rs
+-index a3fdddb..eba055c 100644
+---- a/library/core/primitives/interop/rust/lib.rs
+-+++ b/library/core/primitives/interop/rust/lib.rs
+-@@ -1,342 +1,46 @@
+- #![forbid(unsafe_code)]
+- 
+--use std::collections::{BTreeMap, HashMap};
+--use std::fmt;
+--
+- pub const PACKAGE_NAME: &str = "core.primitives";
+- 
+--/// Stable identity of a declaration in the primitive bootstrap package.
+--#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+--pub struct PrimitiveId(pub u64);
+--
+--impl PrimitiveId {
+--    pub const fn from_declaration_id(id: u64) -> Self {
+--        Self(id)
+--    }
+--}
+--
+--#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+--pub enum PrimitiveCategory {
+--    Boolean,
+--    Integer,
+--    Float,
+--    Text,
+--    Bytes,
+--    Absence,
+--    Unit,
+--}
+--
+--impl PrimitiveCategory {
+--    pub fn from_contract(value: &str) -> Result<Self, PrimitiveError> {
+--        match value {
+--            "boolean" => Ok(Self::Boolean),
+--            "integer" => Ok(Self::Integer),
+--            "float" => Ok(Self::Float),
+--            "text" => Ok(Self::Text),
+--            "bytes" => Ok(Self::Bytes),
+--            "absence" => Ok(Self::Absence),
+--            "unit" => Ok(Self::Unit),
+--            other => Err(PrimitiveError::UnknownCategory(other.to_owned())),
+--        }
+--    }
+--}
+--
+--/// Raw metadata mechanically extracted from a declaration by the compiler's
+--/// source adapter. Interpretation and validation belong to this crate.
+--#[derive(Debug, Clone, PartialEq, Eq)]
+--pub struct PrimitiveMetadata {
+--    /// Canonical declaration identity assigned by the compiler resolver.
+--    pub id: PrimitiveId,
+--    pub name: String,
+--    pub category: Option<String>,
+--    pub representation: Option<String>,
+--    pub bits: Option<i64>,
+--    pub signed: Option<bool>,
+--    pub default_literal: Option<bool>,
+--}
+--
+--#[derive(Debug, Clone, PartialEq, Eq)]
+--pub struct PrimitiveDefinition {
+--    pub id: PrimitiveId,
+--    pub name: String,
+--    pub category: PrimitiveCategory,
+--    pub representation: String,
+--    pub bit_width: Option<u16>,
+--    pub signed: Option<bool>,
+--    pub default_literal: bool,
+--}
+--
+--impl PrimitiveDefinition {
+--    fn interpret(metadata: PrimitiveMetadata) -> Result<Self, PrimitiveError> {
+--        let category_name = metadata
+--            .category
+--            .ok_or_else(|| PrimitiveError::MissingCategory(metadata.name.clone()))?;
+--        let category = PrimitiveCategory::from_contract(&category_name)?;
+--        let representation = metadata
+--            .representation
+--            .filter(|representation| !representation.is_empty())
+--            .ok_or_else(|| PrimitiveError::MissingRepresentation(metadata.name.clone()))?;
+--        let bit_width = match metadata.bits {
+--            None | Some(0) => None,
+--            Some(bits) => Some(
+--                u16::try_from(bits)
+--                    .map_err(|_| PrimitiveError::InvalidBitWidth(metadata.name.clone(), bits))?,
+--            ),
+--        };
+--        let signed = match category {
+--            PrimitiveCategory::Integer => Some(metadata.signed.unwrap_or(false)),
+--            _ if metadata.signed.is_some() => {
+--                return Err(PrimitiveError::SignedNonInteger(metadata.name))
+--            }
+--            _ => None,
+--        };
+--        Ok(Self {
+--            id: metadata.id,
+--            name: metadata.name,
+--            category,
+--            representation,
+--            bit_width,
+--            signed,
+--            default_literal: metadata.default_literal.unwrap_or(false),
+--        })
+--    }
+--
+--    pub const fn is_numeric(&self) -> bool {
+--        matches!(self.category, PrimitiveCategory::Integer | PrimitiveCategory::Float)
+--    }
+--
+--    pub const fn supports_equality(&self) -> bool {
+--        true
+--    }
+--
+--    pub const fn supports_ordering(&self) -> bool {
+--        matches!(
+--            self.category,
+--            PrimitiveCategory::Integer
+--                | PrimitiveCategory::Float
+--                | PrimitiveCategory::Text
+--                | PrimitiveCategory::Bytes
+--        )
+--    }
+--}
+--
+--#[derive(Debug, Clone, PartialEq, Eq)]
+--pub struct PrimitiveCatalog {
+--    by_name: HashMap<String, PrimitiveId>,
+--    definitions: BTreeMap<PrimitiveId, PrimitiveDefinition>,
+--    defaults: HashMap<PrimitiveCategory, PrimitiveId>,
+--}
+--
+--impl PrimitiveCatalog {
+--    pub fn from_metadata(
+--        metadata: impl IntoIterator<Item = PrimitiveMetadata>,
+--    ) -> Result<Self, PrimitiveError> {
+--        let mut catalog = Self {
+--            by_name: HashMap::new(),
+--            definitions: BTreeMap::new(),
+--            defaults: HashMap::new(),
+--        };
+--        for metadata in metadata {
+--            let definition = PrimitiveDefinition::interpret(metadata)?;
+--            if catalog.by_name.contains_key(&definition.name) {
+--                return Err(PrimitiveError::DuplicateName(definition.name));
+--            }
+--            if definition.default_literal
+--                && catalog
+--                    .defaults
+--                    .insert(definition.category, definition.id)
+--                    .is_some()
+--            {
+--                return Err(PrimitiveError::DuplicateDefault(definition.category));
+--            }
+--            catalog.by_name.insert(definition.name.clone(), definition.id);
+--            catalog.definitions.insert(definition.id, definition);
+--        }
+--        if catalog.definitions.is_empty() {
+--            return Err(PrimitiveError::EmptyCatalog);
+--        }
+--        Ok(catalog)
+--    }
+--
+--    pub fn contains(&self, name: &str) -> bool {
+--        self.by_name.contains_key(name)
+--    }
+--
+--    pub fn resolve(&self, name: &str) -> Option<PrimitiveId> {
+--        self.by_name.get(name).copied()
+--    }
+--
+--    pub fn definition(&self, id: PrimitiveId) -> Option<&PrimitiveDefinition> {
+--        self.definitions.get(&id)
+--    }
+--
+--    pub fn definitions(&self) -> impl Iterator<Item = &PrimitiveDefinition> {
+--        self.definitions.values()
+--    }
+--
+--    pub fn default_for(&self, category: PrimitiveCategory) -> Option<PrimitiveId> {
+--        self.defaults.get(&category).copied()
+--    }
+--}
+--
+--pub fn assignable(actual: &PrimitiveDefinition, expected: &PrimitiveDefinition) -> bool {
+--    if actual.id == expected.id {
+--        return true;
+--    }
+--    match (actual.category, expected.category) {
+--        (PrimitiveCategory::Integer, PrimitiveCategory::Integer) => {
+--            actual.signed == expected.signed && width_fits(actual.bit_width, expected.bit_width)
+--        }
+--        (PrimitiveCategory::Float, PrimitiveCategory::Float) => {
+--            width_fits(actual.bit_width, expected.bit_width)
+--        }
+--        _ => false,
+--    }
+--}
+--
+--pub fn arithmetic_result(
+--    left: &PrimitiveDefinition,
+--    right: &PrimitiveDefinition,
+--) -> Option<PrimitiveId> {
+--    (left.id == right.id && left.is_numeric()).then_some(left.id)
+--}
+--
+--pub fn equality_allowed(left: &PrimitiveDefinition, right: &PrimitiveDefinition) -> bool {
+--    left.id == right.id && left.supports_equality()
+--}
+--
+--pub fn ordering_allowed(left: &PrimitiveDefinition, right: &PrimitiveDefinition) -> bool {
+--    left.id == right.id && left.supports_ordering()
+--}
+--
+--fn width_fits(actual: Option<u16>, expected: Option<u16>) -> bool {
+--    match (actual, expected) {
+--        (Some(actual), Some(expected)) => actual <= expected,
+--        (None, None) => true,
+--        _ => false,
+--    }
+--}
+--
+--#[derive(Debug, Clone, PartialEq, Eq)]
+--pub enum PrimitiveError {
+--    EmptyCatalog,
+--    DuplicateName(String),
+--    DuplicateDefault(PrimitiveCategory),
+--    UnknownCategory(String),
+--    MissingCategory(String),
+--    MissingRepresentation(String),
+--    InvalidBitWidth(String, i64),
+--    SignedNonInteger(String),
+--}
+--
+--impl fmt::Display for PrimitiveError {
+--    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+--        match self {
+--            Self::EmptyCatalog => formatter.write_str("core primitive catalog is empty"),
+--            Self::DuplicateName(name) => write!(formatter, "duplicate primitive `{name}`"),
+--            Self::DuplicateDefault(category) => {
+--                write!(formatter, "multiple default literal primitives for `{category:?}`")
+--            }
+--            Self::UnknownCategory(category) => {
+--                write!(formatter, "unknown primitive category `{category}`")
+--            }
+--            Self::MissingCategory(name) => {
+--                write!(formatter, "primitive `{name}` has no category")
+--            }
+--            Self::MissingRepresentation(name) => {
+--                write!(formatter, "primitive `{name}` has no representation")
+--            }
+--            Self::InvalidBitWidth(name, bits) => {
+--                write!(formatter, "primitive `{name}` has invalid bit width `{bits}`")
+--            }
+--            Self::SignedNonInteger(name) => {
+--                write!(formatter, "non-integer primitive `{name}` declares signedness")
+--            }
+--        }
+--    }
+--}
+--
+--impl std::error::Error for PrimitiveError {}
+--
+--#[cfg(test)]
+--mod tests {
+--    use super::*;
+--
+--    fn metadata(
+--        id: u64,
+--        name: &str,
+--        category: &str,
+--        representation: &str,
+--        bit_width: Option<u16>,
+--        default_literal: bool,
+--    ) -> PrimitiveMetadata {
+--        PrimitiveMetadata {
+--            id: PrimitiveId::from_declaration_id(id),
+--            name: name.into(),
+--            category: Some(category.into()),
+--            representation: Some(representation.into()),
+--            bits: bit_width.map(i64::from),
+--            signed: (category == "integer").then_some(true),
+--            default_literal: Some(default_literal),
+--        }
+--    }
+--
+--    #[test]
+--    fn annotation_and_inference_use_the_registered_identity() {
+--        let catalog = PrimitiveCatalog::from_metadata([metadata(
+--            32,
+--            "i32",
+--            "integer",
+--            "fixed-integer",
+--            Some(32),
+--            true,
+--        )])
+--        .unwrap();
+--        assert_eq!(
+--            catalog.resolve("i32"),
+--            catalog.default_for(PrimitiveCategory::Integer)
+--        );
+--    }
+--
+--    #[test]
+--    fn arbitrary_new_declarations_need_no_model_enum_variant() {
+--        let catalog = PrimitiveCatalog::from_metadata([metadata(
+--            128,
+--            "f128",
+--            "float",
+--            "ieee-float",
+--            Some(128),
+--            false,
+--        )])
+--        .unwrap();
+--        assert_eq!(
+--            catalog.definition(PrimitiveId(128)).unwrap().bit_width,
+--            Some(128)
+--        );
+--    }
+--
+--    #[test]
+--    fn bytes_remains_a_distinct_registered_primitive() {
+--        let catalog = PrimitiveCatalog::from_metadata([metadata(
+--            7,
+--            "bytes",
+--            "bytes",
+--            "byte-string",
+--            None,
+--            false,
+--        )])
+--        .unwrap();
+--        let bytes = catalog
+--            .definition(catalog.resolve("bytes").unwrap())
+--            .unwrap();
+--        assert_eq!(bytes.category, PrimitiveCategory::Bytes);
+--    }
+--
+--    #[test]
+--    fn missing_bootstrap_catalog_is_a_hard_error() {
+--        assert_eq!(
+--            PrimitiveCatalog::from_metadata([]),
+--            Err(PrimitiveError::EmptyCatalog)
+--        );
+--    }
+--}
+-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-+pub struct PrimitiveSource {
+-+    pub path: &'static str,
+-+    pub source: &'static str,
+-+}
+-+
+-+/// Authoritative Severian sources. This wrapper intentionally performs no
+-+/// parsing, ID allocation, metadata interpretation, or semantic resolution.
+-+pub const SOURCES: &[PrimitiveSource] = &[
+-+    PrimitiveSource {
+-+        path: "src/mod.sev",
+-+        source: include_str!("../../src/mod.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/bool.sev",
+-+        source: include_str!("../../src/bool.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/bytes.sev",
+-+        source: include_str!("../../src/bytes.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/floats.sev",
+-+        source: include_str!("../../src/floats.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/integers.sev",
+-+        source: include_str!("../../src/integers.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/none.sev",
+-+        source: include_str!("../../src/none.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/string.sev",
+-+        source: include_str!("../../src/string.sev"),
+-+    },
+-+    PrimitiveSource {
+-+        path: "src/unit.sev",
+-+        source: include_str!("../../src/unit.sev"),
+-+    },
+-+];
+-diff --git a/library/core/primitives/src/floats.sev b/library/core/primitives/src/floats.sev
+-index 0a08359..e85a036 100644
+---- a/library/core/primitives/src/floats.sev
+-+++ b/library/core/primitives/src/floats.sev
+-@@ -1,4 +1,6 @@
+- trait Floating[T]:
+-+    operator +() -> T
+-+    operator -() -> T
+-     operator +(right: T) -> T
+-     operator -(right: T) -> T
+-     operator *(right: T) -> T
+-diff --git a/library/core/primitives/src/integers.sev b/library/core/primitives/src/integers.sev
+-index ff2ef05..27eaf24 100644
+---- a/library/core/primitives/src/integers.sev
+-+++ b/library/core/primitives/src/integers.sev
+-@@ -1,4 +1,6 @@
+- trait Integer[T]:
+-+    operator +() -> T
+-+    operator -() -> T
+-     operator +(right: T) -> T
+-     operator -(right: T) -> T
+-     operator *(right: T) -> T
+diff --git a/tools/quality/check_architecture.py b/tools/quality/check_architecture.py
+index 2b4f996..51f28c2 100644
+--- a/tools/quality/check_architecture.py
++++ b/tools/quality/check_architecture.py
+@@ -13,17 +13,12 @@ from pathlib import Path
+ ROOT = Path(__file__).resolve().parents[2]
+ 
+ 
+-def load_policy() -> tuple[dict[str, set[str]], dict[str, str], list[dict[str, str]]]:
++def load_policy() -> tuple[dict[str, str], dict[str, set[str]], list[dict[str, str]]]:
+     manifest = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+     architecture = manifest["workspace"]["metadata"]["architecture"]
+-    layers = {
+-        name: set(allowed) for name, allowed in architecture["layers"].items()
+-    }
+     packages = architecture["packages"]
+-    unknown_assignments = sorted(set(packages.values()) - set(layers))
+-    if unknown_assignments:
+-        raise ValueError(f"packages use unknown layers: {', '.join(unknown_assignments)}")
+-    return layers, packages, architecture.get("reject", [])
++    allow = {name: set(dependencies) for name, dependencies in architecture["allow"].items()}
++    return packages, allow, architecture.get("reject", [])
+ 
+ 
+ def cargo_metadata() -> dict[str, object]:
+@@ -39,7 +34,7 @@ def cargo_metadata() -> dict[str, object]:
+ 
+ def main() -> int:
+     try:
+-        layers, assignments, rejection_tests = load_policy()
++        assignments, allow, rejection_tests = load_policy()
+         metadata = cargo_metadata()
+         members = set(metadata["workspace_members"])
+         packages = {
+@@ -49,38 +44,45 @@ def main() -> int:
+         }
+         missing = sorted(set(packages) - set(assignments))
+         stale = sorted(set(assignments) - set(packages))
+-        if missing or stale:
++        missing_allow = sorted(set(packages) - set(allow))
++        stale_allow = sorted(set(allow) - set(packages))
++        if missing or stale or missing_allow or stale_allow:
+             details = []
+             if missing:
+                 details.append(f"unassigned workspace packages: {', '.join(missing)}")
+             if stale:
+                 details.append(f"unknown policy packages: {', '.join(stale)}")
++            if missing_allow:
++                details.append(f"packages without allowlists: {', '.join(missing_allow)}")
++            if stale_allow:
++                details.append(f"unknown allowlist packages: {', '.join(stale_allow)}")
+             raise ValueError("; ".join(details))
+ 
++        for name, dependencies in allow.items():
++            unknown = sorted(dependencies - set(packages))
++            if unknown:
++                raise ValueError(f"{name} allows unknown packages: {', '.join(unknown)}")
++
+         for test in rejection_tests:
+             source = test["from"]
+             target = test["to"]
+             if source not in assignments or target not in assignments:
+                 raise ValueError(f"architecture rejection test names unknown package: {test}")
+-            source_layer = assignments[source]
+-            target_layer = assignments[target]
+-            if target_layer in layers[source_layer]:
++            if target in allow[source]:
+                 raise ValueError(
+                     f"expected rejection is now allowed: {source} -> {target}"
+                 )
+ 
+         violations: list[str] = []
+         for name, package in sorted(packages.items()):
+-            source_layer = assignments[name]
+-            allowed = layers[source_layer]
+             for dependency in package["dependencies"]:
+                 target = dependency["name"]
+                 if dependency["kind"] == "dev" or target not in packages:
+                     continue
+-                target_layer = assignments[target]
+-                if target_layer not in allowed:
++                if target not in allow[name]:
+                     violations.append(
+-                        f"{name} ({source_layer}) -> {target} ({target_layer})"
++                        f"{name} ({assignments[name]}) -> "
++                        f"{target} ({assignments[target]})"
+                     )
+         if violations:
+             print("architecture dependency violations:", file=sys.stderr)

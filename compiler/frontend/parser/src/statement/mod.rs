@@ -1,5 +1,5 @@
 use severian_ast::{
-    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Literal, Module,
+    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Item, Literal, Module,
     OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, TraitDeclaration,
     TypeAnnotation, TypeAnnotationKind, UnaryOperator,
 };
@@ -22,13 +22,13 @@ impl Parser<'_> {
         self.separators();
         while !self.at(&TokenKind::Eof) {
             if self.at_identifier("trait") {
-                module.traits.push(self.trait_declaration()?);
+                module.items.push(Item::Trait(self.trait_declaration()?));
                 self.separators();
                 continue;
             } else if self.at_identifier("import") {
-                module.imports.push(self.import_declaration()?);
+                module.items.push(Item::Import(self.import_declaration()?));
             } else {
-                module.bindings.push(self.binding()?);
+                module.items.push(Item::Binding(self.binding()?));
             }
             if !self.at(&TokenKind::Newline)
                 && !self.at(&TokenKind::Comma)
@@ -206,7 +206,12 @@ impl Parser<'_> {
                 break;
             }
             self.next();
-            let right = self.expression(precedence + 1)?;
+            let right_precedence = if operator == BinaryOperator::Power {
+                precedence
+            } else {
+                precedence + 1
+            };
+            let right = self.expression(right_precedence)?;
             let span = Span::new(
                 expression.span.source,
                 expression.span.start,
@@ -314,7 +319,10 @@ impl Parser<'_> {
                 }
             }
             end = self
-                .expect(&TokenKind::RightBracket, "expected `]` after type arguments")?
+                .expect(
+                    &TokenKind::RightBracket,
+                    "expected `]` after type arguments",
+                )?
                 .span
                 .end;
         }

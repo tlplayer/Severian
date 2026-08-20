@@ -64,9 +64,13 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 continue;
             }
-            b'\n' | b';' => {
+            b'\n' => {
                 cursor += 1;
                 line_start = true;
+                TokenKind::Newline
+            }
+            b';' => {
+                cursor += 1;
                 TokenKind::Newline
             }
             b',' => one(&mut cursor, TokenKind::Comma),

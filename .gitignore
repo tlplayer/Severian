@@ -26,3 +26,4 @@ tmp*
 *.CLEANUP.md
 docs/examples/setup.bash
 *.*.md
+*review.diff

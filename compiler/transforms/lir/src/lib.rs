@@ -1,7 +1,5 @@
 #![forbid(unsafe_code)]
 
-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoweredFloatFormat {
     Ieee(u16),
@@ -29,18 +27,54 @@ pub struct Value {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Constant {
+    Integer(String),
+    Float(String),
+    Boolean(bool),
+    String(String),
+    Bytes(Vec<u8>),
+    None,
+    Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOperation {
+    Positive,
+    Negative,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOperation {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Power,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation {
     Constant {
-        value: LiteralValue,
+        value: Constant,
         result: ValueId,
     },
     Unary {
-        operator: UnaryOperator,
+        operator: UnaryOperation,
         operand: ValueId,
         result: ValueId,
     },
     Binary {
-        operator: BinaryOperator,
+        operator: BinaryOperation,
         left: ValueId,
         right: ValueId,
         result: ValueId,

@@ -13,7 +13,37 @@ mod tests {
     fn parses_two_bindings() {
         let source = SourceFile::virtual_source("test.sev", "b = 2, a = 1 + b");
         let module = parse(&scan(&source).unwrap()).unwrap();
-        assert_eq!(module.bindings.len(), 2);
+        assert_eq!(module.items.len(), 2);
+        assert!(module
+            .items
+            .iter()
+            .all(|item| matches!(item, severian_ast::Item::Binding(_))));
+    }
+
+    #[test]
+    fn semicolon_separates_without_starting_a_physical_line() {
+        let source = SourceFile::virtual_source("test.sev", "x = 1; y = 2");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert_eq!(module.items.len(), 2);
+    }
+
+    #[test]
+    fn power_is_right_associative() {
+        let source = SourceFile::virtual_source("test.sev", "x = 2 ** 3 ** 2");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(binding) = &module.items[0] else {
+            unreachable!()
+        };
+        let severian_ast::ExpressionKind::Binary { right, .. } = &binding.value.kind else {
+            unreachable!()
+        };
+        assert!(matches!(
+            right.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::Power,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -23,10 +53,18 @@ mod tests {
             "trait i32: Primitive + Integer[i32]:\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
-        assert_eq!(module.traits[0].name, "i32");
-        assert_eq!(module.traits[0].bases.len(), 2);
+        let declaration = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                severian_ast::Item::Trait(declaration) => Some(declaration),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(declaration.name, "i32");
+        assert_eq!(declaration.bases.len(), 2);
         assert_eq!(
-            module.traits[0].operators[0].operator,
+            declaration.operators[0].operator,
             severian_ast::OperatorSyntax::Plus
         );
     }
@@ -38,15 +76,35 @@ mod tests {
             "trait Example: Base[Tensor[f32]]:\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
-        let base = &module.traits[0].bases[0];
-        let property = &module.traits[0].properties[0].annotation;
-        let parameter = &module.traits[0].operators[0].parameters[0].annotation;
-        let result = &module.traits[0].operators[0].result;
-        let binding = module.bindings[0].annotation.as_ref().unwrap();
-        assert!(matches!(base.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-        assert!(matches!(property.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-        assert!(matches!(parameter.kind, severian_ast::TypeAnnotationKind::Named { .. }));
-        assert!(matches!(result.kind, severian_ast::TypeAnnotationKind::Union(_)));
+        assert!(matches!(module.items[0], severian_ast::Item::Trait(_)));
+        assert!(matches!(module.items[1], severian_ast::Item::Binding(_)));
+        let severian_ast::Item::Trait(declaration) = &module.items[0] else {
+            unreachable!()
+        };
+        let severian_ast::Item::Binding(binding) = &module.items[1] else {
+            unreachable!()
+        };
+        let base = &declaration.bases[0];
+        let property = &declaration.properties[0].annotation;
+        let parameter = &declaration.operators[0].parameters[0].annotation;
+        let result = &declaration.operators[0].result;
+        let binding = binding.annotation.as_ref().unwrap();
+        assert!(matches!(
+            base.kind,
+            severian_ast::TypeAnnotationKind::Named { .. }
+        ));
+        assert!(matches!(
+            property.kind,
+            severian_ast::TypeAnnotationKind::Named { .. }
+        ));
+        assert!(matches!(
+            parameter.kind,
+            severian_ast::TypeAnnotationKind::Named { .. }
+        ));
+        assert!(matches!(
+            result.kind,
+            severian_ast::TypeAnnotationKind::Union(_)
+        ));
         assert_eq!(binding.named_parts().unwrap().0, "list");
         assert_eq!(property.named_parts().unwrap().0, "list");
         assert_eq!(binding.named_parts().unwrap().1.len(), 1);

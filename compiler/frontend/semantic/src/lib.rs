@@ -22,7 +22,10 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
         next_binding: 0,
     };
     let mut bindings = Vec::new();
-    for ast_binding in &ast.bindings {
+    for ast_binding in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Binding(binding) => Some(binding),
+        _ => None,
+    }) {
         if analyzer.names.contains_key(&ast_binding.name) {
             return Err(Diagnostic::new(
                 "E000203",

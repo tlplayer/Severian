@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 use severian_lir::LoweredFloatFormat;
-pub use severian_lir::{LoweredType, Module as LoweredModule, Operation, ValueId};
-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
+pub use severian_lir::{
+    BinaryOperation, Constant, LoweredType, Module as LoweredModule, Operation, UnaryOperation,
+    ValueId,
+};
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -159,11 +161,11 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
     }
 }
 
-fn c_literal(value: &LiteralValue, ty: LoweredType) -> Result<String, BackendError> {
+fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> {
     match (value, ty) {
-        (LiteralValue::Integer(spelling), LoweredType::Integer { .. })
-        | (LiteralValue::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
-        (LiteralValue::Boolean(value), LoweredType::Boolean) => {
+        (Constant::Integer(spelling), LoweredType::Integer { .. })
+        | (Constant::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
+        (Constant::Boolean(value), LoweredType::Boolean) => {
             Ok(if *value { "1" } else { "0" }.into())
         }
         _ => Err(BackendError::UnsupportedOperation(format!(
@@ -172,34 +174,34 @@ fn c_literal(value: &LiteralValue, ty: LoweredType) -> Result<String, BackendErr
     }
 }
 
-fn c_unary(operator: UnaryOperator) -> &'static str {
+fn c_unary(operator: UnaryOperation) -> &'static str {
     match operator {
-        UnaryOperator::Positive => "+",
-        UnaryOperator::Negative => "-",
-        UnaryOperator::Not => "!",
+        UnaryOperation::Positive => "+",
+        UnaryOperation::Negative => "-",
+        UnaryOperation::Not => "!",
     }
 }
 
-fn c_binary(operator: BinaryOperator) -> Result<&'static str, BackendError> {
+fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
     Ok(match operator {
-        BinaryOperator::Add => "+",
-        BinaryOperator::Subtract => "-",
-        BinaryOperator::Multiply => "*",
-        BinaryOperator::Divide => "/",
-        BinaryOperator::Remainder => "%",
-        BinaryOperator::Power => {
+        BinaryOperation::Add => "+",
+        BinaryOperation::Subtract => "-",
+        BinaryOperation::Multiply => "*",
+        BinaryOperation::Divide => "/",
+        BinaryOperation::Remainder => "%",
+        BinaryOperation::Power => {
             return Err(BackendError::UnsupportedOperation(
                 "power requires a lowered runtime or target operation".into(),
             ))
         }
-        BinaryOperator::Equal => "==",
-        BinaryOperator::NotEqual => "!=",
-        BinaryOperator::Less => "<",
-        BinaryOperator::LessEqual => "<=",
-        BinaryOperator::Greater => ">",
-        BinaryOperator::GreaterEqual => ">=",
-        BinaryOperator::And => "&&",
-        BinaryOperator::Or => "||",
+        BinaryOperation::Equal => "==",
+        BinaryOperation::NotEqual => "!=",
+        BinaryOperation::Less => "<",
+        BinaryOperation::LessEqual => "<=",
+        BinaryOperation::Greater => ">",
+        BinaryOperation::GreaterEqual => ">=",
+        BinaryOperation::And => "&&",
+        BinaryOperation::Or => "||",
     })
 }
 
@@ -246,7 +248,7 @@ mod tests {
                 },
             }],
             operations: vec![Operation::Constant {
-                value: LiteralValue::Integer("10".into()),
+                value: Constant::Integer("10".into()),
                 result: ValueId(0),
             }],
             last_binding: Some(ValueId(0)),

@@ -18,7 +18,6 @@ name = "severian-backend"
 version = "0.1.0"
 dependencies = [
  "severian-lir",
- "severian-universal",
 ]
 
 [[package]]
@@ -84,9 +83,6 @@ dependencies = [
 [[package]]
 name = "severian-lir"
 version = "0.1.0"
-dependencies = [
- "severian-universal",
-]
 
 [[package]]
 name = "severian-lowering"
@@ -110,7 +106,6 @@ name = "severian-mlir"
 version = "0.1.0"
 dependencies = [
  "severian-lir",
- "severian-universal",
 ]
 
 [[package]]

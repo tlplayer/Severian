@@ -1,5 +1,7 @@
-use severian_lir::{LoweredFloatFormat, LoweredType, Module, Operation, ValueId};
-use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
+use severian_lir::{
+    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module, Operation, UnaryOperation,
+    ValueId,
+};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,9 +27,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                 let ty = value_type(module, *result)?;
                 let spelling = mlir_type(ty)?;
                 let literal = match value {
-                    LiteralValue::Integer(value) | LiteralValue::Float(value) => value,
-                    LiteralValue::Boolean(true) => "1",
-                    LiteralValue::Boolean(false) => "0",
+                    Constant::Integer(value) | Constant::Float(value) => value,
+                    Constant::Boolean(true) => "1",
+                    Constant::Boolean(false) => "0",
                     other => {
                         return Err(MlirError::UnsupportedOperation(format!(
                             "MLIR constant lowering is unavailable for {other:?}"
@@ -99,22 +101,22 @@ fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
     })
 }
 
-fn mlir_binary(operator: BinaryOperator, ty: LoweredType) -> Result<&'static str, MlirError> {
+fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static str, MlirError> {
     let float = matches!(ty, LoweredType::Float { .. });
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     Ok(match (operator, float) {
-        (BinaryOperator::Add, false) => "arith.addi",
-        (BinaryOperator::Subtract, false) => "arith.subi",
-        (BinaryOperator::Multiply, false) => "arith.muli",
-        (BinaryOperator::Divide, false) if signed => "arith.divsi",
-        (BinaryOperator::Divide, false) => "arith.divui",
-        (BinaryOperator::Remainder, false) if signed => "arith.remsi",
-        (BinaryOperator::Remainder, false) => "arith.remui",
-        (BinaryOperator::Add, true) => "arith.addf",
-        (BinaryOperator::Subtract, true) => "arith.subf",
-        (BinaryOperator::Multiply, true) => "arith.mulf",
-        (BinaryOperator::Divide, true) => "arith.divf",
-        (BinaryOperator::Remainder, true) => "arith.remf",
+        (BinaryOperation::Add, false) => "arith.addi",
+        (BinaryOperation::Subtract, false) => "arith.subi",
+        (BinaryOperation::Multiply, false) => "arith.muli",
+        (BinaryOperation::Divide, false) if signed => "arith.divsi",
+        (BinaryOperation::Divide, false) => "arith.divui",
+        (BinaryOperation::Remainder, false) if signed => "arith.remsi",
+        (BinaryOperation::Remainder, false) => "arith.remui",
+        (BinaryOperation::Add, true) => "arith.addf",
+        (BinaryOperation::Subtract, true) => "arith.subf",
+        (BinaryOperation::Multiply, true) => "arith.mulf",
+        (BinaryOperation::Divide, true) => "arith.divf",
+        (BinaryOperation::Remainder, true) => "arith.remf",
         _ => {
             return Err(MlirError::UnsupportedOperation(format!(
                 "MLIR binary lowering is unavailable for {operator:?} on {ty:?}"
@@ -124,7 +126,7 @@ fn mlir_binary(operator: BinaryOperator, ty: LoweredType) -> Result<&'static str
 }
 
 #[allow(dead_code)]
-fn _unary_is_universal(_: UnaryOperator) {}
+fn _unary_is_lir(_: UnaryOperation) {}
 
 #[cfg(test)]
 mod tests {

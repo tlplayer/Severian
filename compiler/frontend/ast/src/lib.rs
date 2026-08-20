@@ -13,7 +13,12 @@ pub use types::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
-    pub bindings: Vec<Binding>,
-    pub traits: Vec<TraitDeclaration>,
-    pub imports: Vec<ImportDeclaration>,
+    pub items: Vec<Item>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Item {
+    Import(ImportDeclaration),
+    Trait(TraitDeclaration),
+    Binding(Binding),
 }

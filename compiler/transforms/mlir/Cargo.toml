@@ -7,7 +7,6 @@ repository.workspace = true
 
 [dependencies]
 severian-lir = { path = "../lir" }
-severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"

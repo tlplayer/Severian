@@ -5,8 +5,5 @@ edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 
-[dependencies]
-severian-universal = { path = "../../universal" }
-
 [lib]
 path = "src/lib.rs"

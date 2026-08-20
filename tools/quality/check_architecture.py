@@ -13,17 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_policy() -> tuple[dict[str, set[str]], dict[str, str], list[dict[str, str]]]:
+def load_policy() -> tuple[dict[str, str], dict[str, set[str]], list[dict[str, str]]]:
     manifest = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     architecture = manifest["workspace"]["metadata"]["architecture"]
-    layers = {
-        name: set(allowed) for name, allowed in architecture["layers"].items()
-    }
     packages = architecture["packages"]
-    unknown_assignments = sorted(set(packages.values()) - set(layers))
-    if unknown_assignments:
-        raise ValueError(f"packages use unknown layers: {', '.join(unknown_assignments)}")
-    return layers, packages, architecture.get("reject", [])
+    allow = {name: set(dependencies) for name, dependencies in architecture["allow"].items()}
+    return packages, allow, architecture.get("reject", [])
 
 
 def cargo_metadata() -> dict[str, object]:
@@ -39,7 +34,7 @@ def cargo_metadata() -> dict[str, object]:
 
 def main() -> int:
     try:
-        layers, assignments, rejection_tests = load_policy()
+        assignments, allow, rejection_tests = load_policy()
         metadata = cargo_metadata()
         members = set(metadata["workspace_members"])
         packages = {
@@ -49,38 +44,45 @@ def main() -> int:
         }
         missing = sorted(set(packages) - set(assignments))
         stale = sorted(set(assignments) - set(packages))
-        if missing or stale:
+        missing_allow = sorted(set(packages) - set(allow))
+        stale_allow = sorted(set(allow) - set(packages))
+        if missing or stale or missing_allow or stale_allow:
             details = []
             if missing:
                 details.append(f"unassigned workspace packages: {', '.join(missing)}")
             if stale:
                 details.append(f"unknown policy packages: {', '.join(stale)}")
+            if missing_allow:
+                details.append(f"packages without allowlists: {', '.join(missing_allow)}")
+            if stale_allow:
+                details.append(f"unknown allowlist packages: {', '.join(stale_allow)}")
             raise ValueError("; ".join(details))
+
+        for name, dependencies in allow.items():
+            unknown = sorted(dependencies - set(packages))
+            if unknown:
+                raise ValueError(f"{name} allows unknown packages: {', '.join(unknown)}")
 
         for test in rejection_tests:
             source = test["from"]
             target = test["to"]
             if source not in assignments or target not in assignments:
                 raise ValueError(f"architecture rejection test names unknown package: {test}")
-            source_layer = assignments[source]
-            target_layer = assignments[target]
-            if target_layer in layers[source_layer]:
+            if target in allow[source]:
                 raise ValueError(
                     f"expected rejection is now allowed: {source} -> {target}"
                 )
 
         violations: list[str] = []
         for name, package in sorted(packages.items()):
-            source_layer = assignments[name]
-            allowed = layers[source_layer]
             for dependency in package["dependencies"]:
                 target = dependency["name"]
                 if dependency["kind"] == "dev" or target not in packages:
                     continue
-                target_layer = assignments[target]
-                if target_layer not in allowed:
+                if target not in allow[name]:
                     violations.append(
-                        f"{name} ({source_layer}) -> {target} ({target_layer})"
+                        f"{name} ({assignments[name]}) -> "
+                        f"{target} ({assignments[target]})"
                     )
         if violations:
             print("architecture dependency violations:", file=sys.stderr)

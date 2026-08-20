@@ -39,30 +39,8 @@ license-file = "LICENSE.md"
 repository = "https://github.com/tlplayer/Severian"
 version = "0.1.0"
 
-# Fail-closed dependency layers, enforced by tools/quality/check_architecture.py.
-[workspace.metadata.architecture.layers]
-source = []
-diagnostics = ["source"]
-syntax = ["source", "diagnostics", "syntax"]
-universal = []
-primitive_source = []
-semantic = ["source", "diagnostics", "syntax", "universal", "semantic"]
-bootstrap = ["source", "diagnostics", "syntax", "universal", "primitive_source"]
-transform = ["universal", "semantic", "transform"]
-boundary = ["universal", "transform", "boundary"]
-driver = [
-    "source",
-    "diagnostics",
-    "syntax",
-    "universal",
-    "primitive_source",
-    "semantic",
-    "bootstrap",
-    "transform",
-    "boundary",
-    "driver",
-]
-
+# Package classifications are descriptive. Exact package allowlists below are
+# authoritative and fail closed for every new production dependency.
 [workspace.metadata.architecture.packages]
 severian-source = "source"
 severian-diagnostics = "diagnostics"
@@ -83,6 +61,58 @@ severian-interface = "boundary"
 severian-backend = "boundary"
 severian-mlir = "boundary"
 severian-driver = "driver"
+
+[workspace.metadata.architecture.allow]
+severian-source = []
+severian-diagnostics = ["severian-source"]
+severian-lexer = ["severian-diagnostics", "severian-source"]
+severian-ast = ["severian-source"]
+severian-parser = [
+    "severian-ast",
+    "severian-diagnostics",
+    "severian-lexer",
+    "severian-source",
+]
+severian-universal = []
+severian-primitives = []
+severian-hir = ["severian-source", "severian-universal"]
+severian-semantic = [
+    "severian-ast",
+    "severian-diagnostics",
+    "severian-hir",
+    "severian-source",
+    "severian-universal",
+]
+severian-ownership = ["severian-diagnostics", "severian-hir"]
+severian-bootstrap = [
+    "severian-ast",
+    "severian-diagnostics",
+    "severian-lexer",
+    "severian-parser",
+    "severian-primitives",
+    "severian-source",
+    "severian-universal",
+]
+severian-mir = ["severian-hir", "severian-universal"]
+severian-lir = []
+severian-lowering = ["severian-lir", "severian-mir", "severian-universal"]
+severian-abi = []
+severian-interface = ["severian-universal"]
+severian-backend = ["severian-lir"]
+severian-mlir = ["severian-lir"]
+severian-driver = [
+    "severian-backend",
+    "severian-bootstrap",
+    "severian-diagnostics",
+    "severian-lexer",
+    "severian-lowering",
+    "severian-mir",
+    "severian-ownership",
+    "severian-parser",
+    "severian-semantic",
+    "severian-source",
+    "severian-universal",
+]
 
 [[workspace.metadata.architecture.reject]]
 from = "severian-ast"

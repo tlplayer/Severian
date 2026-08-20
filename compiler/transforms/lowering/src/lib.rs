@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
 use severian_lir::{
-    LoweredFloatFormat, LoweredType, Module as LirModule, Operation as LirOperation, Value, ValueId,
+    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module as LirModule,
+    Operation as LirOperation, UnaryOperation, Value, ValueId,
 };
 use severian_mir::{Module as MirModule, Operation as MirOperation};
 use severian_universal::{
-    FloatFormat, IntegerWidth, PrimitiveRepresentation, TargetSpec, TypeContext, TypeId,
+    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TargetSpec,
+    TypeContext, TypeId, UnaryOperator,
 };
 use std::fmt;
 
@@ -29,7 +31,7 @@ pub fn lower(
         .iter()
         .map(|operation| match operation {
             MirOperation::Constant { value, result } => LirOperation::Constant {
-                value: value.clone(),
+                value: lower_constant(value),
                 result: ValueId(result.0),
             },
             MirOperation::Unary {
@@ -37,7 +39,7 @@ pub fn lower(
                 operand,
                 result,
             } => LirOperation::Unary {
-                operator: *operator,
+                operator: lower_unary(*operator),
                 operand: ValueId(operand.0),
                 result: ValueId(result.0),
             },
@@ -47,7 +49,7 @@ pub fn lower(
                 right,
                 result,
             } => LirOperation::Binary {
-                operator: *operator,
+                operator: lower_binary(*operator),
                 left: ValueId(left.0),
                 right: ValueId(right.0),
                 result: ValueId(result.0),
@@ -59,6 +61,45 @@ pub fn lower(
         operations,
         last_binding: mir.bindings.last().map(|(_, value)| ValueId(value.0)),
     })
+}
+
+fn lower_constant(value: &LiteralValue) -> Constant {
+    match value {
+        LiteralValue::Integer(value) => Constant::Integer(value.clone()),
+        LiteralValue::Float(value) => Constant::Float(value.clone()),
+        LiteralValue::Boolean(value) => Constant::Boolean(*value),
+        LiteralValue::String(value) => Constant::String(value.clone()),
+        LiteralValue::Bytes(value) => Constant::Bytes(value.clone()),
+        LiteralValue::None => Constant::None,
+        LiteralValue::Unit => Constant::Unit,
+    }
+}
+
+fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
+    match operator {
+        UnaryOperator::Positive => UnaryOperation::Positive,
+        UnaryOperator::Negative => UnaryOperation::Negative,
+        UnaryOperator::Not => UnaryOperation::Not,
+    }
+}
+
+fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
+    match operator {
+        BinaryOperator::Add => BinaryOperation::Add,
+        BinaryOperator::Subtract => BinaryOperation::Subtract,
+        BinaryOperator::Multiply => BinaryOperation::Multiply,
+        BinaryOperator::Divide => BinaryOperation::Divide,
+        BinaryOperator::Remainder => BinaryOperation::Remainder,
+        BinaryOperator::Power => BinaryOperation::Power,
+        BinaryOperator::Equal => BinaryOperation::Equal,
+        BinaryOperator::NotEqual => BinaryOperation::NotEqual,
+        BinaryOperator::Less => BinaryOperation::Less,
+        BinaryOperator::LessEqual => BinaryOperation::LessEqual,
+        BinaryOperator::Greater => BinaryOperation::Greater,
+        BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
+        BinaryOperator::And => BinaryOperation::And,
+        BinaryOperator::Or => BinaryOperation::Or,
+    }
 }
 
 fn lower_type(

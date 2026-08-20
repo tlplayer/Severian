@@ -36,7 +36,10 @@ fn build_from_sources<'a>(
         };
         let tokens = severian_lexer::scan(&source).map_err(BootstrapError::Parse)?;
         let module = severian_parser::parse(&tokens).map_err(BootstrapError::Parse)?;
-        for declaration in module.traits {
+        for declaration in module.items.into_iter().filter_map(|item| match item {
+            severian_ast::Item::Trait(declaration) => Some(declaration),
+            _ => None,
+        }) {
             let name = declaration.name.clone();
             if declarations.insert(name.clone(), declaration).is_some() {
                 return Err(BootstrapError::DuplicateDeclaration(name));
@@ -144,10 +147,7 @@ fn collect_operators(
             .iter()
             .zip(arguments)
             .map(|(parameter, argument)| {
-                (
-                    parameter.clone(),
-                    substitute_type(argument, substitutions),
-                )
+                (parameter.clone(), substitute_type(argument, substitutions))
             })
             .collect();
         collect_operators(inherited, &inherited_substitutions, declarations, output)?;
@@ -315,15 +315,13 @@ fn integer_property(
         Some(Expression {
             kind: ExpressionKind::Literal(AstLiteral::Integer(value)),
             ..
-        }) => {
-            value
-                .parse()
-                .map(Some)
-                .map_err(|_| BootstrapError::InvalidProperty {
-                    declaration: declaration.name.clone(),
-                    property: name.into(),
-                })
-        }
+        }) => value
+            .parse()
+            .map(Some)
+            .map_err(|_| BootstrapError::InvalidProperty {
+                declaration: declaration.name.clone(),
+                property: name.into(),
+            }),
         None => Ok(None),
         _ => Err(BootstrapError::InvalidProperty {
             declaration: declaration.name.clone(),
