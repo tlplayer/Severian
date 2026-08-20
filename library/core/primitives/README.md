@@ -1,18 +1,43 @@
-# Core primitive bootstrap contract
+# Core primitives
 
-This package is the canonical source-language declaration database for
-Severian primitive types. The compiler must load it before user semantic
-analysis and must fail bootstrap when it is missing or malformed.
+This package is the source-level definition of Severian primitive types. It is compiler input, not a second Rust implementation of the language.
 
-The compiler recognizes the structural `Primitive` protocol. A declaration's
-identity comes from the declaration itself; its `category`, `representation`,
-`bits`, `signed`, and `default_literal` properties describe the limited facts
-needed by semantic analysis and lowering. The compiler must not maintain a
-second list of user-visible primitive names.
+## Contents
 
-Adding a primitive consists of adding a declaration here, teaching semantic
-capability rules about a genuinely new category if necessary, and adding
-backend support for a genuinely new representation. Ordinary expression,
-generic, HIR, MIR, parser, and call-analysis code must remain unchanged.
+The package declares primitive identities, literal defaults, typed representations, and full operator signatures in `.sev` source.
 
-Tensor and other parameterized library abstractions are not primitives.
+Examples of information declared here:
+
+- Stable qualified identity.
+- Primitive category.
+- Fixed-width, pointer-width, float, text, bytes, absence, or unit representation.
+- Whether a literal kind defaults to the primitive.
+- Operator parameter and result types.
+- Constraints inherited from numeric or other traits.
+
+Operator metadata must retain signatures. A set containing only `"+"` is insufficient because operand types, result types, constraints, and coercions are part of the contract.
+
+## Compiler access
+
+```text
+this package
+  -> compiler/bootstrap
+  -> UniversalContext
+  -> all remaining compiler phases by reference
+```
+
+No semantic, lowering, MIR, backend, or interface crate reads this directory directly.
+
+## Prohibited implementation
+
+This package must not contain a Rust parser that scans `.sev` text with string operations. The real Severian lexer and parser are the only source parser.
+
+The end state is a source-only Severian package, not a Rust workspace crate. Any transitional Rust loader is frozen and deleted after `compiler/bootstrap` supplies the same functionality.
+
+## Compatibility tests
+
+- Reordering declarations preserves stable IDs.
+- Formatting and comments do not change definitions.
+- Exactly one default exists per literal kind that requires a default.
+- Operator signatures resolve through universal tests.
+- Every declared representation can be lowered or produces a target-specific unsupported error.
