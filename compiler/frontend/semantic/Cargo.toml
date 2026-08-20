@@ -9,11 +9,14 @@ repository.workspace = true
 severian-ast = { path = "../ast" }
 severian-diagnostics = { path = "../../diagnostics" }
 severian-hir = { path = "../hir" }
-severian-interface = { path = "../../boundaries/interface" }
-severian-primitives = { path = "../../../library/core/primitives" }
+severian-universal = { path = "../../universal" }
+severian-source = { path = "../../source" }
 
 [lib]
 path = "src/lib.rs"
 
 [dev-dependencies]
 severian-source = { path = "../../source" }
+severian-bootstrap = { path = "../../bootstrap" }
+severian-lexer = { path = "../lexer" }
+severian-parser = { path = "../parser" }

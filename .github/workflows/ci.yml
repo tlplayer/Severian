@@ -18,6 +18,9 @@ jobs:
         with:
           components: llvm-tools-preview
 
+      - name: Enforce compiler dependency layers
+        run: python3 tools/quality/check_architecture.py
+
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Measure line and branch coverage

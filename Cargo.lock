@@ -17,7 +17,21 @@ dependencies = [
 name = "severian-backend"
 version = "0.1.0"
 dependencies = [
- "severian-abi",
+ "severian-lir",
+ "severian-universal",
+]
+
+[[package]]
+name = "severian-bootstrap"
+version = "0.1.0"
+dependencies = [
+ "severian-ast",
+ "severian-diagnostics",
+ "severian-lexer",
+ "severian-parser",
+ "severian-primitives",
+ "severian-source",
+ "severian-universal",
 ]
 
 [[package]]
@@ -32,6 +46,7 @@ name = "severian-driver"
 version = "0.1.0"
 dependencies = [
  "severian-backend",
+ "severian-bootstrap",
  "severian-diagnostics",
  "severian-lexer",
  "severian-lowering",
@@ -40,19 +55,23 @@ dependencies = [
  "severian-parser",
  "severian-semantic",
  "severian-source",
+ "severian-universal",
 ]
 
 [[package]]
 name = "severian-hir"
 version = "0.1.0"
 dependencies = [
- "severian-interface",
  "severian-source",
+ "severian-universal",
 ]
 
 [[package]]
 name = "severian-interface"
 version = "0.1.0"
+dependencies = [
+ "severian-universal",
+]
 
 [[package]]
 name = "severian-lexer"
@@ -63,13 +82,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-lir"
+version = "0.1.0"
+dependencies = [
+ "severian-universal",
+]
+
+[[package]]
 name = "severian-lowering"
 version = "0.1.0"
 dependencies = [
- "severian-backend",
- "severian-hir",
+ "severian-lir",
  "severian-mir",
- "severian-primitives",
+ "severian-universal",
 ]
 
 [[package]]
@@ -77,15 +102,15 @@ name = "severian-mir"
 version = "0.1.0"
 dependencies = [
  "severian-hir",
- "severian-interface",
- "severian-source",
+ "severian-universal",
 ]
 
 [[package]]
 name = "severian-mlir"
 version = "0.1.0"
 dependencies = [
- "severian-backend",
+ "severian-lir",
+ "severian-universal",
 ]
 
 [[package]]
@@ -109,22 +134,25 @@ dependencies = [
 [[package]]
 name = "severian-primitives"
 version = "0.1.0"
-dependencies = [
- "severian-interface",
-]
 
 [[package]]
 name = "severian-semantic"
 version = "0.1.0"
 dependencies = [
  "severian-ast",
+ "severian-bootstrap",
  "severian-diagnostics",
  "severian-hir",
- "severian-interface",
- "severian-primitives",
+ "severian-lexer",
+ "severian-parser",
  "severian-source",
+ "severian-universal",
 ]
 
 [[package]]
 name = "severian-source"
+version = "0.1.0"
+
+[[package]]
+name = "severian-universal"
 version = "0.1.0"

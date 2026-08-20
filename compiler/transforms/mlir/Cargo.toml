@@ -6,7 +6,8 @@ license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
-severian-backend = { path = "../../boundaries/backend" }
+severian-lir = { path = "../lir" }
+severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"

@@ -1,0 +1,18 @@
+[package]
+name = "severian-bootstrap"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-ast = { path = "../frontend/ast" }
+severian-diagnostics = { path = "../diagnostics" }
+severian-lexer = { path = "../frontend/lexer" }
+severian-parser = { path = "../frontend/parser" }
+severian-primitives = { path = "../../library/core/primitives" }
+severian-source = { path = "../source" }
+severian-universal = { path = "../universal" }
+
+[lib]
+path = "src/lib.rs"

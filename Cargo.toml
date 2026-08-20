@@ -1,6 +1,10 @@
 [workspace]
 members = [
+    # Universal semantic authority
+    "compiler/universal",
+
     # Language bootstrap
+    "compiler/bootstrap",
     "library/core/primitives",
 
     # Boundaries
@@ -22,6 +26,7 @@ members = [
     "compiler/source",
 
     # Transforms
+    "compiler/transforms/lir",
     "compiler/transforms/lowering",
     "compiler/transforms/mir",
     "compiler/transforms/mlir",
@@ -33,3 +38,64 @@ edition = "2021"
 license-file = "LICENSE.md"
 repository = "https://github.com/tlplayer/Severian"
 version = "0.1.0"
+
+# Fail-closed dependency layers, enforced by tools/quality/check_architecture.py.
+[workspace.metadata.architecture.layers]
+source = []
+diagnostics = ["source"]
+syntax = ["source", "diagnostics", "syntax"]
+universal = []
+primitive_source = []
+semantic = ["source", "diagnostics", "syntax", "universal", "semantic"]
+bootstrap = ["source", "diagnostics", "syntax", "universal", "primitive_source"]
+transform = ["universal", "semantic", "transform"]
+boundary = ["universal", "transform", "boundary"]
+driver = [
+    "source",
+    "diagnostics",
+    "syntax",
+    "universal",
+    "primitive_source",
+    "semantic",
+    "bootstrap",
+    "transform",
+    "boundary",
+    "driver",
+]
+
+[workspace.metadata.architecture.packages]
+severian-source = "source"
+severian-diagnostics = "diagnostics"
+severian-lexer = "syntax"
+severian-ast = "syntax"
+severian-parser = "syntax"
+severian-universal = "universal"
+severian-primitives = "primitive_source"
+severian-hir = "semantic"
+severian-semantic = "semantic"
+severian-ownership = "semantic"
+severian-bootstrap = "bootstrap"
+severian-mir = "transform"
+severian-lir = "transform"
+severian-lowering = "transform"
+severian-abi = "boundary"
+severian-interface = "boundary"
+severian-backend = "boundary"
+severian-mlir = "boundary"
+severian-driver = "driver"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-ast"
+to = "severian-universal"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-parser"
+to = "severian-universal"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-universal"
+to = "severian-ast"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-backend"
+to = "severian-semantic"

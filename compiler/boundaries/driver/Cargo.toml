@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 severian-backend = { path = "../backend" }
+severian-bootstrap = { path = "../../bootstrap" }
 severian-diagnostics = { path = "../../diagnostics" }
 severian-lexer = { path = "../../frontend/lexer" }
 severian-lowering = { path = "../../transforms/lowering" }
@@ -15,6 +16,7 @@ severian-ownership = { path = "../../frontend/ownership" }
 severian-parser = { path = "../../frontend/parser" }
 severian-semantic = { path = "../../frontend/semantic" }
 severian-source = { path = "../../source" }
+severian-universal = { path = "../../universal" }
 
 [lib]
 path = "src/lib.rs"

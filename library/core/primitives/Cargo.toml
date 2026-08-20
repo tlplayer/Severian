@@ -6,7 +6,4 @@ license-file.workspace = true
 repository.workspace = true
 
 [lib]
-path = "src/lib.rs"
-
-[dependencies]
-severian-interface = { path = "../../../compiler/boundaries/interface" }
+path = "interop/rust/lib.rs"

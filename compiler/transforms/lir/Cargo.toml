@@ -1,12 +1,11 @@
 [package]
-name = "severian-backend"
+name = "severian-lir"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
-severian-lir = { path = "../../transforms/lir" }
 severian-universal = { path = "../../universal" }
 
 [lib]
