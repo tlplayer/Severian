@@ -1,8 +1,15 @@
 use severian_diagnostics::Diagnostic;
-use severian_hir::{Expression, ExpressionKind, HirId, Module};
+use severian_hir::{Expression, ExpressionKind, HirId, Module, Program};
 use std::collections::BTreeSet;
 
-pub fn validate(module: &Module) -> Result<(), Diagnostic> {
+pub fn validate(program: &Program) -> Result<(), Diagnostic> {
+    for module in &program.modules {
+        validate_module(module)?;
+    }
+    Ok(())
+}
+
+fn validate_module(module: &Module) -> Result<(), Diagnostic> {
     let mut declared = BTreeSet::new();
     for binding in &module.bindings {
         validate_expression(&binding.value, &declared)?;

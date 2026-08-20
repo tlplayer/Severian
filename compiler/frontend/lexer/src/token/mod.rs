@@ -4,6 +4,7 @@ use severian_source::Span;
 pub enum TokenKind {
     Identifier(String),
     Integer(i64),
+    Colon,
     Equal,
     Plus,
     Separator,

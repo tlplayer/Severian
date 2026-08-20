@@ -1,4 +1,4 @@
-use severian_ast::{Binding, Expression, ExpressionKind, Module};
+use severian_ast::{Binding, Expression, ExpressionKind, Module, TypeAnnotation};
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{Token, TokenKind};
 use severian_source::Span;
@@ -36,10 +36,28 @@ impl Parser<'_> {
             ));
         };
         let name = name.clone();
+        let annotation = if matches!(self.peek().kind, TokenKind::Colon) {
+            self.next();
+            let type_token = self.next();
+            let TokenKind::Identifier(name) = type_token.kind else {
+                return Err(Diagnostic::new(
+                    "E000113",
+                    "expected a type name after `:`",
+                    Some(type_token.span),
+                ));
+            };
+            Some(TypeAnnotation {
+                name,
+                span: type_token.span,
+            })
+        } else {
+            None
+        };
         self.expect(TokenKind::Equal, "expected `=` after binding name")?;
         let value = self.expression()?;
         Ok(Binding {
             name,
+            annotation,
             span: Span::new(
                 name_token.span.source,
                 name_token.span.start,

@@ -21,6 +21,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 TokenKind::Equal
             }
+            b':' => {
+                cursor += 1;
+                TokenKind::Colon
+            }
             b'+' => {
                 cursor += 1;
                 TokenKind::Plus

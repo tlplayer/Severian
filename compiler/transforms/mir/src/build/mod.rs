@@ -1,16 +1,18 @@
 use crate::{Module, Operation, Value, ValueId};
-use severian_hir::{Expression, ExpressionKind, HirId, Module as HirModule};
+use severian_hir::{Expression, ExpressionKind, HirId, Program as HirProgram};
 use std::collections::BTreeMap;
 
-pub fn build(hir: &HirModule) -> Module {
+pub fn build(hir: &HirProgram) -> Module {
     let mut builder = Builder {
         module: Module::default(),
         bindings: BTreeMap::new(),
     };
-    for binding in &hir.bindings {
-        let value = builder.expression(&binding.value);
-        builder.bindings.insert(binding.id, value);
-        builder.module.bindings.push((binding.id, value));
+    for hir_module in &hir.modules {
+        for binding in &hir_module.bindings {
+            let value = builder.expression(&binding.value);
+            builder.bindings.insert(binding.id, value);
+            builder.module.bindings.push((binding.id, value));
+        }
     }
     builder.module
 }

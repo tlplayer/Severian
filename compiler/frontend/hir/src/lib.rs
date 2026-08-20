@@ -40,7 +40,12 @@ impl TypeTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Program {
+    pub modules: Vec<Module>,
+    pub types: TypeTable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
     pub bindings: Vec<Binding>,
-    pub types: TypeTable,
 }
