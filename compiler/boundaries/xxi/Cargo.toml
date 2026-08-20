@@ -1,0 +1,21 @@
+[package]
+name = "severian-xxi"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-abi = { path = "../abi" }
+severian-ast = { path = "../../frontend/ast" }
+severian-ffi = { path = "../ffi" }
+severian-universal = { path = "../../universal" }
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+severian-bootstrap = { path = "../../bootstrap" }
+severian-lexer = { path = "../../frontend/lexer" }
+severian-parser = { path = "../../frontend/parser" }
+severian-source = { path = "../../source" }

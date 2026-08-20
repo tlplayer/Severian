@@ -15,6 +15,91 @@ pub struct HirId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BindingId(pub u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DeclaredTypeId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompilerId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InterfaceId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FfiId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AbiId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProviderId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompileType {
+    Standard,
+    Compiler(CompilerId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallType {
+    Severian,
+    External(ExternalCall),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalCall {
+    pub interface: InterfaceId,
+    pub symbol: SymbolId,
+    pub provider: Option<ProviderId>,
+    pub ffi: FfiId,
+    pub abi: AbiId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemanticType {
+    Universal(TypeId),
+    Declared(DeclaredTypeId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryModifier {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryType {
+    pub ty: SemanticType,
+    pub modifiers: Vec<BoundaryModifier>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionParameter {
+    pub name: String,
+    pub contract: BoundaryType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionDeclaration {
+    pub id: FunctionId,
+    pub name: String,
+    pub parameters: Vec<FunctionParameter>,
+    pub result: BoundaryType,
+    pub compile_type: CompileType,
+    pub call_type: CallType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDeclaration {
+    pub id: DeclaredTypeId,
+    pub name: String,
+    pub interface: Option<InterfaceId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Program {
     pub modules: Vec<Module>,
@@ -23,4 +108,6 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
     pub bindings: Vec<Binding>,
+    pub functions: Vec<FunctionDeclaration>,
+    pub types: Vec<TypeDeclaration>,
 }

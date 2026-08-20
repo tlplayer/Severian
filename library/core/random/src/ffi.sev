@@ -1,0 +1,10 @@
+import "c:random-c" as native
+
+@c(symbol = "sev_abi_v1_random_float")
+def random() -> float
+
+@c(symbol = "sev_abi_v1_random_int")
+def randint(start: int, stop: int) -> int
+
+@c(symbol = "sev_abi_v1_random_seed")
+def seed(value: int)

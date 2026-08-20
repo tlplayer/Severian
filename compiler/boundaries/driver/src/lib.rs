@@ -25,4 +25,19 @@ mod tests {
             .success());
         std::fs::remove_file(output).unwrap();
     }
+
+    #[test]
+    fn validates_external_boundaries_before_lowering() {
+        let source = SourceFile::virtual_source(
+            "invalid-ffi.sev",
+            "@c\ndef invalid(value: nullable[i32]) -> i32\nx: i32 = 1\n",
+        );
+        let output =
+            std::env::temp_dir().join(format!("severian-invalid-ffi-{}", std::process::id()));
+        assert!(matches!(
+            compile_source(&source, &output),
+            Err(CompileError::External(_))
+        ));
+        assert!(!output.exists());
+    }
 }

@@ -1,15 +1,14 @@
-use crate::{TargetSpec, TypeContext};
+use crate::TypeContext;
 use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct UniversalContext {
     pub types: TypeContext,
-    pub target: TargetSpec,
 }
 
 impl UniversalContext {
-    pub fn new(types: TypeContext, target: TargetSpec) -> Self {
-        Self { types, target }
+    pub fn new(types: TypeContext) -> Self {
+        Self { types }
     }
 }
 

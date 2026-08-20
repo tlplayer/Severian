@@ -5,7 +5,7 @@ Lowering converts typed MIR into target-resolved LIR.
 ## API
 
 ```text
-lower(mir, universal_context, target_spec) -> LirModule
+lower(mir, type_context, abi_target) -> LirModule
 ```
 
 Lowering may:

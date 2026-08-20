@@ -6,26 +6,24 @@ use severian_ast::{
 };
 use severian_source::{SourceFile, SourceId};
 use severian_universal::{
-    BinaryOperator, OperatorSignature, PrimitiveCategory, PrimitiveRepresentation, TargetSpec,
-    TypeContext, TypeId, TypePattern, UnaryOperator, UniversalContext,
+    BinaryOperator, OperatorSignature, PrimitiveCategory, PrimitiveRepresentation, TypeContext,
+    TypeId, TypePattern, UnaryOperator, UniversalContext,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 const PACKAGE_PATH: &str = "core.primitives";
 
-pub fn load(target: TargetSpec) -> Result<UniversalContext, BootstrapError> {
+pub fn load() -> Result<UniversalContext, BootstrapError> {
     build_from_sources(
         severian_primitives::SOURCES
             .iter()
             .map(|source| (source.path, source.source)),
-        target,
     )
 }
 
 fn build_from_sources<'a>(
     sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-    target: TargetSpec,
 ) -> Result<UniversalContext, BootstrapError> {
     let mut declarations = BTreeMap::<String, TraitDeclaration>::new();
     for (index, (path, text)) in sources.into_iter().enumerate() {
@@ -109,7 +107,7 @@ fn build_from_sources<'a>(
         }
     }
 
-    Ok(UniversalContext::new(types, target))
+    Ok(UniversalContext::new(types))
 }
 
 #[derive(Debug, Clone)]
@@ -379,7 +377,7 @@ mod tests {
 
     #[test]
     fn loads_sources_through_the_real_parser() {
-        let context = load(TargetSpec::host()).unwrap();
+        let context = load().unwrap();
         let i32 = context.types.resolve_name("i32").unwrap();
         let definition = context.types.primitive(i32).unwrap();
         assert_eq!(
@@ -393,7 +391,7 @@ mod tests {
 
     #[test]
     fn inherited_operator_constraints_are_symmetric() {
-        let context = load(TargetSpec::host()).unwrap();
+        let context = load().unwrap();
         let i32 = context.types.resolve_name("i32").unwrap();
         for operands in [
             (
@@ -422,7 +420,6 @@ mod tests {
             severian_primitives::SOURCES
                 .iter()
                 .map(|source| (source.path, source.source)),
-            TargetSpec::host(),
         )
         .unwrap();
         let reverse = build_from_sources(
@@ -430,7 +427,6 @@ mod tests {
                 .iter()
                 .rev()
                 .map(|source| (source.path, source.source)),
-            TargetSpec::host(),
         )
         .unwrap();
         let id = |context: &UniversalContext| {
@@ -451,7 +447,6 @@ mod tests {
                 .iter()
                 .map(|source| (source.path, source.source))
                 .chain(std::iter::once(("src/f128.sev", F128))),
-            TargetSpec::host(),
         )
         .unwrap();
         let f128 = context.types.resolve_name("f128").unwrap();

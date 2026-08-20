@@ -5,9 +5,10 @@ use severian_lir::{
     Operation as LirOperation, UnaryOperation, Value, ValueId,
 };
 use severian_mir::{Module as MirModule, Operation as MirOperation};
+use severian_target::TargetSpec;
 use severian_universal::{
-    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TargetSpec,
-    TypeContext, TypeId, UnaryOperator,
+    BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TypeContext,
+    TypeId, UnaryOperator,
 };
 use std::fmt;
 
@@ -112,19 +113,21 @@ fn lower_type(
         PrimitiveRepresentation::Integer { bits, signed } => LoweredType::Integer {
             bits: match bits {
                 IntegerWidth::Fixed(bits) => bits,
-                IntegerWidth::Machine => target.layout.machine_integer_bits,
+                IntegerWidth::Machine => target.machine_integer_bits(),
             },
             signed,
         },
         PrimitiveRepresentation::PointerInteger { signed } => LoweredType::Integer {
-            bits: target.layout.pointer_bits,
+            bits: target.pointer_bits(),
             signed,
         },
         PrimitiveRepresentation::Float { format } => LoweredType::Float {
             format: match format {
                 FloatFormat::Ieee(bits) => LoweredFloatFormat::Ieee(bits),
                 FloatFormat::BrainFloat16 => LoweredFloatFormat::BrainFloat16,
-                FloatFormat::Machine => LoweredFloatFormat::Ieee(target.layout.machine_float_bits),
+                FloatFormat::Machine => {
+                    LoweredFloatFormat::Ieee(target.machine_float_bits())
+                }
             },
         },
         PrimitiveRepresentation::Boolean => LoweredType::Boolean,
@@ -154,7 +157,7 @@ mod tests {
     use severian_mir::{Module, Value as MirValue, ValueId as MirValueId};
     use severian_universal::{PrimitiveCategory, UniversalContext};
 
-    fn pointer_context(pointer_bits: u16) -> (UniversalContext, TypeId) {
+    fn pointer_context() -> (UniversalContext, TypeId) {
         let mut types = TypeContext::new();
         let id = types.register_declaration("core.usize", "usize").unwrap();
         types
@@ -165,21 +168,13 @@ mod tests {
                 false,
             )
             .unwrap();
-        let target = TargetSpec {
-            name: "test".into(),
-            layout: severian_universal::TargetLayout {
-                pointer_bits,
-                machine_integer_bits: 64,
-                machine_float_bits: 64,
-            },
-        };
-        (UniversalContext::new(types, target), id)
+        (UniversalContext::new(types), id)
     }
 
     #[test]
     fn usize_is_resolved_only_from_target_layout() {
         for bits in [32, 64] {
-            let (context, type_id) = pointer_context(bits);
+            let (context, type_id) = pointer_context();
             let mir = Module {
                 values: vec![MirValue {
                     id: MirValueId(0),
@@ -188,7 +183,18 @@ mod tests {
                 ..Module::default()
             };
             assert_eq!(
-                lower(&mir, &context.types, &context.target).unwrap().values[0].ty,
+                lower(
+                    &mir,
+                    &context.types,
+                    &if bits == 32 {
+                        TargetSpec::new("wasm32-unknown-wasi")
+                    } else {
+                        TargetSpec::new("x86_64-unknown-linux")
+                    },
+                )
+                .unwrap()
+                .values[0]
+                    .ty,
                 LoweredType::Integer {
                     bits,
                     signed: false,

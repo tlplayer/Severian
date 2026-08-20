@@ -283,10 +283,9 @@ fn semantic_error(message: String, span: severian_source::Span) -> Diagnostic {
 mod tests {
     use super::*;
     use severian_source::SourceFile;
-    use severian_universal::TargetSpec;
 
     fn analyze_source(source: &str) -> (Program, severian_universal::UniversalContext) {
-        let context = severian_bootstrap::load(TargetSpec::host()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source("test.sev", source);
         let tokens = severian_lexer::scan(&source).unwrap();
         let ast = severian_parser::parse(&tokens).unwrap();

@@ -3,8 +3,63 @@ use severian_source::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportDeclaration {
-    pub path: String,
-    pub alias: String,
+    pub subject: ImportSubject,
+    pub source: Option<String>,
+    pub alias: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportSubject {
+    Name(String),
+    Locator(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecoratorValue {
+    Name(String),
+    String(String),
+    Integer(String),
+    Boolean(bool),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecoratorArgument {
+    pub name: Option<String>,
+    pub value: DecoratorValue,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decorator {
+    pub name: String,
+    pub arguments: Vec<DecoratorArgument>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionParameter {
+    pub name: String,
+    pub annotation: TypeAnnotation,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionDeclaration {
+    pub decorators: Vec<Decorator>,
+    pub name: String,
+    pub type_parameters: Vec<String>,
+    pub parameters: Vec<FunctionParameter>,
+    pub result: TypeAnnotation,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDeclaration {
+    pub decorators: Vec<Decorator>,
+    pub name: String,
+    pub type_parameters: Vec<String>,
+    pub definition: Option<TypeAnnotation>,
     pub span: Span,
 }
 
@@ -94,6 +149,7 @@ pub struct OperatorDeclaration {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitDeclaration {
+    pub decorators: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
     pub bases: Vec<TypeAnnotation>,

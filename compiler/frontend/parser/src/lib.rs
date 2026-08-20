@@ -110,4 +110,32 @@ mod tests {
         assert_eq!(binding.named_parts().unwrap().1.len(), 1);
         assert_eq!(property.named_parts().unwrap().1.len(), 1);
     }
+
+    #[test]
+    fn parses_xxi_external_declarations_with_attributes() {
+        let source = SourceFile::virtual_source(
+            "ffi.sev",
+            "@c(symbol = \"strlen\")\ndef length(value: borrowed[string]) -> usize\n@rust\ntype RustBuffer[T]\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::ExternalFunction(function) = &module.items[0] else {
+            unreachable!()
+        };
+        assert_eq!(function.attributes[0].name, "c");
+        assert_eq!(
+            function.parameters[0].annotation.named_parts().unwrap().0,
+            "borrowed"
+        );
+        assert!(matches!(
+            module.items[1],
+            severian_ast::Item::ExternalType(_)
+        ));
+    }
+
+    #[test]
+    fn language_attribute_replaces_the_extern_keyword() {
+        let source =
+            SourceFile::virtual_source("ffi.sev", "@c\nextern def legacy(value: i32) -> i32\n");
+        assert!(parse(&scan(&source).unwrap()).is_err());
+    }
 }

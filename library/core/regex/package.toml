@@ -12,15 +12,14 @@ sources = ["src/ffi.sev"]
 path = "src/lib.sev"
 
 [dependencies]
-abi = { path = "../abi", version = "0.1.0" }
-ffi = { path = "../ffi", version = "0.1.0" }
+abi = { path = "../../interop/abi", version = "0.1.0" }
 
 [[ffi.c]]
 name = "regex-posix"
 abi = "c-v1"
 targets = ["linux", "macos"]
-sources = ["native/posix/regex.c"]
-include = ["native/include"]
+sources = ["extern/posix/regex.c"]
+include = ["extern/include"]
 libraries = []
 
 [package.metadata.library]

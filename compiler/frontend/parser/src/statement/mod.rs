@@ -1,7 +1,9 @@
 use severian_ast::{
-    BinaryOperator, Binding, Expression, ExpressionKind, ImportDeclaration, Item, Literal, Module,
-    OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, TraitDeclaration,
-    TypeAnnotation, TypeAnnotationKind, UnaryOperator,
+    BinaryOperator, Binding, Decorator, DecoratorArgument, DecoratorValue, Expression,
+    ExpressionKind, FunctionDeclaration, FunctionParameter, ImportDeclaration, ImportSubject,
+    Item, Literal, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax,
+    PropertyDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
+    UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{Token, TokenKind};
@@ -21,13 +23,34 @@ impl Parser<'_> {
         let mut module = Module::default();
         self.separators();
         while !self.at(&TokenKind::Eof) {
+            let decorators = if self.at(&TokenKind::At) {
+                self.decorators()?
+            } else {
+                Vec::new()
+            };
             if self.at_identifier("trait") {
-                module.items.push(Item::Trait(self.trait_declaration()?));
+                module
+                    .items
+                    .push(Item::Trait(self.trait_declaration(decorators)?));
                 self.separators();
                 continue;
+            } else if self.at_identifier("def") {
+                module
+                    .items
+                    .push(Item::Function(self.function_declaration(decorators)?));
+            } else if self.at_identifier("type") {
+                module
+                    .items
+                    .push(Item::Type(self.type_declaration(decorators)?));
             } else if self.at_identifier("import") {
+                if !decorators.is_empty() {
+                    return Err(self.error("decorators may only precede declarations"));
+                }
                 module.items.push(Item::Import(self.import_declaration()?));
             } else {
+                if !decorators.is_empty() {
+                    return Err(self.error("expected a declaration after decorator"));
+                }
                 module.items.push(Item::Binding(self.binding()?));
             }
             if !self.at(&TokenKind::Newline)
@@ -41,44 +64,195 @@ impl Parser<'_> {
         Ok(module)
     }
 
-    fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
-        let start = self.next().span;
-        let path_token = self.next();
-        let TokenKind::String(path) = path_token.kind else {
-            return Err(Diagnostic::new(
-                "E000118",
-                "expected an import path string",
-                Some(path_token.span),
-            ));
-        };
-        if !self.at_identifier("as") {
-            return Err(self.error("expected `as` after import path"));
+    fn decorators(&mut self) -> Result<Vec<Decorator>, Diagnostic> {
+        let mut decorators = Vec::new();
+        while self.take(&TokenKind::At).is_some() {
+            let (name, name_span) = self.identifier("expected an attribute name after `@`")?;
+            let mut arguments = Vec::new();
+            let mut end = name_span.end;
+            if self.take(&TokenKind::LeftParen).is_some() {
+                if !self.at(&TokenKind::RightParen) {
+                    loop {
+                        let start = self.peek().span;
+                        let argument_name = if matches!(self.peek().kind, TokenKind::Identifier(_))
+                            && self
+                                .tokens
+                                .get(self.cursor + 1)
+                                .is_some_and(|token| token.kind == TokenKind::Equal)
+                        {
+                            let name = self.identifier("expected an attribute argument name")?.0;
+                            self.expect(
+                                &TokenKind::Equal,
+                                "expected `=` after attribute argument name",
+                            )?;
+                            Some(name)
+                        } else {
+                            None
+                        };
+                        let value_token = self.next();
+                        let value = match value_token.kind {
+                            TokenKind::String(value) => DecoratorValue::String(value),
+                            TokenKind::Integer(value) => DecoratorValue::Integer(value),
+                            TokenKind::Identifier(value) if value == "true" => {
+                                DecoratorValue::Boolean(true)
+                            }
+                            TokenKind::Identifier(value) if value == "false" => {
+                                DecoratorValue::Boolean(false)
+                            }
+                            TokenKind::Identifier(value) => DecoratorValue::Name(value),
+                            _ => {
+                                return Err(Diagnostic::new(
+                                    "E000120",
+                                    "expected an attribute value",
+                                    Some(value_token.span),
+                                ))
+                            }
+                        };
+                        arguments.push(DecoratorArgument {
+                            name: argument_name,
+                            value,
+                            span: Span::new(start.source, start.start, value_token.span.end),
+                        });
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                end = self
+                    .expect(&TokenKind::RightParen, "expected `)` after attribute")?
+                    .span
+                    .end;
+            }
+            decorators.push(Decorator {
+                name,
+                arguments,
+                span: Span::new(name_span.source, name_span.start, end),
+            });
+            if self.take(&TokenKind::Newline).is_none() {
+                break;
+            }
+            while self.take(&TokenKind::Newline).is_some() {}
         }
-        self.next();
-        let (alias, end) = self.identifier("expected an import alias")?;
-        Ok(ImportDeclaration {
-            path,
-            alias,
-            span: Span::new(start.source, start.start, end.end),
-        })
+        Ok(decorators)
     }
 
-    fn trait_declaration(&mut self) -> Result<TraitDeclaration, Diagnostic> {
+    fn function_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<FunctionDeclaration, Diagnostic> {
         let start = self.next().span;
-        let (name, _) = self.identifier("expected a trait name")?;
-        let mut type_parameters = Vec::new();
-        if self.take(&TokenKind::LeftBracket).is_some() {
+        let (name, _) = self.identifier("expected a function name")?;
+        let type_parameters = self.type_parameters()?;
+        self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
+        let mut parameters = Vec::new();
+        if !self.at(&TokenKind::RightParen) {
             loop {
-                type_parameters.push(self.identifier("expected a type parameter")?.0);
+                let (parameter_name, parameter_span) =
+                    self.identifier("expected a parameter name")?;
+                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
+                let annotation = self.type_annotation()?;
+                parameters.push(FunctionParameter {
+                    name: parameter_name,
+                    span: Span::new(
+                        parameter_span.source,
+                        parameter_span.start,
+                        annotation.span.end,
+                    ),
+                    annotation,
+                });
                 if self.take(&TokenKind::Comma).is_none() {
                     break;
                 }
             }
-            self.expect(
-                &TokenKind::RightBracket,
-                "expected `]` after type parameters",
-            )?;
         }
+        let close = self
+            .expect(&TokenKind::RightParen, "expected `)` after parameters")?
+            .span;
+        let result = if self.take(&TokenKind::Arrow).is_some() {
+            self.type_annotation()?
+        } else {
+            TypeAnnotation::named("unit", vec![], close)
+        };
+        Ok(FunctionDeclaration {
+            decorators,
+            name,
+            type_parameters,
+            parameters,
+            span: Span::new(start.source, start.start, result.span.end),
+            result,
+        })
+    }
+
+    fn type_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<TypeDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, name_span) = self.identifier("expected a type name")?;
+        let type_parameters = self.type_parameters()?;
+        let definition = if self.take(&TokenKind::Equal).is_some() {
+            Some(self.type_annotation()?)
+        } else {
+            None
+        };
+        let end = definition
+            .as_ref()
+            .map_or(name_span.end, |definition| definition.span.end);
+        Ok(TypeDeclaration {
+            decorators,
+            name,
+            type_parameters,
+            definition,
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
+    fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let subject_token = self.next();
+        let subject = match subject_token.kind {
+            TokenKind::Identifier(name) => ImportSubject::Name(name),
+            TokenKind::String(locator) => ImportSubject::Locator(locator),
+            _ => {
+                return Err(Diagnostic::new(
+                    "E000118",
+                    "expected an import name or locator string",
+                    Some(subject_token.span),
+                ))
+            }
+        };
+        let mut end = subject_token.span.end;
+        let source = if self.at_identifier("from") {
+            self.next();
+            let (source, span) = self.identifier("expected an import source after `from`")?;
+            end = span.end;
+            Some(source)
+        } else {
+            None
+        };
+        let alias = if self.at_identifier("as") {
+            self.next();
+            let (alias, span) = self.identifier("expected an import alias")?;
+            end = span.end;
+            Some(alias)
+        } else {
+            None
+        };
+        Ok(ImportDeclaration {
+            subject,
+            source,
+            alias,
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
+    fn trait_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<TraitDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, _) = self.identifier("expected a trait name")?;
+        let type_parameters = self.type_parameters()?;
         self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
         let mut bases = Vec::new();
         if !self.at(&TokenKind::Newline) {
@@ -113,6 +287,7 @@ impl Parser<'_> {
             .expect(&TokenKind::Dedent, "expected end of trait body")?
             .span;
         Ok(TraitDeclaration {
+            decorators,
             name,
             type_parameters,
             bases,
@@ -120,6 +295,23 @@ impl Parser<'_> {
             operators,
             span: Span::new(start.source, start.start, end.end),
         })
+    }
+
+    fn type_parameters(&mut self) -> Result<Vec<String>, Diagnostic> {
+        let mut type_parameters = Vec::new();
+        if self.take(&TokenKind::LeftBracket).is_some() {
+            loop {
+                type_parameters.push(self.identifier("expected a type parameter")?.0);
+                if self.take(&TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(
+                &TokenKind::RightBracket,
+                "expected `]` after type parameters",
+            )?;
+        }
+        Ok(type_parameters)
     }
 
     fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {

@@ -73,6 +73,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 TokenKind::Newline
             }
+            b'@' => one(&mut cursor, TokenKind::At),
             b',' => one(&mut cursor, TokenKind::Comma),
             b':' => one(&mut cursor, TokenKind::Colon),
             b'(' => one(&mut cursor, TokenKind::LeftParen),

@@ -7,8 +7,9 @@ mod types;
 pub use expression::{BinaryOperator, Expression, ExpressionKind, Literal, UnaryOperator};
 pub use statement::Binding;
 pub use types::{
-    ImportDeclaration, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
-    TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+    Decorator, DecoratorArgument, DecoratorValue, FunctionDeclaration, FunctionParameter,
+    ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorParameter, OperatorSyntax,
+    PropertyDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -21,4 +22,6 @@ pub enum Item {
     Import(ImportDeclaration),
     Trait(TraitDeclaration),
     Binding(Binding),
+    Function(FunctionDeclaration),
+    Type(TypeDeclaration),
 }

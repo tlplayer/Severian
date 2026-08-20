@@ -10,7 +10,7 @@ LIR is the shared output of target lowering and the input to concrete emitters.
 - Value, block, function, and module identities.
 - Optional debug/source-location references.
 
-Examples of LIR types include a concrete signed 32-bit integer, BF16, a target pointer, or a runtime string handle. Pointer-sized source types have already been resolved using `TargetSpec`.
+Examples of LIR types include a concrete signed 32-bit integer, BF16, a target pointer, or a runtime string handle. Pointer-sized source types have already been resolved using the ABI target layout.
 
 ## Does not own
 
@@ -24,7 +24,7 @@ Examples of LIR types include a concrete signed 32-bit integer, BF16, a target p
 ## Dependency rule
 
 ```text
-MIR + UniversalContext + TargetSpec -> lowering -> LIR
+MIR + UniversalContext + ABI Target -> lowering -> LIR
 LIR -> C emitter
 LIR -> MLIR emitter
 LIR -> other backend emitters

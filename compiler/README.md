@@ -9,6 +9,9 @@ source
   -> lexer
   -> parser
   -> AST
+  -> XXI external declaration resolution
+  -> FFI ownership/conversion validation
+  -> ABI layout and call classification
   -> bootstrap/declaration loading
   -> UniversalContext
   -> semantic analysis
@@ -35,6 +38,9 @@ source
 | Typed expressions and bindings | HIR |
 | Executable operations and control flow | MIR |
 | Target-resolved physical types and operations | LIR |
+| Calling conventions, concrete layouts, pass modes, and symbols | `compiler/boundaries/abi` |
+| Foreign ownership, lifetime, and conversion plans | `compiler/boundaries/ffi` |
+| `@c`/`@rust` declarations and external imports | `compiler/boundaries/xxi` |
 | C, MLIR, LLVM, XLA, or Triton spelling | The corresponding backend/emitter |
 | `.pkg` and `.pkgi` serialization | `compiler/boundaries/interface` |
 | Loading `library/core/primitives` | `compiler/bootstrap` |
@@ -60,12 +66,13 @@ library source never depends on Rust compiler crates.
 2. Only `compiler/bootstrap` reads `library/core/primitives`.
 3. A compiler phase receives `&UniversalContext`; it does not call a global `load()` function.
 4. Semantic analysis delegates literal and operator resolution to `compiler/universal`.
-5. Lowering accepts typed definitions and `TargetSpec`; it does not reinterpret source strings.
+5. Lowering accepts typed definitions and the ABI target; it does not reinterpret source strings.
 6. Backends consume LIR and return an unsupported-capability error when they cannot represent an operation. Silent fallback is prohibited.
 7. A semantic enum or ID is defined once. A second copy is allowed only when the new representation has a distinct invariant or loses/gains information.
 8. Backend spelling methods do not live on universal or LIR types.
 9. Interface DTOs are serialization models, not the live compiler type system.
 10. Every architectural move must preserve or add a vertical end-to-end test.
+11. AST records external syntax, XXI maps it to FFI, and FFI delegates concrete layout and call classification to ABI.
 
 ## Change test
 

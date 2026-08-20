@@ -2,6 +2,7 @@
 members = [
     # Universal semantic authority
     "compiler/universal",
+    "compiler/target",
 
     # Language bootstrap
     "compiler/bootstrap",
@@ -11,7 +12,9 @@ members = [
     "compiler/boundaries/abi",
     "compiler/boundaries/backend",
     "compiler/boundaries/driver",
+    "compiler/boundaries/ffi",
     "compiler/boundaries/interface",
+    "compiler/boundaries/xxi",
 
     # Cross-cutting
     "compiler/diagnostics",
@@ -48,6 +51,7 @@ severian-lexer = "syntax"
 severian-ast = "syntax"
 severian-parser = "syntax"
 severian-universal = "universal"
+severian-target = "target"
 severian-primitives = "primitive_source"
 severian-hir = "semantic"
 severian-semantic = "semantic"
@@ -57,8 +61,10 @@ severian-mir = "transform"
 severian-lir = "transform"
 severian-lowering = "transform"
 severian-abi = "boundary"
+severian-ffi = "boundary"
 severian-interface = "boundary"
 severian-backend = "boundary"
+severian-xxi = "boundary"
 severian-mlir = "boundary"
 severian-driver = "driver"
 
@@ -74,6 +80,7 @@ severian-parser = [
     "severian-source",
 ]
 severian-universal = []
+severian-target = []
 severian-primitives = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
@@ -95,12 +102,25 @@ severian-bootstrap = [
 ]
 severian-mir = ["severian-hir", "severian-universal"]
 severian-lir = []
-severian-lowering = ["severian-lir", "severian-mir", "severian-universal"]
-severian-abi = []
+severian-lowering = [
+    "severian-lir",
+    "severian-mir",
+    "severian-target",
+    "severian-universal",
+]
+severian-abi = ["severian-target"]
+severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
 severian-backend = ["severian-lir"]
+severian-xxi = [
+    "severian-abi",
+    "severian-ast",
+    "severian-ffi",
+    "severian-universal",
+]
 severian-mlir = ["severian-lir"]
 severian-driver = [
+    "severian-abi",
     "severian-backend",
     "severian-bootstrap",
     "severian-diagnostics",
@@ -111,7 +131,9 @@ severian-driver = [
     "severian-parser",
     "severian-semantic",
     "severian-source",
+    "severian-target",
     "severian-universal",
+    "severian-xxi",
 ]
 
 [[workspace.metadata.architecture.reject]]
@@ -129,3 +151,15 @@ to = "severian-ast"
 [[workspace.metadata.architecture.reject]]
 from = "severian-backend"
 to = "severian-semantic"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-ast"
+to = "severian-ffi"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-ffi"
+to = "severian-ast"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-target"
+to = "severian-abi"

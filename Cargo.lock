@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "severian-abi"
 version = "0.1.0"
+dependencies = [
+ "severian-target",
+]
 
 [[package]]
 name = "severian-ast"
@@ -44,6 +47,7 @@ dependencies = [
 name = "severian-driver"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
  "severian-backend",
  "severian-bootstrap",
  "severian-diagnostics",
@@ -54,6 +58,16 @@ dependencies = [
  "severian-parser",
  "severian-semantic",
  "severian-source",
+ "severian-universal",
+ "severian-xxi",
+]
+
+[[package]]
+name = "severian-ffi"
+version = "0.1.0"
+dependencies = [
+ "severian-abi",
+ "severian-target",
  "severian-universal",
 ]
 
@@ -90,6 +104,7 @@ version = "0.1.0"
 dependencies = [
  "severian-lir",
  "severian-mir",
+ "severian-target",
  "severian-universal",
 ]
 
@@ -149,5 +164,23 @@ name = "severian-source"
 version = "0.1.0"
 
 [[package]]
+name = "severian-target"
+version = "0.1.0"
+
+[[package]]
 name = "severian-universal"
 version = "0.1.0"
+
+[[package]]
+name = "severian-xxi"
+version = "0.1.0"
+dependencies = [
+ "severian-abi",
+ "severian-ast",
+ "severian-bootstrap",
+ "severian-ffi",
+ "severian-lexer",
+ "severian-parser",
+ "severian-source",
+ "severian-universal",
+]

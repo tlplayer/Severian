@@ -5,7 +5,7 @@ Transforms change program representation without redefining source-language sema
 ## Stages
 
 ```text
-HIR -> MIR -> lowering(TargetSpec) -> LIR -> emitter/backend
+HIR -> MIR -> lowering(ABI Target) -> LIR -> emitter/backend
 ```
 
 - MIR owns executable control flow and language-level operations.
@@ -18,7 +18,7 @@ HIR -> MIR -> lowering(TargetSpec) -> LIR -> emitter/backend
 1. Transforms receive `&UniversalContext`; they never reload primitive source.
 2. Type and operator meaning is already resolved before MIR lowering.
 3. Lowering may inspect typed `PrimitiveRepresentation`; it may not match raw category or representation strings.
-4. `usize` and `isize` widths come from `TargetSpec`, not a fixed constant.
+4. `usize` and `isize` widths come from the ABI target layout, not a fixed constant.
 5. Shared lowered types and operations live in LIR, not in a backend crate.
 6. C or MLIR spelling lives in the corresponding emitter, not on `LirType`.
 7. Unsupported target capabilities return errors. No fallback to an unrelated width or format is allowed.

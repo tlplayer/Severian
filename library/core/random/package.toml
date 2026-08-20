@@ -11,15 +11,12 @@ sources = ["src/ffi.sev"]
 [lib]
 path = "src/lib.sev"
 
-[dependencies]
-ffi = { path = "../ffi", version = "0.1.0" }
-
 [[ffi.c]]
 name = "random-c"
 abi = "c-v1"
 targets = ["linux", "macos"]
-sources = ["native/random.c"]
-include = ["native/include"]
+sources = ["extern/c/random.c"]
+include = ["extern/c/include"]
 libraries = []
 
 [package.metadata.library]
