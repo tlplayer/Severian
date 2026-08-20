@@ -5,6 +5,27 @@ on:
   pull_request:
 
 jobs:
+  quality-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce 800-line source-file limit
+        run: python3 tools/quality/check_source_loc.py
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Measure line and branch coverage
+        run: cargo llvm-cov --locked --workspace --all-targets --branch --json --output-path target/coverage.json
+
+      - name: Enforce 95% line and branch coverage
+        run: python3 tools/quality/check_coverage.py target/coverage.json
+
   checked-native-core:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

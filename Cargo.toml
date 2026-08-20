@@ -19,7 +19,7 @@ members = [
     "compiler/frontend/ownership",
     "compiler/frontend/parser",
     "compiler/frontend/semantic",
-    "compiler/frontend/source",
+    "compiler/source",
 
     # Transforms
     "compiler/transforms/lowering",

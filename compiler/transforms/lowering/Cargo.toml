@@ -1,0 +1,15 @@
+[package]
+name = "severian-lowering"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-backend = { path = "../../boundaries/backend" }
+severian-hir = { path = "../../frontend/hir" }
+severian-mir = { path = "../mir" }
+severian-primitives = { path = "../../../library/core/primitives" }
+
+[lib]
+path = "src/lib.rs"

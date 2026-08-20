@@ -1,0 +1,15 @@
+[package]
+name = "severian-parser"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-ast = { path = "../ast" }
+severian-diagnostics = { path = "../../diagnostics" }
+severian-lexer = { path = "../lexer" }
+severian-source = { path = "../../source" }
+
+[lib]
+path = "src/lib.rs"

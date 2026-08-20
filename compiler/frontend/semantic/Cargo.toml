@@ -1,0 +1,19 @@
+[package]
+name = "severian-semantic"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-ast = { path = "../ast" }
+severian-diagnostics = { path = "../../diagnostics" }
+severian-hir = { path = "../hir" }
+severian-interface = { path = "../../boundaries/interface" }
+severian-primitives = { path = "../../../library/core/primitives" }
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+severian-source = { path = "../../source" }

@@ -1,0 +1,24 @@
+[package]
+name = "severian-driver"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-backend = { path = "../backend" }
+severian-diagnostics = { path = "../../diagnostics" }
+severian-lexer = { path = "../../frontend/lexer" }
+severian-lowering = { path = "../../transforms/lowering" }
+severian-mir = { path = "../../transforms/mir" }
+severian-ownership = { path = "../../frontend/ownership" }
+severian-parser = { path = "../../frontend/parser" }
+severian-semantic = { path = "../../frontend/semantic" }
+severian-source = { path = "../../source" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sev"
+path = "src/main.rs"

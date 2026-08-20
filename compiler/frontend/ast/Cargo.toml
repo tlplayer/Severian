@@ -1,12 +1,12 @@
 [package]
-name = "severian-primitives"
+name = "severian-ast"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 
+[dependencies]
+severian-source = { path = "../../source" }
+
 [lib]
 path = "src/lib.rs"
-
-[dependencies]
-severian-interface = { path = "../../../compiler/boundaries/interface" }

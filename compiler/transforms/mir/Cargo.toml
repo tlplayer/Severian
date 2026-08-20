@@ -1,0 +1,16 @@
+[package]
+name = "severian-mir"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-hir = { path = "../../frontend/hir" }
+severian-interface = { path = "../../boundaries/interface" }
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+severian-source = { path = "../../source" }
