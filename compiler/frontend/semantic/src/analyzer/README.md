@@ -1,0 +1,1 @@
+The analyzer is concerned with walking/checking programs rather than also being the type database and resolver.

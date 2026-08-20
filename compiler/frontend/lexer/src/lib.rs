@@ -11,7 +11,6 @@ pub struct Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    Extern,
     Def,
     Class,
     Trait,
