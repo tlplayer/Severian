@@ -1,5 +1,8 @@
 [workspace]
 members = [
+    # Language bootstrap
+    "library/core/primitives",
+
     # Boundaries
     "compiler/boundaries/abi",
     "compiler/boundaries/backend",

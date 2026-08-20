@@ -1,9 +1,0 @@
-[package]
-name = "severian-source"
-version.workspace = true
-edition.workspace = true
-license-file.workspace = true
-repository.workspace = true
-
-[dependencies]
-severian-ast = { version = "0.1.0", path = "../ast" }

@@ -1,6 +1,9 @@
 [package]
-name = "severian-mlir"
+name = "severian-primitives"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
