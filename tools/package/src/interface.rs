@@ -233,6 +233,25 @@ pub fn load_official_interfaces(
     Ok(interfaces)
 }
 
+/// Loads the mandatory language bootstrap package independently of user
+/// imports. Absence is an error: the compiler must never fabricate fallback
+/// primitive declarations.
+pub fn load_core_primitive_interfaces(
+    library_root: &Path,
+) -> Result<Vec<PackageInterface>, PackageError> {
+    const PACKAGE: &str = "core.primitives";
+    let directory = PACKAGE
+        .split('.')
+        .fold(library_root.to_path_buf(), |path, segment| path.join(segment));
+    if manifest_in(&directory).is_none() {
+        return Err(PackageError::Manifest(format!(
+            "compiler bootstrap failed: `{PACKAGE}` is unavailable at {}",
+            directory.display()
+        )));
+    }
+    load_interface_tree_as(PACKAGE, PACKAGE, &directory)
+}
+
 /// Loads standard packages embedded in the compiler binary. This keeps named
 /// imports available when `sev` is installed or relocated without its source
 /// checkout. An explicit `SEVERIAN_LIBRARY_PATH` can still select editable
@@ -241,9 +260,20 @@ pub fn load_embedded_official_interfaces(
     module: &Module,
     packages: &[EmbeddedOfficialPackage<'_>],
 ) -> Result<Vec<PackageInterface>, PackageError> {
-    let mut pending = imported_packages(module)
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+    load_embedded_named_interfaces(imported_packages(module), packages)
+}
+
+pub fn load_embedded_core_primitive_interfaces(
+    packages: &[EmbeddedOfficialPackage<'_>],
+) -> Result<Vec<PackageInterface>, PackageError> {
+    load_embedded_named_interfaces(["core.primitives".to_owned()], packages)
+}
+
+fn load_embedded_named_interfaces(
+    names: impl IntoIterator<Item = String>,
+    packages: &[EmbeddedOfficialPackage<'_>],
+) -> Result<Vec<PackageInterface>, PackageError> {
+    let mut pending = names.into_iter().collect::<BTreeSet<_>>();
     let mut loaded = HashSet::new();
     let mut interfaces = Vec::new();
     while let Some(name) = pending.pop_first() {

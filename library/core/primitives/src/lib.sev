@@ -1,6 +1,0 @@
-import "src/base.sev" as base
-import "src/integer.sev" as integer
-import "src/float.sev" as float
-import "src/bool.sev" as boolean
-import "src/string.sev" as string
-import "src/none.sev" as none

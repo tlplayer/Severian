@@ -1,5 +1,12 @@
 trait string: Primitive:
-    property kind: string = "string"
-    property default: bool = true
+    property category: string = "text"
+    property representation: string = "string"
+    property default_literal: bool = true
 
     operator +(right: string) -> string
+    operator ==(right: string) -> bool
+    operator !=(right: string) -> bool
+    operator <(right: string) -> bool
+    operator <=(right: string) -> bool
+    operator >(right: string) -> bool
+    operator >=(right: string) -> bool

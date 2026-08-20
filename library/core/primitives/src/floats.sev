@@ -1,0 +1,44 @@
+trait Floating[T]:
+    operator +(right: T) -> T
+    operator -(right: T) -> T
+    operator *(right: T) -> T
+    operator /(right: T) -> T
+    operator %(right: T) -> T
+    operator **(right: T) -> T
+
+    operator ==(right: T) -> bool
+    operator !=(right: T) -> bool
+    operator <(right: T) -> bool
+    operator <=(right: T) -> bool
+    operator >(right: T) -> bool
+    operator >=(right: T) -> bool
+
+
+trait float: Primitive + Floating[float]:
+    property category: string = "float"
+    property representation: string = "machine-float"
+    property default_literal: bool = true
+
+
+trait f16: Primitive + Floating[f16]:
+    property category: string = "float"
+    property representation: string = "ieee-float"
+    property bits: int = 16
+
+
+trait bf16: Primitive + Floating[bf16]:
+    property category: string = "float"
+    property representation: string = "brain-float"
+    property bits: int = 16
+
+
+trait f32: Primitive + Floating[f32]:
+    property category: string = "float"
+    property representation: string = "ieee-float"
+    property bits: int = 32
+
+
+trait f64: Primitive + Floating[f64]:
+    property category: string = "float"
+    property representation: string = "ieee-float"
+    property bits: int = 64

@@ -12,7 +12,8 @@ use severian_hir::{
     Decorator as HirDecorator, DecoratorOption as HirDecoratorOption, DefinitionId,
     DetailedFunctionType, EnumDefinition, Expression, FieldDefinition, Function,
     FunctionContract as HirFunctionContract, FunctionId, FunctionType, Global, HirId, Instruction,
-    MatchPattern, OwnershipOp, Parameter, Program, ProgramMetadata, ReceiverType,
+    MatchPattern, OwnershipOp, Parameter, PrimitiveCategory, PrimitiveDefinition, PrimitiveId,
+    Program, ProgramMetadata, ReceiverType,
     ScopedBehavior as HirScopedBehavior, SemanticContext, SemanticMember, SourceRange, SourceSpan,
     SwitchArm as HirSwitchArm, TaskPlacement, TensorDimension, TensorElementType, TensorType, Test,
     TestMode as HirTestMode, TraitImplementationDefinition, TraitPropertyDefinition,
@@ -157,6 +158,8 @@ mod control;
 mod expression;
 mod generics;
 mod pipeline;
+#[path = "../types/mod.rs"]
+mod types;
 #[path = "../registry/mod.rs"]
 mod registry;
 #[path = "../resolve/mod.rs"]
@@ -167,6 +170,7 @@ use control::*;
 use expression::*;
 use generics::*;
 pub use pipeline::*;
+use types::*;
 pub use registry::*;
 pub use resolve::enforce_type_resolution_policy;
 use resolve::*;

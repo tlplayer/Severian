@@ -1,0 +1,97 @@
+trait Integer[T]:
+    operator +(right: T) -> T
+    operator -(right: T) -> T
+    operator *(right: T) -> T
+    operator /(right: T) -> T
+    operator %(right: T) -> T
+    operator **(right: T) -> T
+
+    operator ==(right: T) -> bool
+    operator !=(right: T) -> bool
+    operator <(right: T) -> bool
+    operator <=(right: T) -> bool
+    operator >(right: T) -> bool
+    operator >=(right: T) -> bool
+
+
+trait int: Primitive + Integer[int]:
+    property category: string = "integer"
+    property representation: string = "machine-signed"
+    property signed: bool = true
+    property default_literal: bool = true
+
+
+trait i8: Primitive + Integer[i8]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 8
+    property signed: bool = true
+
+
+trait i16: Primitive + Integer[i16]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 16
+    property signed: bool = true
+
+
+trait i32: Primitive + Integer[i32]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 32
+    property signed: bool = true
+
+
+trait i64: Primitive + Integer[i64]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 64
+    property signed: bool = true
+
+
+trait i128: Primitive + Integer[i128]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 128
+    property signed: bool = true
+
+
+trait isize: Primitive + Integer[isize]:
+    property category: string = "integer"
+    property representation: string = "pointer-integer"
+    property signed: bool = true
+
+
+trait u8: Primitive + Integer[u8]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 8
+
+
+trait u16: Primitive + Integer[u16]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 16
+
+
+trait u32: Primitive + Integer[u32]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 32
+
+
+trait u64: Primitive + Integer[u64]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 64
+
+
+trait u128: Primitive + Integer[u128]:
+    property category: string = "integer"
+    property representation: string = "fixed-integer"
+    property bits: int = 128
+
+
+trait usize: Primitive + Integer[usize]:
+    property category: string = "integer"
+    property representation: string = "pointer-integer"

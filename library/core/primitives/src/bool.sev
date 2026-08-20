@@ -1,7 +1,11 @@
 trait bool: Primitive:
-    property kind: string = "bool"
-    property default: bool = true
+    property category: string = "boolean"
+    property representation: string = "i1"
+    property bits: int = 1
+    property default_literal: bool = true
 
     operator and(right: bool) -> bool
     operator or(right: bool) -> bool
     operator not() -> bool
+    operator ==(right: bool) -> bool
+    operator !=(right: bool) -> bool

@@ -13,17 +13,6 @@ pub fn attach_module_metadata(
     attach_module_metadata_with_packages(module, program, path, source, namespace, &[]);
 }
 
-'''
-TODO: thread primitives through:
-
-intern_optional_type
-register_function_metadata
-register_constructor_metadata
-register_class_field_aliases
-register_method_return_alias
-attach_module_metadata...
-'''
-
 pub fn attach_module_metadata_with_packages(
     module: &Module,
     program: &mut Program,
@@ -95,7 +84,11 @@ fn attach_specialized_module_metadata_to_with_packages(
     namespace: Option<&str>,
     interfaces: &[PackageInterface],
 ) {
+    let primitives = PrimitiveCatalog::from_interfaces(interfaces)
+        .expect("core primitives were validated before HIR metadata attachment");
+    primitives.install_in(metadata);
     let file = program.attach_source_file_to(metadata, path, source);
+    attach_inferred_primitive_types(program, metadata, &primitives);
     let mut known_types = module
         .items
         .iter()
@@ -149,7 +142,15 @@ fn attach_specialized_module_metadata_to_with_packages(
     for item in &module.items {
         match item {
             Item::Function(function) => {
-                register_function_metadata(function, None, namespace, file, &known_types, metadata);
+                register_function_metadata(
+                    function,
+                    None,
+                    namespace,
+                    file,
+                    &known_types,
+                    &primitives,
+                    metadata,
+                );
             }
             Item::Class(class) => {
                 let id = metadata_type_id(namespace, &class.name.name);
@@ -164,6 +165,7 @@ fn attach_specialized_module_metadata_to_with_packages(
                         ty: intern_optional_type(
                             field.ty.as_ref(),
                             &known_types,
+                            &primitives,
                             &mut metadata.types,
                         ),
                         default: field.default.as_ref().map(|default| {
@@ -192,6 +194,7 @@ fn attach_specialized_module_metadata_to_with_packages(
                         namespace,
                         file,
                         &known_types,
+                        &primitives,
                         metadata,
                     );
                 }
@@ -202,6 +205,7 @@ fn attach_specialized_module_metadata_to_with_packages(
                         namespace,
                         file,
                         &known_types,
+                        &primitives,
                         metadata,
                     );
                 }
@@ -235,6 +239,7 @@ fn attach_specialized_module_metadata_to_with_packages(
                                     intern_optional_type(
                                         field.ty.as_ref(),
                                         &known_types,
+                                        &primitives,
                                         &mut metadata.types,
                                     )
                                 })
@@ -258,7 +263,12 @@ fn attach_specialized_module_metadata_to_with_packages(
             }
             Item::Statement(Stmt::Let(binding)) => {
                 let ty =
-                    intern_optional_type(binding.ty.as_ref(), &known_types, &mut metadata.types);
+                    intern_optional_type(
+                        binding.ty.as_ref(),
+                        &known_types,
+                        &primitives,
+                        &mut metadata.types,
+                    );
                 metadata.globals.insert(binding.name.name.clone(), ty);
             }
             Item::Trait(_) | Item::Import(_) | Item::Statement(_) => {}
@@ -281,12 +291,39 @@ fn attach_specialized_module_metadata_to_with_packages(
     });
 }
 
+fn attach_inferred_primitive_types(
+    program: &mut Program,
+    metadata: &mut ProgramMetadata,
+    primitives: &PrimitiveCatalog,
+) {
+    program.visit_expressions_mut(&mut |expression| {
+        let Expression::Typed { id, expression, .. } = expression else {
+            return;
+        };
+        let literal = match expression.kind() {
+            Expression::Integer(_) => Some(LiteralClass::Integer),
+            Expression::Float(_) => Some(LiteralClass::Float),
+            Expression::Boolean(_) => Some(LiteralClass::Boolean),
+            Expression::String(_) => Some(LiteralClass::String),
+            Expression::Variant { name, .. } if name == "None" => Some(LiteralClass::None),
+            _ => None,
+        };
+        let Some(literal) = literal else { return };
+        let Ok(primitive) = infer_literal_primitive(literal, primitives) else {
+            return;
+        };
+        let ty = metadata.types.intern(TypeKind::Primitive(primitive));
+        metadata.expression_types.insert(*id, ty);
+    });
+}
+
 pub(in crate::analyzer) fn register_constructor_metadata(
     constructor: &severian_ast::ConstructorDecl,
     class: &str,
     namespace: Option<&str>,
     file: severian_hir::SourceFileId,
     known_types: &HashMap<String, TypeDefinitionId>,
+    primitives: &PrimitiveCatalog,
     metadata: &mut ProgramMetadata,
 ) {
     let id = constructor_id(class, &constructor.name.name, constructor.span);
@@ -299,7 +336,12 @@ pub(in crate::analyzer) fn register_constructor_metadata(
         .params
         .iter()
         .map(|parameter| {
-            intern_optional_type(parameter.ty.as_ref(), known_types, &mut metadata.types)
+            intern_optional_type(
+                parameter.ty.as_ref(),
+                known_types,
+                primitives,
+                &mut metadata.types,
+            )
         })
         .collect();
     let returns = metadata.types.intern(TypeKind::Unit);
@@ -318,6 +360,7 @@ pub(in crate::analyzer) fn register_function_metadata(
     namespace: Option<&str>,
     file: severian_hir::SourceFileId,
     known_types: &HashMap<String, TypeDefinitionId>,
+    primitives: &PrimitiveCatalog,
     metadata: &mut ProgramMetadata,
 ) {
     let name = if let Some(class) = class {
@@ -340,11 +383,16 @@ pub(in crate::analyzer) fn register_function_metadata(
         .params
         .iter()
         .map(|parameter| {
-            intern_optional_type(parameter.ty.as_ref(), known_types, &mut metadata.types)
+            intern_optional_type(
+                parameter.ty.as_ref(),
+                known_types,
+                primitives,
+                &mut metadata.types,
+            )
         })
         .collect();
     let returns = match &function.return_type {
-        Some(ty) => intern_type(ty, known_types, &mut metadata.types),
+        Some(ty) => intern_type(ty, known_types, primitives, &mut metadata.types),
         None => metadata.types.intern(TypeKind::Unit),
     };
     metadata.functions.insert(
@@ -363,7 +411,7 @@ pub(in crate::analyzer) fn intern_optional_type(
     types: &mut TypeTable,
 ) -> TypeId {
     match ty {
-        Some(ty) => intern_type(ty, known_types, types),
+        Some(ty) => intern_type(ty, known_types, primitives, types),
         None => types.intern(TypeKind::Any),
     }
 }
@@ -396,10 +444,9 @@ pub(in crate::analyzer) fn intern_type(
                 .args
                 .iter()
                 .filter_map(TypeArg::as_type)
-                .map(|argument| intern_type(argument, known_types, types))
+                .map(|argument| intern_type(argument, known_types, primitives, types))
                 .collect::<Vec<_>>();
             match name.as_str() {
-                | "usize" => types.intern(TypeKind::Int),
                 "Any" | "any" => types.intern(TypeKind::Any),
                 "list" => {
                     let element = arguments
@@ -466,39 +513,39 @@ pub(in crate::analyzer) fn intern_type(
             }
         }
         Type::List { element, .. } => {
-            let element = intern_type(element, known_types, types);
+            let element = intern_type(element, known_types, primitives, types);
             types.intern(TypeKind::List(element))
         }
         Type::Tuple { elements, .. } => {
             let elements = elements
                 .iter()
-                .map(|element| intern_type(element, known_types, types))
+                .map(|element| intern_type(element, known_types, primitives, types))
                 .collect();
             types.intern(TypeKind::Tuple(elements))
         }
         Type::Union { alternatives, .. } => {
             let alternatives = alternatives
                 .iter()
-                .map(|alternative| intern_type(alternative, known_types, types))
+                .map(|alternative| intern_type(alternative, known_types, primitives, types))
                 .collect();
             types.intern(TypeKind::Union(alternatives))
         }
         Type::Map { key, value, .. } => {
-            let key = intern_type(key, known_types, types);
-            let value = intern_type(value, known_types, types);
+            let key = intern_type(key, known_types, primitives, types);
+            let value = intern_type(value, known_types, primitives, types);
             types.intern(TypeKind::Map { key, value })
         }
         Type::Set { element, .. } => {
-            let element = intern_type(element, known_types, types);
+            let element = intern_type(element, known_types, primitives, types);
             types.intern(TypeKind::Set(element))
         }
         Type::Result { ok, err, .. } => {
-            let ok = intern_type(ok, known_types, types);
-            let error = intern_type(err, known_types, types);
+            let ok = intern_type(ok, known_types, primitives, types);
+            let error = intern_type(err, known_types, primitives, types);
             types.intern(TypeKind::Result { ok, error })
         }
         Type::Option { some, .. } => {
-            let some = intern_type(some, known_types, types);
+            let some = intern_type(some, known_types, primitives, types);
             types.intern(TypeKind::Option(some))
         }
         Type::Function {
@@ -506,20 +553,20 @@ pub(in crate::analyzer) fn intern_type(
         } => {
             let parameters = params
                 .iter()
-                .map(|parameter| intern_type(parameter, known_types, types))
+                .map(|parameter| intern_type(parameter, known_types, primitives, types))
                 .collect();
-            let returns = intern_type(returns, known_types, types);
+            let returns = intern_type(returns, known_types, primitives, types);
             types.intern(TypeKind::Function {
                 parameters,
                 returns,
             })
         }
         Type::Future { output, .. } => {
-            let output = intern_type(output, known_types, types);
+            let output = intern_type(output, known_types, primitives, types);
             types.intern(TypeKind::Future(output))
         }
         Type::Reference { mutable, inner, .. } => {
-            let inner = intern_type(inner, known_types, types);
+            let inner = intern_type(inner, known_types, primitives, types);
             types.intern(TypeKind::Reference {
                 mutable: *mutable,
                 inner,

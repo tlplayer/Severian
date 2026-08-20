@@ -5,6 +5,6 @@ edition = "2026"
 description = "Severian primitive type contracts"
 
 [lib]
-path = "src/lib.sev"
+path = "src/mod.sev"
 
-# no dependencies.
+# Bootstrap packages cannot have dependencies.

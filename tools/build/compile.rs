@@ -41,9 +41,10 @@ impl Drop for Compilation {
 }
 pub fn compile_source(source: &str) -> Result<Compilation, CompileError> {
     let ast = parse_source(source, Path::new("<memory>"))?;
+    let interfaces = load_core_primitive_interfaces()?;
     compile_ast(
         &ast,
-        &[],
+        &interfaces,
         Path::new("<memory>"),
         source,
         severian_package::TypeResolutionPolicy::default(),
@@ -541,6 +542,9 @@ fn frontend_path(
         .iter()
         .map(|interface| interface.name.clone())
         .collect::<HashSet<_>>();
+    for primitive in load_core_primitive_interfaces()? {
+        insert_official_interface(&mut interfaces, primitive, &dependency_names)?;
+    }
     let mut local_interfaces = severian_package::load_local_interfaces(&ast, project_root)
         .map_err(|error| CompileError::Package(error.to_string()))?;
     if let Some(manifest_path) = manifest_path.as_deref() {
@@ -696,6 +700,27 @@ fn load_official_interfaces(module: &AstModule) -> Result<Vec<PackageInterface>,
             .map_err(|error| CompileError::Package(error.to_string()))
     } else {
         severian_package::load_embedded_official_interfaces(module, EMBEDDED_OFFICIAL_PACKAGES)
+            .map_err(|error| CompileError::Package(error.to_string()))
+    }
+}
+
+fn load_core_primitive_interfaces() -> Result<Vec<PackageInterface>, CompileError> {
+    if let Some(library_root) = std::env::var_os("SEVERIAN_LIBRARY_PATH").map(PathBuf::from) {
+        return severian_package::load_core_primitive_interfaces(&library_root)
+            .map_err(|error| CompileError::Package(error.to_string()));
+    }
+
+    if let Some(library_root) = installed_library_root() {
+        return severian_package::load_core_primitive_interfaces(&library_root)
+            .map_err(|error| CompileError::Package(error.to_string()));
+    }
+
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library");
+    if checkout.is_dir() {
+        severian_package::load_core_primitive_interfaces(&checkout)
+            .map_err(|error| CompileError::Package(error.to_string()))
+    } else {
+        severian_package::load_embedded_core_primitive_interfaces(EMBEDDED_OFFICIAL_PACKAGES)
             .map_err(|error| CompileError::Package(error.to_string()))
     }
 }

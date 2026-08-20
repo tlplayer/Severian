@@ -1,0 +1,7 @@
+trait None: Primitive:
+    property category: string = "absence"
+    property representation: string = "none"
+    property default_literal: bool = true
+
+    operator ==(right: None) -> bool
+    operator !=(right: None) -> bool

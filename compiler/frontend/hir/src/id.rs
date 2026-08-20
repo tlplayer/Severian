@@ -206,6 +206,7 @@ pub struct TypeId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeKind {
+    Primitive(PrimitiveId),
     Int,
     Float,
     Bool,
@@ -401,6 +402,8 @@ pub enum TraitPropertyValue {
 pub struct ProgramMetadata {
     pub sources: SourceMap,
     pub types: TypeTable,
+    /// Primitive contracts loaded before ordinary semantic analysis.
+    pub primitives: BTreeMap<PrimitiveId, PrimitiveDefinition>,
     pub expression_types: BTreeMap<HirId, TypeId>,
     pub expression_any_origins: BTreeMap<HirId, AnyOrigin>,
     pub globals: BTreeMap<String, TypeId>,

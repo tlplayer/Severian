@@ -59,6 +59,22 @@ impl Program {
             .id
             .and_then(|id| self.hir.metadata.sources.expression_span(id))
     }
+
+    /// The resolved semantic type carried across the HIR -> MIR boundary.
+    /// MIR never reconstructs this information from source spelling.
+    pub fn resolved_type(&self, value: ValueRef) -> Option<severian_hir::TypeId> {
+        value
+            .id
+            .and_then(|id| self.hir.metadata.expression_types.get(&id).copied())
+    }
+
+    pub fn primitive(&self, value: ValueRef) -> Option<severian_hir::PrimitiveId> {
+        let ty = self.resolved_type(value)?;
+        match self.hir.metadata.types.get(ty)? {
+            severian_hir::TypeKind::Primitive(primitive) => Some(*primitive),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

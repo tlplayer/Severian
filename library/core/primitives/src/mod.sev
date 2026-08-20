@@ -1,0 +1,18 @@
+import "src/bool.sev" as boolean
+import "src/integers.sev" as integers
+import "src/floats.sev" as floats
+import "src/string.sev" as text
+import "src/bytes.sev" as byte_string
+import "src/none.sev" as absence
+import "src/unit.sev" as unit_value
+
+
+# The compiler discovers primitive declarations by this composed trait. The
+# properties form the bootstrap protocol; they are data, not ordinary runtime
+# fields and are read before user semantic analysis starts.
+trait Primitive:
+    property category: string
+    property representation: string
+    property bits: int = 0
+    property signed: bool = false
+    property default_literal: bool = false
