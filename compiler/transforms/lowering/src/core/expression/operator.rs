@@ -1,7 +1,7 @@
 use super::*;
 
 impl LowerContext<'_> {
-    pub(super) fn lower_binary_values(
+    pub(in crate::core) fn lower_binary_values(
         &mut self,
         (mut left, mut operand_type): (String, ValueType),
         op: BinaryOp,
@@ -346,7 +346,7 @@ impl LowerContext<'_> {
         (result, result_type)
     }
 
-    pub(super) fn lower_power_values(
+    pub(in crate::core) fn lower_power_values(
         &mut self,
         (mut base, base_type): (String, ValueType),
         (exponent, exponent_type): (String, ValueType),
@@ -408,13 +408,13 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn fresh_value(&mut self) -> String {
+    pub(in crate::core) fn fresh_value(&mut self) -> String {
         let value = format!("%v{}", self.next_value);
         self.next_value += 1;
         value
     }
 
-    pub(super) fn lower_formatted_print(&mut self, format: &str, value: &str, ty: ValueType) {
+    pub(in crate::core) fn lower_formatted_print(&mut self, format: &str, value: &str, ty: ValueType) {
         let format_value = self.fresh_value();
         writeln!(
             self.output,

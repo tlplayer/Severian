@@ -264,17 +264,15 @@ struct LowerContext<'a> {
 
 mod bridge;
 mod collect;
-mod collection;
-mod control_flow;
+mod control;
 mod expression;
-mod ffi_shim;
-mod instruction;
+mod ffi;
 mod module;
-mod operator;
 mod types;
-mod value;
 
 pub use bridge::{native_bridge_source, rocm_bridge_source};
 use collect::*;
+use control::*;
+use expression::*;
 pub use module::lower;
 use types::*;

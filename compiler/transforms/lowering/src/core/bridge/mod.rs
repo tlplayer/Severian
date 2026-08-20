@@ -442,7 +442,7 @@ pub(super) fn native_bridge_source_for_target(
         "void *__sev_builtin_float_parse(void *text) { if (!text) return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); char *end = NULL; double value = strtod(text, &end); if (end == text || *end != '\\0') return __sev_variant_new(\"failure\", __sev_box_string(\"invalid float\")); return __sev_variant_new(\"ok\", __sev_box_f64(value)); }\n",
         "\n",
     ));
-    super::ffi_shim::append_c_v1_shims(&mut source, program);
+    super::ffi::append_c_v1_shims(&mut source, program);
     source.push_str(
         r#"
 static void *sev_failure(const char *message) {

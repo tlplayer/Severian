@@ -152,37 +152,21 @@ fn declared_any_origin(ty: Option<&Type>, resolved: ValueType) -> Option<AnyOrig
     })
 }
 
-mod call;
-mod contract;
+mod contracts;
+mod control;
 mod expression;
-mod expression_helpers;
 mod generics;
-mod metadata;
-mod pattern;
 mod pipeline;
+#[path = "../registry/mod.rs"]
+mod registry;
+#[path = "../resolve/mod.rs"]
 mod resolve;
-mod statement;
-mod structural;
-mod switch;
-mod tensor;
-mod traits;
-mod type_resolution;
-mod types;
-mod primitives;
 
-use call::*;
-use contract::*;
+use contracts::*;
+use control::*;
 use expression::*;
-use expression_helpers::*;
 use generics::*;
-pub use metadata::*;
-use pattern::*;
 pub use pipeline::*;
+pub use registry::*;
+pub use resolve::enforce_type_resolution_policy;
 use resolve::*;
-use statement::*;
-use structural::*;
-use switch::*;
-use traits::*;
-pub use type_resolution::enforce_type_resolution_policy;
-use types::*;
-use primitives::*;

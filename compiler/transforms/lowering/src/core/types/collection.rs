@@ -1,7 +1,7 @@
 use super::*;
 
 impl LowerContext<'_> {
-    pub(super) fn lower_comprehension(
+    pub(in crate::core) fn lower_comprehension(
         &mut self,
         element: Option<&Expression>,
         key: Option<&Expression>,
@@ -34,7 +34,7 @@ impl LowerContext<'_> {
         (result, result_type)
     }
 
-    pub(super) fn lower_inline_callable(
+    pub(in crate::core) fn lower_inline_callable(
         &mut self,
         callable: &Expression,
         args: Vec<(String, ValueType)>,
@@ -71,7 +71,7 @@ impl LowerContext<'_> {
         (result, ValueType::Any)
     }
 
-    pub(super) fn lower_collection_transform(
+    pub(in crate::core) fn lower_collection_transform(
         &mut self,
         object: &Expression,
         callable: &Expression,
@@ -85,7 +85,7 @@ impl LowerContext<'_> {
         (result, ValueType::List)
     }
 
-    pub(super) fn lower_collection_transform_from_value(
+    pub(in crate::core) fn lower_collection_transform_from_value(
         &mut self,
         object: String,
         callable: &Expression,
@@ -159,7 +159,7 @@ impl LowerContext<'_> {
         result
     }
 
-    pub(super) fn lower_collection_reduce(
+    pub(in crate::core) fn lower_collection_reduce(
         &mut self,
         object: &Expression,
         callable: &Expression,
@@ -250,7 +250,7 @@ impl LowerContext<'_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn lower_comprehension_level(
+    pub(in crate::core) fn lower_comprehension_level(
         &mut self,
         element: Option<&Expression>,
         key: Option<&Expression>,
@@ -355,7 +355,7 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn bind_comprehension_pattern(
+    pub(in crate::core) fn bind_comprehension_pattern(
         &mut self,
         pattern: &MatchPattern,
         item: &str,

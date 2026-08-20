@@ -81,7 +81,7 @@ impl LowerContext<'_> {
         Some(matches)
     }
 
-    pub(super) fn lower_switch(&mut self, value: &Expression, arms: &[SwitchArm]) {
+    pub(in crate::core) fn lower_switch(&mut self, value: &Expression, arms: &[SwitchArm]) {
         let (value, value_type) = self.lower_expression(value);
         let incoming = self.variables.clone();
         let mut carried = incoming.keys().cloned().collect::<Vec<_>>();
@@ -286,7 +286,7 @@ impl LowerContext<'_> {
         self.terminated = false;
     }
 
-    pub(super) fn lower_channel_switch(
+    pub(in crate::core) fn lower_channel_switch(
         &mut self,
         channels: &[Expression],
         setup: Option<&Instruction>,
@@ -331,7 +331,7 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn lower_while(&mut self, condition: &Expression, instructions: &[Instruction]) {
+    pub(in crate::core) fn lower_while(&mut self, condition: &Expression, instructions: &[Instruction]) {
         let mut carried = self
             .variables
             .iter()
@@ -466,7 +466,7 @@ impl LowerContext<'_> {
         self.terminated = false;
     }
 
-    pub(super) fn lower_for(
+    pub(in crate::core) fn lower_for(
         &mut self,
         pattern: &severian_hir::MatchPattern,
         iterable: &Expression,
@@ -815,7 +815,7 @@ impl LowerContext<'_> {
         self.terminated = false;
     }
 
-    pub(super) fn fresh_block(&mut self) -> usize {
+    pub(in crate::core) fn fresh_block(&mut self) -> usize {
         let block = self.next_block;
         self.next_block += 1;
         block

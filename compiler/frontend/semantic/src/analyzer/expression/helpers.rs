@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn propagate_unknown_collection_shapes(
+pub(in crate::analyzer) fn propagate_unknown_collection_shapes(
     outer: &mut HashMap<String, Binding>,
     inner: &HashMap<String, Binding>,
 ) {
@@ -15,7 +15,7 @@ pub(super) fn propagate_unknown_collection_shapes(
     }
 }
 
-pub(super) fn lower_declared_call(
+pub(in crate::analyzer) fn lower_declared_call(
     call: &severian_ast::CallExpr,
     function: &str,
     signature: &Signature,
@@ -218,14 +218,14 @@ fn instantiate_signature_type(
     }
 }
 
-pub(super) fn collection_length(expression: &Expr) -> Option<usize> {
+pub(in crate::analyzer) fn collection_length(expression: &Expr) -> Option<usize> {
     match expression {
         Expr::List(collection) | Expr::Tuple(collection) => Some(collection.elements.len()),
         _ => None,
     }
 }
 
-pub(super) fn constant_integer(expression: &Expr) -> Option<i64> {
+pub(in crate::analyzer) fn constant_integer(expression: &Expr) -> Option<i64> {
     match expression {
         Expr::Literal(Literal::Integer { value, .. }) => Some(*value),
         Expr::Binary(binary) => {
@@ -242,11 +242,11 @@ pub(super) fn constant_integer(expression: &Expr) -> Option<i64> {
     }
 }
 
-pub(super) fn named_type_is(ty: &Type, expected: &str) -> bool {
+pub(in crate::analyzer) fn named_type_is(ty: &Type, expected: &str) -> bool {
     matches!(ty, Type::Named(path) if path.segments.first().is_some_and(|segment| segment.name == expected))
 }
 
-pub(super) fn checked_integer_overflow(
+pub(in crate::analyzer) fn checked_integer_overflow(
     expression: &Expr,
     scope: &HashMap<String, Binding>,
 ) -> bool {
@@ -277,7 +277,7 @@ pub(super) fn checked_integer_overflow(
     result.is_none_or(|result| !(0..=maximum).contains(&result))
 }
 
-pub(super) fn inclusive_collection_range(expression: &Expr) -> bool {
+pub(in crate::analyzer) fn inclusive_collection_range(expression: &Expr) -> bool {
     let Expr::Call(call) = expression else {
         return false;
     };
@@ -299,7 +299,7 @@ pub(super) fn inclusive_collection_range(expression: &Expr) -> bool {
     matches!(size.callee.as_ref(), Expr::Identifier(name) if name.name == "size")
 }
 
-pub(super) fn lower_format_args(
+pub(in crate::analyzer) fn lower_format_args(
     template: &str,
     scope: &HashMap<String, Binding>,
     span: Span,
@@ -339,7 +339,7 @@ pub(super) fn lower_format_args(
     Ok((args, arg_types))
 }
 
-pub(super) fn lower_comprehension_clauses(
+pub(in crate::analyzer) fn lower_comprehension_clauses(
     clauses: &[severian_ast::ComprehensionClause],
     scope: &mut HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -367,7 +367,7 @@ pub(super) fn lower_comprehension_clauses(
     Ok(lowered)
 }
 
-pub(super) fn lower_collection(
+pub(in crate::analyzer) fn lower_collection(
     elements: &[Expr],
     scope: &HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -381,7 +381,7 @@ pub(super) fn lower_collection(
         .collect()
 }
 
-pub(super) fn lower_signature(
+pub(in crate::analyzer) fn lower_signature(
     name: &str,
     native_symbol: Option<&str>,
     generic_params: &[severian_ast::GenericParameter],
@@ -463,7 +463,7 @@ fn result_ok_type(ty: Option<&Type>) -> Option<&Type> {
     }
 }
 
-pub(super) fn result_payload_type(
+pub(in crate::analyzer) fn result_payload_type(
     expression: &Expr,
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
@@ -480,7 +480,7 @@ pub(super) fn result_payload_type(
         .map(|ty| ty.resolved(aliases))
 }
 
-pub(super) fn result_payload_receiver(
+pub(in crate::analyzer) fn result_payload_receiver(
     expression: &Expr,
     signatures: &HashMap<String, Signature>,
     aliases: &HashMap<String, String>,
@@ -762,7 +762,7 @@ fn replace_type_name(source: &str, name: &str, replacement: &str) -> String {
     result
 }
 
-pub(super) fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
+pub(in crate::analyzer) fn function_return_type(ty: Option<&Type>) -> Option<ValueType> {
     let Type::Named(path) = ty? else {
         return None;
     };

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const COMPILER_FUNCTION_NAMES: &[&str] = &[
+pub(in crate::analyzer) const COMPILER_FUNCTION_NAMES: &[&str] = &[
     "abs",
     "all",
     "any",
@@ -25,11 +25,11 @@ pub(super) const COMPILER_FUNCTION_NAMES: &[&str] = &[
     "zip",
 ];
 
-pub(super) fn is_compiler_function_name(name: &str) -> bool {
+pub(in crate::analyzer) fn is_compiler_function_name(name: &str) -> bool {
     COMPILER_FUNCTION_NAMES.contains(&name)
 }
 
-pub(super) fn validate_no_explicit_self_parameter(
+pub(in crate::analyzer) fn validate_no_explicit_self_parameter(
     parameters: &[severian_ast::Parameter],
 ) -> Result<(), SemanticError> {
     let Some(parameter) = parameters
@@ -43,7 +43,7 @@ pub(super) fn validate_no_explicit_self_parameter(
         "E000209: `self` is an implicit class receiver and must not be declared as a parameter",
     ))
 }
-pub(super) fn class_type_name(
+pub(in crate::analyzer) fn class_type_name(
     ty: &Type,
     primitives: &PrimitiveCatalog,
 ) -> Option<String> {
@@ -76,7 +76,7 @@ pub(super) fn class_type_name(
     })
 }
 
-pub(super) fn resolved_class_type_name(
+pub(in crate::analyzer) fn resolved_class_type_name(
     ty: &Type,
     aliases: &HashMap<String, String>,
 ) -> Option<String> {
@@ -115,7 +115,7 @@ pub(super) fn resolved_class_type_name(
         })
         .or_else(|| class_type_name(ty))
 }
-pub(super) fn lower_type(
+pub(in crate::analyzer) fn lower_type(
     ty: &Type,
     primitives: &PrimitiveCatalog,
 ) -> Result<ValueType, SemanticError> {
@@ -154,7 +154,7 @@ pub(super) fn lower_type(
     }
 }
 
-pub(super) fn declared_value_type(
+pub(in crate::analyzer) fn declared_value_type(
     ty: &Type,
     aliases: &HashMap<String, String>,
     primitives: &PrimitiveCatalog,
@@ -210,7 +210,7 @@ fn is_conventional_type_variable(name: &str) -> bool {
     matches!(name, "type" | "T" | "K" | "V")
 }
 
-pub(super) fn lower_tensor_type(
+pub(in crate::analyzer) fn lower_tensor_type(
     path: &severian_ast::TypePath,
 ) -> Result<TensorType, SemanticError> {
     let element = match path.args.first().and_then(TypeArg::as_type) {
@@ -253,7 +253,7 @@ pub(super) fn lower_tensor_type(
     TensorType::ranked(element, &dimensions).map_err(|message| error(path.span, message))
 }
 
-pub(super) fn merge_numeric(
+pub(in crate::analyzer) fn merge_numeric(
     left: ValueType,
     right: ValueType,
     span: Span,
@@ -268,7 +268,7 @@ pub(super) fn merge_numeric(
     }
 }
 
-pub(super) fn power_type(
+pub(in crate::analyzer) fn power_type(
     base: ValueType,
     exponent: ValueType,
     span: Span,
@@ -287,7 +287,7 @@ pub(super) fn power_type(
     Err(error(span, "power requires numeric values"))
 }
 
-pub(super) fn compatible(
+pub(in crate::analyzer) fn compatible(
     span: Span,
     actual: ValueType,
     expected: ValueType,
@@ -315,7 +315,7 @@ pub(super) fn compatible(
     }
 }
 
-pub(super) fn value_type_name(ty: ValueType) -> String {
+pub(in crate::analyzer) fn value_type_name(ty: ValueType) -> String {
     match ty {
         ValueType::Int => "int".into(),
         ValueType::Float => "float".into(),
@@ -346,7 +346,7 @@ pub(super) fn value_type_name(ty: ValueType) -> String {
     }
 }
 
-pub(super) fn always_returns(instructions: &[Instruction]) -> bool {
+pub(in crate::analyzer) fn always_returns(instructions: &[Instruction]) -> bool {
     instructions.iter().any(|instruction| match instruction {
         Instruction::Return(_) => true,
         Instruction::If {
@@ -367,11 +367,11 @@ pub(super) fn always_returns(instructions: &[Instruction]) -> bool {
     })
 }
 
-pub(super) fn is_upper_camel_case(name: &str) -> bool {
+pub(in crate::analyzer) fn is_upper_camel_case(name: &str) -> bool {
     name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
         && name.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
-pub(super) fn value_span(value: &Option<Expr>) -> Span {
+pub(in crate::analyzer) fn value_span(value: &Option<Expr>) -> Span {
     value.as_ref().map_or(Span::dummy(), Expr::span)
 }

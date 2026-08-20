@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn lower_block(
+pub(in crate::analyzer) fn lower_block(
     block: &Block,
     scope: &mut HashMap<String, Binding>,
     return_type: ValueType,

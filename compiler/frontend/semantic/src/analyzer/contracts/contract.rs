@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn lower_test_modes(modes: &[severian_ast::TestMode]) -> Vec<HirTestMode> {
+pub(in crate::analyzer) fn lower_test_modes(modes: &[severian_ast::TestMode]) -> Vec<HirTestMode> {
     modes
         .iter()
         .map(|mode| match mode {
@@ -13,7 +13,7 @@ pub(super) fn lower_test_modes(modes: &[severian_ast::TestMode]) -> Vec<HirTestM
         .collect()
 }
 
-pub(super) fn lower_test_return_type(
+pub(in crate::analyzer) fn lower_test_return_type(
     test: &severian_ast::TestBlock,
 ) -> Result<ValueType, SemanticError> {
     let Some(return_type) = &test.return_type else {
@@ -34,7 +34,7 @@ pub(super) fn lower_test_return_type(
     Ok(ValueType::Result)
 }
 
-pub(super) fn enforce_function_contract(
+pub(in crate::analyzer) fn enforce_function_contract(
     instructions: &mut Vec<Instruction>,
     contract: Option<&HirFunctionContract>,
 ) {
@@ -49,7 +49,7 @@ pub(super) fn enforce_function_contract(
     *instructions = entry;
 }
 
-pub(super) fn insert_deferred_contract_checks(
+pub(in crate::analyzer) fn insert_deferred_contract_checks(
     instructions: &mut Vec<Instruction>,
     clauses: &[HirContractClause],
 ) {
@@ -91,7 +91,7 @@ pub(super) fn insert_deferred_contract_checks(
     }
 }
 
-pub(super) fn changed_contract_binding(instruction: &Instruction) -> Option<BindingRef> {
+pub(in crate::analyzer) fn changed_contract_binding(instruction: &Instruction) -> Option<BindingRef> {
     match instruction {
         Instruction::Assign { target, .. } => root_variable(target).cloned(),
         Instruction::Evaluate(expression) => match expression.kind() {
@@ -104,7 +104,7 @@ pub(super) fn changed_contract_binding(instruction: &Instruction) -> Option<Bind
     }
 }
 
-pub(super) fn contract_mutating_method(method: &str) -> bool {
+pub(in crate::analyzer) fn contract_mutating_method(method: &str) -> bool {
     matches!(
         method,
         "append"
@@ -131,7 +131,7 @@ pub(super) fn contract_mutating_method(method: &str) -> bool {
     )
 }
 
-pub(super) fn root_variable(expression: &Expression) -> Option<&BindingRef> {
+pub(in crate::analyzer) fn root_variable(expression: &Expression) -> Option<&BindingRef> {
     match expression.kind() {
         Expression::Variable(name) => Some(name),
         Expression::Member { object, .. } | Expression::Index { object, .. } => {
@@ -141,7 +141,7 @@ pub(super) fn root_variable(expression: &Expression) -> Option<&BindingRef> {
     }
 }
 
-pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruction {
+pub(in crate::analyzer) fn contract_check_instruction(clause: &HirContractClause) -> Instruction {
     let range = clause
         .condition
         .hir_id()
@@ -220,7 +220,7 @@ pub(super) fn contract_check_instruction(clause: &HirContractClause) -> Instruct
     }
 }
 
-pub(super) fn synthetic_string(id: u64, value: String) -> Expression {
+pub(in crate::analyzer) fn synthetic_string(id: u64, value: String) -> Expression {
     Expression::Typed {
         id: HirId::synthetic(id),
         ty: ValueType::String,
@@ -229,7 +229,7 @@ pub(super) fn synthetic_string(id: u64, value: String) -> Expression {
     }
 }
 
-pub(super) fn collect_contract_dependencies(
+pub(in crate::analyzer) fn collect_contract_dependencies(
     expression: &Expression,
     dependencies: &mut Vec<BindingRef>,
 ) {
@@ -322,7 +322,7 @@ pub(super) fn collect_contract_dependencies(
     }
 }
 
-pub(super) fn error(span: Span, message: impl Into<String>) -> SemanticError {
+pub(in crate::analyzer) fn error(span: Span, message: impl Into<String>) -> SemanticError {
     SemanticError {
         span,
         message: message.into(),

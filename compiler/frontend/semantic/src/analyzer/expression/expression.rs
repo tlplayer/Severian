@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn lower_expression(
+pub(in crate::analyzer) fn lower_expression(
     expression: &Expr,
     scope: &HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -114,7 +114,7 @@ fn combine_any_origins(origins: impl IntoIterator<Item = AnyOrigin>) -> Option<A
     })
 }
 
-pub(super) fn lower_expression_kind(
+pub(in crate::analyzer) fn lower_expression_kind(
     expression: &Expr,
     scope: &HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -761,7 +761,7 @@ pub(super) fn lower_expression_kind(
     }
 }
 
-pub(super) fn add_test_bindings(
+pub(in crate::analyzer) fn add_test_bindings(
     scope: &mut HashMap<String, Binding>,
     modes: &[severian_ast::TestMode],
 ) {

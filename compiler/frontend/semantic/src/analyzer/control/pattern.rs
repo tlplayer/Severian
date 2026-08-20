@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn lower_pattern(
+pub(in crate::analyzer) fn lower_pattern(
     pattern: &Pattern,
     scope: &mut HashMap<String, Binding>,
     aliases: &HashMap<String, String>,

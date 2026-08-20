@@ -1,7 +1,7 @@
 use super::*;
 
 impl LowerContext<'_> {
-    pub(super) fn lower_instructions(&mut self, instructions: &[Instruction]) {
+    pub(in crate::core) fn lower_instructions(&mut self, instructions: &[Instruction]) {
         for instruction in instructions {
             if self.terminated {
                 break;
@@ -504,7 +504,7 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn lower_loop_jump(&mut self, continuing: bool) {
+    pub(in crate::core) fn lower_loop_jump(&mut self, continuing: bool) {
         let target = self
             .loop_targets
             .last()

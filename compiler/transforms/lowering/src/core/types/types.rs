@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn task_type_suffix(ty: ValueType) -> &'static str {
+pub(in crate::core) fn task_type_suffix(ty: ValueType) -> &'static str {
     match ty {
         ValueType::Int => "i64",
         ValueType::Float => "f64",
@@ -22,7 +22,7 @@ pub(super) fn task_type_suffix(ty: ValueType) -> &'static str {
     }
 }
 
-pub(super) fn source_function_symbol(name: &str) -> String {
+pub(in crate::core) fn source_function_symbol(name: &str) -> String {
     if name == "main" {
         "main".into()
     } else {
@@ -30,7 +30,7 @@ pub(super) fn source_function_symbol(name: &str) -> String {
     }
 }
 
-pub(super) fn mangle_symbol_component(name: &str) -> String {
+pub(in crate::core) fn mangle_symbol_component(name: &str) -> String {
     use std::fmt::Write as _;
 
     let mut symbol = String::with_capacity(name.len());
@@ -44,7 +44,7 @@ pub(super) fn mangle_symbol_component(name: &str) -> String {
     symbol
 }
 
-pub(super) fn class_function_symbol(class: &str, method: &str) -> String {
+pub(in crate::core) fn class_function_symbol(class: &str, method: &str) -> String {
     format!(
         "__sev_method_{}_{}",
         mangle_symbol_component(class),
@@ -70,15 +70,15 @@ mod tests {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DynamicMethodDispatch {
-    pub(super) symbol: String,
-    pub(super) method: String,
-    pub(super) params: Vec<ValueType>,
-    pub(super) returns: ValueType,
-    pub(super) classes: Vec<String>,
+pub(in crate::core) struct DynamicMethodDispatch {
+    pub(in crate::core) symbol: String,
+    pub(in crate::core) method: String,
+    pub(in crate::core) params: Vec<ValueType>,
+    pub(in crate::core) returns: ValueType,
+    pub(in crate::core) classes: Vec<String>,
 }
 
-pub(super) fn dynamic_method_dispatches(program: &Program) -> Vec<DynamicMethodDispatch> {
+pub(in crate::core) fn dynamic_method_dispatches(program: &Program) -> Vec<DynamicMethodDispatch> {
     let mut groups = HashMap::<(String, Vec<ValueType>, ValueType), Vec<String>>::new();
     for class in &program.classes {
         for method in &class.methods {
@@ -161,7 +161,7 @@ pub(super) fn dynamic_method_dispatches(program: &Program) -> Vec<DynamicMethodD
     dispatches
 }
 
-pub(super) fn dynamic_method_dispatch_symbol(
+pub(in crate::core) fn dynamic_method_dispatch_symbol(
     method: &str,
     params: &[ValueType],
     returns: ValueType,
@@ -182,7 +182,7 @@ pub(super) fn dynamic_method_dispatch_symbol(
     )
 }
 
-pub(super) fn dynamic_type_suffix(ty: ValueType) -> &'static str {
+pub(in crate::core) fn dynamic_type_suffix(ty: ValueType) -> &'static str {
     match ty {
         ValueType::Int => "i64",
         ValueType::Float => "f64",
@@ -205,14 +205,14 @@ pub(super) fn dynamic_type_suffix(ty: ValueType) -> &'static str {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct NativeCallSignature {
-    pub(super) id: FunctionId,
-    pub(super) symbol: String,
-    pub(super) params: Vec<ValueType>,
-    pub(super) returns: ValueType,
+pub(in crate::core) struct NativeCallSignature {
+    pub(in crate::core) id: FunctionId,
+    pub(in crate::core) symbol: String,
+    pub(in crate::core) params: Vec<ValueType>,
+    pub(in crate::core) returns: ValueType,
 }
 
-pub(super) fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignature> {
+pub(in crate::core) fn native_call_signatures(program: &Program) -> HashMap<String, NativeCallSignature> {
     let mut signatures = HashMap::new();
     let mut scanned = program.clone();
     scanned.visit_expressions_mut(&mut |expression| {
@@ -253,7 +253,7 @@ pub(super) fn native_call_signatures(program: &Program) -> HashMap<String, Nativ
     signatures
 }
 
-pub(super) fn foreign_result_type(ty: severian_abi::AbiType) -> ValueType {
+pub(in crate::core) fn foreign_result_type(ty: severian_abi::AbiType) -> ValueType {
     match ty {
         severian_abi::AbiType::Unit => ValueType::Unit,
         severian_abi::AbiType::Bool => ValueType::Bool,
@@ -277,14 +277,14 @@ pub(super) fn foreign_result_type(ty: severian_abi::AbiType) -> ValueType {
     }
 }
 
-pub(super) fn is_predeclared_native_symbol(symbol: &str) -> bool {
+pub(in crate::core) fn is_predeclared_native_symbol(symbol: &str) -> bool {
     matches!(
         symbol,
         "__sev_string_length" | "__sev_value_map_get" | "__sev_map_pop"
     )
 }
 
-pub(super) fn c_type(ty: ValueType) -> &'static str {
+pub(in crate::core) fn c_type(ty: ValueType) -> &'static str {
     match ty {
         ValueType::Int => "int64_t",
         ValueType::Float => "double",
@@ -306,7 +306,7 @@ pub(super) fn c_type(ty: ValueType) -> &'static str {
     }
 }
 
-pub(super) fn static_tensor_elements(tensor: severian_hir::TensorType) -> Option<i64> {
+pub(in crate::core) fn static_tensor_elements(tensor: severian_hir::TensorType) -> Option<i64> {
     let rank = usize::from(tensor.rank?);
     tensor.dimensions[..rank]
         .iter()
@@ -318,11 +318,11 @@ pub(super) fn static_tensor_elements(tensor: severian_hir::TensorType) -> Option
         })
 }
 
-pub(super) fn tensor_element_bytes(element: severian_hir::TensorElementType) -> i64 {
+pub(in crate::core) fn tensor_element_bytes(element: severian_hir::TensorElementType) -> i64 {
     i64::from(element.storage_bytes())
 }
 
-pub(super) fn mlir_type(ty: ValueType) -> &'static str {
+pub(in crate::core) fn mlir_type(ty: ValueType) -> &'static str {
     match ty {
         ValueType::Int => "i64",
         ValueType::Float => "f64",
@@ -344,7 +344,7 @@ pub(super) fn mlir_type(ty: ValueType) -> &'static str {
     }
 }
 
-pub(super) fn assignment_binary(op: AssignmentOp) -> BinaryOp {
+pub(in crate::core) fn assignment_binary(op: AssignmentOp) -> BinaryOp {
     match op {
         AssignmentOp::Assign => unreachable!(),
         AssignmentOp::Add => BinaryOp::Add,
@@ -355,7 +355,7 @@ pub(super) fn assignment_binary(op: AssignmentOp) -> BinaryOp {
     }
 }
 
-pub(super) fn escape_string(value: &str) -> String {
+pub(in crate::core) fn escape_string(value: &str) -> String {
     let mut escaped = String::new();
     for byte in value.as_bytes() {
         match byte {
@@ -366,7 +366,7 @@ pub(super) fn escape_string(value: &str) -> String {
     escaped
 }
 
-pub(super) fn native_format_template(template: &str, arg_types: &[ValueType]) -> String {
+pub(in crate::core) fn native_format_template(template: &str, arg_types: &[ValueType]) -> String {
     let mut output = String::new();
     let mut remainder = template;
     let mut index = 0;

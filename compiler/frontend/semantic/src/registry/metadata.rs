@@ -281,7 +281,7 @@ fn attach_specialized_module_metadata_to_with_packages(
     });
 }
 
-pub(super) fn register_constructor_metadata(
+pub(in crate::analyzer) fn register_constructor_metadata(
     constructor: &severian_ast::ConstructorDecl,
     class: &str,
     namespace: Option<&str>,
@@ -312,7 +312,7 @@ pub(super) fn register_constructor_metadata(
     );
 }
 
-pub(super) fn register_function_metadata(
+pub(in crate::analyzer) fn register_function_metadata(
     function: &severian_ast::FunctionDecl,
     class: Option<&str>,
     namespace: Option<&str>,
@@ -356,7 +356,7 @@ pub(super) fn register_function_metadata(
     );
 }
 
-pub(super) fn intern_optional_type(
+pub(in crate::analyzer) fn intern_optional_type(
     ty: Option<&Type>,
     known_types: &HashMap<String, TypeDefinitionId>,
     primitives: &PrimitiveCatalog,
@@ -368,7 +368,7 @@ pub(super) fn intern_optional_type(
     }
 }
 
-pub(super) fn intern_type(
+pub(in crate::analyzer) fn intern_type(
     ty: &Type,
     known_types: &HashMap<String, TypeDefinitionId>,
     primitives: &PrimitiveCatalog,
@@ -528,18 +528,18 @@ pub(super) fn intern_type(
     }
 }
 
-pub(super) fn metadata_type_id(namespace: Option<&str>, name: &str) -> TypeDefinitionId {
+pub(in crate::analyzer) fn metadata_type_id(namespace: Option<&str>, name: &str) -> TypeDefinitionId {
     TypeDefinitionId::from_name(&qualified_name(namespace, name))
 }
 
-pub(super) fn qualified_name(namespace: Option<&str>, name: &str) -> String {
+pub(in crate::analyzer) fn qualified_name(namespace: Option<&str>, name: &str) -> String {
     namespace.map_or_else(
         || name.to_owned(),
         |namespace| format!("{namespace}.{name}"),
     )
 }
 
-pub(super) fn source_span(file: severian_hir::SourceFileId, span: Span) -> SourceSpan {
+pub(in crate::analyzer) fn source_span(file: severian_hir::SourceFileId, span: Span) -> SourceSpan {
     SourceSpan {
         file,
         range: SourceRange {
@@ -549,7 +549,7 @@ pub(super) fn source_span(file: severian_hir::SourceFileId, span: Span) -> Sourc
     }
 }
 
-pub(super) fn declared_receiver_type(
+pub(in crate::analyzer) fn declared_receiver_type(
     ty: &Type,
     aliases: &HashMap<String, String>,
 ) -> Option<ReceiverType> {
@@ -567,7 +567,7 @@ pub(super) fn declared_receiver_type(
     })
 }
 
-pub(super) fn register_class_field_aliases(
+pub(in crate::analyzer) fn register_class_field_aliases(
     aliases: &mut HashMap<String, String>,
     class: &str,
     fields: &[severian_ast::Field],
@@ -598,7 +598,7 @@ pub(super) fn register_class_field_aliases(
     Ok(())
 }
 
-pub(super) fn register_method_return_alias(
+pub(in crate::analyzer) fn register_method_return_alias(
     aliases: &mut HashMap<String, String>,
     class: &str,
     method: &str,
@@ -620,7 +620,7 @@ pub(super) fn register_method_return_alias(
     Ok(())
 }
 
-pub(super) fn register_class_method_signature_alias(
+pub(in crate::analyzer) fn register_class_method_signature_alias(
     aliases: &mut HashMap<String, String>,
     class: &str,
     method: &severian_ast::FunctionDecl,
@@ -631,7 +631,7 @@ pub(super) fn register_class_method_signature_alias(
     );
 }
 
-pub(super) fn register_trait_aliases(
+pub(in crate::analyzer) fn register_trait_aliases(
     aliases: &mut HashMap<String, String>,
     declaration: &severian_ast::TraitDecl,
 ) {
@@ -669,7 +669,7 @@ pub(super) fn register_trait_aliases(
     }
 }
 
-pub(super) fn callable_signature(
+pub(in crate::analyzer) fn callable_signature(
     parameters: &[severian_ast::Parameter],
     returns: Option<&Type>,
 ) -> String {
@@ -695,7 +695,7 @@ pub(super) fn callable_signature(
     format!("{parameters}->{returns}")
 }
 
-pub(super) fn encode_field_type(ty: ValueType) -> String {
+pub(in crate::analyzer) fn encode_field_type(ty: ValueType) -> String {
     match ty {
         ValueType::Int => "int".into(),
         ValueType::Float => "float".into(),
@@ -733,7 +733,7 @@ fn encode_tensor_type(tensor: TensorType) -> String {
     format!("tensor:{element}:{rank}:{dimensions}")
 }
 
-pub(super) fn decode_field_type(value: &str) -> Option<ValueType> {
+pub(in crate::analyzer) fn decode_field_type(value: &str) -> Option<ValueType> {
     if value.starts_with("tensor:") {
         return decode_tensor_type(value).map(ValueType::Tensor);
     }

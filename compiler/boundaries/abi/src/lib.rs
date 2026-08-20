@@ -7,22 +7,10 @@
 //! Generic ABI schemas are allowed here. Concrete layout/code generation is not:
 //! every schema must be instantiated to `AbiType` / `AbiSignature` first.
 
-pub mod convention;
-pub mod id;
-pub mod instantiate;
-pub mod layout;
+pub mod model;
 pub mod registry;
-pub mod schema;
-pub mod signature;
-pub mod types;
 pub mod validate;
 
-pub use convention::*;
-pub use id::*;
-pub use instantiate::*;
-pub use layout::*;
+pub use model::*;
 pub use registry::*;
-pub use schema::*;
-pub use signature::*;
-pub use types::*;
 pub use validate::*;

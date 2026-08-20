@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn expression_class(
+pub(in crate::analyzer) fn expression_class(
     expression: &Expr,
     scope: &HashMap<String, Binding>,
     aliases: &HashMap<String, String>,
@@ -86,7 +86,7 @@ pub(super) fn expression_class(
     }
 }
 
-pub(super) fn expression_enum_variant(
+pub(in crate::analyzer) fn expression_enum_variant(
     expression: &Expr,
     scope: &HashMap<String, Binding>,
     aliases: &HashMap<String, String>,
@@ -112,7 +112,7 @@ pub(super) fn expression_enum_variant(
     }
 }
 
-pub(super) fn file_read_result_class(
+pub(in crate::analyzer) fn file_read_result_class(
     expression: &Expr,
     aliases: &HashMap<String, String>,
 ) -> Option<String> {
@@ -158,7 +158,7 @@ pub(super) fn file_read_result_class(
         .or_else(|| Some(class.to_owned()))
 }
 
-pub(super) fn file_read_receiver_type(
+pub(in crate::analyzer) fn file_read_receiver_type(
     expression: &Expr,
     aliases: &HashMap<String, String>,
 ) -> Option<ReceiverType> {
@@ -176,7 +176,7 @@ pub(super) fn file_read_receiver_type(
     })
 }
 
-pub(super) fn called_function_name(
+pub(in crate::analyzer) fn called_function_name(
     callee: &Expr,
     aliases: &HashMap<String, String>,
 ) -> Option<String> {
@@ -201,7 +201,7 @@ pub(super) fn called_function_name(
     }
 }
 
-pub(super) fn file_class_for_literal_path(
+pub(in crate::analyzer) fn file_class_for_literal_path(
     path: &str,
     aliases: &HashMap<String, String>,
 ) -> Option<String> {
@@ -236,7 +236,7 @@ pub(super) fn file_class_for_literal_path(
         .cloned()
 }
 
-pub(super) fn refine_success_pattern_bindings(
+pub(in crate::analyzer) fn refine_success_pattern_bindings(
     pattern: &MatchPattern,
     class: &str,
     scope: &mut HashMap<String, Binding>,
@@ -256,7 +256,7 @@ pub(super) fn refine_success_pattern_bindings(
     }
 }
 
-pub(super) fn success_pattern_receivers(
+pub(in crate::analyzer) fn success_pattern_receivers(
     pattern: &MatchPattern,
     receiver: &ReceiverType,
 ) -> BTreeMap<BindingId, ReceiverType> {
@@ -277,7 +277,7 @@ pub(super) fn success_pattern_receivers(
         .collect()
 }
 
-pub(super) fn imports_entire_module(module: &Module, module_name: &str) -> bool {
+pub(in crate::analyzer) fn imports_entire_module(module: &Module, module_name: &str) -> bool {
     module.items.iter().any(|item| {
         let Item::Import(import) = item else {
             return false;
@@ -299,7 +299,7 @@ pub(super) fn imports_entire_module(module: &Module, module_name: &str) -> bool 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn lower_class_function(
+pub(in crate::analyzer) fn lower_class_function(
     id: FunctionId,
     class_name: &str,
     fields: &[String],
@@ -451,11 +451,11 @@ pub(super) fn lower_class_function(
     })
 }
 
-pub(super) fn constructor_id(class: &str, name: &str, span: severian_ast::Span) -> FunctionId {
+pub(in crate::analyzer) fn constructor_id(class: &str, name: &str, span: severian_ast::Span) -> FunctionId {
     FunctionId::from_name(&format!("{class}.{name}@{}:{}", span.start, span.end))
 }
 
-pub(super) fn lower_function_contract(
+pub(in crate::analyzer) fn lower_function_contract(
     contract: Option<&severian_ast::FunctionContract>,
     scope: &HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -520,7 +520,7 @@ pub(super) fn lower_function_contract(
         .transpose()
 }
 
-pub(super) fn collect_imports(module: &Module) -> HashMap<String, String> {
+pub(in crate::analyzer) fn collect_imports(module: &Module) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
     for item in &module.items {
         let Item::Import(import) = item else { continue };
@@ -566,7 +566,7 @@ pub(super) fn collect_imports(module: &Module) -> HashMap<String, String> {
     aliases
 }
 
-pub(super) fn function_semantic_decorators(
+pub(in crate::analyzer) fn function_semantic_decorators(
     decorators: &[severian_ast::Decorator],
     contract: Option<&severian_ast::FunctionContract>,
     trait_semantics: &TraitSemantics,
@@ -658,7 +658,7 @@ fn semantic_decorator_from_expression(
     }))
 }
 
-pub(super) fn wrap_scoped_behaviors(
+pub(in crate::analyzer) fn wrap_scoped_behaviors(
     instructions: &mut Vec<Instruction>,
     decorators: &[HirDecorator],
 ) {
@@ -687,7 +687,7 @@ pub(super) fn wrap_scoped_behaviors(
     });
 }
 
-pub(super) fn aliases_with_decorators(
+pub(in crate::analyzer) fn aliases_with_decorators(
     aliases: &HashMap<String, String>,
     decorators: &[severian_ast::Decorator],
     trait_semantics: &TraitSemantics,
@@ -737,7 +737,7 @@ pub(super) fn aliases_with_decorators(
     Ok(aliases)
 }
 
-pub(super) fn collect_imported_modules(module: &Module) -> HashSet<String> {
+pub(in crate::analyzer) fn collect_imported_modules(module: &Module) -> HashSet<String> {
     module
         .items
         .iter()
@@ -763,7 +763,7 @@ pub(super) fn collect_imported_modules(module: &Module) -> HashSet<String> {
         .collect()
 }
 
-pub(super) fn lower_decorators(
+pub(in crate::analyzer) fn lower_decorators(
     decorators: &[severian_ast::Decorator],
     imported_modules: &HashSet<String>,
     trait_semantics: &TraitSemantics,
@@ -835,7 +835,7 @@ pub(super) fn lower_decorators(
     decorator_metadata(decorators, trait_semantics)
 }
 
-pub(super) fn decorator_metadata(
+pub(in crate::analyzer) fn decorator_metadata(
     decorators: &[severian_ast::Decorator],
     trait_semantics: &TraitSemantics,
 ) -> Result<Vec<HirDecorator>, SemanticError> {

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn lower_call(
+pub(in crate::analyzer) fn lower_call(
     call: &severian_ast::CallExpr,
     scope: &HashMap<String, Binding>,
     signatures: &HashMap<String, Signature>,
@@ -717,7 +717,7 @@ fn declaration_expression_name(expression: &Expr) -> Option<String> {
     }
 }
 
-pub(super) fn static_class_name(
+pub(in crate::analyzer) fn static_class_name(
     expression: &Expr,
     aliases: &HashMap<String, String>,
 ) -> Option<String> {
@@ -748,7 +748,7 @@ pub(super) fn static_class_name(
     }
 }
 
-pub(super) fn generated_object_call_class(
+pub(in crate::analyzer) fn generated_object_call_class(
     call: &severian_ast::CallExpr,
     scope: &HashMap<String, Binding>,
     aliases: &HashMap<String, String>,
@@ -1148,7 +1148,7 @@ fn validate_structural_conversion_inner(
     Ok(())
 }
 
-pub(super) fn resolve_linked_function<'a>(
+pub(in crate::analyzer) fn resolve_linked_function<'a>(
     imported: &'a str,
     signatures: &HashMap<String, Signature>,
 ) -> &'a str {
@@ -1163,7 +1163,7 @@ pub(super) fn resolve_linked_function<'a>(
     }
 }
 
-pub(super) fn method_return_type(object: ValueType, method: &str) -> ValueType {
+pub(in crate::analyzer) fn method_return_type(object: ValueType, method: &str) -> ValueType {
     match (object, method) {
         (
             ValueType::String,
@@ -1249,7 +1249,7 @@ pub(super) fn method_return_type(object: ValueType, method: &str) -> ValueType {
     }
 }
 
-pub(super) fn collection_shape_mutating_method(method: &str) -> bool {
+pub(in crate::analyzer) fn collection_shape_mutating_method(method: &str) -> bool {
     matches!(
         method,
         "append"
@@ -1270,7 +1270,7 @@ pub(super) fn collection_shape_mutating_method(method: &str) -> bool {
     )
 }
 
-pub(super) fn validate_builtin_method(
+pub(in crate::analyzer) fn validate_builtin_method(
     span: Span,
     object: ValueType,
     method: &str,

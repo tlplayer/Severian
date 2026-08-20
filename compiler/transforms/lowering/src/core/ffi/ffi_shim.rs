@@ -2,7 +2,7 @@ use severian_abi::AbiType;
 use severian_hir::Program;
 use std::fmt::Write;
 
-pub(super) fn append_c_v1_shims(source: &mut String, program: &Program) {
+pub(in crate::core) fn append_c_v1_shims(source: &mut String, program: &Program) {
     if program.metadata.external_functions.is_empty() {
         return;
     }

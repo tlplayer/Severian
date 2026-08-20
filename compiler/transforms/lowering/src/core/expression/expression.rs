@@ -1,7 +1,7 @@
 use super::*;
 
 impl LowerContext<'_> {
-    pub(super) fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
+    pub(in crate::core) fn lower_expression(&mut self, expression: &Expression) -> (String, ValueType) {
         match expression {
             Expression::Typed {
                 id, ty, expression, ..
@@ -3241,7 +3241,7 @@ impl LowerContext<'_> {
         (result, definition.return_type)
     }
 
-    pub(super) fn validate_object(&mut self, object: &str, class: &str) {
+    pub(in crate::core) fn validate_object(&mut self, object: &str, class: &str) {
         let Some(definition) = self
             .classes
             .iter()

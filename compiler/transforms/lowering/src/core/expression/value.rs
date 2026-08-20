@@ -1,11 +1,11 @@
 use super::*;
 
 impl LowerContext<'_> {
-    pub(super) fn emit_runtime_site(&mut self) {
+    pub(in crate::core) fn emit_runtime_site(&mut self) {
         self.emit_runtime_site_for(self.active_hir_id);
     }
 
-    pub(super) fn emit_runtime_site_for(&mut self, id: Option<severian_hir::HirId>) {
+    pub(in crate::core) fn emit_runtime_site_for(&mut self, id: Option<severian_hir::HirId>) {
         let Some(id) = id else {
             return;
         };
@@ -67,7 +67,7 @@ impl LowerContext<'_> {
         writeln!(self.output, "    llvm.call @__sev_runtime_set_site({path_value}, {line_value}, {column_value}, {end_column_value}) : (!llvm.ptr, i64, i64, i64) -> ()").unwrap();
     }
 
-    pub(super) fn carry_value_metadata(&mut self, source: &str, target: &str) {
+    pub(in crate::core) fn carry_value_metadata(&mut self, source: &str, target: &str) {
         if let Some(class) = self.object_classes.get(source).cloned() {
             self.object_classes.insert(target.to_owned(), class);
         }
@@ -85,7 +85,7 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn lower_short_circuit_chain(
+    pub(in crate::core) fn lower_short_circuit_chain(
         &mut self,
         left: &Expression,
         op: BinaryOp,
@@ -122,7 +122,7 @@ impl LowerContext<'_> {
         value
     }
 
-    pub(super) fn lower_slice_expression(
+    pub(in crate::core) fn lower_slice_expression(
         &mut self,
         object: &Expression,
         start: &Option<Box<Expression>>,
@@ -167,7 +167,7 @@ impl LowerContext<'_> {
         (result, object_type)
     }
 
-    pub(super) fn lower_conditional_expression(
+    pub(in crate::core) fn lower_conditional_expression(
         &mut self,
         condition: &Expression,
         then_expression: &Expression,
@@ -218,7 +218,7 @@ impl LowerContext<'_> {
         (result, result_type)
     }
 
-    pub(super) fn coerce_conditional_value(
+    pub(in crate::core) fn coerce_conditional_value(
         &mut self,
         value: (String, ValueType),
         expected: ValueType,
@@ -234,7 +234,7 @@ impl LowerContext<'_> {
         }
     }
 
-    pub(super) fn lower_collection_literal(
+    pub(in crate::core) fn lower_collection_literal(
         &mut self,
         values: &[Expression],
         ty: ValueType,
@@ -264,7 +264,7 @@ impl LowerContext<'_> {
         (result, ty)
     }
 
-    pub(super) fn string_address(&mut self, value: &str) -> String {
+    pub(in crate::core) fn string_address(&mut self, value: &str) -> String {
         let index = self
             .strings
             .iter()
@@ -281,7 +281,7 @@ impl LowerContext<'_> {
         result
     }
 
-    pub(super) fn has_known_class_method(&self, object: &Expression, method: &str) -> bool {
+    pub(in crate::core) fn has_known_class_method(&self, object: &Expression, method: &str) -> bool {
         let class_id = match object.kind() {
             Expression::Variable(name) => self
                 .variables
@@ -334,7 +334,7 @@ impl LowerContext<'_> {
             })
     }
 
-    pub(super) fn has_abstract_class_method(&self, object: &Expression, method: &str) -> bool {
+    pub(in crate::core) fn has_abstract_class_method(&self, object: &Expression, method: &str) -> bool {
         let Expression::Variable(name) = object.kind() else {
             return false;
         };
@@ -364,7 +364,7 @@ impl LowerContext<'_> {
         !receiver.concrete && receiver.methods.iter().any(|name| name == method)
     }
 
-    pub(super) fn object_field_metadata(
+    pub(in crate::core) fn object_field_metadata(
         &self,
         object: &str,
         field: &str,
@@ -385,7 +385,7 @@ impl LowerContext<'_> {
             })
     }
 
-    pub(super) fn box_value(&mut self, (value, ty): (String, ValueType)) -> String {
+    pub(in crate::core) fn box_value(&mut self, (value, ty): (String, ValueType)) -> String {
         let function = match ty {
             ValueType::Int => "__sev_box_i64",
             ValueType::Float => "__sev_box_f64",
@@ -407,7 +407,7 @@ impl LowerContext<'_> {
         result
     }
 
-    pub(super) fn coerce_resolved_call_arguments(
+    pub(in crate::core) fn coerce_resolved_call_arguments(
         &mut self,
         target: &severian_hir::CallTarget,
         arguments: Vec<(String, ValueType)>,
@@ -438,7 +438,7 @@ impl LowerContext<'_> {
             .collect()
     }
 
-    pub(super) fn unbox_value(
+    pub(in crate::core) fn unbox_value(
         &mut self,
         (value, ty): (String, ValueType),
         expected: ValueType,
@@ -467,13 +467,13 @@ impl LowerContext<'_> {
         (result, expected)
     }
 
-    pub(super) fn next_closure_symbol(&self, prefix: &str) -> String {
+    pub(in crate::core) fn next_closure_symbol(&self, prefix: &str) -> String {
         let index = self.next_closure.get();
         self.next_closure.set(index + 1);
         format!("__sev_{prefix}_{index}")
     }
 
-    pub(super) fn ensure_function_closure(
+    pub(in crate::core) fn ensure_function_closure(
         &mut self,
         function: &severian_hir::CallTarget,
     ) -> String {
@@ -546,7 +546,7 @@ impl LowerContext<'_> {
         symbol
     }
 
-    pub(super) fn emit_lambda_closure(
+    pub(in crate::core) fn emit_lambda_closure(
         &mut self,
         params: &[BindingRef],
         body: &Expression,
@@ -626,7 +626,7 @@ impl LowerContext<'_> {
         closure
     }
 
-    pub(super) fn emit_block_closure(
+    pub(in crate::core) fn emit_block_closure(
         &mut self,
         params: &[severian_hir::Parameter],
         body: &[Instruction],
@@ -717,7 +717,7 @@ impl LowerContext<'_> {
         closure
     }
 
-    pub(super) fn callback_context<'b>(&'b self, output: &'b mut String) -> LowerContext<'b> {
+    pub(in crate::core) fn callback_context<'b>(&'b self, output: &'b mut String) -> LowerContext<'b> {
         LowerContext {
             output,
             strings: self.strings,

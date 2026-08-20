@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
-pub mod coverage;
-pub mod dead_code;
-pub mod doctor;
-pub mod explain;
+pub mod catalog;
 pub mod lint;
-pub mod naming;
 pub mod render;
-pub mod verify;
+pub mod tooling;
+
+pub use catalog::explain;
+pub use lint::{dead_code, naming};
+pub use tooling::{coverage, doctor, verify};
 
 use std::path::PathBuf;
 

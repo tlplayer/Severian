@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn register_concrete_trait_aliases(
+pub(in crate::analyzer) fn register_concrete_trait_aliases(
     aliases: &mut HashMap<String, String>,
     module: &Module,
     interfaces: &[PackageInterface],
@@ -158,7 +158,7 @@ fn collect_function_types(function: &severian_ast::FunctionDecl, output: &mut Ve
     output.extend(function.return_type.clone());
 }
 
-pub(super) fn substitute_declared_type(ty: &Type, substitutions: &HashMap<String, Type>) -> Type {
+pub(in crate::analyzer) fn substitute_declared_type(ty: &Type, substitutions: &HashMap<String, Type>) -> Type {
     if let Type::Named(path) = ty {
         if path.args.is_empty() && path.segments.len() == 1 {
             if let Some(replacement) = substitutions.get(&path.segments[0].name) {

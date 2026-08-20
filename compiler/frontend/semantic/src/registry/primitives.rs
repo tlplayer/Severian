@@ -3,7 +3,7 @@ use super::*;
 const PRIMITIVES_PACKAGE: &str = "core.primitives";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum PrimitiveKind {
+pub(in crate::analyzer) enum PrimitiveKind {
     Integer,
     Float,
     Bool,
@@ -12,7 +12,7 @@ pub(super) enum PrimitiveKind {
 }
 
 impl PrimitiveKind {
-    pub(super) fn value_type(self) -> ValueType {
+    pub(in crate::analyzer) fn value_type(self) -> ValueType {
         match self {
             Self::Integer => ValueType::Int,
             Self::Float => ValueType::Float,
@@ -22,7 +22,7 @@ impl PrimitiveKind {
         }
     }
 
-    pub(super) fn type_kind(self) -> TypeKind {
+    pub(in crate::analyzer) fn type_kind(self) -> TypeKind {
         match self {
             Self::Integer => TypeKind::Int,
             Self::Float => TypeKind::Float,
@@ -34,19 +34,19 @@ impl PrimitiveKind {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PrimitiveDefinition {
+pub(in crate::analyzer) struct PrimitiveDefinition {
     pub name: String,
     pub kind: PrimitiveKind,
     pub default: bool,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct PrimitiveCatalog {
+pub(in crate::analyzer) struct PrimitiveCatalog {
     definitions: HashMap<String, PrimitiveDefinition>,
 }
 
 impl PrimitiveCatalog {
-    pub(super) fn from_interfaces(
+    pub(in crate::analyzer) fn from_interfaces(
         interfaces: &[PackageInterface],
     ) -> Result<Self, SemanticError> {
         let mut catalog = Self::default();
@@ -96,23 +96,23 @@ impl PrimitiveCatalog {
         Ok(catalog)
     }
 
-    pub(super) fn contains(&self, name: &str) -> bool {
+    pub(in crate::analyzer) fn contains(&self, name: &str) -> bool {
         self.definitions.contains_key(name)
     }
 
-    pub(super) fn value_type(&self, name: &str) -> Option<ValueType> {
+    pub(in crate::analyzer) fn value_type(&self, name: &str) -> Option<ValueType> {
         self.definitions
             .get(name)
             .map(|primitive| primitive.kind.value_type())
     }
 
-    pub(super) fn type_kind(&self, name: &str) -> Option<TypeKind> {
+    pub(in crate::analyzer) fn type_kind(&self, name: &str) -> Option<TypeKind> {
         self.definitions
             .get(name)
             .map(|primitive| primitive.kind.type_kind())
     }
 
-    pub(super) fn kind(&self, name: &str) -> Option<PrimitiveKind> {
+    pub(in crate::analyzer) fn kind(&self, name: &str) -> Option<PrimitiveKind> {
         self.definitions.get(name).map(|primitive| primitive.kind)
     }
 }

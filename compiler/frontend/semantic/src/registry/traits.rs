@@ -8,7 +8,7 @@ struct TraitEntry {
     declaration: severian_ast::TraitDecl,
 }
 
-pub(super) fn expand_trait_compositions(
+pub(in crate::analyzer) fn expand_trait_compositions(
     module: &Module,
     interfaces: &[PackageInterface],
 ) -> Result<(Module, Vec<PackageInterface>, TraitSemantics), SemanticError> {
@@ -509,7 +509,7 @@ fn substitute_trait_operator(
     }
 }
 
-pub(super) fn trait_operator_signature(operator: &severian_ast::TraitOperator) -> String {
+pub(in crate::analyzer) fn trait_operator_signature(operator: &severian_ast::TraitOperator) -> String {
     let params = operator
         .params
         .iter()
@@ -530,7 +530,7 @@ pub(super) fn trait_operator_signature(operator: &severian_ast::TraitOperator) -
     format!("operator {}({params}) -> {returns}", operator.symbol)
 }
 
-pub(super) fn validate_trait_implementations(
+pub(in crate::analyzer) fn validate_trait_implementations(
     module: &Module,
     interfaces: &[PackageInterface],
     aliases: &HashMap<String, String>,
@@ -1232,7 +1232,7 @@ fn validate_from_implementation(
     Ok(())
 }
 
-pub(super) fn declaration_type_name(ty: &Type) -> Option<String> {
+pub(in crate::analyzer) fn declaration_type_name(ty: &Type) -> Option<String> {
     let Type::Named(path) = ty else { return None };
     Some(
         path.segments
@@ -1243,7 +1243,7 @@ pub(super) fn declaration_type_name(ty: &Type) -> Option<String> {
     )
 }
 
-pub(super) fn canonical_declared_type_name(
+pub(in crate::analyzer) fn canonical_declared_type_name(
     name: &str,
     aliases: &HashMap<String, String>,
 ) -> String {
@@ -1258,7 +1258,7 @@ pub(super) fn canonical_declared_type_name(
     }
 }
 
-pub(super) fn optional_declaration_types_match(left: Option<&Type>, right: Option<&Type>) -> bool {
+pub(in crate::analyzer) fn optional_declaration_types_match(left: Option<&Type>, right: Option<&Type>) -> bool {
     match (left, right) {
         (None, None) => true,
         (Some(left), Some(right)) => declaration_type_key(left) == declaration_type_key(right),
@@ -1266,7 +1266,7 @@ pub(super) fn optional_declaration_types_match(left: Option<&Type>, right: Optio
     }
 }
 
-pub(super) fn declaration_type_key(ty: &Type) -> String {
+pub(in crate::analyzer) fn declaration_type_key(ty: &Type) -> String {
     match ty {
         Type::Named(path) => {
             let mut result = path
@@ -1332,7 +1332,7 @@ pub(super) fn declaration_type_key(ty: &Type) -> String {
     }
 }
 
-pub(super) fn trait_method_signature(method: &severian_ast::TraitMethod) -> String {
+pub(in crate::analyzer) fn trait_method_signature(method: &severian_ast::TraitMethod) -> String {
     let params = method
         .params
         .iter()

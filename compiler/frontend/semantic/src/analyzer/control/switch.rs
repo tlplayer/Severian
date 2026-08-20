@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn validate_exhaustive_enum_switch(
+pub(in crate::analyzer) fn validate_exhaustive_enum_switch(
     statement: &severian_ast::SwitchStmt,
     scope: &HashMap<String, Binding>,
     aliases: &HashMap<String, String>,
