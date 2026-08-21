@@ -4,7 +4,7 @@ import environment as env
 test "environment variable lifecycle":
     name = "SEVERIAN_EXAMPLE_VALUE"
 
-    environment.remove(name)
+    env.remove(name)
 
     assert(env.set(name, "hello"))
     assert(env.get(name) == "hello")

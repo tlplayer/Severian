@@ -12,4 +12,4 @@ test with integ "file metadata":
     assert(information.path == path)
     assert(information.is_file)
     assert(not information.is_directory)
-    assert(information.size == 8)
+    assert(information.size == 8B)

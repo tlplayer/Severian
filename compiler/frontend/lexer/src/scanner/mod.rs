@@ -75,6 +75,10 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             }
             b'@' => one(&mut cursor, TokenKind::At),
             b',' => one(&mut cursor, TokenKind::Comma),
+            b':' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::ColonEqual
+            }
             b':' => one(&mut cursor, TokenKind::Colon),
             b'(' => one(&mut cursor, TokenKind::LeftParen),
             b')' => one(&mut cursor, TokenKind::RightParen),

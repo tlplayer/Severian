@@ -19,6 +19,11 @@ pub enum Operation {
         right: ValueId,
         result: ValueId,
     },
+    Call {
+        function: severian_hir::FunctionId,
+        arguments: Vec<ValueId>,
+        result: ValueId,
+    },
     /// Planner-produced bridge back into the standard pipeline. Source MIR
     /// never creates this operation directly.
     CompiledRegionCall {

@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
+pub mod config;
 mod pipeline;
 
-pub use pipeline::{compile_file, compile_source, CompileError, Compiler};
+pub use pipeline::{check_file, compile_file, compile_source, CompileError, Compiler};
 
 #[cfg(test)]
 mod tests {
@@ -109,16 +110,17 @@ mod tests {
     }
 
     #[test]
-    fn normal_compilation_does_not_run_external_boundary_phases() {
+    fn ordinary_compilation_validates_external_boundaries() {
         let source = SourceFile::virtual_source(
             "invalid-ffi.sev",
             "@c\ndef invalid(value: nullable[i32]) -> i32\nx: i32 = 1\n",
         );
         let output =
             std::env::temp_dir().join(format!("severian-invalid-ffi-{}", std::process::id()));
-        let artifact = compile_source(&source, &output).unwrap();
-        assert!(artifact.path.exists());
-        std::fs::remove_file(output).unwrap();
+        let error = compile_source(&source, &output).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("only pointer representations may be nullable"));
     }
 
     #[test]
@@ -143,28 +145,31 @@ mod tests {
                     type_id: i32_type,
                 },
             ],
-            operations: vec![
-                Operation::Constant {
-                    value: LiteralValue::Integer("2".into()),
-                    result: ValueId(0),
-                },
-                Operation::Constant {
-                    value: LiteralValue::Integer("1".into()),
-                    result: ValueId(1),
-                },
-                Operation::Unary {
-                    operator: severian_universal::UnaryOperator::Positive,
-                    operand: ValueId(1),
-                    result: ValueId(2),
-                },
-                Operation::Binary {
-                    operator: BinaryOperator::Add,
-                    left: ValueId(2),
-                    right: ValueId(0),
-                    result: ValueId(3),
-                },
-            ],
+            initializer: severian_mir::Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: LiteralValue::Integer("2".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Constant {
+                        value: LiteralValue::Integer("1".into()),
+                        result: ValueId(1),
+                    },
+                    Operation::Unary {
+                        operator: severian_universal::UnaryOperator::Positive,
+                        operand: ValueId(1),
+                        result: ValueId(2),
+                    },
+                    Operation::Binary {
+                        operator: BinaryOperator::Add,
+                        left: ValueId(2),
+                        right: ValueId(0),
+                        result: ValueId(3),
+                    },
+                ],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let mut compiler = Compiler::with_context(context, TargetSpec::new("x86_64-unknown-linux"));
         compiler
@@ -202,6 +207,24 @@ mod tests {
             .status()
             .unwrap()
             .success());
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn global_initialization_runs_before_root_main() {
+        let source = SourceFile::virtual_source(
+            "entry.sev",
+            "print(\"initializing\")\nseed := 7\ndef main():\n    observed := seed\n    print(\"running\")\n",
+        );
+        let output =
+            std::env::temp_dir().join(format!("severian-entry-contract-{}", std::process::id()));
+        compile_source(&source, &output).unwrap();
+        let result = std::process::Command::new(&output).output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            String::from_utf8(result.stdout).unwrap(),
+            "initializing\nrunning\n"
+        );
         std::fs::remove_file(output).unwrap();
     }
 }

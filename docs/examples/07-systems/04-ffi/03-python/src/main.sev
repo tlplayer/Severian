@@ -1,18 +1,20 @@
-from ffi import python
+import python from xxi
 
-@python
+@python(symbol = "add")
 def add(left: int, right: int) -> int
 
 
-@python
+@python(symbol = "greeting")
 def greeting(name: string) -> string
 
 
 test:
-    assert(add(20, 22) == 42)
-    assert(greeting("severian") == "hello severian")
+    unsafe:
+        assert(add(20, 22) == 42)
+        assert(greeting("severian") == "hello severian")
 
 
 def main():
-    print(add(20, 22))
-    print(greeting("severian"))
+    unsafe:
+        print(add(20, 22))
+        print(greeting("severian"))

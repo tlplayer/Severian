@@ -7,7 +7,8 @@ mod registry;
 
 pub use error::CompileError;
 pub use model::{
-    CompileContext, CompilePlan, CompileRegion, EffectSet, PlanSegment, StandardRegion,
+    CompileContext, CompilePlan, CompileRegion, EffectSet, PlanSegment, PlannedBlock,
+    PlannedFunction, StandardRegion,
 };
 pub use planner::plan;
 pub use registry::{CompileHandler, CompilerRegistry};
@@ -139,14 +140,20 @@ mod tests {
         let (types, standard, _, compiler) = types();
         let module = Module {
             values: vec![value(0, standard)],
-            operations: vec![Operation::Constant {
-                value: LiteralValue::Integer("1".into()),
-                result: ValueId(0),
-            }],
+            initializer: severian_mir::Block {
+                operations: vec![Operation::Constant {
+                    value: LiteralValue::Integer("1".into()),
+                    result: ValueId(0),
+                }],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let plan = plan(&module, &types).unwrap();
-        assert!(matches!(plan.segments[0], PlanSegment::Standard(_)));
+        assert!(matches!(
+            plan.initializer.segments[0],
+            PlanSegment::Standard(_)
+        ));
         let calls = Arc::new(AtomicUsize::new(0));
         let mut registry = CompilerRegistry::new();
         registry
@@ -175,17 +182,63 @@ mod tests {
         let (types, _, special, _) = types();
         let module = Module {
             values: vec![value(0, special)],
-            operations: vec![Operation::Constant {
-                value: LiteralValue::Integer("1".into()),
-                result: ValueId(0),
-            }],
+            initializer: severian_mir::Block {
+                operations: vec![Operation::Constant {
+                    value: LiteralValue::Integer("1".into()),
+                    result: ValueId(0),
+                }],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let resumed = plan(&module, &types).unwrap().resumed_mir();
         assert!(matches!(
-            resumed.operations[0],
+            resumed.initializer.operations[0],
             Operation::CompiledRegionCall { .. }
         ));
+    }
+
+    #[test]
+    fn initializer_and_function_bodies_are_planned_independently() {
+        let (types, standard, special, _) = types();
+        let module = Module {
+            values: vec![value(0, special), value(1, special), value(2, standard)],
+            initializer: severian_mir::Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: LiteralValue::Integer("1".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Unary {
+                        operator: UnaryOperator::Positive,
+                        operand: ValueId(0),
+                        result: ValueId(1),
+                    },
+                ],
+            },
+            functions: vec![severian_mir::Function {
+                id: severian_mir::FunctionId(0),
+                name: "main".into(),
+                parameters: vec![],
+                result: standard,
+                body: Some(severian_mir::Block {
+                    operations: vec![Operation::Constant {
+                        value: LiteralValue::Integer("2".into()),
+                        result: ValueId(2),
+                    }],
+                }),
+                call_type: severian_mir::CallType::Severian,
+            }],
+            entry: Some(severian_mir::FunctionId(0)),
+            ..Module::default()
+        };
+        let resumed = plan(&module, &types).unwrap().resumed_mir();
+        assert_eq!(resumed.initializer.operations.len(), 1);
+        assert_eq!(
+            resumed.functions[0].body.as_ref().unwrap().operations.len(),
+            1
+        );
+        assert_eq!(resumed.entry, Some(severian_mir::FunctionId(0)));
     }
 
     #[test]
@@ -198,32 +251,35 @@ mod tests {
                 value(2, standard),
                 value(3, standard),
             ],
-            operations: vec![
-                Operation::Constant {
-                    value: LiteralValue::Integer("2".into()),
-                    result: ValueId(0),
-                },
-                Operation::Constant {
-                    value: LiteralValue::Integer("1".into()),
-                    result: ValueId(1),
-                },
-                Operation::Unary {
-                    operator: UnaryOperator::Positive,
-                    operand: ValueId(1),
-                    result: ValueId(2),
-                },
-                Operation::Binary {
-                    operator: BinaryOperator::Add,
-                    left: ValueId(2),
-                    right: ValueId(0),
-                    result: ValueId(3),
-                },
-            ],
+            initializer: severian_mir::Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: LiteralValue::Integer("2".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Constant {
+                        value: LiteralValue::Integer("1".into()),
+                        result: ValueId(1),
+                    },
+                    Operation::Unary {
+                        operator: UnaryOperator::Positive,
+                        operand: ValueId(1),
+                        result: ValueId(2),
+                    },
+                    Operation::Binary {
+                        operator: BinaryOperator::Add,
+                        left: ValueId(2),
+                        right: ValueId(0),
+                        result: ValueId(3),
+                    },
+                ],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let target = TargetSpec::new("x86_64-unknown-linux");
         let plan = plan(&module, &types).unwrap();
-        assert_eq!(plan.segments.len(), 3);
+        assert_eq!(plan.initializer.segments.len(), 3);
         let mut registry = CompilerRegistry::new();
         registry
             .register(
@@ -246,6 +302,7 @@ mod tests {
         assert_eq!(artifacts.len(), 1);
         assert!(plan
             .resumed_mir()
+            .initializer
             .operations
             .iter()
             .any(|operation| matches!(operation, Operation::CompiledRegionCall { .. })));
@@ -256,11 +313,14 @@ mod tests {
         let (types, _, special, compiler) = types();
         let module = Module {
             values: vec![value(0, special)],
-            operations: vec![Operation::Constant {
-                value: LiteralValue::Integer("1".into()),
-                result: ValueId(0),
-            }],
+            initializer: severian_mir::Block {
+                operations: vec![Operation::Constant {
+                    value: LiteralValue::Integer("1".into()),
+                    result: ValueId(0),
+                }],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let target = TargetSpec::new("x86_64-unknown-linux");
         let plan = plan(&module, &types).unwrap();
@@ -290,13 +350,16 @@ mod tests {
         let types = types.build();
         let conflict = Module {
             values: vec![value(0, special), value(1, other), value(2, standard)],
-            operations: vec![Operation::Binary {
-                operator: BinaryOperator::Add,
-                left: ValueId(0),
-                right: ValueId(1),
-                result: ValueId(2),
-            }],
+            initializer: severian_mir::Block {
+                operations: vec![Operation::Binary {
+                    operator: BinaryOperator::Add,
+                    left: ValueId(0),
+                    right: ValueId(1),
+                    result: ValueId(2),
+                }],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         assert!(matches!(
             plan(&conflict, &types),
@@ -309,11 +372,14 @@ mod tests {
         let (types, _, special, compiler) = types();
         let module = Module {
             values: vec![value(0, special)],
-            operations: vec![Operation::Constant {
-                value: LiteralValue::Integer("1".into()),
-                result: ValueId(0),
-            }],
+            initializer: severian_mir::Block {
+                operations: vec![Operation::Constant {
+                    value: LiteralValue::Integer("1".into()),
+                    result: ValueId(0),
+                }],
+            },
             bindings: vec![],
+            ..Module::default()
         };
         let plan = plan(&module, &types).unwrap();
         let target = TargetSpec::new("x86_64-unknown-linux");

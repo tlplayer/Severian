@@ -1,4 +1,4 @@
-from ffi import c
+import c from xxi
 
 
 @c
@@ -14,10 +14,10 @@ class Rectangle:
 
 
 test:
-    assert(bytes[Point]() == 8)
-    assert(alignment[Point]() == 4)
+    assert(bytes[Point]() == 8B)
+    assert(alignment[Point]() == 4B)
 
-    assert(offset[Point]("x") == 0)
-    assert(offset[Point]("y") == 4)
+    assert(offset[Point]("x") == 0B)
+    assert(offset[Point]("y") == 4B)
 
-    assert(bytes[Rectangle]() == 16)
+    assert(bytes[Rectangle]() == 16B)

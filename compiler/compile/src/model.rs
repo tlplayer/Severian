@@ -1,5 +1,8 @@
 use severian_artifact::{ArtifactId, CompiledRegionId};
-use severian_mir::{Module as MirModule, Operation as MirOperation, Value as MirValue};
+use severian_mir::{
+    Block as MirBlock, Function as MirFunction, Module as MirModule, Operation as MirOperation,
+    Value as MirValue,
+};
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, TypeContext};
 
@@ -31,16 +34,35 @@ pub enum PlanSegment {
     Compiler(CompileRegion),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlannedBlock {
+    pub segments: Vec<PlanSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedFunction {
+    pub declaration: MirFunction,
+    pub body: Option<PlannedBlock>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompilePlan {
     pub source: MirModule,
-    pub segments: Vec<PlanSegment>,
+    pub initializer: PlannedBlock,
+    pub functions: Vec<PlannedFunction>,
 }
 
 impl CompilePlan {
     pub fn has_custom_regions(&self) -> bool {
-        self.segments
+        self.initializer
+            .segments
             .iter()
+            .chain(
+                self.functions
+                    .iter()
+                    .filter_map(|function| function.body.as_ref())
+                    .flat_map(|body| &body.segments),
+            )
             .any(|segment| matches!(segment, PlanSegment::Compiler(_)))
     }
 
@@ -50,24 +72,35 @@ impl CompilePlan {
         let mut module = MirModule {
             values: self.source.values.clone(),
             bindings: self.source.bindings.clone(),
-            operations: Vec::new(),
+            globals: self.source.globals.clone(),
+            initializer: resume_block(&self.initializer),
+            functions: Vec::new(),
+            entry: self.source.entry,
         };
-        for segment in &self.segments {
-            match segment {
-                PlanSegment::Standard(region) => {
-                    module.operations.extend(region.operations.iter().cloned());
-                }
-                PlanSegment::Compiler(region) => {
-                    module.operations.push(MirOperation::CompiledRegionCall {
-                        artifact: ArtifactId::for_region(region.id),
-                        inputs: region.inputs.iter().map(|value| value.id).collect(),
-                        outputs: region.outputs.iter().map(|value| value.id).collect(),
-                    });
-                }
-            }
+        for function in &self.functions {
+            let mut declaration = function.declaration.clone();
+            declaration.body = function.body.as_ref().map(resume_block);
+            module.functions.push(declaration);
         }
         module
     }
+}
+
+fn resume_block(block: &PlannedBlock) -> MirBlock {
+    let mut operations = Vec::new();
+    for segment in &block.segments {
+        match segment {
+            PlanSegment::Standard(region) => operations.extend(region.operations.iter().cloned()),
+            PlanSegment::Compiler(region) => {
+                operations.push(MirOperation::CompiledRegionCall {
+                    artifact: ArtifactId::for_region(region.id),
+                    inputs: region.inputs.iter().map(|value| value.id).collect(),
+                    outputs: region.outputs.iter().map(|value| value.id).collect(),
+                });
+            }
+        }
+    }
+    MirBlock { operations }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
 use severian_lir::{
-    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module as LirModule,
+    BinaryOperation, Block as LirBlock, Constant, Function as LirFunction, FunctionId,
+    FunctionLinkage, LoweredFloatFormat, LoweredType, Module as LirModule,
     Operation as LirOperation, UnaryOperation, Value, ValueId,
 };
-use severian_mir::{Module as MirModule, Operation as MirOperation};
+use severian_mir::{Block as MirBlock, Module as MirModule, Operation as MirOperation};
 use severian_target::TargetSpec;
 use severian_universal::{
     BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TypeContext,
@@ -27,7 +28,41 @@ pub fn lower(
             })
         })
         .collect::<Result<Vec<_>, LoweringError>>()?;
-    let operations = mir
+    let initializer = lower_block(&mir.initializer);
+    let functions = mir
+        .functions
+        .iter()
+        .map(|function| {
+            Ok(LirFunction {
+                id: FunctionId(function.id.0),
+                name: function.name.clone(),
+                parameters: function
+                    .parameters
+                    .iter()
+                    .map(|value| ValueId(value.0))
+                    .collect(),
+                result: lower_type(function.result, types, target)?,
+                body: function.body.as_ref().map(lower_block),
+                linkage: match &function.call_type {
+                    severian_mir::CallType::Severian => FunctionLinkage::Internal,
+                    severian_mir::CallType::External(call) => FunctionLinkage::External {
+                        symbol: call.symbol.0.clone(),
+                    },
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    Ok(LirModule {
+        values,
+        globals: mir.globals.iter().map(|value| ValueId(value.0)).collect(),
+        initializer,
+        functions,
+        entry: mir.entry.map(|entry| FunctionId(entry.0)),
+    })
+}
+
+fn lower_block(block: &MirBlock) -> LirBlock {
+    let operations = block
         .operations
         .iter()
         .map(|operation| match operation {
@@ -55,6 +90,15 @@ pub fn lower(
                 right: ValueId(right.0),
                 result: ValueId(result.0),
             },
+            MirOperation::Call {
+                function,
+                arguments,
+                result,
+            } => LirOperation::Call {
+                function: FunctionId(function.0),
+                arguments: arguments.iter().map(|value| ValueId(value.0)).collect(),
+                result: ValueId(result.0),
+            },
             MirOperation::CompiledRegionCall {
                 artifact,
                 inputs,
@@ -66,11 +110,7 @@ pub fn lower(
             },
         })
         .collect();
-    Ok(LirModule {
-        values,
-        operations,
-        last_binding: mir.bindings.last().map(|(_, value)| ValueId(value.0)),
-    })
+    LirBlock { operations }
 }
 
 fn lower_constant(value: &LiteralValue) -> Constant {
@@ -142,6 +182,7 @@ fn lower_type(
         PrimitiveRepresentation::Bytes => LoweredType::Bytes,
         PrimitiveRepresentation::None => LoweredType::None,
         PrimitiveRepresentation::Unit => LoweredType::Unit,
+        PrimitiveRepresentation::Arguments => LoweredType::Arguments,
     })
 }
 

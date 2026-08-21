@@ -7,11 +7,11 @@ test:
         values[2] = 30
         values[3] = 40
 
-        pointer := &values
+        pointer: *[int] = values
 
         assert(pointer[0] == 10)
-        assert((pointer + 1)[int] == 20)
-        assert((pointer)[3] == 40)
+        assert((pointer + 1)[0] == 20)
+        assert(pointer[3] == 40)
 
         free(values)
 

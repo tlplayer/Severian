@@ -14,6 +14,7 @@ pub enum PrimitiveCategory {
     Bytes,
     Absence,
     Unit,
+    Arguments,
 }
 
 impl PrimitiveCategory {
@@ -26,19 +27,21 @@ impl PrimitiveCategory {
             "bytes" => Ok(Self::Bytes),
             "absence" => Ok(Self::Absence),
             "unit" => Ok(Self::Unit),
+            "arguments" => Ok(Self::Arguments),
             value => Err(TypeError::UnknownCategory(value.to_owned())),
         }
     }
 
-    const fn literal_kind(self) -> LiteralKind {
+    const fn literal_kind(self) -> Option<LiteralKind> {
         match self {
-            Self::Boolean => LiteralKind::Boolean,
-            Self::Integer => LiteralKind::Integer,
-            Self::Float => LiteralKind::Float,
-            Self::Text => LiteralKind::String,
-            Self::Bytes => LiteralKind::Bytes,
-            Self::Absence => LiteralKind::None,
-            Self::Unit => LiteralKind::Unit,
+            Self::Boolean => Some(LiteralKind::Boolean),
+            Self::Integer => Some(LiteralKind::Integer),
+            Self::Float => Some(LiteralKind::Float),
+            Self::Text => Some(LiteralKind::String),
+            Self::Bytes => Some(LiteralKind::Bytes),
+            Self::Absence => Some(LiteralKind::None),
+            Self::Unit => Some(LiteralKind::Unit),
+            Self::Arguments => None,
         }
     }
 }
@@ -66,6 +69,7 @@ pub enum PrimitiveRepresentation {
     Bytes,
     None,
     Unit,
+    Arguments,
 }
 
 impl PrimitiveRepresentation {
@@ -94,6 +98,7 @@ impl PrimitiveRepresentation {
             "byte-string" => Ok(Self::Bytes),
             "none" => Ok(Self::None),
             "unit" => Ok(Self::Unit),
+            "arguments" => Ok(Self::Arguments),
             value => Err(TypeError::UnknownRepresentation(value.to_owned())),
         }
     }
@@ -293,7 +298,9 @@ impl TypeContext {
             default_literal,
         };
         if default_literal {
-            let kind = category.literal_kind();
+            let kind = category
+                .literal_kind()
+                .ok_or(TypeError::InvalidDefaultLiteralCategory)?;
             if self.defaults.insert(kind, type_id).is_some() {
                 return Err(TypeError::DuplicateDefault(kind));
             }
@@ -476,7 +483,7 @@ impl TypeContext {
             let primitive = self
                 .primitive(expected)
                 .ok_or(TypeError::InvalidLiteralForType(literal.kind(), expected))?;
-            if primitive.category.literal_kind() == literal.kind()
+            if primitive.category.literal_kind() == Some(literal.kind())
                 && literal_fits(literal, primitive.representation)
             {
                 return Ok(expected);
@@ -632,7 +639,7 @@ fn constraint_matches(
         TypeConstraint::Known(actual) => actual == candidate,
         TypeConstraint::Literal(kind) => context
             .primitive(candidate)
-            .is_some_and(|primitive| primitive.category.literal_kind() == kind),
+            .is_some_and(|primitive| primitive.category.literal_kind() == Some(kind)),
     }
 }
 
@@ -700,6 +707,7 @@ pub enum TypeError {
     UnknownCategory(String),
     UnknownRepresentation(String),
     MissingBitWidth,
+    InvalidDefaultLiteralCategory,
     DuplicateDefault(LiteralKind),
     NoLiteralDefault(LiteralKind),
     InvalidLiteralForType(LiteralKind, TypeId),

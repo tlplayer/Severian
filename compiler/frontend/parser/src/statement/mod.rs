@@ -2,7 +2,8 @@ use severian_ast::{
     BinaryOperator, Binding, Decorator, DecoratorArgument, DecoratorValue, Expression,
     ExpressionKind, FunctionDeclaration, FunctionParameter, ImportDeclaration, ImportSubject, Item,
     Literal, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
-    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    Statement, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
+    UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{Token, TokenKind};
@@ -34,9 +35,13 @@ impl Parser<'_> {
                 self.separators();
                 continue;
             } else if self.at_identifier("def") {
-                module
-                    .items
-                    .push(Item::Function(self.function_declaration(decorators)?));
+                let declaration = self.function_declaration(decorators)?;
+                let has_body = declaration.body.is_some();
+                module.items.push(Item::Function(declaration));
+                if has_body {
+                    self.separators();
+                    continue;
+                }
             } else if self.at_identifier("type") {
                 module
                     .items
@@ -50,7 +55,22 @@ impl Parser<'_> {
                 if !decorators.is_empty() {
                     return Err(self.error("expected a declaration after decorator"));
                 }
-                module.items.push(Item::Binding(self.binding()?));
+                if self.at_identifier("return")
+                    || self.at_identifier("break")
+                    || self.at_identifier("continue")
+                {
+                    return Err(Diagnostic::new(
+                        "E000121",
+                        "`return`, `break`, and `continue` are not valid at module scope",
+                        Some(self.peek().span),
+                    ));
+                }
+                match self.statement()? {
+                    Statement::Binding(binding) => module.items.push(Item::Binding(binding)),
+                    Statement::Expression(expression) => {
+                        module.items.push(Item::Expression(expression))
+                    }
+                }
             }
             if !self.at(&TokenKind::Newline)
                 && !self.at(&TokenKind::Comma)
@@ -172,13 +192,50 @@ impl Parser<'_> {
         } else {
             TypeAnnotation::named("unit", vec![], close)
         };
+        let mut end = result.span.end;
+        let body = if self.take(&TokenKind::Colon).is_some() {
+            self.expect(
+                &TokenKind::Newline,
+                "expected a newline after function header",
+            )?;
+            while self.take(&TokenKind::Newline).is_some() {}
+            self.expect(&TokenKind::Indent, "expected an indented function body")?;
+            let mut statements = Vec::new();
+            self.separators();
+            while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+                if self.at_identifier("pass") {
+                    self.next();
+                } else if self.at_identifier("return")
+                    || self.at_identifier("break")
+                    || self.at_identifier("continue")
+                {
+                    return Err(self.error(
+                        "function control-flow statements are not implemented in this bootstrap subset",
+                    ));
+                } else {
+                    statements.push(self.statement()?);
+                }
+                if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                    return Err(self.error("expected a newline after function statement"));
+                }
+                self.separators();
+            }
+            end = self
+                .expect(&TokenKind::Dedent, "expected end of function body")?
+                .span
+                .end;
+            Some(statements)
+        } else {
+            None
+        };
         Ok(FunctionDeclaration {
             decorators,
             name,
             type_parameters,
             parameters,
-            span: Span::new(start.source, start.start, result.span.end),
+            span: Span::new(start.source, start.start, end),
             result,
+            body,
         })
     }
 
@@ -376,12 +433,15 @@ impl Parser<'_> {
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
         let (name, name_span) = self.identifier("expected a binding name")?;
-        let annotation = if self.take(&TokenKind::Colon).is_some() {
+        let inferred = self.take(&TokenKind::ColonEqual).is_some();
+        let annotation = if !inferred && self.take(&TokenKind::Colon).is_some() {
             Some(self.type_annotation()?)
         } else {
             None
         };
-        self.expect(&TokenKind::Equal, "expected `=` after binding name")?;
+        if !inferred {
+            self.expect(&TokenKind::Equal, "expected `=` or `:=` after binding name")?;
+        }
         let value = self.expression(0)?;
         Ok(Binding {
             name,
@@ -389,6 +449,24 @@ impl Parser<'_> {
             span: Span::new(name_span.source, name_span.start, value.span.end),
             value,
         })
+    }
+
+    fn statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.looks_like_binding() {
+            Ok(Statement::Binding(self.binding()?))
+        } else {
+            Ok(Statement::Expression(self.expression(0)?))
+        }
+    }
+
+    fn looks_like_binding(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self.tokens.get(self.cursor + 1).is_some_and(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Colon | TokenKind::ColonEqual | TokenKind::Equal
+                )
+            })
     }
 
     fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
@@ -440,7 +518,35 @@ impl Parser<'_> {
                 },
             });
         }
-        self.primary()
+        self.postfix()
+    }
+
+    fn postfix(&mut self) -> Result<Expression, Diagnostic> {
+        let mut expression = self.primary()?;
+        while self.take(&TokenKind::LeftParen).is_some() {
+            let mut arguments = Vec::new();
+            if !self.at(&TokenKind::RightParen) {
+                loop {
+                    arguments.push(self.expression(0)?);
+                    if self.take(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+            }
+            let end = self
+                .expect(&TokenKind::RightParen, "expected `)` after arguments")?
+                .span
+                .end;
+            let span = Span::new(expression.span.source, expression.span.start, end);
+            expression = Expression {
+                kind: ExpressionKind::Call {
+                    callee: Box::new(expression),
+                    arguments,
+                },
+                span,
+            };
+        }
+        Ok(expression)
     }
 
     fn primary(&mut self) -> Result<Expression, Diagnostic> {

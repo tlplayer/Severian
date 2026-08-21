@@ -67,20 +67,25 @@ dependencies = [
 name = "severian-driver"
 version = "0.1.0"
 dependencies = [
+ "severian-abi",
+ "severian-ast",
  "severian-backend",
  "severian-bootstrap",
  "severian-compile",
  "severian-diagnostics",
+ "severian-hir",
  "severian-lexer",
  "severian-lowering",
  "severian-mir",
  "severian-mlir",
+ "severian-modules",
  "severian-ownership",
  "severian-parser",
  "severian-semantic",
  "severian-source",
  "severian-target",
  "severian-universal",
+ "severian-xxi",
 ]
 
 [[package]]
@@ -149,6 +154,17 @@ dependencies = [
  "severian-artifact",
  "severian-lir",
  "severian-target",
+]
+
+[[package]]
+name = "severian-modules"
+version = "0.1.0"
+dependencies = [
+ "severian-ast",
+ "severian-diagnostics",
+ "severian-lexer",
+ "severian-parser",
+ "severian-source",
 ]
 
 [[package]]

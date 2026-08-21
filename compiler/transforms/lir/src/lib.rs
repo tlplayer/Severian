@@ -17,10 +17,14 @@ pub enum LoweredType {
     Bytes,
     None,
     Unit,
+    Arguments,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ValueId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Value {
@@ -81,6 +85,11 @@ pub enum Operation {
         right: ValueId,
         result: ValueId,
     },
+    Call {
+        function: FunctionId,
+        arguments: Vec<ValueId>,
+        result: ValueId,
+    },
     ArtifactCall {
         artifact: ArtifactId,
         inputs: Vec<ValueId>,
@@ -91,6 +100,29 @@ pub enum Operation {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
     pub values: Vec<Value>,
+    pub globals: Vec<ValueId>,
+    pub initializer: Block,
+    pub functions: Vec<Function>,
+    pub entry: Option<FunctionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Block {
     pub operations: Vec<Operation>,
-    pub last_binding: Option<ValueId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionLinkage {
+    Internal,
+    External { symbol: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub id: FunctionId,
+    pub name: String,
+    pub parameters: Vec<ValueId>,
+    pub result: LoweredType,
+    pub body: Option<Block>,
+    pub linkage: FunctionLinkage,
 }

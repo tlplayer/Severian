@@ -48,7 +48,13 @@ impl std::error::Error for MlirError {}
 pub fn render(module: &Module) -> Result<String, MlirError> {
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
-    for operation in &module.operations {
+    for operation in module.initializer.operations.iter().chain(
+        module
+            .functions
+            .iter()
+            .filter_map(|function| function.body.as_ref())
+            .flat_map(|body| &body.operations),
+    ) {
         if let Operation::ArtifactCall {
             artifact,
             inputs,
@@ -95,7 +101,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         ));
     }
     output.push_str("  func.func @main() -> i32 {\n");
-    for operation in &module.operations {
+    for operation in &module.initializer.operations {
         match operation {
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
@@ -138,6 +144,11 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                 output.push_str(&format!(
                     "    %v{} = {instruction} %v{}, %v{} : {spelling}\n",
                     result.0, left.0, right.0
+                ));
+            }
+            Operation::Call { .. } => {
+                return Err(MlirError::UnsupportedOperation(
+                    "ordinary calls require function-aware MLIR lowering".into(),
                 ));
             }
             Operation::ArtifactCall {
@@ -315,12 +326,16 @@ mod tests {
                     ty: f32_type,
                 },
             ],
-            operations: vec![Operation::ArtifactCall {
-                artifact: artifact_id(),
-                inputs: vec![],
-                outputs: vec![ValueId(0), ValueId(1)],
-            }],
-            last_binding: None,
+            globals: vec![],
+            initializer: severian_lir::Block {
+                operations: vec![Operation::ArtifactCall {
+                    artifact: artifact_id(),
+                    inputs: vec![],
+                    outputs: vec![ValueId(0), ValueId(1)],
+                }],
+            },
+            functions: vec![],
+            entry: None,
         })
         .unwrap();
         let artifact = verify_artifact(

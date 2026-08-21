@@ -1,7 +1,7 @@
-from ffi import c
+import c from xxi
 
 
-@c
+@c(symbol = "example_add")
 def add(left: i32, right: i32) -> i32
 
 

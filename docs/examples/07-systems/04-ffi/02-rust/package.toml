@@ -1,0 +1,11 @@
+[package]
+name = "ffi-rust"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "ffi-rust"
+path = "src/main.sev"
+
+[xxi.rust]
+sources = ["native.rs"]

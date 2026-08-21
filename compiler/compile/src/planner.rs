@@ -1,6 +1,9 @@
-use crate::{CompileError, CompilePlan, CompileRegion, EffectSet, PlanSegment, StandardRegion};
+use crate::{
+    CompileError, CompilePlan, CompileRegion, EffectSet, PlanSegment, PlannedBlock,
+    PlannedFunction, StandardRegion,
+};
 use severian_artifact::CompiledRegionId;
-use severian_mir::{Module, Operation, Value, ValueId};
+use severian_mir::{Block, Module, Operation, Value, ValueId};
 use severian_universal::{BinaryOperator, CompileRoute, CompilerId, TypeContext};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,45 +13,78 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
         .iter()
         .map(|value| (value.id, *value))
         .collect::<BTreeMap<_, _>>();
-    let routes = module
+    let mut next_region = 0u32;
+    let initializer = plan_block(
+        &module.initializer,
+        &values,
+        &module.globals.iter().copied().collect(),
+        types,
+        &mut next_region,
+    )?;
+    let functions = module
+        .functions
+        .iter()
+        .map(|function| {
+            Ok(PlannedFunction {
+                declaration: function.clone(),
+                body: function
+                    .body
+                    .as_ref()
+                    .map(|body| {
+                        plan_block(body, &values, &BTreeSet::new(), types, &mut next_region)
+                    })
+                    .transpose()?,
+            })
+        })
+        .collect::<Result<Vec<_>, CompileError>>()?;
+    Ok(CompilePlan {
+        source: module.clone(),
+        initializer,
+        functions,
+    })
+}
+
+fn plan_block(
+    block: &Block,
+    values: &BTreeMap<ValueId, Value>,
+    retained: &BTreeSet<ValueId>,
+    types: &TypeContext,
+    next_region: &mut u32,
+) -> Result<PlannedBlock, CompileError> {
+    let routes = block
         .operations
         .iter()
         .enumerate()
-        .map(|(index, operation)| operation_route(index, operation, &values, types))
+        .map(|(index, operation)| operation_route(index, operation, values, types))
         .collect::<Result<Vec<_>, _>>()?;
     let mut segments = Vec::new();
-    let mut next_region = 0u32;
     let mut start = 0usize;
-    while start < module.operations.len() {
+    while start < block.operations.len() {
         let route = routes[start];
         let mut end = start + 1;
-        while end < module.operations.len() && routes[end] == route {
+        while end < block.operations.len() && routes[end] == route {
             end += 1;
         }
-        let operations = module.operations[start..end].to_vec();
+        let operations = block.operations[start..end].to_vec();
         match route {
             CompileRoute::Standard => {
                 segments.push(PlanSegment::Standard(StandardRegion { operations }));
             }
             CompileRoute::Compiler(compiler) => {
                 segments.push(PlanSegment::Compiler(build_region(
-                    module,
-                    &values,
-                    CompiledRegionId::new(next_region),
+                    values,
+                    CompiledRegionId::new(*next_region),
                     compiler,
-                    start,
-                    end,
                     operations,
+                    &block.operations[end..],
+                    retained,
                 )?));
-                next_region += 1;
+                *next_region += 1;
             }
         }
         start = end;
     }
-    Ok(CompilePlan {
-        source: module.clone(),
-        segments,
-    })
+    Ok(PlannedBlock { segments })
 }
 
 fn operation_route(
@@ -91,13 +127,12 @@ fn operation_route(
 }
 
 fn build_region(
-    module: &Module,
     values: &BTreeMap<ValueId, Value>,
     id: CompiledRegionId,
     compiler: CompilerId,
-    start: usize,
-    end: usize,
     operations: Vec<Operation>,
+    following: &[Operation],
+    retained: &BTreeSet<ValueId>,
 ) -> Result<CompileRegion, CompileError> {
     let produced = operations
         .iter()
@@ -110,24 +145,16 @@ fn build_region(
             inputs.push(value(values, input)?);
         }
     }
-    let bound = module
-        .bindings
+    let live_after = following
         .iter()
-        .map(|(_, value)| *value)
+        .flat_map(operation_inputs)
+        .chain(retained.iter().copied())
         .collect::<BTreeSet<_>>();
-    let mut outputs = Vec::new();
-    for output in produced {
-        let used_outside = module
-            .operations
-            .iter()
-            .enumerate()
-            .any(|(index, operation)| {
-                (index < start || index >= end) && operation_inputs(operation).contains(&output)
-            });
-        if used_outside || bound.contains(&output) {
-            outputs.push(value(values, output)?);
-        }
-    }
+    let outputs = produced
+        .into_iter()
+        .filter(|output| live_after.contains(output))
+        .map(|output| value(values, output))
+        .collect::<Result<Vec<_>, _>>()?;
     let effects = operations
         .iter()
         .fold(EffectSet::default(), |mut effects, operation| {
@@ -140,6 +167,11 @@ fn build_region(
                     ..
                 }
             ) {
+                effects.may_trap = true;
+            }
+            if matches!(operation, Operation::Call { .. }) {
+                effects.reads_memory = true;
+                effects.writes_memory = true;
                 effects.may_trap = true;
             }
             effects
@@ -166,6 +198,7 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Constant { .. } => Vec::new(),
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
+        Operation::Call { arguments, .. } => arguments.clone(),
         Operation::CompiledRegionCall { inputs, .. } => inputs.clone(),
     }
 }
@@ -174,7 +207,8 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
         Operation::Constant { result, .. }
         | Operation::Unary { result, .. }
-        | Operation::Binary { result, .. } => vec![*result],
+        | Operation::Binary { result, .. }
+        | Operation::Call { result, .. } => vec![*result],
         Operation::CompiledRegionCall { outputs, .. } => outputs.clone(),
     }
 }

@@ -7,7 +7,7 @@ mod statement;
 
 pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{CompileRoute, CompilerId, TypeId};
-pub use statement::Binding;
+pub use statement::{Binding, Block, Statement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HirId(pub u32);
@@ -70,6 +70,7 @@ pub struct BoundaryType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionParameter {
+    pub binding: BindingId,
     pub name: String,
     pub contract: BoundaryType,
 }
@@ -82,6 +83,7 @@ pub struct FunctionDeclaration {
     pub result: BoundaryType,
     pub compile_route: CompileRoute,
     pub call_type: CallType,
+    pub body: Option<Block>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,7 +100,11 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
+    /// Binding metadata is stored once; ordered execution sections refer to it
+    /// by identity.
     pub bindings: Vec<Binding>,
+    pub initializer: Block,
     pub functions: Vec<FunctionDeclaration>,
+    pub entry: Option<FunctionId>,
     pub types: Vec<TypeDeclaration>,
 }

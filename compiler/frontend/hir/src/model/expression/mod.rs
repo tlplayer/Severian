@@ -1,4 +1,4 @@
-use crate::{BindingId, HirId, TypeId};
+use crate::{BindingId, FunctionId, HirId, TypeId};
 use severian_source::Span;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
@@ -14,6 +14,10 @@ pub struct Expression {
 pub enum ExpressionKind {
     Literal(LiteralValue),
     Binding(BindingId),
+    Call {
+        function: FunctionId,
+        arguments: Vec<Expression>,
+    },
     Unary {
         operator: UnaryOperator,
         operand: Box<Expression>,

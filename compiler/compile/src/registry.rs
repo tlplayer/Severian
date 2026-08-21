@@ -39,8 +39,15 @@ impl CompilerRegistry {
         plan: &CompilePlan,
         context: &CompileContext<'_>,
     ) -> Result<Vec<VerifiedMlirArtifact>, CompileError> {
-        plan.segments
+        plan.initializer
+            .segments
             .iter()
+            .chain(
+                plan.functions
+                    .iter()
+                    .filter_map(|function| function.body.as_ref())
+                    .flat_map(|body| &body.segments),
+            )
             .filter_map(|segment| match segment {
                 PlanSegment::Compiler(region) => Some(region),
                 PlanSegment::Standard(_) => None,

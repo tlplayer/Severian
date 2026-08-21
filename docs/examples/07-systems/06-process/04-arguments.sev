@@ -1,13 +1,26 @@
-import process
+import cli
 
 
-test "process arguments":
-    #args is also ok. kwargs is case for compatibility with python but not hidden. Must be caller transparent
-    arguments = process.arguments()
-
-    assert(size(arguments) > 0)
+def interface() -> cli.Command:
+    return cli.command(
+        "arguments",
+        "Print each application argument",
+        arguments=[
+            cli.argument(
+                "values",
+                "Values to print",
+                required=false,
+                multiple=true,
+            ),
+        ],
+    )
 
 
 def main():
-    for argument in process.arguments():
-        print(argument)
+    application = interface()
+    match cli.parse_process(application):
+        case matches:
+            for value in cli.values(matches, "values"):
+                print(value)
+        case error:
+            print(cli.render_error(error))

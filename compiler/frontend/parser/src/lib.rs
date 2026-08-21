@@ -135,4 +135,27 @@ mod tests {
             SourceFile::virtual_source("ffi.sev", "@c\nextern def legacy(value: i32) -> i32\n");
         assert!(parse(&scan(&source).unwrap()).is_err());
     }
+
+    #[test]
+    fn parses_ordered_global_calls_and_an_optional_main_body() {
+        let source = SourceFile::virtual_source(
+            "entry.sev",
+            "print(\"global\")\nseed := 7\ndef main():\n    print(seed)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert!(matches!(module.items[0], severian_ast::Item::Expression(_)));
+        assert!(matches!(module.items[1], severian_ast::Item::Binding(_)));
+        let severian_ast::Item::Function(main) = &module.items[2] else {
+            unreachable!()
+        };
+        assert_eq!(main.name, "main");
+        assert_eq!(main.body.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rejects_function_control_flow_at_global_scope() {
+        let source = SourceFile::virtual_source("invalid.sev", "return 1\n");
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.code, "E000121");
+    }
 }

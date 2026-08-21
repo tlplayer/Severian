@@ -1,0 +1,3 @@
+trait args: Primitive:
+    property category: string = "bytes"
+    property representation: string = "arguments"

@@ -1,0 +1,11 @@
+[package]
+name = "ffi-python"
+version = "0.1.0"
+edition = "2026"
+
+[[bin]]
+name = "ffi-python"
+path = "src/main.sev"
+
+[xxi.python]
+sources = ["native.py"]

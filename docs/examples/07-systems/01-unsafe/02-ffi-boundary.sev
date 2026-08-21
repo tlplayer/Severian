@@ -1,18 +1,13 @@
-def c_strlen() -> string:
-    return 
-    """
-// strlen_wrapper.c
-#include <stddef.h>
-#include <string.h>
+import c from xxi
 
-size_t sev_strlen(const char *text)
-{
-    return strlen(text);
-}
-    """
 
-def strlen(text: string) -> usize:
-    return c_strlen(text)
+@c(symbol = "strlen")
+def c_strlen(text: borrowed[string]) -> usize
+
+
+def string_length(text: string) -> usize:
+    unsafe:
+        return c_strlen(text)
 
 def main():
-    print(strlen("severian"))
+    print(string_length("severian"))

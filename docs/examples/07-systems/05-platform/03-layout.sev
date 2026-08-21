@@ -1,0 +1,16 @@
+import platform
+
+
+class Header:
+    tag: u8
+    length: u32
+
+
+test "layout comes from the selected target":
+    target = platform.current()
+    layout = platform.layout[Header](target)
+
+    assert(layout.size >= 5B)
+    assert(layout.alignment >= 1B)
+    assert(layout.field("tag").offset == 0B)
+    assert(layout.field("length").offset % layout.field("length").alignment == 0B)

@@ -12,4 +12,4 @@ test:
     assert(alignment[u32]() == 4B)
 
     print(bytes[Header]())
-    print(bytes[Header]())
+    print(alignment[Header]())

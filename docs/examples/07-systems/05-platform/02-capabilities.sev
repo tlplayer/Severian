@@ -1,0 +1,12 @@
+import platform
+
+
+def can_launch_tools(target: platform.Target) -> bool:
+    return target.capabilities.contains(platform.Processes)
+
+
+test "capabilities are values rather than target-name branches":
+    target = platform.current()
+
+    if can_launch_tools(target):
+        assert(target.capabilities.contains(platform.ProcessPipes))

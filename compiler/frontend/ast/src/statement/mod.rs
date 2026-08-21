@@ -8,3 +8,9 @@ pub struct Binding {
     pub value: Expression,
     pub span: Span,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Statement {
+    Binding(Binding),
+    Expression(Expression),
+}

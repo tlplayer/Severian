@@ -26,11 +26,13 @@ application = cli.command(
 )
 ```
 
-Use `cli.parse_process(application)` at the executable boundary. Parsing
-returns `Matches` or a structured `CliError`; it never prints or exits on the
-application's behalf. This makes the same command definition deterministic in
-unit tests and lets BetterQuest decide whether errors go to a terminal, log,
-GUI, or service response.
+Use `cli.parse_process(application)` at the executable boundary. That function
+explicitly obtains the raw argument vector from `process.arguments()` and
+removes the executable name before parsing. Parsing returns `Matches` or a
+structured `CliError`; it never prints or exits on the application's behalf.
+Tests use `cli.parse(application, values)` with an explicit value list. This
+makes the same command definition deterministic and lets BetterQuest decide
+whether errors go to a terminal, log, GUI, or service response.
 
 `cli.check(application)` performs schema checks such as duplicate flags,
 invalid kebab-case names, missing help, contradictory required/default values,

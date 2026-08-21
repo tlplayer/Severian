@@ -5,10 +5,10 @@ test "stream copy":
     source = io.MemoryStream([1, 2, 3, 4, 5])
     destination = io.MemoryStream([])
 
-    copied = io.copy(source, destination, 2)
+    copied = io.copy(source, destination, 2B)
 
-    assert(copied == 5)
+    assert(copied == 5B)
 
-    destination.seek(0, io.Start)
+    destination.seek(0B, io.Start)
 
     assert(io.read_all(destination) == [1, 2, 3, 4, 5])

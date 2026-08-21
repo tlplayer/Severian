@@ -28,6 +28,7 @@ members = [
     "compiler/frontend/ast",
     "compiler/frontend/hir",
     "compiler/frontend/lexer",
+    "compiler/frontend/modules",
     "compiler/frontend/ownership",
     "compiler/frontend/parser",
     "compiler/frontend/semantic",
@@ -55,6 +56,7 @@ severian-diagnostics = "diagnostics"
 severian-lexer = "syntax"
 severian-ast = "syntax"
 severian-parser = "syntax"
+severian-modules = "semantic"
 severian-universal = "universal"
 severian-target = "target"
 severian-compile = "compile"
@@ -85,6 +87,13 @@ severian-parser = [
     "severian-ast",
     "severian-diagnostics",
     "severian-lexer",
+    "severian-source",
+]
+severian-modules = [
+    "severian-ast",
+    "severian-diagnostics",
+    "severian-lexer",
+    "severian-parser",
     "severian-source",
 ]
 severian-universal = []
@@ -139,11 +148,15 @@ severian-xxi = [
 ]
 severian-mlir = ["severian-artifact", "severian-lir", "severian-target"]
 severian-driver = [
+    "severian-abi",
+    "severian-ast",
     "severian-backend",
     "severian-bootstrap",
     "severian-compile",
     "severian-diagnostics",
     "severian-lexer",
+    "severian-hir",
+    "severian-modules",
     "severian-lowering",
     "severian-mir",
     "severian-mlir",
@@ -153,6 +166,7 @@ severian-driver = [
     "severian-source",
     "severian-target",
     "severian-universal",
+    "severian-xxi",
 ]
 
 [[workspace.metadata.architecture.reject]]

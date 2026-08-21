@@ -1,0 +1,15 @@
+import io
+
+
+def main():
+    io.print("no newline")?
+    io.println(" followed by a line")?
+
+
+test "printing targets an injected writer":
+    output = io.MemoryStream([])
+
+    io.print_to(output, "value", 42)?
+    io.println_to(output, " done")?
+
+    assert(output.text() == "value 42 done\n")

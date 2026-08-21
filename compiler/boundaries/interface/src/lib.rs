@@ -29,6 +29,7 @@ pub enum CategoryRecord {
     Bytes,
     Absence,
     Unit,
+    Arguments,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub enum RepresentationRecord {
     Bytes,
     None,
     Unit,
+    Arguments,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +86,7 @@ impl From<PrimitiveCategory> for CategoryRecord {
             PrimitiveCategory::Bytes => Self::Bytes,
             PrimitiveCategory::Absence => Self::Absence,
             PrimitiveCategory::Unit => Self::Unit,
+            PrimitiveCategory::Arguments => Self::Arguments,
         }
     }
 }
@@ -111,6 +114,7 @@ impl From<PrimitiveRepresentation> for RepresentationRecord {
             PrimitiveRepresentation::Bytes => Self::Bytes,
             PrimitiveRepresentation::None => Self::None,
             PrimitiveRepresentation::Unit => Self::Unit,
+            PrimitiveRepresentation::Arguments => Self::Arguments,
         }
     }
 }
@@ -193,6 +197,7 @@ fn category_tag(category: CategoryRecord) -> u8 {
         CategoryRecord::Bytes => 4,
         CategoryRecord::Absence => 5,
         CategoryRecord::Unit => 6,
+        CategoryRecord::Arguments => 7,
     }
 }
 
@@ -205,6 +210,7 @@ fn decode_category(tag: u8) -> Result<CategoryRecord, InterfaceError> {
         4 => CategoryRecord::Bytes,
         5 => CategoryRecord::Absence,
         6 => CategoryRecord::Unit,
+        7 => CategoryRecord::Arguments,
         tag => return Err(InterfaceError::InvalidTag(tag)),
     })
 }
@@ -235,6 +241,7 @@ fn encode_representation(bytes: &mut Vec<u8>, representation: &RepresentationRec
         RepresentationRecord::Bytes => bytes.push(5),
         RepresentationRecord::None => bytes.push(6),
         RepresentationRecord::Unit => bytes.push(7),
+        RepresentationRecord::Arguments => bytes.push(8),
     }
 }
 
@@ -276,6 +283,7 @@ fn decode_representation(
         5 => RepresentationRecord::Bytes,
         6 => RepresentationRecord::None,
         7 => RepresentationRecord::Unit,
+        8 => RepresentationRecord::Arguments,
         tag => return Err(InterfaceError::InvalidTag(tag)),
     })
 }

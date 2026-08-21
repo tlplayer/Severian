@@ -1,7 +1,7 @@
 import io
 
 
-def duplicate(source: io.Reader, destination: io.Writer) -> int | io.StreamError:
+def duplicate(source: io.Reader, destination: io.Writer) -> Unit[Data] | io.StreamError:
     return io.copy(source, destination)
 
 
@@ -11,5 +11,5 @@ test:
 
     copied = duplicate(source, destination)
 
-    assert(copied == 3)
+    assert(copied == 3B)
     assert(destination.snapshot() == [1, 2, 3])

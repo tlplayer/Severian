@@ -43,4 +43,8 @@ pub const SOURCES: &[PrimitiveSource] = &[
         path: "src/unit.sev",
         source: include_str!("../../src/unit.sev"),
     },
+    PrimitiveSource {
+        path: "src/args.sev",
+        source: include_str!("../../src/args.sev"),
+    },
 ];

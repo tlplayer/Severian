@@ -5,4 +5,5 @@ test:
         integer_pointer: *[u32] := &value
         byte_pointer: *[u8] := [*[u8]](integer_pointer)
 
+        #You don't need [0B] [] infers the pointed address without offset
         assert(byte_pointer[] == 42)

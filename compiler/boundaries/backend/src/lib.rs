@@ -2,8 +2,8 @@
 
 use severian_lir::LoweredFloatFormat;
 pub use severian_lir::{
-    BinaryOperation, Constant, LoweredType, Module as LoweredModule, Operation, UnaryOperation,
-    ValueId,
+    BinaryOperation, Block, Constant, Function, FunctionId, FunctionLinkage, LoweredType,
+    Module as LoweredModule, Operation, UnaryOperation, ValueId,
 };
 use std::fmt;
 use std::io::Write;
@@ -77,27 +77,137 @@ impl fmt::Display for BackendError {
 impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
-    let mut output = String::from("#include <stdint.h>\n\nint main(void) {\n");
-    for operation in &module.operations {
+    let mut output = String::from(
+        "#include <stdint.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\n",
+    );
+    for value in &module.globals {
+        output.push_str(&format!(
+            "static {} v{};\n",
+            c_type(value_type(module, *value)?)?,
+            value.0
+        ));
+    }
+    if !module.globals.is_empty() {
+        output.push('\n');
+    }
+    for function in &module.functions {
+        let parameters = function
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(format!(
+                    "{} v{}",
+                    c_type(value_type(module, *parameter)?)?,
+                    parameter.0
+                ))
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?
+            .join(", ");
+        let name = function_name(function);
+        let prefix = match function.linkage {
+            FunctionLinkage::Internal => "static ",
+            FunctionLinkage::External { .. } => "extern ",
+        };
+        output.push_str(&format!(
+            "{prefix}{} {name}({});\n",
+            c_return_type(function.result)?,
+            if parameters.is_empty() {
+                "void"
+            } else {
+                &parameters
+            }
+        ));
+    }
+    output.push_str("\nstatic int __sev_init_state;\nstatic int __sev_init(void) {\n    if (__sev_init_state == 2) return 0;\n    if (__sev_init_state == 1) return 1;\n    __sev_init_state = 1;\n");
+    render_block(&mut output, module, &module.initializer)?;
+    output.push_str("    __sev_init_state = 2;\n    return 0;\n}\n\n");
+
+    for function in module
+        .functions
+        .iter()
+        .filter(|function| function.body.is_some())
+    {
+        let parameters = function
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(format!(
+                    "{} v{}",
+                    c_type(value_type(module, *parameter)?)?,
+                    parameter.0
+                ))
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?
+            .join(", ");
+        output.push_str(&format!(
+            "static {} {}({}) {{\n",
+            c_return_type(function.result)?,
+            function_name(function),
+            if parameters.is_empty() {
+                "void"
+            } else {
+                &parameters
+            }
+        ));
+        render_block(
+            &mut output,
+            module,
+            function.body.as_ref().expect("filtered source body"),
+        )?;
+        if function.result == LoweredType::Unit {
+            output.push_str("    return;\n");
+        } else {
+            return Err(BackendError::UnsupportedOperation(format!(
+                "function `{}` requires explicit return lowering",
+                function.name
+            )));
+        }
+        output.push_str("}\n\n");
+    }
+
+    output.push_str("int main(int argc, char **argv) {\n    (void)argc;\n    (void)argv;\n    if (__sev_init() != 0) return 1;\n");
+    if let Some(entry) = module.entry {
+        let function = function(module, entry)?;
+        match function.parameters.as_slice() {
+            [] => output.push_str(&format!("    {}();\n", function_name(function))),
+            [parameter] if value_type(module, *parameter)? == LoweredType::Arguments => {
+                output.push_str("    sev_args __sev_args = { argc - 1, argv + 1 };\n");
+                output.push_str(&format!("    {}(__sev_args);\n", function_name(function)));
+            }
+            _ => {
+                return Err(BackendError::UnsupportedOperation(
+                    "entry must be `main()` or `main(args: args)`".into(),
+                ))
+            }
+        }
+    }
+    output.push_str("    return 0;\n}\n");
+    Ok(output)
+}
+
+fn render_block(
+    output: &mut String,
+    module: &LoweredModule,
+    block: &Block,
+) -> Result<(), BackendError> {
+    for operation in &block.operations {
         match operation {
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
-                let spelling = c_type(ty)?;
                 let literal = c_literal(value, ty)?;
-                output.push_str(&format!("    {spelling} v{} = {literal};\n", result.0));
+                define_value(output, module, *result, &literal)?;
             }
             Operation::Unary {
                 operator,
                 operand,
                 result,
             } => {
-                let spelling = c_type(value_type(module, *result)?)?;
-                output.push_str(&format!(
-                    "    {spelling} v{} = {}v{};\n",
-                    result.0,
-                    c_unary(*operator),
-                    operand.0
-                ));
+                define_value(
+                    output,
+                    module,
+                    *result,
+                    &format!("{}v{}", c_unary(*operator), operand.0),
+                )?;
             }
             Operation::Binary {
                 operator,
@@ -117,14 +227,31 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
                         "string/byte operations require a lowered runtime interface".into(),
                     ));
                 }
-                let spelling = c_type(result_type)?;
-                output.push_str(&format!(
-                    "    {spelling} v{} = v{} {} v{};\n",
-                    result.0,
-                    left.0,
-                    c_binary(*operator)?,
-                    right.0
-                ));
+                let _ = result_type;
+                define_value(
+                    output,
+                    module,
+                    *result,
+                    &format!("v{} {} v{}", left.0, c_binary(*operator)?, right.0),
+                )?;
+            }
+            Operation::Call {
+                function: target,
+                arguments,
+                result,
+            } => {
+                let target = function(module, *target)?;
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| format!("v{}", argument.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let call = format!("{}({arguments})", function_name(target));
+                if value_type(module, *result)? == LoweredType::Unit {
+                    output.push_str(&format!("    {call};\n"));
+                } else {
+                    define_value(output, module, *result, &call)?;
+                }
             }
             Operation::ArtifactCall { artifact, .. } => {
                 return Err(BackendError::UnsupportedOperation(format!(
@@ -133,11 +260,48 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
             }
         }
     }
-    if let Some(value) = module.last_binding {
-        output.push_str(&format!("    (void)v{};\n", value.0));
+    Ok(())
+}
+
+fn define_value(
+    output: &mut String,
+    module: &LoweredModule,
+    result: ValueId,
+    expression: &str,
+) -> Result<(), BackendError> {
+    if module.globals.contains(&result) {
+        output.push_str(&format!("    v{} = {expression};\n", result.0));
+    } else {
+        output.push_str(&format!(
+            "    {} v{} = {expression};\n",
+            c_type(value_type(module, result)?)?,
+            result.0
+        ));
     }
-    output.push_str("    return 0;\n}\n");
-    Ok(output)
+    Ok(())
+}
+
+fn function(module: &LoweredModule, id: FunctionId) -> Result<&Function, BackendError> {
+    module
+        .functions
+        .iter()
+        .find(|function| function.id == id)
+        .ok_or_else(|| BackendError::UnsupportedOperation(format!("unknown LIR function {}", id.0)))
+}
+
+fn function_name(function: &Function) -> String {
+    match &function.linkage {
+        FunctionLinkage::Internal => format!("__sev_fn_{}", function.id.0),
+        FunctionLinkage::External { symbol } => symbol.clone(),
+    }
+}
+
+fn c_return_type(ty: LoweredType) -> Result<&'static str, BackendError> {
+    if ty == LoweredType::Unit {
+        Ok("void")
+    } else {
+        c_type(ty)
+    }
 }
 
 pub fn supports_direct_lir(module: &LoweredModule) -> bool {
@@ -194,6 +358,9 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
             format: LoweredFloatFormat::Ieee(64),
         } => Ok("double"),
         LoweredType::Boolean => Ok("_Bool"),
+        LoweredType::String => Ok("const char *"),
+        LoweredType::None | LoweredType::Unit => Ok("uint8_t"),
+        LoweredType::Arguments => Ok("sev_args"),
         unsupported => Err(BackendError::UnsupportedType(unsupported)),
     }
 }
@@ -205,10 +372,29 @@ fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> 
         (Constant::Boolean(value), LoweredType::Boolean) => {
             Ok(if *value { "1" } else { "0" }.into())
         }
+        (Constant::String(value), LoweredType::String) => Ok(c_string_literal(value)),
+        (Constant::None, LoweredType::None) | (Constant::Unit, LoweredType::Unit) => Ok("0".into()),
         _ => Err(BackendError::UnsupportedOperation(format!(
             "C backend cannot emit {value:?} as {ty:?}"
         ))),
     }
+}
+
+fn c_string_literal(value: &str) -> String {
+    let mut output = String::from("\"");
+    for byte in value.bytes() {
+        match byte {
+            b'\\' => output.push_str("\\\\"),
+            b'\"' => output.push_str("\\\""),
+            b'\n' => output.push_str("\\n"),
+            b'\r' => output.push_str("\\r"),
+            b'\t' => output.push_str("\\t"),
+            0x20..=0x7e => output.push(char::from(byte)),
+            _ => output.push_str(&format!("\\{:03o}", byte)),
+        }
+    }
+    output.push('\"');
+    output
 }
 
 fn c_unary(operator: UnaryOperation) -> &'static str {
@@ -361,11 +547,15 @@ mod tests {
                     signed: true,
                 },
             }],
-            operations: vec![Operation::Constant {
-                value: Constant::Integer("10".into()),
-                result: ValueId(0),
-            }],
-            last_binding: Some(ValueId(0)),
+            globals: vec![],
+            initializer: Block {
+                operations: vec![Operation::Constant {
+                    value: Constant::Integer("10".into()),
+                    result: ValueId(0),
+                }],
+            },
+            functions: vec![],
+            entry: None,
         };
         assert!(render_c(&module).unwrap().contains("int32_t v0 = 10;"));
     }
@@ -385,5 +575,11 @@ mod tests {
             }),
             Err(BackendError::UnsupportedType(_))
         ));
+    }
+
+    #[test]
+    fn c_strings_are_escaped_without_changing_their_bytes() {
+        assert_eq!(c_string_literal("a\n\"b\\c"), "\"a\\n\\\"b\\\\c\"");
+        assert_eq!(c_string_literal("é"), "\"\\303\\251\"");
     }
 }

@@ -4,8 +4,8 @@ import io
 test "memory stream":
     stream = io.MemoryStream([10, 20, 30, 40])
 
-    first = stream.read(2)
+    first = stream.read(2B)
 
     assert(first == [10, 20])
-    assert(stream.tell() == 2)
-    assert(stream.remaining() == 2)
+    assert(stream.tell() == 2B)
+    assert(stream.remaining() == 2B)

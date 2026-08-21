@@ -1,5 +1,5 @@
 test:
     unsafe:
-        pointer: ptr[int] | None := None
+        pointer: *[int] | None := None
 
         assert(pointer == None)

@@ -8,3 +8,14 @@ pub struct Binding {
     pub value: Expression,
     pub span: Span,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Statement {
+    Binding(BindingId),
+    Expression(Expression),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+}

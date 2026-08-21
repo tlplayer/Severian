@@ -4,11 +4,11 @@ import io
 test "seek":
     stream = io.MemoryStream([1, 2, 3, 4])
 
-    stream.seek(-1, io.End)
+    stream.seek(-1B, io.End)
 
-    assert(stream.tell() == 3)
-    assert(stream.read(1) == [4])
+    assert(stream.tell() == 3B)
+    assert(stream.read(1B) == [4])
 
-    stream.seek(0, io.Start)
+    stream.seek(0B, io.Start)
 
-    assert(stream.read(2) == [1, 2])
+    assert(stream.read(2B) == [1, 2])

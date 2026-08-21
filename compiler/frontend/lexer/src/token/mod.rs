@@ -8,6 +8,7 @@ pub enum TokenKind {
     String(String),
     At,
     Colon,
+    ColonEqual,
     Equal,
     Plus,
     Minus,

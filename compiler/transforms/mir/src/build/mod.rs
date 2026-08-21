@@ -1,5 +1,5 @@
-use crate::{Module, Operation, Value, ValueId};
-use severian_hir::{BindingId, Expression, ExpressionKind, Program as HirProgram};
+use crate::{Block, Function, Module, Operation, Value, ValueId};
+use severian_hir::{BindingId, Expression, ExpressionKind, Program as HirProgram, Statement};
 use std::collections::BTreeMap;
 
 pub fn build(hir: &HirProgram) -> Module {
@@ -8,10 +8,70 @@ pub fn build(hir: &HirProgram) -> Module {
         bindings: BTreeMap::new(),
     };
     for hir_module in &hir.modules {
-        for binding in &hir_module.bindings {
-            let value = builder.expression(&binding.value);
-            builder.bindings.insert(binding.id, value);
-            builder.module.bindings.push((binding.id, value));
+        builder.module.entry = hir_module.entry;
+        for function in &hir_module.functions {
+            let parameters = function
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    let severian_hir::SemanticType::Universal(type_id) = parameter.contract.ty
+                    else {
+                        panic!("declared source types must be lowered before MIR")
+                    };
+                    builder.value(type_id)
+                })
+                .collect();
+            builder.module.functions.push(Function {
+                id: function.id,
+                name: function.name.clone(),
+                parameters,
+                result: match function.result.ty {
+                    severian_hir::SemanticType::Universal(type_id) => type_id,
+                    severian_hir::SemanticType::Declared(_) => {
+                        panic!("declared result types must be lowered before MIR")
+                    }
+                },
+                body: None,
+                call_type: function.call_type.clone(),
+            });
+        }
+
+        let mut initializer = Block::default();
+        if hir_module.initializer.statements.is_empty() && hir_module.functions.is_empty() {
+            for binding in &hir_module.bindings {
+                builder.binding(binding, &mut initializer);
+            }
+        } else {
+            for statement in &hir_module.initializer.statements {
+                builder.statement(statement, hir_module, &mut initializer);
+            }
+        }
+        builder.module.initializer = initializer;
+        builder.module.globals = builder
+            .module
+            .bindings
+            .iter()
+            .map(|(_, value)| *value)
+            .collect();
+        let globals = builder.bindings.clone();
+
+        for (index, function) in hir_module.functions.iter().enumerate() {
+            let Some(hir_body) = &function.body else {
+                continue;
+            };
+            builder.bindings.clone_from(&globals);
+            for (parameter, value) in function
+                .parameters
+                .iter()
+                .zip(builder.module.functions[index].parameters.iter().copied())
+            {
+                builder.bindings.insert(parameter.binding, value);
+            }
+            let mut body = Block::default();
+            for statement in &hir_body.statements {
+                builder.statement(statement, hir_module, &mut body);
+            }
+            builder.module.functions[index].body = Some(body);
         }
     }
     builder.module
@@ -23,27 +83,70 @@ struct Builder {
 }
 
 impl Builder {
+    fn statement(
+        &mut self,
+        statement: &Statement,
+        module: &severian_hir::Module,
+        block: &mut Block,
+    ) {
+        match statement {
+            Statement::Binding(id) => {
+                let binding = module
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == *id)
+                    .expect("HIR statement references a binding");
+                self.binding(binding, block);
+            }
+            Statement::Expression(expression) => {
+                self.expression(expression, block);
+            }
+        }
+    }
+
+    fn binding(&mut self, binding: &severian_hir::Binding, block: &mut Block) {
+        let value = self.expression(&binding.value, block);
+        self.bindings.insert(binding.id, value);
+        self.module.bindings.push((binding.id, value));
+    }
+
     fn value(&mut self, type_id: severian_universal::TypeId) -> ValueId {
         let id = ValueId(self.module.values.len() as u32);
         self.module.values.push(Value { id, type_id });
         id
     }
 
-    fn expression(&mut self, expression: &Expression) -> ValueId {
+    fn expression(&mut self, expression: &Expression, block: &mut Block) -> ValueId {
         match &expression.kind {
             ExpressionKind::Literal(value) => {
                 let result = self.value(expression.type_id);
-                self.module.operations.push(Operation::Constant {
+                block.operations.push(Operation::Constant {
                     value: value.clone(),
                     result,
                 });
                 result
             }
             ExpressionKind::Binding(binding) => self.bindings[binding],
-            ExpressionKind::Unary { operator, operand } => {
-                let operand = self.expression(operand);
+            ExpressionKind::Call {
+                function,
+                arguments,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.expression(argument, block))
+                    .collect();
                 let result = self.value(expression.type_id);
-                self.module.operations.push(Operation::Unary {
+                block.operations.push(Operation::Call {
+                    function: *function,
+                    arguments,
+                    result,
+                });
+                result
+            }
+            ExpressionKind::Unary { operator, operand } => {
+                let operand = self.expression(operand, block);
+                let result = self.value(expression.type_id);
+                block.operations.push(Operation::Unary {
                     operator: *operator,
                     operand,
                     result,
@@ -55,10 +158,10 @@ impl Builder {
                 left,
                 right,
             } => {
-                let left = self.expression(left);
-                let right = self.expression(right);
+                let left = self.expression(left, block);
+                let right = self.expression(right, block);
                 let result = self.value(expression.type_id);
-                self.module.operations.push(Operation::Binary {
+                block.operations.push(Operation::Binary {
                     operator: *operator,
                     left,
                     right,

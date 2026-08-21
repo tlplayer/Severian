@@ -1,4 +1,4 @@
-use crate::Expression;
+use crate::{Expression, Statement};
 use severian_source::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,9 @@ pub struct FunctionDeclaration {
     pub type_parameters: Vec<String>,
     pub parameters: Vec<FunctionParameter>,
     pub result: TypeAnnotation,
+    /// `None` denotes an interface declaration. Source functions have an
+    /// ordered body, including an explicitly empty body.
+    pub body: Option<Vec<Statement>>,
     pub span: Span,
 }
 

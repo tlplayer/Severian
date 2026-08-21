@@ -22,6 +22,6 @@ test "raw memory allocation":
 
         free(memory)
 
-test with compiler "compiler rejects safe memory allocation calles":
+test with compiler "compiler rejects raw allocation from safe code":
     reject:
         memory := allocate[int](4)

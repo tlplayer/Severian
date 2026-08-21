@@ -169,6 +169,11 @@ fn lower_semantic(
                 "none/unit cannot be passed as an argument".into(),
             ))
         }
+        PrimitiveRepresentation::Arguments => {
+            return Err(FfiError::UnsupportedRepresentation(
+                "program arguments cannot cross an external function boundary".into(),
+            ))
+        }
     })
 }
 

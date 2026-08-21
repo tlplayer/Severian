@@ -10,8 +10,8 @@ test with integ "UDP sockets":
     sender = network.udp_bind("127.0.0.1", 0)
     defer sender.close()
 
-    assert(sender.send([1, 2, 3, 4], address.host, address.port) == 4)
+    assert(sender.send([1, 2, 3, 4], address.host, address.port) == 4B)
 
-    packet = receiver.receive(4)
+    packet = receiver.receive(4B)
 
     assert(packet.data == [1, 2, 3, 4])

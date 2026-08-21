@@ -1,6 +1,6 @@
-from ffi import rust
+import rust from xxi
 
-@rust
+@rust(symbol = "example_multiply")
 def multiply(left: i32, right: i32) -> i32
 
 

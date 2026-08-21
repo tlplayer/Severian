@@ -2,76 +2,176 @@
 
 use severian_ast::{
     BinaryOperator as AstBinaryOperator, Expression as AstExpression,
-    ExpressionKind as AstExpressionKind, Literal as AstLiteral, TypeAnnotation,
-    UnaryOperator as AstUnaryOperator,
+    ExpressionKind as AstExpressionKind, Literal as AstLiteral, Statement as AstStatement,
+    TypeAnnotation, UnaryOperator as AstUnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_hir::{
-    Binding, BindingId, Expression, ExpressionKind, HirId, Module, Program, TypeId,
+    Binding, BindingId, Block, BoundaryType, CallType, Expression, ExpressionKind,
+    FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, SemanticType,
+    Statement, TypeId,
 };
 use severian_universal::{
     BinaryOperator, LiteralValue, TypeConstraint, TypeContext, UnaryOperator,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Program, Diagnostic> {
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
+        declarations: BTreeSet::new(),
+        functions: BTreeMap::new(),
+        signatures: Vec::new(),
         next_hir: 0,
         next_binding: 0,
     };
-    let mut bindings = Vec::new();
-    for ast_binding in ast.items.iter().filter_map(|item| match item {
-        severian_ast::Item::Binding(binding) => Some(binding),
+    let mut module = Module::default();
+
+    // Function identities and signatures are registered before executable
+    // statements are analyzed. Bodies remain ordinary analyzed blocks.
+    for ast_function in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Function(function) => Some(function),
         _ => None,
     }) {
-        if analyzer.names.contains_key(&ast_binding.name) {
-            return Err(Diagnostic::new(
-                "E000203",
-                format!("binding `{}` is already defined", ast_binding.name),
-                Some(ast_binding.span),
-            ));
+        let id = FunctionId(module.functions.len() as u32);
+        let mut parameters = Vec::new();
+        let mut parameter_types = Vec::new();
+        for parameter in &ast_function.parameters {
+            let type_id = resolve_type_annotation(types, &parameter.annotation)?;
+            let binding = analyzer.new_binding_id();
+            parameter_types.push(type_id);
+            parameters.push(FunctionParameter {
+                binding,
+                name: parameter.name.clone(),
+                contract: universal_boundary(type_id),
+            });
         }
-        let expected = ast_binding
-            .annotation
-            .as_ref()
-            .map(|annotation| resolve_type_annotation(types, annotation))
-            .transpose()?;
-        let value = analyzer.expression(&ast_binding.value, expected)?;
-        let type_id = expected.unwrap_or(value.type_id);
-        if !types.assignable(value.type_id, type_id) {
-            return Err(Diagnostic::new(
-                "E000205",
-                "binding value is not assignable to its declared type",
-                Some(ast_binding.value.span),
-            ));
-        }
-        let id = BindingId(analyzer.next_binding);
-        analyzer.next_binding += 1;
+        let result = resolve_type_annotation(types, &ast_function.result)?;
+        let compile_route = types
+            .compile_route(result)
+            .map_err(|error| semantic_error(error.to_string(), ast_function.result.span))?;
         analyzer
-            .names
-            .insert(ast_binding.name.clone(), (id, type_id));
-        bindings.push(Binding {
+            .functions
+            .entry(ast_function.name.clone())
+            .or_default()
+            .push(id);
+        analyzer.signatures.push(FunctionSignature {
+            parameters: parameter_types,
+            result,
+        });
+        module.functions.push(FunctionDeclaration {
             id,
-            type_id,
-            value,
-            span: ast_binding.span,
+            name: ast_function.name.clone(),
+            parameters,
+            result: universal_boundary(result),
+            compile_route,
+            call_type: CallType::Severian,
+            body: None,
         });
     }
+
+    for item in &ast.items {
+        match item {
+            severian_ast::Item::Binding(binding) => {
+                let id = analyzer.binding(binding, &mut module.bindings)?;
+                module.initializer.statements.push(Statement::Binding(id));
+            }
+            severian_ast::Item::Expression(expression) => {
+                module.initializer.statements.push(Statement::Expression(
+                    analyzer.expression(expression, None)?,
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    let globals = analyzer.names.clone();
+    let ast_functions = ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Function(function) => Some(function),
+        _ => None,
+    });
+    for (ast_function, function) in ast_functions.zip(module.functions.iter_mut()) {
+        let Some(ast_body) = &ast_function.body else {
+            continue;
+        };
+        analyzer.names = globals.clone();
+        analyzer.declarations.clear();
+        for parameter in &function.parameters {
+            let SemanticType::Universal(type_id) = parameter.contract.ty else {
+                unreachable!("source parameters are universally resolved")
+            };
+            if !analyzer.declarations.insert(parameter.name.clone()) {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!("parameter `{}` is declared more than once", parameter.name),
+                    Some(ast_function.span),
+                ));
+            }
+            analyzer
+                .names
+                .insert(parameter.name.clone(), (parameter.binding, type_id));
+        }
+        let mut body = Block::default();
+        for statement in ast_body {
+            body.statements
+                .push(analyzer.statement(statement, &mut module.bindings)?);
+        }
+        let SemanticType::Universal(result_type) = function.result.ty else {
+            unreachable!("source results are universally resolved")
+        };
+        if result_type != types.resolve_name("unit").expect("bootstrap defines unit") {
+            return Err(Diagnostic::new(
+                "E000209",
+                "a function body with a non-unit result requires an explicit return",
+                Some(ast_function.span),
+            ));
+        }
+        function.body = Some(body);
+        if function.name == "main" {
+            let arguments_type = types.resolve_name("args").expect("bootstrap defines args");
+            let valid_parameters = match function.parameters.as_slice() {
+                [] => true,
+                [parameter] => parameter.contract.ty == SemanticType::Universal(arguments_type),
+                _ => false,
+            };
+            if !valid_parameters {
+                return Err(Diagnostic::new(
+                    "E000209",
+                    "entry must be `main()` or `main(args: args)`",
+                    Some(ast_function.span),
+                ));
+            }
+            if module.entry.replace(function.id).is_some() {
+                return Err(Diagnostic::new(
+                    "E000208",
+                    "module defines more than one `main` function",
+                    Some(ast_function.span),
+                ));
+            }
+        }
+    }
     Ok(Program {
-        modules: vec![Module {
-            bindings,
-            ..Module::default()
-        }],
+        modules: vec![module],
     })
 }
 
 struct Analyzer<'a> {
     types: &'a TypeContext,
     names: BTreeMap<String, (BindingId, TypeId)>,
+    /// Names declared in the current lexical scope. `names` also contains
+    /// readable parent bindings, which may be shadowed by this set.
+    declarations: BTreeSet<String>,
     next_hir: u32,
     next_binding: u32,
+    functions: BTreeMap<String, Vec<FunctionId>>,
+    signatures: Vec<FunctionSignature>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSignature {
+    parameters: Vec<TypeId>,
+    result: TypeId,
 }
 
 enum Prepared {
@@ -89,6 +189,64 @@ impl Prepared {
 }
 
 impl Analyzer<'_> {
+    fn new_binding_id(&mut self) -> BindingId {
+        let id = BindingId(self.next_binding);
+        self.next_binding += 1;
+        id
+    }
+
+    fn binding(
+        &mut self,
+        ast_binding: &severian_ast::Binding,
+        bindings: &mut Vec<Binding>,
+    ) -> Result<BindingId, Diagnostic> {
+        if !self.declarations.insert(ast_binding.name.clone()) {
+            return Err(Diagnostic::new(
+                "E000203",
+                format!("binding `{}` is already defined", ast_binding.name),
+                Some(ast_binding.span),
+            ));
+        }
+        let expected = ast_binding
+            .annotation
+            .as_ref()
+            .map(|annotation| resolve_type_annotation(self.types, annotation))
+            .transpose()?;
+        let value = self.expression(&ast_binding.value, expected)?;
+        let type_id = expected.unwrap_or(value.type_id);
+        if !self.types.assignable(value.type_id, type_id) {
+            return Err(Diagnostic::new(
+                "E000205",
+                "binding value is not assignable to its declared type",
+                Some(ast_binding.value.span),
+            ));
+        }
+        let id = self.new_binding_id();
+        self.names.insert(ast_binding.name.clone(), (id, type_id));
+        bindings.push(Binding {
+            id,
+            type_id,
+            value,
+            span: ast_binding.span,
+        });
+        Ok(id)
+    }
+
+    fn statement(
+        &mut self,
+        statement: &AstStatement,
+        bindings: &mut Vec<Binding>,
+    ) -> Result<Statement, Diagnostic> {
+        match statement {
+            AstStatement::Binding(binding) => {
+                Ok(Statement::Binding(self.binding(binding, bindings)?))
+            }
+            AstStatement::Expression(expression) => {
+                Ok(Statement::Expression(self.expression(expression, None)?))
+            }
+        }
+    }
+
     fn next_id(&mut self) -> HirId {
         let id = HirId(self.next_hir);
         self.next_hir += 1;
@@ -170,6 +328,51 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
+            AstExpressionKind::Call { callee, arguments } => {
+                let AstExpressionKind::Name(name) = &callee.kind else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "call target must resolve to a function declaration",
+                        Some(callee.span),
+                    ));
+                };
+                let candidates = self.functions.get(name).cloned().unwrap_or_default();
+                let mut matches = Vec::new();
+                for function in candidates {
+                    let signature = self.signatures[function.0 as usize].clone();
+                    if signature.parameters.len() != arguments.len()
+                        || expected.is_some_and(|expected| {
+                            !self.types.assignable(signature.result, expected)
+                        })
+                    {
+                        continue;
+                    }
+                    let resolved = arguments
+                        .iter()
+                        .zip(&signature.parameters)
+                        .map(|(argument, parameter)| self.expression(argument, Some(*parameter)))
+                        .collect::<Result<Vec<_>, _>>();
+                    if let Ok(arguments) = resolved {
+                        matches.push((function, signature.result, arguments));
+                    }
+                }
+                let [(function, result, arguments)] = matches.as_slice() else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("call to `{name}` has no unique compatible declaration"),
+                        Some(ast.span),
+                    ));
+                };
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: *result,
+                    kind: ExpressionKind::Call {
+                        function: *function,
+                        arguments: arguments.clone(),
+                    },
+                    span: ast.span,
+                })
+            }
             AstExpressionKind::Unary { operator, operand } => {
                 let operator = universal_unary(*operator);
                 let prepared = self.prepare(operand)?;
@@ -237,6 +440,13 @@ fn resolve_type_annotation(
             Some(annotation.span),
         )
     })
+}
+
+fn universal_boundary(type_id: TypeId) -> BoundaryType {
+    BoundaryType {
+        ty: SemanticType::Universal(type_id),
+        modifiers: Vec::new(),
+    }
 }
 
 fn universal_literal(literal: &AstLiteral) -> LiteralValue {
@@ -324,5 +534,20 @@ mod tests {
             program.modules[0].bindings[1].type_id,
             context.types.resolve_name("int").unwrap()
         );
+    }
+
+    #[test]
+    fn function_scopes_can_read_and_shadow_globals() {
+        let (program, _) = analyze_source(
+            "value := 1\ndef use_global():\n    observed := value\ndef main():\n    value := 2\n    observed := value\n",
+        );
+        let module = &program.modules[0];
+        let global = module.bindings[0].id;
+        let first_body_binding = module.bindings[1].id;
+        let shadow = module.bindings[2].id;
+        let shadow_use = &module.bindings[3].value;
+        assert_ne!(global, first_body_binding);
+        assert_ne!(global, shadow);
+        assert_eq!(shadow_use.kind, ExpressionKind::Binding(shadow));
     }
 }

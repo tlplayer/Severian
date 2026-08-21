@@ -46,6 +46,10 @@ pub struct Expression {
 pub enum ExpressionKind {
     Literal(Literal),
     Name(String),
+    Call {
+        callee: Box<Expression>,
+        arguments: Vec<Expression>,
+    },
     Unary {
         operator: UnaryOperator,
         operand: Box<Expression>,
