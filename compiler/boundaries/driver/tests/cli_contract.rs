@@ -447,3 +447,289 @@ fn recursive_test_discovery_does_not_run_imported_test_modules_twice() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn validation_package_uses_linked_examples_as_independent_roots() {
+    use std::os::unix::fs::symlink;
+
+    let root = temporary("example-validation");
+    let examples = root.join("canonical-examples");
+    let package = root.join("validation");
+    let dependency = root.join("support");
+    fs::create_dir_all(&examples).unwrap();
+    fs::create_dir_all(package.join("src")).unwrap();
+    fs::create_dir_all(dependency.join("src")).unwrap();
+    fs::write(
+        dependency.join("package.toml"),
+        "[package]\nname = \"support\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+    )
+    .unwrap();
+    fs::write(dependency.join("src/lib.sev"), "support_value := 1\n").unwrap();
+    fs::write(
+        examples.join("first.sev"),
+        "import support\n\ndef main():\n    print(\"first\")\n\ntest \"same name\":\n    assert(true)\n",
+    )
+    .unwrap();
+    fs::write(
+        examples.join("second.sev"),
+        "def main():\n    print(\"second\")\n\ntest \"same name\":\n    assert(true)\n",
+    )
+    .unwrap();
+    fs::write(
+        package.join("package.toml"),
+        "[package]\nname = \"examples-validation\"\npublish = false\n\n[lib]\npath = \"src/validation.sev\"\n\n[dependencies]\nsupport = { path = \"../support\" }\n",
+    )
+    .unwrap();
+    fs::write(package.join("src/validation.sev"), "# package anchor\n").unwrap();
+    fs::write(
+        package.join("validation.toml"),
+        "[validation]\nsource = \"linked\"\nline-coverage = 100\nbranch-coverage = 100\n",
+    )
+    .unwrap();
+    symlink("../canonical-examples", package.join("linked")).unwrap();
+
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout.matches("test same name ... ok").count(),
+        2,
+        "{stdout}"
+    );
+    assert_eq!(
+        stdout
+            .lines()
+            .filter(|line| line.starts_with("example "))
+            .count(),
+        2,
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("validated 2 independent source(s) and 0 package fixture(s)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("examples-validation.json"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+fn validation_fixture(
+    name: &str,
+    source: &str,
+    extra_validation: &str,
+) -> (PathBuf, PathBuf, PathBuf) {
+    use std::os::unix::fs::symlink;
+
+    let root = temporary(name);
+    let examples = root.join("examples");
+    let package = root.join("validation");
+    fs::create_dir_all(&examples).unwrap();
+    fs::create_dir_all(package.join("src")).unwrap();
+    fs::write(examples.join("example.sev"), source).unwrap();
+    fs::write(
+        package.join("package.toml"),
+        "[package]\nname = \"examples-validation\"\npublish = false\n\n[lib]\npath = \"src/validation.sev\"\n",
+    )
+    .unwrap();
+    fs::write(package.join("src/validation.sev"), "# anchor\n").unwrap();
+    fs::write(
+        package.join("validation.toml"),
+        format!(
+            "[validation]\nsource = \"linked\"\nline-coverage = 100\nbranch-coverage = 100\n{extra_validation}"
+        ),
+    )
+    .unwrap();
+    symlink("../examples", package.join("linked")).unwrap();
+    (root, examples, package)
+}
+
+#[cfg(unix)]
+fn find_report(directory: &std::path::Path) -> Option<PathBuf> {
+    for entry in fs::read_dir(directory).ok()? {
+        let path = entry.ok()?.path();
+        if path.is_dir() {
+            if let Some(report) = find_report(&path) {
+                return Some(report);
+            }
+        } else if path.file_name().and_then(|name| name.to_str())
+            == Some("examples-validation.json")
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_rejects_a_copied_example_directory() {
+    let (root, _, package) =
+        validation_fixture("copied-validation", "test:\n    assert(true)\n", "");
+    fs::remove_file(package.join("linked")).unwrap();
+    fs::create_dir(package.join("linked")).unwrap();
+    fs::write(
+        package.join("linked/example.sev"),
+        "test:\n    assert(true)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("must be a relative symlink"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_fails_when_a_line_is_uncovered() {
+    let (root, _, package) = validation_fixture(
+        "line-coverage",
+        "def never_called():\n    value := 1\n\ntest:\n    assert(true)\n",
+        "",
+    );
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("line coverage"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_fails_when_a_branch_is_uncovered() {
+    let (root, _, package) = validation_fixture(
+        "branch-coverage",
+        "def choose() -> int:\n    if true:\n        return 1\n    else:\n        return 2\n\ntest:\n    assert(choose() == 1)\n",
+        "",
+    );
+    fs::write(
+        package.join("validation.toml"),
+        "[validation]\nsource = \"linked\"\nline-coverage = 0\nbranch-coverage = 100\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("branch coverage"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_fails_on_exact_stdout_mismatch() {
+    let (root, examples, package) = validation_fixture(
+        "stdout-mismatch",
+        "def main():\n    print(\"actual\")\n",
+        "",
+    );
+    fs::write(examples.join("example.stdout"), "expected\n").unwrap();
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("stdout did not match"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_reports_canonical_paths_and_structured_routes() {
+    let (root, examples, package) = validation_fixture(
+        "canonical-report",
+        "test:\n    assert(true)\n",
+        "\n[[example]]\npath = \"linked/example.sev\"\nrequired-routes = [\"standard\"]\nallow-fallback = false\n",
+    );
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = fs::read_to_string(find_report(&package).expect("validation report")).unwrap();
+    let canonical = fs::canonicalize(examples.join("example.sev")).unwrap();
+    assert!(
+        report.contains(&canonical.display().to_string()),
+        "{report}"
+    );
+    assert!(report.contains("\"routes\": [\"standard\"]"), "{report}");
+    assert!(
+        !report.contains("validation/linked/example.sev"),
+        "{report}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn dependency_tests_are_not_executed_as_example_tests() {
+    let (root, examples, package) = validation_fixture(
+        "dependency-test-isolation",
+        "import support\n\ntest \"example test\":\n    assert(true)\n",
+        "",
+    );
+    let dependency = root.join("support");
+    fs::create_dir_all(dependency.join("src")).unwrap();
+    fs::write(
+        dependency.join("package.toml"),
+        "[package]\nname = \"support\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("src/lib.sev"),
+        "test \"dependency test\":\n    assert(false)\n",
+    )
+    .unwrap();
+    fs::write(
+        package.join("package.toml"),
+        "[package]\nname = \"examples-validation\"\npublish = false\n\n[lib]\npath = \"src/validation.sev\"\n\n[dependencies]\nsupport = { path = \"../support\" }\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test example test ... ok"), "{stdout}");
+    assert!(!stdout.contains("dependency test"), "{stdout}");
+    assert!(fs::canonicalize(examples).is_ok());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn validation_can_expect_a_nonzero_example_exit() {
+    let (root, _, package) = validation_fixture(
+        "expected-exit",
+        "def main():\n    assert(false)\n",
+        "\n[[example]]\npath = \"linked/example.sev\"\nexpected-exit = 1\n",
+    );
+    let output = sev().args(["test"]).arg(&package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}

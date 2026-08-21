@@ -1,0 +1,5 @@
+[validation]
+source = "linked"
+line-coverage = 100
+branch-coverage = 100
+

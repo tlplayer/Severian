@@ -49,6 +49,22 @@ pub struct AssertionLocation {
     pub expression: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CoverageKind {
+    Line,
+    Branch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CoveragePoint {
+    pub span_start: u32,
+    pub kind: CoverageKind,
+    pub ordinal: u32,
+    pub key: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchArm {
     pub type_id: Option<severian_universal::TypeId>,

@@ -196,7 +196,8 @@ fn operation_route(
     }
     if matches!(
         operation,
-        Operation::Return { .. }
+        Operation::Coverage { .. }
+            | Operation::Return { .. }
             | Operation::Assert { .. }
             | Operation::If { .. }
             | Operation::Match { .. }
@@ -302,7 +303,7 @@ fn value(values: &BTreeMap<ValueId, Value>, id: ValueId) -> Result<Value, Compil
 
 fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
-        Operation::Constant { .. } => Vec::new(),
+        Operation::Coverage { .. } | Operation::Constant { .. } => Vec::new(),
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
         Operation::Call { arguments, .. } => arguments.clone(),
@@ -332,6 +333,7 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
 
 fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
+        Operation::Coverage { .. } => Vec::new(),
         Operation::Constant { result, .. }
         | Operation::Unary { result, .. }
         | Operation::Binary { result, .. }

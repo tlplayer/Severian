@@ -1,0 +1,3 @@
+# The validation target intentionally contains no copied examples. `linked`
+# supplies every canonical .sev file as its own independent source root.
+

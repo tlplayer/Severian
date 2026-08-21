@@ -1,9 +1,10 @@
+mod example_validation;
 mod test_runner;
 
 use severian_driver::config::{BinaryTarget, Catalog, DeclaredTarget, LibraryTarget, Manifest};
 use severian_driver::Compiler;
 use severian_target::TargetSpec;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -253,7 +254,7 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         _ => None,
     };
     let config = resolve_config(catalog, manifest, &options)?;
-    let compiler = compiler(&config)?;
+    let compiler = compiler(&config, manifest, false)?;
     for target in selected_targets(&input, options.bin.as_deref())? {
         compiler
             .check_file(target.path())
@@ -272,7 +273,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
         _ => None,
     };
     let config = resolve_config(catalog, manifest, &options)?;
-    let compiler = compiler(&config)?;
+    let compiler = compiler(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
     if options.output.is_some() && targets.len() != 1 {
         return Err("`--output` requires exactly one selected artifact".into());
@@ -327,7 +328,7 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
-    compiler(&config)?
+    compiler(&config, manifest, false)?
         .compile_file(&binary.path, &output)
         .map_err(|error| error.to_string())?;
     let executable = if output.is_absolute() {
@@ -353,40 +354,56 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         return Err("`sev test` does not accept application arguments".into());
     }
     let requested = options.path.clone().unwrap_or_else(|| PathBuf::from("."));
-    let (sources, root, manifest) =
+    let (mut sources, fixture_packages, root, manifest, validation) =
         if requested.is_dir() && !requested.join("package.toml").is_file() {
             let mut sources = Vec::new();
-            collect_test_sources(&requested, &mut sources)?;
-            let sources = deduplicate_test_roots(sources)?;
-            (sources, requested.clone(), None)
+            test_runner::collect_sources(&requested, &mut sources)?;
+            (sources, Vec::new(), requested.clone(), None, None)
         } else {
             let input = discover(Some(&requested), catalog)?;
-            let mut sources = selected_targets(&input, options.bin.as_deref())?
-                .into_iter()
-                .map(|target| target.path().to_owned())
-                .collect::<Vec<_>>();
-            if let Input::Package(manifest) = &input {
-                let tests = manifest.root.join("tests");
-                if tests.is_dir() {
-                    collect_test_sources(&tests, &mut sources)?;
+            let validation = match &input {
+                Input::Package(manifest) => manifest.validation.clone(),
+                Input::Source { .. } => None,
+            };
+            let (sources, fixture_packages) = if let Some(validation) = &validation {
+                let discovery = example_validation::discover(validation)?;
+                (discovery.sources, discovery.packages)
+            } else {
+                let mut sources = selected_targets(&input, options.bin.as_deref())?
+                    .into_iter()
+                    .map(|target| target.path().to_owned())
+                    .collect::<Vec<_>>();
+                if let Input::Package(manifest) = &input {
+                    let tests = manifest.root.join("tests");
+                    if tests.is_dir() {
+                        test_runner::collect_sources(&tests, &mut sources)?;
+                    }
                 }
-            }
-            let sources = deduplicate_test_roots(sources)?;
+                (sources, Vec::new())
+            };
             let root = input_root(&input).to_owned();
             let manifest = match input {
                 Input::Package(manifest) => Some(manifest),
                 Input::Source { .. } => None,
             };
-            (sources, root, manifest)
+            (sources, fixture_packages, root, manifest, validation)
         };
-    if sources.is_empty() {
+    if sources.is_empty() && fixture_packages.is_empty() {
         return Err(format!(
             "no Severian test sources found in {}",
             requested.display()
         ));
     }
     let config = resolve_config(catalog, manifest.as_ref(), &options)?;
-    let compiler = compiler(&config)?;
+    let compiler = compiler(&config, manifest.as_ref(), true)?;
+    let compiler = if validation.is_some() {
+        compiler.with_coverage()
+    } else {
+        compiler
+    };
+    if validation.is_none() {
+        sources = test_runner::deduplicate_roots(&compiler, sources)?;
+    }
     let invocation = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("could not identify test invocation: {error}"))?
@@ -400,65 +417,27 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     fs::create_dir_all(&output_root)
         .map_err(|error| format!("could not create {}: {error}", output_root.display()))?;
 
-    test_runner::run(&compiler, &sources, &output_root)
-}
-
-fn collect_test_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in fs::read_dir(directory)
-        .map_err(|error| format!("could not read {}: {error}", directory.display()))?
-    {
-        let path = entry.map_err(|error| error.to_string())?.path();
-        if path.is_dir() {
-            if path.file_name().and_then(|name| name.to_str()) != Some("target") {
-                collect_test_sources(&path, output)?;
-            }
-        } else if path.extension().and_then(|extension| extension.to_str()) == Some("sev") {
-            output.push(path);
-        }
+    if let (Some(manifest), Some(validation)) = (manifest.as_ref(), validation.as_ref()) {
+        example_validation::run(
+            &compiler,
+            manifest,
+            validation,
+            &sources,
+            &fixture_packages,
+            &output_root,
+            catalog,
+            &options,
+        )
+    } else {
+        test_runner::run(&compiler, &sources, &output_root)
     }
-    Ok(())
 }
 
-fn deduplicate_test_roots(sources: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
-    let mut graphs = sources
-        .into_iter()
-        .map(|source| {
-            let root = fs::canonicalize(&source)
-                .map_err(|error| format!("could not resolve {}: {error}", source.display()))?;
-            // Discovery must not hide a malformed test behind an early graph
-            // error. Keep it as an independent root so the normal compiler
-            // path can report the source diagnostic alongside other tests.
-            let modules = match severian_modules::resolve(&root) {
-                Ok(graph) => graph
-                    .modules
-                    .into_iter()
-                    .map(|module| module.path)
-                    .collect::<BTreeSet<_>>(),
-                Err(_) => BTreeSet::from([root.clone()]),
-            };
-            Ok((root, modules))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    graphs.sort_by(|(left_path, left_modules), (right_path, right_modules)| {
-        right_modules
-            .len()
-            .cmp(&left_modules.len())
-            .then_with(|| left_path.cmp(right_path))
-    });
-    let mut covered = BTreeSet::new();
-    let mut roots = Vec::new();
-    for (root, modules) in graphs {
-        if covered.contains(&root) {
-            continue;
-        }
-        covered.extend(modules);
-        roots.push(root);
-    }
-    roots.sort();
-    Ok(roots)
-}
-
-fn compiler(config: &ResolvedConfig) -> Result<Compiler, String> {
+fn compiler(
+    config: &ResolvedConfig,
+    manifest: Option<&Manifest>,
+    include_root_dev: bool,
+) -> Result<Compiler, String> {
     if config.backend == "xla" {
         return Err("whole-program `xla` is not available yet; use `auto` for native programs containing CompileType-selected kernels".into());
     }
@@ -467,7 +446,12 @@ fn compiler(config: &ResolvedConfig) -> Result<Compiler, String> {
     } else {
         TargetSpec::new(config.target.clone())
     };
-    Compiler::new(target).map_err(|error| error.to_string())
+    Compiler::new(target)
+        .map(|compiler| match manifest {
+            Some(manifest) => compiler.with_packages(manifest.module_graph(include_root_dev)),
+            None => compiler,
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn selected_targets(input: &Input, selected: Option<&str>) -> Result<Vec<DeclaredTarget>, String> {

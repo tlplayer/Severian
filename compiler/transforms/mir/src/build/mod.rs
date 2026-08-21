@@ -98,6 +98,33 @@ impl Builder {
         module: &severian_hir::Module,
         block: &mut Block,
     ) {
+        let span_start = match statement {
+            Statement::Binding(id) => module
+                .bindings
+                .iter()
+                .find(|binding| binding.id == *id)
+                .map(|binding| binding.span.start),
+            Statement::Expression(expression) => Some(expression.span.start),
+            Statement::Return(Some(expression)) => Some(expression.span.start),
+            Statement::Return(None) => None,
+            Statement::Assert { span, .. } => Some(span.start),
+            Statement::If { condition, .. }
+            | Statement::Match {
+                subject: condition, ..
+            } => Some(condition.span.start),
+        };
+        if let Some(span_start) = span_start {
+            block.operations.push(Operation::Coverage {
+                point: crate::CoveragePoint {
+                    span_start,
+                    kind: crate::CoverageKind::Line,
+                    ordinal: 0,
+                    key: None,
+                    file: None,
+                    line: None,
+                },
+            });
+        }
         match statement {
             Statement::Binding(id) => {
                 let binding = module
@@ -140,14 +167,35 @@ impl Builder {
                 then_block,
                 else_block,
             } => {
+                let condition_span = condition.span.start;
                 let condition = self.expression(condition, block);
                 let outer_bindings = self.bindings.clone();
                 let mut then_mir = Block::default();
+                then_mir.operations.push(Operation::Coverage {
+                    point: crate::CoveragePoint {
+                        span_start: condition_span,
+                        kind: crate::CoverageKind::Branch,
+                        ordinal: 0,
+                        key: None,
+                        file: None,
+                        line: None,
+                    },
+                });
                 for statement in &then_block.statements {
                     self.statement(statement, module, &mut then_mir);
                 }
                 self.bindings.clone_from(&outer_bindings);
                 let mut else_mir = Block::default();
+                else_mir.operations.push(Operation::Coverage {
+                    point: crate::CoveragePoint {
+                        span_start: condition_span,
+                        kind: crate::CoverageKind::Branch,
+                        ordinal: 1,
+                        key: None,
+                        file: None,
+                        line: None,
+                    },
+                });
                 for statement in &else_block.statements {
                     self.statement(statement, module, &mut else_mir);
                 }
@@ -159,16 +207,27 @@ impl Builder {
                 });
             }
             Statement::Match { subject, arms } => {
+                let subject_span = subject.span.start;
                 let subject = self.expression(subject, block);
                 let outer_bindings = self.bindings.clone();
                 let mut mir_arms = Vec::new();
-                for arm in arms {
+                for (ordinal, arm) in arms.iter().enumerate() {
                     self.bindings.clone_from(&outer_bindings);
                     if let Some(binding) = arm.binding {
                         self.bindings.insert(binding, subject);
                         self.module.bindings.push((binding, subject));
                     }
                     let mut body = Block::default();
+                    body.operations.push(Operation::Coverage {
+                        point: crate::CoveragePoint {
+                            span_start: subject_span,
+                            kind: crate::CoverageKind::Branch,
+                            ordinal: ordinal as u32,
+                            key: None,
+                            file: None,
+                            line: None,
+                        },
+                    });
                     for statement in &arm.body.statements {
                         self.statement(statement, module, &mut body);
                     }

@@ -1,0 +1,3 @@
+# Core facade. Primitive declarations and the prelude are compiler-bootstrapped
+# from their source-owned packages until public module re-exports are available.
+

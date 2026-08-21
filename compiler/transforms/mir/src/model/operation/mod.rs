@@ -1,9 +1,12 @@
-use crate::{AssertionOrigin, Block, MatchArm, ValueId};
+use crate::{AssertionOrigin, Block, CoveragePoint, MatchArm, ValueId};
 use severian_artifact::ArtifactId;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation {
+    Coverage {
+        point: CoveragePoint,
+    },
     Constant {
         value: LiteralValue,
         result: ValueId,

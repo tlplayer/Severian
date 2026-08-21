@@ -72,8 +72,26 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             }
         }
     }
+    let coverage = all_operations(module)
+        .into_iter()
+        .filter_map(|operation| match operation {
+            Operation::Coverage { key } => Some(key),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     let mut output = String::from("module {\n");
+    if !coverage.is_empty() {
+        output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
+        for key in &coverage {
+            output.push_str(&format!(
+                "  llvm.mlir.global private constant @{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+                coverage_symbol(key),
+                mlir_string(key),
+                key.len() + 1,
+            ));
+        }
+    }
     for operation in all_operations(module) {
         if let Operation::Constant {
             value: Constant::String(value),
@@ -151,6 +169,15 @@ fn render_block(
     let indentation = " ".repeat(indent);
     for operation in &block.operations {
         match operation {
+            Operation::Coverage { key } => {
+                let symbol = coverage_symbol(key);
+                output.push_str(&format!(
+                    "{indentation}%{symbol} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
+                ));
+                output.push_str(&format!(
+                    "{indentation}func.call @__sev_coverage_hit(%{symbol}) : (!llvm.ptr) -> ()\n"
+                ));
+            }
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
                 let spelling = mlir_type(ty)?;
@@ -477,6 +504,15 @@ fn block_terminates(block: &Block) -> bool {
 
 fn string_symbol(result: ValueId) -> String {
     format!("__sev_string_{}", result.0)
+}
+
+fn coverage_symbol(key: &str) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in key.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("__sev_coverage_{hash:016x}")
 }
 
 fn mlir_string(value: &str) -> String {

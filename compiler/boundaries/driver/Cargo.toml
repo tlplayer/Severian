@@ -6,6 +6,7 @@ license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 severian-ast = { path = "../../frontend/ast" }
 severian-abi = { path = "../abi" }
 severian-backend = { path = "../backend" }
@@ -25,6 +26,7 @@ severian-source = { path = "../../source" }
 severian-target = { path = "../../target" }
 severian-universal = { path = "../../universal" }
 severian-xxi = { path = "../xxi" }
+toml = "0.8"
 
 [lib]
 path = "src/lib.rs"

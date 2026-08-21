@@ -1,16 +1,15 @@
 # Compiled examples
 
-Run `tools/check_docs_examples.sh --native` to populate `bin/examples` with
-verified native executables. Each output mirrors its source path below
-`docs/examples`:
+Run `sev test test/validation/examples` to validate the canonical examples.
+The validation package compiles each `.sev` file with an isolated module
+identity and executes files that declare `main`. Verified executable artifacts
+remain invocation-local under the validation package's `target` directory.
 
 ```text
 docs/examples/00-getting-started/01-hello.sev
 bin/examples/00-getting-started/01-hello
 ```
 
-Only examples containing `main()` can produce standalone executables. The
-harness runs each temporary native build and compares it byte-for-byte with the
-adjacent `.stdout` fixture. A binary is published here only after that check
-passes. Unsupported lowering, crashes, timeouts, stderr, output differences, and
-missing expectations are failures and do not produce a binary.
+Adjacent `.stdout` and `.stderr` files are exact output fixtures when present.
+Unsupported lowering, crashes, nonzero exits, and output differences fail the
+validation run.

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
     pub path: PathBuf,
+    pub package: PackageId,
     pub ast: Module,
 }
 
@@ -18,24 +19,74 @@ pub struct ModuleGraph {
     pub modules: Vec<ResolvedModule>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PackageId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPackage {
+    pub id: PackageId,
+    pub root: PathBuf,
+    pub library: PathBuf,
+    pub dependencies: BTreeMap<String, PackageId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageGraph {
+    pub root: PackageId,
+    pub packages: BTreeMap<PackageId, ResolvedPackage>,
+}
+
 pub fn resolve(root: &Path) -> Result<ModuleGraph, Diagnostic> {
-    let mut resolver = Resolver::default();
-    resolver.visit(root)?;
+    let package = PackageId(0);
+    let graph = PackageGraph {
+        root: package,
+        packages: BTreeMap::from([(
+            package,
+            ResolvedPackage {
+                id: package,
+                root: root.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
+                library: root.to_owned(),
+                dependencies: BTreeMap::new(),
+            },
+        )]),
+    };
+    resolve_with_packages(root, &graph)
+}
+
+/// Resolves source locators and package imports to concrete module roots.
+/// Package identity comes from the caller's manifest context; the resolver
+/// never guesses public package names from filenames.
+pub fn resolve_with_packages(
+    root: &Path,
+    packages: &PackageGraph,
+) -> Result<ModuleGraph, Diagnostic> {
+    let mut resolver = Resolver::new(packages);
+    resolver.visit(root, packages.root)?;
     Ok(ModuleGraph {
         modules: resolver.order,
     })
 }
 
-#[derive(Default)]
-struct Resolver {
+struct Resolver<'a> {
+    packages: &'a PackageGraph,
     parsed: BTreeMap<PathBuf, Module>,
     visiting: Vec<PathBuf>,
     visited: BTreeSet<PathBuf>,
     order: Vec<ResolvedModule>,
 }
 
-impl Resolver {
-    fn visit(&mut self, path: &Path) -> Result<(), Diagnostic> {
+impl<'a> Resolver<'a> {
+    fn new(packages: &'a PackageGraph) -> Self {
+        Self {
+            packages,
+            parsed: BTreeMap::new(),
+            visiting: Vec::new(),
+            visited: BTreeSet::new(),
+            order: Vec::new(),
+        }
+    }
+
+    fn visit(&mut self, path: &Path, package: PackageId) -> Result<(), Diagnostic> {
         let canonical = std::fs::canonicalize(path).map_err(|error| {
             Diagnostic::new(
                 "E000001",
@@ -83,14 +134,17 @@ impl Resolver {
             Item::Import(import) => Some(import),
             _ => None,
         }) {
-            if let Some(dependency) = source_import(&canonical, import)? {
-                self.visit(&dependency)?;
+            if let Some((dependency, dependency_package)) =
+                source_import(&canonical, package, import, self.packages)?
+            {
+                self.visit(&dependency, dependency_package)?;
             }
         }
         self.visiting.pop();
         self.visited.insert(canonical.clone());
         self.order.push(ResolvedModule {
             path: canonical,
+            package,
             ast,
         });
         Ok(())
@@ -99,21 +153,16 @@ impl Resolver {
 
 fn source_import(
     importer: &Path,
+    importer_package: PackageId,
     import: &ImportDeclaration,
-) -> Result<Option<PathBuf>, Diagnostic> {
-    if import.source.is_some() {
-        return Ok(None);
+    packages: &PackageGraph,
+) -> Result<Option<(PathBuf, PackageId)>, Diagnostic> {
+    if let Some(package) = &import.source {
+        return package_source(importer_package, import, package, packages).map(Some);
     }
     let locator = match &import.subject {
-        // Bare names belong to package/semantic resolution. Reject them until
-        // that resolver can provide a concrete package identity; never guess a
-        // sibling `<name>.sev` file or silently discard the import.
         ImportSubject::Name(name) => {
-            return Err(Diagnostic::new(
-                "E000124",
-                format!("package import `{name}` has not been resolved"),
-                Some(import.span),
-            ))
+            return package_source(importer_package, import, name, packages).map(Some)
         }
         ImportSubject::Locator(locator) if locator.contains(':') => return Ok(None),
         ImportSubject::Locator(locator) => locator.clone(),
@@ -123,7 +172,7 @@ fn source_import(
         .unwrap_or_else(|| Path::new("."))
         .join(locator);
     if path.is_file() {
-        Ok(Some(path))
+        Ok(Some((path, importer_package)))
     } else {
         Err(Diagnostic::new(
             "E000123",
@@ -131,6 +180,36 @@ fn source_import(
             Some(import.span),
         ))
     }
+}
+
+fn package_source(
+    importer_package: PackageId,
+    import: &ImportDeclaration,
+    package: &str,
+    packages: &PackageGraph,
+) -> Result<(PathBuf, PackageId), Diagnostic> {
+    let current = packages.packages.get(&importer_package).ok_or_else(|| {
+        Diagnostic::new(
+            "E000125",
+            format!("module belongs to unknown package {:?}", importer_package),
+            Some(import.span),
+        )
+    })?;
+    let dependency = current.dependencies.get(package).ok_or_else(|| {
+        Diagnostic::new(
+            "E000124",
+            format!("package import `{package}` has not been resolved"),
+            Some(import.span),
+        )
+    })?;
+    let dependency = packages.packages.get(dependency).ok_or_else(|| {
+        Diagnostic::new(
+            "E000125",
+            format!("package import `{package}` resolves to a missing package node"),
+            Some(import.span),
+        )
+    })?;
+    Ok((dependency.library.clone(), dependency.id))
 }
 
 fn has_runtime_initializer(module: &Module) -> bool {
@@ -207,6 +286,88 @@ mod tests {
         std::fs::write(root.join("root.sev"), "import io\n").unwrap();
         let error = resolve(&root.join("root.sev")).unwrap_err();
         assert_eq!(error.code, "E000124");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_imports_use_only_the_supplied_manifest_context() {
+        let root = temporary();
+        let package = root.join("tensor/lib.sev");
+        std::fs::create_dir_all(package.parent().unwrap()).unwrap();
+        std::fs::write(&package, "def shape():\n    pass\n").unwrap();
+        std::fs::write(root.join("root.sev"), "import tensor\n").unwrap();
+        let root_package = PackageId(0);
+        let tensor_package = PackageId(1);
+        let packages = PackageGraph {
+            root: root_package,
+            packages: BTreeMap::from([
+                (
+                    root_package,
+                    ResolvedPackage {
+                        id: root_package,
+                        root: root.clone(),
+                        library: root.join("root.sev"),
+                        dependencies: BTreeMap::from([("tensor".into(), tensor_package)]),
+                    },
+                ),
+                (
+                    tensor_package,
+                    ResolvedPackage {
+                        id: tensor_package,
+                        root: package.parent().unwrap().to_owned(),
+                        library: package.clone(),
+                        dependencies: BTreeMap::new(),
+                    },
+                ),
+            ]),
+        };
+        let graph = resolve_with_packages(&root.join("root.sev"), &packages).unwrap();
+        assert_eq!(graph.modules.len(), 2);
+        assert_eq!(
+            graph.modules[0].path,
+            std::fs::canonicalize(package).unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn selective_imports_resolve_their_declared_source_package() {
+        let root = temporary();
+        let package = root.join("io/lib.sev");
+        std::fs::create_dir_all(package.parent().unwrap()).unwrap();
+        std::fs::write(&package, "def print(value: string):\n    pass\n").unwrap();
+        std::fs::write(root.join("root.sev"), "import print from io\n").unwrap();
+        let root_package = PackageId(0);
+        let io_package = PackageId(1);
+        let packages = PackageGraph {
+            root: root_package,
+            packages: BTreeMap::from([
+                (
+                    root_package,
+                    ResolvedPackage {
+                        id: root_package,
+                        root: root.clone(),
+                        library: root.join("root.sev"),
+                        dependencies: BTreeMap::from([("io".into(), io_package)]),
+                    },
+                ),
+                (
+                    io_package,
+                    ResolvedPackage {
+                        id: io_package,
+                        root: package.parent().unwrap().to_owned(),
+                        library: package.clone(),
+                        dependencies: BTreeMap::new(),
+                    },
+                ),
+            ]),
+        };
+        let graph = resolve_with_packages(&root.join("root.sev"), &packages).unwrap();
+        assert_eq!(graph.modules.len(), 2);
+        assert_eq!(
+            graph.modules[0].path,
+            std::fs::canonicalize(package).unwrap()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

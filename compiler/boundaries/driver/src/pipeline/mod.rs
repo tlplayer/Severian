@@ -39,6 +39,8 @@ pub struct Compiler {
     context: UniversalContext,
     target: TargetSpec,
     compile_handlers: CompilerRegistry,
+    packages: Option<severian_modules::PackageGraph>,
+    coverage: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +74,19 @@ impl Compiler {
             context,
             target,
             compile_handlers: CompilerRegistry::new(),
+            packages: None,
+            coverage: false,
         }
+    }
+
+    pub fn with_packages(mut self, packages: severian_modules::PackageGraph) -> Self {
+        self.packages = Some(packages);
+        self
+    }
+
+    pub fn with_coverage(mut self) -> Self {
+        self.coverage = true;
+        self
     }
 
     pub fn context(&self) -> &UniversalContext {
@@ -134,6 +148,9 @@ impl Compiler {
         let mut mir =
             self.check_ast_to_mir(&ast, CompileMode::Build, &module_name(&source.path))?;
         attach_assertion_locations(&mut mir, source);
+        if !self.coverage {
+            remove_module_coverage(&mut mir);
+        }
         Ok(mir)
     }
 
@@ -183,6 +200,105 @@ impl Compiler {
             .map(|_| ())
     }
 
+    pub fn file_has_entry(&self, source: &Path) -> Result<bool, CompileError> {
+        let root = std::fs::canonicalize(source).map_err(|error| {
+            CompileError::Diagnostic(Diagnostic::new(
+                "E000001",
+                format!("could not read {}: {error}", source.display()),
+                None,
+            ))
+        })?;
+        let graph = self.resolve_modules(source)?;
+        Ok(graph.modules.iter().any(|module| {
+            module.path == root
+                && module.ast.items.iter().any(|item| {
+                    matches!(item, severian_ast::Item::Function(function) if function.name == "main")
+                })
+        }))
+    }
+
+    pub fn file_has_asserting_tests(&self, source: &Path) -> Result<bool, CompileError> {
+        fn has_assert(statements: &[severian_ast::Statement]) -> bool {
+            statements.iter().any(|statement| match statement {
+                severian_ast::Statement::Assert { .. } => true,
+                severian_ast::Statement::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => has_assert(then_block) || has_assert(else_block),
+                severian_ast::Statement::Match { cases, .. } => {
+                    cases.iter().any(|case| has_assert(&case.body))
+                }
+                _ => false,
+            })
+        }
+        let root = std::fs::canonicalize(source).map_err(|error| {
+            CompileError::Diagnostic(Diagnostic::new(
+                "E000001",
+                format!("could not read {}: {error}", source.display()),
+                None,
+            ))
+        })?;
+        let graph = self.resolve_modules(source)?;
+        Ok(graph.modules.iter().any(|module| {
+            module.path == root
+                && module.ast.items.iter().any(
+                    |item| matches!(item, severian_ast::Item::Test(test) if has_assert(&test.body)),
+                )
+        }))
+    }
+
+    pub fn resolved_module_paths(
+        &self,
+        source: &Path,
+    ) -> Result<BTreeSet<std::path::PathBuf>, CompileError> {
+        Ok(self
+            .resolve_modules(source)?
+            .modules
+            .into_iter()
+            .map(|module| module.path)
+            .collect())
+    }
+
+    pub fn routes_file(
+        &self,
+        source: &Path,
+        tests: bool,
+    ) -> Result<BTreeSet<String>, CompileError> {
+        let mode = if tests {
+            CompileMode::Test
+        } else {
+            CompileMode::Build
+        };
+        let mir = self.check_file_to_mir(source, mode)?;
+        let plan =
+            severian_compile::plan(&mir, &self.context.types).map_err(CompileError::Compile)?;
+        Ok(self.routes(&plan))
+    }
+
+    pub fn coverage_points_file(
+        &self,
+        source: &Path,
+        tests: bool,
+    ) -> Result<BTreeSet<severian_mir::CoveragePoint>, CompileError> {
+        let mode = if tests {
+            CompileMode::Test
+        } else {
+            CompileMode::Build
+        };
+        let mir = self.check_file_to_mir(source, mode)?;
+        let mut points = BTreeSet::new();
+        collect_coverage_points(&mir.initializer, &mut points);
+        for body in mir
+            .functions
+            .iter()
+            .filter_map(|function| function.body.as_ref())
+        {
+            collect_coverage_points(body, &mut points);
+        }
+        Ok(points)
+    }
+
     pub fn compile_tests_file(
         &self,
         source: &Path,
@@ -221,9 +337,18 @@ impl Compiler {
     }
 
     fn compiler_test_results(&self, source: &Path) -> Result<Vec<Option<String>>, CompileError> {
-        let graph = severian_modules::resolve(source).map_err(CompileError::Diagnostic)?;
+        let graph = self.resolve_modules(source)?;
+        let root_package = graph
+            .modules
+            .last()
+            .map(|module| module.package)
+            .expect("a resolved module graph contains its root");
         let mut results = Vec::new();
-        for module in &graph.modules {
+        for module in graph
+            .modules
+            .iter()
+            .filter(|module| module.package == root_package)
+        {
             let declarations = module
                 .ast
                 .items
@@ -294,7 +419,12 @@ impl Compiler {
         source: &Path,
         mode: CompileMode,
     ) -> Result<MirModule, CompileError> {
-        let graph = severian_modules::resolve(source).map_err(CompileError::Diagnostic)?;
+        let graph = self.resolve_modules(source)?;
+        let root_package = graph
+            .modules
+            .last()
+            .map(|module| module.package)
+            .expect("a resolved module graph contains its root");
         let modules = graph
             .modules
             .iter()
@@ -306,13 +436,22 @@ impl Compiler {
                         None,
                     ))
                 })?;
+                let module_mode = if module.package == root_package {
+                    mode
+                } else {
+                    CompileMode::Build
+                };
                 let mut mir =
-                    self.check_ast_to_mir(&module.ast, mode, &module_name(&module.path))?;
+                    self.check_ast_to_mir(&module.ast, module_mode, &module_name(&module.path))?;
                 attach_assertion_locations(&mut mir, &source);
                 Ok(mir)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(merge_modules(modules))
+        let mut merged = merge_modules(modules);
+        if !self.coverage {
+            remove_module_coverage(&mut merged);
+        }
+        Ok(merged)
     }
 
     fn compile_mir(&self, mir: &MirModule, output: &Path) -> Result<Artifact, CompileError> {
@@ -331,6 +470,55 @@ impl Compiler {
         severian_backend::emit_mlir_executable(&mlir, &self.target.triple, output)
             .map_err(CompileError::Backend)
     }
+
+    fn resolve_modules(
+        &self,
+        source: &Path,
+    ) -> Result<severian_modules::ModuleGraph, CompileError> {
+        match &self.packages {
+            Some(packages) => severian_modules::resolve_with_packages(source, packages),
+            None => severian_modules::resolve(source),
+        }
+        .map_err(CompileError::Diagnostic)
+    }
+
+    fn routes(&self, plan: &CompilePlan) -> BTreeSet<String> {
+        fn block(
+            block: &severian_compile::PlannedBlock,
+            output: &mut BTreeSet<Option<CompilerId>>,
+        ) {
+            for segment in &block.segments {
+                match segment {
+                    severian_compile::PlanSegment::Standard(_) => {
+                        output.insert(None);
+                    }
+                    severian_compile::PlanSegment::Compiler(region) => {
+                        output.insert(Some(region.compiler));
+                    }
+                }
+            }
+        }
+        let mut routes = BTreeSet::new();
+        block(&plan.initializer, &mut routes);
+        for function in &plan.functions {
+            if let Some(body) = &function.body {
+                block(body, &mut routes);
+            }
+        }
+        routes
+            .into_iter()
+            .map(|route| match route {
+                None => "standard".into(),
+                Some(compiler) => self
+                    .context
+                    .types
+                    .definitions()
+                    .find(|definition| definition.declaration == compiler.declaration())
+                    .map(|definition| definition.path.clone())
+                    .unwrap_or_else(|| format!("compiler:{compiler}")),
+            })
+            .collect()
+    }
 }
 
 fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {
@@ -345,6 +533,25 @@ fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {
 fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &SourceFile) {
     for operation in &mut block.operations {
         match operation {
+            MirOperation::Coverage { point } => {
+                let before = source
+                    .text
+                    .get(..usize::try_from(point.span_start).unwrap_or(0))
+                    .unwrap_or("");
+                let line = u32::try_from(before.bytes().filter(|byte| *byte == b'\n').count() + 1)
+                    .unwrap_or(u32::MAX);
+                let kind = match point.kind {
+                    severian_mir::CoverageKind::Line => "line",
+                    severian_mir::CoverageKind::Branch => "branch",
+                };
+                let file = source.path.display().to_string();
+                point.key = Some(format!(
+                    "{file}|{kind}|{line}|{}|{}",
+                    point.span_start, point.ordinal
+                ));
+                point.file = Some(file);
+                point.line = Some(line);
+            }
             MirOperation::Assert { origin, .. } => {
                 origin.location = assertion_location(origin, source);
             }
@@ -359,6 +566,68 @@ fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &So
             MirOperation::Match { arms, .. } => {
                 for arm in arms {
                     attach_block_assertion_locations(&mut arm.body, source);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn remove_coverage(block: &mut severian_mir::Block) {
+    block
+        .operations
+        .retain(|operation| !matches!(operation, MirOperation::Coverage { .. }));
+    for operation in &mut block.operations {
+        match operation {
+            MirOperation::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                remove_coverage(then_block);
+                remove_coverage(else_block);
+            }
+            MirOperation::Match { arms, .. } => {
+                for arm in arms {
+                    remove_coverage(&mut arm.body);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn remove_module_coverage(module: &mut MirModule) {
+    remove_coverage(&mut module.initializer);
+    for body in module
+        .functions
+        .iter_mut()
+        .filter_map(|function| function.body.as_mut())
+    {
+        remove_coverage(body);
+    }
+}
+
+fn collect_coverage_points(
+    block: &severian_mir::Block,
+    output: &mut BTreeSet<severian_mir::CoveragePoint>,
+) {
+    for operation in &block.operations {
+        match operation {
+            MirOperation::Coverage { point } => {
+                output.insert(point.clone());
+            }
+            MirOperation::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                collect_coverage_points(then_block, output);
+                collect_coverage_points(else_block, output);
+            }
+            MirOperation::Match { arms, .. } => {
+                for arm in arms {
+                    collect_coverage_points(&arm.body, output);
                 }
             }
             _ => {}
@@ -581,6 +850,9 @@ fn merge_modules(modules: Vec<MirModule>) -> MirModule {
 fn remap_operation(operation: &MirOperation, offset: u32, function_offset: u32) -> MirOperation {
     let value = |value: ValueId| ValueId(value.0 + offset);
     match operation {
+        MirOperation::Coverage { point } => MirOperation::Coverage {
+            point: point.clone(),
+        },
         MirOperation::Constant {
             value: literal,
             result,

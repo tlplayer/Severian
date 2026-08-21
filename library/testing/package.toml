@@ -1,0 +1,9 @@
+[package]
+name = "testing"
+version = "0.1.0"
+edition = "2026"
+description = "Source-level testing protocols and assertions"
+
+[lib]
+path = "src/lib.sev"
+

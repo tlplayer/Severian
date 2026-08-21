@@ -69,6 +69,12 @@ fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, Lowerin
     let mut operations = Vec::new();
     for operation in &block.operations {
         let operation = match operation {
+            MirOperation::Coverage { point } => LirOperation::Coverage {
+                key: point
+                    .key
+                    .clone()
+                    .expect("source attachment assigns every coverage key"),
+            },
             MirOperation::Constant { value, result } => LirOperation::Constant {
                 value: lower_constant(value),
                 result: ValueId(result.0),

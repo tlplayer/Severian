@@ -78,7 +78,7 @@ impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     let mut output = String::from(
-        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\n",
+        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nstatic void __sev_coverage_hit(const char *key) {\n    const char *path = getenv(\"SEV_COVERAGE_FILE\");\n    if (path == NULL) return;\n    FILE *file = fopen(path, \"a\");\n    if (file == NULL) return;\n    fputs(key, file);\n    fputc('\\n', file);\n    fclose(file);\n}\n\n",
     );
     for value in &module.globals {
         output.push_str(&format!(
@@ -187,6 +187,12 @@ fn render_block(
 ) -> Result<(), BackendError> {
     for operation in &block.operations {
         match operation {
+            Operation::Coverage { key } => {
+                output.push_str(&format!(
+                    "    __sev_coverage_hit({});\n",
+                    c_string_literal(key)
+                ));
+            }
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
                 let literal = c_literal(value, ty)?;
@@ -536,10 +542,24 @@ pub fn emit_mlir_executable(
     )?;
     let target = format!("--target={target_triple}");
     let output_path = output.to_string_lossy().into_owned();
+    let coverage_runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/coverage_runtime.c")
+        .to_string_lossy()
+        .into_owned();
     run_tool(
         "clang",
         tool("SEVERIAN_CLANG", "clang-21"),
-        &[&target, "-x", "ir", "-", "-o", &output_path],
+        &[
+            &target,
+            "-x",
+            "ir",
+            "-",
+            "-x",
+            "c",
+            &coverage_runtime,
+            "-o",
+            &output_path,
+        ],
         &llvm_ir,
     )?;
     Ok(Artifact {
