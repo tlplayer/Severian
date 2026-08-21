@@ -1,2 +1,0 @@
-# Bootstrap module counterpart of compiler/frontend/hir/src/identity.
-# Fill this boundary while preserving its paired Rust responsibility.

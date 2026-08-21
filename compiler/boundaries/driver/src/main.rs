@@ -202,7 +202,7 @@ enum Input {
         root: PathBuf,
         name: String,
     },
-    Package(Manifest),
+    Package(Box<Manifest>),
 }
 
 fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
@@ -233,7 +233,9 @@ fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
     loop {
         let manifest = directory.join("package.toml");
         if manifest.is_file() {
-            return Manifest::load(&manifest, catalog).map(Input::Package);
+            return Manifest::load(&manifest, catalog)
+                .map(Box::new)
+                .map(Input::Package);
         }
         directory = directory.parent().ok_or_else(|| {
             format!(
@@ -250,7 +252,7 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     }
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = match &input {
-        Input::Package(manifest) => Some(manifest),
+        Input::Package(manifest) => Some(manifest.as_ref()),
         _ => None,
     };
     let config = resolve_config(catalog, manifest, &options)?;
@@ -269,7 +271,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
     }
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = match &input {
-        Input::Package(manifest) => Some(manifest),
+        Input::Package(manifest) => Some(manifest.as_ref()),
         _ => None,
     };
     let config = resolve_config(catalog, manifest, &options)?;
@@ -299,7 +301,11 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
                 compiler
                     .check_file(&library.path)
                     .map_err(|error| error.to_string())?;
-                emit_library_package(library, &output)?;
+                emit_library_package(
+                    library,
+                    manifest.expect("library targets belong to packages"),
+                    &output,
+                )?;
             }
         }
         println!("built {}", output.display());
@@ -312,7 +318,7 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     let application_args = std::mem::take(&mut options.application_args);
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = match &input {
-        Input::Package(manifest) => Some(manifest),
+        Input::Package(manifest) => Some(manifest.as_ref()),
         _ => None,
     };
     let config = resolve_config(catalog, manifest, &options)?;
@@ -383,7 +389,7 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
             };
             let root = input_root(&input).to_owned();
             let manifest = match input {
-                Input::Package(manifest) => Some(manifest),
+                Input::Package(manifest) => Some(*manifest),
                 Input::Source { .. } => None,
             };
             (sources, fixture_packages, root, manifest, validation)
@@ -422,9 +428,11 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
             &compiler,
             manifest,
             validation,
-            &sources,
-            &fixture_packages,
-            &output_root,
+            example_validation::RunTargets {
+                sources: &sources,
+                packages: &fixture_packages,
+                output_root: &output_root,
+            },
             catalog,
             &options,
         )
@@ -565,16 +573,28 @@ fn artifact_path(root: &Path, config: &ResolvedConfig, target: &DeclaredTarget) 
     }
 }
 
-fn emit_library_package(library: &LibraryTarget, output: &Path) -> Result<(), String> {
-    let graph = severian_modules::resolve(&library.path).map_err(|error| error.to_string())?;
+fn emit_library_package(
+    library: &LibraryTarget,
+    manifest: &Manifest,
+    output: &Path,
+) -> Result<(), String> {
+    let packages = manifest.module_graph(false);
+    let root_package = packages.root;
+    let graph = severian_modules::resolve_with_packages(&library.path, &packages)
+        .map_err(|error| error.to_string())?;
+    let modules = graph
+        .modules
+        .into_iter()
+        .filter(|module| module.package == root_package)
+        .collect::<Vec<_>>();
     let name = library.name.as_bytes();
     let source_root = fs::canonicalize(library.path.parent().unwrap_or_else(|| Path::new(".")))
         .map_err(|error| format!("could not resolve package source root: {error}"))?;
     let mut package = b"SEVPKG\0\x01".to_vec();
     package.extend_from_slice(&(name.len() as u32).to_be_bytes());
     package.extend_from_slice(name);
-    package.extend_from_slice(&(graph.modules.len() as u32).to_be_bytes());
-    for module in graph.modules {
+    package.extend_from_slice(&(modules.len() as u32).to_be_bytes());
+    for module in modules {
         let source = fs::read(&module.path)
             .map_err(|error| format!("could not read {}: {error}", module.path.display()))?;
         let relative = module
@@ -627,7 +647,7 @@ fn config(arguments: Vec<String>, catalog: &Catalog) -> Result<(), String> {
             let options = parse_common(arguments[1..].to_vec())?;
             let input = discover(options.path.as_deref(), catalog)?;
             let manifest = match &input {
-                Input::Package(manifest) => Some(manifest),
+                Input::Package(manifest) => Some(manifest.as_ref()),
                 _ => None,
             };
             let resolved = resolve_config(catalog, manifest, &options)?;

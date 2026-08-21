@@ -65,6 +65,19 @@ class BootstrapMirrorTests(unittest.TestCase):
         failures, _, _ = check_mirror(root)
         self.assertTrue(any("missing mirrored directory" in failure for failure in failures))
 
+    def test_rejects_extra_directories_sources_and_packages(self) -> None:
+        temporary, root = self.fixture()
+        self.addCleanup(temporary.cleanup)
+        (root / "sev_compiler/orphan/src").mkdir(parents=True)
+        (root / "sev_compiler/orphan/src/lib.sev").write_text("pass\n")
+        (root / "sev_compiler/orphan/package.toml").write_text(
+            "[package]\nname='orphan'\n[lib]\npath='src/lib.sev'\n"
+        )
+        failures, _, _ = check_mirror(root)
+        self.assertTrue(any("extra mirrored directory" in failure for failure in failures))
+        self.assertTrue(any("extra source mirror" in failure for failure in failures))
+        self.assertTrue(any("extra package mirror" in failure for failure in failures))
+
     def test_rejects_an_incomplete_stage_sequence(self) -> None:
         temporary, root = self.fixture()
         self.addCleanup(temporary.cleanup)

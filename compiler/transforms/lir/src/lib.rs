@@ -102,6 +102,13 @@ pub enum Operation {
         arguments: Vec<ValueId>,
         result: ValueId,
     },
+    /// A call to the versioned native runtime ABI selected during lowering.
+    /// Emitters treat the symbol and physical signature generically.
+    RuntimeCall {
+        symbol: String,
+        arguments: Vec<ValueId>,
+        result: Option<ValueId>,
+    },
     Return {
         value: Option<ValueId>,
     },

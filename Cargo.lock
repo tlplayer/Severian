@@ -110,6 +110,7 @@ name = "severian-backend"
 version = "0.1.0"
 dependencies = [
  "severian-lir",
+ "severian-runtime",
 ]
 
 [[package]]
@@ -274,6 +275,10 @@ dependencies = [
 
 [[package]]
 name = "severian-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "severian-runtime"
 version = "0.1.0"
 
 [[package]]

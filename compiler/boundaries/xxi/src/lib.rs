@@ -75,11 +75,10 @@ pub fn resolve(
         _ => None,
     }) {
         let resolved = resolve_function(declaration, &foreign, &imports, types)?;
-        if foreign
-            .functions
-            .iter()
-            .any(|known| known.name == resolved.name && known.parameters == resolved.parameters)
-        {
+        if foreign.functions.iter().any(|known| {
+            known.name == resolved.name
+                && same_parameter_contract(&known.parameters, &resolved.parameters)
+        }) {
             return Err(XxiError::DuplicateDeclaration(declaration.name.clone()));
         }
         foreign.functions.push(resolved);
@@ -97,6 +96,14 @@ pub fn resolve(
         foreign,
         plans,
     })
+}
+
+fn same_parameter_contract(left: &[ForeignParameter], right: &[ForeignParameter]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.contract == right.contract && left.mode == right.mode)
 }
 
 fn external_import(path: &str, alias: &str) -> Option<Result<ExternalImport, XxiError>> {
@@ -454,7 +461,7 @@ mod tests {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source(
             "duplicates.sev",
-            "@c(symbol = \"first\")\ndef print(value: int) -> i32\n@c(symbol = \"second\")\ndef print(value: int) -> i32\n",
+            "@c(symbol = \"first\")\ndef print(value: int) -> i32\n@c(symbol = \"second\")\ndef print(other: int) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         assert_eq!(

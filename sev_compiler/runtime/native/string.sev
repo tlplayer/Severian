@@ -1,0 +1,10 @@
+# Source-language counterpart of compiler/runtime/native/string.c.
+
+def concat_symbol() -> string:
+    return "__sev_string_concat"
+
+def compare_symbol() -> string:
+    return "__sev_string_compare"
+
+def release_symbol() -> string:
+    return "__sev_string_release"

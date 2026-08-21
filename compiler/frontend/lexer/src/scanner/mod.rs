@@ -290,24 +290,35 @@ fn block_string(raw: &str) -> String {
     let common_indent = content
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            line.chars()
-                .take_while(|character| matches!(character, ' ' | '\t'))
-                .count()
-        })
+        .map(indentation_width)
         .min()
         .unwrap_or(0);
     content
         .split('\n')
-        .map(|line| {
-            let byte_offset = line
-                .char_indices()
-                .nth(common_indent)
-                .map_or(line.len(), |(offset, _)| offset);
-            &line[byte_offset..]
-        })
+        .map(|line| strip_indentation(line, common_indent))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn indentation_width(line: &str) -> usize {
+    line.chars()
+        .take_while(|character| matches!(character, ' ' | '\t'))
+        .map(|character| if character == '\t' { 4 } else { 1 })
+        .sum()
+}
+
+fn strip_indentation(line: &str, width: usize) -> &str {
+    let mut consumed = 0usize;
+    let mut byte_offset = 0usize;
+    for (offset, character) in line.char_indices() {
+        if consumed >= width || !matches!(character, ' ' | '\t') {
+            byte_offset = offset;
+            break;
+        }
+        consumed += if character == '\t' { 4 } else { 1 };
+        byte_offset = offset + character.len_utf8();
+    }
+    &line[byte_offset..]
 }
 
 fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {

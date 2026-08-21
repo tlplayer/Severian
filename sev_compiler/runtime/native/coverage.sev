@@ -1,0 +1,4 @@
+# Source-language counterpart of compiler/runtime/native/coverage.c.
+
+def coverage_symbol() -> string:
+    return "__sev_coverage_hit"

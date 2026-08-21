@@ -15,9 +15,17 @@ def counterpart(path: Path, host: Path, bootstrap: Path) -> Path:
     relative = path.relative_to(host)
     if path.name == "Cargo.toml":
         relative = relative.with_name("package.toml")
-    elif path.suffix == ".rs":
+    elif path.suffix in {".rs", ".c"}:
         relative = relative.with_suffix(".sev")
     return bootstrap / relative
+
+
+def generated_output(path: Path, bootstrap: Path) -> bool:
+    parts = path.relative_to(bootstrap).parts
+    return any(
+        part == "target" and following in {"host", "target"}
+        for part, following in zip(parts, parts[1:])
+    )
 
 
 def check_mirror(root: Path = ROOT) -> tuple[list[str], int, int]:
@@ -34,6 +42,21 @@ def check_mirror(root: Path = ROOT) -> tuple[list[str], int, int]:
             failures.append(
                 f"missing mirrored directory: {expected.relative_to(root)}"
             )
+    expected_directories = {
+        directory.relative_to(host) for directory in host_directories
+    }
+    bootstrap_directories = {
+        directory.relative_to(bootstrap_root)
+        for directory in bootstrap_root.rglob("*")
+        if directory.is_dir()
+        and not generated_output(directory, bootstrap_root)
+        and not (
+            directory.name == "target"
+            and directory.relative_to(bootstrap_root) not in expected_directories
+        )
+    }
+    for directory in sorted(bootstrap_directories - expected_directories):
+        failures.append(f"extra mirrored directory: sev_compiler/{directory}")
 
     rust_sources = sorted(host.rglob("*.rs"))
     for source in rust_sources:
@@ -41,7 +64,36 @@ def check_mirror(root: Path = ROOT) -> tuple[list[str], int, int]:
         if not expected.is_file():
             failures.append(f"missing source mirror: {expected.relative_to(root)}")
 
+    native_sources = sorted(host.rglob("*.c"))
+    severian_fixtures = sorted(host.rglob("*.sev"))
+    expected_sources = {
+        counterpart(source, host, bootstrap_root).relative_to(bootstrap_root)
+        for source in [*rust_sources, *native_sources, *severian_fixtures]
+    }
+    bootstrap_sources = {
+        source.relative_to(bootstrap_root)
+        for source in bootstrap_root.rglob("*.sev")
+        if not generated_output(source, bootstrap_root)
+    }
+    for source in sorted(bootstrap_sources - expected_sources):
+        failures.append(f"extra source mirror: sev_compiler/{source}")
+    for source in [*native_sources, *severian_fixtures]:
+        expected = counterpart(source, host, bootstrap_root)
+        if not expected.is_file():
+            failures.append(f"missing source mirror: {expected.relative_to(root)}")
+
     manifests = sorted(host.rglob("Cargo.toml"))
+    expected_manifests = {
+        counterpart(manifest, host, bootstrap_root).relative_to(bootstrap_root)
+        for manifest in manifests
+    }
+    bootstrap_manifests = {
+        manifest.relative_to(bootstrap_root)
+        for manifest in bootstrap_root.rglob("package.toml")
+        if not generated_output(manifest, bootstrap_root)
+    }
+    for manifest in sorted(bootstrap_manifests - expected_manifests):
+        failures.append(f"extra package mirror: sev_compiler/{manifest}")
     for manifest in manifests:
         expected = counterpart(manifest, host, bootstrap_root)
         if not expected.is_file():

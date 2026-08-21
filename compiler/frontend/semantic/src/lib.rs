@@ -707,18 +707,26 @@ impl Analyzer<'_> {
                         .map(|(argument, parameter)| self.expression(argument, Some(*parameter)))
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
-                        let exact_parameters = arguments
+                        let conversions = arguments
                             .iter()
                             .zip(&signature.parameters)
-                            .filter(|(argument, parameter)| argument.type_id == **parameter)
-                            .count();
-                        matches.push((exact_parameters, function, signature.result, arguments));
+                            .map(|(argument, parameter)| {
+                                conversion_rank(self.types, argument.type_id, *parameter)
+                                    .expect("resolved arguments are assignable")
+                            })
+                            .collect::<Vec<_>>();
+                        matches.push((conversions, function, signature.result, arguments));
                     }
                 }
-                let best_score = matches.iter().map(|candidate| candidate.0).max();
                 let best = matches
                     .iter()
-                    .filter(|candidate| Some(candidate.0) == best_score)
+                    .enumerate()
+                    .filter(|(index, candidate)| {
+                        !matches.iter().enumerate().any(|(other_index, other)| {
+                            other_index != *index && dominates(&other.0, &candidate.0)
+                        })
+                    })
+                    .map(|(_, candidate)| candidate)
                     .collect::<Vec<_>>();
                 let [(_, function, result, arguments)] = best.as_slice() else {
                     return Err(Diagnostic::new(
@@ -818,6 +826,55 @@ fn universal_boundary(type_id: TypeId) -> BoundaryType {
         ty: SemanticType::Universal(type_id),
         modifiers: Vec::new(),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ConversionRank {
+    Exact,
+    Widening(u16),
+    General,
+}
+
+fn conversion_rank(
+    types: &TypeContext,
+    actual: TypeId,
+    expected: TypeId,
+) -> Option<ConversionRank> {
+    if actual == expected {
+        return Some(ConversionRank::Exact);
+    }
+    if !types.assignable(actual, expected) {
+        return None;
+    }
+    let actual = types.primitive(actual)?.representation;
+    let expected = types.primitive(expected)?.representation;
+    match (actual, expected) {
+        (
+            severian_universal::PrimitiveRepresentation::Integer {
+                bits: severian_universal::IntegerWidth::Fixed(actual),
+                ..
+            },
+            severian_universal::PrimitiveRepresentation::Integer {
+                bits: severian_universal::IntegerWidth::Fixed(expected),
+                ..
+            },
+        ) => Some(ConversionRank::Widening(expected - actual)),
+        (
+            severian_universal::PrimitiveRepresentation::Float {
+                format: severian_universal::FloatFormat::Ieee(actual),
+            },
+            severian_universal::PrimitiveRepresentation::Float {
+                format: severian_universal::FloatFormat::Ieee(expected),
+            },
+        ) => Some(ConversionRank::Widening(expected - actual)),
+        _ => Some(ConversionRank::General),
+    }
+}
+
+fn dominates(left: &[ConversionRank], right: &[ConversionRank]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| left <= right)
+        && left.iter().zip(right).any(|(left, right)| left < right)
 }
 
 fn test_mode(
@@ -1155,5 +1212,29 @@ mod tests {
         );
         let selected = program.modules[0].bindings.last().unwrap();
         assert_eq!(selected.type_id, context.types.resolve_name("i32").unwrap());
+    }
+
+    #[test]
+    fn crossed_widening_overloads_remain_ambiguous() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "ambiguous.sev",
+            "def choose(left: i32, right: i128) -> i32:\n    return left\ndef choose(left: i64, right: i64) -> i64:\n    return left\nleft: i32 = 1\nright: i32 = 2\nselected = choose(left, right)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000206");
+    }
+
+    #[test]
+    fn conversion_categories_order_exact_before_widening_before_general() {
+        let context = severian_bootstrap::load().unwrap();
+        let resolve = |name| context.types.resolve_name(name).unwrap();
+        let exact = conversion_rank(&context.types, resolve("i32"), resolve("i32")).unwrap();
+        let widening = conversion_rank(&context.types, resolve("i32"), resolve("i64")).unwrap();
+        let general = conversion_rank(&context.types, resolve("bf16"), resolve("f32")).unwrap();
+        assert!(exact < widening);
+        assert!(widening < general);
     }
 }

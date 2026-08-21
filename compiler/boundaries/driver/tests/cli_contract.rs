@@ -196,6 +196,35 @@ fn build_emits_every_declared_binary_and_library_artifact() {
 }
 
 #[test]
+fn multi_target_package_retains_dependency_context_for_its_library() {
+    let root = temporary("multi-target-dependency");
+    let dependency = root.join("dependency");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::create_dir_all(dependency.join("src")).unwrap();
+    fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"mixed\"\n\n[[bin]]\nname = \"mixed\"\npath = \"src/main.sev\"\n\n[lib]\npath = \"src/lib.sev\"\n\n[dependencies]\nsupport = { path = \"dependency\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("package.toml"),
+        "[package]\nname = \"support\"\n\n[lib]\npath = \"src/lib.sev\"\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/main.sev"), "").unwrap();
+    fs::write(root.join("src/lib.sev"), "import support\n").unwrap();
+    fs::write(dependency.join("src/lib.sev"), "").unwrap();
+    let output = sev().args(["build"]).arg(&root).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_library_only_package_builds_without_a_binary() {
     let root = temporary("library-only");
     fs::create_dir(root.join("src")).unwrap();
@@ -356,7 +385,45 @@ fn numeric_print_overloads_are_resolved_through_the_io_boundary() {
     let source = root.join("numeric.sev");
     fs::write(
         &source,
-        "int whole = 3\nfloat decimal = 3.1415926\n\ntest with integ:\n    narrow: i32 = 32\n    wide: i64 = 64\n    precise: f64 = 0.125\n    enabled: bool = true\n    letter: char = 'λ'\n    print(whole)\n    print(decimal)\n    print(narrow)\n    print(wide)\n    print(precise)\n    print(enabled)\n    print(letter)\n    assert(\"3\" in stdout)\n    assert(\"3.1415926\" in stdout)\n    assert(\"32\" in stdout)\n    assert(\"64\" in stdout)\n    assert(\"0.125\" in stdout)\n    assert(\"true\" in stdout)\n    assert(\"λ\" in stdout)\n",
+        "int whole = 3\nfloat decimal = 3.1415926\n\ntest with integ:\n    tiny: i8 = 8\n    narrow: i32 = 32\n    wide: i64 = 64\n    maximum: i128 = 170141183460469231731687303715884105727\n    unsigned_maximum: u128 = 340282366920938463463374607431768211455\n    single: f32 = 0.25\n    precise: f64 = 0.125\n    enabled: bool = true\n    letter: char = 'λ'\n    print(whole)\n    print(decimal)\n    print(tiny)\n    print(narrow)\n    print(wide)\n    print(maximum)\n    print(unsigned_maximum)\n    print(single)\n    print(precise)\n    print(enabled)\n    print(letter)\n    assert(stdout == \"\"\"\n    3\n    3.1415926\n    8\n    32\n    64\n    170141183460469231731687303715884105727\n    340282366920938463463374607431768211455\n    0.25\n    0.125\n    true\n    λ\n    \"\"\")\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn owned_string_results_execute_through_the_runtime_boundary() {
+    let root = temporary("owned-string-runtime");
+    let source = root.join("strings.sev");
+    fs::write(
+        &source,
+        "test with integ:\n    combined := \"left\" + \"right\"\n    print(combined)\n    assert(combined == \"leftright\")\n    assert(stdout == \"\"\"\n    leftright\n    \"\"\")\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compound_assignment_executes_and_rejects_invalid_updates() {
+    let root = temporary("compound-assignment");
+    let source = root.join("updates.sev");
+    fs::write(
+        &source,
+        "test \"updates existing bindings\":\n    value := 1\n    value += 2\n    assert(value == 3)\n\ntest with compiler \"rejects missing updates\":\n    reject:\n        missing += 1\n\ntest with compiler \"rejects incompatible updates\":\n    reject:\n        value: i32 = 1\n        value += 1.5\n",
     )
     .unwrap();
     let output = sev().args(["test"]).arg(&source).output().unwrap();

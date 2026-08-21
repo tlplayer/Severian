@@ -18,19 +18,19 @@ require-backend-route-parity = true
 [[stage]]
 compiler = "sev0"
 produced-by = "rust"
-build = "sev0 build sev_compiler --output target/bootstrap/stage1/sev"
+build = "sev0 build sev_compiler/boundaries/driver --bin sev-bootstrap-driver --output target/bootstrap/stage1/sev"
 validation = "sev0 test test/validation/examples"
 
 [[stage]]
 compiler = "sev1"
 produced-by = "sev0"
-build = "target/bootstrap/stage1/sev build sev_compiler --output target/bootstrap/stage2/sev"
+build = "target/bootstrap/stage1/sev build sev_compiler/boundaries/driver --bin sev-bootstrap-driver --output target/bootstrap/stage2/sev"
 validation = "target/bootstrap/stage1/sev test test/validation/examples"
 
 [[stage]]
 compiler = "sev2"
 produced-by = "sev1"
-build = "target/bootstrap/stage2/sev build sev_compiler --output target/bootstrap/stage3/sev"
+build = "target/bootstrap/stage2/sev build sev_compiler/boundaries/driver --bin sev-bootstrap-driver --output target/bootstrap/stage3/sev"
 validation = "target/bootstrap/stage2/sev test test/validation/examples"
 fixed-point-with = "sev3"
 

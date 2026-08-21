@@ -723,6 +723,16 @@ fn with_core_prelude(
     );
     let tokens = severian_lexer::scan(&io).map_err(CompileError::Diagnostic)?;
     let mut module = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    module.items.retain(|item| match item {
+        severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
+            function
+                .parameters
+                .iter()
+                .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
+                && boundary_type_is_available(&function.result, types)
+        }
+        _ => true,
+    });
 
     let prelude = SourceFile::virtual_source(
         "core/prelude.sev",
@@ -733,6 +743,19 @@ fn with_core_prelude(
     module.items.extend(prelude.items);
     module.items.extend(ast.items.iter().cloned());
     Ok(module)
+}
+
+fn boundary_type_is_available(
+    annotation: &severian_ast::TypeAnnotation,
+    types: &severian_universal::TypeContext,
+) -> bool {
+    let Some((name, arguments)) = annotation.named_parts() else {
+        return false;
+    };
+    types.resolve_name(name).is_some()
+        && arguments
+            .iter()
+            .all(|argument| boundary_type_is_available(argument, types))
 }
 
 fn apply_external_calls(

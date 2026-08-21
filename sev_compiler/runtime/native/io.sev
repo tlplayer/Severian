@@ -1,0 +1,7 @@
+# Source-language counterpart of compiler/runtime/native/io.c.
+
+def integer_print_symbol() -> string:
+    return "__sev_print_int"
+
+def float_print_symbol() -> string:
+    return "__sev_print_float"

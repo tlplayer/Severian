@@ -31,8 +31,8 @@ Run the structural and stage-0 gates with:
 
 ```bash
 python3 tools/quality/check_bootstrap_mirror.py
-cargo run -q -p severian-driver -- check sev_compiler
-cargo run -q -p severian-driver -- build sev_compiler
+cargo run -q -p severian-driver -- check sev_compiler/boundaries/driver
+cargo run -q -p severian-driver -- build sev_compiler/boundaries/driver --bin sev-bootstrap-driver
 cargo run -q -p severian-driver -- test test/validation/examples
 ```
 

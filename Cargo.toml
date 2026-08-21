@@ -4,6 +4,7 @@ members = [
     "compiler/universal",
     "compiler/target",
     "compiler/artifact",
+    "compiler/runtime",
 
     # CompileType dispatch and custom compiler integration
     "compiler/compile",
@@ -61,6 +62,7 @@ severian-universal = "universal"
 severian-target = "target"
 severian-compile = "compile"
 severian-artifact = "artifact"
+severian-runtime = "runtime"
 severian-compile-protocol = "core_source"
 severian-primitives = "primitive_source"
 severian-hir = "semantic"
@@ -106,6 +108,7 @@ severian-compile = [
     "severian-universal",
 ]
 severian-artifact = []
+severian-runtime = []
 severian-compile-protocol = []
 severian-primitives = []
 severian-hir = ["severian-source", "severian-universal"]
@@ -139,7 +142,7 @@ severian-lowering = [
 severian-abi = ["severian-target"]
 severian-ffi = ["severian-abi", "severian-universal"]
 severian-interface = ["severian-universal"]
-severian-backend = ["severian-lir"]
+severian-backend = ["severian-lir", "severian-runtime"]
 severian-xxi = [
     "severian-abi",
     "severian-ast",

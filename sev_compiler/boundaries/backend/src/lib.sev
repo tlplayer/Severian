@@ -1,3 +1,4 @@
 # Bootstrap counterpart of compiler/boundaries/backend/src/lib.rs.
 # These imports preserve the Rust package dependency direction.
 import lir
+import runtime

@@ -774,4 +774,38 @@ mod tests {
         assert!(template.contains("profile = \"dev\""));
         assert!(template.contains("backend = \"auto\""));
     }
+
+    #[test]
+    fn mirrored_driver_manifest_retains_its_dependency_aliases() {
+        let catalog = Catalog::load().unwrap();
+        let manifest = Manifest::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../sev_compiler/boundaries/driver/package.toml"),
+            &catalog,
+        )
+        .unwrap();
+        let graph = manifest.module_graph(false);
+        let root = graph.packages.get(&graph.root).unwrap();
+        assert!(root.dependencies.contains_key("abi"));
+        assert!(!root.dependencies.contains_key("runtime"));
+        severian_modules::resolve_with_packages(
+            manifest.library.as_ref().unwrap().path.as_path(),
+            &graph,
+        )
+        .unwrap();
+        let compiler = crate::Compiler::new(severian_target::TargetSpec::host())
+            .unwrap()
+            .with_packages(graph);
+        let output = std::env::temp_dir().join(format!(
+            "severian-bootstrap-driver-test-{}",
+            std::process::id()
+        ));
+        compiler
+            .compile_file(&manifest.bins[0].path, &output)
+            .unwrap();
+        compiler
+            .check_file(&manifest.library.as_ref().unwrap().path)
+            .unwrap();
+        std::fs::remove_file(output).unwrap();
+    }
 }

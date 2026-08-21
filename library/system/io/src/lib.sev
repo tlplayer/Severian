@@ -13,8 +13,41 @@ def print(value: float) -> i32
 @c(symbol = "__sev_print_i32")
 def print(value: i32) -> i32
 
+@c(symbol = "__sev_print_i8")
+def print(value: i8) -> i32
+
+@c(symbol = "__sev_print_i16")
+def print(value: i16) -> i32
+
 @c(symbol = "__sev_print_i64")
 def print(value: i64) -> i32
+
+@c(symbol = "__sev_print_i128")
+def print(value: i128) -> i32
+
+@c(symbol = "__sev_print_isize")
+def print(value: isize) -> i32
+
+@c(symbol = "__sev_print_u8")
+def print(value: u8) -> i32
+
+@c(symbol = "__sev_print_u16")
+def print(value: u16) -> i32
+
+@c(symbol = "__sev_print_u32")
+def print(value: u32) -> i32
+
+@c(symbol = "__sev_print_u64")
+def print(value: u64) -> i32
+
+@c(symbol = "__sev_print_u128")
+def print(value: u128) -> i32
+
+@c(symbol = "__sev_print_usize")
+def print(value: usize) -> i32
+
+@c(symbol = "__sev_print_f32")
+def print(value: f32) -> i32
 
 @c(symbol = "__sev_print_f64")
 def print(value: f64) -> i32

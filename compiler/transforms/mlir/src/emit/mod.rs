@@ -48,28 +48,51 @@ impl std::error::Error for MlirError {}
 pub fn render(module: &Module) -> Result<String, MlirError> {
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
+    let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
     for operation in all_operations(module) {
-        if let Operation::ArtifactCall {
-            artifact,
-            inputs,
-            outputs,
-        } = operation
-        {
-            let inputs = inputs
-                .iter()
-                .map(|value| value_type(module, *value))
-                .collect::<Result<Vec<_>, _>>()?;
-            let outputs = outputs
-                .iter()
-                .map(|value| value_type(module, *value))
-                .collect::<Result<Vec<_>, _>>()?;
-            if let Some((known_inputs, known_outputs)) = artifact_signatures.get(artifact) {
-                if known_inputs != &inputs || known_outputs != &outputs {
-                    return Err(MlirError::ArtifactSignatureConflict(*artifact));
+        match operation {
+            Operation::ArtifactCall {
+                artifact,
+                inputs,
+                outputs,
+            } => {
+                let inputs = inputs
+                    .iter()
+                    .map(|value| value_type(module, *value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let outputs = outputs
+                    .iter()
+                    .map(|value| value_type(module, *value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if let Some((known_inputs, known_outputs)) = artifact_signatures.get(artifact) {
+                    if known_inputs != &inputs || known_outputs != &outputs {
+                        return Err(MlirError::ArtifactSignatureConflict(*artifact));
+                    }
+                } else {
+                    artifact_signatures.insert(*artifact, (inputs, outputs));
                 }
-            } else {
-                artifact_signatures.insert(*artifact, (inputs, outputs));
             }
+            Operation::RuntimeCall {
+                symbol,
+                arguments,
+                result,
+            } => {
+                let inputs = arguments
+                    .iter()
+                    .map(|value| value_type(module, *value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = result.map(|value| value_type(module, value)).transpose()?;
+                if let Some(known) =
+                    runtime_signatures.insert(symbol.clone(), (inputs.clone(), result))
+                {
+                    if known != (inputs, result) {
+                        return Err(MlirError::UnsupportedOperation(format!(
+                            "runtime symbol `{symbol}` has conflicting physical signatures"
+                        )));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     let coverage = all_operations(module)
@@ -81,36 +104,20 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         .collect::<Vec<_>>();
 
     let mut output = String::from("module {\n");
-    if all_operations(module).into_iter().any(|operation| {
-        matches!(
-            operation,
-            Operation::Binary {
-                operator: BinaryOperation::Equal
-                    | BinaryOperation::NotEqual
-                    | BinaryOperation::Less
-                    | BinaryOperation::LessEqual
-                    | BinaryOperation::Greater
-                    | BinaryOperation::GreaterEqual,
-                left,
-                ..
-            } if value_type(module, *left) == Ok(LoweredType::String)
-        )
-    }) {
-        output.push_str("  func.func private @strcmp(!llvm.ptr, !llvm.ptr) -> i32\n");
-    }
-    if all_operations(module).into_iter().any(|operation| {
-        matches!(
-            operation,
-            Operation::Binary {
-                operator: BinaryOperation::Add,
-                left,
-                ..
-            } if value_type(module, *left) == Ok(LoweredType::String)
-        )
-    }) {
-        output.push_str(
-            "  func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
-        );
+    for (symbol, (inputs, result)) in runtime_signatures {
+        let inputs = inputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        let result = result
+            .map(mlir_type)
+            .transpose()?
+            .map(|result| format!(" -> {result}"))
+            .unwrap_or_default();
+        output.push_str(&format!(
+            "  func.func private @{symbol}({inputs}){result}\n"
+        ));
     }
     if !coverage.is_empty() {
         output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
@@ -253,41 +260,6 @@ fn render_block(
                 result,
             } => {
                 let input_type = value_type(module, *left)?;
-                if input_type == LoweredType::String {
-                    if *operator == BinaryOperation::Add {
-                        output.push_str(&format!(
-                            "{indentation}%v{} = func.call @__sev_string_concat(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
-                            result.0, left.0, right.0
-                        ));
-                        continue;
-                    }
-                    let predicate = match operator {
-                        BinaryOperation::Equal => "eq",
-                        BinaryOperation::NotEqual => "ne",
-                        BinaryOperation::Less => "slt",
-                        BinaryOperation::LessEqual => "sle",
-                        BinaryOperation::Greater => "sgt",
-                        BinaryOperation::GreaterEqual => "sge",
-                        _ => {
-                            return Err(MlirError::UnsupportedOperation(format!(
-                                "MLIR string lowering is unavailable for {operator:?}"
-                            )))
-                        }
-                    };
-                    output.push_str(&format!(
-                        "{indentation}%v{}_strcmp = func.call @strcmp(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> i32\n",
-                        result.0, left.0, right.0
-                    ));
-                    output.push_str(&format!(
-                        "{indentation}%v{}_zero = arith.constant 0 : i32\n",
-                        result.0
-                    ));
-                    output.push_str(&format!(
-                        "{indentation}%v{} = arith.cmpi {predicate}, %v{}_strcmp, %v{}_zero : i32\n",
-                        result.0, result.0, result.0
-                    ));
-                    continue;
-                }
                 let spelling = mlir_type(input_type)?;
                 let instruction = mlir_binary(*operator, input_type)?;
                 output.push_str(&format!(
@@ -318,6 +290,33 @@ fn render_block(
                         "{indentation}%v{} = func.call @{}({arguments}) : ({argument_types}) -> {result_type}\n",
                         result.0,
                         function_symbol(target),
+                    ));
+                }
+            }
+            Operation::RuntimeCall {
+                symbol,
+                arguments,
+                result,
+            } => {
+                let arguments_text = arguments
+                    .iter()
+                    .map(|value| format!("%v{}", value.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let argument_types = arguments
+                    .iter()
+                    .map(|value| mlir_type(value_type(module, *value)?))
+                    .collect::<Result<Vec<_>, MlirError>>()?
+                    .join(", ");
+                if let Some(result) = result {
+                    let result_type = mlir_type(value_type(module, *result)?)?;
+                    output.push_str(&format!(
+                        "{indentation}%v{} = func.call @{symbol}({arguments_text}) : ({argument_types}) -> {result_type}\n",
+                        result.0
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "{indentation}func.call @{symbol}({arguments_text}) : ({argument_types}) -> ()\n"
                     ));
                 }
             }
@@ -710,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn string_addition_uses_the_shared_runtime_abi() {
+    fn mlir_emitter_handles_lowered_runtime_calls_generically() {
         let module = Module {
             values: (0..3)
                 .map(|id| severian_lir::Value {
@@ -728,11 +727,10 @@ mod tests {
                         value: Constant::String("right".into()),
                         result: ValueId(1),
                     },
-                    Operation::Binary {
-                        operator: BinaryOperation::Add,
-                        left: ValueId(0),
-                        right: ValueId(1),
-                        result: ValueId(2),
+                    Operation::RuntimeCall {
+                        symbol: "__sev_string_concat".into(),
+                        arguments: vec![ValueId(0), ValueId(1)],
+                        result: Some(ValueId(2)),
                     },
                 ],
             },

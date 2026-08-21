@@ -1,5 +1,5 @@
 [workspace]
-members = ["library", "sev_compiler"]
+members = ["library", "sev_compiler/boundaries/driver"]
 
 [build]
 pipeline = [

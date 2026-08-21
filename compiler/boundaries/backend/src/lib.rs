@@ -5,6 +5,7 @@ pub use severian_lir::{
     BinaryOperation, Block, Constant, Function, FunctionId, FunctionLinkage, LoweredType,
     Module as LoweredModule, Operation, UnaryOperation, ValueId,
 };
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -78,8 +79,48 @@ impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     let mut output = String::from(
-        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\nconst char *__sev_string_concat(const char *left, const char *right);\n\n",
+        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\n",
     );
+    let mut runtime_signatures = BTreeMap::new();
+    for operation in all_operations(module) {
+        let Operation::RuntimeCall {
+            symbol,
+            arguments,
+            result,
+        } = operation
+        else {
+            continue;
+        };
+        let inputs = arguments
+            .iter()
+            .map(|argument| value_type(module, *argument))
+            .collect::<Result<Vec<_>, _>>()?;
+        let output_type = result
+            .map(|result| value_type(module, result))
+            .transpose()?;
+        if let Some(known) =
+            runtime_signatures.insert(symbol.clone(), (inputs.clone(), output_type))
+        {
+            if known != (inputs, output_type) {
+                return Err(BackendError::UnsupportedOperation(format!(
+                    "runtime symbol `{symbol}` has conflicting physical signatures"
+                )));
+            }
+        }
+    }
+    for (symbol, (inputs, result)) in runtime_signatures {
+        let inputs = inputs
+            .into_iter()
+            .map(c_type)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        output.push_str(&format!(
+            "{} {symbol}({});\n",
+            result.map(c_type).transpose()?.unwrap_or("void"),
+            if inputs.is_empty() { "void" } else { &inputs }
+        ));
+    }
+    output.push('\n');
     for value in &module.globals {
         output.push_str(&format!(
             "static {} v{};\n",
@@ -219,37 +260,6 @@ fn render_block(
                 let result_type = value_type(module, *result)?;
                 let left_type = value_type(module, *left)?;
                 let right_type = value_type(module, *right)?;
-                if left_type == LoweredType::String && right_type == LoweredType::String {
-                    if *operator == BinaryOperation::Add {
-                        define_value(
-                            output,
-                            module,
-                            *result,
-                            &format!("__sev_string_concat(v{}, v{})", left.0, right.0),
-                        )?;
-                        continue;
-                    }
-                    let comparison = match operator {
-                        BinaryOperation::Equal => "== 0",
-                        BinaryOperation::NotEqual => "!= 0",
-                        BinaryOperation::Less => "< 0",
-                        BinaryOperation::LessEqual => "<= 0",
-                        BinaryOperation::Greater => "> 0",
-                        BinaryOperation::GreaterEqual => ">= 0",
-                        _ => {
-                            return Err(BackendError::UnsupportedOperation(
-                                "this string operation requires a lowered runtime interface".into(),
-                            ))
-                        }
-                    };
-                    define_value(
-                        output,
-                        module,
-                        *result,
-                        &format!("strcmp(v{}, v{}) {comparison}", left.0, right.0),
-                    )?;
-                    continue;
-                }
                 if matches!(left_type, LoweredType::String | LoweredType::Bytes)
                     || matches!(right_type, LoweredType::String | LoweredType::Bytes)
                 {
@@ -281,6 +291,23 @@ fn render_block(
                     output.push_str(&format!("    {call};\n"));
                 } else {
                     define_value(output, module, *result, &call)?;
+                }
+            }
+            Operation::RuntimeCall {
+                symbol,
+                arguments,
+                result,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| format!("v{}", argument.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let call = format!("{symbol}({arguments})");
+                if let Some(result) = result {
+                    define_value(output, module, *result, &call)?;
+                } else {
+                    output.push_str(&format!("    {call};\n"));
                 }
             }
             Operation::Return { value } => match value {
@@ -370,6 +397,34 @@ fn function(module: &LoweredModule, id: FunctionId) -> Result<&Function, Backend
         .ok_or_else(|| BackendError::UnsupportedOperation(format!("unknown LIR function {}", id.0)))
 }
 
+fn all_operations(module: &LoweredModule) -> Vec<&Operation> {
+    let mut operations = Vec::new();
+    collect_operations(&module.initializer, &mut operations);
+    for body in module
+        .functions
+        .iter()
+        .filter_map(|function| function.body.as_ref())
+    {
+        collect_operations(body, &mut operations);
+    }
+    operations
+}
+
+fn collect_operations<'a>(block: &'a Block, operations: &mut Vec<&'a Operation>) {
+    for operation in &block.operations {
+        operations.push(operation);
+        if let Operation::If {
+            then_block,
+            else_block,
+            ..
+        } = operation
+        {
+            collect_operations(then_block, operations);
+            collect_operations(else_block, operations);
+        }
+    }
+}
+
 fn function_name(function: &Function) -> String {
     match &function.linkage {
         FunctionLinkage::Internal => format!("__sev_fn_{}", function.id.0),
@@ -456,8 +511,10 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
 
 fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> {
     match (value, ty) {
-        (Constant::Integer(spelling), LoweredType::Integer { .. })
-        | (Constant::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
+        (Constant::Integer(spelling), LoweredType::Integer { bits, signed }) => {
+            c_integer_literal(spelling, bits, signed)
+        }
+        (Constant::Float(spelling), LoweredType::Float { .. }) => Ok(spelling.clone()),
         (Constant::Boolean(value), LoweredType::Boolean) => {
             Ok(if *value { "1" } else { "0" }.into())
         }
@@ -467,6 +524,33 @@ fn c_literal(value: &Constant, ty: LoweredType) -> Result<String, BackendError> 
             "C backend cannot emit {value:?} as {ty:?}"
         ))),
     }
+}
+
+fn c_integer_literal(spelling: &str, bits: u16, signed: bool) -> Result<String, BackendError> {
+    if bits != 128 {
+        return Ok(spelling.to_owned());
+    }
+    let value = if signed {
+        spelling.parse::<i128>().map(|value| value as u128)
+    } else {
+        spelling.parse::<u128>()
+    }
+    .map_err(|_| {
+        BackendError::UnsupportedOperation(format!(
+            "invalid {}128 integer literal `{spelling}`",
+            if signed { "i" } else { "u" }
+        ))
+    })?;
+    let high = value >> 64;
+    let low = value as u64;
+    let limbs = format!(
+        "((((unsigned __int128)UINT64_C(0x{high:016x})) << 64) | (unsigned __int128)UINT64_C(0x{low:016x}))"
+    );
+    Ok(if signed {
+        format!("((__int128){limbs})")
+    } else {
+        limbs
+    })
 }
 
 fn c_string_literal(value: &str) -> String {
@@ -524,10 +608,9 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
 
 pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact, BackendError> {
     let source = render_c(module)?;
-    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/coverage_runtime.c");
     let mut child = Command::new("cc")
         .args(["-std=c11", "-x", "c", "-"])
-        .arg(runtime)
+        .args(severian_runtime::native_sources())
         .arg("-o")
         .arg(output)
         .stdin(Stdio::piped())
@@ -582,24 +665,28 @@ pub fn emit_mlir_executable(
     )?;
     let target = format!("--target={target_triple}");
     let output_path = output.to_string_lossy().into_owned();
-    let coverage_runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/coverage_runtime.c")
-        .to_string_lossy()
-        .into_owned();
+    let mut clang_arguments = vec![
+        target,
+        "-x".into(),
+        "ir".into(),
+        "-".into(),
+        "-x".into(),
+        "c".into(),
+    ];
+    clang_arguments.extend(
+        severian_runtime::native_sources()
+            .into_iter()
+            .map(|source| source.to_string_lossy().into_owned()),
+    );
+    clang_arguments.extend(["-o".into(), output_path]);
+    let clang_arguments = clang_arguments
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     run_tool(
         "clang",
         tool("SEVERIAN_CLANG", "clang-21"),
-        &[
-            &target,
-            "-x",
-            "ir",
-            "-",
-            "-x",
-            "c",
-            &coverage_runtime,
-            "-o",
-            &output_path,
-        ],
+        &clang_arguments,
         &llvm_ir,
     )?;
     Ok(Artifact {
@@ -695,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn c_string_addition_uses_the_shared_runtime_abi() {
+    fn c_emitter_handles_lowered_runtime_calls_generically() {
         let module = LoweredModule {
             values: (0..3)
                 .map(|id| Value {
@@ -713,11 +800,10 @@ mod tests {
                         value: Constant::String("right".into()),
                         result: ValueId(1),
                     },
-                    Operation::Binary {
-                        operator: BinaryOperation::Add,
-                        left: ValueId(0),
-                        right: ValueId(1),
-                        result: ValueId(2),
+                    Operation::RuntimeCall {
+                        symbol: "__sev_string_concat".into(),
+                        arguments: vec![ValueId(0), ValueId(1)],
+                        result: Some(ValueId(2)),
                     },
                 ],
             },
@@ -725,5 +811,22 @@ mod tests {
         };
         let rendered = render_c(&module).unwrap();
         assert!(rendered.contains("__sev_string_concat(v0, v1)"));
+        assert!(rendered.contains("const char * __sev_string_concat(const char *, const char *);"));
+    }
+
+    #[test]
+    fn i128_literals_are_composed_from_exact_u64_limbs() {
+        assert_eq!(
+            c_integer_literal(&i128::MIN.to_string(), 128, true).unwrap(),
+            "((__int128)((((unsigned __int128)UINT64_C(0x8000000000000000)) << 64) | (unsigned __int128)UINT64_C(0x0000000000000000)))"
+        );
+        assert_eq!(
+            c_integer_literal(&i128::MAX.to_string(), 128, true).unwrap(),
+            "((__int128)((((unsigned __int128)UINT64_C(0x7fffffffffffffff)) << 64) | (unsigned __int128)UINT64_C(0xffffffffffffffff)))"
+        );
+        assert_eq!(
+            c_integer_literal(&u128::MAX.to_string(), 128, false).unwrap(),
+            "((((unsigned __int128)UINT64_C(0xffffffffffffffff)) << 64) | (unsigned __int128)UINT64_C(0xffffffffffffffff))"
+        );
     }
 }

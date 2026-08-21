@@ -13,6 +13,12 @@ pub(crate) struct Discovery {
     pub packages: Vec<PathBuf>,
 }
 
+pub(crate) struct RunTargets<'a> {
+    pub sources: &'a [PathBuf],
+    pub packages: &'a [PathBuf],
+    pub output_root: &'a Path,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CoverageSummary {
     lines: f64,
@@ -53,12 +59,15 @@ pub(crate) fn run(
     compiler: &Compiler,
     manifest: &Manifest,
     validation: &ValidationManifest,
-    sources: &[PathBuf],
-    fixture_packages: &[PathBuf],
-    output_root: &Path,
+    targets: RunTargets<'_>,
     catalog: &Catalog,
     options: &super::CommonOptions,
 ) -> Result<(), String> {
+    let RunTargets {
+        sources,
+        packages: fixture_packages,
+        output_root,
+    } = targets;
     let coverage_file = output_root.join("coverage.hits");
     let test_result =
         test_runner::run_with_coverage(compiler, sources, output_root, Some(&coverage_file));

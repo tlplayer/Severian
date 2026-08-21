@@ -1,2 +1,0 @@
-# Bootstrap module counterpart of compiler/transforms/mlir/src/operations.
-# Fill this boundary while preserving its paired Rust responsibility.

@@ -18,7 +18,7 @@ pub fn lower(
     types: &TypeContext,
     target: &TargetSpec,
 ) -> Result<LirModule, LoweringError> {
-    let values = mir
+    let mut values = mir
         .values
         .iter()
         .map(|value| {
@@ -28,34 +28,31 @@ pub fn lower(
             })
         })
         .collect::<Result<Vec<_>, LoweringError>>()?;
-    let initializer = lower_block(&mir.initializer, mir)?;
-    let functions = mir
-        .functions
-        .iter()
-        .map(|function| {
-            Ok(LirFunction {
-                id: FunctionId(function.id.0),
-                name: function.name.clone(),
-                parameters: function
-                    .parameters
-                    .iter()
-                    .map(|value| ValueId(value.0))
-                    .collect(),
-                result: lower_type(function.result, types, target)?,
-                body: function
-                    .body
-                    .as_ref()
-                    .map(|body| lower_block(body, mir))
-                    .transpose()?,
-                linkage: match &function.call_type {
-                    severian_mir::CallType::Severian => FunctionLinkage::Internal,
-                    severian_mir::CallType::External(call) => FunctionLinkage::External {
-                        symbol: call.symbol.0.clone(),
-                    },
+    let initializer = lower_block(&mir.initializer, mir, types, target, &mut values)?;
+    let mut functions = Vec::new();
+    for function in &mir.functions {
+        functions.push(LirFunction {
+            id: FunctionId(function.id.0),
+            name: function.name.clone(),
+            parameters: function
+                .parameters
+                .iter()
+                .map(|value| ValueId(value.0))
+                .collect(),
+            result: lower_type(function.result, types, target)?,
+            body: function
+                .body
+                .as_ref()
+                .map(|body| lower_block(body, mir, types, target, &mut values))
+                .transpose()?,
+            linkage: match &function.call_type {
+                severian_mir::CallType::Severian => FunctionLinkage::Internal,
+                severian_mir::CallType::External(call) => FunctionLinkage::External {
+                    symbol: call.symbol.0.clone(),
                 },
-            })
-        })
-        .collect::<Result<Vec<_>, LoweringError>>()?;
+            },
+        });
+    }
     Ok(LirModule {
         values,
         globals: mir.globals.iter().map(|value| ValueId(value.0)).collect(),
@@ -65,8 +62,15 @@ pub fn lower(
     })
 }
 
-fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, LoweringError> {
+fn lower_block(
+    block: &MirBlock,
+    module: &MirModule,
+    types: &TypeContext,
+    target: &TargetSpec,
+    values: &mut Vec<Value>,
+) -> Result<LirBlock, LoweringError> {
     let mut operations = Vec::new();
+    let mut owned_strings = Vec::new();
     for operation in &block.operations {
         let operation = match operation {
             MirOperation::Coverage { point } => LirOperation::Coverage {
@@ -93,12 +97,68 @@ fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, Lowerin
                 left,
                 right,
                 result,
-            } => LirOperation::Binary {
-                operator: lower_binary(*operator),
-                left: ValueId(left.0),
-                right: ValueId(right.0),
-                result: ValueId(result.0),
-            },
+            } => {
+                let left_type = mir_value_type(module, *left)?;
+                if lower_type(left_type, types, target)? == LoweredType::String {
+                    match operator {
+                        BinaryOperator::Add => {
+                            let result = ValueId(result.0);
+                            owned_strings.push(result);
+                            LirOperation::RuntimeCall {
+                                symbol: "__sev_string_concat".into(),
+                                arguments: vec![ValueId(left.0), ValueId(right.0)],
+                                result: Some(result),
+                            }
+                        }
+                        BinaryOperator::Equal
+                        | BinaryOperator::NotEqual
+                        | BinaryOperator::Less
+                        | BinaryOperator::LessEqual
+                        | BinaryOperator::Greater
+                        | BinaryOperator::GreaterEqual => {
+                            let comparison = new_value(
+                                values,
+                                LoweredType::Integer {
+                                    bits: 32,
+                                    signed: true,
+                                },
+                            );
+                            let zero = new_value(
+                                values,
+                                LoweredType::Integer {
+                                    bits: 32,
+                                    signed: true,
+                                },
+                            );
+                            operations.push(LirOperation::RuntimeCall {
+                                symbol: "__sev_string_compare".into(),
+                                arguments: vec![ValueId(left.0), ValueId(right.0)],
+                                result: Some(comparison),
+                            });
+                            operations.push(LirOperation::Constant {
+                                value: Constant::Integer("0".into()),
+                                result: zero,
+                            });
+                            LirOperation::Binary {
+                                operator: lower_binary(*operator),
+                                left: comparison,
+                                right: zero,
+                                result: ValueId(result.0),
+                            }
+                        }
+                        _ => {
+                            return Err(LoweringError::UnsupportedStringOperation(*operator));
+                        }
+                    }
+                } else {
+                    LirOperation::Binary {
+                        operator: lower_binary(*operator),
+                        left: ValueId(left.0),
+                        right: ValueId(right.0),
+                        result: ValueId(result.0),
+                    }
+                }
+            }
             MirOperation::Call {
                 function,
                 arguments,
@@ -133,8 +193,8 @@ fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, Lowerin
                 else_block,
             } => LirOperation::If {
                 condition: ValueId(condition.0),
-                then_block: lower_block(then_block, module)?,
-                else_block: lower_block(else_block, module)?,
+                then_block: lower_block(then_block, module, types, target, values)?,
+                else_block: lower_block(else_block, module, types, target, values)?,
             },
             MirOperation::Match { subject, arms } => {
                 let subject_type = module
@@ -148,7 +208,8 @@ fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, Lowerin
                     .find(|arm| arm.type_id == Some(subject_type))
                     .or_else(|| arms.iter().find(|arm| arm.type_id.is_none()))
                     .ok_or(LoweringError::NonExhaustiveMatch(subject_type))?;
-                operations.extend(lower_block(&arm.body, module)?.operations);
+                operations
+                    .extend(lower_block(&arm.body, module, types, target, values)?.operations);
                 continue;
             }
             MirOperation::CompiledRegionCall {
@@ -163,7 +224,120 @@ fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, Lowerin
         };
         operations.push(operation);
     }
+    insert_owned_string_releases(&mut operations, &owned_strings, module)?;
     Ok(LirBlock { operations })
+}
+
+fn mir_value_type(
+    module: &MirModule,
+    value: severian_mir::ValueId,
+) -> Result<TypeId, LoweringError> {
+    module
+        .values
+        .iter()
+        .find(|known| known.id == value)
+        .map(|known| known.type_id)
+        .ok_or(LoweringError::UnknownValue(value))
+}
+
+fn new_value(values: &mut Vec<Value>, ty: LoweredType) -> ValueId {
+    let id = ValueId(values.len() as u32);
+    values.push(Value { id, ty });
+    id
+}
+
+fn insert_owned_string_releases(
+    operations: &mut Vec<LirOperation>,
+    owned: &[ValueId],
+    module: &MirModule,
+) -> Result<(), LoweringError> {
+    let mut releases = Vec::new();
+    for value in owned {
+        if module.globals.iter().any(|global| global.0 == value.0)
+            || operations
+                .iter()
+                .any(|operation| returns_value(operation, *value))
+        {
+            return Err(LoweringError::OwnedStringEscapes(*value));
+        }
+        let definition = operations
+            .iter()
+            .position(|operation| {
+                matches!(operation, LirOperation::RuntimeCall { result: Some(result), .. } if result == value)
+            })
+            .expect("every owned string is produced by a runtime call");
+        let last_use = operations
+            .iter()
+            .enumerate()
+            .filter(|(_, operation)| operation_uses_value(operation, *value))
+            .map(|(index, _)| index)
+            .max()
+            .unwrap_or(definition);
+        releases.push((last_use + 1, *value));
+    }
+    releases.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+    for (index, value) in releases {
+        operations.insert(
+            index,
+            LirOperation::RuntimeCall {
+                symbol: "__sev_string_release".into(),
+                arguments: vec![value],
+                result: None,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
+    match operation {
+        LirOperation::Unary { operand, .. } => *operand == value,
+        LirOperation::Binary { left, right, .. } => *left == value || *right == value,
+        LirOperation::Call { arguments, .. } | LirOperation::RuntimeCall { arguments, .. } => {
+            arguments.contains(&value)
+        }
+        LirOperation::Return { value: returned } => *returned == Some(value),
+        LirOperation::Assert {
+            condition, message, ..
+        } => *condition == value || *message == Some(value),
+        LirOperation::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            *condition == value
+                || then_block
+                    .operations
+                    .iter()
+                    .any(|operation| operation_uses_value(operation, value))
+                || else_block
+                    .operations
+                    .iter()
+                    .any(|operation| operation_uses_value(operation, value))
+        }
+        LirOperation::ArtifactCall {
+            inputs, outputs, ..
+        } => inputs.contains(&value) || outputs.contains(&value),
+        LirOperation::Coverage { .. } | LirOperation::Constant { .. } => false,
+    }
+}
+
+fn returns_value(operation: &LirOperation, value: ValueId) -> bool {
+    match operation {
+        LirOperation::Return {
+            value: Some(returned),
+        } => *returned == value,
+        LirOperation::If {
+            then_block,
+            else_block,
+            ..
+        } => then_block
+            .operations
+            .iter()
+            .chain(&else_block.operations)
+            .any(|operation| returns_value(operation, value)),
+        _ => false,
+    }
 }
 
 fn lower_constant(value: &LiteralValue) -> Constant {
@@ -250,6 +424,8 @@ pub enum LoweringError {
     NotPrimitive(TypeId),
     UnknownValue(severian_mir::ValueId),
     NonExhaustiveMatch(TypeId),
+    UnsupportedStringOperation(BinaryOperator),
+    OwnedStringEscapes(ValueId),
 }
 
 impl fmt::Display for LoweringError {
@@ -278,6 +454,29 @@ mod tests {
             )
             .unwrap();
         (UniversalContext::new(types.build()), id)
+    }
+
+    fn string_context() -> (UniversalContext, TypeId, TypeId) {
+        let mut types = TypeContextBuilder::new();
+        let string = types.register_declaration("core.string", "string").unwrap();
+        types
+            .define_primitive(
+                string,
+                PrimitiveCategory::Text,
+                PrimitiveRepresentation::String,
+                true,
+            )
+            .unwrap();
+        let boolean = types.register_declaration("core.bool", "bool").unwrap();
+        types
+            .define_primitive(
+                boolean,
+                PrimitiveCategory::Boolean,
+                PrimitiveRepresentation::Boolean,
+                true,
+            )
+            .unwrap();
+        (UniversalContext::new(types.build()), string, boolean)
     }
 
     #[test]
@@ -310,5 +509,112 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn string_operations_become_owned_runtime_calls_before_emission() {
+        let (context, string, boolean) = string_context();
+        let mir = Module {
+            values: vec![
+                MirValue {
+                    id: MirValueId(0),
+                    type_id: string,
+                },
+                MirValue {
+                    id: MirValueId(1),
+                    type_id: string,
+                },
+                MirValue {
+                    id: MirValueId(2),
+                    type_id: string,
+                },
+                MirValue {
+                    id: MirValueId(3),
+                    type_id: boolean,
+                },
+            ],
+            initializer: MirBlock {
+                operations: vec![
+                    MirOperation::Constant {
+                        value: LiteralValue::String("left".into()),
+                        result: MirValueId(0),
+                    },
+                    MirOperation::Constant {
+                        value: LiteralValue::String("right".into()),
+                        result: MirValueId(1),
+                    },
+                    MirOperation::Binary {
+                        operator: BinaryOperator::Add,
+                        left: MirValueId(0),
+                        right: MirValueId(1),
+                        result: MirValueId(2),
+                    },
+                    MirOperation::Binary {
+                        operator: BinaryOperator::Equal,
+                        left: MirValueId(2),
+                        right: MirValueId(1),
+                        result: MirValueId(3),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+        let lir = lower(&mir, &context.types, &TargetSpec::host()).unwrap();
+        let symbols = lir
+            .initializer
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                LirOperation::RuntimeCall { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            symbols,
+            [
+                "__sev_string_concat",
+                "__sev_string_compare",
+                "__sev_string_release"
+            ]
+        );
+    }
+
+    #[test]
+    fn owned_string_escape_fails_closed_until_transfer_is_modeled() {
+        let (context, string, _) = string_context();
+        let mir = Module {
+            values: (0..3)
+                .map(|id| MirValue {
+                    id: MirValueId(id),
+                    type_id: string,
+                })
+                .collect(),
+            initializer: MirBlock {
+                operations: vec![
+                    MirOperation::Constant {
+                        value: LiteralValue::String("left".into()),
+                        result: MirValueId(0),
+                    },
+                    MirOperation::Constant {
+                        value: LiteralValue::String("right".into()),
+                        result: MirValueId(1),
+                    },
+                    MirOperation::Binary {
+                        operator: BinaryOperator::Add,
+                        left: MirValueId(0),
+                        right: MirValueId(1),
+                        result: MirValueId(2),
+                    },
+                    MirOperation::Return {
+                        value: Some(MirValueId(2)),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+        assert!(matches!(
+            lower(&mir, &context.types, &TargetSpec::host()),
+            Err(LoweringError::OwnedStringEscapes(ValueId(2)))
+        ));
     }
 }

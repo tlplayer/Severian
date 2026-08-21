@@ -1,0 +1,7 @@
+# Bootstrap counterpart of compiler/runtime/src/lib.rs.
+
+def runtime_abi_version() -> int:
+    return 1
+
+test "runtime ABI is versioned":
+    assert(runtime_abi_version() == 1)

@@ -1,2 +1,8 @@
 # Bootstrap counterpart of compiler/boundaries/driver/src/main.rs.
 # Translate the Rust behavior here; parity is checked with shared fixtures.
+# Until that translation exists, fail closed instead of presenting an empty
+# executable as a working bootstrap stage.
+
+def main():
+    print("sev bootstrap driver is not implemented yet")
+    assert(false)

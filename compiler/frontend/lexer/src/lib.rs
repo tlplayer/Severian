@@ -70,4 +70,28 @@ mod tests {
         assert_eq!(error.code, "E000101");
         assert!(error.message.contains("block string"));
     }
+
+    #[test]
+    fn block_strings_preserve_unicode_and_blank_lines() {
+        let source = SourceFile::virtual_source(
+            "unicode-block.sev",
+            "value = \"\"\"\n    λ\n\n    世界\n    \"\"\"\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::String("λ\n\n世界\n".into())));
+    }
+
+    #[test]
+    fn block_string_tabs_have_the_same_width_as_source_indentation() {
+        let source = SourceFile::virtual_source(
+            "tabbed-block.sev",
+            "value = \"\"\"\n\tfirst\n\t\tsecond\n    third\n\t\"\"\"\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::String("first\n\tsecond\nthird\n".into())));
+    }
 }
