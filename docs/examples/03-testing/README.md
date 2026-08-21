@@ -37,6 +37,12 @@ test with property and chaos "generated inputs under injected failures":
 
 The files in this directory demonstrate each form and representative use cases.
 
+Compiler tests currently accept only `accept:` and `reject:` cases. Their
+fragments have already passed lexing and parsing, so they test semantic
+compilation rather than lexer/parser diagnostics. A named diagnostic binding
+such as `reject error:` is reserved for the future diagnostic object model and
+is rejected for now instead of being silently ignored.
+
 Run every test with `sev test`. Run only profile tests and enforce their runtime
 contracts with `sev test --profile`. During development, use
 `sev test --profile --memory` to combine the profile report with native address

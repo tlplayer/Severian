@@ -48,13 +48,7 @@ impl std::error::Error for MlirError {}
 pub fn render(module: &Module) -> Result<String, MlirError> {
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
-    for operation in module.initializer.operations.iter().chain(
-        module
-            .functions
-            .iter()
-            .filter_map(|function| function.body.as_ref())
-            .flat_map(|body| &body.operations),
-    ) {
+    for operation in all_operations(module) {
         if let Operation::ArtifactCall {
             artifact,
             inputs,
@@ -129,7 +123,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         render_function_definition(&mut output, module, function)?;
     }
     output.push_str("  func.func @main() -> i32 {\n");
-    render_block(&mut output, module, &module.initializer)?;
+    render_block(&mut output, module, &module.initializer, 4, None)?;
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
         if !function.parameters.is_empty() {
@@ -147,7 +141,14 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     Ok(output)
 }
 
-fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(), MlirError> {
+fn render_block(
+    output: &mut String,
+    module: &Module,
+    block: &Block,
+    indent: usize,
+    function_result: Option<LoweredType>,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
     for operation in &block.operations {
         match operation {
             Operation::Constant { value, result } => {
@@ -159,7 +160,7 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                     Constant::Boolean(false) => "0",
                     Constant::String(_) => {
                         output.push_str(&format!(
-                            "    %v{} = llvm.mlir.addressof @{} : !llvm.ptr\n",
+                            "{indentation}%v{} = llvm.mlir.addressof @{} : !llvm.ptr\n",
                             result.0,
                             string_symbol(*result),
                         ));
@@ -172,7 +173,7 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                     }
                 };
                 output.push_str(&format!(
-                    "    %v{} = arith.constant {literal} : {spelling}\n",
+                    "{indentation}%v{} = arith.constant {literal} : {spelling}\n",
                     result.0
                 ));
             }
@@ -197,7 +198,7 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                 let spelling = mlir_type(input_type)?;
                 let instruction = mlir_binary(*operator, input_type)?;
                 output.push_str(&format!(
-                    "    %v{} = {instruction} %v{}, %v{} : {spelling}\n",
+                    "{indentation}%v{} = {instruction} %v{}, %v{} : {spelling}\n",
                     result.0, left.0, right.0
                 ));
             }
@@ -213,34 +214,70 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                     .collect::<Vec<_>>()
                     .join(", ");
                 let argument_types = argument_types(module, target)?;
-                let result_type = mlir_type(value_type(module, *result)?)?;
                 if target.result == LoweredType::Unit {
                     output.push_str(&format!(
-                        "    func.call @{}({arguments}) : ({argument_types}) -> ()\n",
+                        "{indentation}func.call @{}({arguments}) : ({argument_types}) -> ()\n",
                         function_symbol(target),
                     ));
                 } else {
+                    let result_type = mlir_type(value_type(module, *result)?)?;
                     output.push_str(&format!(
-                        "    %v{} = func.call @{}({arguments}) : ({argument_types}) -> {result_type}\n",
+                        "{indentation}%v{} = func.call @{}({arguments}) : ({argument_types}) -> {result_type}\n",
                         result.0,
                         function_symbol(target),
                     ));
                 }
             }
-            Operation::Return { .. } => {
-                return Err(MlirError::UnsupportedOperation(
-                    "return requires control-flow-aware MLIR lowering".into(),
-                ));
+            Operation::Return { value } => {
+                let expected = function_result.ok_or_else(|| {
+                    MlirError::UnsupportedOperation(
+                        "return is not valid in module initialization".into(),
+                    )
+                })?;
+                match (value, expected) {
+                    (None, LoweredType::Unit) => {
+                        output.push_str(&format!("{indentation}return\n"));
+                    }
+                    (Some(value), expected) if expected != LoweredType::Unit => {
+                        let actual = value_type(module, *value)?;
+                        if actual != expected {
+                            return Err(MlirError::SignatureMismatch);
+                        }
+                        output.push_str(&format!(
+                            "{indentation}return %v{} : {}\n",
+                            value.0,
+                            mlir_type(actual)?
+                        ));
+                    }
+                    _ => return Err(MlirError::SignatureMismatch),
+                }
             }
             Operation::Assert { .. } => {
                 return Err(MlirError::UnsupportedOperation(
                     "assert requires the standard test runtime lowering path".into(),
                 ));
             }
-            Operation::If { .. } => {
-                return Err(MlirError::UnsupportedOperation(
-                    "if requires control-flow-aware MLIR lowering".into(),
-                ));
+            Operation::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                if block_contains_return(then_block) || block_contains_return(else_block) {
+                    return Err(MlirError::UnsupportedOperation(
+                        "return inside if requires CFG lowering".into(),
+                    ));
+                }
+                output.push_str(&format!("{indentation}scf.if %v{} {{\n", condition.0));
+                render_block(output, module, then_block, indent + 2, function_result)?;
+                output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
+                if else_block.operations.is_empty() {
+                    output.push_str(&format!("{indentation}}}\n"));
+                } else {
+                    output.push_str(&format!("{indentation}}} else {{\n"));
+                    render_block(output, module, else_block, indent + 2, function_result)?;
+                    output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
+                    output.push_str(&format!("{indentation}}}\n"));
+                }
             }
             Operation::ArtifactCall {
                 artifact,
@@ -260,12 +297,12 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                     .join(", ");
                 match outputs.as_slice() {
                     [] => output.push_str(&format!(
-                        "    func.call @{symbol}({arguments}) : ({input_types}) -> ()\n"
+                        "{indentation}func.call @{symbol}({arguments}) : ({input_types}) -> ()\n"
                     )),
                     [result] => {
                         let ty = mlir_type(value_type(module, *result)?)?;
                         output.push_str(&format!(
-                            "    %v{} = func.call @{symbol}({arguments}) : ({input_types}) -> {ty}\n",
+                            "{indentation}%v{} = func.call @{symbol}({arguments}) : ({input_types}) -> {ty}\n",
                             result.0
                         ));
                     }
@@ -281,11 +318,14 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                             .collect::<Result<Vec<_>, _>>()?
                             .join(", ");
                         output.push_str(&format!(
-                            "    {result_names} = func.call @{symbol}({arguments}) : ({input_types}) -> ({result_types})\n"
+                            "{indentation}{result_names} = func.call @{symbol}({arguments}) : ({input_types}) -> ({result_types})\n"
                         ));
                     }
                 }
             }
+        }
+        if matches!(operation, Operation::Return { .. }) {
+            break;
         }
     }
     Ok(())
@@ -324,12 +364,6 @@ fn render_function_definition(
     module: &Module,
     function: &Function,
 ) -> Result<(), MlirError> {
-    if function.result != LoweredType::Unit {
-        return Err(MlirError::UnsupportedOperation(format!(
-            "function `{}` requires explicit return lowering",
-            function.name
-        )));
-    }
     let parameters = function
         .parameters
         .iter()
@@ -342,16 +376,23 @@ fn render_function_definition(
         })
         .collect::<Result<Vec<_>, MlirError>>()?
         .join(", ");
+    let result = function_result(function.result)?;
     output.push_str(&format!(
-        "  func.func private @{}({parameters}) {{\n",
+        "  func.func private @{}({parameters}){result} {{\n",
         function_symbol(function),
     ));
-    render_block(
-        output,
-        module,
-        function.body.as_ref().expect("filtered source body"),
-    )?;
-    output.push_str("    return\n  }\n");
+    let body = function.body.as_ref().expect("filtered source body");
+    render_block(output, module, body, 4, Some(function.result))?;
+    if !block_terminates(body) {
+        if function.result != LoweredType::Unit {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "function `{}` falls through without returning a value",
+                function.name
+            )));
+        }
+        output.push_str("    return\n");
+    }
+    output.push_str("  }\n");
     Ok(())
 }
 
@@ -378,14 +419,60 @@ fn function_symbol(function: &Function) -> String {
     }
 }
 
-fn all_operations(module: &Module) -> impl Iterator<Item = &Operation> {
-    module.initializer.operations.iter().chain(
-        module
-            .functions
-            .iter()
-            .filter_map(|function| function.body.as_ref())
-            .flat_map(|body| &body.operations),
-    )
+fn all_operations(module: &Module) -> Vec<&Operation> {
+    let mut operations = Vec::new();
+    collect_operations(&module.initializer, &mut operations);
+    for body in module
+        .functions
+        .iter()
+        .filter_map(|function| function.body.as_ref())
+    {
+        collect_operations(body, &mut operations);
+    }
+    operations
+}
+
+fn collect_operations<'a>(block: &'a Block, operations: &mut Vec<&'a Operation>) {
+    for operation in &block.operations {
+        operations.push(operation);
+        if let Operation::If {
+            then_block,
+            else_block,
+            ..
+        } = operation
+        {
+            collect_operations(then_block, operations);
+            collect_operations(else_block, operations);
+        }
+    }
+}
+
+fn block_contains_return(block: &Block) -> bool {
+    block.operations.iter().any(|operation| match operation {
+        Operation::Return { .. } => true,
+        Operation::If {
+            then_block,
+            else_block,
+            ..
+        } => block_contains_return(then_block) || block_contains_return(else_block),
+        _ => false,
+    })
+}
+
+fn block_terminates(block: &Block) -> bool {
+    block.operations.iter().any(|operation| match operation {
+        Operation::Return { .. } => true,
+        Operation::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            !else_block.operations.is_empty()
+                && block_terminates(then_block)
+                && block_terminates(else_block)
+        }
+        _ => false,
+    })
 }
 
 fn string_symbol(result: ValueId) -> String {
@@ -560,6 +647,44 @@ mod tests {
         let composed = compose(&ordinary, &[artifact], &target).unwrap();
         assert!(composed.contains("call @__sev_artifact_0"));
         assert!(composed.contains("func.func @__sev_artifact_0"));
+    }
+
+    #[test]
+    fn nested_artifact_calls_are_declared_and_rendered_inside_control_flow() {
+        let ordinary = render(&Module {
+            values: vec![severian_lir::Value {
+                id: ValueId(0),
+                ty: LoweredType::Boolean,
+            }],
+            globals: vec![],
+            initializer: Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: Constant::Boolean(true),
+                        result: ValueId(0),
+                    },
+                    Operation::If {
+                        condition: ValueId(0),
+                        then_block: Block {
+                            operations: vec![Operation::ArtifactCall {
+                                artifact: artifact_id(),
+                                inputs: vec![],
+                                outputs: vec![],
+                            }],
+                        },
+                        else_block: Block::default(),
+                    },
+                ],
+            },
+            functions: vec![],
+            entry: None,
+        })
+        .unwrap();
+
+        assert!(ordinary.contains("func.func private @__sev_artifact_0()"));
+        assert!(ordinary.contains("scf.if %v0"));
+        assert!(ordinary.contains("func.call @__sev_artifact_0()"));
+        compose(&ordinary, &[], &TargetSpec::new("x86_64-unknown-linux")).unwrap();
     }
 
     #[test]

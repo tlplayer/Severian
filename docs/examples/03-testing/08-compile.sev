@@ -1,23 +1,16 @@
 def foo(x: int) -> int:
     return x + 1
 
-test with compiler:
-    #Should not compile foo get the error
-    reject error:
+test with compiler "checks accepted and rejected semantic fragments":
+    # This fragment reaches semantic analysis and must be rejected.
+    reject:
         foo("bar")
-    #Should accept 1 get result
+
+    # This fragment must be accepted.
     accept:
         value = foo(1)
-    assert(value == 1)
-    assert(error.code == "E0012")
-    assert(error.severity == Error)
-    assert(error.message.contains("expected int"))
 
-test with compiler:
-    #borrow check will error on this
-    reject error:
-        value := Thing()
-        moved := move value
-        print(value)
-    #TODO: change the error code to match also error codes should locase like E001001 not E000101 3 and 3 
-    assert(error.code == "E000")
+test with compiler "rejects duplicate declarations":
+    reject:
+        value := 1
+        value := 2

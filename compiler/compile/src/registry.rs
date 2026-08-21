@@ -52,6 +52,7 @@ impl CompilerRegistry {
                 PlanSegment::Compiler(region) => Some(region),
                 PlanSegment::Standard(_) => None,
             })
+            .chain(&plan.nested_regions)
             .map(|region| {
                 let handler = self
                     .handlers

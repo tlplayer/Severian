@@ -6,6 +6,7 @@ use severian_mir::{Module as MirModule, Operation as MirOperation, Value as MirV
 use severian_source::SourceFile;
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
@@ -52,6 +53,12 @@ pub struct CompiledTest {
 pub enum TestExecution {
     Executable(Artifact),
     Compiler { failure: Option<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompileMode {
+    Build,
+    Test,
 }
 
 impl Compiler {
@@ -124,12 +131,18 @@ impl Compiler {
     fn check_source_to_mir(&self, source: &SourceFile) -> Result<MirModule, CompileError> {
         let tokens = severian_lexer::scan(source).map_err(CompileError::Diagnostic)?;
         let ast = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
-        let mut mir = self.check_ast_to_mir(&ast)?;
+        let mut mir =
+            self.check_ast_to_mir(&ast, CompileMode::Build, &module_name(&source.path))?;
         attach_assertion_locations(&mut mir, source);
         Ok(mir)
     }
 
-    fn check_ast_to_mir(&self, ast: &severian_ast::Module) -> Result<MirModule, CompileError> {
+    fn check_ast_to_mir(
+        &self,
+        ast: &severian_ast::Module,
+        mode: CompileMode,
+        module_name: &str,
+    ) -> Result<MirModule, CompileError> {
         let ast = with_core_prelude(ast, &self.context.types)?;
         let external = severian_xxi::resolve(
             &ast,
@@ -139,8 +152,18 @@ impl Compiler {
         .map_err(|error| {
             CompileError::Diagnostic(Diagnostic::new("E000701", error.to_string(), None))
         })?;
-        let mut hir = severian_semantic::analyze(&ast, &self.context.types)
-            .map_err(CompileError::Diagnostic)?;
+        let mut hir = severian_semantic::analyze_with_context(
+            &ast,
+            &self.context.types,
+            severian_semantic::AnalysisContext {
+                mode: match mode {
+                    CompileMode::Build => severian_semantic::AnalysisMode::Build,
+                    CompileMode::Test => severian_semantic::AnalysisMode::Test,
+                },
+                module_name,
+            },
+        )
+        .map_err(CompileError::Diagnostic)?;
         apply_external_calls(&ast, &external, &mut hir);
         severian_ownership::validate(&hir).map_err(CompileError::Diagnostic)?;
         Ok(severian_mir::build(&hir))
@@ -151,12 +174,13 @@ impl Compiler {
     }
 
     pub fn compile_file(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
-        let mir = self.check_file_to_mir(source)?;
+        let mir = self.check_file_to_mir(source, CompileMode::Build)?;
         self.compile_mir(&mir, output)
     }
 
     pub fn check_file(&self, source: &Path) -> Result<(), CompileError> {
-        self.check_file_to_mir(source).map(|_| ())
+        self.check_file_to_mir(source, CompileMode::Build)
+            .map(|_| ())
     }
 
     pub fn compile_tests_file(
@@ -164,7 +188,7 @@ impl Compiler {
         source: &Path,
         output_directory: &Path,
     ) -> Result<Vec<CompiledTest>, CompileError> {
-        let mir = self.check_file_to_mir(source)?;
+        let mir = self.check_file_to_mir(source, CompileMode::Test)?;
         let compiler_results = self.compiler_test_results(source)?;
         let mut compiler_results = compiler_results.into_iter();
         mir.tests
@@ -183,9 +207,7 @@ impl Compiler {
                         expectations: test.expectations.clone(),
                     });
                 }
-                let mut selected = mir.clone();
-                selected.entry = Some(test.function);
-                selected.tests.clear();
+                let selected = select_test(&mir, test.function);
                 let artifact =
                     self.compile_mir(&selected, &output_directory.join(format!("test-{index}")))?;
                 Ok(CompiledTest {
@@ -243,7 +265,7 @@ impl Compiler {
                     if failure.is_some() {
                         break;
                     }
-                    let result = self.check_ast_to_mir(&ast);
+                    let result = self.check_ast_to_mir(&ast, CompileMode::Build, "compiler_case");
                     let matched = match case.expectation {
                         severian_ast::CompilerExpectation::Accept => result.is_ok(),
                         severian_ast::CompilerExpectation::Reject => result.is_err(),
@@ -267,7 +289,11 @@ impl Compiler {
         Ok(results)
     }
 
-    fn check_file_to_mir(&self, source: &Path) -> Result<MirModule, CompileError> {
+    fn check_file_to_mir(
+        &self,
+        source: &Path,
+        mode: CompileMode,
+    ) -> Result<MirModule, CompileError> {
         let graph = severian_modules::resolve(source).map_err(CompileError::Diagnostic)?;
         let modules = graph
             .modules
@@ -280,7 +306,8 @@ impl Compiler {
                         None,
                     ))
                 })?;
-                let mut mir = self.check_ast_to_mir(&module.ast)?;
+                let mut mir =
+                    self.check_ast_to_mir(&module.ast, mode, &module_name(&module.path))?;
                 attach_assertion_locations(&mut mir, &source);
                 Ok(mir)
             })
@@ -369,6 +396,46 @@ fn assertion_location(
         column,
         expression,
     })
+}
+
+fn module_name(path: &Path) -> String {
+    let package_root = path
+        .ancestors()
+        .skip(1)
+        .find(|directory| directory.join("package.toml").is_file())
+        .or_else(|| path.parent())
+        .unwrap_or_else(|| Path::new(""));
+    let package = package_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("package");
+    let relative = path.strip_prefix(package_root).unwrap_or(path);
+    let relative = relative.with_extension("");
+    format!("{package}_{}", relative.display())
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn select_test(module: &MirModule, selected: severian_mir::FunctionId) -> MirModule {
+    let mut module = module.clone();
+    module.entry = Some(selected);
+    let test_functions = module
+        .tests
+        .iter()
+        .map(|test| test.function)
+        .collect::<BTreeSet<_>>();
+    module
+        .functions
+        .retain(|function| !test_functions.contains(&function.id) || function.id == selected);
+    module.tests.clear();
+    module
 }
 
 fn with_core_prelude(
@@ -627,7 +694,7 @@ pub fn check_file(source: &Path) -> Result<(), CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_mir::Value;
+    use severian_mir::{Value, ValueId};
     use severian_universal::TypeId;
 
     #[test]
@@ -645,5 +712,56 @@ mod tests {
             merged.bindings,
             vec![(BindingId(0), ValueId(0)), (BindingId(1), ValueId(1))]
         );
+    }
+
+    #[test]
+    fn selecting_one_test_removes_other_test_functions_and_keeps_dense_value_ids() {
+        let function = |id: u32, value: u32| severian_mir::Function {
+            id: severian_mir::FunctionId(id),
+            name: format!("test-{id}"),
+            parameters: Vec::new(),
+            result: TypeId(0),
+            body: Some(severian_mir::Block {
+                operations: vec![MirOperation::Constant {
+                    value: severian_universal::LiteralValue::Integer(value.to_string()),
+                    result: ValueId(value),
+                }],
+            }),
+            call_type: severian_mir::CallType::Severian,
+        };
+        let module = MirModule {
+            values: vec![
+                Value {
+                    id: ValueId(0),
+                    type_id: TypeId(0),
+                },
+                Value {
+                    id: ValueId(1),
+                    type_id: TypeId(0),
+                },
+            ],
+            functions: vec![function(0, 0), function(1, 1)],
+            tests: vec![
+                severian_mir::TestDeclaration {
+                    name: "first".into(),
+                    modes: Vec::new(),
+                    function: severian_mir::FunctionId(0),
+                    expectations: Vec::new(),
+                },
+                severian_mir::TestDeclaration {
+                    name: "second".into(),
+                    modes: Vec::new(),
+                    function: severian_mir::FunctionId(1),
+                    expectations: Vec::new(),
+                },
+            ],
+            ..MirModule::default()
+        };
+        let selected = select_test(&module, severian_mir::FunctionId(0));
+        assert_eq!(selected.functions.len(), 1);
+        assert_eq!(selected.functions[0].id, severian_mir::FunctionId(0));
+        assert_eq!(selected.values.len(), 2);
+        assert_eq!(selected.values[0].id, ValueId(0));
+        assert!(selected.tests.is_empty());
     }
 }

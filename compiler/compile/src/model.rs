@@ -50,20 +50,24 @@ pub struct CompilePlan {
     pub source: MirModule,
     pub initializer: PlannedBlock,
     pub functions: Vec<PlannedFunction>,
+    /// Custom regions extracted from nested standard control-flow blocks.
+    pub nested_regions: Vec<CompileRegion>,
 }
 
 impl CompilePlan {
     pub fn has_custom_regions(&self) -> bool {
-        self.initializer
-            .segments
-            .iter()
-            .chain(
-                self.functions
-                    .iter()
-                    .filter_map(|function| function.body.as_ref())
-                    .flat_map(|body| &body.segments),
-            )
-            .any(|segment| matches!(segment, PlanSegment::Compiler(_)))
+        !self.nested_regions.is_empty()
+            || self
+                .initializer
+                .segments
+                .iter()
+                .chain(
+                    self.functions
+                        .iter()
+                        .filter_map(|function| function.body.as_ref())
+                        .flat_map(|body| &body.segments),
+                )
+                .any(|segment| matches!(segment, PlanSegment::Compiler(_)))
     }
 
     /// Replaces every custom region with a typed generated-function call. The
@@ -87,7 +91,7 @@ impl CompilePlan {
     }
 }
 
-fn resume_block(block: &PlannedBlock) -> MirBlock {
+pub(crate) fn resume_block(block: &PlannedBlock) -> MirBlock {
     let mut operations = Vec::new();
     for segment in &block.segments {
         match segment {

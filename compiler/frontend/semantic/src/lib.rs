@@ -16,7 +16,34 @@ use severian_universal::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisMode {
+    Build,
+    Test,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AnalysisContext<'a> {
+    pub mode: AnalysisMode,
+    pub module_name: &'a str,
+}
+
 pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Program, Diagnostic> {
+    analyze_with_context(
+        ast,
+        types,
+        AnalysisContext {
+            mode: AnalysisMode::Build,
+            module_name: "memory",
+        },
+    )
+}
+
+pub fn analyze_with_context(
+    ast: &severian_ast::Module,
+    types: &TypeContext,
+    context: AnalysisContext<'_>,
+) -> Result<Program, Diagnostic> {
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -71,49 +98,56 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
         });
     }
     let source_function_count = module.functions.len();
-    for (index, test) in ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            severian_ast::Item::Test(test) => Some(test),
-            _ => None,
-        })
-        .enumerate()
-    {
-        let id = FunctionId(module.functions.len() as u32);
-        let unit = types.resolve_name("unit").expect("bootstrap defines unit");
-        let function_name = format!("__sev_test_{index}");
-        analyzer
-            .functions
-            .entry(function_name.clone())
-            .or_default()
-            .push(id);
-        analyzer.signatures.push(FunctionSignature {
-            parameters: Vec::new(),
-            result: unit,
-        });
-        module.functions.push(FunctionDeclaration {
-            id,
-            name: function_name,
-            parameters: Vec::new(),
-            result: universal_boundary(unit),
-            compile_route: severian_universal::CompileRoute::Standard,
-            call_type: CallType::Severian,
-            body: None,
-        });
-        module.tests.push(severian_hir::TestDeclaration {
-            name: test
+    if context.mode == AnalysisMode::Test {
+        for (index, test) in ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Test(test) => Some(test),
+                _ => None,
+            })
+            .enumerate()
+        {
+            let id = FunctionId(module.functions.len() as u32);
+            let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+            let mode_suffix = if test.modes.is_empty() {
+                String::new()
+            } else {
+                format!("_with_{}", test.modes.join("-"))
+            };
+            let name_suffix = test
                 .name
-                .clone()
-                .unwrap_or_else(|| format!("test {}", index + 1)),
-            modes: test
-                .modes
-                .iter()
-                .map(|mode| test_mode(mode, test.span))
-                .collect::<Result<Vec<_>, _>>()?,
-            function: id,
-            expectations: Vec::new(),
-        });
+                .as_deref()
+                .map(internal_name_part)
+                .filter(|name| !name.is_empty())
+                .map(|name| format!("_{name}"))
+                .unwrap_or_default();
+            module.functions.push(FunctionDeclaration {
+                id,
+                name: format!(
+                    "__sev_{}_test{mode_suffix}{name_suffix}_{index}",
+                    context.module_name
+                ),
+                parameters: Vec::new(),
+                result: universal_boundary(unit),
+                compile_route: severian_universal::CompileRoute::Standard,
+                call_type: CallType::Severian,
+                body: None,
+            });
+            module.tests.push(severian_hir::TestDeclaration {
+                name: test
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("test {}", index + 1)),
+                modes: test
+                    .modes
+                    .iter()
+                    .map(|mode| test_mode(mode, test.span))
+                    .collect::<Result<Vec<_>, _>>()?,
+                function: id,
+                expectations: Vec::new(),
+            });
+        }
     }
 
     for item in &ast.items {
@@ -169,7 +203,7 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
             )?);
         }
         if result_type != types.resolve_name("unit").expect("bootstrap defines unit")
-            && !block_returns(ast_body)
+            && block_flow(ast_body) == ControlFlow::FallsThrough
         {
             return Err(Diagnostic::new(
                 "E000209",
@@ -201,40 +235,67 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
             }
         }
     }
-    for (offset, test) in ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            severian_ast::Item::Test(test) => Some(test),
-            _ => None,
-        })
-        .enumerate()
-    {
-        analyzer.names = globals.clone();
-        analyzer.declarations.clear();
-        let unit = types.resolve_name("unit").expect("bootstrap defines unit");
-        let mut body = Block::default();
-        if module.tests[offset]
-            .modes
-            .contains(&severian_hir::TestMode::Compiler)
+    if context.mode == AnalysisMode::Test {
+        for (offset, test) in ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Test(test) => Some(test),
+                _ => None,
+            })
+            .enumerate()
         {
-            module.functions[source_function_count + offset].body = Some(body);
-            continue;
-        }
-        for statement in &test.body {
+            analyzer.names = globals.clone();
+            analyzer.declarations.clear();
+            let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+            let mut body = Block::default();
             if module.tests[offset]
                 .modes
-                .contains(&severian_hir::TestMode::Integration)
+                .contains(&severian_hir::TestMode::Compiler)
             {
-                if let Some(expectation) = integration_expectation(statement) {
-                    module.tests[offset].expectations.push(expectation);
-                    continue;
+                if !test.body.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000217",
+                        "compiler tests currently allow only `accept:` and `reject:` cases; diagnostic assertions are not implemented",
+                        Some(test.span),
+                    ));
                 }
+                if test.compiler_cases.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000217",
+                        "a compiler test requires at least one `accept:` or `reject:` case",
+                        Some(test.span),
+                    ));
+                }
+                if test
+                    .compiler_cases
+                    .iter()
+                    .any(|case| case.diagnostic_name.is_some())
+                {
+                    return Err(Diagnostic::new(
+                        "E000217",
+                        "named compiler diagnostics are not implemented; use `reject:` without a binding",
+                        Some(test.span),
+                    ));
+                }
+                module.functions[source_function_count + offset].body = Some(body);
+                continue;
             }
-            body.statements
-                .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+            for statement in &test.body {
+                if module.tests[offset]
+                    .modes
+                    .contains(&severian_hir::TestMode::Integration)
+                {
+                    if let Some(expectation) = integration_expectation(statement) {
+                        module.tests[offset].expectations.push(expectation);
+                        continue;
+                    }
+                }
+                body.statements
+                    .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+            }
+            module.functions[source_function_count + offset].body = Some(body);
         }
-        module.functions[source_function_count + offset].body = Some(body);
     }
     Ok(Program {
         modules: vec![module],
@@ -742,21 +803,57 @@ fn test_mode(
     }
 }
 
-fn block_returns(statements: &[AstStatement]) -> bool {
-    statements.last().is_some_and(|statement| match statement {
-        AstStatement::Return { .. } => true,
-        AstStatement::If {
-            then_block,
-            else_block,
-            ..
-        } => !else_block.is_empty() && block_returns(then_block) && block_returns(else_block),
-        AstStatement::Match { cases, .. } => {
-            !cases.is_empty() && cases.iter().all(|case| block_returns(&case.body))
+fn internal_name_part(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlFlow {
+    FallsThrough,
+    Returns,
+}
+
+fn block_flow(statements: &[AstStatement]) -> ControlFlow {
+    for statement in statements {
+        let flow = match statement {
+            AstStatement::Return { .. } => ControlFlow::Returns,
+            AstStatement::If {
+                then_block,
+                else_block,
+                ..
+            } if !else_block.is_empty()
+                && block_flow(then_block) == ControlFlow::Returns
+                && block_flow(else_block) == ControlFlow::Returns =>
+            {
+                ControlFlow::Returns
+            }
+            AstStatement::Match { cases, .. }
+                if !cases.is_empty()
+                    && cases
+                        .iter()
+                        .all(|case| block_flow(&case.body) == ControlFlow::Returns) =>
+            {
+                ControlFlow::Returns
+            }
+            AstStatement::Binding(_)
+            | AstStatement::Expression(_)
+            | AstStatement::Assert { .. }
+            | AstStatement::If { .. }
+            | AstStatement::Match { .. } => ControlFlow::FallsThrough,
+        };
+        if flow == ControlFlow::Returns {
+            return flow;
         }
-        AstStatement::Binding(_) | AstStatement::Expression(_) | AstStatement::Assert { .. } => {
-            false
-        }
-    })
+    }
+    ControlFlow::FallsThrough
 }
 
 fn integration_expectation(statement: &AstStatement) -> Option<severian_hir::TestExpectation> {
@@ -913,6 +1010,58 @@ mod tests {
     }
 
     #[test]
+    fn build_excludes_tests_and_test_mode_uses_descriptive_internal_names() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "checks.sev",
+            "def helper():\n    pass\n\ntest with profile and compiler \"frontend diagnostics\":\n    reject:\n        missing()\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let build = analyze(&ast, &context.types).unwrap();
+        assert!(build.modules[0].tests.is_empty());
+        assert_eq!(build.modules[0].functions.len(), 1);
+
+        let tests = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "package_checks",
+            },
+        )
+        .unwrap();
+        assert_eq!(tests.modules[0].tests.len(), 1);
+        assert_eq!(
+            tests.modules[0].functions[1].name,
+            "__sev_package_checks_test_with_profile-compiler_frontend_diagnostics_0"
+        );
+    }
+
+    #[test]
+    fn compiler_tests_reject_unimplemented_body_and_diagnostic_assertions() {
+        let context = severian_bootstrap::load().unwrap();
+        for source_text in [
+            "test with compiler:\n    assert(false)\n    reject:\n        missing()\n",
+            "test with compiler:\n    reject error:\n        missing()\n",
+        ] {
+            let source = SourceFile::virtual_source("compiler-test.sev", source_text);
+            let tokens = severian_lexer::scan(&source).unwrap();
+            let ast = severian_parser::parse(&tokens).unwrap();
+            let error = analyze_with_context(
+                &ast,
+                &context.types,
+                AnalysisContext {
+                    mode: AnalysisMode::Test,
+                    module_name: "package_compiler_test",
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "E000217");
+        }
+    }
+
+    #[test]
     fn function_scopes_can_read_and_shadow_globals() {
         let (program, _) = analyze_source(
             "value := 1\ndef use_global():\n    observed := value\ndef main():\n    value := 2\n    observed := value\n",
@@ -925,5 +1074,12 @@ mod tests {
         assert_ne!(global, first_body_binding);
         assert_ne!(global, shadow);
         assert_eq!(shadow_use.kind, ExpressionKind::Binding(shadow));
+    }
+
+    #[test]
+    fn return_analysis_is_control_flow_based_not_last_statement_based() {
+        let (program, _) =
+            analyze_source("def answer() -> int:\n    return 42\n    unreachable := 0\n");
+        assert_eq!(program.modules[0].functions.len(), 1);
     }
 }

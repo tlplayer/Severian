@@ -199,6 +199,67 @@ mod tests {
     }
 
     #[test]
+    fn custom_operations_inside_control_flow_are_planned_recursively() {
+        let (types, standard, special, compiler) = types();
+        let module = Module {
+            values: vec![value(0, standard), value(1, special)],
+            initializer: severian_mir::Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: LiteralValue::Boolean(true),
+                        result: ValueId(0),
+                    },
+                    Operation::If {
+                        condition: ValueId(0),
+                        then_block: severian_mir::Block {
+                            operations: vec![Operation::Constant {
+                                value: LiteralValue::Integer("1".into()),
+                                result: ValueId(1),
+                            }],
+                        },
+                        else_block: severian_mir::Block::default(),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+
+        let plan = plan(&module, &types).unwrap();
+        assert!(plan.has_custom_regions());
+        assert_eq!(plan.nested_regions.len(), 1);
+        let resumed = plan.resumed_mir();
+        let Operation::If { then_block, .. } = &resumed.initializer.operations[1] else {
+            panic!("expected standard if operation");
+        };
+        assert!(matches!(
+            then_block.operations.as_slice(),
+            [Operation::CompiledRegionCall { .. }]
+        ));
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = CompilerRegistry::new();
+        registry
+            .register(
+                compiler,
+                Handler {
+                    calls: calls.clone(),
+                    invalid: false,
+                },
+            )
+            .unwrap();
+        registry
+            .compile(
+                &plan,
+                &CompileContext {
+                    types: &types,
+                    target: &TargetSpec::new("x86_64-unknown-linux"),
+                },
+            )
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn initializer_and_function_bodies_are_planned_independently() {
         let (types, standard, special, _) = types();
         let module = Module {

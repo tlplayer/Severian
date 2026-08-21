@@ -273,7 +273,7 @@ fn test_runs_compiler_expectations_and_continues_after_source_errors() {
     let root = temporary("compiler-tests");
     fs::write(
         root.join("compiler.sev"),
-        "def increment(value: int) -> int:\n    return value + 1\n\ntest with compiler \"type checks declarations\":\n    reject error:\n        increment(\"wrong\")\n    accept:\n        value = increment(1)\n",
+        "def increment(value: int) -> int:\n    return value + 1\n\ntest with compiler \"type checks declarations\":\n    reject:\n        increment(\"wrong\")\n    accept:\n        value = increment(1)\n",
     )
     .unwrap();
     fs::write(
@@ -379,6 +379,71 @@ fn match_case_bindings_are_typed_without_magic_error_or_value_names() {
         "stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn package_tests_include_declared_sources_and_conventional_tests_directory() {
+    let root = temporary("package-test-discovery");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::create_dir_all(root.join("tests")).unwrap();
+    fs::write(
+        root.join("package.toml"),
+        "[package]\nname = \"discovery\"\n\n[[bin]]\nname = \"discovery\"\npath = \"src/main.sev\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/main.sev"),
+        "test \"package source\":\n    assert(true)\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("tests/basic.sev"),
+        "test \"conventional test\":\n    assert(true)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&root).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test package source ... ok"), "{stdout}");
+    assert!(stdout.contains("test conventional test ... ok"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn recursive_test_discovery_does_not_run_imported_test_modules_twice() {
+    let root = temporary("deduplicated-test-roots");
+    fs::write(
+        root.join("a.sev"),
+        "import \"b.sev\" as b\n\ntest \"root test\":\n    assert(true)\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("b.sev"),
+        "test \"dependency test\":\n    assert(true)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&root).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        stdout.matches("test dependency test ... ok").count(),
+        1,
+        "{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("test root test ... ok").count(),
+        1,
+        "{stdout}"
     );
     fs::remove_dir_all(root).unwrap();
 }

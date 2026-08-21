@@ -36,14 +36,25 @@ mod tests {
                 calls.fetch_add(1, Ordering::SeqCst);
             }
             assert!(region.inputs.is_empty());
-            assert_eq!(region.outputs.len(), 1);
+            assert!(region.outputs.len() <= 1);
+            let (module, outputs) = if region.outputs.is_empty() {
+                (
+                    "module { func.func @handler_entry() { return } }".into(),
+                    Vec::new(),
+                )
+            } else {
+                (
+                    "module { func.func @handler_entry() -> i32 { %0 = arith.constant 7 : i32 return %0 : i32 } }".into(),
+                    vec![LoweredType::Integer {
+                        bits: 32,
+                        signed: true,
+                    }],
+                )
+            };
             Ok(MlirArtifact {
-                module: "module { func.func @handler_entry() -> i32 { %0 = arith.constant 7 : i32 return %0 : i32 } }".into(),
+                module,
                 inputs: vec![],
-                outputs: vec![LoweredType::Integer {
-                    bits: 32,
-                    signed: true,
-                }],
+                outputs,
             })
         }
     }
@@ -73,6 +84,15 @@ mod tests {
                 string_type,
                 PrimitiveCategory::Text,
                 PrimitiveRepresentation::String,
+                true,
+            )
+            .unwrap();
+        let bool_type = types.register_declaration("test.bool", "bool").unwrap();
+        types
+            .define_primitive(
+                bool_type,
+                PrimitiveCategory::Boolean,
+                PrimitiveRepresentation::Boolean,
                 true,
             )
             .unwrap();
@@ -259,6 +279,35 @@ mod tests {
         let result = std::process::Command::new(&artifact.path).output().unwrap();
         assert!(result.status.success());
         assert_eq!(result.stdout, b"resumed\n");
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn compile_type_operations_inside_if_are_composed_end_to_end() {
+        let (context, _, _, compiler_id) = compile_type_context();
+        let mut compiler = Compiler::with_context(context, TargetSpec::new("x86_64-unknown-linux"));
+        let calls = Arc::new(AtomicUsize::new(0));
+        compiler
+            .register_compile_handler(
+                compiler_id,
+                TestHandler {
+                    calls: Some(calls.clone()),
+                },
+            )
+            .unwrap();
+        let source = SourceFile::virtual_source(
+            "custom-if.sev",
+            "def compute(flag: bool) -> i32:\n    if flag:\n        special: CustomValue = 1\n    result: i32 = 7\n    return result\n\ndef main():\n    observed: i32 = compute(true)\n",
+        );
+        let output =
+            std::env::temp_dir().join(format!("severian-compile-type-if-{}", std::process::id()));
+
+        let artifact = compiler.compile_source(&source, &output).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(std::process::Command::new(&artifact.path)
+            .status()
+            .unwrap()
+            .success());
         std::fs::remove_file(output).unwrap();
     }
 
