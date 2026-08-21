@@ -175,6 +175,35 @@ mod tests {
     }
 
     #[test]
+    fn match_cases_use_bindings_and_types_instead_of_magic_names() {
+        let source = SourceFile::virtual_source(
+            "match.sev",
+            "def handle(result: int) -> int:\n    match result:\n        case error: int:\n            return error\n        case int failure:\n            return failure\n        case _:\n            return 0\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let module = parse(&tokens).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::Match { cases, .. } = &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected match")
+        };
+        assert_eq!(cases[0].binding.as_deref(), Some("error"));
+        assert_eq!(
+            cases[0].annotation.as_ref().unwrap().simple_name(),
+            Some("int")
+        );
+        assert_eq!(cases[1].binding.as_deref(), Some("failure"));
+        assert_eq!(
+            cases[1].annotation.as_ref().unwrap().simple_name(),
+            Some("int")
+        );
+        assert_eq!(cases[2].binding, None);
+        assert_eq!(cases[2].annotation, None);
+    }
+
+    #[test]
     fn rejects_function_control_flow_at_global_scope() {
         let source = SourceFile::virtual_source("invalid.sev", "return 1\n");
         let error = parse(&scan(&source).unwrap()).unwrap_err();

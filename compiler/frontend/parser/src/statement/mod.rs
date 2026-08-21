@@ -1,7 +1,7 @@
 use severian_ast::{
     BinaryOperator, Binding, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
-    ImportDeclaration, ImportSubject, Item, Literal, Module, OperatorDeclaration,
+    ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration,
     OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration,
     TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
@@ -77,7 +77,10 @@ impl Parser<'_> {
                     Statement::Expression(expression) => {
                         module.items.push(Item::Expression(expression))
                     }
-                    Statement::Return { .. } | Statement::Assert { .. } | Statement::If { .. } => {
+                    Statement::Return { .. }
+                    | Statement::Assert { .. }
+                    | Statement::If { .. }
+                    | Statement::Match { .. } => {
                         unreachable!("module parsing only requests simple statements")
                     }
                 }
@@ -323,7 +326,7 @@ impl Parser<'_> {
         let mut statements = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            let compound = self.at_identifier("if");
+            let compound = self.at_identifier("if") || self.at_identifier("match");
             if self.at_identifier("pass") {
                 self.next();
             } else {
@@ -395,10 +398,70 @@ impl Parser<'_> {
                 span: Span::new(start.source, start.start, end),
             });
         }
+        if self.at_identifier("match") {
+            return self.match_statement();
+        }
         if self.at_identifier("break") || self.at_identifier("continue") {
             return Err(self.error("loop control is not implemented yet"));
         }
         self.statement()
+    }
+
+    fn match_statement(&mut self) -> Result<Statement, Diagnostic> {
+        let start = self.next().span;
+        let subject = self.expression(0)?;
+        self.expect(&TokenKind::Colon, "expected `:` after match expression")?;
+        self.expect(&TokenKind::Newline, "expected a newline after match header")?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected indented match cases")?;
+        self.separators();
+        let mut cases = Vec::new();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            if !self.at_identifier("case") {
+                return Err(self.error("match arms must start with `case`"));
+            }
+            let case_start = self.next().span;
+            let pattern_start = self.cursor;
+            let (first, _) = self.identifier("expected a case binding, `_`, or type")?;
+            let (binding, annotation) = if self.at(&TokenKind::Colon) {
+                self.next();
+                let binding = (first != "_").then_some(first);
+                let annotation = if self.at(&TokenKind::Newline) {
+                    None
+                } else {
+                    let annotation = self.type_annotation()?;
+                    self.expect(&TokenKind::Colon, "expected `:` after the case type")?;
+                    Some(annotation)
+                };
+                (binding, annotation)
+            } else {
+                self.cursor = pattern_start;
+                let annotation = self.type_annotation()?;
+                let (name, _) = self.identifier("expected a binding after the case type")?;
+                self.expect(&TokenKind::Colon, "expected `:` after the case binding")?;
+                ((name != "_").then_some(name), Some(annotation))
+            };
+            let (body, end) = self.indented_block("case")?;
+            cases.push(MatchCase {
+                binding,
+                annotation,
+                body,
+                span: Span::new(case_start.source, case_start.start, end),
+            });
+            self.separators();
+        }
+        if cases.is_empty() {
+            return Err(self.error("a match requires at least one case"));
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of match")?
+            .span
+            .end;
+        Ok(Statement::Match {
+            subject,
+            cases,
+            span: Span::new(start.source, start.start, end),
+        })
     }
 
     fn type_declaration(

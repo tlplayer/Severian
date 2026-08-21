@@ -93,6 +93,19 @@ fn validate_statement(
             }
             Ok(())
         }
+        Statement::Match { subject, arms } => {
+            validate_expression(subject, declared)?;
+            for arm in arms {
+                let mut arm_declared = declared.clone();
+                if let Some(binding) = arm.binding {
+                    arm_declared.insert(binding);
+                }
+                for statement in &arm.body.statements {
+                    validate_statement(statement, bindings, &mut arm_declared)?;
+                }
+            }
+            Ok(())
+        }
     }
 }
 

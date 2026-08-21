@@ -28,7 +28,7 @@ pub fn lower(
             })
         })
         .collect::<Result<Vec<_>, LoweringError>>()?;
-    let initializer = lower_block(&mir.initializer);
+    let initializer = lower_block(&mir.initializer, mir)?;
     let functions = mir
         .functions
         .iter()
@@ -42,7 +42,11 @@ pub fn lower(
                     .map(|value| ValueId(value.0))
                     .collect(),
                 result: lower_type(function.result, types, target)?,
-                body: function.body.as_ref().map(lower_block),
+                body: function
+                    .body
+                    .as_ref()
+                    .map(|body| lower_block(body, mir))
+                    .transpose()?,
                 linkage: match &function.call_type {
                     severian_mir::CallType::Severian => FunctionLinkage::Internal,
                     severian_mir::CallType::External(call) => FunctionLinkage::External {
@@ -61,11 +65,10 @@ pub fn lower(
     })
 }
 
-fn lower_block(block: &MirBlock) -> LirBlock {
-    let operations = block
-        .operations
-        .iter()
-        .map(|operation| match operation {
+fn lower_block(block: &MirBlock, module: &MirModule) -> Result<LirBlock, LoweringError> {
+    let mut operations = Vec::new();
+    for operation in &block.operations {
+        let operation = match operation {
             MirOperation::Constant { value, result } => LirOperation::Constant {
                 value: lower_constant(value),
                 result: ValueId(result.0),
@@ -124,9 +127,24 @@ fn lower_block(block: &MirBlock) -> LirBlock {
                 else_block,
             } => LirOperation::If {
                 condition: ValueId(condition.0),
-                then_block: lower_block(then_block),
-                else_block: lower_block(else_block),
+                then_block: lower_block(then_block, module)?,
+                else_block: lower_block(else_block, module)?,
             },
+            MirOperation::Match { subject, arms } => {
+                let subject_type = module
+                    .values
+                    .iter()
+                    .find(|value| value.id == *subject)
+                    .ok_or(LoweringError::UnknownValue(*subject))?
+                    .type_id;
+                let arm = arms
+                    .iter()
+                    .find(|arm| arm.type_id == Some(subject_type))
+                    .or_else(|| arms.iter().find(|arm| arm.type_id.is_none()))
+                    .ok_or(LoweringError::NonExhaustiveMatch(subject_type))?;
+                operations.extend(lower_block(&arm.body, module)?.operations);
+                continue;
+            }
             MirOperation::CompiledRegionCall {
                 artifact,
                 inputs,
@@ -136,9 +154,10 @@ fn lower_block(block: &MirBlock) -> LirBlock {
                 inputs: inputs.iter().map(|value| ValueId(value.0)).collect(),
                 outputs: outputs.iter().map(|value| ValueId(value.0)).collect(),
             },
-        })
-        .collect();
-    LirBlock { operations }
+        };
+        operations.push(operation);
+    }
+    Ok(LirBlock { operations })
 }
 
 fn lower_constant(value: &LiteralValue) -> Constant {
@@ -223,6 +242,8 @@ fn lower_type(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringError {
     NotPrimitive(TypeId),
+    UnknownValue(severian_mir::ValueId),
+    NonExhaustiveMatch(TypeId),
 }
 
 impl fmt::Display for LoweringError {

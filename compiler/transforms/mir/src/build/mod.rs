@@ -158,6 +158,31 @@ impl Builder {
                     else_block: else_mir,
                 });
             }
+            Statement::Match { subject, arms } => {
+                let subject = self.expression(subject, block);
+                let outer_bindings = self.bindings.clone();
+                let mut mir_arms = Vec::new();
+                for arm in arms {
+                    self.bindings.clone_from(&outer_bindings);
+                    if let Some(binding) = arm.binding {
+                        self.bindings.insert(binding, subject);
+                        self.module.bindings.push((binding, subject));
+                    }
+                    let mut body = Block::default();
+                    for statement in &arm.body.statements {
+                        self.statement(statement, module, &mut body);
+                    }
+                    mir_arms.push(crate::MatchArm {
+                        type_id: arm.type_id,
+                        body,
+                    });
+                }
+                self.bindings = outer_bindings;
+                block.operations.push(Operation::Match {
+                    subject,
+                    arms: mir_arms,
+                });
+            }
         }
     }
 

@@ -7,7 +7,7 @@ mod statement;
 
 pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{CompileRoute, CompilerId, TypeId};
-pub use statement::{Binding, Block, Statement};
+pub use statement::{Binding, Block, MatchArm, Statement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HirId(pub u32);

@@ -49,6 +49,12 @@ pub struct AssertionLocation {
     pub expression: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub type_id: Option<severian_universal::TypeId>,
+    pub body: Block,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Block {
     pub operations: Vec<Operation>,

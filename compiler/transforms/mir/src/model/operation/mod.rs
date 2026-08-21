@@ -1,4 +1,4 @@
-use crate::{AssertionOrigin, Block, ValueId};
+use crate::{AssertionOrigin, Block, MatchArm, ValueId};
 use severian_artifact::ArtifactId;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
@@ -36,6 +36,10 @@ pub enum Operation {
         condition: ValueId,
         then_block: Block,
         else_block: Block,
+    },
+    Match {
+        subject: ValueId,
+        arms: Vec<MatchArm>,
     },
     /// Planner-produced bridge back into the standard pipeline. Source MIR
     /// never creates this operation directly.

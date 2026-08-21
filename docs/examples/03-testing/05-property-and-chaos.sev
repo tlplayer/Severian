@@ -14,5 +14,5 @@ test with property and chaos "first is safe for generated lists":
         case value:
             assert(value == values[0])
 
-        failure _:
+        case _:
             assert(size(values) == 0)

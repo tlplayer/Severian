@@ -363,3 +363,22 @@ fn concurrent_test_invocations_do_not_replace_each_others_executables() {
     assert!(second.wait_with_output().unwrap().status.success());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn match_case_bindings_are_typed_without_magic_error_or_value_names() {
+    let root = temporary("typed-match-cases");
+    let source = root.join("match.sev");
+    fs::write(
+        &source,
+        "def binding_first(result: int) -> int:\n    match result:\n        case error: int:\n            return error\n\ndef type_first(result: int) -> int:\n    match result:\n        case int failure:\n            return failure\n\ndef default_case(result: int) -> int:\n    match result:\n        case _:\n            return 9\n\ntest \"typed case bindings\":\n    assert(binding_first(4) == 4)\n    assert(type_first(5) == 5)\n    assert(default_case(6) == 9)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}

@@ -329,6 +329,11 @@ fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &So
                 attach_block_assertion_locations(then_block, source);
                 attach_block_assertion_locations(else_block, source);
             }
+            MirOperation::Match { arms, .. } => {
+                for arm in arms {
+                    attach_block_assertion_locations(&mut arm.body, source);
+                }
+            }
             _ => {}
         }
     }
@@ -577,6 +582,23 @@ fn remap_operation(operation: &MirOperation, offset: u32, function_offset: u32) 
                     .map(|operation| remap_operation(operation, offset, function_offset))
                     .collect(),
             },
+        },
+        MirOperation::Match { subject, arms } => MirOperation::Match {
+            subject: value(*subject),
+            arms: arms
+                .iter()
+                .map(|arm| severian_mir::MatchArm {
+                    type_id: arm.type_id,
+                    body: severian_mir::Block {
+                        operations: arm
+                            .body
+                            .operations
+                            .iter()
+                            .map(|operation| remap_operation(operation, offset, function_offset))
+                            .collect(),
+                    },
+                })
+                .collect(),
         },
         MirOperation::CompiledRegionCall {
             artifact,

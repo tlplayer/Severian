@@ -403,7 +403,95 @@ impl Analyzer<'_> {
                     else_block,
                 })
             }
+            AstStatement::Match {
+                subject,
+                cases,
+                span,
+            } => self.match_statement(subject, cases, *span, bindings, result_type),
         }
+    }
+
+    fn match_statement(
+        &mut self,
+        subject: &AstExpression,
+        cases: &[severian_ast::MatchCase],
+        span: severian_source::Span,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Statement, Diagnostic> {
+        let subject = self.expression(subject, None)?;
+        let subject_type = subject.type_id;
+        let outer_names = self.names.clone();
+        let outer_declarations = self.declarations.clone();
+        let mut seen_types = BTreeSet::new();
+        let mut catch_all = false;
+        let mut arms = Vec::new();
+        for case in cases {
+            if catch_all {
+                return Err(Diagnostic::new(
+                    "E000214",
+                    "this case is unreachable because a previous case matches every remaining value",
+                    Some(case.span),
+                ));
+            }
+            let type_id = case
+                .annotation
+                .as_ref()
+                .map(|annotation| resolve_type_annotation(self.types, annotation))
+                .transpose()?;
+            if let Some(type_id) = type_id {
+                if !seen_types.insert(type_id) {
+                    return Err(Diagnostic::new(
+                        "E000214",
+                        "this match type is handled more than once",
+                        Some(case.span),
+                    ));
+                }
+                if type_id != subject_type {
+                    return Err(Diagnostic::new(
+                        "E000215",
+                        "case type cannot occur in this non-union matched expression",
+                        Some(case.span),
+                    ));
+                }
+                catch_all = true;
+            } else {
+                catch_all = true;
+            }
+
+            self.names.clone_from(&outer_names);
+            self.declarations.clone_from(&outer_declarations);
+            let binding = if let Some(name) = &case.binding {
+                let id = self.new_binding_id();
+                let binding_type = type_id.unwrap_or(subject_type);
+                self.names.insert(name.clone(), (id, binding_type));
+                self.declarations.insert(name.clone());
+                bindings.push(Binding {
+                    id,
+                    type_id: binding_type,
+                    value: subject.clone(),
+                    span: case.span,
+                });
+                Some(id)
+            } else {
+                None
+            };
+            arms.push(severian_hir::MatchArm {
+                binding,
+                type_id,
+                body: self.block(&case.body, bindings, result_type)?,
+            });
+        }
+        self.names = outer_names;
+        self.declarations = outer_declarations;
+        if !catch_all && !seen_types.contains(&subject_type) {
+            return Err(Diagnostic::new(
+                "E000216",
+                "match is not exhaustive; add a compatible typed case or `case _:`",
+                Some(span),
+            ));
+        }
+        Ok(Statement::Match { subject, arms })
     }
 
     fn block(
@@ -662,6 +750,9 @@ fn block_returns(statements: &[AstStatement]) -> bool {
             else_block,
             ..
         } => !else_block.is_empty() && block_returns(then_block) && block_returns(else_block),
+        AstStatement::Match { cases, .. } => {
+            !cases.is_empty() && cases.iter().all(|case| block_returns(&case.body))
+        }
         AstStatement::Binding(_) | AstStatement::Expression(_) | AstStatement::Assert { .. } => {
             false
         }
@@ -805,6 +896,20 @@ mod tests {
             program.modules[0].bindings[1].type_id,
             context.types.resolve_name("int").unwrap()
         );
+    }
+
+    #[test]
+    fn untyped_case_binding_is_a_catch_all_not_a_magic_result_variant() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "match.sev",
+            "def invalid(result: int) -> int:\n    match result:\n        case value:\n            return value\n        case error: int:\n            return error\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000214");
+        assert!(error.message.contains("unreachable"));
     }
 
     #[test]

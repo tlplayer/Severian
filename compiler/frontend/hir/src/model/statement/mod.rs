@@ -25,6 +25,17 @@ pub enum Statement {
         then_block: Block,
         else_block: Block,
     },
+    Match {
+        subject: Expression,
+        arms: Vec<MatchArm>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub binding: Option<BindingId>,
+    pub type_id: Option<TypeId>,
+    pub body: Block,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

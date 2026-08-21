@@ -98,7 +98,10 @@ fn operation_route(
     }
     if matches!(
         operation,
-        Operation::Return { .. } | Operation::Assert { .. } | Operation::If { .. }
+        Operation::Return { .. }
+            | Operation::Assert { .. }
+            | Operation::If { .. }
+            | Operation::Match { .. }
     ) {
         return Ok(CompileRoute::Standard);
     }
@@ -219,6 +222,12 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
             .chain(then_block.operations.iter().flat_map(operation_inputs))
             .chain(else_block.operations.iter().flat_map(operation_inputs))
             .collect(),
+        Operation::Match { subject, arms } => std::iter::once(*subject)
+            .chain(
+                arms.iter()
+                    .flat_map(|arm| arm.body.operations.iter().flat_map(operation_inputs)),
+            )
+            .collect(),
         Operation::CompiledRegionCall { inputs, .. } => inputs.clone(),
     }
 }
@@ -239,6 +248,10 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
             .iter()
             .flat_map(operation_outputs)
             .chain(else_block.operations.iter().flat_map(operation_outputs))
+            .collect(),
+        Operation::Match { arms, .. } => arms
+            .iter()
+            .flat_map(|arm| arm.body.operations.iter().flat_map(operation_outputs))
             .collect(),
         Operation::CompiledRegionCall { outputs, .. } => outputs.clone(),
     }

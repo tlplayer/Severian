@@ -10,6 +10,14 @@ pub struct Binding {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchCase {
+    pub binding: Option<String>,
+    pub annotation: Option<TypeAnnotation>,
+    pub body: Vec<Statement>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Binding(Binding),
     Expression(Expression),
@@ -26,6 +34,11 @@ pub enum Statement {
         condition: Expression,
         then_block: Vec<Statement>,
         else_block: Vec<Statement>,
+        span: Span,
+    },
+    Match {
+        subject: Expression,
+        cases: Vec<MatchCase>,
         span: Span,
     },
 }
