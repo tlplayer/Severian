@@ -30,6 +30,7 @@ pub enum TokenKind {
     RightBracket,
     Pipe,
     Comma,
+    Dot,
     Newline,
     Indent,
     Dedent,

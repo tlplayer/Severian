@@ -365,6 +365,7 @@ fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
         OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
         OperatorSyntax::Greater => BinaryOperator::Greater,
         OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
+        OperatorSyntax::Contains => BinaryOperator::Contains,
         OperatorSyntax::And => BinaryOperator::And,
         OperatorSyntax::Or => BinaryOperator::Or,
         OperatorSyntax::Not => return None,

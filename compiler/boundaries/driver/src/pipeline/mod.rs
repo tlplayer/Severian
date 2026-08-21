@@ -40,6 +40,20 @@ pub struct Compiler {
     compile_handlers: CompilerRegistry,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledTest {
+    pub name: String,
+    pub modes: Vec<severian_mir::TestMode>,
+    pub execution: TestExecution,
+    pub expectations: Vec<severian_mir::TestExpectation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestExecution {
+    Executable(Artifact),
+    Compiler { failure: Option<String> },
+}
+
 impl Compiler {
     pub fn new(target: TargetSpec) -> Result<Self, CompileError> {
         let context = severian_bootstrap::load().map_err(CompileError::Bootstrap)?;
@@ -110,7 +124,9 @@ impl Compiler {
     fn check_source_to_mir(&self, source: &SourceFile) -> Result<MirModule, CompileError> {
         let tokens = severian_lexer::scan(source).map_err(CompileError::Diagnostic)?;
         let ast = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
-        self.check_ast_to_mir(&ast)
+        let mut mir = self.check_ast_to_mir(&ast)?;
+        attach_assertion_locations(&mut mir, source);
+        Ok(mir)
     }
 
     fn check_ast_to_mir(&self, ast: &severian_ast::Module) -> Result<MirModule, CompileError> {
@@ -143,12 +159,131 @@ impl Compiler {
         self.check_file_to_mir(source).map(|_| ())
     }
 
+    pub fn compile_tests_file(
+        &self,
+        source: &Path,
+        output_directory: &Path,
+    ) -> Result<Vec<CompiledTest>, CompileError> {
+        let mir = self.check_file_to_mir(source)?;
+        let compiler_results = self.compiler_test_results(source)?;
+        let mut compiler_results = compiler_results.into_iter();
+        mir.tests
+            .iter()
+            .enumerate()
+            .map(|(index, test)| {
+                if test.modes.contains(&severian_mir::TestMode::Compiler) {
+                    return Ok(CompiledTest {
+                        name: test.name.clone(),
+                        modes: test.modes.clone(),
+                        execution: TestExecution::Compiler {
+                            failure: compiler_results
+                                .next()
+                                .expect("every compiler test has an evaluation result"),
+                        },
+                        expectations: test.expectations.clone(),
+                    });
+                }
+                let mut selected = mir.clone();
+                selected.entry = Some(test.function);
+                selected.tests.clear();
+                let artifact =
+                    self.compile_mir(&selected, &output_directory.join(format!("test-{index}")))?;
+                Ok(CompiledTest {
+                    name: test.name.clone(),
+                    modes: test.modes.clone(),
+                    execution: TestExecution::Executable(artifact),
+                    expectations: test.expectations.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn compiler_test_results(&self, source: &Path) -> Result<Vec<Option<String>>, CompileError> {
+        let graph = severian_modules::resolve(source).map_err(CompileError::Diagnostic)?;
+        let mut results = Vec::new();
+        for module in &graph.modules {
+            let declarations = module
+                .ast
+                .items
+                .iter()
+                .filter(|item| !matches!(item, severian_ast::Item::Test(_)))
+                .cloned()
+                .collect::<Vec<_>>();
+            for test in module.ast.items.iter().filter_map(|item| match item {
+                severian_ast::Item::Test(test)
+                    if test.modes.iter().any(|mode| mode == "compiler") =>
+                {
+                    Some(test)
+                }
+                _ => None,
+            }) {
+                let mut failure = None;
+                for case in &test.compiler_cases {
+                    let mut ast = severian_ast::Module {
+                        items: declarations.clone(),
+                    };
+                    for statement in &case.body {
+                        match statement {
+                            severian_ast::Statement::Binding(binding) => {
+                                ast.items.push(severian_ast::Item::Binding(binding.clone()));
+                            }
+                            severian_ast::Statement::Expression(expression) => {
+                                ast.items
+                                    .push(severian_ast::Item::Expression(expression.clone()));
+                            }
+                            _ => {
+                                failure = Some(
+                                    "compiler expectations currently accept declaration fragments only"
+                                        .into(),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    if failure.is_some() {
+                        break;
+                    }
+                    let result = self.check_ast_to_mir(&ast);
+                    let matched = match case.expectation {
+                        severian_ast::CompilerExpectation::Accept => result.is_ok(),
+                        severian_ast::CompilerExpectation::Reject => result.is_err(),
+                    };
+                    if !matched {
+                        failure = Some(match case.expectation {
+                            severian_ast::CompilerExpectation::Accept => format!(
+                                "expected compiler acceptance, got: {}",
+                                result.expect_err("failed acceptance has an error")
+                            ),
+                            severian_ast::CompilerExpectation::Reject => {
+                                "expected compiler rejection, but the fragment was accepted".into()
+                            }
+                        });
+                        break;
+                    }
+                }
+                results.push(failure);
+            }
+        }
+        Ok(results)
+    }
+
     fn check_file_to_mir(&self, source: &Path) -> Result<MirModule, CompileError> {
         let graph = severian_modules::resolve(source).map_err(CompileError::Diagnostic)?;
         let modules = graph
             .modules
             .iter()
-            .map(|module| self.check_ast_to_mir(&module.ast))
+            .map(|module| {
+                let source = SourceFile::load(&module.path).map_err(|error| {
+                    CompileError::Diagnostic(Diagnostic::new(
+                        "E000001",
+                        format!("could not read {}: {error}", module.path.display()),
+                        None,
+                    ))
+                })?;
+                let mut mir = self.check_ast_to_mir(&module.ast)?;
+                attach_assertion_locations(&mut mir, &source);
+                Ok(mir)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(merge_modules(modules))
     }
@@ -169,6 +304,66 @@ impl Compiler {
         severian_backend::emit_mlir_executable(&mlir, &self.target.triple, output)
             .map_err(CompileError::Backend)
     }
+}
+
+fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {
+    attach_block_assertion_locations(&mut module.initializer, source);
+    for function in &mut module.functions {
+        if let Some(body) = &mut function.body {
+            attach_block_assertion_locations(body, source);
+        }
+    }
+}
+
+fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &SourceFile) {
+    for operation in &mut block.operations {
+        match operation {
+            MirOperation::Assert { origin, .. } => {
+                origin.location = assertion_location(origin, source);
+            }
+            MirOperation::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                attach_block_assertion_locations(then_block, source);
+                attach_block_assertion_locations(else_block, source);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn assertion_location(
+    origin: &severian_mir::AssertionOrigin,
+    source: &SourceFile,
+) -> Option<severian_mir::AssertionLocation> {
+    let statement_start = usize::try_from(origin.statement_start).ok()?;
+    let condition_start = usize::try_from(origin.condition_start).ok()?;
+    let condition_end = usize::try_from(origin.condition_end).ok()?;
+    let before = source.text.get(..statement_start)?;
+    let line = u32::try_from(before.bytes().filter(|byte| *byte == b'\n').count() + 1).ok()?;
+    let line_start = before.rfind('\n').map_or(0, |offset| offset + 1);
+    let column = u32::try_from(
+        source
+            .text
+            .get(line_start..statement_start)?
+            .chars()
+            .count()
+            + 1,
+    )
+    .ok()?;
+    let expression = source
+        .text
+        .get(condition_start..condition_end)?
+        .trim()
+        .to_owned();
+    Some(severian_mir::AssertionLocation {
+        file: source.path.display().to_string(),
+        line,
+        column,
+        expression,
+    })
 }
 
 fn with_core_prelude(
@@ -275,6 +470,17 @@ fn merge_modules(modules: Vec<MirModule>) -> MirModule {
                 .iter()
                 .map(|operation| remap_operation(operation, value_offset, function_offset)),
         );
+        merged.tests.extend(
+            module
+                .tests
+                .iter()
+                .map(|test| severian_mir::TestDeclaration {
+                    name: test.name.clone(),
+                    modes: test.modes.clone(),
+                    function: severian_mir::FunctionId(test.function.0 + function_offset),
+                    expectations: test.expectations.clone(),
+                }),
+        );
         for mut function in module.functions {
             function.id.0 += function_offset;
             function.parameters = function
@@ -338,6 +544,39 @@ fn remap_operation(operation: &MirOperation, offset: u32, function_offset: u32) 
             function: severian_mir::FunctionId(function.0 + function_offset),
             arguments: arguments.iter().copied().map(value).collect(),
             result: value(*result),
+        },
+        MirOperation::Return { value: returned } => MirOperation::Return {
+            value: returned.map(value),
+        },
+        MirOperation::Assert {
+            condition,
+            message,
+            origin,
+        } => MirOperation::Assert {
+            condition: value(*condition),
+            message: message.map(value),
+            origin: origin.clone(),
+        },
+        MirOperation::If {
+            condition,
+            then_block,
+            else_block,
+        } => MirOperation::If {
+            condition: value(*condition),
+            then_block: severian_mir::Block {
+                operations: then_block
+                    .operations
+                    .iter()
+                    .map(|operation| remap_operation(operation, offset, function_offset))
+                    .collect(),
+            },
+            else_block: severian_mir::Block {
+                operations: else_block
+                    .operations
+                    .iter()
+                    .map(|operation| remap_operation(operation, offset, function_offset))
+                    .collect(),
+            },
         },
         MirOperation::CompiledRegionCall {
             artifact,

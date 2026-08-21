@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -233,5 +233,133 @@ fn run_executes_a_relative_output_path_without_searching_path() {
     );
     assert_eq!(output.stdout, b"relative output\n");
     assert!(root.join("app").is_file());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn test_discovers_named_and_anonymous_tests_and_reports_failures() {
+    let root = temporary("tests");
+    let passing = root.join("passing.sev");
+    fs::write(
+        &passing,
+        "def clamp(value: int, low: int, high: int) -> int:\n    if value < low:\n        return low\n    if value > high:\n        return high\n    return value\n\ntest:\n    assert(clamp(4, 0, 10) == 4)\n\ntest \"named\":\n    assert(clamp(-1, 0, 10) == 0)\n    assert(clamp(12, 0, 10) == 10)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&passing).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test test 1 ... ok"), "{stdout}");
+    assert!(stdout.contains("test named ... ok"), "{stdout}");
+
+    let failing = root.join("failing.sev");
+    fs::write(&failing, "test \"fails\":\n    assert(false)\n").unwrap();
+    let output = sev().args(["test"]).arg(&failing).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("test fails ... FAILED"));
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("failing.sev:2:5: assertion failed: false"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn test_runs_compiler_expectations_and_continues_after_source_errors() {
+    let root = temporary("compiler-tests");
+    fs::write(
+        root.join("compiler.sev"),
+        "def increment(value: int) -> int:\n    return value + 1\n\ntest with compiler \"type checks declarations\":\n    reject error:\n        increment(\"wrong\")\n    accept:\n        value = increment(1)\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("invalid.sev"),
+        "test:\n    assert([1, 2] == [1, 2])\n",
+    )
+    .unwrap();
+
+    let output = sev().args(["test"]).arg(&root).output().unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("test type checks declarations ... ok"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("invalid.sev ... FAILED (compile)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("test result: 1 passed; 1 failed"),
+        "{stdout}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn test_runs_benchmarks_and_captured_integration_expectations() {
+    let root = temporary("test-modes");
+    let source = root.join("modes.sev");
+    fs::write(
+        &source,
+        "def main():\n    print(\"captured\")\n\ntest with bench \"bench\":\n    assert(2 + 2 == 4)\n\ntest with integ \"integration\":\n    main()\n    assert(\"captured\" in stdout)\n    assert(stderr == \"\")\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test bench ... bench ("), "{stdout}");
+    assert!(stdout.contains("test integration ... ok"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn test_rejects_unimplemented_runner_modes_instead_of_passing_them_as_skipped() {
+    let root = temporary("unsupported-test-mode");
+    let source = root.join("property.sev");
+    fs::write(&source, "test with property:\n    assert(true)\n").unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("FAILED (unsupported runner: property)"),
+        "{stdout}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn concurrent_test_invocations_do_not_replace_each_others_executables() {
+    let root = temporary("concurrent-tests");
+    let source = root.join("same.sev");
+    fs::write(
+        &source,
+        "test \"first\":\n    assert(true)\n\ntest \"second\":\n    assert(true)\n",
+    )
+    .unwrap();
+    let first = sev()
+        .args(["test"])
+        .arg(&source)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let second = sev()
+        .args(["test"])
+        .arg(&source)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    assert!(first.wait_with_output().unwrap().status.success());
+    assert!(second.wait_with_output().unwrap().status.success());
     fs::remove_dir_all(root).unwrap();
 }

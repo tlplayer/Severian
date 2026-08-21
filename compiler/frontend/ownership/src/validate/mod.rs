@@ -65,6 +65,34 @@ fn validate_statement(
             Ok(())
         }
         Statement::Expression(expression) => validate_expression(expression, declared),
+        Statement::Return(value) => value
+            .as_ref()
+            .map_or(Ok(()), |value| validate_expression(value, declared)),
+        Statement::Assert {
+            condition, message, ..
+        } => {
+            validate_expression(condition, declared)?;
+            if let Some(message) = message {
+                validate_expression(message, declared)?;
+            }
+            Ok(())
+        }
+        Statement::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            validate_expression(condition, declared)?;
+            let mut then_declared = declared.clone();
+            for statement in &then_block.statements {
+                validate_statement(statement, bindings, &mut then_declared)?;
+            }
+            let mut else_declared = declared.clone();
+            for statement in &else_block.statements {
+                validate_statement(statement, bindings, &mut else_declared)?;
+            }
+            Ok(())
+        }
     }
 }
 

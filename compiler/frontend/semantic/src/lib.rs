@@ -70,6 +70,51 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
             body: None,
         });
     }
+    let source_function_count = module.functions.len();
+    for (index, test) in ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Test(test) => Some(test),
+            _ => None,
+        })
+        .enumerate()
+    {
+        let id = FunctionId(module.functions.len() as u32);
+        let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+        let function_name = format!("__sev_test_{index}");
+        analyzer
+            .functions
+            .entry(function_name.clone())
+            .or_default()
+            .push(id);
+        analyzer.signatures.push(FunctionSignature {
+            parameters: Vec::new(),
+            result: unit,
+        });
+        module.functions.push(FunctionDeclaration {
+            id,
+            name: function_name,
+            parameters: Vec::new(),
+            result: universal_boundary(unit),
+            compile_route: severian_universal::CompileRoute::Standard,
+            call_type: CallType::Severian,
+            body: None,
+        });
+        module.tests.push(severian_hir::TestDeclaration {
+            name: test
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("test {}", index + 1)),
+            modes: test
+                .modes
+                .iter()
+                .map(|mode| test_mode(mode, test.span))
+                .collect::<Result<Vec<_>, _>>()?,
+            function: id,
+            expectations: Vec::new(),
+        });
+    }
 
     for item in &ast.items {
         match item {
@@ -113,17 +158,22 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
                 .insert(parameter.name.clone(), (parameter.binding, type_id));
         }
         let mut body = Block::default();
-        for statement in ast_body {
-            body.statements
-                .push(analyzer.statement(statement, &mut module.bindings)?);
-        }
         let SemanticType::Universal(result_type) = function.result.ty else {
             unreachable!("source results are universally resolved")
         };
-        if result_type != types.resolve_name("unit").expect("bootstrap defines unit") {
+        for statement in ast_body {
+            body.statements.push(analyzer.statement(
+                statement,
+                &mut module.bindings,
+                result_type,
+            )?);
+        }
+        if result_type != types.resolve_name("unit").expect("bootstrap defines unit")
+            && !block_returns(ast_body)
+        {
             return Err(Diagnostic::new(
                 "E000209",
-                "a function body with a non-unit result requires an explicit return",
+                "not every path in this function returns its declared result",
                 Some(ast_function.span),
             ));
         }
@@ -150,6 +200,41 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
                 ));
             }
         }
+    }
+    for (offset, test) in ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Test(test) => Some(test),
+            _ => None,
+        })
+        .enumerate()
+    {
+        analyzer.names = globals.clone();
+        analyzer.declarations.clear();
+        let unit = types.resolve_name("unit").expect("bootstrap defines unit");
+        let mut body = Block::default();
+        if module.tests[offset]
+            .modes
+            .contains(&severian_hir::TestMode::Compiler)
+        {
+            module.functions[source_function_count + offset].body = Some(body);
+            continue;
+        }
+        for statement in &test.body {
+            if module.tests[offset]
+                .modes
+                .contains(&severian_hir::TestMode::Integration)
+            {
+                if let Some(expectation) = integration_expectation(statement) {
+                    module.tests[offset].expectations.push(expectation);
+                    continue;
+                }
+            }
+            body.statements
+                .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+        }
+        module.functions[source_function_count + offset].body = Some(body);
     }
     Ok(Program {
         modules: vec![module],
@@ -236,6 +321,7 @@ impl Analyzer<'_> {
         &mut self,
         statement: &AstStatement,
         bindings: &mut Vec<Binding>,
+        result_type: TypeId,
     ) -> Result<Statement, Diagnostic> {
         match statement {
             AstStatement::Binding(binding) => {
@@ -244,7 +330,95 @@ impl Analyzer<'_> {
             AstStatement::Expression(expression) => {
                 Ok(Statement::Expression(self.expression(expression, None)?))
             }
+            AstStatement::Return { value, span } => {
+                let unit = self
+                    .types
+                    .resolve_name("unit")
+                    .expect("bootstrap defines unit");
+                let value = match value {
+                    Some(value) if result_type == unit => {
+                        return Err(Diagnostic::new(
+                            "E000210",
+                            "a unit function cannot return a value",
+                            Some(*span),
+                        ))
+                    }
+                    Some(value) => Some(self.expression(value, Some(result_type))?),
+                    None if result_type != unit => {
+                        return Err(Diagnostic::new(
+                            "E000210",
+                            "this function must return its declared result",
+                            Some(*span),
+                        ))
+                    }
+                    None => None,
+                };
+                Ok(Statement::Return(value))
+            }
+            AstStatement::Assert {
+                condition,
+                message,
+                span,
+            } => {
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                Ok(Statement::Assert {
+                    condition: self.expression(condition, Some(boolean))?,
+                    message: message
+                        .as_ref()
+                        .map(|message| self.expression(message, Some(string)))
+                        .transpose()?,
+                    span: *span,
+                    condition_span: condition.span,
+                })
+            }
+            AstStatement::If {
+                condition,
+                then_block,
+                else_block,
+                ..
+            } => {
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let condition = self.expression(condition, Some(boolean))?;
+                let outer_names = self.names.clone();
+                let outer_declarations = self.declarations.clone();
+                let then_block = self.block(then_block, bindings, result_type)?;
+                self.names.clone_from(&outer_names);
+                self.declarations.clone_from(&outer_declarations);
+                let else_block = self.block(else_block, bindings, result_type)?;
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                Ok(Statement::If {
+                    condition,
+                    then_block,
+                    else_block,
+                })
+            }
         }
+    }
+
+    fn block(
+        &mut self,
+        statements: &[AstStatement],
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Block, Diagnostic> {
+        let mut block = Block::default();
+        for statement in statements {
+            block
+                .statements
+                .push(self.statement(statement, bindings, result_type)?);
+        }
+        Ok(block)
     }
 
     fn next_id(&mut self) -> HirId {
@@ -328,6 +502,11 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
+            AstExpressionKind::Member { .. } => Err(Diagnostic::new(
+                "E000211",
+                "member access is not implemented yet",
+                Some(ast.span),
+            )),
             AstExpressionKind::Call { callee, arguments } => {
                 let AstExpressionKind::Name(name) = &callee.kind else {
                     return Err(Diagnostic::new(
@@ -374,6 +553,13 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Unary { operator, operand } => {
+                if *operator == AstUnaryOperator::Move {
+                    return Err(Diagnostic::new(
+                        "E000302",
+                        "move checking is not implemented yet",
+                        Some(ast.span),
+                    ));
+                }
                 let operator = universal_unary(*operator);
                 let prepared = self.prepare(operand)?;
                 let resolved = self
@@ -449,6 +635,88 @@ fn universal_boundary(type_id: TypeId) -> BoundaryType {
     }
 }
 
+fn test_mode(
+    name: &str,
+    span: severian_source::Span,
+) -> Result<severian_hir::TestMode, Diagnostic> {
+    match name {
+        "property" => Ok(severian_hir::TestMode::Property),
+        "bench" | "benchmark" => Ok(severian_hir::TestMode::Benchmark),
+        "chaos" => Ok(severian_hir::TestMode::Chaos),
+        "profile" => Ok(severian_hir::TestMode::Profile),
+        "compiler" => Ok(severian_hir::TestMode::Compiler),
+        "integ" | "integration" => Ok(severian_hir::TestMode::Integration),
+        _ => Err(Diagnostic::new(
+            "E000213",
+            format!("unknown test runner `{name}`"),
+            Some(span),
+        )),
+    }
+}
+
+fn block_returns(statements: &[AstStatement]) -> bool {
+    statements.last().is_some_and(|statement| match statement {
+        AstStatement::Return { .. } => true,
+        AstStatement::If {
+            then_block,
+            else_block,
+            ..
+        } => !else_block.is_empty() && block_returns(then_block) && block_returns(else_block),
+        AstStatement::Binding(_) | AstStatement::Expression(_) | AstStatement::Assert { .. } => {
+            false
+        }
+    })
+}
+
+fn integration_expectation(statement: &AstStatement) -> Option<severian_hir::TestExpectation> {
+    let AstStatement::Assert { condition, .. } = statement else {
+        return None;
+    };
+    let AstExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &condition.kind
+    else {
+        return None;
+    };
+    match operator {
+        AstBinaryOperator::Contains => Some(severian_hir::TestExpectation::Contains {
+            stream: test_stream(right)?,
+            value: string_literal(left)?.to_owned(),
+        }),
+        AstBinaryOperator::Equal => {
+            if let (Some(stream), Some(value)) = (test_stream(left), string_literal(right)) {
+                Some(severian_hir::TestExpectation::Equals {
+                    stream,
+                    value: value.to_owned(),
+                })
+            } else {
+                Some(severian_hir::TestExpectation::Equals {
+                    stream: test_stream(right)?,
+                    value: string_literal(left)?.to_owned(),
+                })
+            }
+        }
+        _ => None,
+    }
+}
+
+fn test_stream(expression: &AstExpression) -> Option<severian_hir::TestStream> {
+    match &expression.kind {
+        AstExpressionKind::Name(name) if name == "stdout" => Some(severian_hir::TestStream::Stdout),
+        AstExpressionKind::Name(name) if name == "stderr" => Some(severian_hir::TestStream::Stderr),
+        _ => None,
+    }
+}
+
+fn string_literal(expression: &AstExpression) -> Option<&str> {
+    match &expression.kind {
+        AstExpressionKind::Literal(AstLiteral::String(value)) => Some(value),
+        _ => None,
+    }
+}
+
 fn universal_literal(literal: &AstLiteral) -> LiteralValue {
     match literal {
         AstLiteral::Integer(value) => LiteralValue::Integer(value.clone()),
@@ -467,6 +735,7 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
         AstUnaryOperator::Positive => UnaryOperator::Positive,
         AstUnaryOperator::Negative => UnaryOperator::Negative,
         AstUnaryOperator::Not => UnaryOperator::Not,
+        AstUnaryOperator::Move => unreachable!("move is rejected before universal resolution"),
     }
 }
 
@@ -484,6 +753,7 @@ fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
         AstBinaryOperator::LessEqual => BinaryOperator::LessEqual,
         AstBinaryOperator::Greater => BinaryOperator::Greater,
         AstBinaryOperator::GreaterEqual => BinaryOperator::GreaterEqual,
+        AstBinaryOperator::Contains => BinaryOperator::Contains,
         AstBinaryOperator::And => BinaryOperator::And,
         AstBinaryOperator::Or => BinaryOperator::Or,
     }

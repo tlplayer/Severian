@@ -1,11 +1,14 @@
 use severian_driver::config::{BinaryTarget, Catalog, DeclaredTarget, LibraryTarget, Manifest};
 use severian_driver::Compiler;
 use severian_target::TargetSpec;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{self, Command};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn main() {
     if let Err(message) = run(env::args().skip(1).collect()) {
@@ -42,6 +45,7 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
         "check" => check(parse_common(arguments)?, &catalog),
         "build" | "compile" => build(parse_common(arguments)?, &catalog).map(|_| ()),
         "run" => run_program(parse_common(arguments)?, &catalog),
+        "test" => test(parse_common(arguments)?, &catalog),
         "config" => config(arguments, &catalog),
         "new" => create_project(arguments, &catalog, true),
         "init" => create_project(arguments, &catalog, false),
@@ -54,7 +58,7 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
 fn is_command(argument: &str) -> bool {
     matches!(
         argument,
-        "check" | "build" | "compile" | "run" | "new" | "init" | "config"
+        "check" | "build" | "compile" | "run" | "test" | "new" | "init" | "config"
     )
 }
 
@@ -344,6 +348,237 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
     }
 }
 
+fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+    if !options.application_args.is_empty() {
+        return Err("`sev test` does not accept application arguments".into());
+    }
+    let requested = options.path.clone().unwrap_or_else(|| PathBuf::from("."));
+    let (sources, root, manifest) =
+        if requested.is_dir() && !requested.join("package.toml").is_file() {
+            let mut sources = Vec::new();
+            collect_test_sources(&requested, &mut sources)?;
+            sources.sort();
+            (sources, requested.clone(), None)
+        } else {
+            let input = discover(Some(&requested), catalog)?;
+            let sources = selected_targets(&input, options.bin.as_deref())?
+                .into_iter()
+                .map(|target| target.path().to_owned())
+                .collect();
+            let root = input_root(&input).to_owned();
+            let manifest = match input {
+                Input::Package(manifest) => Some(manifest),
+                Input::Source { .. } => None,
+            };
+            (sources, root, manifest)
+        };
+    if sources.is_empty() {
+        return Err(format!(
+            "no Severian test sources found in {}",
+            requested.display()
+        ));
+    }
+    let config = resolve_config(catalog, manifest.as_ref(), &options)?;
+    let compiler = compiler(&config)?;
+    let invocation = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("could not identify test invocation: {error}"))?
+        .as_nanos();
+    let output_root = root
+        .join("target")
+        .join(target_directory(&config.target))
+        .join(&config.profile)
+        .join("tests")
+        .join(format!("run-{}-{invocation}", process::id()));
+    fs::create_dir_all(&output_root)
+        .map_err(|error| format!("could not create {}: {error}", output_root.display()))?;
+
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    for (source_index, source) in sources.iter().enumerate() {
+        let directory = output_root.join(format!("source-{source_index}"));
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+        let tests = match compiler.compile_tests_file(source, &directory) {
+            Ok(tests) => tests,
+            Err(error) => {
+                println!("test {} ... FAILED (compile)", source.display());
+                eprintln!("{error}");
+                failed += 1;
+                continue;
+            }
+        };
+        for test in tests {
+            let artifact = match &test.execution {
+                severian_driver::TestExecution::Compiler { failure } => {
+                    if let Some(message) = failure {
+                        println!("test {} ... FAILED", test.name);
+                        eprintln!("{message}");
+                        failed += 1;
+                    } else {
+                        println!("test {} ... ok", test.name);
+                        passed += 1;
+                    }
+                    continue;
+                }
+                severian_driver::TestExecution::Executable(artifact) => artifact,
+            };
+            if test.modes == [severian_mir::TestMode::Integration] {
+                let result = Command::new(&artifact.path).output().map_err(|error| {
+                    format!("could not run {}: {error}", artifact.path.display())
+                })?;
+                let expectation_failure = test.expectations.iter().find_map(|expectation| {
+                    let (actual, expected, relation) = match expectation {
+                        severian_mir::TestExpectation::Contains { stream, value } => {
+                            (test_stream(stream, &result), value, "contain")
+                        }
+                        severian_mir::TestExpectation::Equals { stream, value } => {
+                            (test_stream(stream, &result), value, "equal")
+                        }
+                    };
+                    let matches = match expectation {
+                        severian_mir::TestExpectation::Contains { .. } => actual.contains(expected),
+                        severian_mir::TestExpectation::Equals { .. } => actual.as_ref() == expected,
+                    };
+                    (!matches).then(|| {
+                        format!("captured stream did not {relation} {expected:?}; got {actual:?}")
+                    })
+                });
+                if result.status.success() && expectation_failure.is_none() {
+                    println!("test {} ... ok", test.name);
+                    passed += 1;
+                } else {
+                    println!("test {} ... FAILED", test.name);
+                    if let Some(message) = expectation_failure {
+                        eprintln!("{message}");
+                    }
+                    report_captured_output(&result);
+                    failed += 1;
+                }
+                continue;
+            }
+            if test.modes == [severian_mir::TestMode::Benchmark] {
+                let warmup = Command::new(&artifact.path).output().map_err(|error| {
+                    format!("could not run {}: {error}", artifact.path.display())
+                })?;
+                if !warmup.status.success() {
+                    println!("test {} ... FAILED", test.name);
+                    report_captured_output(&warmup);
+                    failed += 1;
+                    continue;
+                }
+                let iterations = 10u32;
+                let started = Instant::now();
+                let mut failure = None;
+                for _ in 0..iterations {
+                    let result = Command::new(&artifact.path).output().map_err(|error| {
+                        format!("could not run {}: {error}", artifact.path.display())
+                    })?;
+                    if !result.status.success() {
+                        failure = Some(result);
+                        break;
+                    }
+                }
+                if let Some(output) = failure {
+                    println!("test {} ... FAILED", test.name);
+                    report_captured_output(&output);
+                    failed += 1;
+                } else {
+                    let per_iteration = started.elapsed() / iterations;
+                    println!("test {} ... bench ({})", test.name, duration(per_iteration));
+                    passed += 1;
+                }
+                continue;
+            }
+            if !test.modes.is_empty() {
+                println!(
+                    "test {} ... FAILED (unsupported runner: {})",
+                    test.name,
+                    test.modes
+                        .iter()
+                        .map(|mode| mode.name())
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                );
+                failed += 1;
+                continue;
+            }
+            let result = Command::new(&artifact.path)
+                .output()
+                .map_err(|error| format!("could not run {}: {error}", artifact.path.display()))?;
+            if result.status.success() {
+                println!("test {} ... ok", test.name);
+                passed += 1;
+            } else {
+                println!("test {} ... FAILED", test.name);
+                report_captured_output(&result);
+                failed += 1;
+            }
+        }
+    }
+    println!("\ntest result: {passed} passed; {failed} failed; 0 skipped");
+    if failed == 0 {
+        Ok(())
+    } else {
+        Err(format!("{failed} test(s) failed"))
+    }
+}
+
+fn test_stream<'a>(
+    stream: &severian_mir::TestStream,
+    output: &'a std::process::Output,
+) -> Cow<'a, str> {
+    let bytes = match stream {
+        severian_mir::TestStream::Stdout => &output.stdout,
+        severian_mir::TestStream::Stderr => &output.stderr,
+    };
+    String::from_utf8_lossy(bytes)
+}
+
+fn report_captured_output(output: &std::process::Output) {
+    if !output.stdout.is_empty() {
+        println!("--- stdout ---");
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        if !output.stdout.ends_with(b"\n") {
+            println!();
+        }
+    }
+    if !output.stderr.is_empty() {
+        let _ = io::stdout().flush();
+        eprintln!("--- stderr ---");
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+}
+
+fn duration(value: Duration) -> String {
+    if value.as_secs() > 0 {
+        format!("{:.3}s/iteration", value.as_secs_f64())
+    } else if value.as_millis() > 0 {
+        format!("{:.3}ms/iteration", value.as_secs_f64() * 1_000.0)
+    } else {
+        format!(
+            "{:.3}\u{00b5}s/iteration",
+            value.as_secs_f64() * 1_000_000.0
+        )
+    }
+}
+
+fn collect_test_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("could not read {}: {error}", directory.display()))?
+    {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) != Some("target") {
+                collect_test_sources(&path, output)?;
+            }
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("sev") {
+            output.push(path);
+        }
+    }
+    Ok(())
+}
+
 fn compiler(config: &ResolvedConfig) -> Result<Compiler, String> {
     if config.backend == "xla" {
         return Err("whole-program `xla` is not available yet; use `auto` for native programs containing CompileType-selected kernels".into());
@@ -625,7 +860,7 @@ fn help(catalog: &Catalog) -> String {
     let mut output = String::from(
         "usage: sev [command] [path] [options] [-- application-args]\n\n\
 default:\n  sev [path] [-- args...]       Check, build, and run the default binary.\n\n\
-commands:\n  check   build   compile   run   new   init   config <show|sync|defaults>\n\n\
+commands:\n  check   build   compile   run   test   new   init   config <show|sync|defaults>\n\n\
 build options:\n",
     );
     for path in ["build.profile", "build.backend", "build.target"] {

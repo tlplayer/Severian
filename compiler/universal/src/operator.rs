@@ -33,6 +33,7 @@ pub enum BinaryOperator {
     LessEqual,
     Greater,
     GreaterEqual,
+    Contains,
     And,
     Or,
 }
@@ -52,6 +53,7 @@ impl BinaryOperator {
             "<=" => Some(Self::LessEqual),
             ">" => Some(Self::Greater),
             ">=" => Some(Self::GreaterEqual),
+            "in" => Some(Self::Contains),
             "and" => Some(Self::And),
             "or" => Some(Self::Or),
             _ => None,
@@ -74,6 +76,7 @@ impl fmt::Display for BinaryOperator {
             Self::LessEqual => "<=",
             Self::Greater => ">",
             Self::GreaterEqual => ">=",
+            Self::Contains => "in",
             Self::And => "and",
             Self::Or => "or",
         })

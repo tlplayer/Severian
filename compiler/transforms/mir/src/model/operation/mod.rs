@@ -1,4 +1,4 @@
-use crate::ValueId;
+use crate::{AssertionOrigin, Block, ValueId};
 use severian_artifact::ArtifactId;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
@@ -23,6 +23,19 @@ pub enum Operation {
         function: severian_hir::FunctionId,
         arguments: Vec<ValueId>,
         result: ValueId,
+    },
+    Return {
+        value: Option<ValueId>,
+    },
+    Assert {
+        condition: ValueId,
+        message: Option<ValueId>,
+        origin: AssertionOrigin,
+    },
+    If {
+        condition: ValueId,
+        then_block: Block,
+        else_block: Block,
     },
     /// Planner-produced bridge back into the standard pipeline. Source MIR
     /// never creates this operation directly.

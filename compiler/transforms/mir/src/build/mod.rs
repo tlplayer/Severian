@@ -9,6 +9,15 @@ pub fn build(hir: &HirProgram) -> Module {
     };
     for hir_module in &hir.modules {
         builder.module.entry = hir_module.entry;
+        builder
+            .module
+            .tests
+            .extend(hir_module.tests.iter().map(|test| crate::TestDeclaration {
+                name: test.name.clone(),
+                modes: test.modes.clone(),
+                function: test.function,
+                expectations: test.expectations.clone(),
+            }));
         for function in &hir_module.functions {
             let parameters = function
                 .parameters
@@ -100,6 +109,54 @@ impl Builder {
             }
             Statement::Expression(expression) => {
                 self.expression(expression, block);
+            }
+            Statement::Return(value) => {
+                let value = value.as_ref().map(|value| self.expression(value, block));
+                block.operations.push(Operation::Return { value });
+            }
+            Statement::Assert {
+                condition,
+                message,
+                span,
+                condition_span,
+            } => {
+                let condition = self.expression(condition, block);
+                let message = message
+                    .as_ref()
+                    .map(|message| self.expression(message, block));
+                block.operations.push(Operation::Assert {
+                    condition,
+                    message,
+                    origin: crate::AssertionOrigin {
+                        statement_start: span.start,
+                        condition_start: condition_span.start,
+                        condition_end: condition_span.end,
+                        location: None,
+                    },
+                });
+            }
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                let condition = self.expression(condition, block);
+                let outer_bindings = self.bindings.clone();
+                let mut then_mir = Block::default();
+                for statement in &then_block.statements {
+                    self.statement(statement, module, &mut then_mir);
+                }
+                self.bindings.clone_from(&outer_bindings);
+                let mut else_mir = Block::default();
+                for statement in &else_block.statements {
+                    self.statement(statement, module, &mut else_mir);
+                }
+                self.bindings = outer_bindings;
+                block.operations.push(Operation::If {
+                    condition,
+                    then_block: then_mir,
+                    else_block: else_mir,
+                });
             }
         }
     }

@@ -17,6 +17,7 @@ pub enum UnaryOperator {
     Positive,
     Negative,
     Not,
+    Move,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub enum BinaryOperator {
     LessEqual,
     Greater,
     GreaterEqual,
+    Contains,
     And,
     Or,
 }
@@ -47,6 +49,10 @@ pub struct Expression {
 pub enum ExpressionKind {
     Literal(Literal),
     Name(String),
+    Member {
+        object: Box<Expression>,
+        name: String,
+    },
     Call {
         callee: Box<Expression>,
         arguments: Vec<Expression>,

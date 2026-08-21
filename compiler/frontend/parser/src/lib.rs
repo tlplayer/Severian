@@ -153,6 +153,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_named_ordinary_and_composed_test_declarations() {
+        let source = SourceFile::virtual_source(
+            "tests.sev",
+            "test:\n    assert(true)\n\ntest with property and chaos \"generated\":\n    assert(true)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let module = parse(&tokens).unwrap();
+        let tests = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Test(test) => Some(test),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tests.len(), 2);
+        assert_eq!(tests[0].name, None);
+        assert_eq!(tests[1].name.as_deref(), Some("generated"));
+        assert_eq!(tests[1].modes, ["property", "chaos"]);
+    }
+
+    #[test]
     fn rejects_function_control_flow_at_global_scope() {
         let source = SourceFile::virtual_source("invalid.sev", "return 1\n");
         let error = parse(&scan(&source).unwrap()).unwrap_err();

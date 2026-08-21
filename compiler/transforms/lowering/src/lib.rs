@@ -99,6 +99,34 @@ fn lower_block(block: &MirBlock) -> LirBlock {
                 arguments: arguments.iter().map(|value| ValueId(value.0)).collect(),
                 result: ValueId(result.0),
             },
+            MirOperation::Return { value } => LirOperation::Return {
+                value: value.map(|value| ValueId(value.0)),
+            },
+            MirOperation::Assert {
+                condition,
+                message,
+                origin,
+            } => LirOperation::Assert {
+                condition: ValueId(condition.0),
+                message: message.map(|message| ValueId(message.0)),
+                location: origin.location.as_ref().map(|location| {
+                    severian_lir::AssertionLocation {
+                        file: location.file.clone(),
+                        line: location.line,
+                        column: location.column,
+                        expression: location.expression.clone(),
+                    }
+                }),
+            },
+            MirOperation::If {
+                condition,
+                then_block,
+                else_block,
+            } => LirOperation::If {
+                condition: ValueId(condition.0),
+                then_block: lower_block(then_block),
+                else_block: lower_block(else_block),
+            },
             MirOperation::CompiledRegionCall {
                 artifact,
                 inputs,
@@ -148,6 +176,7 @@ fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
         BinaryOperator::LessEqual => BinaryOperation::LessEqual,
         BinaryOperator::Greater => BinaryOperation::Greater,
         BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
+        BinaryOperator::Contains => BinaryOperation::Contains,
         BinaryOperator::And => BinaryOperation::And,
         BinaryOperator::Or => BinaryOperation::Or,
     }

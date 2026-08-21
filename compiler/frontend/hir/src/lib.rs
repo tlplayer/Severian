@@ -87,6 +87,49 @@ pub struct FunctionDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestDeclaration {
+    pub name: String,
+    pub modes: Vec<TestMode>,
+    pub function: FunctionId,
+    pub expectations: Vec<TestExpectation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestMode {
+    Property,
+    Benchmark,
+    Chaos,
+    Profile,
+    Compiler,
+    Integration,
+}
+
+impl TestMode {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Property => "property",
+            Self::Benchmark => "bench",
+            Self::Chaos => "chaos",
+            Self::Profile => "profile",
+            Self::Compiler => "compiler",
+            Self::Integration => "integ",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestExpectation {
+    Contains { stream: TestStream, value: String },
+    Equals { stream: TestStream, value: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDeclaration {
     pub id: DeclaredTypeId,
     pub name: String,
@@ -106,5 +149,6 @@ pub struct Module {
     pub initializer: Block,
     pub functions: Vec<FunctionDeclaration>,
     pub entry: Option<FunctionId>,
+    pub tests: Vec<TestDeclaration>,
     pub types: Vec<TypeDeclaration>,
 }

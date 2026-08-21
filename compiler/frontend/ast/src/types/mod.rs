@@ -66,6 +66,29 @@ pub struct TypeDeclaration {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestDeclaration {
+    pub name: Option<String>,
+    pub modes: Vec<String>,
+    pub body: Vec<crate::Statement>,
+    pub compiler_cases: Vec<CompilerTestCase>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompilerTestCase {
+    pub expectation: CompilerExpectation,
+    pub diagnostic_name: Option<String>,
+    pub body: Vec<crate::Statement>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilerExpectation {
+    Accept,
+    Reject,
+}
+
 /// The one source-level type node used in every annotation position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeAnnotation {
@@ -122,6 +145,7 @@ pub enum OperatorSyntax {
     LessEqual,
     Greater,
     GreaterEqual,
+    Contains,
     And,
     Or,
     Not,

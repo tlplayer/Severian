@@ -227,6 +227,21 @@ fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(
                     ));
                 }
             }
+            Operation::Return { .. } => {
+                return Err(MlirError::UnsupportedOperation(
+                    "return requires control-flow-aware MLIR lowering".into(),
+                ));
+            }
+            Operation::Assert { .. } => {
+                return Err(MlirError::UnsupportedOperation(
+                    "assert requires the standard test runtime lowering path".into(),
+                ));
+            }
+            Operation::If { .. } => {
+                return Err(MlirError::UnsupportedOperation(
+                    "if requires control-flow-aware MLIR lowering".into(),
+                ));
+            }
             Operation::ArtifactCall {
                 artifact,
                 inputs,

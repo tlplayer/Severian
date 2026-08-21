@@ -33,6 +33,14 @@ pub struct Value {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionLocation {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub expression: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Constant {
     Integer(String),
     Float(String),
@@ -64,6 +72,7 @@ pub enum BinaryOperation {
     LessEqual,
     Greater,
     GreaterEqual,
+    Contains,
     And,
     Or,
 }
@@ -89,6 +98,19 @@ pub enum Operation {
         function: FunctionId,
         arguments: Vec<ValueId>,
         result: ValueId,
+    },
+    Return {
+        value: Option<ValueId>,
+    },
+    Assert {
+        condition: ValueId,
+        message: Option<ValueId>,
+        location: Option<AssertionLocation>,
+    },
+    If {
+        condition: ValueId,
+        then_block: Block,
+        else_block: Block,
     },
     ArtifactCall {
         artifact: ArtifactId,

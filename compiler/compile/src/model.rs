@@ -76,6 +76,7 @@ impl CompilePlan {
             initializer: resume_block(&self.initializer),
             functions: Vec::new(),
             entry: self.source.entry,
+            tests: self.source.tests.clone(),
         };
         for function in &self.functions {
             let mut declaration = function.declaration.clone();

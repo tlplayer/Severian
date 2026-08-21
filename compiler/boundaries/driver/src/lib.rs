@@ -3,7 +3,9 @@
 pub mod config;
 mod pipeline;
 
-pub use pipeline::{check_file, compile_file, compile_source, CompileError, Compiler};
+pub use pipeline::{
+    check_file, compile_file, compile_source, CompileError, CompiledTest, Compiler, TestExecution,
+};
 
 #[cfg(test)]
 mod tests {

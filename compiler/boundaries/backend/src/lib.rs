@@ -78,7 +78,7 @@ impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     let mut output = String::from(
-        "#include <stdint.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\n",
+        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\n",
     );
     for value in &module.globals {
         output.push_str(&format!(
@@ -156,11 +156,6 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
         )?;
         if function.result == LoweredType::Unit {
             output.push_str("    return;\n");
-        } else {
-            return Err(BackendError::UnsupportedOperation(format!(
-                "function `{}` requires explicit return lowering",
-                function.name
-            )));
         }
         output.push_str("}\n\n");
     }
@@ -251,6 +246,57 @@ fn render_block(
                     output.push_str(&format!("    {call};\n"));
                 } else {
                     define_value(output, module, *result, &call)?;
+                }
+            }
+            Operation::Return { value } => match value {
+                Some(value) => output.push_str(&format!("    return v{};\n", value.0)),
+                None => output.push_str("    return;\n"),
+            },
+            Operation::Assert {
+                condition,
+                message,
+                location,
+            } => {
+                output.push_str(&format!("    if (!v{}) {{\n", condition.0));
+                let failure = location.as_ref().map(|location| {
+                    format!(
+                        "{}:{}:{}: assertion failed: {}",
+                        location.file, location.line, location.column, location.expression
+                    )
+                });
+                match (failure, message) {
+                    (Some(failure), Some(message)) => output.push_str(&format!(
+                        "        fprintf(stderr, \"%s: %s\\n\", {}, v{});\n",
+                        c_string_literal(&failure),
+                        message.0
+                    )),
+                    (Some(failure), None) => output.push_str(&format!(
+                        "        fputs({}, stderr);\n",
+                        c_string_literal(&format!("{failure}\n"))
+                    )),
+                    (None, Some(message)) => output.push_str(&format!(
+                        "        fprintf(stderr, \"assertion failed: %s\\n\", v{});\n",
+                        message.0
+                    )),
+                    (None, None) => {
+                        output.push_str("        fputs(\"assertion failed\\n\", stderr);\n");
+                    }
+                }
+                output.push_str("        exit(1);\n    }\n");
+            }
+            Operation::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                output.push_str(&format!("    if (v{}) {{\n", condition.0));
+                render_block(output, module, then_block)?;
+                if else_block.operations.is_empty() {
+                    output.push_str("    }\n");
+                } else {
+                    output.push_str("    } else {\n");
+                    render_block(output, module, else_block)?;
+                    output.push_str("    }\n");
                 }
             }
             Operation::ArtifactCall { artifact, .. } => {
@@ -423,6 +469,11 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
         BinaryOperation::LessEqual => "<=",
         BinaryOperation::Greater => ">",
         BinaryOperation::GreaterEqual => ">=",
+        BinaryOperation::Contains => {
+            return Err(BackendError::UnsupportedOperation(
+                "containment requires a lowered collection or test-runner operation".into(),
+            ))
+        }
         BinaryOperation::And => "&&",
         BinaryOperation::Or => "||",
     })

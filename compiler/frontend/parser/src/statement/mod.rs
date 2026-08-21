@@ -1,9 +1,9 @@
 use severian_ast::{
-    BinaryOperator, Binding, Decorator, DecoratorArgument, DecoratorValue, Expression,
-    ExpressionKind, FunctionDeclaration, FunctionParameter, ImportDeclaration, ImportSubject, Item,
-    Literal, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
-    Statement, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
-    UnaryOperator,
+    BinaryOperator, Binding, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
+    DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
+    ImportDeclaration, ImportSubject, Item, Literal, Module, OperatorDeclaration,
+    OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration,
+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{Token, TokenKind};
@@ -46,6 +46,13 @@ impl Parser<'_> {
                 module
                     .items
                     .push(Item::Type(self.type_declaration(decorators)?));
+            } else if self.at_identifier("test") {
+                if !decorators.is_empty() {
+                    return Err(self.error("decorators may not precede a test declaration"));
+                }
+                module.items.push(Item::Test(self.test_declaration()?));
+                self.separators();
+                continue;
             } else if self.at_identifier("import") {
                 if !decorators.is_empty() {
                     return Err(self.error("decorators may only precede declarations"));
@@ -69,6 +76,9 @@ impl Parser<'_> {
                     Statement::Binding(binding) => module.items.push(Item::Binding(binding)),
                     Statement::Expression(expression) => {
                         module.items.push(Item::Expression(expression))
+                    }
+                    Statement::Return { .. } | Statement::Assert { .. } | Statement::If { .. } => {
+                        unreachable!("module parsing only requests simple statements")
                     }
                 }
             }
@@ -194,36 +204,8 @@ impl Parser<'_> {
         };
         let mut end = result.span.end;
         let body = if self.take(&TokenKind::Colon).is_some() {
-            self.expect(
-                &TokenKind::Newline,
-                "expected a newline after function header",
-            )?;
-            while self.take(&TokenKind::Newline).is_some() {}
-            self.expect(&TokenKind::Indent, "expected an indented function body")?;
-            let mut statements = Vec::new();
-            self.separators();
-            while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-                if self.at_identifier("pass") {
-                    self.next();
-                } else if self.at_identifier("return")
-                    || self.at_identifier("break")
-                    || self.at_identifier("continue")
-                {
-                    return Err(self.error(
-                        "function control-flow statements are not implemented in this bootstrap subset",
-                    ));
-                } else {
-                    statements.push(self.statement()?);
-                }
-                if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
-                    return Err(self.error("expected a newline after function statement"));
-                }
-                self.separators();
-            }
-            end = self
-                .expect(&TokenKind::Dedent, "expected end of function body")?
-                .span
-                .end;
+            let (statements, block_end) = self.indented_block("function")?;
+            end = block_end;
             Some(statements)
         } else {
             None
@@ -237,6 +219,186 @@ impl Parser<'_> {
             result,
             body,
         })
+    }
+
+    fn test_declaration(&mut self) -> Result<TestDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let mut modes = Vec::new();
+        if self.at_identifier("with") {
+            self.next();
+            loop {
+                modes.push(self.identifier("expected a test mode after `with`")?.0);
+                if !self.at_identifier("and") {
+                    break;
+                }
+                self.next();
+            }
+        }
+        let name = match self.peek().kind.clone() {
+            TokenKind::String(name) => {
+                self.next();
+                Some(name)
+            }
+            _ => None,
+        };
+        self.expect(&TokenKind::Colon, "expected `:` after test declaration")?;
+        let (body, compiler_cases, end) = if modes.iter().any(|mode| mode == "compiler") {
+            let (body, cases, end) = self.compiler_test_block()?;
+            (body, cases, end)
+        } else {
+            let (body, end) = self.indented_block("test")?;
+            (body, Vec::new(), end)
+        };
+        Ok(TestDeclaration {
+            name,
+            modes,
+            body,
+            compiler_cases,
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
+    fn compiler_test_block(
+        &mut self,
+    ) -> Result<(Vec<Statement>, Vec<CompilerTestCase>, u32), Diagnostic> {
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after compiler test header",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(
+            &TokenKind::Indent,
+            "expected an indented compiler test body",
+        )?;
+        let mut body = Vec::new();
+        let mut cases = Vec::new();
+        self.separators();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            if self.at_identifier("accept") || self.at_identifier("reject") {
+                let token = self.next();
+                let expectation = match &token.kind {
+                    TokenKind::Identifier(value) if value == "accept" => {
+                        CompilerExpectation::Accept
+                    }
+                    _ => CompilerExpectation::Reject,
+                };
+                let diagnostic_name = if !self.at(&TokenKind::Colon) {
+                    Some(self.identifier("expected a diagnostic binding or `:`")?.0)
+                } else {
+                    None
+                };
+                self.expect(&TokenKind::Colon, "expected `:` after compiler expectation")?;
+                let (case_body, end) = self.indented_block("compiler expectation")?;
+                cases.push(CompilerTestCase {
+                    expectation,
+                    diagnostic_name,
+                    body: case_body,
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
+            } else {
+                body.push(self.block_statement()?);
+                if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                    return Err(self.error("expected a newline after compiler test assertion"));
+                }
+            }
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of compiler test body")?
+            .span
+            .end;
+        Ok((body, cases, end))
+    }
+
+    fn indented_block(&mut self, owner: &str) -> Result<(Vec<Statement>, u32), Diagnostic> {
+        self.expect(
+            &TokenKind::Newline,
+            &format!("expected a newline after {owner} header"),
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(
+            &TokenKind::Indent,
+            &format!("expected an indented {owner} body"),
+        )?;
+        let mut statements = Vec::new();
+        self.separators();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let compound = self.at_identifier("if");
+            if self.at_identifier("pass") {
+                self.next();
+            } else {
+                statements.push(self.block_statement()?);
+            }
+            if !compound && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                return Err(self.error(&format!("expected a newline after {owner} statement")));
+            }
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, &format!("expected end of {owner} body"))?
+            .span
+            .end;
+        Ok((statements, end))
+    }
+
+    fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.at_identifier("return") {
+            let start = self.next().span;
+            let value = if self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent) {
+                None
+            } else {
+                Some(self.expression(0)?)
+            };
+            let end = value.as_ref().map_or(start.end, |value| value.span.end);
+            return Ok(Statement::Return {
+                value,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("assert") {
+            let start = self.next().span;
+            self.expect(&TokenKind::LeftParen, "expected `(` after `assert`")?;
+            let condition = self.expression(0)?;
+            let message = if self.take(&TokenKind::Comma).is_some() {
+                Some(self.expression(0)?)
+            } else {
+                None
+            };
+            let end = self
+                .expect(&TokenKind::RightParen, "expected `)` after assertion")?
+                .span
+                .end;
+            return Ok(Statement::Assert {
+                condition,
+                message,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("if") {
+            let start = self.next().span;
+            let condition = self.expression(0)?;
+            self.expect(&TokenKind::Colon, "expected `:` after condition")?;
+            let (then_block, mut end) = self.indented_block("if")?;
+            let else_block = if self.at_identifier("else") {
+                self.next();
+                self.expect(&TokenKind::Colon, "expected `:` after `else`")?;
+                let (body, block_end) = self.indented_block("else")?;
+                end = block_end;
+                body
+            } else {
+                Vec::new()
+            };
+            return Ok(Statement::If {
+                condition,
+                then_block,
+                else_block,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("break") || self.at_identifier("continue") {
+            return Err(self.error("loop control is not implemented yet"));
+        }
+        self.statement()
     }
 
     fn type_declaration(
@@ -505,6 +667,7 @@ impl Parser<'_> {
             TokenKind::Plus => Some(UnaryOperator::Positive),
             TokenKind::Minus => Some(UnaryOperator::Negative),
             TokenKind::Identifier(value) if value == "not" => Some(UnaryOperator::Not),
+            TokenKind::Identifier(value) if value == "move" => Some(UnaryOperator::Move),
             _ => None,
         };
         if let Some(operator) = operator {
@@ -523,28 +686,46 @@ impl Parser<'_> {
 
     fn postfix(&mut self) -> Result<Expression, Diagnostic> {
         let mut expression = self.primary()?;
-        while self.take(&TokenKind::LeftParen).is_some() {
-            let mut arguments = Vec::new();
-            if !self.at(&TokenKind::RightParen) {
-                loop {
-                    arguments.push(self.expression(0)?);
-                    if self.take(&TokenKind::Comma).is_none() {
-                        break;
+        loop {
+            if self.take(&TokenKind::Dot).is_some() {
+                let (name, member_span) = self.identifier("expected a member name after `.`")?;
+                let expression_span = expression.span;
+                expression = Expression {
+                    kind: ExpressionKind::Member {
+                        object: Box::new(expression),
+                        name,
+                    },
+                    span: Span::new(
+                        expression_span.source,
+                        expression_span.start,
+                        member_span.end,
+                    ),
+                };
+            } else if self.take(&TokenKind::LeftParen).is_some() {
+                let mut arguments = Vec::new();
+                if !self.at(&TokenKind::RightParen) {
+                    loop {
+                        arguments.push(self.expression(0)?);
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
                     }
                 }
+                let end = self
+                    .expect(&TokenKind::RightParen, "expected `)` after arguments")?
+                    .span
+                    .end;
+                let span = Span::new(expression.span.source, expression.span.start, end);
+                expression = Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(expression),
+                        arguments,
+                    },
+                    span,
+                };
+            } else {
+                break;
             }
-            let end = self
-                .expect(&TokenKind::RightParen, "expected `)` after arguments")?
-                .span
-                .end;
-            let span = Span::new(expression.span.source, expression.span.start, end);
-            expression = Expression {
-                kind: ExpressionKind::Call {
-                    callee: Box::new(expression),
-                    arguments,
-                },
-                span,
-            };
         }
         Ok(expression)
     }
@@ -699,6 +880,7 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
         TokenKind::LessEqual => OperatorSyntax::LessEqual,
         TokenKind::Greater => OperatorSyntax::Greater,
         TokenKind::GreaterEqual => OperatorSyntax::GreaterEqual,
+        TokenKind::Identifier(value) if value == "in" => OperatorSyntax::Contains,
         _ => return None,
     })
 }
@@ -717,6 +899,7 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
         OperatorSyntax::LessEqual => BinaryOperator::LessEqual,
         OperatorSyntax::Greater => BinaryOperator::Greater,
         OperatorSyntax::GreaterEqual => BinaryOperator::GreaterEqual,
+        OperatorSyntax::Contains => BinaryOperator::Contains,
         OperatorSyntax::And => BinaryOperator::And,
         OperatorSyntax::Or => BinaryOperator::Or,
         OperatorSyntax::Not => return None,
@@ -733,6 +916,7 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::LessEqual
         | BinaryOperator::Greater
         | BinaryOperator::GreaterEqual => 3,
+        BinaryOperator::Contains => 3,
         BinaryOperator::Add | BinaryOperator::Subtract => 4,
         BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => 5,
         BinaryOperator::Power => 6,

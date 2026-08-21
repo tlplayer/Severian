@@ -96,6 +96,12 @@ fn operation_route(
     if matches!(operation, Operation::CompiledRegionCall { .. }) {
         return Err(CompileError::PlannerGeneratedOperation(index));
     }
+    if matches!(
+        operation,
+        Operation::Return { .. } | Operation::Assert { .. } | Operation::If { .. }
+    ) {
+        return Ok(CompileRoute::Standard);
+    }
     let mut compilers = BTreeSet::new();
     for value_id in operation_inputs(operation)
         .into_iter()
@@ -199,6 +205,20 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
         Operation::Call { arguments, .. } => arguments.clone(),
+        Operation::Return { value } => value.iter().copied().collect(),
+        Operation::Assert {
+            condition, message, ..
+        } => std::iter::once(*condition)
+            .chain(message.iter().copied())
+            .collect(),
+        Operation::If {
+            condition,
+            then_block,
+            else_block,
+        } => std::iter::once(*condition)
+            .chain(then_block.operations.iter().flat_map(operation_inputs))
+            .chain(else_block.operations.iter().flat_map(operation_inputs))
+            .collect(),
         Operation::CompiledRegionCall { inputs, .. } => inputs.clone(),
     }
 }
@@ -209,6 +229,17 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         | Operation::Unary { result, .. }
         | Operation::Binary { result, .. }
         | Operation::Call { result, .. } => vec![*result],
+        Operation::Return { .. } | Operation::Assert { .. } => Vec::new(),
+        Operation::If {
+            then_block,
+            else_block,
+            ..
+        } => then_block
+            .operations
+            .iter()
+            .flat_map(operation_outputs)
+            .chain(else_block.operations.iter().flat_map(operation_outputs))
+            .collect(),
         Operation::CompiledRegionCall { outputs, .. } => outputs.clone(),
     }
 }

@@ -20,6 +20,33 @@ pub struct Module {
     pub initializer: Block,
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
+    pub tests: Vec<TestDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestDeclaration {
+    pub name: String,
+    pub modes: Vec<TestMode>,
+    pub function: FunctionId,
+    pub expectations: Vec<TestExpectation>,
+}
+
+pub use severian_hir::{TestExpectation, TestMode, TestStream};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionOrigin {
+    pub statement_start: u32,
+    pub condition_start: u32,
+    pub condition_end: u32,
+    pub location: Option<AssertionLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertionLocation {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub expression: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

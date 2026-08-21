@@ -13,4 +13,19 @@ pub struct Binding {
 pub enum Statement {
     Binding(Binding),
     Expression(Expression),
+    Return {
+        value: Option<Expression>,
+        span: Span,
+    },
+    Assert {
+        condition: Expression,
+        message: Option<Expression>,
+        span: Span,
+    },
+    If {
+        condition: Expression,
+        then_block: Vec<Statement>,
+        else_block: Vec<Statement>,
+        span: Span,
+    },
 }

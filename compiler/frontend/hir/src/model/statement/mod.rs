@@ -13,6 +13,18 @@ pub struct Binding {
 pub enum Statement {
     Binding(BindingId),
     Expression(Expression),
+    Return(Option<Expression>),
+    Assert {
+        condition: Expression,
+        message: Option<Expression>,
+        span: Span,
+        condition_span: Span,
+    },
+    If {
+        condition: Expression,
+        then_block: Block,
+        else_block: Block,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
