@@ -1,0 +1,8 @@
+# UniversalContext owns one TypeContext. Value classes and typed error payloads
+# are the remaining representation dependencies for this paired module.
+trait UniversalContextBridge:
+    pass
+
+
+trait UniversalErrorBridge:
+    pass

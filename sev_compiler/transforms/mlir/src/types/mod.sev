@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/transforms/mlir/src/types.
+# Fill this boundary while preserving its paired Rust responsibility.

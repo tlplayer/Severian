@@ -2,5 +2,5 @@
 name = "core.compile"
 version = "0.1.0"
 
-[exports]
-module = "src/mod.sev"
+[lib]
+path = "src/mod.sev"

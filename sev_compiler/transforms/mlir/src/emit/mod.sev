@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/transforms/mlir/src/emit/mod.rs.
+# Translate the Rust behavior here; parity is checked with shared fixtures.

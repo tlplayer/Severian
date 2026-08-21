@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/diagnostics/src/render/source.
+# Fill this boundary while preserving its paired Rust responsibility.

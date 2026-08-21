@@ -1,0 +1,12 @@
+[package]
+name = "sev-compiler-hir"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+source = { path = "../../source" }
+universal = { path = "../../universal" }

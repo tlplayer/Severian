@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/boundaries/driver/src/test_runner/mod.rs.
+# Translate the Rust behavior here; parity is checked with shared fixtures.

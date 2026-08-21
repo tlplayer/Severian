@@ -1,0 +1,63 @@
+def primitive_category(contract: string) -> string:
+    if contract == "boolean":
+        return "boolean"
+    if contract == "character":
+        return "character"
+    if contract == "integer":
+        return "integer"
+    if contract == "float":
+        return "float"
+    if contract == "text":
+        return "text"
+    if contract == "bytes":
+        return "bytes"
+    if contract == "absence":
+        return "absence"
+    if contract == "unit":
+        return "unit"
+    if contract == "arguments":
+        return "arguments"
+    return ""
+
+
+def primitive_representation(contract: string) -> string:
+    if contract == "fixed-integer":
+        return "fixed-integer"
+    if contract == "machine-signed":
+        return "machine-signed"
+    if contract == "pointer-integer":
+        return "pointer-integer"
+    if contract == "machine-float":
+        return "machine-float"
+    if contract == "ieee-float":
+        return "ieee-float"
+    if contract == "brain-float":
+        return "brain-float"
+    if contract == "i1":
+        return "i1"
+    if contract == "unicode-scalar":
+        return "unicode-scalar"
+    if contract == "string":
+        return "string"
+    if contract == "byte-string":
+        return "byte-string"
+    if contract == "none":
+        return "none"
+    if contract == "unit":
+        return "unit"
+    if contract == "arguments":
+        return "arguments"
+    return ""
+
+
+# Definitions, maps, generic applications, defaults, constraints, and compile
+# routes remain paired behind this boundary until value classes, maps, and
+# payload enums are supported by the source-language frontend.
+trait TypeContextBridge:
+    pass
+
+
+test "primitive contracts retain canonical categories and representations":
+    assert(primitive_category("integer") == "integer")
+    assert(primitive_category("unknown") == "")
+    assert(primitive_representation("brain-float") == "brain-float")

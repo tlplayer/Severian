@@ -1,0 +1,4 @@
+# Bootstrap counterpart of compiler/frontend/hir/src/lib.rs.
+# These imports preserve the Rust package dependency direction.
+import source
+import universal

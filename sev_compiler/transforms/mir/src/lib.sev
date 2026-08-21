@@ -1,0 +1,5 @@
+# Bootstrap counterpart of compiler/transforms/mir/src/lib.rs.
+# These imports preserve the Rust package dependency direction.
+import artifact
+import hir
+import universal

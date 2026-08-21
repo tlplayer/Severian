@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/diagnostics/src/catalog/explain.
+# Fill this boundary while preserving its paired Rust responsibility.

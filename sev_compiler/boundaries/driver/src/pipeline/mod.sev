@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/boundaries/driver/src/pipeline/mod.rs.
+# Translate the Rust behavior here; parity is checked with shared fixtures.

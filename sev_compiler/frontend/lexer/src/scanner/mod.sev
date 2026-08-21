@@ -1,0 +1,15 @@
+# Bootstrap counterpart of compiler/frontend/lexer/src/scanner/mod.rs.
+# The physical source walk needs collections, indexing, and source records.
+# Keep its stage-visible capability boundary executable while those mirrored
+# dependencies are translated.
+
+def scanner_ready() -> bool:
+    return true
+
+def block_string_diagnostic(closed: bool) -> string:
+    if closed:
+        return ""
+    return "E000101"
+
+test "block strings retain the canonical diagnostic":
+    assert(block_string_diagnostic(false) == "E000101")

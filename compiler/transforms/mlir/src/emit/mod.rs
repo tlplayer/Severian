@@ -81,6 +81,37 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         .collect::<Vec<_>>();
 
     let mut output = String::from("module {\n");
+    if all_operations(module).into_iter().any(|operation| {
+        matches!(
+            operation,
+            Operation::Binary {
+                operator: BinaryOperation::Equal
+                    | BinaryOperation::NotEqual
+                    | BinaryOperation::Less
+                    | BinaryOperation::LessEqual
+                    | BinaryOperation::Greater
+                    | BinaryOperation::GreaterEqual,
+                left,
+                ..
+            } if value_type(module, *left) == Ok(LoweredType::String)
+        )
+    }) {
+        output.push_str("  func.func private @strcmp(!llvm.ptr, !llvm.ptr) -> i32\n");
+    }
+    if all_operations(module).into_iter().any(|operation| {
+        matches!(
+            operation,
+            Operation::Binary {
+                operator: BinaryOperation::Add,
+                left,
+                ..
+            } if value_type(module, *left) == Ok(LoweredType::String)
+        )
+    }) {
+        output.push_str(
+            "  func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+        );
+    }
     if !coverage.is_empty() {
         output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
         for key in &coverage {
@@ -222,6 +253,41 @@ fn render_block(
                 result,
             } => {
                 let input_type = value_type(module, *left)?;
+                if input_type == LoweredType::String {
+                    if *operator == BinaryOperation::Add {
+                        output.push_str(&format!(
+                            "{indentation}%v{} = func.call @__sev_string_concat(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
+                            result.0, left.0, right.0
+                        ));
+                        continue;
+                    }
+                    let predicate = match operator {
+                        BinaryOperation::Equal => "eq",
+                        BinaryOperation::NotEqual => "ne",
+                        BinaryOperation::Less => "slt",
+                        BinaryOperation::LessEqual => "sle",
+                        BinaryOperation::Greater => "sgt",
+                        BinaryOperation::GreaterEqual => "sge",
+                        _ => {
+                            return Err(MlirError::UnsupportedOperation(format!(
+                                "MLIR string lowering is unavailable for {operator:?}"
+                            )))
+                        }
+                    };
+                    output.push_str(&format!(
+                        "{indentation}%v{}_strcmp = func.call @strcmp(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> i32\n",
+                        result.0, left.0, right.0
+                    ));
+                    output.push_str(&format!(
+                        "{indentation}%v{}_zero = arith.constant 0 : i32\n",
+                        result.0
+                    ));
+                    output.push_str(&format!(
+                        "{indentation}%v{} = arith.cmpi {predicate}, %v{}_strcmp, %v{}_zero : i32\n",
+                        result.0, result.0, result.0
+                    ));
+                    continue;
+                }
                 let spelling = mlir_type(input_type)?;
                 let instruction = mlir_binary(*operator, input_type)?;
                 output.push_str(&format!(
@@ -565,19 +631,38 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
 fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static str, MlirError> {
     let float = matches!(ty, LoweredType::Float { .. });
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
-    Ok(match (operator, float) {
-        (BinaryOperation::Add, false) => "arith.addi",
-        (BinaryOperation::Subtract, false) => "arith.subi",
-        (BinaryOperation::Multiply, false) => "arith.muli",
-        (BinaryOperation::Divide, false) if signed => "arith.divsi",
-        (BinaryOperation::Divide, false) => "arith.divui",
-        (BinaryOperation::Remainder, false) if signed => "arith.remsi",
-        (BinaryOperation::Remainder, false) => "arith.remui",
-        (BinaryOperation::Add, true) => "arith.addf",
-        (BinaryOperation::Subtract, true) => "arith.subf",
-        (BinaryOperation::Multiply, true) => "arith.mulf",
-        (BinaryOperation::Divide, true) => "arith.divf",
-        (BinaryOperation::Remainder, true) => "arith.remf",
+    let integer = matches!(ty, LoweredType::Integer { .. } | LoweredType::Boolean);
+    Ok(match (operator, float, integer) {
+        (BinaryOperation::Add, false, true) => "arith.addi",
+        (BinaryOperation::Subtract, false, true) => "arith.subi",
+        (BinaryOperation::Multiply, false, true) => "arith.muli",
+        (BinaryOperation::Divide, false, true) if signed => "arith.divsi",
+        (BinaryOperation::Divide, false, true) => "arith.divui",
+        (BinaryOperation::Remainder, false, true) if signed => "arith.remsi",
+        (BinaryOperation::Remainder, false, true) => "arith.remui",
+        (BinaryOperation::Equal, false, true) => "arith.cmpi eq,",
+        (BinaryOperation::NotEqual, false, true) => "arith.cmpi ne,",
+        (BinaryOperation::Less, false, true) if signed => "arith.cmpi slt,",
+        (BinaryOperation::Less, false, true) => "arith.cmpi ult,",
+        (BinaryOperation::LessEqual, false, true) if signed => "arith.cmpi sle,",
+        (BinaryOperation::LessEqual, false, true) => "arith.cmpi ule,",
+        (BinaryOperation::Greater, false, true) if signed => "arith.cmpi sgt,",
+        (BinaryOperation::Greater, false, true) => "arith.cmpi ugt,",
+        (BinaryOperation::GreaterEqual, false, true) if signed => "arith.cmpi sge,",
+        (BinaryOperation::GreaterEqual, false, true) => "arith.cmpi uge,",
+        (BinaryOperation::And, false, true) => "arith.andi",
+        (BinaryOperation::Or, false, true) => "arith.ori",
+        (BinaryOperation::Add, true, false) => "arith.addf",
+        (BinaryOperation::Subtract, true, false) => "arith.subf",
+        (BinaryOperation::Multiply, true, false) => "arith.mulf",
+        (BinaryOperation::Divide, true, false) => "arith.divf",
+        (BinaryOperation::Remainder, true, false) => "arith.remf",
+        (BinaryOperation::Equal, true, false) => "arith.cmpf oeq,",
+        (BinaryOperation::NotEqual, true, false) => "arith.cmpf une,",
+        (BinaryOperation::Less, true, false) => "arith.cmpf olt,",
+        (BinaryOperation::LessEqual, true, false) => "arith.cmpf ole,",
+        (BinaryOperation::Greater, true, false) => "arith.cmpf ogt,",
+        (BinaryOperation::GreaterEqual, true, false) => "arith.cmpf oge,",
         _ => {
             return Err(MlirError::UnsupportedOperation(format!(
                 "MLIR binary lowering is unavailable for {operator:?} on {ty:?}"
@@ -622,6 +707,65 @@ mod tests {
     #[test]
     fn strings_use_llvm_globals_without_changing_their_bytes() {
         assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
+    }
+
+    #[test]
+    fn string_addition_uses_the_shared_runtime_abi() {
+        let module = Module {
+            values: (0..3)
+                .map(|id| severian_lir::Value {
+                    id: ValueId(id),
+                    ty: LoweredType::String,
+                })
+                .collect(),
+            initializer: Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: Constant::String("left".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Constant {
+                        value: Constant::String("right".into()),
+                        result: ValueId(1),
+                    },
+                    Operation::Binary {
+                        operator: BinaryOperation::Add,
+                        left: ValueId(0),
+                        right: ValueId(1),
+                        result: ValueId(2),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+        let rendered = render(&module).unwrap();
+        assert!(rendered.contains("func.call @__sev_string_concat(%v0, %v1)"));
+    }
+
+    #[test]
+    fn integer_comparisons_preserve_signedness() {
+        assert_eq!(
+            mlir_binary(
+                BinaryOperation::Equal,
+                LoweredType::Integer {
+                    bits: 32,
+                    signed: false,
+                },
+            )
+            .unwrap(),
+            "arith.cmpi eq,"
+        );
+        assert_eq!(
+            mlir_binary(
+                BinaryOperation::Less,
+                LoweredType::Integer {
+                    bits: 32,
+                    signed: false,
+                },
+            )
+            .unwrap(),
+            "arith.cmpi ult,"
+        );
     }
 
     #[test]

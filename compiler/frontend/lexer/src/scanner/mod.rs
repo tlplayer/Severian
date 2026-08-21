@@ -86,17 +86,37 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             b'[' => one(&mut cursor, TokenKind::LeftBracket),
             b']' => one(&mut cursor, TokenKind::RightBracket),
             b'|' => one(&mut cursor, TokenKind::Pipe),
+            b'+' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::PlusEqual
+            }
             b'+' => one(&mut cursor, TokenKind::Plus),
+            b'%' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::PercentEqual
+            }
             b'%' => one(&mut cursor, TokenKind::Percent),
             b'*' if bytes.get(cursor + 1) == Some(&b'*') => {
                 cursor += 2;
                 TokenKind::Power
             }
+            b'*' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::StarEqual
+            }
             b'*' => one(&mut cursor, TokenKind::Star),
+            b'/' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::SlashEqual
+            }
             b'/' => one(&mut cursor, TokenKind::Slash),
             b'-' if bytes.get(cursor + 1) == Some(&b'>') => {
                 cursor += 2;
                 TokenKind::Arrow
+            }
+            b'-' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                TokenKind::MinusEqual
             }
             b'-' => one(&mut cursor, TokenKind::Minus),
             b'=' if bytes.get(cursor + 1) == Some(&b'=') => {
@@ -119,6 +139,27 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             }
             b'>' => one(&mut cursor, TokenKind::Greater),
             b'"' => {
+                let block = bytes.get(cursor..cursor + 3) == Some(b"\"\"\"");
+                if block {
+                    cursor += 3;
+                    let content_start = cursor;
+                    while cursor + 2 < bytes.len()
+                        && bytes.get(cursor..cursor + 3) != Some(b"\"\"\"")
+                    {
+                        cursor += 1;
+                    }
+                    if cursor + 2 >= bytes.len() {
+                        return Err(Diagnostic::new(
+                            "E000101",
+                            "unterminated block string literal",
+                            Some(Span::new(source.id, start as u32, bytes.len() as u32)),
+                        ));
+                    }
+                    let value = block_string(&source.text[content_start..cursor]);
+                    cursor += 3;
+                    tokens.push(token(source, TokenKind::String(value), start, cursor));
+                    continue;
+                }
                 cursor += 1;
                 let content_start = cursor;
                 while cursor < bytes.len() && bytes[cursor] != b'"' {
@@ -242,6 +283,31 @@ fn character_error(source: &SourceFile, start: usize, cursor: usize) -> Diagnost
             cursor.min(source.text.len()) as u32,
         )),
     )
+}
+
+fn block_string(raw: &str) -> String {
+    let content = raw.strip_prefix('\n').unwrap_or(raw);
+    let common_indent = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.chars()
+                .take_while(|character| matches!(character, ' ' | '\t'))
+                .count()
+        })
+        .min()
+        .unwrap_or(0);
+    content
+        .split('\n')
+        .map(|line| {
+            let byte_offset = line
+                .char_indices()
+                .nth(common_indent)
+                .map_or(line.len(), |(offset, _)| offset);
+            &line[byte_offset..]
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {

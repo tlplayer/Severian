@@ -657,7 +657,52 @@ impl Parser<'_> {
     }
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
+        if self.looks_like_prefix_typed_binding() {
+            let annotation = self.type_annotation()?;
+            let start = annotation.span;
+            let (name, _) = self.identifier("expected a binding name after its type")?;
+            self.expect(&TokenKind::Equal, "expected `=` after binding name")?;
+            let value = self.expression(0)?;
+            return Ok(Binding {
+                name,
+                annotation: Some(annotation),
+                span: Span::new(start.source, start.start, value.span.end),
+                value,
+                update: false,
+            });
+        }
         let (name, name_span) = self.identifier("expected a binding name")?;
+        let compound = match self.peek().kind {
+            TokenKind::PlusEqual => Some(BinaryOperator::Add),
+            TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
+            TokenKind::StarEqual => Some(BinaryOperator::Multiply),
+            TokenKind::SlashEqual => Some(BinaryOperator::Divide),
+            TokenKind::PercentEqual => Some(BinaryOperator::Remainder),
+            _ => None,
+        };
+        if let Some(operator) = compound {
+            self.next();
+            let right = self.expression(0)?;
+            let left = Expression {
+                kind: ExpressionKind::Name(name.clone()),
+                span: name_span,
+            };
+            let value = Expression {
+                span: Span::new(name_span.source, name_span.start, right.span.end),
+                kind: ExpressionKind::Binary {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+            };
+            return Ok(Binding {
+                name,
+                annotation: None,
+                span: value.span,
+                value,
+                update: true,
+            });
+        }
         let inferred = self.take(&TokenKind::ColonEqual).is_some();
         let annotation = if !inferred && self.take(&TokenKind::Colon).is_some() {
             Some(self.type_annotation()?)
@@ -673,6 +718,7 @@ impl Parser<'_> {
             annotation,
             span: Span::new(name_span.source, name_span.start, value.span.end),
             value,
+            update: false,
         })
     }
 
@@ -685,13 +731,34 @@ impl Parser<'_> {
     }
 
     fn looks_like_binding(&self) -> bool {
-        matches!(self.peek().kind, TokenKind::Identifier(_))
-            && self.tokens.get(self.cursor + 1).is_some_and(|token| {
-                matches!(
-                    token.kind,
-                    TokenKind::Colon | TokenKind::ColonEqual | TokenKind::Equal
-                )
-            })
+        self.looks_like_prefix_typed_binding()
+            || (matches!(self.peek().kind, TokenKind::Identifier(_))
+                && self.tokens.get(self.cursor + 1).is_some_and(|token| {
+                    matches!(
+                        token.kind,
+                        TokenKind::Colon
+                            | TokenKind::ColonEqual
+                            | TokenKind::Equal
+                            | TokenKind::PlusEqual
+                            | TokenKind::MinusEqual
+                            | TokenKind::StarEqual
+                            | TokenKind::SlashEqual
+                            | TokenKind::PercentEqual
+                    )
+                }))
+    }
+
+    fn looks_like_prefix_typed_binding(&self) -> bool {
+        let mut trial = Parser {
+            tokens: self.tokens,
+            cursor: self.cursor,
+        };
+        trial.type_annotation().is_ok()
+            && matches!(trial.peek().kind, TokenKind::Identifier(_))
+            && trial
+                .tokens
+                .get(trial.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Equal)
     }
 
     fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {

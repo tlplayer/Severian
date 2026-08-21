@@ -1,0 +1,1019 @@
+diff --git a/compiler/boundaries/backend/src/coverage_runtime.c b/compiler/boundaries/backend/src/coverage_runtime.c
+index 7e6e94c..43e04c7 100644
+--- a/compiler/boundaries/backend/src/coverage_runtime.c
++++ b/compiler/boundaries/backend/src/coverage_runtime.c
+@@ -1,5 +1,8 @@
++#include <inttypes.h>
+ #include <stdio.h>
++#include <stdint.h>
+ #include <stdlib.h>
++#include <string.h>
+ 
+ void __sev_coverage_hit(const char *key) {
+     const char *path = getenv("SEV_COVERAGE_FILE");
+@@ -10,3 +13,64 @@ void __sev_coverage_hit(const char *key) {
+     fputc('\n', file);
+     fclose(file);
+ }
++
++const char *__sev_string_concat(const char *left, const char *right) {
++    size_t left_length = strlen(left);
++    size_t right_length = strlen(right);
++    if (right_length > SIZE_MAX - left_length - 1) abort();
++    char *result = malloc(left_length + right_length + 1);
++    if (result == NULL) abort();
++    memcpy(result, left, left_length);
++    memcpy(result + left_length, right, right_length + 1);
++    return result;
++}
++
++int32_t __sev_print_int(int64_t value) {
++    return printf("%" PRId64 "\n", value);
++}
++
++int32_t __sev_print_float(double value) {
++    return printf("%.15g\n", value);
++}
++
++int32_t __sev_print_i32(int32_t value) {
++    return printf("%" PRId32 "\n", value);
++}
++
++int32_t __sev_print_i64(int64_t value) {
++    return printf("%" PRId64 "\n", value);
++}
++
++int32_t __sev_print_f64(double value) {
++    return printf("%.15g\n", value);
++}
++
++int32_t __sev_print_bool(_Bool value) {
++    return puts(value ? "true" : "false");
++}
++
++int32_t __sev_print_char(uint32_t value) {
++    unsigned char encoded[4];
++    size_t length;
++    if (value <= 0x7f) {
++        encoded[0] = value;
++        length = 1;
++    } else if (value <= 0x7ff) {
++        encoded[0] = 0xc0 | (value >> 6);
++        encoded[1] = 0x80 | (value & 0x3f);
++        length = 2;
++    } else if (value <= 0xffff) {
++        encoded[0] = 0xe0 | (value >> 12);
++        encoded[1] = 0x80 | ((value >> 6) & 0x3f);
++        encoded[2] = 0x80 | (value & 0x3f);
++        length = 3;
++    } else {
++        encoded[0] = 0xf0 | (value >> 18);
++        encoded[1] = 0x80 | ((value >> 12) & 0x3f);
++        encoded[2] = 0x80 | ((value >> 6) & 0x3f);
++        encoded[3] = 0x80 | (value & 0x3f);
++        length = 4;
++    }
++    if (fwrite(encoded, 1, length, stdout) != length) return -1;
++    return putchar('\n');
++}
+diff --git a/compiler/boundaries/backend/src/lib.rs b/compiler/boundaries/backend/src/lib.rs
+index 4fad304..93ba1b7 100644
+--- a/compiler/boundaries/backend/src/lib.rs
++++ b/compiler/boundaries/backend/src/lib.rs
+@@ -78,7 +78,7 @@ impl std::error::Error for BackendError {}
+ 
+ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
+     let mut output = String::from(
+-        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nstatic void __sev_coverage_hit(const char *key) {\n    const char *path = getenv(\"SEV_COVERAGE_FILE\");\n    if (path == NULL) return;\n    FILE *file = fopen(path, \"a\");\n    if (file == NULL) return;\n    fputs(key, file);\n    fputc('\\n', file);\n    fclose(file);\n}\n\n",
++        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\nconst char *__sev_string_concat(const char *left, const char *right);\n\n",
+     );
+     for value in &module.globals {
+         output.push_str(&format!(
+@@ -217,13 +217,42 @@ fn render_block(
+                 result,
+             } => {
+                 let result_type = value_type(module, *result)?;
+-                if matches!(
+-                    value_type(module, *left)?,
+-                    LoweredType::String | LoweredType::Bytes
+-                ) || matches!(
+-                    value_type(module, *right)?,
+-                    LoweredType::String | LoweredType::Bytes
+-                ) {
++                let left_type = value_type(module, *left)?;
++                let right_type = value_type(module, *right)?;
++                if left_type == LoweredType::String && right_type == LoweredType::String {
++                    if *operator == BinaryOperation::Add {
++                        define_value(
++                            output,
++                            module,
++                            *result,
++                            &format!("__sev_string_concat(v{}, v{})", left.0, right.0),
++                        )?;
++                        continue;
++                    }
++                    let comparison = match operator {
++                        BinaryOperation::Equal => "== 0",
++                        BinaryOperation::NotEqual => "!= 0",
++                        BinaryOperation::Less => "< 0",
++                        BinaryOperation::LessEqual => "<= 0",
++                        BinaryOperation::Greater => "> 0",
++                        BinaryOperation::GreaterEqual => ">= 0",
++                        _ => {
++                            return Err(BackendError::UnsupportedOperation(
++                                "this string operation requires a lowered runtime interface".into(),
++                            ))
++                        }
++                    };
++                    define_value(
++                        output,
++                        module,
++                        *result,
++                        &format!("strcmp(v{}, v{}) {comparison}", left.0, right.0),
++                    )?;
++                    continue;
++                }
++                if matches!(left_type, LoweredType::String | LoweredType::Bytes)
++                    || matches!(right_type, LoweredType::String | LoweredType::Bytes)
++                {
+                     return Err(BackendError::UnsupportedOperation(
+                         "string/byte operations require a lowered runtime interface".into(),
+                     ));
+@@ -387,6 +416,10 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
+             bits: 64,
+             signed: true,
+         } => Ok("int64_t"),
++        LoweredType::Integer {
++            bits: 128,
++            signed: true,
++        } => Ok("__int128"),
+         LoweredType::Integer {
+             bits: 8,
+             signed: false,
+@@ -403,6 +436,10 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
+             bits: 64,
+             signed: false,
+         } => Ok("uint64_t"),
++        LoweredType::Integer {
++            bits: 128,
++            signed: false,
++        } => Ok("unsigned __int128"),
+         LoweredType::Float {
+             format: LoweredFloatFormat::Ieee(32),
+         } => Ok("float"),
+@@ -487,8 +524,11 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
+ 
+ pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact, BackendError> {
+     let source = render_c(module)?;
++    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/coverage_runtime.c");
+     let mut child = Command::new("cc")
+-        .args(["-std=c11", "-x", "c", "-", "-o"])
++        .args(["-std=c11", "-x", "c", "-"])
++        .arg(runtime)
++        .arg("-o")
+         .arg(output)
+         .stdin(Stdio::piped())
+         .stderr(Stdio::piped())
+@@ -653,4 +693,37 @@ mod tests {
+         assert_eq!(c_string_literal("a\n\"b\\c"), "\"a\\n\\\"b\\\\c\"");
+         assert_eq!(c_string_literal("é"), "\"\\303\\251\"");
+     }
++
++    #[test]
++    fn c_string_addition_uses_the_shared_runtime_abi() {
++        let module = LoweredModule {
++            values: (0..3)
++                .map(|id| Value {
++                    id: ValueId(id),
++                    ty: LoweredType::String,
++                })
++                .collect(),
++            initializer: Block {
++                operations: vec![
++                    Operation::Constant {
++                        value: Constant::String("left".into()),
++                        result: ValueId(0),
++                    },
++                    Operation::Constant {
++                        value: Constant::String("right".into()),
++                        result: ValueId(1),
++                    },
++                    Operation::Binary {
++                        operator: BinaryOperation::Add,
++                        left: ValueId(0),
++                        right: ValueId(1),
++                        result: ValueId(2),
++                    },
++                ],
++            },
++            ..LoweredModule::default()
++        };
++        let rendered = render_c(&module).unwrap();
++        assert!(rendered.contains("__sev_string_concat(v0, v1)"));
++    }
+ }
+diff --git a/compiler/boundaries/driver/tests/cli_contract.rs b/compiler/boundaries/driver/tests/cli_contract.rs
+index 6416328..9713c7d 100644
+--- a/compiler/boundaries/driver/tests/cli_contract.rs
++++ b/compiler/boundaries/driver/tests/cli_contract.rs
+@@ -19,6 +19,35 @@ fn sev() -> Command {
+     Command::new(env!("CARGO_BIN_EXE_sev"))
+ }
+ 
++fn repository_root() -> PathBuf {
++    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
++        .join("../../..")
++        .canonicalize()
++        .unwrap()
++}
++
++#[test]
++fn core_compile_resolves_through_its_library_target() {
++    let package = repository_root().join("library/core/compile");
++    let output = sev().args(["check"]).arg(package).output().unwrap();
++    assert!(
++        output.status.success(),
++        "{}",
++        String::from_utf8_lossy(&output.stderr)
++    );
++}
++
++#[test]
++fn primitive_submodules_resolve_relative_to_their_module_root() {
++    let package = repository_root().join("library/core/primitives");
++    let output = sev().args(["check"]).arg(package).output().unwrap();
++    assert!(
++        output.status.success(),
++        "{}",
++        String::from_utf8_lossy(&output.stderr)
++    );
++}
++
+ #[test]
+ fn bare_source_runs_globals_before_main() {
+     let root = temporary("entry");
+@@ -321,6 +350,25 @@ fn test_runs_benchmarks_and_captured_integration_expectations() {
+     fs::remove_dir_all(root).unwrap();
+ }
+ 
++#[test]
++fn numeric_print_overloads_are_resolved_through_the_io_boundary() {
++    let root = temporary("numeric-print");
++    let source = root.join("numeric.sev");
++    fs::write(
++        &source,
++        "int whole = 3\nfloat decimal = 3.1415926\n\ntest with integ:\n    narrow: i32 = 32\n    wide: i64 = 64\n    precise: f64 = 0.125\n    enabled: bool = true\n    letter: char = 'λ'\n    print(whole)\n    print(decimal)\n    print(narrow)\n    print(wide)\n    print(precise)\n    print(enabled)\n    print(letter)\n    assert(\"3\" in stdout)\n    assert(\"3.1415926\" in stdout)\n    assert(\"32\" in stdout)\n    assert(\"64\" in stdout)\n    assert(\"0.125\" in stdout)\n    assert(\"true\" in stdout)\n    assert(\"λ\" in stdout)\n",
++    )
++    .unwrap();
++    let output = sev().args(["test"]).arg(&source).output().unwrap();
++    assert!(
++        output.status.success(),
++        "stdout:\n{}\nstderr:\n{}",
++        String::from_utf8_lossy(&output.stdout),
++        String::from_utf8_lossy(&output.stderr)
++    );
++    fs::remove_dir_all(root).unwrap();
++}
++
+ #[test]
+ fn test_rejects_unimplemented_runner_modes_instead_of_passing_them_as_skipped() {
+     let root = temporary("unsupported-test-mode");
+diff --git a/compiler/boundaries/xxi/src/lib.rs b/compiler/boundaries/xxi/src/lib.rs
+index 748c8af..bc1c0e0 100644
+--- a/compiler/boundaries/xxi/src/lib.rs
++++ b/compiler/boundaries/xxi/src/lib.rs
+@@ -74,16 +74,15 @@ pub fn resolve(
+         Item::Function(declaration) if !declaration.decorators.is_empty() => Some(declaration),
+         _ => None,
+     }) {
++        let resolved = resolve_function(declaration, &foreign, &imports, types)?;
+         if foreign
+             .functions
+             .iter()
+-            .any(|known| known.name == declaration.name)
++            .any(|known| known.name == resolved.name && known.parameters == resolved.parameters)
+         {
+             return Err(XxiError::DuplicateDeclaration(declaration.name.clone()));
+         }
+-        foreign
+-            .functions
+-            .push(resolve_function(declaration, &foreign, &imports, types)?);
++        foreign.functions.push(resolved);
+     }
+     let plans = foreign
+         .functions
+@@ -437,6 +436,33 @@ mod tests {
+         assert_eq!(resolved.foreign.functions[0].abi, AbiSelection::System);
+     }
+ 
++    #[test]
++    fn external_functions_may_overload_by_parameter_contract() {
++        let context = severian_bootstrap::load().unwrap();
++        let source = SourceFile::virtual_source(
++            "overloads.sev",
++            "@c(symbol = \"print_text\")\ndef print(value: string) -> i32\n@c(symbol = \"print_int\")\ndef print(value: int) -> i32\n",
++        );
++        let module = parse(&scan(&source).unwrap()).unwrap();
++        let resolved = resolve(&module, &context.types, &target()).unwrap();
++        assert_eq!(resolved.foreign.functions.len(), 2);
++        assert_eq!(resolved.plans.len(), 2);
++    }
++
++    #[test]
++    fn external_functions_reject_duplicate_parameter_contracts() {
++        let context = severian_bootstrap::load().unwrap();
++        let source = SourceFile::virtual_source(
++            "duplicates.sev",
++            "@c(symbol = \"first\")\ndef print(value: int) -> i32\n@c(symbol = \"second\")\ndef print(value: int) -> i32\n",
++        );
++        let module = parse(&scan(&source).unwrap()).unwrap();
++        assert_eq!(
++            resolve(&module, &context.types, &target()).unwrap_err(),
++            XxiError::DuplicateDeclaration("print".into())
++        );
++    }
++
+     #[test]
+     fn core_native_declarations_use_xxi_instead_of_legacy_extern_syntax() {
+         let context = severian_bootstrap::load().unwrap();
+diff --git a/compiler/frontend/ast/src/statement/mod.rs b/compiler/frontend/ast/src/statement/mod.rs
+index 61d18c6..f90e7dc 100644
+--- a/compiler/frontend/ast/src/statement/mod.rs
++++ b/compiler/frontend/ast/src/statement/mod.rs
+@@ -6,6 +6,9 @@ pub struct Binding {
+     pub name: String,
+     pub annotation: Option<TypeAnnotation>,
+     pub value: Expression,
++    /// Compound assignment creates a new SSA binding for an existing source
++    /// name instead of declaring a second lexical name.
++    pub update: bool,
+     pub span: Span,
+ }
+ 
+diff --git a/compiler/frontend/lexer/src/lib.rs b/compiler/frontend/lexer/src/lib.rs
+index bd0422d..0a66663 100644
+--- a/compiler/frontend/lexer/src/lib.rs
++++ b/compiler/frontend/lexer/src/lib.rs
+@@ -50,4 +50,24 @@ mod tests {
+             .iter()
+             .any(|token| token.kind == TokenKind::Integer("1000000".into())));
+     }
++
++    #[test]
++    fn block_strings_remove_structural_indentation_and_preserve_lines() {
++        let source = SourceFile::virtual_source(
++            "block-string.sev",
++            "value = \"\"\"\n    first\n      second\n    third\n    \"\"\"\n",
++        );
++        let tokens = scan(&source).unwrap();
++        assert!(tokens
++            .iter()
++            .any(|token| { token.kind == TokenKind::String("first\n  second\nthird\n".into()) }));
++    }
++
++    #[test]
++    fn unterminated_block_strings_have_the_block_string_diagnostic() {
++        let source = SourceFile::virtual_source("block-string.sev", "value = \"\"\"open\n");
++        let error = scan(&source).unwrap_err();
++        assert_eq!(error.code, "E000101");
++        assert!(error.message.contains("block string"));
++    }
+ }
+diff --git a/compiler/frontend/lexer/src/scanner/mod.rs b/compiler/frontend/lexer/src/scanner/mod.rs
+index 5014a6a..76a2265 100644
+--- a/compiler/frontend/lexer/src/scanner/mod.rs
++++ b/compiler/frontend/lexer/src/scanner/mod.rs
+@@ -86,18 +86,38 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+             b'[' => one(&mut cursor, TokenKind::LeftBracket),
+             b']' => one(&mut cursor, TokenKind::RightBracket),
+             b'|' => one(&mut cursor, TokenKind::Pipe),
++            b'+' if bytes.get(cursor + 1) == Some(&b'=') => {
++                cursor += 2;
++                TokenKind::PlusEqual
++            }
+             b'+' => one(&mut cursor, TokenKind::Plus),
++            b'%' if bytes.get(cursor + 1) == Some(&b'=') => {
++                cursor += 2;
++                TokenKind::PercentEqual
++            }
+             b'%' => one(&mut cursor, TokenKind::Percent),
+             b'*' if bytes.get(cursor + 1) == Some(&b'*') => {
+                 cursor += 2;
+                 TokenKind::Power
+             }
++            b'*' if bytes.get(cursor + 1) == Some(&b'=') => {
++                cursor += 2;
++                TokenKind::StarEqual
++            }
+             b'*' => one(&mut cursor, TokenKind::Star),
++            b'/' if bytes.get(cursor + 1) == Some(&b'=') => {
++                cursor += 2;
++                TokenKind::SlashEqual
++            }
+             b'/' => one(&mut cursor, TokenKind::Slash),
+             b'-' if bytes.get(cursor + 1) == Some(&b'>') => {
+                 cursor += 2;
+                 TokenKind::Arrow
+             }
++            b'-' if bytes.get(cursor + 1) == Some(&b'=') => {
++                cursor += 2;
++                TokenKind::MinusEqual
++            }
+             b'-' => one(&mut cursor, TokenKind::Minus),
+             b'=' if bytes.get(cursor + 1) == Some(&b'=') => {
+                 cursor += 2;
+@@ -119,6 +139,27 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
+             }
+             b'>' => one(&mut cursor, TokenKind::Greater),
+             b'"' => {
++                let block = bytes.get(cursor..cursor + 3) == Some(b"\"\"\"");
++                if block {
++                    cursor += 3;
++                    let content_start = cursor;
++                    while cursor + 2 < bytes.len()
++                        && bytes.get(cursor..cursor + 3) != Some(b"\"\"\"")
++                    {
++                        cursor += 1;
++                    }
++                    if cursor + 2 >= bytes.len() {
++                        return Err(Diagnostic::new(
++                            "E000101",
++                            "unterminated block string literal",
++                            Some(Span::new(source.id, start as u32, bytes.len() as u32)),
++                        ));
++                    }
++                    let value = block_string(&source.text[content_start..cursor]);
++                    cursor += 3;
++                    tokens.push(token(source, TokenKind::String(value), start, cursor));
++                    continue;
++                }
+                 cursor += 1;
+                 let content_start = cursor;
+                 while cursor < bytes.len() && bytes[cursor] != b'"' {
+@@ -244,6 +285,31 @@ fn character_error(source: &SourceFile, start: usize, cursor: usize) -> Diagnost
+     )
+ }
+ 
++fn block_string(raw: &str) -> String {
++    let content = raw.strip_prefix('\n').unwrap_or(raw);
++    let common_indent = content
++        .lines()
++        .filter(|line| !line.trim().is_empty())
++        .map(|line| {
++            line.chars()
++                .take_while(|character| matches!(character, ' ' | '\t'))
++                .count()
++        })
++        .min()
++        .unwrap_or(0);
++    content
++        .split('\n')
++        .map(|line| {
++            let byte_offset = line
++                .char_indices()
++                .nth(common_indent)
++                .map_or(line.len(), |(offset, _)| offset);
++            &line[byte_offset..]
++        })
++        .collect::<Vec<_>>()
++        .join("\n")
++}
++
+ fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {
+     *cursor += 1;
+     kind
+diff --git a/compiler/frontend/lexer/src/token/mod.rs b/compiler/frontend/lexer/src/token/mod.rs
+index 2022ea5..fc11412 100644
+--- a/compiler/frontend/lexer/src/token/mod.rs
++++ b/compiler/frontend/lexer/src/token/mod.rs
+@@ -12,10 +12,15 @@ pub enum TokenKind {
+     ColonEqual,
+     Equal,
+     Plus,
++    PlusEqual,
+     Minus,
++    MinusEqual,
+     Star,
++    StarEqual,
+     Slash,
++    SlashEqual,
+     Percent,
++    PercentEqual,
+     Power,
+     EqualEqual,
+     NotEqual,
+diff --git a/compiler/frontend/parser/src/lib.rs b/compiler/frontend/parser/src/lib.rs
+index 99e783b..5fe00d9 100644
+--- a/compiler/frontend/parser/src/lib.rs
++++ b/compiler/frontend/parser/src/lib.rs
+@@ -20,6 +20,49 @@ mod tests {
+             .all(|item| matches!(item, severian_ast::Item::Binding(_))));
+     }
+ 
++    #[test]
++    fn compound_assignment_is_an_explicit_binding_update() {
++        let source = SourceFile::virtual_source("update.sev", "value := 1\nvalue += 2\n");
++        let module = parse(&scan(&source).unwrap()).unwrap();
++        let severian_ast::Item::Binding(update) = &module.items[1] else {
++            panic!("expected binding update")
++        };
++        assert!(update.update);
++        assert!(matches!(
++            update.value.kind,
++            severian_ast::ExpressionKind::Binary {
++                operator: severian_ast::BinaryOperator::Add,
++                ..
++            }
++        ));
++    }
++
++    #[test]
++    fn prefix_typed_constants_use_the_same_binding_ast() {
++        let source = SourceFile::virtual_source(
++            "constants.sev",
++            "int MAX_RETRIES = 3\nfloat PI = 3.1415926\n",
++        );
++        let tokens = severian_lexer::scan(&source).unwrap();
++        let module = parse(&tokens).unwrap();
++        let severian_ast::Item::Binding(first) = &module.items[0] else {
++            panic!("expected a binding")
++        };
++        assert_eq!(first.name, "MAX_RETRIES");
++        assert_eq!(
++            first.annotation.as_ref().unwrap().simple_name(),
++            Some("int")
++        );
++        let severian_ast::Item::Binding(second) = &module.items[1] else {
++            panic!("expected a binding")
++        };
++        assert_eq!(second.name, "PI");
++        assert_eq!(
++            second.annotation.as_ref().unwrap().simple_name(),
++            Some("float")
++        );
++    }
++
+     #[test]
+     fn semicolon_separates_without_starting_a_physical_line() {
+         let source = SourceFile::virtual_source("test.sev", "x = 1; y = 2");
+diff --git a/compiler/frontend/parser/src/statement/mod.rs b/compiler/frontend/parser/src/statement/mod.rs
+index aca059f..e7ea848 100644
+--- a/compiler/frontend/parser/src/statement/mod.rs
++++ b/compiler/frontend/parser/src/statement/mod.rs
+@@ -657,7 +657,52 @@ impl Parser<'_> {
+     }
+ 
+     fn binding(&mut self) -> Result<Binding, Diagnostic> {
++        if self.looks_like_prefix_typed_binding() {
++            let annotation = self.type_annotation()?;
++            let start = annotation.span;
++            let (name, _) = self.identifier("expected a binding name after its type")?;
++            self.expect(&TokenKind::Equal, "expected `=` after binding name")?;
++            let value = self.expression(0)?;
++            return Ok(Binding {
++                name,
++                annotation: Some(annotation),
++                span: Span::new(start.source, start.start, value.span.end),
++                value,
++                update: false,
++            });
++        }
+         let (name, name_span) = self.identifier("expected a binding name")?;
++        let compound = match self.peek().kind {
++            TokenKind::PlusEqual => Some(BinaryOperator::Add),
++            TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
++            TokenKind::StarEqual => Some(BinaryOperator::Multiply),
++            TokenKind::SlashEqual => Some(BinaryOperator::Divide),
++            TokenKind::PercentEqual => Some(BinaryOperator::Remainder),
++            _ => None,
++        };
++        if let Some(operator) = compound {
++            self.next();
++            let right = self.expression(0)?;
++            let left = Expression {
++                kind: ExpressionKind::Name(name.clone()),
++                span: name_span,
++            };
++            let value = Expression {
++                span: Span::new(name_span.source, name_span.start, right.span.end),
++                kind: ExpressionKind::Binary {
++                    operator,
++                    left: Box::new(left),
++                    right: Box::new(right),
++                },
++            };
++            return Ok(Binding {
++                name,
++                annotation: None,
++                span: value.span,
++                value,
++                update: true,
++            });
++        }
+         let inferred = self.take(&TokenKind::ColonEqual).is_some();
+         let annotation = if !inferred && self.take(&TokenKind::Colon).is_some() {
+             Some(self.type_annotation()?)
+@@ -673,6 +718,7 @@ impl Parser<'_> {
+             annotation,
+             span: Span::new(name_span.source, name_span.start, value.span.end),
+             value,
++            update: false,
+         })
+     }
+ 
+@@ -685,13 +731,34 @@ impl Parser<'_> {
+     }
+ 
+     fn looks_like_binding(&self) -> bool {
+-        matches!(self.peek().kind, TokenKind::Identifier(_))
+-            && self.tokens.get(self.cursor + 1).is_some_and(|token| {
+-                matches!(
+-                    token.kind,
+-                    TokenKind::Colon | TokenKind::ColonEqual | TokenKind::Equal
+-                )
+-            })
++        self.looks_like_prefix_typed_binding()
++            || (matches!(self.peek().kind, TokenKind::Identifier(_))
++                && self.tokens.get(self.cursor + 1).is_some_and(|token| {
++                    matches!(
++                        token.kind,
++                        TokenKind::Colon
++                            | TokenKind::ColonEqual
++                            | TokenKind::Equal
++                            | TokenKind::PlusEqual
++                            | TokenKind::MinusEqual
++                            | TokenKind::StarEqual
++                            | TokenKind::SlashEqual
++                            | TokenKind::PercentEqual
++                    )
++                }))
++    }
++
++    fn looks_like_prefix_typed_binding(&self) -> bool {
++        let mut trial = Parser {
++            tokens: self.tokens,
++            cursor: self.cursor,
++        };
++        trial.type_annotation().is_ok()
++            && matches!(trial.peek().kind, TokenKind::Identifier(_))
++            && trial
++                .tokens
++                .get(trial.cursor + 1)
++                .is_some_and(|token| token.kind == TokenKind::Equal)
+     }
+ 
+     fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
+diff --git a/compiler/frontend/semantic/src/lib.rs b/compiler/frontend/semantic/src/lib.rs
+index efe7d0d..5df3be0 100644
+--- a/compiler/frontend/semantic/src/lib.rs
++++ b/compiler/frontend/semantic/src/lib.rs
+@@ -134,16 +134,25 @@ pub fn analyze_with_context(
+                 call_type: CallType::Severian,
+                 body: None,
+             });
++            let mut modes = test
++                .modes
++                .iter()
++                .map(|mode| test_mode(mode, test.span))
++                .collect::<Result<Vec<_>, _>>()?;
++            if modes.is_empty()
++                && test
++                    .body
++                    .iter()
++                    .any(|statement| integration_expectation(statement).is_some())
++            {
++                modes.push(severian_hir::TestMode::Integration);
++            }
+             module.tests.push(severian_hir::TestDeclaration {
+                 name: test
+                     .name
+                     .clone()
+                     .unwrap_or_else(|| format!("test {}", index + 1)),
+-                modes: test
+-                    .modes
+-                    .iter()
+-                    .map(|mode| test_mode(mode, test.span))
+-                    .collect::<Result<Vec<_>, _>>()?,
++                modes,
+                 function: id,
+                 expectations: Vec::new(),
+             });
+@@ -346,7 +355,23 @@ impl Analyzer<'_> {
+         ast_binding: &severian_ast::Binding,
+         bindings: &mut Vec<Binding>,
+     ) -> Result<BindingId, Diagnostic> {
+-        if !self.declarations.insert(ast_binding.name.clone()) {
++        let update_type = if ast_binding.update {
++            Some(
++                self.names
++                    .get(&ast_binding.name)
++                    .map(|(_, type_id)| *type_id)
++                    .ok_or_else(|| {
++                        Diagnostic::new(
++                            "E000201",
++                            format!("cannot update unknown binding `{}`", ast_binding.name),
++                            Some(ast_binding.span),
++                        )
++                    })?,
++            )
++        } else {
++            None
++        };
++        if !ast_binding.update && !self.declarations.insert(ast_binding.name.clone()) {
+             return Err(Diagnostic::new(
+                 "E000203",
+                 format!("binding `{}` is already defined", ast_binding.name),
+@@ -357,7 +382,8 @@ impl Analyzer<'_> {
+             .annotation
+             .as_ref()
+             .map(|annotation| resolve_type_annotation(self.types, annotation))
+-            .transpose()?;
++            .transpose()?
++            .or(update_type);
+         let value = self.expression(&ast_binding.value, expected)?;
+         let type_id = expected.unwrap_or(value.type_id);
+         if !self.types.assignable(value.type_id, type_id) {
+@@ -681,10 +707,20 @@ impl Analyzer<'_> {
+                         .map(|(argument, parameter)| self.expression(argument, Some(*parameter)))
+                         .collect::<Result<Vec<_>, _>>();
+                     if let Ok(arguments) = resolved {
+-                        matches.push((function, signature.result, arguments));
++                        let exact_parameters = arguments
++                            .iter()
++                            .zip(&signature.parameters)
++                            .filter(|(argument, parameter)| argument.type_id == **parameter)
++                            .count();
++                        matches.push((exact_parameters, function, signature.result, arguments));
+                     }
+                 }
+-                let [(function, result, arguments)] = matches.as_slice() else {
++                let best_score = matches.iter().map(|candidate| candidate.0).max();
++                let best = matches
++                    .iter()
++                    .filter(|candidate| Some(candidate.0) == best_score)
++                    .collect::<Vec<_>>();
++                let [(_, function, result, arguments)] = best.as_slice() else {
+                     return Err(Diagnostic::new(
+                         "E000206",
+                         format!("call to `{name}` has no unique compatible declaration"),
+@@ -696,7 +732,7 @@ impl Analyzer<'_> {
+                     type_id: *result,
+                     kind: ExpressionKind::Call {
+                         function: *function,
+-                        arguments: arguments.clone(),
++                        arguments: (*arguments).clone(),
+                     },
+                     span: ast.span,
+                 })
+@@ -1061,6 +1097,35 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn captured_stream_assertions_make_ordinary_tests_integration_tests() {
++        let context = severian_bootstrap::load().unwrap();
++        let source = SourceFile::virtual_source(
++            "implicit-integration.sev",
++            "test:\n    assert(\"captured\" in stdout)\n",
++        );
++        let tokens = severian_lexer::scan(&source).unwrap();
++        let ast = severian_parser::parse(&tokens).unwrap();
++        let program = analyze_with_context(
++            &ast,
++            &context.types,
++            AnalysisContext {
++                mode: AnalysisMode::Test,
++                module_name: "implicit_integration",
++            },
++        )
++        .unwrap();
++        let test = &program.modules[0].tests[0];
++        assert_eq!(test.modes, [severian_hir::TestMode::Integration]);
++        assert_eq!(
++            test.expectations,
++            [severian_hir::TestExpectation::Contains {
++                stream: severian_hir::TestStream::Stdout,
++                value: "captured".to_owned(),
++            }]
++        );
++    }
++
+     #[test]
+     fn function_scopes_can_read_and_shadow_globals() {
+         let (program, _) = analyze_source(
+@@ -1082,4 +1147,13 @@ mod tests {
+             analyze_source("def answer() -> int:\n    return 42\n    unreachable := 0\n");
+         assert_eq!(program.modules[0].functions.len(), 1);
+     }
++
++    #[test]
++    fn overload_resolution_prefers_exact_parameters_over_widening() {
++        let (program, context) = analyze_source(
++            "def choose(value: i32) -> i32:\n    return value\ndef choose(value: i64) -> i64:\n    return value\nsource: i32 = 1\nselected = choose(source)\n",
++        );
++        let selected = program.modules[0].bindings.last().unwrap();
++        assert_eq!(selected.type_id, context.types.resolve_name("i32").unwrap());
++    }
+ }
+diff --git a/compiler/transforms/mlir/src/emit/mod.rs b/compiler/transforms/mlir/src/emit/mod.rs
+index b6d774c..02c07d9 100644
+--- a/compiler/transforms/mlir/src/emit/mod.rs
++++ b/compiler/transforms/mlir/src/emit/mod.rs
+@@ -81,6 +81,37 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
+         .collect::<Vec<_>>();
+ 
+     let mut output = String::from("module {\n");
++    if all_operations(module).into_iter().any(|operation| {
++        matches!(
++            operation,
++            Operation::Binary {
++                operator: BinaryOperation::Equal
++                    | BinaryOperation::NotEqual
++                    | BinaryOperation::Less
++                    | BinaryOperation::LessEqual
++                    | BinaryOperation::Greater
++                    | BinaryOperation::GreaterEqual,
++                left,
++                ..
++            } if value_type(module, *left) == Ok(LoweredType::String)
++        )
++    }) {
++        output.push_str("  func.func private @strcmp(!llvm.ptr, !llvm.ptr) -> i32\n");
++    }
++    if all_operations(module).into_iter().any(|operation| {
++        matches!(
++            operation,
++            Operation::Binary {
++                operator: BinaryOperation::Add,
++                left,
++                ..
++            } if value_type(module, *left) == Ok(LoweredType::String)
++        )
++    }) {
++        output.push_str(
++            "  func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
++        );
++    }
+     if !coverage.is_empty() {
+         output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
+         for key in &coverage {
+@@ -222,6 +253,41 @@ fn render_block(
+                 result,
+             } => {
+                 let input_type = value_type(module, *left)?;
++                if input_type == LoweredType::String {
++                    if *operator == BinaryOperation::Add {
++                        output.push_str(&format!(
++                            "{indentation}%v{} = func.call @__sev_string_concat(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n",
++                            result.0, left.0, right.0
++                        ));
++                        continue;
++                    }
++                    let predicate = match operator {
++                        BinaryOperation::Equal => "eq",
++                        BinaryOperation::NotEqual => "ne",
++                        BinaryOperation::Less => "slt",
++                        BinaryOperation::LessEqual => "sle",
++                        BinaryOperation::Greater => "sgt",
++                        BinaryOperation::GreaterEqual => "sge",
++                        _ => {
++                            return Err(MlirError::UnsupportedOperation(format!(
++                                "MLIR string lowering is unavailable for {operator:?}"
++                            )))
++                        }
++                    };
++                    output.push_str(&format!(
++                        "{indentation}%v{}_strcmp = func.call @strcmp(%v{}, %v{}) : (!llvm.ptr, !llvm.ptr) -> i32\n",
++                        result.0, left.0, right.0
++                    ));
++                    output.push_str(&format!(
++                        "{indentation}%v{}_zero = arith.constant 0 : i32\n",
++                        result.0
++                    ));
++                    output.push_str(&format!(
++                        "{indentation}%v{} = arith.cmpi {predicate}, %v{}_strcmp, %v{}_zero : i32\n",
++                        result.0, result.0, result.0
++                    ));
++                    continue;
++                }
+                 let spelling = mlir_type(input_type)?;
+                 let instruction = mlir_binary(*operator, input_type)?;
+                 output.push_str(&format!(
+@@ -565,19 +631,38 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
+ fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static str, MlirError> {
+     let float = matches!(ty, LoweredType::Float { .. });
+     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
+-    Ok(match (operator, float) {
+-        (BinaryOperation::Add, false) => "arith.addi",
+-        (BinaryOperation::Subtract, false) => "arith.subi",
+-        (BinaryOperation::Multiply, false) => "arith.muli",
+-        (BinaryOperation::Divide, false) if signed => "arith.divsi",
+-        (BinaryOperation::Divide, false) => "arith.divui",
+-        (BinaryOperation::Remainder, false) if signed => "arith.remsi",
+-        (BinaryOperation::Remainder, false) => "arith.remui",
+-        (BinaryOperation::Add, true) => "arith.addf",
+-        (BinaryOperation::Subtract, true) => "arith.subf",
+-        (BinaryOperation::Multiply, true) => "arith.mulf",
+-        (BinaryOperation::Divide, true) => "arith.divf",
+-        (BinaryOperation::Remainder, true) => "arith.remf",
++    let integer = matches!(ty, LoweredType::Integer { .. } | LoweredType::Boolean);
++    Ok(match (operator, float, integer) {
++        (BinaryOperation::Add, false, true) => "arith.addi",
++        (BinaryOperation::Subtract, false, true) => "arith.subi",
++        (BinaryOperation::Multiply, false, true) => "arith.muli",
++        (BinaryOperation::Divide, false, true) if signed => "arith.divsi",
++        (BinaryOperation::Divide, false, true) => "arith.divui",
++        (BinaryOperation::Remainder, false, true) if signed => "arith.remsi",
++        (BinaryOperation::Remainder, false, true) => "arith.remui",
++        (BinaryOperation::Equal, false, true) => "arith.cmpi eq,",
++        (BinaryOperation::NotEqual, false, true) => "arith.cmpi ne,",
++        (BinaryOperation::Less, false, true) if signed => "arith.cmpi slt,",
++        (BinaryOperation::Less, false, true) => "arith.cmpi ult,",
++        (BinaryOperation::LessEqual, false, true) if signed => "arith.cmpi sle,",
++        (BinaryOperation::LessEqual, false, true) => "arith.cmpi ule,",
++        (BinaryOperation::Greater, false, true) if signed => "arith.cmpi sgt,",
++        (BinaryOperation::Greater, false, true) => "arith.cmpi ugt,",
++        (BinaryOperation::GreaterEqual, false, true) if signed => "arith.cmpi sge,",
++        (BinaryOperation::GreaterEqual, false, true) => "arith.cmpi uge,",
++        (BinaryOperation::And, false, true) => "arith.andi",
++        (BinaryOperation::Or, false, true) => "arith.ori",
++        (BinaryOperation::Add, true, false) => "arith.addf",
++        (BinaryOperation::Subtract, true, false) => "arith.subf",
++        (BinaryOperation::Multiply, true, false) => "arith.mulf",
++        (BinaryOperation::Divide, true, false) => "arith.divf",
++        (BinaryOperation::Remainder, true, false) => "arith.remf",
++        (BinaryOperation::Equal, true, false) => "arith.cmpf oeq,",
++        (BinaryOperation::NotEqual, true, false) => "arith.cmpf une,",
++        (BinaryOperation::Less, true, false) => "arith.cmpf olt,",
++        (BinaryOperation::LessEqual, true, false) => "arith.cmpf ole,",
++        (BinaryOperation::Greater, true, false) => "arith.cmpf ogt,",
++        (BinaryOperation::GreaterEqual, true, false) => "arith.cmpf oge,",
+         _ => {
+             return Err(MlirError::UnsupportedOperation(format!(
+                 "MLIR binary lowering is unavailable for {operator:?} on {ty:?}"
+@@ -624,6 +709,65 @@ mod tests {
+         assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
+     }
+ 
++    #[test]
++    fn string_addition_uses_the_shared_runtime_abi() {
++        let module = Module {
++            values: (0..3)
++                .map(|id| severian_lir::Value {
++                    id: ValueId(id),
++                    ty: LoweredType::String,
++                })
++                .collect(),
++            initializer: Block {
++                operations: vec![
++                    Operation::Constant {
++                        value: Constant::String("left".into()),
++                        result: ValueId(0),
++                    },
++                    Operation::Constant {
++                        value: Constant::String("right".into()),
++                        result: ValueId(1),
++                    },
++                    Operation::Binary {
++                        operator: BinaryOperation::Add,
++                        left: ValueId(0),
++                        right: ValueId(1),
++                        result: ValueId(2),
++                    },
++                ],
++            },
++            ..Module::default()
++        };
++        let rendered = render(&module).unwrap();
++        assert!(rendered.contains("func.call @__sev_string_concat(%v0, %v1)"));
++    }
++
++    #[test]
++    fn integer_comparisons_preserve_signedness() {
++        assert_eq!(
++            mlir_binary(
++                BinaryOperation::Equal,
++                LoweredType::Integer {
++                    bits: 32,
++                    signed: false,
++                },
++            )
++            .unwrap(),
++            "arith.cmpi eq,"
++        );
++        assert_eq!(
++            mlir_binary(
++                BinaryOperation::Less,
++                LoweredType::Integer {
++                    bits: 32,
++                    signed: false,
++                },
++            )
++            .unwrap(),
++            "arith.cmpi ult,"
++        );
++    }
++
+     #[test]
+     fn generated_artifacts_are_verified_and_composed() {
+         let target = TargetSpec::new("x86_64-unknown-linux");

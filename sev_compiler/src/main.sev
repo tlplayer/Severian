@@ -1,0 +1,10 @@
+# Stage-0 executable root. Resolving this source loads the complete mirrored
+# compiler package graph.
+import driver
+import interface
+
+
+def main(arguments: args):
+    captured_arguments = arguments
+    print("sev1 bootstrap driver is not implemented yet")
+    assert(false)

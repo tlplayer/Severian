@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/transforms/mir/src/model/block.
+# Fill this boundary while preserving its paired Rust responsibility.

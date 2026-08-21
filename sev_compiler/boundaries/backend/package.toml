@@ -1,0 +1,11 @@
+[package]
+name = "sev-compiler-backend"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+lir = { path = "../../transforms/lir" }

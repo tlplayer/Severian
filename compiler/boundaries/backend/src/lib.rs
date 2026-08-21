@@ -78,7 +78,7 @@ impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     let mut output = String::from(
-        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nstatic void __sev_coverage_hit(const char *key) {\n    const char *path = getenv(\"SEV_COVERAGE_FILE\");\n    if (path == NULL) return;\n    FILE *file = fopen(path, \"a\");\n    if (file == NULL) return;\n    fputs(key, file);\n    fputc('\\n', file);\n    fclose(file);\n}\n\n",
+        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\nconst char *__sev_string_concat(const char *left, const char *right);\n\n",
     );
     for value in &module.globals {
         output.push_str(&format!(
@@ -217,13 +217,42 @@ fn render_block(
                 result,
             } => {
                 let result_type = value_type(module, *result)?;
-                if matches!(
-                    value_type(module, *left)?,
-                    LoweredType::String | LoweredType::Bytes
-                ) || matches!(
-                    value_type(module, *right)?,
-                    LoweredType::String | LoweredType::Bytes
-                ) {
+                let left_type = value_type(module, *left)?;
+                let right_type = value_type(module, *right)?;
+                if left_type == LoweredType::String && right_type == LoweredType::String {
+                    if *operator == BinaryOperation::Add {
+                        define_value(
+                            output,
+                            module,
+                            *result,
+                            &format!("__sev_string_concat(v{}, v{})", left.0, right.0),
+                        )?;
+                        continue;
+                    }
+                    let comparison = match operator {
+                        BinaryOperation::Equal => "== 0",
+                        BinaryOperation::NotEqual => "!= 0",
+                        BinaryOperation::Less => "< 0",
+                        BinaryOperation::LessEqual => "<= 0",
+                        BinaryOperation::Greater => "> 0",
+                        BinaryOperation::GreaterEqual => ">= 0",
+                        _ => {
+                            return Err(BackendError::UnsupportedOperation(
+                                "this string operation requires a lowered runtime interface".into(),
+                            ))
+                        }
+                    };
+                    define_value(
+                        output,
+                        module,
+                        *result,
+                        &format!("strcmp(v{}, v{}) {comparison}", left.0, right.0),
+                    )?;
+                    continue;
+                }
+                if matches!(left_type, LoweredType::String | LoweredType::Bytes)
+                    || matches!(right_type, LoweredType::String | LoweredType::Bytes)
+                {
                     return Err(BackendError::UnsupportedOperation(
                         "string/byte operations require a lowered runtime interface".into(),
                     ));
@@ -388,6 +417,10 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
             signed: true,
         } => Ok("int64_t"),
         LoweredType::Integer {
+            bits: 128,
+            signed: true,
+        } => Ok("__int128"),
+        LoweredType::Integer {
             bits: 8,
             signed: false,
         } => Ok("uint8_t"),
@@ -403,6 +436,10 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
             bits: 64,
             signed: false,
         } => Ok("uint64_t"),
+        LoweredType::Integer {
+            bits: 128,
+            signed: false,
+        } => Ok("unsigned __int128"),
         LoweredType::Float {
             format: LoweredFloatFormat::Ieee(32),
         } => Ok("float"),
@@ -487,8 +524,11 @@ fn c_binary(operator: BinaryOperation) -> Result<&'static str, BackendError> {
 
 pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact, BackendError> {
     let source = render_c(module)?;
+    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/coverage_runtime.c");
     let mut child = Command::new("cc")
-        .args(["-std=c11", "-x", "c", "-", "-o"])
+        .args(["-std=c11", "-x", "c", "-"])
+        .arg(runtime)
+        .arg("-o")
         .arg(output)
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
@@ -652,5 +692,38 @@ mod tests {
     fn c_strings_are_escaped_without_changing_their_bytes() {
         assert_eq!(c_string_literal("a\n\"b\\c"), "\"a\\n\\\"b\\\\c\"");
         assert_eq!(c_string_literal("é"), "\"\\303\\251\"");
+    }
+
+    #[test]
+    fn c_string_addition_uses_the_shared_runtime_abi() {
+        let module = LoweredModule {
+            values: (0..3)
+                .map(|id| Value {
+                    id: ValueId(id),
+                    ty: LoweredType::String,
+                })
+                .collect(),
+            initializer: Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: Constant::String("left".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Constant {
+                        value: Constant::String("right".into()),
+                        result: ValueId(1),
+                    },
+                    Operation::Binary {
+                        operator: BinaryOperation::Add,
+                        left: ValueId(0),
+                        right: ValueId(1),
+                        result: ValueId(2),
+                    },
+                ],
+            },
+            ..LoweredModule::default()
+        };
+        let rendered = render_c(&module).unwrap();
+        assert!(rendered.contains("__sev_string_concat(v0, v1)"));
     }
 }

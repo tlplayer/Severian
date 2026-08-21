@@ -1,0 +1,42 @@
+def literal_integer() -> string:
+    return "integer"
+
+
+def literal_float() -> string:
+    return "float"
+
+
+def literal_boolean() -> string:
+    return "boolean"
+
+
+def literal_character() -> string:
+    return "character"
+
+
+def literal_string() -> string:
+    return "string"
+
+
+def literal_bytes() -> string:
+    return "bytes"
+
+
+def literal_none() -> string:
+    return "none"
+
+
+def literal_unit() -> string:
+    return "unit"
+
+
+# Payload-bearing literal enums migrate once source-language enums can retain
+# typed payloads. Spelling remains owned by the lexer and AST until then.
+trait LiteralValueBridge:
+    pass
+
+
+test "literal kind names are stable interface data":
+    assert(literal_integer() == "integer")
+    assert(literal_string() == "string")
+    assert(literal_unit() == "unit")

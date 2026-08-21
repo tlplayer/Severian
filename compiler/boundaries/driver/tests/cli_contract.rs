@@ -19,6 +19,35 @@ fn sev() -> Command {
     Command::new(env!("CARGO_BIN_EXE_sev"))
 }
 
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap()
+}
+
+#[test]
+fn core_compile_resolves_through_its_library_target() {
+    let package = repository_root().join("library/core/compile");
+    let output = sev().args(["check"]).arg(package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn primitive_submodules_resolve_relative_to_their_module_root() {
+    let package = repository_root().join("library/core/primitives");
+    let output = sev().args(["check"]).arg(package).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn bare_source_runs_globals_before_main() {
     let root = temporary("entry");
@@ -318,6 +347,25 @@ fn test_runs_benchmarks_and_captured_integration_expectations() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("test bench ... bench ("), "{stdout}");
     assert!(stdout.contains("test integration ... ok"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn numeric_print_overloads_are_resolved_through_the_io_boundary() {
+    let root = temporary("numeric-print");
+    let source = root.join("numeric.sev");
+    fs::write(
+        &source,
+        "int whole = 3\nfloat decimal = 3.1415926\n\ntest with integ:\n    narrow: i32 = 32\n    wide: i64 = 64\n    precise: f64 = 0.125\n    enabled: bool = true\n    letter: char = 'λ'\n    print(whole)\n    print(decimal)\n    print(narrow)\n    print(wide)\n    print(precise)\n    print(enabled)\n    print(letter)\n    assert(\"3\" in stdout)\n    assert(\"3.1415926\" in stdout)\n    assert(\"32\" in stdout)\n    assert(\"64\" in stdout)\n    assert(\"0.125\" in stdout)\n    assert(\"true\" in stdout)\n    assert(\"λ\" in stdout)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

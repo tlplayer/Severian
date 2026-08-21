@@ -134,16 +134,25 @@ pub fn analyze_with_context(
                 call_type: CallType::Severian,
                 body: None,
             });
+            let mut modes = test
+                .modes
+                .iter()
+                .map(|mode| test_mode(mode, test.span))
+                .collect::<Result<Vec<_>, _>>()?;
+            if modes.is_empty()
+                && test
+                    .body
+                    .iter()
+                    .any(|statement| integration_expectation(statement).is_some())
+            {
+                modes.push(severian_hir::TestMode::Integration);
+            }
             module.tests.push(severian_hir::TestDeclaration {
                 name: test
                     .name
                     .clone()
                     .unwrap_or_else(|| format!("test {}", index + 1)),
-                modes: test
-                    .modes
-                    .iter()
-                    .map(|mode| test_mode(mode, test.span))
-                    .collect::<Result<Vec<_>, _>>()?,
+                modes,
                 function: id,
                 expectations: Vec::new(),
             });
@@ -346,7 +355,23 @@ impl Analyzer<'_> {
         ast_binding: &severian_ast::Binding,
         bindings: &mut Vec<Binding>,
     ) -> Result<BindingId, Diagnostic> {
-        if !self.declarations.insert(ast_binding.name.clone()) {
+        let update_type = if ast_binding.update {
+            Some(
+                self.names
+                    .get(&ast_binding.name)
+                    .map(|(_, type_id)| *type_id)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000201",
+                            format!("cannot update unknown binding `{}`", ast_binding.name),
+                            Some(ast_binding.span),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        if !ast_binding.update && !self.declarations.insert(ast_binding.name.clone()) {
             return Err(Diagnostic::new(
                 "E000203",
                 format!("binding `{}` is already defined", ast_binding.name),
@@ -357,7 +382,8 @@ impl Analyzer<'_> {
             .annotation
             .as_ref()
             .map(|annotation| resolve_type_annotation(self.types, annotation))
-            .transpose()?;
+            .transpose()?
+            .or(update_type);
         let value = self.expression(&ast_binding.value, expected)?;
         let type_id = expected.unwrap_or(value.type_id);
         if !self.types.assignable(value.type_id, type_id) {
@@ -681,10 +707,20 @@ impl Analyzer<'_> {
                         .map(|(argument, parameter)| self.expression(argument, Some(*parameter)))
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
-                        matches.push((function, signature.result, arguments));
+                        let exact_parameters = arguments
+                            .iter()
+                            .zip(&signature.parameters)
+                            .filter(|(argument, parameter)| argument.type_id == **parameter)
+                            .count();
+                        matches.push((exact_parameters, function, signature.result, arguments));
                     }
                 }
-                let [(function, result, arguments)] = matches.as_slice() else {
+                let best_score = matches.iter().map(|candidate| candidate.0).max();
+                let best = matches
+                    .iter()
+                    .filter(|candidate| Some(candidate.0) == best_score)
+                    .collect::<Vec<_>>();
+                let [(_, function, result, arguments)] = best.as_slice() else {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("call to `{name}` has no unique compatible declaration"),
@@ -696,7 +732,7 @@ impl Analyzer<'_> {
                     type_id: *result,
                     kind: ExpressionKind::Call {
                         function: *function,
-                        arguments: arguments.clone(),
+                        arguments: (*arguments).clone(),
                     },
                     span: ast.span,
                 })
@@ -1062,6 +1098,35 @@ mod tests {
     }
 
     #[test]
+    fn captured_stream_assertions_make_ordinary_tests_integration_tests() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "implicit-integration.sev",
+            "test:\n    assert(\"captured\" in stdout)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "implicit_integration",
+            },
+        )
+        .unwrap();
+        let test = &program.modules[0].tests[0];
+        assert_eq!(test.modes, [severian_hir::TestMode::Integration]);
+        assert_eq!(
+            test.expectations,
+            [severian_hir::TestExpectation::Contains {
+                stream: severian_hir::TestStream::Stdout,
+                value: "captured".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
     fn function_scopes_can_read_and_shadow_globals() {
         let (program, _) = analyze_source(
             "value := 1\ndef use_global():\n    observed := value\ndef main():\n    value := 2\n    observed := value\n",
@@ -1081,5 +1146,14 @@ mod tests {
         let (program, _) =
             analyze_source("def answer() -> int:\n    return 42\n    unreachable := 0\n");
         assert_eq!(program.modules[0].functions.len(), 1);
+    }
+
+    #[test]
+    fn overload_resolution_prefers_exact_parameters_over_widening() {
+        let (program, context) = analyze_source(
+            "def choose(value: i32) -> i32:\n    return value\ndef choose(value: i64) -> i64:\n    return value\nsource: i32 = 1\nselected = choose(source)\n",
+        );
+        let selected = program.modules[0].bindings.last().unwrap();
+        assert_eq!(selected.type_id, context.types.resolve_name("i32").unwrap());
     }
 }

@@ -1,0 +1,6 @@
+# Bootstrap counterpart of compiler/boundaries/xxi/src/lib.rs.
+# These imports preserve the Rust package dependency direction.
+import abi
+import ast
+import ffi
+import universal

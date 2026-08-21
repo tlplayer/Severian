@@ -1,0 +1,4 @@
+# Bootstrap counterpart of compiler/frontend/ownership/src/lib.rs.
+# These imports preserve the Rust package dependency direction.
+import diagnostics
+import hir

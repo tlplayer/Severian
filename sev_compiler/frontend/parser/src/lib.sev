@@ -1,0 +1,6 @@
+# Bootstrap counterpart of compiler/frontend/parser/src/lib.rs.
+# These imports preserve the Rust package dependency direction.
+import ast
+import diagnostics
+import lexer
+import source

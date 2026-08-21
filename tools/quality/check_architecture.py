@@ -9,6 +9,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from check_bootstrap_mirror import check_mirror
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,6 +36,9 @@ def cargo_metadata() -> dict[str, object]:
 
 def main() -> int:
     try:
+        mirror_failures, mirror_packages, mirror_sources = check_mirror()
+        if mirror_failures:
+            raise ValueError("; ".join(mirror_failures))
         assignments, allow, rejection_tests = load_policy()
         metadata = cargo_metadata()
         members = set(metadata["workspace_members"])
@@ -95,7 +100,8 @@ def main() -> int:
 
     print(
         "architecture check passed: "
-        f"{len(packages)} packages, {len(rejection_tests)} rejection tests"
+        f"{len(packages)} Rust packages, {len(rejection_tests)} rejection tests, "
+        f"{mirror_packages} mirrored packages, {mirror_sources} mirrored sources"
     )
     return 0
 

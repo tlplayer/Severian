@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/compile/src/error.rs.
+# Translate the Rust behavior here; parity is checked with shared fixtures.

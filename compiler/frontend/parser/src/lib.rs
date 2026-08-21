@@ -21,6 +21,49 @@ mod tests {
     }
 
     #[test]
+    fn compound_assignment_is_an_explicit_binding_update() {
+        let source = SourceFile::virtual_source("update.sev", "value := 1\nvalue += 2\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(update) = &module.items[1] else {
+            panic!("expected binding update")
+        };
+        assert!(update.update);
+        assert!(matches!(
+            update.value.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prefix_typed_constants_use_the_same_binding_ast() {
+        let source = SourceFile::virtual_source(
+            "constants.sev",
+            "int MAX_RETRIES = 3\nfloat PI = 3.1415926\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let module = parse(&tokens).unwrap();
+        let severian_ast::Item::Binding(first) = &module.items[0] else {
+            panic!("expected a binding")
+        };
+        assert_eq!(first.name, "MAX_RETRIES");
+        assert_eq!(
+            first.annotation.as_ref().unwrap().simple_name(),
+            Some("int")
+        );
+        let severian_ast::Item::Binding(second) = &module.items[1] else {
+            panic!("expected a binding")
+        };
+        assert_eq!(second.name, "PI");
+        assert_eq!(
+            second.annotation.as_ref().unwrap().simple_name(),
+            Some("float")
+        );
+    }
+
+    #[test]
     fn semicolon_separates_without_starting_a_physical_line() {
         let source = SourceFile::virtual_source("test.sev", "x = 1; y = 2");
         let module = parse(&scan(&source).unwrap()).unwrap();

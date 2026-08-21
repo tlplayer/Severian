@@ -6,6 +6,9 @@ pub struct Binding {
     pub name: String,
     pub annotation: Option<TypeAnnotation>,
     pub value: Expression,
+    /// Compound assignment creates a new SSA binding for an existing source
+    /// name instead of declaring a second lexical name.
+    pub update: bool,
     pub span: Span,
 }
 

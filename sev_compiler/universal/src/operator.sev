@@ -1,0 +1,53 @@
+def unary_operator(spelling: string) -> string:
+    if spelling == "+":
+        return "positive"
+    if spelling == "-":
+        return "negative"
+    if spelling == "not":
+        return "not"
+    return ""
+
+
+def binary_operator(spelling: string) -> string:
+    if spelling == "+":
+        return "add"
+    if spelling == "-":
+        return "subtract"
+    if spelling == "*":
+        return "multiply"
+    if spelling == "/":
+        return "divide"
+    if spelling == "%":
+        return "remainder"
+    if spelling == "**":
+        return "power"
+    if spelling == "==":
+        return "equal"
+    if spelling == "!=":
+        return "not-equal"
+    if spelling == "<":
+        return "less"
+    if spelling == "<=":
+        return "less-equal"
+    if spelling == ">":
+        return "greater"
+    if spelling == ">=":
+        return "greater-equal"
+    if spelling == "in":
+        return "contains"
+    if spelling == "and":
+        return "and"
+    if spelling == "or":
+        return "or"
+    return ""
+
+
+trait OperatorSignatureBridge:
+    pass
+
+
+test "operator spellings resolve without public type-name matching":
+    assert(unary_operator("-") == "negative")
+    assert(binary_operator("+") == "add")
+    assert(binary_operator("in") == "contains")
+    assert(binary_operator("unknown") == "")

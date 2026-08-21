@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/tools/build/src/graph.
+# Fill this boundary while preserving its paired Rust responsibility.

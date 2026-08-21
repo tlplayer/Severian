@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/transforms/mir/src/model/function.
+# Fill this boundary while preserving its paired Rust responsibility.

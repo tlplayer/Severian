@@ -1,0 +1,15 @@
+[package]
+name = "sev-compiler-semantic"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+ast = { path = "../ast" }
+diagnostics = { path = "../../diagnostics" }
+hir = { path = "../hir" }
+source = { path = "../../source" }
+universal = { path = "../../universal" }

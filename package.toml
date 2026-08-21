@@ -1,5 +1,5 @@
 [workspace]
-members = ["library"]
+members = ["library", "sev_compiler"]
 
 [build]
 pipeline = [
@@ -114,6 +114,7 @@ soft_lines = 500
 hard_lines = 800
 include = [
     "compiler/**/*.rs",
+    "sev_compiler/**/*.sev",
     "library/**/*.sev",
     "docs/**/*.sev",
     "bench/**/*.sev",

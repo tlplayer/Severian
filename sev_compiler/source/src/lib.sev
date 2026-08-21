@@ -1,0 +1,25 @@
+# SourceId and Span are value structs in the Rust stage. Until Severian value
+# classes land, their scalar semantics remain explicit and fully typed here.
+def source_id(index: u32) -> u32:
+    return index
+
+
+def span_length(start: u32, end: u32) -> u32:
+    return end - start
+
+
+def span_contains(start: u32, end: u32, offset: u32) -> bool:
+    return start <= offset and offset < end
+
+
+# File loading remains a host boundary until filesystem results and owned path
+# values are available to the source-language compiler.
+trait SourceFileLoaderBridge:
+    pass
+
+
+test "source identities and spans preserve scalar semantics":
+    assert(source_id(7) == 7)
+    assert(span_length(4, 11) == 7)
+    assert(span_contains(4, 11, 4))
+    assert(not span_contains(4, 11, 11))

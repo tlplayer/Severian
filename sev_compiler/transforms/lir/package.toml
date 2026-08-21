@@ -1,0 +1,11 @@
+[package]
+name = "sev-compiler-lir"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+artifact = { path = "../../artifact" }

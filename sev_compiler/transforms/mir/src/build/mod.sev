@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/transforms/mir/src/build/mod.rs.
+# Translate the Rust behavior here; parity is checked with shared fixtures.

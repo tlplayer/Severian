@@ -1,0 +1,33 @@
+[package]
+name = "sev-compiler-driver"
+version = "0.1.0"
+edition = "2026"
+publish = false
+
+[lib]
+path = "src/lib.sev"
+
+[[bin]]
+name = "sev-bootstrap-driver"
+path = "src/main.sev"
+
+[dependencies]
+abi = { path = "../abi" }
+ast = { path = "../../frontend/ast" }
+backend = { path = "../backend" }
+bootstrap = { path = "../../bootstrap" }
+compile = { path = "../../compile" }
+diagnostics = { path = "../../diagnostics" }
+lexer = { path = "../../frontend/lexer" }
+hir = { path = "../../frontend/hir" }
+modules = { path = "../../frontend/modules" }
+lowering = { path = "../../transforms/lowering" }
+mir = { path = "../../transforms/mir" }
+mlir = { path = "../../transforms/mlir" }
+ownership = { path = "../../frontend/ownership" }
+parser = { path = "../../frontend/parser" }
+semantic = { path = "../../frontend/semantic" }
+source = { path = "../../source" }
+target = { path = "../../target" }
+universal = { path = "../../universal" }
+xxi = { path = "../xxi" }

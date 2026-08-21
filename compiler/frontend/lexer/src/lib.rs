@@ -50,4 +50,24 @@ mod tests {
             .iter()
             .any(|token| token.kind == TokenKind::Integer("1000000".into())));
     }
+
+    #[test]
+    fn block_strings_remove_structural_indentation_and_preserve_lines() {
+        let source = SourceFile::virtual_source(
+            "block-string.sev",
+            "value = \"\"\"\n    first\n      second\n    third\n    \"\"\"\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| { token.kind == TokenKind::String("first\n  second\nthird\n".into()) }));
+    }
+
+    #[test]
+    fn unterminated_block_strings_have_the_block_string_diagnostic() {
+        let source = SourceFile::virtual_source("block-string.sev", "value = \"\"\"open\n");
+        let error = scan(&source).unwrap_err();
+        assert_eq!(error.code, "E000101");
+        assert!(error.message.contains("block string"));
+    }
 }

@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/boundaries/ffi/src/marshal/argument.
+# Fill this boundary while preserving its paired Rust responsibility.

@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/frontend/lexer/src/trivia.
+# Fill this boundary while preserving its paired Rust responsibility.

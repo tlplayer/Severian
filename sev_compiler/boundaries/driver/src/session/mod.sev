@@ -1,0 +1,2 @@
+# Bootstrap module counterpart of compiler/boundaries/driver/src/session.
+# Fill this boundary while preserving its paired Rust responsibility.

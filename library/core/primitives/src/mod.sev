@@ -1,12 +1,12 @@
-import "src/bool.sev" as boolean
-import "src/char.sev" as character
-import "src/integers.sev" as integers
-import "src/floats.sev" as floats
-import "src/string.sev" as text
-import "src/bytes.sev" as byte_string
-import "src/none.sev" as absence
-import "src/unit.sev" as unit_value
-import "src/args.sev" as program_arguments
+import "bool.sev" as boolean
+import "char.sev" as character
+import "integers.sev" as integers
+import "floats.sev" as floats
+import "string.sev" as text
+import "bytes.sev" as byte_string
+import "none.sev" as absence
+import "unit.sev" as unit_value
+import "args.sev" as program_arguments
 
 
 # The compiler discovers primitive declarations by this composed trait. The

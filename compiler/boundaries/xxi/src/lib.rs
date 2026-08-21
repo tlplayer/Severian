@@ -74,16 +74,15 @@ pub fn resolve(
         Item::Function(declaration) if !declaration.decorators.is_empty() => Some(declaration),
         _ => None,
     }) {
+        let resolved = resolve_function(declaration, &foreign, &imports, types)?;
         if foreign
             .functions
             .iter()
-            .any(|known| known.name == declaration.name)
+            .any(|known| known.name == resolved.name && known.parameters == resolved.parameters)
         {
             return Err(XxiError::DuplicateDeclaration(declaration.name.clone()));
         }
-        foreign
-            .functions
-            .push(resolve_function(declaration, &foreign, &imports, types)?);
+        foreign.functions.push(resolved);
     }
     let plans = foreign
         .functions
@@ -435,6 +434,33 @@ mod tests {
         let module = parse(&scan(&source).unwrap()).unwrap();
         let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert_eq!(resolved.foreign.functions[0].abi, AbiSelection::System);
+    }
+
+    #[test]
+    fn external_functions_may_overload_by_parameter_contract() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "overloads.sev",
+            "@c(symbol = \"print_text\")\ndef print(value: string) -> i32\n@c(symbol = \"print_int\")\ndef print(value: int) -> i32\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert_eq!(resolved.foreign.functions.len(), 2);
+        assert_eq!(resolved.plans.len(), 2);
+    }
+
+    #[test]
+    fn external_functions_reject_duplicate_parameter_contracts() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "duplicates.sev",
+            "@c(symbol = \"first\")\ndef print(value: int) -> i32\n@c(symbol = \"second\")\ndef print(value: int) -> i32\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert_eq!(
+            resolve(&module, &context.types, &target()).unwrap_err(),
+            XxiError::DuplicateDeclaration("print".into())
+        );
     }
 
     #[test]

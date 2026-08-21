@@ -1,0 +1,29 @@
+# Stable IDs keep distinct constructors even while their value-class
+# representation and FNV-1a implementation remain host bridged.
+def type_id(index: u32) -> u32:
+    return index
+
+
+def primitive_id(declaration: u128) -> u128:
+    return declaration
+
+
+def compiler_id(declaration: u128) -> u128:
+    return declaration
+
+
+def compiler_declaration(compiler: u128) -> u128:
+    return compiler
+
+
+trait DeclarationHashBridge:
+    pass
+
+
+test "typed identity projections preserve their payload":
+    type_index: u32 = 5
+    primitive_declaration: u128 = 17
+    compiler_declaration_id: u128 = 23
+    assert(type_id(type_index) == type_index)
+    assert(primitive_id(primitive_declaration) == primitive_declaration)
+    assert(compiler_declaration(compiler_id(compiler_declaration_id)) == compiler_declaration_id)
