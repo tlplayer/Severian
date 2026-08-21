@@ -5,6 +5,7 @@ pub enum TokenKind {
     Identifier(String),
     Integer(String),
     Float(String),
+    Character(char),
     String(String),
     At,
     Colon,

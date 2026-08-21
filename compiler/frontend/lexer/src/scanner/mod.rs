@@ -141,6 +141,38 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 1;
                 TokenKind::String(value)
             }
+            b'\'' => {
+                cursor += 1;
+                let value = if bytes.get(cursor) == Some(&b'\\') {
+                    cursor += 1;
+                    let escaped = match bytes.get(cursor).copied() {
+                        Some(b'n') => '\n',
+                        Some(b'r') => '\r',
+                        Some(b't') => '\t',
+                        Some(b'0') => '\0',
+                        Some(b'\\') => '\\',
+                        Some(b'\'') => '\'',
+                        Some(b'"') => '"',
+                        _ => return Err(character_error(source, start, cursor)),
+                    };
+                    cursor += 1;
+                    escaped
+                } else {
+                    let Some(character) = source.text[cursor..].chars().next() else {
+                        return Err(character_error(source, start, cursor));
+                    };
+                    if character == '\n' || character == '\'' {
+                        return Err(character_error(source, start, cursor));
+                    }
+                    cursor += character.len_utf8();
+                    character
+                };
+                if bytes.get(cursor) != Some(&b'\'') {
+                    return Err(character_error(source, start, cursor));
+                }
+                cursor += 1;
+                TokenKind::Character(value)
+            }
             b'#' => {
                 while cursor < bytes.len() && bytes[cursor] != b'\n' {
                     cursor += 1;
@@ -149,19 +181,27 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             }
             byte if byte.is_ascii_digit() => {
                 cursor += 1;
-                while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                while cursor < bytes.len()
+                    && (bytes[cursor].is_ascii_digit()
+                        || (bytes[cursor] == b'_'
+                            && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)))
+                {
                     cursor += 1;
                 }
                 if bytes.get(cursor) == Some(&b'.')
                     && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)
                 {
                     cursor += 1;
-                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                    while cursor < bytes.len()
+                        && (bytes[cursor].is_ascii_digit()
+                            || (bytes[cursor] == b'_'
+                                && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)))
+                    {
                         cursor += 1;
                     }
-                    TokenKind::Float(source.text[start..cursor].to_owned())
+                    TokenKind::Float(source.text[start..cursor].replace('_', ""))
                 } else {
-                    TokenKind::Integer(source.text[start..cursor].to_owned())
+                    TokenKind::Integer(source.text[start..cursor].replace('_', ""))
                 }
             }
             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
@@ -189,6 +229,18 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
     }
     tokens.push(token(source, TokenKind::Eof, cursor, cursor));
     Ok(tokens)
+}
+
+fn character_error(source: &SourceFile, start: usize, cursor: usize) -> Diagnostic {
+    Diagnostic::new(
+        "E000103",
+        "character literals contain exactly one Unicode scalar value",
+        Some(Span::new(
+            source.id,
+            start as u32,
+            cursor.min(source.text.len()) as u32,
+        )),
+    )
 }
 
 fn one(cursor: &mut usize, kind: TokenKind) -> TokenKind {

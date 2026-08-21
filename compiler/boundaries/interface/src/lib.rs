@@ -23,6 +23,7 @@ pub struct PrimitiveRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CategoryRecord {
     Boolean,
+    Character,
     Integer,
     Float,
     Text,
@@ -38,6 +39,7 @@ pub enum RepresentationRecord {
     Float { format: FloatRecord },
     PointerInteger { signed: bool },
     Boolean,
+    Character,
     String,
     Bytes,
     None,
@@ -80,6 +82,7 @@ impl From<PrimitiveCategory> for CategoryRecord {
     fn from(category: PrimitiveCategory) -> Self {
         match category {
             PrimitiveCategory::Boolean => Self::Boolean,
+            PrimitiveCategory::Character => Self::Character,
             PrimitiveCategory::Integer => Self::Integer,
             PrimitiveCategory::Float => Self::Float,
             PrimitiveCategory::Text => Self::Text,
@@ -110,6 +113,7 @@ impl From<PrimitiveRepresentation> for RepresentationRecord {
             },
             PrimitiveRepresentation::PointerInteger { signed } => Self::PointerInteger { signed },
             PrimitiveRepresentation::Boolean => Self::Boolean,
+            PrimitiveRepresentation::Character => Self::Character,
             PrimitiveRepresentation::String => Self::String,
             PrimitiveRepresentation::Bytes => Self::Bytes,
             PrimitiveRepresentation::None => Self::None,
@@ -198,6 +202,7 @@ fn category_tag(category: CategoryRecord) -> u8 {
         CategoryRecord::Absence => 5,
         CategoryRecord::Unit => 6,
         CategoryRecord::Arguments => 7,
+        CategoryRecord::Character => 8,
     }
 }
 
@@ -211,6 +216,7 @@ fn decode_category(tag: u8) -> Result<CategoryRecord, InterfaceError> {
         5 => CategoryRecord::Absence,
         6 => CategoryRecord::Unit,
         7 => CategoryRecord::Arguments,
+        8 => CategoryRecord::Character,
         tag => return Err(InterfaceError::InvalidTag(tag)),
     })
 }
@@ -242,6 +248,7 @@ fn encode_representation(bytes: &mut Vec<u8>, representation: &RepresentationRec
         RepresentationRecord::None => bytes.push(6),
         RepresentationRecord::Unit => bytes.push(7),
         RepresentationRecord::Arguments => bytes.push(8),
+        RepresentationRecord::Character => bytes.push(9),
     }
 }
 
@@ -284,6 +291,7 @@ fn decode_representation(
         6 => RepresentationRecord::None,
         7 => RepresentationRecord::Unit,
         8 => RepresentationRecord::Arguments,
+        9 => RepresentationRecord::Character,
         tag => return Err(InterfaceError::InvalidTag(tag)),
     })
 }

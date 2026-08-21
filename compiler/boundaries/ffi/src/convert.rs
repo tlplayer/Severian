@@ -159,6 +159,7 @@ fn lower_semantic(
             AbiType::Scalar(severian_abi::ScalarType::Boolean),
             Conversion::Boolean,
         ),
+        PrimitiveRepresentation::Character => (AbiType::integer(32, false), Conversion::Direct),
         PrimitiveRepresentation::String => (view_type("StringView", target), Conversion::Utf8View),
         PrimitiveRepresentation::Bytes => (view_type("BytesView", target), Conversion::BytesView),
         PrimitiveRepresentation::None | PrimitiveRepresentation::Unit if result => {

@@ -494,6 +494,25 @@ mod tests {
     }
 
     #[test]
+    fn character_literals_are_defined_by_the_core_primitive_contract() {
+        let context = load().unwrap();
+        let character = context.types.resolve_name("char").unwrap();
+        let definition = context.types.primitive(character).unwrap();
+        assert_eq!(definition.category, PrimitiveCategory::Character);
+        assert_eq!(
+            definition.representation,
+            PrimitiveRepresentation::Character
+        );
+        assert_eq!(
+            context.types.resolve_literal(
+                &severian_universal::LiteralValue::Character('\u{03bb}'),
+                None,
+            ),
+            Ok(character)
+        );
+    }
+
+    #[test]
     fn inherited_operator_constraints_are_symmetric() {
         let context = load().unwrap();
         let i32 = context.types.resolve_name("i32").unwrap();

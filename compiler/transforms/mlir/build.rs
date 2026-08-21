@@ -58,6 +58,7 @@ fn build_linux_bridge(libdir: &str, llvm_library: &str) {
         "libMLIRCAPIArith.a",
         "libMLIRCAPIControlFlow.a",
         "libMLIRCAPIFunc.a",
+        "libMLIRCAPILLVM.a",
         "libMLIRCAPIMath.a",
         "libMLIRCAPISCF.a",
     ];

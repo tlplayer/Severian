@@ -554,6 +554,7 @@ impl Parser<'_> {
         let kind = match token.kind {
             TokenKind::Integer(value) => ExpressionKind::Literal(Literal::Integer(value)),
             TokenKind::Float(value) => ExpressionKind::Literal(Literal::Float(value)),
+            TokenKind::Character(value) => ExpressionKind::Literal(Literal::Character(value)),
             TokenKind::String(value) => ExpressionKind::Literal(Literal::String(value)),
             TokenKind::Identifier(value) if value == "true" => {
                 ExpressionKind::Literal(Literal::Boolean(true))

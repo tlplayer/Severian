@@ -65,6 +65,33 @@ mod tests {
                 true,
             )
             .unwrap();
+        let string_type = types.register_declaration("test.string", "string").unwrap();
+        types
+            .define_primitive(
+                string_type,
+                PrimitiveCategory::Text,
+                PrimitiveRepresentation::String,
+                true,
+            )
+            .unwrap();
+        let unit_type = types.register_declaration("test.unit", "unit").unwrap();
+        types
+            .define_primitive(
+                unit_type,
+                PrimitiveCategory::Unit,
+                PrimitiveRepresentation::Unit,
+                true,
+            )
+            .unwrap();
+        let arguments_type = types.register_declaration("test.args", "args").unwrap();
+        types
+            .define_primitive(
+                arguments_type,
+                PrimitiveCategory::Arguments,
+                PrimitiveRepresentation::Arguments,
+                false,
+            )
+            .unwrap();
         let custom = types
             .register_declaration("test.custom", "CustomValue")
             .unwrap();
@@ -203,6 +230,48 @@ mod tests {
         let artifact = compiler.compile_source(&source, &output).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(artifact.path.exists());
+        assert!(std::process::Command::new(&artifact.path)
+            .status()
+            .unwrap()
+            .success());
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn mixed_compile_type_programs_resume_through_ordinary_print() {
+        let (context, _, _, compiler_id) = compile_type_context();
+        let mut compiler = Compiler::with_context(context, TargetSpec::new("x86_64-unknown-linux"));
+        compiler
+            .register_compile_handler(compiler_id, TestHandler { calls: None })
+            .unwrap();
+        let source = SourceFile::virtual_source(
+            "custom-print.sev",
+            "value: CustomValue = 1\ndef main():\n    print(\"resumed\")\n",
+        );
+        let output = std::env::temp_dir().join(format!(
+            "severian-compile-type-print-{}",
+            std::process::id()
+        ));
+
+        let artifact = compiler.compile_source(&source, &output).unwrap();
+        let result = std::process::Command::new(&artifact.path).output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(result.stdout, b"resumed\n");
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn core_character_literals_and_numeric_separators_compile_end_to_end() {
+        let source = SourceFile::virtual_source(
+            "primitive-literals.sev",
+            "letter: char = '\u{03bb}'\nlarge: i64 = 1_000_000\n",
+        );
+        let output = std::env::temp_dir().join(format!(
+            "severian-primitive-literals-{}",
+            std::process::id()
+        ));
+
+        let artifact = compile_source(&source, &output).unwrap();
         assert!(std::process::Command::new(&artifact.path)
             .status()
             .unwrap()

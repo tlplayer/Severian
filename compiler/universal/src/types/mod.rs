@@ -8,6 +8,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrimitiveCategory {
     Boolean,
+    Character,
     Integer,
     Float,
     Text,
@@ -21,6 +22,7 @@ impl PrimitiveCategory {
     pub fn from_contract(value: &str) -> Result<Self, TypeError> {
         match value {
             "boolean" => Ok(Self::Boolean),
+            "character" => Ok(Self::Character),
             "integer" => Ok(Self::Integer),
             "float" => Ok(Self::Float),
             "text" => Ok(Self::Text),
@@ -35,6 +37,7 @@ impl PrimitiveCategory {
     const fn literal_kind(self) -> Option<LiteralKind> {
         match self {
             Self::Boolean => Some(LiteralKind::Boolean),
+            Self::Character => Some(LiteralKind::Character),
             Self::Integer => Some(LiteralKind::Integer),
             Self::Float => Some(LiteralKind::Float),
             Self::Text => Some(LiteralKind::String),
@@ -65,6 +68,7 @@ pub enum PrimitiveRepresentation {
     Float { format: FloatFormat },
     PointerInteger { signed: bool },
     Boolean,
+    Character,
     String,
     Bytes,
     None,
@@ -94,6 +98,7 @@ impl PrimitiveRepresentation {
                 format: FloatFormat::BrainFloat16,
             }),
             "i1" => Ok(Self::Boolean),
+            "unicode-scalar" => Ok(Self::Character),
             "string" => Ok(Self::String),
             "byte-string" => Ok(Self::Bytes),
             "none" => Ok(Self::None),
@@ -669,6 +674,7 @@ fn literal_fits(literal: &LiteralValue, representation: PrimitiveRepresentation)
         }
         (LiteralValue::Float(_), PrimitiveRepresentation::Float { .. })
         | (LiteralValue::Boolean(_), PrimitiveRepresentation::Boolean)
+        | (LiteralValue::Character(_), PrimitiveRepresentation::Character)
         | (LiteralValue::String(_), PrimitiveRepresentation::String)
         | (LiteralValue::Bytes(_), PrimitiveRepresentation::Bytes)
         | (LiteralValue::None, PrimitiveRepresentation::None)

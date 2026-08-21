@@ -5,6 +5,7 @@ pub enum Literal {
     Integer(String),
     Float(String),
     Boolean(bool),
+    Character(char),
     String(String),
     Bytes(Vec<u8>),
     None,

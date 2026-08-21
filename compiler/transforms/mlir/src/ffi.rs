@@ -51,6 +51,7 @@ pub type MlirStringCallback = unsafe extern "C" fn(MlirStringRef, *mut c_void);
     link(name = "MLIRCAPIControlFlow", kind = "static")
 )]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIFunc", kind = "static"))]
+#[cfg_attr(target_os = "macos", link(name = "MLIRCAPILLVM", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPIMath", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIRCAPISCF", kind = "static"))]
 #[cfg_attr(target_os = "macos", link(name = "MLIR", kind = "dylib"))]
@@ -64,6 +65,7 @@ unsafe extern "C" {
     pub fn mlirGetDialectHandle__arith__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__cf__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__func__() -> MlirDialectHandle;
+    pub fn mlirGetDialectHandle__llvm__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__math__() -> MlirDialectHandle;
     pub fn mlirGetDialectHandle__scf__() -> MlirDialectHandle;
     pub fn mlirDialectHandleInsertDialect(handle: MlirDialectHandle, registry: MlirDialectRegistry);

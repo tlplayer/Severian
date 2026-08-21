@@ -1,7 +1,7 @@
 use severian_artifact::ArtifactId;
 use severian_lir::{
-    BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module, Operation, UnaryOperation,
-    ValueId,
+    BinaryOperation, Block, Constant, Function, FunctionId, FunctionLinkage, LoweredFloatFormat,
+    LoweredType, Module, Operation, UnaryOperation, ValueId,
 };
 use std::collections::BTreeMap;
 use std::fmt;
@@ -80,6 +80,20 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     }
 
     let mut output = String::from("module {\n");
+    for operation in all_operations(module) {
+        if let Operation::Constant {
+            value: Constant::String(value),
+            result,
+        } = operation
+        {
+            output.push_str(&format!(
+                "  llvm.mlir.global private constant @{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+                string_symbol(*result),
+                mlir_string(value),
+                value.len() + 1,
+            ));
+        }
+    }
     for (artifact, (inputs, outputs)) in artifact_signatures {
         let symbol = artifact_symbol(artifact);
         let inputs = inputs
@@ -100,8 +114,41 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             "  func.func private @{symbol}({inputs}){result}\n"
         ));
     }
+    for function in module
+        .functions
+        .iter()
+        .filter(|function| matches!(function.linkage, FunctionLinkage::External { .. }))
+    {
+        render_function_declaration(&mut output, module, function)?;
+    }
+    for function in module
+        .functions
+        .iter()
+        .filter(|function| function.body.is_some())
+    {
+        render_function_definition(&mut output, module, function)?;
+    }
     output.push_str("  func.func @main() -> i32 {\n");
-    for operation in &module.initializer.operations {
+    render_block(&mut output, module, &module.initializer)?;
+    if let Some(entry) = module.entry {
+        let function = function(module, entry)?;
+        if !function.parameters.is_empty() {
+            return Err(MlirError::UnsupportedOperation(
+                "MLIR entry lowering does not yet provide process arguments".into(),
+            ));
+        }
+        output.push_str(&format!(
+            "    func.call @{}() : () -> ()\n",
+            function_symbol(function)
+        ));
+    }
+    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
+    output.push_str("    return %sev_exit : i32\n  }\n}\n");
+    Ok(output)
+}
+
+fn render_block(output: &mut String, module: &Module, block: &Block) -> Result<(), MlirError> {
+    for operation in &block.operations {
         match operation {
             Operation::Constant { value, result } => {
                 let ty = value_type(module, *result)?;
@@ -110,6 +157,14 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                     Constant::Integer(value) | Constant::Float(value) => value,
                     Constant::Boolean(true) => "1",
                     Constant::Boolean(false) => "0",
+                    Constant::String(_) => {
+                        output.push_str(&format!(
+                            "    %v{} = llvm.mlir.addressof @{} : !llvm.ptr\n",
+                            result.0,
+                            string_symbol(*result),
+                        ));
+                        continue;
+                    }
                     other => {
                         return Err(MlirError::UnsupportedOperation(format!(
                             "MLIR constant lowering is unavailable for {other:?}"
@@ -146,10 +201,31 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                     result.0, left.0, right.0
                 ));
             }
-            Operation::Call { .. } => {
-                return Err(MlirError::UnsupportedOperation(
-                    "ordinary calls require function-aware MLIR lowering".into(),
-                ));
+            Operation::Call {
+                function: target,
+                arguments,
+                result,
+            } => {
+                let target = function(module, *target)?;
+                let arguments = arguments
+                    .iter()
+                    .map(|value| format!("%v{}", value.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let argument_types = argument_types(module, target)?;
+                let result_type = mlir_type(value_type(module, *result)?)?;
+                if target.result == LoweredType::Unit {
+                    output.push_str(&format!(
+                        "    func.call @{}({arguments}) : ({argument_types}) -> ()\n",
+                        function_symbol(target),
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "    %v{} = func.call @{}({arguments}) : ({argument_types}) -> {result_type}\n",
+                        result.0,
+                        function_symbol(target),
+                    ));
+                }
             }
             Operation::ArtifactCall {
                 artifact,
@@ -197,9 +273,121 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             }
         }
     }
-    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
-    output.push_str("    return %sev_exit : i32\n  }\n}\n");
-    Ok(output)
+    Ok(())
+}
+
+fn argument_types(module: &Module, function: &Function) -> Result<String, MlirError> {
+    function
+        .parameters
+        .iter()
+        .map(|parameter| mlir_type(value_type(module, *parameter)?))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|types| types.join(", "))
+}
+
+fn render_function_declaration(
+    output: &mut String,
+    module: &Module,
+    function: &Function,
+) -> Result<(), MlirError> {
+    let parameters = function
+        .parameters
+        .iter()
+        .map(|parameter| mlir_type(value_type(module, *parameter)?))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let result = function_result(function.result)?;
+    output.push_str(&format!(
+        "  func.func private @{}({parameters}){result}\n",
+        function_symbol(function),
+    ));
+    Ok(())
+}
+
+fn render_function_definition(
+    output: &mut String,
+    module: &Module,
+    function: &Function,
+) -> Result<(), MlirError> {
+    if function.result != LoweredType::Unit {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "function `{}` requires explicit return lowering",
+            function.name
+        )));
+    }
+    let parameters = function
+        .parameters
+        .iter()
+        .map(|parameter| {
+            Ok(format!(
+                "%v{}: {}",
+                parameter.0,
+                mlir_type(value_type(module, *parameter)?)?
+            ))
+        })
+        .collect::<Result<Vec<_>, MlirError>>()?
+        .join(", ");
+    output.push_str(&format!(
+        "  func.func private @{}({parameters}) {{\n",
+        function_symbol(function),
+    ));
+    render_block(
+        output,
+        module,
+        function.body.as_ref().expect("filtered source body"),
+    )?;
+    output.push_str("    return\n  }\n");
+    Ok(())
+}
+
+fn function_result(result: LoweredType) -> Result<String, MlirError> {
+    if result == LoweredType::Unit {
+        Ok(String::new())
+    } else {
+        Ok(format!(" -> {}", mlir_type(result)?))
+    }
+}
+
+fn function(module: &Module, id: FunctionId) -> Result<&Function, MlirError> {
+    module
+        .functions
+        .iter()
+        .find(|function| function.id == id)
+        .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown LIR function {}", id.0)))
+}
+
+fn function_symbol(function: &Function) -> String {
+    match &function.linkage {
+        FunctionLinkage::Internal => format!("__sev_fn_{}", function.id.0),
+        FunctionLinkage::External { symbol } => symbol.clone(),
+    }
+}
+
+fn all_operations(module: &Module) -> impl Iterator<Item = &Operation> {
+    module.initializer.operations.iter().chain(
+        module
+            .functions
+            .iter()
+            .filter_map(|function| function.body.as_ref())
+            .flat_map(|body| &body.operations),
+    )
+}
+
+fn string_symbol(result: ValueId) -> String {
+    format!("__sev_string_{}", result.0)
+}
+
+fn mlir_string(value: &str) -> String {
+    let mut output = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'"' => output.push_str("\\22"),
+            b'\\' => output.push_str("\\5C"),
+            0x20..=0x7e => output.push(char::from(byte)),
+            byte => output.push_str(&format!("\\{byte:02X}")),
+        }
+    }
+    output
 }
 
 pub(crate) fn artifact_symbol(artifact: ArtifactId) -> String {
@@ -231,6 +419,7 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
             format: LoweredFloatFormat::BrainFloat16,
         } => "bf16".into(),
         LoweredType::Boolean => "i1".into(),
+        LoweredType::String => "!llvm.ptr".into(),
         unsupported => return Err(MlirError::UnsupportedType(unsupported)),
     })
 }
@@ -287,9 +476,14 @@ mod tests {
     #[test]
     fn unsupported_aggregate_is_explicit() {
         assert!(matches!(
-            mlir_type(LoweredType::String),
-            Err(MlirError::UnsupportedType(LoweredType::String))
+            mlir_type(LoweredType::Bytes),
+            Err(MlirError::UnsupportedType(LoweredType::Bytes))
         ));
+    }
+
+    #[test]
+    fn strings_use_llvm_globals_without_changing_their_bytes() {
+        assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
     }
 
     #[test]

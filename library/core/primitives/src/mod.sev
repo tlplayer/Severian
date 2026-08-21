@@ -1,4 +1,5 @@
 import "src/bool.sev" as boolean
+import "src/char.sev" as character
 import "src/integers.sev" as integers
 import "src/floats.sev" as floats
 import "src/string.sev" as text

@@ -118,6 +118,7 @@ fn lower_constant(value: &LiteralValue) -> Constant {
         LiteralValue::Integer(value) => Constant::Integer(value.clone()),
         LiteralValue::Float(value) => Constant::Float(value.clone()),
         LiteralValue::Boolean(value) => Constant::Boolean(*value),
+        LiteralValue::Character(value) => Constant::Integer(u32::from(*value).to_string()),
         LiteralValue::String(value) => Constant::String(value.clone()),
         LiteralValue::Bytes(value) => Constant::Bytes(value.clone()),
         LiteralValue::None => Constant::None,
@@ -178,6 +179,10 @@ fn lower_type(
             },
         },
         PrimitiveRepresentation::Boolean => LoweredType::Boolean,
+        PrimitiveRepresentation::Character => LoweredType::Integer {
+            bits: 32,
+            signed: false,
+        },
         PrimitiveRepresentation::String => LoweredType::String,
         PrimitiveRepresentation::Bytes => LoweredType::Bytes,
         PrimitiveRepresentation::None => LoweredType::None,

@@ -454,6 +454,7 @@ fn universal_literal(literal: &AstLiteral) -> LiteralValue {
         AstLiteral::Integer(value) => LiteralValue::Integer(value.clone()),
         AstLiteral::Float(value) => LiteralValue::Float(value.clone()),
         AstLiteral::Boolean(value) => LiteralValue::Boolean(*value),
+        AstLiteral::Character(value) => LiteralValue::Character(*value),
         AstLiteral::String(value) => LiteralValue::String(value.clone()),
         AstLiteral::Bytes(value) => LiteralValue::Bytes(value.clone()),
         AstLiteral::None => LiteralValue::None,
