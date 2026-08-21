@@ -30,6 +30,22 @@ pub enum BackendError {
     Write(std::io::Error),
     Wait(std::io::Error),
     CompilerFailed(String),
+    ToolSpawn {
+        tool: &'static str,
+        source: std::io::Error,
+    },
+    ToolWrite {
+        tool: &'static str,
+        source: std::io::Error,
+    },
+    ToolWait {
+        tool: &'static str,
+        source: std::io::Error,
+    },
+    ToolFailed {
+        tool: &'static str,
+        diagnostic: String,
+    },
 }
 
 impl fmt::Display for BackendError {
@@ -42,6 +58,18 @@ impl fmt::Display for BackendError {
             Self::Write(error) => write!(formatter, "could not write C source: {error}"),
             Self::Wait(error) => write!(formatter, "could not wait for native C compiler: {error}"),
             Self::CompilerFailed(error) => write!(formatter, "native C compiler failed: {error}"),
+            Self::ToolSpawn { tool, source } => {
+                write!(formatter, "could not start {tool}: {source}")
+            }
+            Self::ToolWrite { tool, source } => {
+                write!(formatter, "could not write input to {tool}: {source}")
+            }
+            Self::ToolWait { tool, source } => {
+                write!(formatter, "could not wait for {tool}: {source}")
+            }
+            Self::ToolFailed { tool, diagnostic } => {
+                write!(formatter, "{tool} failed: {diagnostic}")
+            }
         }
     }
 }
@@ -98,6 +126,11 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
                     right.0
                 ));
             }
+            Operation::ArtifactCall { artifact, .. } => {
+                return Err(BackendError::UnsupportedOperation(format!(
+                    "artifact call `{artifact:?}` requires the MLIR composition pipeline"
+                )))
+            }
         }
     }
     if let Some(value) = module.last_binding {
@@ -105,6 +138,10 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     }
     output.push_str("    return 0;\n}\n");
     Ok(output)
+}
+
+pub fn supports_direct_lir(module: &LoweredModule) -> bool {
+    render_c(module).is_ok()
 }
 
 fn value_type(module: &LoweredModule, id: ValueId) -> Result<LoweredType, BackendError> {
@@ -230,6 +267,83 @@ pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact
         path: output.to_owned(),
         kind: ArtifactKind::Executable,
     })
+}
+
+/// Lowers a verified, composed MLIR module through the host MLIR/LLVM
+/// toolchain. This boundary accepts physical IR and never interprets Severian
+/// types or CompileType routes.
+pub fn emit_mlir_executable(
+    module: &str,
+    target_triple: &str,
+    output: &Path,
+) -> Result<Artifact, BackendError> {
+    let lowered = run_tool(
+        "mlir-opt",
+        tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
+        &[
+            "--verify-each",
+            "--convert-scf-to-cf",
+            "--convert-math-to-llvm",
+            "--convert-arith-to-llvm",
+            "--convert-cf-to-llvm",
+            "--convert-func-to-llvm",
+            "--reconcile-unrealized-casts",
+        ],
+        module.as_bytes(),
+    )?;
+    let llvm_ir = run_tool(
+        "mlir-translate",
+        tool("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"),
+        &["--mlir-to-llvmir"],
+        &lowered,
+    )?;
+    let target = format!("--target={target_triple}");
+    let output_path = output.to_string_lossy().into_owned();
+    run_tool(
+        "clang",
+        tool("SEVERIAN_CLANG", "clang-21"),
+        &[&target, "-x", "ir", "-", "-o", &output_path],
+        &llvm_ir,
+    )?;
+    Ok(Artifact {
+        path: output.to_owned(),
+        kind: ArtifactKind::Executable,
+    })
+}
+
+fn tool(variable: &str, default: &'static str) -> String {
+    std::env::var(variable).unwrap_or_else(|_| default.to_owned())
+}
+
+fn run_tool(
+    name: &'static str,
+    program: String,
+    arguments: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>, BackendError> {
+    let mut child = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| BackendError::ToolSpawn { tool: name, source })?;
+    child
+        .stdin
+        .take()
+        .expect("piped stdin is available")
+        .write_all(input)
+        .map_err(|source| BackendError::ToolWrite { tool: name, source })?;
+    let result = child
+        .wait_with_output()
+        .map_err(|source| BackendError::ToolWait { tool: name, source })?;
+    if !result.status.success() {
+        return Err(BackendError::ToolFailed {
+            tool: name,
+            diagnostic: String::from_utf8_lossy(&result.stderr).trim().to_owned(),
+        });
+    }
+    Ok(result.stdout)
 }
 
 #[cfg(test)]

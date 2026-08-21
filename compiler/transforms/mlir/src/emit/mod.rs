@@ -1,14 +1,40 @@
+use severian_artifact::ArtifactId;
 use severian_lir::{
     BinaryOperation, Constant, LoweredFloatFormat, LoweredType, Module, Operation, UnaryOperation,
     ValueId,
 };
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MlirArtifact {
+    /// A complete MLIR module containing exactly one entry function.
+    pub module: String,
+    pub inputs: Vec<LoweredType>,
+    pub outputs: Vec<LoweredType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MlirError {
+    DialectNotAllowed {
+        dialect: String,
+        target: String,
+    },
+    DuplicateSymbol(String),
+    ArtifactSignatureConflict(ArtifactId),
+    EntryFunctionCount(usize),
+    EntryFunctionIsDeclaration,
     InvalidValue(ValueId),
+    MlirApi(String),
+    ParseFailed(String),
+    SignatureMismatch,
+    TargetMismatch {
+        artifact: String,
+        composition: String,
+    },
     UnsupportedType(LoweredType),
     UnsupportedOperation(String),
+    VerificationFailed(String),
 }
 
 impl fmt::Display for MlirError {
@@ -20,7 +46,55 @@ impl fmt::Display for MlirError {
 impl std::error::Error for MlirError {}
 
 pub fn render(module: &Module) -> Result<String, MlirError> {
-    let mut output = String::from("module {\n  func.func @main() {\n");
+    let mut artifact_signatures =
+        BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
+    for operation in &module.operations {
+        if let Operation::ArtifactCall {
+            artifact,
+            inputs,
+            outputs,
+        } = operation
+        {
+            let inputs = inputs
+                .iter()
+                .map(|value| value_type(module, *value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let outputs = outputs
+                .iter()
+                .map(|value| value_type(module, *value))
+                .collect::<Result<Vec<_>, _>>()?;
+            if let Some((known_inputs, known_outputs)) = artifact_signatures.get(artifact) {
+                if known_inputs != &inputs || known_outputs != &outputs {
+                    return Err(MlirError::ArtifactSignatureConflict(*artifact));
+                }
+            } else {
+                artifact_signatures.insert(*artifact, (inputs, outputs));
+            }
+        }
+    }
+
+    let mut output = String::from("module {\n");
+    for (artifact, (inputs, outputs)) in artifact_signatures {
+        let symbol = artifact_symbol(artifact);
+        let inputs = inputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        let outputs = outputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = match outputs.as_slice() {
+            [] => String::new(),
+            [output_type] => format!(" -> {output_type}"),
+            output_types => format!(" -> ({})", output_types.join(", ")),
+        };
+        output.push_str(&format!(
+            "  func.func private @{symbol}({inputs}){result}\n"
+        ));
+    }
+    output.push_str("  func.func @main() -> i32 {\n");
     for operation in &module.operations {
         match operation {
             Operation::Constant { value, result } => {
@@ -66,10 +140,59 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                     result.0, left.0, right.0
                 ));
             }
+            Operation::ArtifactCall {
+                artifact,
+                inputs,
+                outputs,
+            } => {
+                let symbol = artifact_symbol(*artifact);
+                let arguments = inputs
+                    .iter()
+                    .map(|value| format!("%v{}", value.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let input_types = inputs
+                    .iter()
+                    .map(|value| mlir_type(value_type(module, *value)?))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ");
+                match outputs.as_slice() {
+                    [] => output.push_str(&format!(
+                        "    func.call @{symbol}({arguments}) : ({input_types}) -> ()\n"
+                    )),
+                    [result] => {
+                        let ty = mlir_type(value_type(module, *result)?)?;
+                        output.push_str(&format!(
+                            "    %v{} = func.call @{symbol}({arguments}) : ({input_types}) -> {ty}\n",
+                            result.0
+                        ));
+                    }
+                    results => {
+                        let result_names = results
+                            .iter()
+                            .map(|result| format!("%v{}", result.0))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let result_types = results
+                            .iter()
+                            .map(|result| mlir_type(value_type(module, *result)?))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .join(", ");
+                        output.push_str(&format!(
+                            "    {result_names} = func.call @{symbol}({arguments}) : ({input_types}) -> ({result_types})\n"
+                        ));
+                    }
+                }
+            }
         }
     }
-    output.push_str("    return\n  }\n}\n");
+    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
+    output.push_str("    return %sev_exit : i32\n  }\n}\n");
     Ok(output)
+}
+
+pub(crate) fn artifact_symbol(artifact: ArtifactId) -> String {
+    format!("__sev_artifact_{}", artifact.index())
 }
 
 fn value_type(module: &Module, id: ValueId) -> Result<LoweredType, MlirError> {
@@ -81,7 +204,7 @@ fn value_type(module: &Module, id: ValueId) -> Result<LoweredType, MlirError> {
         .ok_or(MlirError::InvalidValue(id))
 }
 
-fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
+pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
     Ok(match ty {
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
         LoweredType::Float {
@@ -131,6 +254,13 @@ fn _unary_is_lir(_: UnaryOperation) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{compose, verify_artifact};
+    use severian_artifact::CompiledRegionId;
+    use severian_target::TargetSpec;
+
+    fn artifact_id() -> ArtifactId {
+        ArtifactId::for_region(CompiledRegionId::new(0))
+    }
 
     #[test]
     fn bfloat_is_not_silently_mapped_to_f32() {
@@ -148,6 +278,115 @@ mod tests {
         assert!(matches!(
             mlir_type(LoweredType::String),
             Err(MlirError::UnsupportedType(LoweredType::String))
+        ));
+    }
+
+    #[test]
+    fn generated_artifacts_are_verified_and_composed() {
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let artifact = MlirArtifact {
+            module: "module {\n  func.func @local_entry() {\n    return\n  }\n}".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        let artifact = verify_artifact(artifact_id(), artifact, &target).unwrap();
+        let composed = compose("module {\n}\n", &[artifact], &target).unwrap();
+        assert!(composed.contains("func.func @__sev_artifact_0"));
+    }
+
+    #[test]
+    fn artifact_calls_and_composition_support_multiple_results() {
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let i32_type = LoweredType::Integer {
+            bits: 32,
+            signed: true,
+        };
+        let f32_type = LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(32),
+        };
+        let ordinary = render(&Module {
+            values: vec![
+                severian_lir::Value {
+                    id: ValueId(0),
+                    ty: i32_type,
+                },
+                severian_lir::Value {
+                    id: ValueId(1),
+                    ty: f32_type,
+                },
+            ],
+            operations: vec![Operation::ArtifactCall {
+                artifact: artifact_id(),
+                inputs: vec![],
+                outputs: vec![ValueId(0), ValueId(1)],
+            }],
+            last_binding: None,
+        })
+        .unwrap();
+        let artifact = verify_artifact(
+            artifact_id(),
+            MlirArtifact {
+                module: "module { func.func @entry() -> (i32, f32) { %0 = arith.constant 1 : i32 %1 = arith.constant 2.0 : f32 return %0, %1 : i32, f32 } }".into(),
+                inputs: vec![],
+                outputs: vec![i32_type, f32_type],
+            },
+            &target,
+        )
+        .unwrap();
+        let composed = compose(&ordinary, &[artifact], &target).unwrap();
+        assert!(composed.contains("call @__sev_artifact_0"));
+        assert!(composed.contains("func.func @__sev_artifact_0"));
+    }
+
+    #[test]
+    fn invalid_or_disallowed_generated_ir_is_rejected() {
+        let target = TargetSpec::new("x86_64-unknown-linux");
+        let invalid = MlirArtifact {
+            module: "module { func.func @bad() {".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        assert!(matches!(
+            verify_artifact(artifact_id(), invalid, &target),
+            Err(MlirError::ParseFailed(_))
+        ));
+
+        let declaration = MlirArtifact {
+            module: "module { func.func private @declaration() }".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        assert!(matches!(
+            verify_artifact(artifact_id(), declaration, &target),
+            Err(MlirError::EntryFunctionIsDeclaration)
+        ));
+
+        let wrong_signature = MlirArtifact {
+            module: "module {\n  func.func @wrong_signature(%arg0: i64) {\n    return\n  }\n}"
+                .into(),
+            inputs: vec![LoweredType::Integer {
+                bits: 32,
+                signed: true,
+            }],
+            outputs: vec![],
+        };
+        assert!(matches!(
+            verify_artifact(artifact_id(), wrong_signature, &target),
+            Err(MlirError::SignatureMismatch)
+        ));
+
+        let disallowed = MlirArtifact {
+            module: "module {\n  func.func @math_entry(%arg0: f32) -> f32 {\n    %0 = math.absf %arg0 : f32\n    return %0 : f32\n  }\n}".into(),
+            inputs: vec![LoweredType::Float {
+                format: LoweredFloatFormat::Ieee(32),
+            }],
+            outputs: vec![LoweredType::Float {
+                format: LoweredFloatFormat::Ieee(32),
+            }],
+        };
+        assert!(matches!(
+            verify_artifact(artifact_id(), disallowed, &target),
+            Err(MlirError::DialectNotAllowed { .. })
         ));
     }
 }

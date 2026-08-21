@@ -9,22 +9,25 @@ source
   -> lexer
   -> parser
   -> AST
-  -> XXI external declaration resolution
-  -> FFI ownership/conversion validation
-  -> ABI layout and call classification
   -> bootstrap/declaration loading
   -> UniversalContext
   -> semantic analysis
   -> HIR
   -> ownership validation
   -> MIR
-  -> target lowering
-  -> LIR
-  -> backend emission
+  -> CompileType planner
+       Standard: MIR -> LIR -> MLIR
+       Compiler: typed MIR region -> verified MLIR
+  -> MLIR composition and target pipeline
+  -> backend/link emission
   -> artifact
 ```
 
 `UniversalContext` is built once by the driver and passed through the pipeline. No later phase reloads or reparses core primitive source.
+
+ABI and FFI are typed services beside this pipeline. Lowering consults them
+only for an external boundary operation; ordinary code never passes through
+XXI, FFI, or ABI phases.
 
 ## Ownership
 
@@ -37,6 +40,10 @@ source
 | Raw source spelling and source spans | AST |
 | Typed expressions and bindings | HIR |
 | Executable operations and control flow | MIR |
+| Stable CompileType routes | `compiler/universal` |
+| MIR region partitioning and handler dispatch | `compiler/compile` |
+| `Compiler` and `CompileType[C]` source protocols | `library/core/compile` |
+| Neutral target, feature, device, and capability selection | `compiler/target` |
 | Target-resolved physical types and operations | LIR |
 | Calling conventions, concrete layouts, pass modes, and symbols | `compiler/boundaries/abi` |
 | Foreign ownership, lifetime, and conversion plans | `compiler/boundaries/ffi` |
@@ -44,18 +51,20 @@ source
 | C, MLIR, LLVM, XLA, or Triton spelling | The corresponding backend/emitter |
 | `.pkg` and `.pkgi` serialization | `compiler/boundaries/interface` |
 | Loading `library/core/primitives` | `compiler/bootstrap` |
+| Loading compiler protocols into stable routes | `compiler/bootstrap` |
 
 ## Dependency direction
 
 ```text
 universal <- bootstrap
 universal <- frontend
-universal <- HIR/MIR/lowering
+universal <- HIR/MIR/compile/lowering
 universal <- interface conversion
 
 AST/HIR/MIR/LIR flow forward only.
 boundaries consume compiler models; they do not define language semantics.
 library source never depends on Rust compiler crates.
+compile -> universal + MIR + MLIR interface + target
 ```
 
 `compiler/universal` must not depend on frontend, HIR, MIR, LIR, lowering, a backend, an interface format, or `library/core/primitives`.
@@ -66,13 +75,18 @@ library source never depends on Rust compiler crates.
 2. Only `compiler/bootstrap` reads `library/core/primitives`.
 3. A compiler phase receives `&UniversalContext`; it does not call a global `load()` function.
 4. Semantic analysis delegates literal and operator resolution to `compiler/universal`.
-5. Lowering accepts typed definitions and the ABI target; it does not reinterpret source strings.
+5. Lowering accepts typed definitions and a neutral `TargetSpec`; it does not reinterpret source strings.
 6. Backends consume LIR and return an unsupported-capability error when they cannot represent an operation. Silent fallback is prohibited.
 7. A semantic enum or ID is defined once. A second copy is allowed only when the new representation has a distinct invariant or loses/gains information.
 8. Backend spelling methods do not live on universal or LIR types.
 9. Interface DTOs are serialization models, not the live compiler type system.
 10. Every architectural move must preserve or add a vertical end-to-end test.
-11. AST records external syntax, XXI maps it to FFI, and FFI delegates concrete layout and call classification to ABI.
+11. CompileType routes are stable declaration identities. Universal, MIR,
+    lowering, and backends contain no specialized type or compiler names.
+12. Custom handlers emit MLIR that is signature-checked, capability-checked,
+    and verified before it rejoins ordinary MLIR.
+13. External declarations remain ordinary decorated declarations. FFI and ABI
+    are consulted only while lowering an external call operation.
 
 ## Change test
 

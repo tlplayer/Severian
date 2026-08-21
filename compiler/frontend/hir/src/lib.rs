@@ -6,7 +6,7 @@ mod expression;
 mod statement;
 
 pub use expression::{Expression, ExpressionKind};
-pub use severian_universal::TypeId;
+pub use severian_universal::{CompileRoute, CompilerId, TypeId};
 pub use statement::Binding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,9 +22,6 @@ pub struct FunctionId(pub u32);
 pub struct DeclaredTypeId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CompilerId(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InterfaceId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,12 +35,6 @@ pub struct SymbolId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProviderId(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompileType {
-    Standard,
-    Compiler(CompilerId),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallType {
@@ -89,7 +80,7 @@ pub struct FunctionDeclaration {
     pub name: String,
     pub parameters: Vec<FunctionParameter>,
     pub result: BoundaryType,
-    pub compile_type: CompileType,
+    pub compile_route: CompileRoute,
     pub call_type: CallType,
 }
 

@@ -7,10 +7,17 @@ mod operator;
 pub mod types;
 
 pub use context::{UniversalContext, UniversalError};
-pub use ids::{DeclarationId, PrimitiveId, TypeId};
+pub use ids::{CompilerId, DeclarationId, PrimitiveId, TypeId};
 pub use literal::{LiteralKind, LiteralValue};
 pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
 pub use types::{
     FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition, PrimitiveRepresentation,
-    ResolvedBinary, ResolvedUnary, TypeContext, TypeDefinition, TypeDefinitionKind, TypeError,
+    ResolvedBinary, ResolvedUnary, TypeContext, TypeContextBuilder, TypeDefinition,
+    TypeDefinitionKind, TypeError,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompileRoute {
+    Standard,
+    Compiler(CompilerId),
+}

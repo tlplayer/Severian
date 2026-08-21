@@ -1,8 +1,10 @@
-use severian_abi::Target;
 use severian_backend::{Artifact, BackendError};
+use severian_compile::{CompileContext, CompileHandler, CompilePlan, CompilerRegistry};
 use severian_diagnostics::Diagnostic;
+use severian_mir::Module as MirModule;
 use severian_source::SourceFile;
-use severian_universal::UniversalContext;
+use severian_target::TargetSpec;
+use severian_universal::{CompilerId, UniversalContext};
 use std::fmt;
 use std::path::Path;
 
@@ -10,9 +12,10 @@ use std::path::Path;
 pub enum CompileError {
     Bootstrap(severian_bootstrap::BootstrapError),
     Diagnostic(Diagnostic),
+    Compile(severian_compile::CompileError),
     Lowering(severian_lowering::LoweringError),
+    Mlir(severian_mlir::MlirError),
     Backend(BackendError),
-    External(severian_xxi::XxiError),
 }
 
 impl fmt::Display for CompileError {
@@ -20,9 +23,10 @@ impl fmt::Display for CompileError {
         match self {
             Self::Bootstrap(error) => write!(formatter, "primitive bootstrap failed: {error}"),
             Self::Diagnostic(diagnostic) => diagnostic.fmt(formatter),
+            Self::Compile(error) => write!(formatter, "CompileType dispatch failed: {error}"),
             Self::Lowering(error) => write!(formatter, "lowering failed: {error}"),
+            Self::Mlir(error) => write!(formatter, "MLIR generation failed: {error}"),
             Self::Backend(error) => error.fmt(formatter),
-            Self::External(error) => write!(formatter, "external interface failed: {error}"),
         }
     }
 }
@@ -31,24 +35,66 @@ impl std::error::Error for CompileError {}
 
 pub struct Compiler {
     context: UniversalContext,
-    abi_target: Target,
+    target: TargetSpec,
+    compile_handlers: CompilerRegistry,
 }
 
 impl Compiler {
-    pub fn new(abi_target: Target) -> Result<Self, CompileError> {
+    pub fn new(target: TargetSpec) -> Result<Self, CompileError> {
         let context = severian_bootstrap::load().map_err(CompileError::Bootstrap)?;
-        Ok(Self {
+        Ok(Self::with_context(context, target))
+    }
+
+    pub fn with_context(context: UniversalContext, target: TargetSpec) -> Self {
+        Self {
             context,
-            abi_target,
-        })
+            target,
+            compile_handlers: CompilerRegistry::new(),
+        }
     }
 
     pub fn context(&self) -> &UniversalContext {
         &self.context
     }
 
-    pub fn abi_target(&self) -> &Target {
-        &self.abi_target
+    pub fn target(&self) -> &TargetSpec {
+        &self.target
+    }
+
+    pub fn register_compile_handler(
+        &mut self,
+        compiler: CompilerId,
+        handler: impl CompileHandler + 'static,
+    ) -> Result<(), CompileError> {
+        self.compile_handlers
+            .register(compiler, handler)
+            .map_err(CompileError::Compile)
+    }
+
+    /// Orchestrates both MIR routes and returns one verified MLIR module.
+    /// Custom handlers never depend on or invoke ordinary lowering directly.
+    pub fn compile_mir_to_mlir(&self, mir: &MirModule) -> Result<String, CompileError> {
+        let plan =
+            severian_compile::plan(mir, &self.context.types).map_err(CompileError::Compile)?;
+        self.compile_plan_to_mlir(&plan)
+    }
+
+    fn compile_plan_to_mlir(&self, plan: &CompilePlan) -> Result<String, CompileError> {
+        let artifacts = self
+            .compile_handlers
+            .compile(
+                plan,
+                &CompileContext {
+                    types: &self.context.types,
+                    target: &self.target,
+                },
+            )
+            .map_err(CompileError::Compile)?;
+        let resumed = plan.resumed_mir();
+        let lir = severian_lowering::lower(&resumed, &self.context.types, &self.target)
+            .map_err(CompileError::Lowering)?;
+        let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
+        severian_mlir::compose(&ordinary, &artifacts, &self.target).map_err(CompileError::Mlir)
     }
 
     pub fn compile_source(
@@ -58,15 +104,24 @@ impl Compiler {
     ) -> Result<Artifact, CompileError> {
         let tokens = severian_lexer::scan(source).map_err(CompileError::Diagnostic)?;
         let ast = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
-        severian_xxi::resolve(&ast, &self.context.types, &self.abi_target)
-            .map_err(CompileError::External)?;
         let hir = severian_semantic::analyze(&ast, &self.context.types)
             .map_err(CompileError::Diagnostic)?;
         severian_ownership::validate(&hir).map_err(CompileError::Diagnostic)?;
         let mir = severian_mir::build(&hir);
-        let lir = severian_lowering::lower(&mir, &self.context.types, &self.abi_target)
-            .map_err(CompileError::Lowering)?;
-        severian_backend::emit_executable(&lir, output).map_err(CompileError::Backend)
+        let plan =
+            severian_compile::plan(&mir, &self.context.types).map_err(CompileError::Compile)?;
+        if !plan.has_custom_regions() {
+            let resumed = plan.resumed_mir();
+            let lir = severian_lowering::lower(&resumed, &self.context.types, &self.target)
+                .map_err(CompileError::Lowering)?;
+            if severian_backend::supports_direct_lir(&lir) {
+                return severian_backend::emit_executable(&lir, output)
+                    .map_err(CompileError::Backend);
+            }
+        }
+        let mlir = self.compile_plan_to_mlir(&plan)?;
+        severian_backend::emit_mlir_executable(&mlir, &self.target.triple, output)
+            .map_err(CompileError::Backend)
     }
 
     pub fn compile_file(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
@@ -82,9 +137,9 @@ impl Compiler {
 }
 
 pub fn compile_source(source: &SourceFile, output: &Path) -> Result<Artifact, CompileError> {
-    Compiler::new(Target::host())?.compile_source(source, output)
+    Compiler::new(TargetSpec::host())?.compile_source(source, output)
 }
 
 pub fn compile_file(source: &Path, output: &Path) -> Result<Artifact, CompileError> {
-    Compiler::new(Target::host())?.compile_file(source, output)
+    Compiler::new(TargetSpec::host())?.compile_file(source, output)
 }

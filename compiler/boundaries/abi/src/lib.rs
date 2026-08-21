@@ -13,6 +13,4 @@ pub use model::{
     AbiFloatFormat, AbiType, CallingConvention, DllStorage, EnumType, Field, FunctionType, Linkage,
     RecordRepresentation, RecordType, ScalarType, Symbol, SymbolKind, SymbolName, Visibility,
 };
-pub use target::{
-    AbiTarget, Endianness, ScalarLayout, TargetDataLayout,
-};
+pub use target::{AbiTarget, Endianness, ScalarLayout, TargetDataLayout};

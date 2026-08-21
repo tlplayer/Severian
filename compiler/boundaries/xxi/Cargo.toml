@@ -19,3 +19,4 @@ severian-bootstrap = { path = "../../bootstrap" }
 severian-lexer = { path = "../../frontend/lexer" }
 severian-parser = { path = "../../frontend/parser" }
 severian-source = { path = "../../source" }
+severian-target = { path = "../../target" }

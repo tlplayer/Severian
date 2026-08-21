@@ -1,6 +1,6 @@
 use crate::{
-    BinaryOperator, DeclarationId, LiteralKind, LiteralValue, OperatorSignature, PrimitiveId,
-    TypeConstraint, TypeId, TypePattern, UnaryOperator,
+    BinaryOperator, CompileRoute, CompilerId, DeclarationId, LiteralKind, LiteralValue,
+    OperatorSignature, PrimitiveId, TypeConstraint, TypeId, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -112,6 +112,10 @@ pub struct PrimitiveDefinition {
 pub enum TypeDefinitionKind {
     Primitive(PrimitiveDefinition),
     Trait,
+    Applied {
+        constructor: TypeId,
+        arguments: Vec<TypeId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +124,7 @@ pub struct TypeDefinition {
     pub declaration: DeclarationId,
     pub path: String,
     pub name: String,
+    pub parameter_count: usize,
     pub kind: TypeDefinitionKind,
 }
 
@@ -146,9 +151,16 @@ pub struct TypeContext {
     defaults: BTreeMap<LiteralKind, TypeId>,
     binary: Vec<OperatorSignature>,
     unary: Vec<(UnaryOperator, TypeId, TypeId)>,
+    compile_routes: BTreeMap<TypeId, CompilerId>,
+    applications: BTreeMap<(TypeId, Vec<TypeId>), TypeId>,
 }
 
-impl TypeContext {
+#[derive(Debug, Clone, Default)]
+pub struct TypeContextBuilder {
+    context: TypeContext,
+}
+
+impl TypeContextBuilder {
     pub fn new() -> Self {
         Self::default()
     }
@@ -157,6 +169,78 @@ impl TypeContext {
         &mut self,
         path: impl Into<String>,
         name: impl Into<String>,
+    ) -> Result<TypeId, TypeError> {
+        self.context.register_declaration(path, name, 0)
+    }
+
+    pub fn register_generic_declaration(
+        &mut self,
+        path: impl Into<String>,
+        name: impl Into<String>,
+        parameter_count: usize,
+    ) -> Result<TypeId, TypeError> {
+        self.context
+            .register_declaration(path, name, parameter_count)
+    }
+
+    pub fn define_primitive(
+        &mut self,
+        type_id: TypeId,
+        category: PrimitiveCategory,
+        representation: PrimitiveRepresentation,
+        default_literal: bool,
+    ) -> Result<PrimitiveId, TypeError> {
+        self.context
+            .define_primitive(type_id, category, representation, default_literal)
+    }
+
+    pub fn add_binary(&mut self, signature: OperatorSignature) {
+        self.context.add_binary(signature);
+    }
+
+    pub fn add_unary(&mut self, operator: UnaryOperator, operand: TypeId, result: TypeId) {
+        self.context.add_unary(operator, operand, result);
+    }
+
+    pub fn set_compile_route(
+        &mut self,
+        type_id: TypeId,
+        compiler: CompilerId,
+    ) -> Result<(), TypeError> {
+        self.context.set_compile_route(type_id, compiler)
+    }
+
+    pub fn instantiate(
+        &mut self,
+        constructor: TypeId,
+        arguments: Vec<TypeId>,
+    ) -> Result<TypeId, TypeError> {
+        self.context.instantiate(constructor, arguments)
+    }
+
+    pub fn resolve_name(&self, name: &str) -> Option<TypeId> {
+        self.context.resolve_name(name)
+    }
+
+    pub fn compiler_id(&self, declaration: TypeId) -> Result<CompilerId, TypeError> {
+        self.context.compiler_id(declaration)
+    }
+
+    pub fn build(self) -> TypeContext {
+        self.context
+    }
+}
+
+impl TypeContext {
+    pub fn builder() -> TypeContextBuilder {
+        TypeContextBuilder::new()
+    }
+
+    fn register_declaration(
+        &mut self,
+        path: impl Into<String>,
+        name: impl Into<String>,
+        parameter_count: usize,
     ) -> Result<TypeId, TypeError> {
         let path = path.into();
         let name = name.into();
@@ -178,6 +262,7 @@ impl TypeContext {
             declaration,
             path,
             name: name.clone(),
+            parameter_count,
             kind: TypeDefinitionKind::Trait,
         });
         self.by_name.insert(name, id);
@@ -185,7 +270,7 @@ impl TypeContext {
         Ok(id)
     }
 
-    pub fn define_primitive(
+    fn define_primitive(
         &mut self,
         type_id: TypeId,
         category: PrimitiveCategory,
@@ -218,13 +303,13 @@ impl TypeContext {
         Ok(id)
     }
 
-    pub fn add_binary(&mut self, signature: OperatorSignature) {
+    fn add_binary(&mut self, signature: OperatorSignature) {
         if !self.binary.contains(&signature) {
             self.binary.push(signature);
         }
     }
 
-    pub fn add_unary(&mut self, operator: UnaryOperator, operand: TypeId, result: TypeId) {
+    fn add_unary(&mut self, operator: UnaryOperator, operand: TypeId, result: TypeId) {
         if !self.unary.contains(&(operator, operand, result)) {
             self.unary.push((operator, operand, result));
         }
@@ -245,12 +330,108 @@ impl TypeContext {
     pub fn primitive(&self, id: TypeId) -> Option<&PrimitiveDefinition> {
         match &self.definition(id)?.kind {
             TypeDefinitionKind::Primitive(primitive) => Some(primitive),
-            TypeDefinitionKind::Trait => None,
+            TypeDefinitionKind::Trait | TypeDefinitionKind::Applied { .. } => None,
         }
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = &TypeDefinition> {
         self.definitions.iter()
+    }
+
+    pub fn compiler_id(&self, declaration: TypeId) -> Result<CompilerId, TypeError> {
+        let declaration = self
+            .definition(declaration)
+            .ok_or(TypeError::UnknownTypeId(declaration))?;
+        Ok(CompilerId::from_declaration(declaration.declaration))
+    }
+
+    fn set_compile_route(
+        &mut self,
+        type_id: TypeId,
+        compiler: CompilerId,
+    ) -> Result<(), TypeError> {
+        self.definition(type_id)
+            .ok_or(TypeError::UnknownTypeId(type_id))?;
+        if !self.by_declaration.contains_key(&compiler.declaration()) {
+            return Err(TypeError::UnknownCompiler(compiler));
+        }
+        if let Some(existing) = self.compile_routes.insert(type_id, compiler) {
+            if existing != compiler {
+                self.compile_routes.insert(type_id, existing);
+                return Err(TypeError::CompileRouteAlreadyDefined(type_id));
+            }
+        }
+        Ok(())
+    }
+
+    fn instantiate(
+        &mut self,
+        constructor: TypeId,
+        arguments: Vec<TypeId>,
+    ) -> Result<TypeId, TypeError> {
+        let definition = self
+            .definition(constructor)
+            .ok_or(TypeError::UnknownTypeId(constructor))?;
+        if definition.parameter_count != arguments.len() {
+            return Err(TypeError::GenericArity {
+                constructor,
+                expected: definition.parameter_count,
+                actual: arguments.len(),
+            });
+        }
+        for argument in &arguments {
+            self.definition(*argument)
+                .ok_or(TypeError::UnknownTypeId(*argument))?;
+        }
+        if let Some(existing) = self.applications.get(&(constructor, arguments.clone())) {
+            return Ok(*existing);
+        }
+        let argument_paths = arguments
+            .iter()
+            .map(|argument| {
+                self.definition(*argument)
+                    .expect("arguments were validated")
+                    .path
+                    .as_str()
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let path = format!("{}[{argument_paths}]", definition.path);
+        let name = format!("{}[{argument_paths}]", definition.name);
+        let declaration = DeclarationId::from_path(&path);
+        if let Some(existing) = self.by_declaration.get(&declaration) {
+            return Ok(*existing);
+        }
+        let id = TypeId(self.definitions.len() as u32);
+        self.definitions.push(TypeDefinition {
+            id,
+            declaration,
+            path,
+            name,
+            parameter_count: 0,
+            kind: TypeDefinitionKind::Applied {
+                constructor,
+                arguments: arguments.clone(),
+            },
+        });
+        self.by_declaration.insert(declaration, id);
+        self.applications.insert((constructor, arguments), id);
+        Ok(id)
+    }
+
+    pub fn compile_route(&self, type_id: TypeId) -> Result<CompileRoute, TypeError> {
+        let definition = self
+            .definition(type_id)
+            .ok_or(TypeError::UnknownTypeId(type_id))?;
+        let route_owner = match &definition.kind {
+            TypeDefinitionKind::Applied { constructor, .. } => *constructor,
+            _ => type_id,
+        };
+        Ok(self
+            .compile_routes
+            .get(&route_owner)
+            .copied()
+            .map_or(CompileRoute::Standard, CompileRoute::Compiler))
     }
 
     pub fn operator_signatures(&self) -> impl Iterator<Item = &OperatorSignature> {
@@ -505,6 +686,13 @@ fn integer_literal_fits(spelling: &str, bits: IntegerWidth, signed: bool) -> boo
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeError {
+    CompileRouteAlreadyDefined(TypeId),
+    UnknownCompiler(CompilerId),
+    GenericArity {
+        constructor: TypeId,
+        expected: usize,
+        actual: usize,
+    },
     DuplicateName(String),
     IdentityCollision(String, String),
     UnknownTypeId(TypeId),
@@ -534,7 +722,7 @@ mod tests {
     use super::*;
 
     fn numeric_context() -> (TypeContext, TypeId, TypeId) {
-        let mut types = TypeContext::new();
+        let mut types = TypeContextBuilder::new();
         let int = types.register_declaration("core.int", "int").unwrap();
         types
             .define_primitive(
@@ -567,7 +755,7 @@ mod tests {
                 result: TypePattern::Exact(ty),
             });
         }
-        (types, int, i32)
+        (types.build(), int, i32)
     }
 
     #[test]
@@ -600,6 +788,32 @@ mod tests {
         assert_eq!(
             representation,
             PrimitiveRepresentation::PointerInteger { signed: false }
+        );
+    }
+
+    #[test]
+    fn generic_instances_inherit_their_constructor_compile_route() {
+        let mut types = TypeContextBuilder::new();
+        let compiler = types
+            .register_declaration("test.compiler", "TestCompiler")
+            .unwrap();
+        let compiler = types.compiler_id(compiler).unwrap();
+        let family = types
+            .register_generic_declaration("test.ir", "TestIR", 1)
+            .unwrap();
+        let f32 = types.register_declaration("core.f32", "f32").unwrap();
+        let bf16 = types.register_declaration("core.bf16", "bf16").unwrap();
+        types.set_compile_route(family, compiler).unwrap();
+        let f32_instance = types.instantiate(family, vec![f32]).unwrap();
+        let bf16_instance = types.instantiate(family, vec![bf16]).unwrap();
+        let types = types.build();
+        assert_eq!(
+            types.compile_route(f32_instance).unwrap(),
+            CompileRoute::Compiler(compiler)
+        );
+        assert_eq!(
+            types.compile_route(bf16_instance).unwrap(),
+            CompileRoute::Compiler(compiler)
         );
     }
 }

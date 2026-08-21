@@ -1,12 +1,9 @@
 [package]
-name = "severian-lir"
+name = "severian-artifact"
 version.workspace = true
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
-
-[dependencies]
-severian-artifact = { path = "../../artifact" }
 
 [lib]
 path = "src/lib.rs"

@@ -10,6 +10,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-artifact"
+version = "0.1.0"
+
+[[package]]
 name = "severian-ast"
 version = "0.1.0"
 dependencies = [
@@ -28,6 +32,7 @@ name = "severian-bootstrap"
 version = "0.1.0"
 dependencies = [
  "severian-ast",
+ "severian-compile-protocol",
  "severian-diagnostics",
  "severian-lexer",
  "severian-parser",
@@ -35,6 +40,21 @@ dependencies = [
  "severian-source",
  "severian-universal",
 ]
+
+[[package]]
+name = "severian-compile"
+version = "0.1.0"
+dependencies = [
+ "severian-artifact",
+ "severian-mir",
+ "severian-mlir",
+ "severian-target",
+ "severian-universal",
+]
+
+[[package]]
+name = "severian-compile-protocol"
+version = "0.1.0"
 
 [[package]]
 name = "severian-diagnostics"
@@ -47,19 +67,20 @@ dependencies = [
 name = "severian-driver"
 version = "0.1.0"
 dependencies = [
- "severian-abi",
  "severian-backend",
  "severian-bootstrap",
+ "severian-compile",
  "severian-diagnostics",
  "severian-lexer",
  "severian-lowering",
  "severian-mir",
+ "severian-mlir",
  "severian-ownership",
  "severian-parser",
  "severian-semantic",
  "severian-source",
+ "severian-target",
  "severian-universal",
- "severian-xxi",
 ]
 
 [[package]]
@@ -97,11 +118,15 @@ dependencies = [
 [[package]]
 name = "severian-lir"
 version = "0.1.0"
+dependencies = [
+ "severian-artifact",
+]
 
 [[package]]
 name = "severian-lowering"
 version = "0.1.0"
 dependencies = [
+ "severian-artifact",
  "severian-lir",
  "severian-mir",
  "severian-target",
@@ -112,6 +137,7 @@ dependencies = [
 name = "severian-mir"
 version = "0.1.0"
 dependencies = [
+ "severian-artifact",
  "severian-hir",
  "severian-universal",
 ]
@@ -120,7 +146,9 @@ dependencies = [
 name = "severian-mlir"
 version = "0.1.0"
 dependencies = [
+ "severian-artifact",
  "severian-lir",
+ "severian-target",
 ]
 
 [[package]]
@@ -182,5 +210,6 @@ dependencies = [
  "severian-lexer",
  "severian-parser",
  "severian-source",
+ "severian-target",
  "severian-universal",
 ]

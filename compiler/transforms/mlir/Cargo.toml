@@ -6,7 +6,9 @@ license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
+severian-artifact = { path = "../../artifact" }
 severian-lir = { path = "../lir" }
+severian-target = { path = "../../target" }
 
 [lib]
 path = "src/lib.rs"

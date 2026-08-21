@@ -1,0 +1,8 @@
+# CompileType is an ordinary core protocol. Universal only receives its
+# resolved stable declaration identities during bootstrap.
+trait Compiler:
+    pass
+
+
+trait CompileType[C]:
+    pass

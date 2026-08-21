@@ -60,7 +60,10 @@ pub fn analyze(ast: &severian_ast::Module, types: &TypeContext) -> Result<Progra
         });
     }
     Ok(Program {
-        modules: vec![Module { bindings }],
+        modules: vec![Module {
+            bindings,
+            ..Module::default()
+        }],
     })
 }
 

@@ -1,0 +1,16 @@
+[package]
+name = "severian-compile"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+severian-artifact = { path = "../artifact" }
+severian-mir = { path = "../transforms/mir" }
+severian-mlir = { path = "../transforms/mlir" }
+severian-target = { path = "../target" }
+severian-universal = { path = "../universal" }
+
+[lib]
+path = "src/lib.rs"

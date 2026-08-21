@@ -55,6 +55,15 @@ pub fn lower(
                 right: ValueId(right.0),
                 result: ValueId(result.0),
             },
+            MirOperation::CompiledRegionCall {
+                artifact,
+                inputs,
+                outputs,
+            } => LirOperation::ArtifactCall {
+                artifact: *artifact,
+                inputs: inputs.iter().map(|value| ValueId(value.0)).collect(),
+                outputs: outputs.iter().map(|value| ValueId(value.0)).collect(),
+            },
         })
         .collect();
     Ok(LirModule {
@@ -125,9 +134,7 @@ fn lower_type(
             format: match format {
                 FloatFormat::Ieee(bits) => LoweredFloatFormat::Ieee(bits),
                 FloatFormat::BrainFloat16 => LoweredFloatFormat::BrainFloat16,
-                FloatFormat::Machine => {
-                    LoweredFloatFormat::Ieee(target.machine_float_bits())
-                }
+                FloatFormat::Machine => LoweredFloatFormat::Ieee(target.machine_float_bits()),
             },
         },
         PrimitiveRepresentation::Boolean => LoweredType::Boolean,
@@ -155,10 +162,10 @@ impl std::error::Error for LoweringError {}
 mod tests {
     use super::*;
     use severian_mir::{Module, Value as MirValue, ValueId as MirValueId};
-    use severian_universal::{PrimitiveCategory, UniversalContext};
+    use severian_universal::{PrimitiveCategory, TypeContextBuilder, UniversalContext};
 
     fn pointer_context() -> (UniversalContext, TypeId) {
-        let mut types = TypeContext::new();
+        let mut types = TypeContextBuilder::new();
         let id = types.register_declaration("core.usize", "usize").unwrap();
         types
             .define_primitive(
@@ -168,7 +175,7 @@ mod tests {
                 false,
             )
             .unwrap();
-        (UniversalContext::new(types), id)
+        (UniversalContext::new(types.build()), id)
     }
 
     #[test]

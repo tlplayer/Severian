@@ -3,9 +3,14 @@ members = [
     # Universal semantic authority
     "compiler/universal",
     "compiler/target",
+    "compiler/artifact",
+
+    # CompileType dispatch and custom compiler integration
+    "compiler/compile",
 
     # Language bootstrap
     "compiler/bootstrap",
+    "library/core/compile",
     "library/core/primitives",
 
     # Boundaries
@@ -52,6 +57,9 @@ severian-ast = "syntax"
 severian-parser = "syntax"
 severian-universal = "universal"
 severian-target = "target"
+severian-compile = "compile"
+severian-artifact = "artifact"
+severian-compile-protocol = "core_source"
 severian-primitives = "primitive_source"
 severian-hir = "semantic"
 severian-semantic = "semantic"
@@ -81,6 +89,15 @@ severian-parser = [
 ]
 severian-universal = []
 severian-target = []
+severian-compile = [
+    "severian-artifact",
+    "severian-mir",
+    "severian-mlir",
+    "severian-target",
+    "severian-universal",
+]
+severian-artifact = []
+severian-compile-protocol = []
 severian-primitives = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
@@ -96,13 +113,15 @@ severian-bootstrap = [
     "severian-diagnostics",
     "severian-lexer",
     "severian-parser",
+    "severian-compile-protocol",
     "severian-primitives",
     "severian-source",
     "severian-universal",
 ]
-severian-mir = ["severian-hir", "severian-universal"]
-severian-lir = []
+severian-mir = ["severian-artifact", "severian-hir", "severian-universal"]
+severian-lir = ["severian-artifact"]
 severian-lowering = [
+    "severian-artifact",
     "severian-lir",
     "severian-mir",
     "severian-target",
@@ -118,22 +137,22 @@ severian-xxi = [
     "severian-ffi",
     "severian-universal",
 ]
-severian-mlir = ["severian-lir"]
+severian-mlir = ["severian-artifact", "severian-lir", "severian-target"]
 severian-driver = [
-    "severian-abi",
     "severian-backend",
     "severian-bootstrap",
+    "severian-compile",
     "severian-diagnostics",
     "severian-lexer",
     "severian-lowering",
     "severian-mir",
+    "severian-mlir",
     "severian-ownership",
     "severian-parser",
     "severian-semantic",
     "severian-source",
     "severian-target",
     "severian-universal",
-    "severian-xxi",
 ]
 
 [[workspace.metadata.architecture.reject]]
@@ -163,3 +182,15 @@ to = "severian-ast"
 [[workspace.metadata.architecture.reject]]
 from = "severian-target"
 to = "severian-abi"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-compile"
+to = "severian-lowering"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-compile"
+to = "severian-abi"
+
+[[workspace.metadata.architecture.reject]]
+from = "severian-compile"
+to = "severian-ffi"

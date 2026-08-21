@@ -6,19 +6,20 @@ license-file.workspace = true
 repository.workspace = true
 
 [dependencies]
-severian-abi = { path = "../abi" }
 severian-backend = { path = "../backend" }
 severian-bootstrap = { path = "../../bootstrap" }
+severian-compile = { path = "../../compile" }
 severian-diagnostics = { path = "../../diagnostics" }
 severian-lexer = { path = "../../frontend/lexer" }
 severian-lowering = { path = "../../transforms/lowering" }
 severian-mir = { path = "../../transforms/mir" }
+severian-mlir = { path = "../../transforms/mlir" }
 severian-ownership = { path = "../../frontend/ownership" }
 severian-parser = { path = "../../frontend/parser" }
 severian-semantic = { path = "../../frontend/semantic" }
 severian-source = { path = "../../source" }
+severian-target = { path = "../../target" }
 severian-universal = { path = "../../universal" }
-severian-xxi = { path = "../xxi" }
 
 [lib]
 path = "src/lib.rs"

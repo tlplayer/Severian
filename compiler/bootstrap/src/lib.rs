@@ -6,30 +6,56 @@ use severian_ast::{
 };
 use severian_source::{SourceFile, SourceId};
 use severian_universal::{
-    BinaryOperator, OperatorSignature, PrimitiveCategory, PrimitiveRepresentation, TypeContext,
-    TypeId, TypePattern, UnaryOperator, UniversalContext,
+    BinaryOperator, OperatorSignature, PrimitiveCategory, PrimitiveRepresentation,
+    TypeContextBuilder, TypeId, TypePattern, UnaryOperator, UniversalContext,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-const PACKAGE_PATH: &str = "core.primitives";
+#[cfg(test)]
+const PRIMITIVE_PACKAGE_PATH: &str = "core.primitives";
 
 pub fn load() -> Result<UniversalContext, BootstrapError> {
-    build_from_sources(
-        severian_primitives::SOURCES
+    build_from_packages(
+        severian_compile_protocol::SOURCES
             .iter()
-            .map(|source| (source.path, source.source)),
+            .map(|source| {
+                (
+                    severian_compile_protocol::PACKAGE_NAME,
+                    source.path,
+                    source.source,
+                )
+            })
+            .chain(severian_primitives::SOURCES.iter().map(|source| {
+                (
+                    severian_primitives::PACKAGE_NAME,
+                    source.path,
+                    source.source,
+                )
+            })),
     )
 }
 
+#[cfg(test)]
 fn build_from_sources<'a>(
     sources: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Result<UniversalContext, BootstrapError> {
+    build_from_packages(
+        sources
+            .into_iter()
+            .map(|(path, source)| (PRIMITIVE_PACKAGE_PATH, path, source)),
+    )
+}
+
+fn build_from_packages<'a>(
+    sources: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>,
+) -> Result<UniversalContext, BootstrapError> {
     let mut declarations = BTreeMap::<String, TraitDeclaration>::new();
-    for (index, (path, text)) in sources.into_iter().enumerate() {
+    let mut declaration_packages = BTreeMap::<String, String>::new();
+    for (index, (package, path, text)) in sources.into_iter().enumerate() {
         let source = SourceFile {
             id: SourceId(index as u32),
-            path: path.into(),
+            path: format!("{package}/{path}").into(),
             text: text.to_owned(),
         };
         let tokens = severian_lexer::scan(&source).map_err(BootstrapError::Parse)?;
@@ -42,15 +68,23 @@ fn build_from_sources<'a>(
             if declarations.insert(name.clone(), declaration).is_some() {
                 return Err(BootstrapError::DuplicateDeclaration(name));
             }
+            declaration_packages.insert(name, package.to_owned());
         }
     }
 
     // Pass 1: every source declaration receives its stable path identity before
     // bases, metadata, or signatures are interpreted.
-    let mut types = TypeContext::new();
+    let mut types = TypeContextBuilder::new();
     for name in declarations.keys() {
+        let package = declaration_packages
+            .get(name)
+            .expect("every declaration records its source package");
         types
-            .register_declaration(format!("{PACKAGE_PATH}.{name}"), name)
+            .register_generic_declaration(
+                format!("{package}.{name}"),
+                name,
+                declarations[name].type_parameters.len(),
+            )
             .map_err(|error| BootstrapError::Type(error.to_string()))?;
     }
 
@@ -107,7 +141,76 @@ fn build_from_sources<'a>(
         }
     }
 
-    Ok(UniversalContext::new(types))
+    // Pass 2c: interpret the ordinary core CompileType protocol. Universal
+    // receives only stable declaration identities; it knows no source names.
+    if declarations.contains_key("CompileType") {
+        if !declarations.contains_key("Compiler") {
+            return Err(BootstrapError::MissingDeclaration("Compiler".into()));
+        }
+        for declaration in declarations.values() {
+            for base in &declaration.bases {
+                let Some((name, arguments)) = base.named_parts() else {
+                    continue;
+                };
+                if name != "CompileType" {
+                    continue;
+                }
+                let [compiler] = arguments else {
+                    return Err(BootstrapError::GenericArity("CompileType".into()));
+                };
+                let compiler_name = compiler
+                    .simple_name()
+                    .ok_or_else(|| BootstrapError::UnsupportedTypeAnnotation(compiler.clone()))?;
+                let compiler_declaration = declarations
+                    .get(compiler_name)
+                    .ok_or_else(|| BootstrapError::MissingDeclaration(compiler_name.into()))?;
+                if !inherits_protocol(
+                    compiler_declaration,
+                    "Compiler",
+                    &declarations,
+                    &mut BTreeSet::new(),
+                ) {
+                    return Err(BootstrapError::InvalidCompiler(compiler_name.into()));
+                }
+                let type_id = types
+                    .resolve_name(&declaration.name)
+                    .ok_or_else(|| BootstrapError::MissingDeclaration(declaration.name.clone()))?;
+                let compiler_type = types
+                    .resolve_name(compiler_name)
+                    .ok_or_else(|| BootstrapError::MissingDeclaration(compiler_name.into()))?;
+                let compiler_id = types
+                    .compiler_id(compiler_type)
+                    .map_err(|error| BootstrapError::Type(error.to_string()))?;
+                types
+                    .set_compile_route(type_id, compiler_id)
+                    .map_err(|error| BootstrapError::Type(error.to_string()))?;
+            }
+        }
+    }
+
+    Ok(UniversalContext::new(types.build()))
+}
+
+fn inherits_protocol(
+    declaration: &TraitDeclaration,
+    protocol: &str,
+    declarations: &BTreeMap<String, TraitDeclaration>,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if !visiting.insert(declaration.name.clone()) {
+        return false;
+    }
+    let found = declaration.bases.iter().any(|base| {
+        let Some((name, _)) = base.named_parts() else {
+            return false;
+        };
+        name == protocol
+            || declarations
+                .get(name)
+                .is_some_and(|base| inherits_protocol(base, protocol, declarations, visiting))
+    });
+    visiting.remove(&declaration.name);
+    found
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +303,7 @@ fn substitute_type(
 }
 
 fn add_operator(
-    types: &mut TypeContext,
+    types: &mut TypeContextBuilder,
     owner: TypeId,
     operator: ResolvedOperator,
 ) -> Result<(), BootstrapError> {
@@ -228,7 +331,7 @@ fn add_operator(
 }
 
 fn resolve_source_type(
-    types: &TypeContext,
+    types: &TypeContextBuilder,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, BootstrapError> {
     let name = annotation
@@ -355,6 +458,7 @@ pub enum BootstrapError {
         declaration: String,
         property: String,
     },
+    InvalidCompiler(String),
     GenericArity(String),
     OperatorArity(OperatorSyntax),
     UnknownOperator(OperatorSyntax),
@@ -373,7 +477,7 @@ impl std::error::Error for BootstrapError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_universal::{IntegerWidth, LiteralKind, TypeConstraint};
+    use severian_universal::{CompileRoute, IntegerWidth, LiteralKind, TypeConstraint};
 
     #[test]
     fn loads_sources_through_the_real_parser() {
@@ -468,6 +572,42 @@ mod tests {
                 .unwrap()
                 .result,
             f128
+        );
+    }
+
+    #[test]
+    fn core_compile_protocol_resolves_to_stable_universal_routes() {
+        const SPECIAL: &str = "trait TestCompiler: Compiler:\n    pass\n\ntrait TestIR[T]: CompileType[TestCompiler]:\n    pass\n";
+        let context = build_from_packages(
+            severian_compile_protocol::SOURCES
+                .iter()
+                .map(|source| {
+                    (
+                        severian_compile_protocol::PACKAGE_NAME,
+                        source.path,
+                        source.source,
+                    )
+                })
+                .chain(severian_primitives::SOURCES.iter().map(|source| {
+                    (
+                        severian_primitives::PACKAGE_NAME,
+                        source.path,
+                        source.source,
+                    )
+                }))
+                .chain(std::iter::once(("test.compile", "src/mod.sev", SPECIAL))),
+        )
+        .unwrap();
+        let compiler_type = context.types.resolve_name("TestCompiler").unwrap();
+        let compiler = context.types.compiler_id(compiler_type).unwrap();
+        let special = context.types.resolve_name("TestIR").unwrap();
+        assert_eq!(
+            context.types.compile_route(special).unwrap(),
+            CompileRoute::Compiler(compiler)
+        );
+        assert_eq!(
+            context.types.definition(compiler_type).unwrap().declaration,
+            severian_universal::DeclarationId::from_path("test.compile.TestCompiler")
         );
     }
 }

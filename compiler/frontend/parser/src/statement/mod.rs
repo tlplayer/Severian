@@ -1,9 +1,8 @@
 use severian_ast::{
     BinaryOperator, Binding, Decorator, DecoratorArgument, DecoratorValue, Expression,
-    ExpressionKind, FunctionDeclaration, FunctionParameter, ImportDeclaration, ImportSubject,
-    Item, Literal, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax,
-    PropertyDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
-    UnaryOperator,
+    ExpressionKind, FunctionDeclaration, FunctionParameter, ImportDeclaration, ImportSubject, Item,
+    Literal, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{Token, TokenKind};
@@ -275,8 +274,10 @@ impl Parser<'_> {
                 properties.push(self.property()?);
             } else if self.at_identifier("operator") {
                 operators.push(self.operator()?);
+            } else if self.at_identifier("pass") {
+                self.next();
             } else {
-                return Err(self.error("expected `property` or `operator` in trait body"));
+                return Err(self.error("expected `property`, `operator`, or `pass` in trait body"));
             }
             if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
                 return Err(self.error("expected a newline after trait member"));

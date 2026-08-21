@@ -112,24 +112,21 @@ mod tests {
     }
 
     #[test]
-    fn parses_xxi_external_declarations_with_attributes() {
+    fn parses_decorated_boundary_declarations_as_normal_declarations() {
         let source = SourceFile::virtual_source(
             "ffi.sev",
             "@c(symbol = \"strlen\")\ndef length(value: borrowed[string]) -> usize\n@rust\ntype RustBuffer[T]\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
-        let severian_ast::Item::ExternalFunction(function) = &module.items[0] else {
+        let severian_ast::Item::Function(function) = &module.items[0] else {
             unreachable!()
         };
-        assert_eq!(function.attributes[0].name, "c");
+        assert_eq!(function.decorators[0].name, "c");
         assert_eq!(
             function.parameters[0].annotation.named_parts().unwrap().0,
             "borrowed"
         );
-        assert!(matches!(
-            module.items[1],
-            severian_ast::Item::ExternalType(_)
-        ));
+        assert!(matches!(module.items[1], severian_ast::Item::Type(_)));
     }
 
     #[test]

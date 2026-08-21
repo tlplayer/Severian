@@ -172,7 +172,7 @@ fn lower_semantic(
     })
 }
 
-fn view_type(name: &str, target: &Target) -> AbiType {
+fn view_type(name: &str, target: &AbiTarget) -> AbiType {
     AbiType::Record(RecordType {
         name: Some(name.into()),
         fields: vec![
@@ -198,14 +198,16 @@ mod tests {
     use crate::{AbiSelection, ForeignParameter, Lifetime, Ownership};
     use severian_abi::CallingConvention;
     use severian_target::TargetSpec;
-    use severian_universal::{PrimitiveCategory, PrimitiveRepresentation, TypeContext};
+    use severian_universal::{
+        PrimitiveCategory, PrimitiveRepresentation, TypeContext, TypeContextBuilder,
+    };
 
     fn primitive_types() -> (
         TypeContext,
         severian_universal::TypeId,
         severian_universal::TypeId,
     ) {
-        let mut types = TypeContext::new();
+        let mut types = TypeContextBuilder::new();
         let i32_id = types.register_declaration("core.i32", "i32").unwrap();
         types
             .define_primitive(
@@ -227,7 +229,7 @@ mod tests {
                 false,
             )
             .unwrap();
-        (types, i32_id, string_id)
+        (types.build(), i32_id, string_id)
     }
 
     fn contract(ty: ForeignTypeRef, ownership: Ownership) -> ValueContract {
@@ -261,13 +263,7 @@ mod tests {
             abi: AbiSelection::C,
             variadic: false,
         };
-        let plan = lower_function(
-            &function,
-            &ForeignModule::default(),
-            &types,
-            &target(),
-        )
-        .unwrap();
+        let plan = lower_function(&function, &ForeignModule::default(), &types, &target()).unwrap();
         assert_eq!(plan.signature.convention, CallingConvention::C);
         assert_eq!(
             severian_abi::classify_signature(&plan.signature, &target())
@@ -294,20 +290,14 @@ mod tests {
             variadic: false,
         };
         assert_eq!(
-            lower_function(
-                &function,
-                &ForeignModule::default(),
-                &types,
-                &target()
-            )
-            .unwrap_err(),
+            lower_function(&function, &ForeignModule::default(), &types, &target()).unwrap_err(),
             FfiError::ReturnCannotBorrowCall
         );
     }
 
     #[test]
     fn preserves_bfloat_as_a_distinct_abi_format() {
-        let mut types = TypeContext::new();
+        let mut types = TypeContextBuilder::new();
         let id = types.register_declaration("core.bf16", "bf16").unwrap();
         types
             .define_primitive(
@@ -319,10 +309,9 @@ mod tests {
                 false,
             )
             .unwrap();
+        let types = types.build();
         assert_eq!(
-            lower_semantic(id, &types, &target(), false)
-                .unwrap()
-                .0,
+            lower_semantic(id, &types, &target(), false).unwrap().0,
             AbiType::bfloat16()
         );
     }

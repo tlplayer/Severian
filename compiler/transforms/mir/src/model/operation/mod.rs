@@ -1,4 +1,5 @@
 use crate::ValueId;
+use severian_artifact::ArtifactId;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,5 +18,12 @@ pub enum Operation {
         left: ValueId,
         right: ValueId,
         result: ValueId,
+    },
+    /// Planner-produced bridge back into the standard pipeline. Source MIR
+    /// never creates this operation directly.
+    CompiledRegionCall {
+        artifact: ArtifactId,
+        inputs: Vec<ValueId>,
+        outputs: Vec<ValueId>,
     },
 }

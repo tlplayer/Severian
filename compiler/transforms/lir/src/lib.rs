@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use severian_artifact::ArtifactId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoweredFloatFormat {
     Ieee(u16),
@@ -78,6 +80,11 @@ pub enum Operation {
         left: ValueId,
         right: ValueId,
         result: ValueId,
+    },
+    ArtifactCall {
+        artifact: ArtifactId,
+        inputs: Vec<ValueId>,
+        outputs: Vec<ValueId>,
     },
 }
 

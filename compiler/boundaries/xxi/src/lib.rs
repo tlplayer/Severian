@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-use severian_abi::{AbiType, CallingConvention, ScalarType, Symbol, Target};
+use severian_abi::{AbiTarget, AbiType, CallingConvention, ScalarType, Symbol};
 use severian_ast::{
-    Attribute, AttributeValue, ExternalFunctionDeclaration, ExternalTypeDeclaration, Item, Module,
-    TypeAnnotation, TypeAnnotationKind,
+    Decorator as Attribute, DecoratorValue as AttributeValue,
+    FunctionDeclaration as ExternalFunctionDeclaration, ImportSubject, Item, Module,
+    TypeAnnotation, TypeAnnotationKind, TypeDeclaration as ExternalTypeDeclaration,
 };
 use severian_ffi::{
     lower_function, AbiSelection, BoundaryPlan, ForeignFunction, ForeignModule, ForeignParameter,
@@ -39,20 +40,25 @@ pub struct ResolvedExternalModule {
 pub fn resolve(
     module: &Module,
     types: &TypeContext,
-    target: &Target,
+    target: &AbiTarget,
 ) -> Result<ResolvedExternalModule, XxiError> {
     let mut imports = Vec::new();
     for import in module.items.iter().filter_map(|item| match item {
         Item::Import(import) => Some(import),
         _ => None,
     }) {
-        if let Some(import) = external_import(&import.path, &import.alias) {
+        let (ImportSubject::Locator(path), None, Some(alias)) =
+            (&import.subject, &import.source, &import.alias)
+        else {
+            continue;
+        };
+        if let Some(import) = external_import(path, alias) {
             imports.push(import?);
         }
     }
     let mut foreign = ForeignModule::default();
     for declaration in module.items.iter().filter_map(|item| match item {
-        Item::ExternalType(declaration) => Some(declaration),
+        Item::Type(declaration) if !declaration.decorators.is_empty() => Some(declaration),
         _ => None,
     }) {
         if foreign
@@ -65,7 +71,7 @@ pub fn resolve(
         foreign.types.push(resolve_external_type(declaration)?);
     }
     for declaration in module.items.iter().filter_map(|item| match item {
-        Item::ExternalFunction(declaration) => Some(declaration),
+        Item::Function(declaration) if !declaration.decorators.is_empty() => Some(declaration),
         _ => None,
     }) {
         if foreign
@@ -109,7 +115,7 @@ fn resolve_external_type(
     if !declaration.type_parameters.is_empty() {
         return Err(XxiError::GenericExternalType(declaration.name.clone()));
     }
-    let (_, language_attribute) = language_attribute(&declaration.attributes)?;
+    let (_, language_attribute) = language_attribute(&declaration.decorators)?;
     let representation = match named_argument(language_attribute, "repr") {
         None | Some("opaque") => AbiType::Opaque {
             name: declaration.name.clone(),
@@ -136,7 +142,7 @@ fn resolve_function(
     imports: &[ExternalImport],
     types: &TypeContext,
 ) -> Result<ForeignFunction, XxiError> {
-    let (language, attribute) = language_attribute(&declaration.attributes)?;
+    let (language, attribute) = language_attribute(&declaration.decorators)?;
     let symbol = named_argument(attribute, "symbol").unwrap_or(&declaration.name);
     let abi = named_argument(attribute, "abi")
         .map(parse_abi)
@@ -381,6 +387,11 @@ mod tests {
     use severian_lexer::scan;
     use severian_parser::parse;
     use severian_source::SourceFile;
+    use severian_target::TargetSpec;
+
+    fn target() -> AbiTarget {
+        AbiTarget::derive(&TargetSpec::host())
+    }
 
     #[test]
     fn maps_c_source_declarations_through_ffi_to_abi() {
@@ -390,8 +401,8 @@ mod tests {
             "import \"c:libc\" as libc\n@c(repr = \"opaque\")\ntype FILE\n@c(symbol = \"sev_write\")\ndef write(value: borrowed[string], output: out[FILE]) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
-        assert!(matches!(module.items[1], Item::ExternalType(_)));
-        let resolved = resolve(&module, &context.types, &Target::host()).unwrap();
+        assert!(matches!(module.items[1], Item::Type(_)));
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert_eq!(resolved.imports[0].provider, "libc");
         assert_eq!(resolved.plans[0].provider.as_deref(), Some("libc"));
         assert_eq!(resolved.plans[0].symbol.name.as_str(), "sev_write");
@@ -407,7 +418,7 @@ mod tests {
         let source =
             SourceFile::virtual_source("ffi.sev", "@rust\ndef identity(value: i32) -> i32\n");
         let module = parse(&scan(&source).unwrap()).unwrap();
-        let resolved = resolve(&module, &context.types, &Target::host()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert_eq!(
             resolved.plans[0].signature.convention,
             CallingConvention::Rust
@@ -422,7 +433,7 @@ mod tests {
             "@swift(symbol = \"foreign_identity\")\ndef identity(value: i32) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
-        let resolved = resolve(&module, &context.types, &Target::host()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
         assert_eq!(resolved.foreign.functions[0].abi, AbiSelection::System);
     }
 
@@ -441,7 +452,7 @@ mod tests {
         ] {
             let source = SourceFile::virtual_source(path, text);
             let module = parse(&scan(&source).unwrap()).unwrap();
-            let resolved = resolve(&module, &context.types, &Target::host()).unwrap();
+            let resolved = resolve(&module, &context.types, &target()).unwrap();
             assert!(!resolved.plans.is_empty());
         }
     }

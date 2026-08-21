@@ -1,5 +1,7 @@
 /target/
 target/
+!compiler/target/
+!compiler/target/**
 /bin/examples/
 /bench/.work/
 /bench/results.csv
