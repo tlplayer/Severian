@@ -1,8 +1,8 @@
 [package]
-name = "list"
+name = "heap"
 version = "0.1.0"
 edition = "2026"
-description = "Source-owned generic contiguous lists"
+description = "Generic binary min-heaps"
 
 [lib]
 path = "src/lib.sev"

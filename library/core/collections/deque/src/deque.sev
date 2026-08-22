@@ -1,0 +1,50 @@
+import storage
+
+
+class deque[T]:
+    storage: storage.ContiguousStorage[T]
+
+    def deque(capacity: usize = 0):
+        this.storage := storage.create[T](capacity)
+
+    def len() -> usize:
+        return storage.len()
+
+    def empty() -> bool:
+        return storage.empty()
+
+    def capacity() -> usize:
+        return storage.capacity()
+
+    def reserve(minimum: usize):
+        storage.reserve(minimum)
+
+    def front() -> borrow T:
+        assert(not empty(), "cannot read the front of an empty deque")
+        return storage.get(0)
+
+    def back() -> borrow T:
+        assert(not empty(), "cannot read the back of an empty deque")
+        return storage.get(len() - 1)
+
+    def push_front(item: T):
+        storage.insert(0, item)
+
+    def push_back(item: T):
+        storage.append(item)
+
+    def pop_front() -> T | None:
+        if empty():
+            return None
+        return storage.remove(0)
+
+    def pop_back() -> T | None:
+        if empty():
+            return None
+        return storage.remove(len() - 1)
+
+    def get(index: usize) -> borrow T:
+        return storage.get(index)
+
+    def clear():
+        storage.clear()

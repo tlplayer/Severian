@@ -1,7 +1,8 @@
 import "list.sev"
+import Iterator from traits
 
 
-class ListIterator[T]:
+class ListIterator[T]: Iterator[T]
     values: borrow list[T]
     index: usize
 

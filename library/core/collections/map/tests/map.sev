@@ -1,0 +1,13 @@
+import map
+
+
+test "map inserts replaces and removes values":
+    values := map.map[string, int]()
+    values.set("one", 1)
+    values.set("two", 2)
+    assert(values.len() == 2)
+    assert(values.get("one") == 1)
+    assert(values.replace("one", 10) == 1)
+    assert(values.get("one") == 10)
+    assert(values.remove("two") == 2)
+    assert(not values.contains("two"))

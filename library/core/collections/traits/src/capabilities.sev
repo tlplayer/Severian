@@ -1,0 +1,7 @@
+trait HashKey:
+    def hash() -> usize
+    operator ==(right: Self) -> bool
+
+
+trait Ordered:
+    operator <(right: Self) -> bool

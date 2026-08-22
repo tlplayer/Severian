@@ -1,0 +1,28 @@
+import deque
+
+
+class queue[T]:
+    values: deque.deque[T]
+
+    def queue(capacity: usize = 0):
+        this.values := deque.deque[T](capacity)
+
+    def len() -> usize:
+        return values.len()
+
+    def empty() -> bool:
+        return values.empty()
+
+    def enqueue(item: T):
+        values.push_back(item)
+
+    def front() -> borrow T | None:
+        if empty():
+            return None
+        return values.front()
+
+    def dequeue() -> T | None:
+        return values.pop_front()
+
+    def clear():
+        values.clear()

@@ -1,0 +1,11 @@
+import queue
+
+
+test "queue is first in first out":
+    values := queue.queue[string]()
+    values.enqueue("a")
+    values.enqueue("b")
+    assert(values.front() == "a")
+    assert(values.dequeue() == "a")
+    assert(values.dequeue() == "b")
+    assert(values.dequeue() is None)

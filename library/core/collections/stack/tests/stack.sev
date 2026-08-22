@@ -1,0 +1,11 @@
+import stack
+
+
+test "stack is last in first out":
+    values := stack.stack[int]()
+    values.push(10)
+    values.push(20)
+    assert(values.peek() == 20)
+    assert(values.pop() == 20)
+    assert(values.pop() == 10)
+    assert(values.pop() is None)

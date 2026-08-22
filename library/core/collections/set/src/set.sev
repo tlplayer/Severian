@@ -1,0 +1,35 @@
+import table
+import HashKey from traits
+
+
+class set[T: HashKey]:
+    table: table.HashTable[T, bool]
+
+    def set(capacity: usize = 0):
+        this.table := table.create[T, bool](capacity)
+
+    def len() -> usize:
+        return table.len()
+
+    def empty() -> bool:
+        return table.empty()
+
+    def reserve(minimum: usize):
+        table.reserve(minimum)
+
+    def contains(item: borrow T) -> bool:
+        return table.contains(item)
+
+    def add(item: T) -> bool:
+        if contains(borrow item):
+            drop item
+            return false
+        table.set(item, true)
+        return true
+
+    def remove(item: borrow T) -> bool:
+        removed ?= table.remove(item)
+        return removed is not None
+
+    def clear():
+        table.clear()

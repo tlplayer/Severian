@@ -1,0 +1,12 @@
+import array
+
+
+test "fixed capacity never grows implicitly":
+    values := array.array[int](2)
+    assert(values.push(10))
+    assert(values.push(20))
+    assert(not values.push(30))
+    assert(values.full())
+    assert(values.get(0) == 10)
+    assert(values.pop() == 20)
+    assert(not values.full())

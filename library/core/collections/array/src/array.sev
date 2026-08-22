@@ -1,0 +1,42 @@
+import storage
+
+
+class array[T]:
+    storage: storage.ContiguousStorage[T]
+    limit: usize
+
+    def array(capacity: usize):
+        this.storage := storage.create[T](capacity)
+        this.limit := capacity
+
+    def len() -> usize:
+        return storage.len()
+
+    def capacity() -> usize:
+        return limit
+
+    def empty() -> bool:
+        return storage.empty()
+
+    def full() -> bool:
+        return len() == limit
+
+    def get(index: usize) -> borrow T:
+        return storage.get(index)
+
+    def set(index: usize, item: T):
+        storage.set(index, item)
+
+    def push(item: T) -> bool:
+        if full():
+            return false
+        storage.append(item)
+        return true
+
+    def pop() -> T | None:
+        if empty():
+            return None
+        return storage.remove(len() - 1)
+
+    def clear():
+        storage.clear()

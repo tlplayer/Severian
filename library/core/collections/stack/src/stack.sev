@@ -1,0 +1,30 @@
+import storage
+
+
+class stack[T]:
+    storage: storage.ContiguousStorage[T]
+
+    def stack(capacity: usize = 0):
+        this.storage := storage.create[T](capacity)
+
+    def len() -> usize:
+        return storage.len()
+
+    def empty() -> bool:
+        return storage.empty()
+
+    def push(item: T):
+        storage.append(item)
+
+    def peek() -> borrow T | None:
+        if empty():
+            return None
+        return storage.get(len() - 1)
+
+    def pop() -> T | None:
+        if empty():
+            return None
+        return storage.remove(len() - 1)
+
+    def clear():
+        storage.clear()

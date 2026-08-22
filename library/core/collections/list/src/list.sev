@@ -1,8 +1,9 @@
 import storage
+import Sequence from traits
 import "iterator.sev"
 
 
-class list[T]:
+class list[T]: Sequence[T]
     storage: storage.ContiguousStorage[T]
 
     def list():

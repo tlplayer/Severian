@@ -1,0 +1,63 @@
+import storage
+import Ordered from traits
+
+
+class heap[T: Ordered]:
+    storage: storage.ContiguousStorage[T]
+
+    def heap(capacity: usize = 0):
+        this.storage := storage.create[T](capacity)
+
+    def len() -> usize:
+        return storage.len()
+
+    def empty() -> bool:
+        return storage.empty()
+
+    def peek() -> borrow T | None:
+        if empty():
+            return None
+        return storage.get(0)
+
+    def push(item: T):
+        storage.append(item)
+        sift_up(len() - 1)
+
+    def pop() -> T | None:
+        if empty():
+            return None
+
+        last := len() - 1
+        storage.swap(0, last)
+        item := storage.remove(last)
+        if not empty():
+            sift_down(0)
+        return item
+
+    def clear():
+        storage.clear()
+
+    def sift_up(start: usize):
+        index := start
+        while index > 0:
+            parent := (index - 1) / 2
+            if not (storage.get(index) < storage.get(parent)):
+                return
+            storage.swap(index, parent)
+            index = parent
+
+    def sift_down(start: usize):
+        index := start
+        while true:
+            left := index * 2 + 1
+            if left >= len():
+                return
+
+            smallest := left
+            right := left + 1
+            if right < len() and storage.get(right) < storage.get(left):
+                smallest = right
+            if not (storage.get(smallest) < storage.get(index)):
+                return
+            storage.swap(index, smallest)
+            index = smallest

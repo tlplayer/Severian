@@ -1,0 +1,14 @@
+import heap
+
+
+test "heap pops values in ascending order":
+    values := heap.heap[int]()
+    values.push(5)
+    values.push(2)
+    values.push(7)
+    values.push(1)
+    assert(values.peek() == 1)
+    assert(values.pop() == 1)
+    assert(values.pop() == 2)
+    assert(values.pop() == 5)
+    assert(values.pop() == 7)

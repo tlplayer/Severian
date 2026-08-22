@@ -1,0 +1,8 @@
+import "collection.sev"
+
+
+trait Mapping[K, V]: Collection[K]:
+    def contains(key: borrow K) -> bool
+    def get(key: borrow K) -> borrow V | None
+    def set(key: K, item: V)
+    def remove(key: borrow K) -> V | None

@@ -1,0 +1,13 @@
+import set
+
+
+test "set stores each value once":
+    values := set.set[int]()
+    assert(values.add(10))
+    assert(values.add(20))
+    assert(not values.add(10))
+    assert(values.len() == 2)
+    assert(values.contains(20))
+    assert(values.remove(10))
+    assert(not values.contains(10))
+    assert(not values.remove(10))

@@ -1,0 +1,38 @@
+import table
+import HashKey from traits
+
+
+class map[K: HashKey, V]:
+    table: table.HashTable[K, V]
+
+    def map(capacity: usize = 0):
+        this.table := table.create[K, V](capacity)
+
+    def len() -> usize:
+        return table.len()
+
+    def empty() -> bool:
+        return table.empty()
+
+    def reserve(minimum: usize):
+        table.reserve(minimum)
+
+    def contains(key: borrow K) -> bool:
+        return table.contains(key)
+
+    def get(key: borrow K) -> borrow V | None:
+        return table.get(key)
+
+    def set(key: K, item: V):
+        previous ?= table.set(key, item)
+        if previous is not None:
+            drop previous
+
+    def replace(key: K, item: V) -> V | None:
+        return table.set(key, item)
+
+    def remove(key: borrow K) -> V | None:
+        return table.remove(key)
+
+    def clear():
+        table.clear()

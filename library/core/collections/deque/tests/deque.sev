@@ -1,0 +1,14 @@
+import deque
+
+
+test "both ends preserve deque order":
+    values := deque.deque[string]()
+    values.push_back("b")
+    values.push_front("a")
+    values.push_back("c")
+    assert(values.front() == "a")
+    assert(values.back() == "c")
+    assert(values.pop_front() == "a")
+    assert(values.pop_back() == "c")
+    assert(values.pop_back() == "b")
+    assert(values.empty())

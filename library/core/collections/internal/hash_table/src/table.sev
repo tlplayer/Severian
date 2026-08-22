@@ -1,0 +1,77 @@
+import storage
+import HashKey from traits
+
+
+class Entry[K, V]:
+    key: K
+    item: V
+    hash: usize
+
+
+# Entries remain dense so removal and deterministic iteration never depend on
+# allocator or map insertion order. Cached hashes avoid recomputing expensive
+# key hashes; bucket indexing can be added here without changing set or map.
+class HashTable[K: HashKey, V]:
+    entries: storage.ContiguousStorage[Entry[K, V]]
+
+    def HashTable(capacity: usize):
+        this.entries := storage.create[Entry[K, V]](capacity)
+
+    def len() -> usize:
+        return entries.len()
+
+    def empty() -> bool:
+        return entries.empty()
+
+    def reserve(minimum: usize):
+        entries.reserve(minimum)
+
+    def position(key: borrow K) -> usize | None:
+        target_hash := key.hash()
+        index := 0
+        while index < entries.len():
+            entry := borrow entries.get(index)
+            if entry.hash == target_hash and entry.key == key:
+                return index
+            index += 1
+        return None
+
+    def contains(key: borrow K) -> bool:
+        found ?= position(key)
+        return found is not None
+
+    def get(key: borrow K) -> borrow V | None:
+        found ?= position(key)
+        if found is None:
+            return None
+        return borrow entries.get(found).item
+
+    def set(key: K, item: V) -> V | None:
+        found ?= position(borrow key)
+        key_hash := key.hash()
+        if found is None:
+            entries.append(Entry[K, V](key, item, key_hash))
+            return None
+
+        previous := entries.remove(found)
+        old_item := move previous.item
+        drop previous.key
+        entries.insert(found, Entry[K, V](key, item, key_hash))
+        return old_item
+
+    def remove(key: borrow K) -> V | None:
+        found ?= position(key)
+        if found is None:
+            return None
+
+        previous := entries.remove(found)
+        item := move previous.item
+        drop previous.key
+        return item
+
+    def clear():
+        entries.clear()
+
+
+def create[K: HashKey, V](capacity: usize = 0) -> HashTable[K, V]:
+    return HashTable[K, V](capacity)
