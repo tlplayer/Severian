@@ -6,8 +6,8 @@ use severian_ast::{
     TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
-use severian_lexer::{Token, TokenKind};
-use severian_source::Span;
+use severian_lexer::{scan, Token, TokenKind};
+use severian_source::{SourceFile, Span};
 
 pub fn parse(tokens: &[Token]) -> Result<Module, Diagnostic> {
     Parser { tokens, cursor: 0 }.module()
@@ -867,6 +867,9 @@ impl Parser<'_> {
             TokenKind::Float(value) => ExpressionKind::Literal(Literal::Float(value)),
             TokenKind::Character(value) => ExpressionKind::Literal(Literal::Character(value)),
             TokenKind::String(value) => ExpressionKind::Literal(Literal::String(value)),
+            TokenKind::FormattedString(value) => {
+                return formatted_string_expression(&value, token.span)
+            }
             TokenKind::Identifier(value) if value == "true" => {
                 ExpressionKind::Literal(Literal::Boolean(true))
             }
@@ -991,6 +994,140 @@ impl Parser<'_> {
     fn error(&self, message: &str) -> Diagnostic {
         Diagnostic::new("E000112", message, Some(self.peek().span))
     }
+}
+
+fn formatted_string_expression(value: &str, span: Span) -> Result<Expression, Diagnostic> {
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let bytes = value.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'{' if bytes.get(cursor + 1) == Some(&b'{') => {
+                literal.push('{');
+                cursor += 2;
+            }
+            b'}' if bytes.get(cursor + 1) == Some(&b'}') => {
+                literal.push('}');
+                cursor += 2;
+            }
+            b'{' => {
+                push_string_part(&mut parts, &mut literal, span);
+                let end = interpolation_end(value, cursor + 1).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000113",
+                        "formatted string interpolation is missing `}`",
+                        Some(span),
+                    )
+                })?;
+                let source = value[cursor + 1..end].trim();
+                if source.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000113",
+                        "formatted string interpolation may not be empty",
+                        Some(span),
+                    ));
+                }
+                parts.push(parse_interpolation(source, span)?);
+                cursor = end + 1;
+            }
+            b'}' => {
+                return Err(Diagnostic::new(
+                    "E000113",
+                    "single `}` in formatted string; write `}}` for a literal brace",
+                    Some(span),
+                ))
+            }
+            _ => {
+                let character = value[cursor..]
+                    .chars()
+                    .next()
+                    .expect("cursor is inside formatted string");
+                literal.push(character);
+                cursor += character.len_utf8();
+            }
+        }
+    }
+    push_string_part(&mut parts, &mut literal, span);
+    let mut parts = parts.into_iter();
+    let Some(mut expression) = parts.next() else {
+        return Ok(Expression {
+            kind: ExpressionKind::Literal(Literal::String(String::new())),
+            span,
+        });
+    };
+    for right in parts {
+        expression = Expression {
+            kind: ExpressionKind::Binary {
+                operator: BinaryOperator::Add,
+                left: Box::new(expression),
+                right: Box::new(right),
+            },
+            span,
+        };
+    }
+    Ok(expression)
+}
+
+fn push_string_part(parts: &mut Vec<Expression>, literal: &mut String, span: Span) {
+    if literal.is_empty() {
+        return;
+    }
+    parts.push(Expression {
+        kind: ExpressionKind::Literal(Literal::String(std::mem::take(literal))),
+        span,
+    });
+}
+
+fn interpolation_end(value: &str, start: usize) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut cursor = start;
+    let mut nesting = 0u32;
+    let mut quote = None;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(expected) = quote {
+            if byte == b'\\' {
+                cursor = (cursor + 2).min(bytes.len());
+                continue;
+            }
+            if byte == expected {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'(' | b'[' => nesting += 1,
+                b')' | b']' => nesting = nesting.saturating_sub(1),
+                b'}' if nesting == 0 => return Some(cursor),
+                _ => {}
+            }
+        }
+        cursor += 1;
+    }
+    None
+}
+
+fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Diagnostic> {
+    let file = SourceFile {
+        id: outer_span.source,
+        path: "<formatted-string>".into(),
+        text: source.to_owned(),
+    };
+    let tokens = scan(&file)?;
+    let mut parser = Parser {
+        tokens: &tokens,
+        cursor: 0,
+    };
+    let expression = parser.expression(0)?;
+    if !parser.at(&TokenKind::Eof) {
+        return Err(Diagnostic::new(
+            "E000113",
+            "formatted string interpolation must contain one expression",
+            Some(outer_span),
+        ));
+    }
+    Ok(expression)
 }
 
 fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {

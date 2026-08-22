@@ -94,4 +94,19 @@ mod tests {
             .iter()
             .any(|token| token.kind == TokenKind::String("first\n\tsecond\nthird\n".into())));
     }
+
+    #[test]
+    fn formatted_block_strings_are_single_tokens() {
+        let source = SourceFile::virtual_source(
+            "formatted.sev",
+            r#"value = f"""module {{
+{body}}}
+"""
+"#,
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens.iter().any(|token| {
+            token.kind == TokenKind::FormattedString("module {{\n{body}}}\n".into())
+        }));
+    }
 }

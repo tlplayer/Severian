@@ -71,6 +71,33 @@ mod tests {
     }
 
     #[test]
+    fn formatted_block_strings_desugar_to_string_concatenation() {
+        let source = SourceFile::virtual_source(
+            "formatted.sev",
+            r#"body = "content"
+output = f"""module {{
+{body}}}
+"""
+"#,
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(output) = &module.items[1] else {
+            panic!("expected output binding")
+        };
+        let severian_ast::ExpressionKind::Binary { operator, .. } = &output.value.kind else {
+            panic!("formatted string was not desugared")
+        };
+        assert_eq!(*operator, severian_ast::BinaryOperator::Add);
+    }
+
+    #[test]
+    fn formatted_block_strings_reject_unescaped_closing_braces() {
+        let source = SourceFile::virtual_source("formatted.sev", "value = f\"\"\"bad }\"\"\"\n");
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.code, "E000113");
+    }
+
+    #[test]
     fn power_is_right_associative() {
         let source = SourceFile::virtual_source("test.sev", "x = 2 ** 3 ** 2");
         let module = parse(&scan(&source).unwrap()).unwrap();

@@ -142,7 +142,10 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             cursor += symbol[1]
             continue
 
-        if character == "\"":
+        formatted = character == "f" and cursor + 3 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\"" and characters[cursor + 3] == "\""
+        if character == "\"" or formatted:
+            if formatted:
+                cursor += 1
             block = cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
             cursor += 3 if block else 1
             content_start = cursor
@@ -162,7 +165,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
                     return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
                 value = characters[content_start:cursor].join("")
                 cursor += 1
-            tokens.append(make_token(file, String(value), start, cursor))
+            tokens.append(make_token(file, FormattedString(value) if formatted else String(value), start, cursor))
             continue
 
         if character.is_digit():
@@ -192,4 +195,3 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
         tokens.append(make_token(file, Dedent, cursor, cursor))
     tokens.append(make_token(file, Eof, cursor, cursor))
     return tokens
-

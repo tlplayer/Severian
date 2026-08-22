@@ -150,15 +150,17 @@ def render_function(module: lir.Module, function: lir.Function) -> string | Mlir
 
 
 def render(module: lir.Module) -> string | MlirError:
-    output = "module {\n"
+    functions = ""
     for function in module.functions:
-        output += render_function(module, function)?
-    output += "  func.func @main() -> i32 {\n"
-    output += render_block(module, module.initializer, "    ")?
+        functions += render_function(module, function)?
+    initializer = render_block(module, module.initializer, "    ")?
+    entry_call = ""
     if module.entry != None:
-        output += "    func.call @__sev_fn_" + string(module.entry.value) + "() : () -> ()\n"
-    output += "    %sev_exit = arith.constant 0 : i32\n"
-    output += "    return %sev_exit : i32\n"
-    output += "  }\n}\n"
-    return output
-
+        entry_call = "    func.call @__sev_fn_" + string(module.entry.value) + "() : () -> ()\n"
+    return f"""module {{
+{functions}  func.func @main() -> i32 {{
+{initializer}{entry_call}    %sev_exit = arith.constant 0 : i32
+    return %sev_exit : i32
+  }}
+}}
+"""

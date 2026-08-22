@@ -138,6 +138,23 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::GreaterEqual
             }
             b'>' => one(&mut cursor, TokenKind::Greater),
+            b'f' if bytes.get(cursor + 1..cursor + 4) == Some(b"\"\"\"") => {
+                cursor += 4;
+                let content_start = cursor;
+                while cursor + 2 < bytes.len() && bytes.get(cursor..cursor + 3) != Some(b"\"\"\"") {
+                    cursor += 1;
+                }
+                if cursor + 2 >= bytes.len() {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "unterminated formatted block string literal",
+                        Some(Span::new(source.id, start as u32, bytes.len() as u32)),
+                    ));
+                }
+                let value = block_string(&source.text[content_start..cursor]);
+                cursor += 3;
+                TokenKind::FormattedString(value)
+            }
             b'"' => {
                 let block = bytes.get(cursor..cursor + 3) == Some(b"\"\"\"");
                 if block {

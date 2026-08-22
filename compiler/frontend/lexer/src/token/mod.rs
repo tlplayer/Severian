@@ -7,6 +7,7 @@ pub enum TokenKind {
     Float(String),
     Character(char),
     String(String),
+    FormattedString(String),
     At,
     Colon,
     ColonEqual,

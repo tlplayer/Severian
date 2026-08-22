@@ -6,6 +6,7 @@ enum TokenKind:
     Float(value: string)
     Character(value: char)
     String(value: string)
+    FormattedString(value: string)
     At
     Colon
     ColonEqual
@@ -44,4 +45,3 @@ enum TokenKind:
 class Token:
     kind: TokenKind
     span: source.Span
-

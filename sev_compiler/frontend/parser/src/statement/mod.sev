@@ -3,6 +3,55 @@ import lexer
 import diagnostics
 import source
 
+def formatted_string_expression(value: string, span: source.Span) -> ast.Expression | diagnostics.Diagnostic:
+    characters = value.characters()
+    cursor = 0
+    literal = ""
+    parts: list[ast.Expression] = []
+    while cursor < len(characters):
+        if characters[cursor] == "{" and cursor + 1 < len(characters) and characters[cursor + 1] == "{":
+            literal += "{"
+            cursor += 2
+            continue
+        if characters[cursor] == "}" and cursor + 1 < len(characters) and characters[cursor + 1] == "}":
+            literal += "}"
+            cursor += 2
+            continue
+        if characters[cursor] == "}":
+            return error(diagnostics.Diagnostic("E000113", "single } in formatted string; write }} for a literal brace", span))
+        if characters[cursor] != "{":
+            literal += string(characters[cursor])
+            cursor += 1
+            continue
+        if len(literal) > 0:
+            parts.append(ast.Expression(ast.LiteralValue(ast.String(literal)), span))
+            literal = ""
+        expression_start = cursor + 1
+        cursor = expression_start
+        nesting = 0
+        while cursor < len(characters):
+            if characters[cursor] == "(" or characters[cursor] == "[": nesting += 1
+            elif characters[cursor] == ")" or characters[cursor] == "]": nesting -= 1
+            elif characters[cursor] == "}" and nesting == 0: break
+            cursor += 1
+        if cursor >= len(characters):
+            return error(diagnostics.Diagnostic("E000113", "formatted string interpolation is missing }", span))
+        expression_source = characters[expression_start:cursor].join("").trim()
+        if len(expression_source) == 0:
+            return error(diagnostics.Diagnostic("E000113", "formatted string interpolation may not be empty", span))
+        interpolation = source.SourceFile(span.source, "<formatted-string>", expression_source)
+        expression_parser = Parser(lexer.scan(interpolation)?)
+        parts.append(expression_parser.expression(0)?)
+        cursor += 1
+    if len(literal) > 0:
+        parts.append(ast.Expression(ast.LiteralValue(ast.String(literal)), span))
+    if len(parts) == 0:
+        return ast.Expression(ast.LiteralValue(ast.String("")), span)
+    result = parts[0]
+    for part in parts[1:]:
+        result = ast.Expression(ast.Binary(ast.Add, result, part), span)
+    return result
+
 class Parser:
     tokens: list[lexer.Token]
     cursor: int
@@ -308,6 +357,7 @@ class Parser:
             case Float: return ast.Expression(ast.LiteralValue(ast.Float(value)), token.span)
             case Character: return ast.Expression(ast.LiteralValue(ast.Character(value)), token.span)
             case String: return ast.Expression(ast.LiteralValue(ast.String(value)), token.span)
+            case FormattedString: return formatted_string_expression(value, token.span)
             case LeftParen:
                 value = expression(0)?
                 expect(RightParen, "expected closing parenthesis")?
