@@ -54,7 +54,7 @@ class PrimitiveRecord:
         return unit
 
     def encode() -> list[u8] | InterfaceError:
-        validate_version()?
+        validate_version()
         output: list[u8] = [83, 69, 86, 80, 75, 71, 73, 0]
         output.append(u8(version >> 8))
         output.append(u8(version))

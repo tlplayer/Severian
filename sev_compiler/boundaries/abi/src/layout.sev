@@ -53,8 +53,8 @@ def layout_of(type_id: AbiType, target: TargetDataLayout) -> Layout | LayoutErro
         case Pointer: return Layout(target.pointer.size, target.pointer.alignment, Pointer)
         case Function: return Layout(target.pointer.size, target.pointer.alignment, LayoutKind.Function)
         case Array:
-            element_layout = layout_of(element, target)?
-            stride = align_to(element_layout.size, element_layout.alignment)?
+            element_layout = layout_of(element, target)
+            stride = align_to(element_layout.size, element_layout.alignment)
             return Layout(stride * length, element_layout.alignment, LayoutKind.Array(stride, length))
         case Record: return record_layout(record, target)
         case Union:
@@ -62,11 +62,11 @@ def layout_of(type_id: AbiType, target: TargetDataLayout) -> Layout | LayoutErro
             alignment: u32 = 1
             fields: list[FieldLayout] = []
             for field in record.fields:
-                field_layout = layout_of(field.type_id, target)?
+                field_layout = layout_of(field.type_id, target)
                 size = max(size, field_layout.size)
                 alignment = max(alignment, field_layout.alignment)
                 fields.append(FieldLayout(field.name, 0, field_layout))
-            return Layout(align_to(size, alignment)?, alignment, LayoutKind.Union(fields))
+            return Layout(align_to(size, alignment), alignment, LayoutKind.Union(fields))
         case Opaque: return error(UnsizedOpaque(name))
     return error(InvalidEnumRepresentation)
 
@@ -82,10 +82,10 @@ def record_layout(record: RecordType, target: TargetDataLayout) -> Layout | Layo
     offset: u64 = 0
     alignment: u32 = 1
     for field in record.fields:
-        field_layout = layout_of(field.type_id, target)?
-        offset = align_to(offset, field_layout.alignment)?
+        field_layout = layout_of(field.type_id, target)
+        offset = align_to(offset, field_layout.alignment)
         fields.append(FieldLayout(field.name, offset, field_layout))
         offset += field_layout.size
         alignment = max(alignment, field_layout.alignment)
-    return Layout(align_to(offset, alignment)?, alignment, Record(fields))
+    return Layout(align_to(offset, alignment), alignment, Record(fields))
 

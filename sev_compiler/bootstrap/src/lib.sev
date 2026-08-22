@@ -28,8 +28,8 @@ def register_primitive(
     representation: universal.PrimitiveRepresentation,
     default_literal: bool,
 ) -> universal.TypeId | BootstrapError:
-    type_id = builder.register_declaration(path, name)?
-    builder.define_primitive(type_id, category, representation, default_literal)?
+    type_id = builder.register_declaration(path, name)
+    builder.define_primitive(type_id, category, representation, default_literal)
     return type_id
 
 
@@ -39,25 +39,25 @@ def integer_representation(bits: u16, signed: bool) -> universal.PrimitiveRepres
 
 def load() -> universal.UniversalContext | BootstrapError:
     builder = universal.TypeContextBuilder()
-    boolean = register_primitive(builder, "core.primitives.bool", "bool", universal.Boolean, universal.PrimitiveRepresentation.Boolean, true)?
-    character = register_primitive(builder, "core.primitives.char", "char", universal.Character, universal.PrimitiveRepresentation.Character, true)?
-    i8 = register_primitive(builder, "core.primitives.i8", "i8", universal.Integer, integer_representation(8, true), false)?
-    i16 = register_primitive(builder, "core.primitives.i16", "i16", universal.Integer, integer_representation(16, true), false)?
-    i32 = register_primitive(builder, "core.primitives.i32", "i32", universal.Integer, integer_representation(32, true), false)?
-    i64 = register_primitive(builder, "core.primitives.i64", "i64", universal.Integer, integer_representation(64, true), false)?
-    integer = register_primitive(builder, "core.primitives.int", "int", universal.Integer, universal.Integer(universal.Machine, true), true)?
-    u8 = register_primitive(builder, "core.primitives.u8", "u8", universal.Integer, integer_representation(8, false), false)?
-    u16 = register_primitive(builder, "core.primitives.u16", "u16", universal.Integer, integer_representation(16, false), false)?
-    u32 = register_primitive(builder, "core.primitives.u32", "u32", universal.Integer, integer_representation(32, false), false)?
-    u64 = register_primitive(builder, "core.primitives.u64", "u64", universal.Integer, integer_representation(64, false), false)?
-    f32 = register_primitive(builder, "core.primitives.f32", "f32", universal.Float, universal.Float(universal.Ieee(32)), false)?
-    f64 = register_primitive(builder, "core.primitives.f64", "f64", universal.Float, universal.Float(universal.Ieee(64)), false)?
-    floating = register_primitive(builder, "core.primitives.float", "float", universal.Float, universal.Float(universal.Machine), true)?
-    text = register_primitive(builder, "core.primitives.string", "string", universal.Text, universal.String, true)?
-    bytes = register_primitive(builder, "core.primitives.bytes", "bytes", universal.Bytes, universal.Bytes, true)?
-    none = register_primitive(builder, "core.primitives.None", "None", universal.Absence, universal.NoneValue, true)?
-    unit_type = register_primitive(builder, "core.primitives.unit", "unit", universal.Unit, universal.Unit, true)?
-    arguments = register_primitive(builder, "core.primitives.args", "args", universal.Arguments, universal.Arguments, false)?
+    boolean = register_primitive(builder, "core.primitives.bool", "bool", universal.Boolean, universal.PrimitiveRepresentation.Boolean, true)
+    character = register_primitive(builder, "core.primitives.char", "char", universal.Character, universal.PrimitiveRepresentation.Character, true)
+    i8 = register_primitive(builder, "core.primitives.i8", "i8", universal.Integer, integer_representation(8, true), false)
+    i16 = register_primitive(builder, "core.primitives.i16", "i16", universal.Integer, integer_representation(16, true), false)
+    i32 = register_primitive(builder, "core.primitives.i32", "i32", universal.Integer, integer_representation(32, true), false)
+    i64 = register_primitive(builder, "core.primitives.i64", "i64", universal.Integer, integer_representation(64, true), false)
+    integer = register_primitive(builder, "core.primitives.int", "int", universal.Integer, universal.Integer(universal.Machine, true), true)
+    u8 = register_primitive(builder, "core.primitives.u8", "u8", universal.Integer, integer_representation(8, false), false)
+    u16 = register_primitive(builder, "core.primitives.u16", "u16", universal.Integer, integer_representation(16, false), false)
+    u32 = register_primitive(builder, "core.primitives.u32", "u32", universal.Integer, integer_representation(32, false), false)
+    u64 = register_primitive(builder, "core.primitives.u64", "u64", universal.Integer, integer_representation(64, false), false)
+    f32 = register_primitive(builder, "core.primitives.f32", "f32", universal.Float, universal.Float(universal.Ieee(32)), false)
+    f64 = register_primitive(builder, "core.primitives.f64", "f64", universal.Float, universal.Float(universal.Ieee(64)), false)
+    floating = register_primitive(builder, "core.primitives.float", "float", universal.Float, universal.Float(universal.Machine), true)
+    text = register_primitive(builder, "core.primitives.string", "string", universal.Text, universal.String, true)
+    bytes = register_primitive(builder, "core.primitives.bytes", "bytes", universal.Bytes, universal.Bytes, true)
+    none = register_primitive(builder, "core.primitives.None", "None", universal.Absence, universal.NoneValue, true)
+    unit_type = register_primitive(builder, "core.primitives.unit", "unit", universal.Unit, universal.Unit, true)
+    arguments = register_primitive(builder, "core.primitives.args", "args", universal.Arguments, universal.Arguments, false)
 
     numeric_types = [i8, i16, i32, i64, integer, u8, u16, u32, u64, f32, f64, floating]
     for type_id in numeric_types:

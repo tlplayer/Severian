@@ -6,18 +6,8 @@ class Counter:
 
     def inc():
         value += 1
-"""
-TODO: fix type coercion failures:
-    sev /home/tplayer/Documents/Severian/docs/examples/13-method-mutation/01-inferred-field-mutation.sev
-error: /usr/bin/mlir-opt-21 failed: /tmp/severian-native-26524-1786876686623170635.source.mlir:217:32: error: use of value '%v10' expects different type than prior uses: 'i64' vs 'f64'
-    %v11 = llvm.icmp "eq" %v9, %v10 : i64
-                               ^
-/tmp/severian-native-26524-1786876686623170635.source.mlir:216:5: note: prior use here
-    %v10 = llvm.mlir.constant(1.00000000000000000e0 : f64) : f64
-    ^
-tplayer@tplayer:~/Documents/Severian$ 
-"""
+
 test:
     counter = Counter()
     counter.inc()
-    assert(counter.value == 1.0)
+    assert(counter.value == 1)

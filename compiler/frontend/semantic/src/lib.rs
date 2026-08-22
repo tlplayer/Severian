@@ -531,6 +531,7 @@ impl Analyzer<'_> {
             id,
             type_id,
             value,
+            preserve_error: ast_binding.preserve_error,
             span: ast_binding.span,
         });
         Ok(id)
@@ -689,6 +690,7 @@ impl Analyzer<'_> {
                     id,
                     type_id: binding_type,
                     value: subject.clone(),
+                    preserve_error: true,
                     span: case.span,
                 });
                 Some(id)
@@ -826,9 +828,9 @@ impl Analyzer<'_> {
                 let mut matches = Vec::new();
                 for function in candidates {
                     let signature = self.signatures[&function].clone();
-                    if expected.is_some_and(|expected| {
-                            !self.types.assignable(signature.result, expected)
-                        }) {
+                    if expected
+                        .is_some_and(|expected| !self.types.assignable(signature.result, expected))
+                    {
                         continue;
                     }
                     let mut ordered = vec![None; signature.parameters.len()];
@@ -1292,6 +1294,13 @@ mod tests {
         let (program, context) = analyze_source("a = 1 + 2\n");
         let int = context.types.resolve_name("int").unwrap();
         assert_eq!(program.modules[0].bindings[0].type_id, int);
+    }
+
+    #[test]
+    fn question_equal_survives_semantic_analysis() {
+        let (program, _) = analyze_source("result ?= 1\nordinary = 2\n");
+        assert!(program.modules[0].bindings[0].preserve_error);
+        assert!(!program.modules[0].bindings[1].preserve_error);
     }
 
     #[test]

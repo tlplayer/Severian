@@ -11,6 +11,7 @@ pub enum TokenKind {
     At,
     Colon,
     ColonEqual,
+    QuestionEqual,
     Equal,
     Plus,
     PlusEqual,

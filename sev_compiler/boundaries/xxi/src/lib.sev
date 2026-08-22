@@ -51,7 +51,7 @@ def language_abi(language: ExternalLanguage) -> ffi.AbiSelection:
 def external_import(locator: string, alias: string) -> ExternalImport | None | XxiError:
     if not locator.contains(":"): return None
     parts = locator.split(":", 1)
-    return ExternalImport(language_from_name(parts[0])?, parts[1], alias)
+    return ExternalImport(language_from_name(parts[0]), parts[1], alias)
 
 
 def resolve_contract(annotation: ast.TypeAnnotation, foreign: ffi.ForeignModule, types: universal.TypeContext, result: bool) -> tuple[ffi.ValueContract, ffi.ParameterMode] | XxiError:
@@ -97,7 +97,7 @@ def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTar
                 match declaration.subject:
                     case Locator:
                         if declaration.alias != None:
-                            resolved = external_import(locator, declaration.alias)?
+                            resolved = external_import(locator, declaration.alias)
                             if resolved != None: imports.append(resolved)
             case Type:
                 if len(declaration.decorators) > 0:
@@ -106,16 +106,16 @@ def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTar
             case Function:
                 if len(declaration.decorators) > 0:
                     attribute = declaration.decorators[0]
-                    language = language_from_name(attribute.name)?
+                    language = language_from_name(attribute.name)
                     parameters: list[ffi.ForeignParameter] = []
                     for parameter in declaration.parameters:
-                        contract = resolve_contract(parameter.annotation, foreign, types, false)?
+                        contract = resolve_contract(parameter.annotation, foreign, types, false)
                         parameters.append(ffi.ForeignParameter(parameter.name, contract[0], contract[1]))
-                    result = resolve_contract(declaration.result, foreign, types, true)?[0]
+                    result = resolve_contract(declaration.result, foreign, types, true)[0]
                     symbol = abi.Symbol(abi.SymbolName(declaration.name), abi.External, abi.Default, abi.Import, abi.Function)
                     foreign.functions.append(ffi.ForeignFunction(declaration.name, None, symbol, parameters, result, language_abi(language), false))
     plans: list[ffi.BoundaryPlan] = []
     for function in foreign.functions:
-        plans.append(ffi.lower_function(function, foreign, types, target)?)
+        plans.append(ffi.lower_function(function, foreign, types, target))
     return ResolvedExternalModule(imports, foreign, plans)
 

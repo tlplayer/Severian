@@ -60,7 +60,7 @@ def default_catalog() -> Catalog:
 
 
 def load_manifest(path: string) -> Manifest | string:
-    document = toml.parse(file.read_string(path)?)
+    document = toml.parse(file.read_string(path))
     root = file.parent(path)
     name = document["package"]["name"]
     binaries: list[BinaryTarget] = []

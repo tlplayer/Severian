@@ -30,14 +30,14 @@ def validate_function(function: ForeignFunction, module: ForeignModule, target: 
         if parameter.name in names:
             return error(DuplicateParameter(parameter.name))
         names.add(parameter.name)
-        validate_type_ref(parameter.contract.type_ref, module)?
+        validate_type_ref(parameter.contract.type_ref, module)
         if (parameter.mode == Out or parameter.mode == InOut) and parameter.contract.ownership == Copy:
             return error(OutputMustCrossByReference(parameter.name))
         match parameter.contract.ownership:
             case Borrowed:
                 if parameter.mode == Out:
                     return error(BorrowedOutput(parameter.name))
-    validate_type_ref(function.result.type_ref, module)?
+    validate_type_ref(function.result.type_ref, module)
     match function.result.ownership:
         case Borrowed:
             if lifetime == Call:

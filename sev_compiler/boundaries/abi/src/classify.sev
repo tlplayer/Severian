@@ -34,7 +34,7 @@ class ClassifiedSignature:
 
 
 def classify(type_id: AbiType, convention: CallingConvention, target: AbiTarget, result: bool) -> ClassifiedValue | LayoutError:
-    layout = layout_of(type_id, target.data_layout)?
+    layout = layout_of(type_id, target.data_layout)
     if layout.size == 0:
         return ClassifiedValue(type_id, Ignore)
     match type_id:
@@ -60,7 +60,7 @@ def classify_signature(signature: AbiSignature, target: AbiTarget) -> Classified
     convention = target.resolve_convention(signature.convention)
     arguments: list[ClassifiedValue] = []
     for parameter in signature.parameters:
-        arguments.append(classify(parameter, convention, target, false)?)
-    result = classify(signature.result, convention, target, true)?
+        arguments.append(classify(parameter, convention, target, false))
+    result = classify(signature.result, convention, target, true)
     return ClassifiedSignature(convention, arguments, result, signature.variadic)
 

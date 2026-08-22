@@ -35,9 +35,9 @@ class CompilerRegistry:
             handler = handlers.get(region.compiler)
             if handler == None:
                 return error(MissingHandler(region.compiler))
-            generated = handler.compile(region, context)?
+            generated = handler.compile(region, context)
             if len(generated.inputs) != len(region.inputs) or len(generated.outputs) != len(region.outputs):
                 return error(InvalidArtifact("handler output does not match region"))
-            artifacts.append(mlir.verify_artifact(artifact.artifact_for_region(region.id), generated, context.target_spec)?)
+            artifacts.append(mlir.verify_artifact(artifact.artifact_for_region(region.id), generated, context.target_spec))
         return artifacts
 

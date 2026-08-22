@@ -9,6 +9,9 @@ pub struct Binding {
     /// Compound assignment creates a new SSA binding for an existing source
     /// name instead of declaring a second lexical name.
     pub update: bool,
+    /// `?=` keeps the complete result union instead of propagating its error
+    /// member out of the current function.
+    pub preserve_error: bool,
     pub span: Span,
 }
 

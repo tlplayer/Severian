@@ -40,8 +40,8 @@ def formatted_string_expression(value: string, span: source.Span) -> ast.Express
         if len(expression_source) == 0:
             return error(diagnostics.Diagnostic("E000113", "formatted string interpolation may not be empty", span))
         interpolation = source.SourceFile(span.source, "<formatted-string>", expression_source)
-        expression_parser = Parser(lexer.scan(interpolation)?)
-        parts.append(expression_parser.expression(0)?)
+        expression_parser = Parser(lexer.scan(interpolation))
+        parts.append(expression_parser.expression(0))
         cursor += 1
     if len(literal) > 0:
         parts.append(ast.Expression(ast.LiteralValue(ast.String(literal)), span))
@@ -107,19 +107,19 @@ class Parser:
         separators()
         while not at_simple(Eof):
             if at_identifier("import"):
-                result.items.append(ast.Import(import_declaration()?))
+                result.items.append(ast.Import(import_declaration()))
             elif at_identifier("trait"):
-                result.items.append(ast.Trait(trait_declaration([])?))
+                result.items.append(ast.Trait(trait_declaration([])))
             elif at_identifier("def"):
-                result.items.append(ast.Function(function_declaration([])?))
+                result.items.append(ast.Function(function_declaration([])))
             elif at_identifier("type"):
-                result.items.append(ast.Type(type_declaration([])?))
+                result.items.append(ast.Type(type_declaration([])))
             elif at_identifier("test"):
-                result.items.append(ast.Test(test_declaration()?))
+                result.items.append(ast.Test(test_declaration()))
             elif at_identifier("return") or at_identifier("break") or at_identifier("continue"):
                 return error(diagnostics.Diagnostic("E000121", "control flow is not valid at module scope", peek().span))
             else:
-                statement = simple_statement()?
+                statement = simple_statement()
                 match statement:
                     case BindingStatement:
                         result.items.append(ast.BindingItem(binding))
@@ -132,19 +132,19 @@ class Parser:
 
     def import_declaration() -> ast.ImportDeclaration | diagnostics.Diagnostic:
         start = next().span
-        first = identifier("expected an import name")?
+        first = identifier("expected an import name")
         if at_identifier("from"):
             next()
-            source_name = identifier("expected an import source")?[0]
+            source_name = identifier("expected an import source")[0]
             alias: string | None = None
             if at_identifier("as"):
                 next()
-                alias = identifier("expected an import alias")?[0]
+                alias = identifier("expected an import alias")[0]
             return ast.ImportDeclaration(ast.Name(first[0]), source_name, alias, source.Span(start.source, start.start, peek().span.start))
         alias: string | None = None
         if at_identifier("as"):
             next()
-            alias = identifier("expected an import alias")?[0]
+            alias = identifier("expected an import alias")[0]
         return ast.ImportDeclaration(ast.Name(first[0]), None, alias, source.Span(start.source, start.start, peek().span.start))
 
     def type_parameters() -> tuple[list[string], list[ast.GenericConstraint]] | diagnostics.Diagnostic:
@@ -154,14 +154,14 @@ class Parser:
             return (parameters, constraints)
         if not at_simple(RightBracket):
             while true:
-                parameter = identifier("expected a generic parameter")?
+                parameter = identifier("expected a generic parameter")
                 parameters.append(parameter[0])
                 if take(Colon) != None:
-                    bound = type_annotation()?
+                    bound = type_annotation()
                     constraints.append(ast.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
                 if take(Comma) == None:
                     break
-        expect(RightBracket, "expected closing type parameter bracket")?
+        expect(RightBracket, "expected closing type parameter bracket")
         return (parameters, constraints)
 
     def declaration_constraints() -> list[ast.GenericConstraint] | diagnostics.Diagnostic:
@@ -169,104 +169,104 @@ class Parser:
         if not at_identifier("with"):
             return constraints
         next()
-        expect(LeftBrace, "expected { after declaration with")?
+        expect(LeftBrace, "expected { after declaration with")
         multiline = take(Newline) != None
         if multiline:
-            expect(Indent, "expected indented declaration constraints")?
+            expect(Indent, "expected indented declaration constraints")
         separators()
         while not at_simple(RightBrace) and not at_simple(Dedent):
             if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Colon:
-                parameter = identifier("expected constrained parameter")?
-                expect(Colon, "expected colon after constrained parameter")?
-                bound = type_annotation()?
+                parameter = identifier("expected constrained parameter")
+                expect(Colon, "expected colon after constrained parameter")
+                bound = type_annotation()
                 constraints.append(ast.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
             else:
-                constraints.append(ast.Predicate(expression(0)?))
+                constraints.append(ast.Predicate(expression(0)))
             take(Comma)
             separators()
         if multiline:
-            expect(Dedent, "expected end of declaration constraints")?
-        expect(RightBrace, "expected } after declaration constraints")?
+            expect(Dedent, "expected end of declaration constraints")
+        expect(RightBrace, "expected } after declaration constraints")
         return constraints
 
     def function_declaration(decorators: list[ast.Decorator]) -> ast.FunctionDeclaration | diagnostics.Diagnostic:
         start = next().span
-        name = identifier("expected a function name")?[0]
-        generic_parts = type_parameters()?
+        name = identifier("expected a function name")[0]
+        generic_parts = type_parameters()
         generics = generic_parts[0]
         constraints = generic_parts[1]
-        expect(LeftParen, "expected opening parenthesis")?
+        expect(LeftParen, "expected opening parenthesis")
         parameters: list[ast.FunctionParameter] = []
         while not at_simple(RightParen):
-            parameter = identifier("expected a parameter name")?
-            expect(Colon, "expected colon after parameter")?
-            annotation = type_annotation()?
+            parameter = identifier("expected a parameter name")
+            expect(Colon, "expected colon after parameter")
+            annotation = type_annotation()
             default: ast.Expression | absent = absent
             if take(Equal) != absent:
-                default = expression(0)?
+                default = expression(0)
             parameter_end = annotation.span.end if default is absent else default.span.end
             parameters.append(ast.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end)))
             if take(Comma) == None:
                 break
-        close = expect(RightParen, "expected closing parenthesis")?.span
+        close = expect(RightParen, "expected closing parenthesis").span
         result = ast.named_type("unit", [], close)
         if take(Arrow) != None:
-            result = type_annotation()?
-        constraints += declaration_constraints()?
+            result = type_annotation()
+        constraints += declaration_constraints()
         body: list[ast.Statement] | None = None
         end = result.span.end
         if take(Colon) != None:
-            block = indented_block("function")?
+            block = indented_block("function")
             body = block[0]
             end = block[1]
         return ast.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end))
 
     def type_declaration(decorators: list[ast.Decorator]) -> ast.TypeDeclaration | diagnostics.Diagnostic:
         start = next().span
-        name = identifier("expected a type name")?[0]
-        generic_parts = type_parameters()?
+        name = identifier("expected a type name")[0]
+        generic_parts = type_parameters()
         parameters = generic_parts[0]
         constraints = generic_parts[1]
         definition: ast.TypeAnnotation | None = None
         if take(Equal) != None:
-            definition = type_annotation()?
-        constraints += declaration_constraints()?
+            definition = type_annotation()
+        constraints += declaration_constraints()
         return ast.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, peek().span.start))
 
     def trait_declaration(decorators: list[ast.Decorator]) -> ast.TraitDeclaration | diagnostics.Diagnostic:
         start = next().span
-        name = identifier("expected a trait name")?[0]
-        generic_parts = type_parameters()?
+        name = identifier("expected a trait name")[0]
+        generic_parts = type_parameters()
         parameters = generic_parts[0]
         constraints = generic_parts[1]
-        constraints += declaration_constraints()?
+        constraints += declaration_constraints()
         bases: list[ast.TypeAnnotation] = []
         if take(Colon) != None and not at_simple(Newline):
             while true:
-                bases.append(type_annotation()?)
+                bases.append(type_annotation())
                 if take(Plus) == None:
                     break
-            expect(Colon, "expected colon before trait body")?
+            expect(Colon, "expected colon before trait body")
         properties: list[ast.PropertyDeclaration] = []
         operators: list[ast.OperatorDeclaration] = []
         if at_simple(Newline):
-            expect(Newline, "expected trait body")?
-            expect(Indent, "expected indented trait body")?
+            expect(Newline, "expected trait body")
+            expect(Indent, "expected indented trait body")
             separators()
             while not at_simple(Dedent):
                 if at_identifier("property"):
                     property_start = next().span
-                    property_name = identifier("expected property name")?[0]
-                    expect(Colon, "expected property type")?
-                    annotation = type_annotation()?
+                    property_name = identifier("expected property name")[0]
+                    expect(Colon, "expected property type")
+                    annotation = type_annotation()
                     default: ast.Expression | None = None
                     if take(Equal) != None:
-                        default = expression(0)?
+                        default = expression(0)
                     properties.append(ast.PropertyDeclaration(property_name, annotation, default, property_start))
                 else:
                     next()
                 separators()
-            expect(Dedent, "expected end of trait")?
+            expect(Dedent, "expected end of trait")
         return ast.TraitDeclaration(decorators, name, parameters, constraints, bases, properties, operators, source.Span(start.source, start.start, peek().span.start))
 
     def test_declaration() -> ast.TestDeclaration | diagnostics.Diagnostic:
@@ -275,7 +275,7 @@ class Parser:
         if at_identifier("with"):
             next()
             while true:
-                modes.append(identifier("expected test mode")?[0])
+                modes.append(identifier("expected test mode")[0])
                 if not at_identifier("and"):
                     break
                 next()
@@ -284,24 +284,24 @@ class Parser:
             case String:
                 name = value
                 next()
-        expect(Colon, "expected colon after test")?
-        block = indented_block("test")?
+        expect(Colon, "expected colon after test")
+        block = indented_block("test")
         return ast.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]))
 
     def indented_block(owner: string) -> tuple[list[ast.Statement], u32] | diagnostics.Diagnostic:
-        expect(Newline, "expected newline after " + owner)?
+        expect(Newline, "expected newline after " + owner)
         while take(Newline) != None:
             pass
-        expect(Indent, "expected indented " + owner + " body")?
+        expect(Indent, "expected indented " + owner + " body")
         statements: list[ast.Statement] = []
         separators()
         while not at_simple(Dedent) and not at_simple(Eof):
             if at_identifier("pass"):
                 next()
             else:
-                statements.append(block_statement()?)
+                statements.append(block_statement())
             separators()
-        end = expect(Dedent, "expected end of " + owner + " body")?.span.end
+        end = expect(Dedent, "expected end of " + owner + " body").span.end
         return (statements, end)
 
     def block_statement() -> ast.Statement | diagnostics.Diagnostic:
@@ -309,51 +309,52 @@ class Parser:
             start = next().span
             if at_simple(Newline) or at_simple(Dedent):
                 return ast.Return(None, start)
-            value = expression(0)?
+            value = expression(0)
             return ast.Return(value, source.Span(start.source, start.start, value.span.end))
         if at_identifier("assert"):
             start = next().span
-            condition = expression(0)?
+            condition = expression(0)
             message: ast.Expression | None = None
             if take(Comma) != None:
-                message = expression(0)?
+                message = expression(0)
             return ast.Assert(condition, message, source.Span(start.source, start.start, condition.span.end))
         return simple_statement()
 
     def simple_statement() -> ast.Statement | diagnostics.Diagnostic:
         if looks_like_binding():
-            return ast.BindingStatement(binding()?)
-        return ast.ExpressionStatement(expression(0)?)
+            return ast.BindingStatement(binding())
+        return ast.ExpressionStatement(expression(0))
 
     def looks_like_binding() -> bool:
         if cursor + 1 >= len(tokens):
             return false
         match tokens[cursor].kind:
             case Identifier:
-                return tokens[cursor + 1].kind == Equal or tokens[cursor + 1].kind == ColonEqual or tokens[cursor + 1].kind == Colon
+                return tokens[cursor + 1].kind == Equal or tokens[cursor + 1].kind == QuestionEqual or tokens[cursor + 1].kind == ColonEqual or tokens[cursor + 1].kind == Colon
         return false
 
     def binding() -> ast.Binding | diagnostics.Diagnostic:
         start = peek().span
-        name = identifier("expected binding name")?[0]
+        name = identifier("expected binding name")[0]
         annotation: ast.TypeAnnotation | None = None
         if take(Colon) != None:
-            annotation = type_annotation()?
-        update = take(ColonEqual) != None
-        if not update:
-            expect(Equal, "expected assignment")?
-        value = expression(0)?
-        return ast.Binding(name, annotation, value, update, source.Span(start.source, start.start, value.span.end))
+            annotation = type_annotation()
+        inferred = take(ColonEqual) != None
+        preserve_error = not inferred and take(QuestionEqual) != None
+        if not inferred and not preserve_error:
+            expect(Equal, "expected `=`, `?=`, or `:=` after binding name")
+        value = expression(0)
+        return ast.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end))
 
     def expression(minimum: int) -> ast.Expression | diagnostics.Diagnostic:
-        left = unary()?
+        left = unary()
         while true:
             operator = binary_operator(peek().kind)
             if operator == None or precedence(operator) < minimum:
                 break
             token = next()
             next_minimum = precedence(operator) if operator == ast.Power else precedence(operator) + 1
-            right = expression(next_minimum)?
+            right = expression(next_minimum)
             left = ast.Expression(ast.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
         return left
 
@@ -366,12 +367,12 @@ class Parser:
         elif at_identifier("move"): operator = ast.Move
         if operator != None:
             next()
-            operand = unary()?
+            operand = unary()
             return ast.Expression(ast.Unary(operator, operand), source.Span(token.span.source, token.span.start, operand.span.end))
         return postfix()
 
     def postfix() -> ast.Expression | diagnostics.Diagnostic:
-        value = primary()?
+        value = primary()
         while true:
             if take(LeftParen) != None:
                 arguments: list[ast.CallArgument] = []
@@ -379,16 +380,16 @@ class Parser:
                     start = peek().span
                     argument_name: string | absent = absent
                     if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Equal:
-                        argument_name = identifier("expected argument name")?[0]
-                        expect(Equal, "expected = after argument name")?
-                    argument = expression(0)?
+                        argument_name = identifier("expected argument name")[0]
+                        expect(Equal, "expected = after argument name")
+                    argument = expression(0)
                     arguments.append(ast.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end)))
                     if take(Comma) == None:
                         break
-                end = expect(RightParen, "expected closing parenthesis")?.span.end
+                end = expect(RightParen, "expected closing parenthesis").span.end
                 value = ast.Expression(ast.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
             elif take(Dot) != None:
-                member = identifier("expected member name")?
+                member = identifier("expected member name")
                 value = ast.Expression(ast.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
             else:
                 break
@@ -408,32 +409,32 @@ class Parser:
             case String: return ast.Expression(ast.LiteralValue(ast.String(value)), token.span)
             case FormattedString: return formatted_string_expression(value, token.span)
             case LeftParen:
-                value = expression(0)?
-                expect(RightParen, "expected closing parenthesis")?
+                value = expression(0)
+                expect(RightParen, "expected closing parenthesis")
                 return value
         return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
 
     def type_annotation() -> ast.TypeAnnotation | diagnostics.Diagnostic:
-        first = type_primary()?
+        first = type_primary()
         if take(Pipe) == None:
             return first
         members: list[ast.TypeAnnotation] = [first]
         while true:
-            members.append(type_primary()?)
+            members.append(type_primary())
             if take(Pipe) == None:
                 break
         return ast.TypeAnnotation(ast.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
 
     def type_primary() -> ast.TypeAnnotation | diagnostics.Diagnostic:
-        name = identifier("expected a type name")?
+        name = identifier("expected a type name")
         arguments: list[ast.TypeAnnotation] = []
         end = name[1].end
         if take(LeftBracket) != None:
             while not at_simple(RightBracket):
-                arguments.append(type_annotation()?)
+                arguments.append(type_annotation())
                 if take(Comma) == None:
                     break
-            end = expect(RightBracket, "expected closing type bracket")?.span.end
+            end = expect(RightBracket, "expected closing type bracket").span.end
         return ast.named_type(name[0], arguments, source.Span(name[1].source, name[1].start, end))
 
 

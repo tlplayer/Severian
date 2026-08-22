@@ -64,16 +64,16 @@ def lower_type_ref(type_ref: ForeignTypeRef, module: ForeignModule, types: unive
             if declaration == None: return error(UnknownExternalType(name))
             return (declaration.representation, Direct)
         case Pointer:
-            lowered = lower_type_ref(pointee, module, types, target, false)?
+            lowered = lower_type_ref(pointee, module, types, target, false)
             return (abi.pointer_to(lowered[0], mutable), Direct)
 
 
 def lower_function(function: ForeignFunction, module: ForeignModule, types: universal.TypeContext, target: abi.AbiTarget) -> BoundaryPlan | FfiError:
-    validate_function(function, module, target)?
+    validate_function(function, module, target)
     parameters: list[LoweredParameter] = []
     abi_parameters: list[abi.AbiType] = []
     for parameter in function.parameters:
-        lowered = lower_type_ref(parameter.contract.type_ref, module, types, target, false)?
+        lowered = lower_type_ref(parameter.contract.type_ref, module, types, target, false)
         conversion = lowered[1]
         type_id = lowered[0]
         if parameter.mode == Out or parameter.mode == InOut:
@@ -81,7 +81,7 @@ def lower_function(function: ForeignFunction, module: ForeignModule, types: univ
             conversion = OutPointer
         parameters.append(LoweredParameter(parameter.name, type_id, conversion))
         abi_parameters.append(type_id)
-    result = lower_type_ref(function.result.type_ref, module, types, target, true)?
+    result = lower_type_ref(function.result.type_ref, module, types, target, true)
     signature = abi.AbiSignature(convention(function.abi_selection), abi_parameters, result[0], function.variadic)
     return BoundaryPlan(function.provider, function.symbol, signature, parameters, result[0], result[1])
 

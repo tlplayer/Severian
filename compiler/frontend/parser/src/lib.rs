@@ -38,6 +38,17 @@ mod tests {
     }
 
     #[test]
+    fn question_equal_preserves_the_result_union() {
+        let source = SourceFile::virtual_source("result.sev", "result ?= read()\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(binding) = &module.items[0] else {
+            panic!("expected an error-preserving binding")
+        };
+        assert!(binding.preserve_error);
+        assert!(!binding.update);
+    }
+
+    #[test]
     fn prefix_typed_constants_use_the_same_binding_ast() {
         let source = SourceFile::virtual_source(
             "constants.sev",

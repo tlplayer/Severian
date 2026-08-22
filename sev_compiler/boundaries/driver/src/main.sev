@@ -50,7 +50,7 @@ def discover_source(path: string | None, selected: string | None) -> tuple[strin
     manifest_path = file.join(input_path, "package.toml")
     if not file.is_file(manifest_path):
         return error("no package.toml found")
-    manifest = load_manifest(manifest_path)?
+    manifest = load_manifest(manifest_path)
     if selected != None:
         target = manifest.target(selected)
         if target == None: return error("unknown binary target " + selected)
@@ -79,22 +79,22 @@ def run(arguments: list[string]) -> unit | string:
     command = "run"
     if len(arguments) > 0 and arguments[0] in ["check", "build", "compile", "run", "test"]:
         command = arguments.pop_front()
-    options = parse_common(arguments)?
-    target_info = discover_source(options.path, options.binary)?
-    compiler = Compiler()?
+    options = parse_common(arguments)
+    target_info = discover_source(options.path, options.binary)
+    compiler = Compiler()
     compiler.backend_name = options.backend
     if options.target != "host":
         compiler.target_spec = target.target_spec(options.target)
 
     if command == "check":
-        compiler.check_file(target_info[0])?
+        compiler.check_file(target_info[0])
         return unit
 
     output = options.output
     if output == None:
         output = file.join("target", target_info[1])
     file.create_directories(file.parent(output))
-    artifact = compiler.compile_file(target_info[0], output)?
+    artifact = compiler.compile_file(target_info[0], output)
     if command == "build" or command == "compile":
         print(artifact.path)
         return unit

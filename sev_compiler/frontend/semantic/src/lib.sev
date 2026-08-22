@@ -22,11 +22,18 @@ class PackageFunction:
     id: hir.FunctionId
     definition: universal.DefId
     type_parameters: list[universal.GenericParamId]
+    constrained: bool
+    constraints_supported: bool
     parameters: list[universal.TypeId]
     result: universal.TypeId
 
 
 class FunctionSignature:
+    type_parameters: list[universal.GenericParamId]
+    constrained: bool
+    constraints_supported: bool
+    binary_requirements: map[universal.GenericParamId, set[universal.BinaryOperator]]
+    capability_requirements: map[universal.GenericParamId, set[universal.CompilerCapability]]
     parameters: list[universal.TypeId]
     result: universal.TypeId
 
@@ -39,6 +46,8 @@ class Analyzer:
     definitions: map[hir.FunctionId, universal.DefId]
     signatures: map[hir.FunctionId, FunctionSignature]
     binding_types: map[hir.BindingId, universal.TypeId]
+    generic_types: map[string, universal.TypeId]
+    generic_binary: map[universal.GenericParamId, set[universal.BinaryOperator]]
     next_hir: u32
     next_binding: u32
 
@@ -55,7 +64,7 @@ class Analyzer:
     def expression(value: ast.Expression, expected: universal.TypeId | None) -> hir.Expression | diagnostics.Diagnostic:
         match value.kind:
             case LiteralValue:
-                literal = lower_literal(value)?
+                literal = lower_literal(value)
                 type_id = types.type_for_literal(literal)
                 if expected != None:
                     type_id = expected
@@ -76,9 +85,9 @@ class Analyzer:
             case Call:
                 arguments_hir: list[hir.Expression] = []
                 if ast_callable_name(callee) == None:
-                    target = expression(callee, None)?
+                    target = expression(callee, None)
                     for argument in arguments:
-                        arguments_hir.append(expression(argument.value, None)?)
+                        arguments_hir.append(expression(argument.value, None))
                     result = expected if expected != None else types.resolve_name("unit")
                     return hir.Expression(new_hir_id(), result, hir.Call(hir.FunctionValue(target.id), arguments_hir), value.span)
                 name = ast_callable_name(callee)
@@ -86,34 +95,52 @@ class Analyzer:
                 if candidates == None:
                     return error(diagnostics.Diagnostic("E000202", "unknown callable " + name, value.span))
                 selected: hir.FunctionId | None = None
+                selected_substitution = universal.Substitution({})
+                selected_rank = 2147483647
+                ambiguous = false
+                for argument in arguments:
+                    arguments_hir.append(expression(argument.value, None))
                 for candidate in candidates:
                     signature = signatures[candidate]
-                    if len(signature.parameters) == len(arguments):
-                        selected = candidate
-                        break
+                    if len(signature.parameters) != len(arguments_hir):
+                        continue
+                    substitution = infer_call_substitution(types, signature, arguments_hir, expected)
+                    if substitution != None:
+                        rank = overload_rank(signature)
+                        if rank < selected_rank:
+                            selected = candidate
+                            selected_substitution = substitution
+                            selected_rank = rank
+                            ambiguous = false
+                        elif rank == selected_rank:
+                            ambiguous = true
                 if selected == None:
                     return error(diagnostics.Diagnostic("E000203", "no overload matches " + name, value.span))
+                if ambiguous:
+                    return error(diagnostics.Diagnostic("E000203", "ambiguous overload for " + name, value.span))
                 signature = signatures[selected]
-                index = 0
-                for argument in arguments:
-                    arguments_hir.append(expression(argument.value, signature.parameters[index])?)
-                    index += 1
+                result = types.substitute(signature.result, selected_substitution)
                 return hir.Expression(
                     new_hir_id(),
-                    signature.result,
-                    hir.Call(hir.Direct(definitions[selected], universal.Substitution({})), arguments_hir),
+                    result,
+                    hir.Call(hir.Direct(definitions[selected], selected_substitution), arguments_hir),
                     value.span,
                 )
             case Unary:
-                operand_hir = expression(operand, expected)?
+                operand_hir = expression(operand, expected)
                 operation = lower_unary(operator)
-                resolved = types.resolve_unary(operation, operand_hir.type_id)?
+                resolved = types.resolve_unary(operation, operand_hir.type_id)
                 return hir.Expression(new_hir_id(), resolved.result, hir.Unary(operation, operand_hir), value.span)
             case Binary:
-                left_hir = expression(left, expected)?
-                right_hir = expression(right, left_hir.type_id)?
+                left_hir = expression(left, expected)
+                right_hir = expression(right, left_hir.type_id)
                 operation = lower_binary(operator)
-                resolved = types.resolve_binary(operation, left_hir.type_id, right_hir.type_id)?
+                require_generic_binary(left_hir.type_id, operation, value.span)
+                require_generic_binary(right_hir.type_id, operation, value.span)
+                generic_result = generic_binary_result(types, left_hir.type_id, right_hir.type_id, operation)
+                if generic_result != None:
+                    return hir.Expression(new_hir_id(), generic_result, hir.Binary(operation, left_hir, right_hir), value.span)
+                resolved = types.resolve_binary(operation, left_hir.type_id, right_hir.type_id)
                 return hir.Expression(new_hir_id(), resolved.result, hir.Binary(operation, left_hir, right_hir), value.span)
             case Member:
                 return error(diagnostics.Diagnostic("E000206", "member lookup requires a registered implementation", value.span))
@@ -121,17 +148,70 @@ class Analyzer:
     def binding_type(binding: hir.BindingId) -> universal.TypeId:
         return self.binding_types[binding]
 
+    def require_generic_binary(
+        type_id: universal.TypeId,
+        operator: universal.BinaryOperator,
+        span: source.Span,
+    ) -> unit | diagnostics.Diagnostic:
+        match types.kind(type_id):
+            case Parameter:
+                capabilities = generic_binary.get(parameter)
+                if capabilities == None or not capabilities.contains(operator):
+                    return error(diagnostics.Diagnostic("E000219", "generic operator use requires an explicit trait capability", span))
+        return unit
+
     def binding(value: ast.Binding, output: list[hir.Binding]) -> hir.BindingId | diagnostics.Diagnostic:
         expected: universal.TypeId | None = None
         if value.annotation != None:
-            expected = resolve_type_annotation(types, value.annotation)?
-        expression_hir = expression(value.value, expected)?
+            expected = resolve_type_annotation_with_parameters(types, value.annotation, generic_types)
+        expression_hir = expression(value.value, expected)
         id = new_binding_id()
-        output.append(hir.Binding(id, expression_hir.type_id, expression_hir, value.span))
+        output.append(hir.Binding(id, expression_hir.type_id, expression_hir, value.preserve_error, value.span))
         names[value.name] = id
         self.binding_types[id] = expression_hir.type_id
         declarations.add(value.name)
         return id
+
+    def statement(
+        value: ast.Statement,
+        output: list[hir.Binding],
+        result_type: universal.TypeId,
+    ) -> hir.Statement | diagnostics.Diagnostic:
+        match value:
+            case BindingStatement:
+                return hir.BindingStatement(self.binding(binding, output))
+            case ExpressionStatement:
+                return hir.ExpressionStatement(self.expression(expression, None))
+            case Return:
+                if value == None:
+                    return hir.Return(None)
+                return hir.Return(self.expression(value, result_type))
+            case Assert:
+                boolean = types.resolve_name("bool")
+                string = types.resolve_name("string")
+                condition_hir = self.expression(condition, boolean)
+                message_hir: hir.Expression | None = None
+                if message != None:
+                    message_hir = self.expression(message, string)
+                return hir.Assert(condition_hir, message_hir, span, condition.span)
+            case If:
+                boolean = types.resolve_name("bool")
+                condition_hir = self.expression(condition, boolean)
+                then_hir = self.block(then_block, output, result_type)
+                else_hir = self.block(else_block, output, result_type)
+                return hir.If(condition_hir, then_hir, else_hir)
+            case Match:
+                return error(diagnostics.Diagnostic("E000206", "generic match lowering is not implemented", span))
+
+    def block(
+        statements: list[ast.Statement],
+        output: list[hir.Binding],
+        result_type: universal.TypeId,
+    ) -> hir.Block | diagnostics.Diagnostic:
+        lowered = hir.empty_block()
+        for statement_value in statements:
+            lowered.statements.append(self.statement(statement_value, output, result_type))
+        return lowered
 
 
 def lower_literal(expression: ast.Expression) -> universal.LiteralValue:
@@ -172,6 +252,156 @@ def lower_binary(operator: ast.BinaryOperator) -> universal.BinaryOperator:
     return universal.Or
 
 
+def trait_binary_operator(operator: ast.OperatorSyntax) -> universal.BinaryOperator | None:
+    if operator == ast.Plus: return universal.Add
+    if operator == ast.Minus: return universal.Subtract
+    if operator == ast.Multiply: return universal.Multiply
+    if operator == ast.Divide: return universal.Divide
+    if operator == ast.Remainder: return universal.Remainder
+    if operator == ast.Power: return universal.Power
+    if operator == ast.Equal: return universal.Equal
+    if operator == ast.NotEqual: return universal.NotEqual
+    if operator == ast.Less: return universal.Less
+    if operator == ast.LessEqual: return universal.LessEqual
+    if operator == ast.Greater: return universal.Greater
+    if operator == ast.GreaterEqual: return universal.GreaterEqual
+    if operator == ast.Contains: return universal.Contains
+    if operator == ast.And: return universal.And
+    if operator == ast.Or: return universal.Or
+    return None
+
+
+def generic_binary_result(
+    types: universal.TypeContext,
+    left: universal.TypeId,
+    right: universal.TypeId,
+    operator: universal.BinaryOperator,
+) -> universal.TypeId | None:
+    left_generic = false
+    right_generic = false
+    match types.kind(left):
+        case Parameter: left_generic = true
+    match types.kind(right):
+        case Parameter: right_generic = true
+    if not left_generic and not right_generic:
+        return None
+    if left != right:
+        return None
+    if operator == universal.Equal or operator == universal.NotEqual or operator == universal.Less or operator == universal.LessEqual or operator == universal.Greater or operator == universal.GreaterEqual or operator == universal.Contains:
+        return types.resolve_name("bool")
+    return left
+
+
+def collect_trait_binary_capabilities(module: ast.Module) -> map[string, set[universal.BinaryOperator]]:
+    capabilities: map[string, set[universal.BinaryOperator]] = {}
+    for item in module.items:
+        match item:
+            case Trait:
+                operators: set[universal.BinaryOperator] = set()
+                for declaration_operator in declaration.operators:
+                    operator = trait_binary_operator(declaration_operator.operator)
+                    if operator != None:
+                        operators.add(operator)
+                capabilities[declaration.name] = operators
+    return capabilities
+
+
+def declaration_binary_requirements(
+    declaration: ast.FunctionDeclaration,
+    trait_capabilities: map[string, set[universal.BinaryOperator]],
+) -> map[universal.GenericParamId, set[universal.BinaryOperator]]:
+    requirements: map[universal.GenericParamId, set[universal.BinaryOperator]] = {}
+    for constraint in declaration.constraints:
+        match constraint:
+            case Parameter:
+                parameter_id = generic_parameter_id(declaration.type_parameters, parameter)
+                bound_name = ast.simple_type_name(bound)
+                if parameter_id != None and bound_name != None:
+                    capabilities = trait_capabilities.get(bound_name)
+                    if capabilities != None:
+                        if not requirements.contains(parameter_id):
+                            requirements[parameter_id] = set()
+                        for operator in capabilities:
+                            requirements[parameter_id].add(operator)
+    return requirements
+
+
+def declaration_capability_requirements(
+    declaration: ast.FunctionDeclaration,
+) -> map[universal.GenericParamId, set[universal.CompilerCapability]]:
+    requirements: map[universal.GenericParamId, set[universal.CompilerCapability]] = {}
+    for constraint in declaration.constraints:
+        match constraint:
+            case Parameter:
+                parameter_id = generic_parameter_id(declaration.type_parameters, parameter)
+                bound_name = type_annotation_head(bound)
+                if parameter_id != None and bound_name != None:
+                    capability = compiler_capability_bound(bound)
+                    if capability != None:
+                        if not requirements.contains(parameter_id):
+                            requirements[parameter_id] = set()
+                        requirements[parameter_id].add(capability)
+    return requirements
+
+
+def type_annotation_head(annotation: ast.TypeAnnotation) -> string | None:
+    match annotation.kind:
+        case Named: return name
+    return None
+
+
+def compiler_capability_bound(annotation: ast.TypeAnnotation) -> universal.CompilerCapability | None:
+    match annotation.kind:
+        case Named:
+            if name == "FfiSafe":
+                if len(arguments) != 1:
+                    return None
+                abi = ast.simple_type_name(arguments[0])
+                if abi == None:
+                    return None
+                return universal.ffi_safe_capability(abi)
+            if len(arguments) == 0:
+                return universal.compiler_capability(name)
+    return None
+
+
+def overload_rank(signature: FunctionSignature) -> int:
+    if len(signature.type_parameters) == 0:
+        return 0
+    if signature.constrained:
+        return 1
+    return 2
+
+
+def declaration_constraints_supported(
+    declaration: ast.FunctionDeclaration,
+    trait_capabilities: map[string, set[universal.BinaryOperator]],
+) -> bool:
+    for constraint in declaration.constraints:
+        match constraint:
+            case Predicate:
+                return false
+            case Parameter:
+                bound_name = type_annotation_head(bound)
+                if bound_name == None:
+                    return false
+                if compiler_capability_bound(bound) != None:
+                    continue
+                capabilities = trait_capabilities.get(bound_name)
+                if capabilities == None or len(capabilities) == 0:
+                    return false
+    return true
+
+
+def generic_parameter_id(parameters: list[string], name: string) -> universal.GenericParamId | None:
+    index: u32 = 0
+    for parameter in parameters:
+        if parameter == name:
+            return universal.GenericParamId(index)
+        index += 1
+    return None
+
+
 def ast_callable_name(expression: ast.Expression) -> string | None:
     match expression.kind:
         case Name: return name
@@ -183,8 +413,19 @@ def ast_callable_name(expression: ast.Expression) -> string | None:
 
 
 def resolve_type_annotation(types: universal.TypeContext, annotation: ast.TypeAnnotation) -> universal.TypeId | diagnostics.Diagnostic:
+    return resolve_type_annotation_with_parameters(types, annotation, {})
+
+
+def resolve_type_annotation_with_parameters(
+    types: universal.TypeContext,
+    annotation: ast.TypeAnnotation,
+    parameters: map[string, universal.TypeId],
+) -> universal.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
+            parameter = parameters.get(name)
+            if parameter != None and len(arguments) == 0:
+                return parameter
             constructor = types.resolve_name(name)
             if constructor == None:
                 return error(diagnostics.Diagnostic("E000205", "unknown type " + name, annotation.span))
@@ -192,13 +433,146 @@ def resolve_type_annotation(types: universal.TypeContext, annotation: ast.TypeAn
                 return constructor
             resolved: list[universal.TypeId] = []
             for argument in arguments:
-                resolved.append(resolve_type_annotation(types, argument)?)
-            return types.instantiate(constructor, resolved)?
+                resolved.append(resolve_type_annotation_with_parameters(types, argument, parameters))
+            return types.instantiate(constructor, resolved)
         case Union:
             resolved: list[universal.TypeId] = []
             for member in members:
-                resolved.append(resolve_type_annotation(types, member)?)
+                resolved.append(resolve_type_annotation_with_parameters(types, member, parameters))
             return types.union(resolved)
+
+
+def infer_type(
+    types: universal.TypeContext,
+    formal: universal.TypeId,
+    actual: universal.TypeId,
+    bindings: map[universal.GenericParamId, universal.TypeId],
+) -> bool:
+    formal_kind = types.kind(formal)
+    match formal_kind:
+        case Parameter:
+            known = bindings.get(parameter)
+            if known == None:
+                bindings[parameter] = actual
+                return true
+            return known == actual
+        case Nominal:
+            return infer_nominal(types, definition, substitution, actual, bindings)
+        case Resource:
+            return infer_resource(types, definition, substitution, actual, bindings)
+        case Reference:
+            return infer_reference(types, target, mutable, actual, bindings)
+        case Tuple:
+            return infer_tuple(types, elements, actual, bindings)
+        else:
+            return formal == actual
+
+
+def infer_nominal(
+    types: universal.TypeContext,
+    formal_definition: universal.DefId,
+    formal_substitution: universal.Substitution,
+    actual: universal.TypeId,
+    bindings: map[universal.GenericParamId, universal.TypeId],
+) -> bool:
+    match types.kind(actual):
+        case Nominal:
+            if definition != formal_definition:
+                return false
+            for parameter, formal_argument in formal_substitution.arguments:
+                actual_argument = substitution.get(parameter)
+                if actual_argument == None or not infer_type(types, formal_argument, actual_argument, bindings):
+                    return false
+            return true
+    return false
+
+
+def infer_resource(
+    types: universal.TypeContext,
+    formal_definition: universal.DefId,
+    formal_substitution: universal.Substitution,
+    actual: universal.TypeId,
+    bindings: map[universal.GenericParamId, universal.TypeId],
+) -> bool:
+    match types.kind(actual):
+        case Resource:
+            if definition != formal_definition:
+                return false
+            for parameter, formal_argument in formal_substitution.arguments:
+                actual_argument = substitution.get(parameter)
+                if actual_argument == None or not infer_type(types, formal_argument, actual_argument, bindings):
+                    return false
+            return true
+    return false
+
+
+def infer_reference(
+    types: universal.TypeContext,
+    formal_target: universal.TypeId,
+    formal_mutable: bool,
+    actual: universal.TypeId,
+    bindings: map[universal.GenericParamId, universal.TypeId],
+) -> bool:
+    match types.kind(actual):
+        case Reference:
+            return mutable == formal_mutable and infer_type(types, formal_target, target, bindings)
+    return false
+
+
+def infer_tuple(
+    types: universal.TypeContext,
+    formal_elements: list[universal.TypeId],
+    actual: universal.TypeId,
+    bindings: map[universal.GenericParamId, universal.TypeId],
+) -> bool:
+    match types.kind(actual):
+        case Tuple:
+            if len(formal_elements) != len(elements):
+                return false
+            index = 0
+            while index < len(elements):
+                if not infer_type(types, formal_elements[index], elements[index], bindings):
+                    return false
+                index += 1
+            return true
+    return false
+
+
+def infer_call_substitution(
+    types: universal.TypeContext,
+    signature: FunctionSignature,
+    arguments: list[hir.Expression],
+    expected: universal.TypeId | None,
+) -> universal.Substitution | None:
+    if not signature.constraints_supported:
+        return None
+    bindings: map[universal.GenericParamId, universal.TypeId] = {}
+    index = 0
+    while index < len(arguments):
+        if not infer_type(types, signature.parameters[index], arguments[index].type_id, bindings):
+            return None
+        index += 1
+    if expected != None and not infer_type(types, signature.result, expected, bindings):
+        return None
+    for parameter in signature.type_parameters:
+        if bindings.get(parameter) == None:
+            return None
+    substitution = universal.Substitution(bindings)
+    for parameter, requirements in signature.binary_requirements:
+        actual = substitution.get(parameter)
+        if actual == None:
+            return None
+        for operator in requirements:
+            if not types.supports_binary(operator, actual):
+                return None
+    for parameter, requirements in signature.capability_requirements:
+        actual = substitution.get(parameter)
+        if actual == None:
+            return None
+        for capability in requirements:
+            if not types.has_capability(actual, capability):
+                return None
+    return substitution
 
 
 def synthetic_definition(module_name: string, name: string, ordinal: int) -> universal.DefId:
@@ -216,14 +590,15 @@ def analyze_with_package_functions(
     own_ids: list[hir.FunctionId],
     test_ids: list[hir.FunctionId],
 ) -> hir.Program | diagnostics.Diagnostic:
-    analyzer = Analyzer(types, {}, set(), {}, {}, {}, {}, 0, 0)
+    analyzer = Analyzer(types, {}, set(), {}, {}, {}, {}, {}, {}, 0, 0)
+    trait_binary = collect_trait_binary_capabilities(module_ast)
 
     for function in visible:
         if not analyzer.functions.contains(function.lookup):
             analyzer.functions[function.lookup] = []
         analyzer.functions[function.lookup].append(function.id)
         analyzer.definitions[function.id] = function.definition
-        analyzer.signatures[function.id] = FunctionSignature(function.parameters, function.result)
+        analyzer.signatures[function.id] = FunctionSignature(function.type_parameters, function.constrained, function.constraints_supported, {}, {}, function.parameters, function.result)
 
     module = hir.empty_module()
     ordinal = 0
@@ -234,25 +609,64 @@ def analyze_with_package_functions(
                 definition = synthetic_definition(context.module_name, declaration.name, ordinal)
                 parameters: list[hir.FunctionParameter] = []
                 parameter_types: list[universal.TypeId] = []
+                type_parameters: list[universal.GenericParamId] = []
+                generic_types: map[string, universal.TypeId] = {}
+                generic_index: u32 = 0
+                for generic in declaration.type_parameters:
+                    generic_id = universal.GenericParamId(generic_index)
+                    type_parameters.append(generic_id)
+                    generic_types[generic] = types.parameter(generic_id)
+                    generic_index += 1
                 for parameter in declaration.parameters:
-                    type_id = resolve_type_annotation(types, parameter.annotation)?
+                    type_id = resolve_type_annotation_with_parameters(types, parameter.annotation, generic_types)
                     binding = analyzer.new_binding_id()
                     parameters.append(hir.FunctionParameter(binding, parameter.name, hir.BoundaryType(type_id, [])))
                     parameter_types.append(type_id)
-                result = resolve_type_annotation(types, declaration.result)?
-                analyzer.functions[declaration.name] = [id]
+                result = resolve_type_annotation_with_parameters(types, declaration.result, generic_types)
+                if not analyzer.functions.contains(declaration.name):
+                    analyzer.functions[declaration.name] = []
+                analyzer.functions[declaration.name].append(id)
                 analyzer.definitions[id] = definition
-                analyzer.signatures[id] = FunctionSignature(parameter_types, result)
-                module.functions.append(hir.FunctionDeclaration(id, definition, declaration.name, [], parameters, hir.BoundaryType(result, []), universal.Standard, hir.Severian, None))
+                requirements = declaration_binary_requirements(declaration, trait_binary)
+                capability_requirements = declaration_capability_requirements(declaration)
+                constraints_supported = declaration_constraints_supported(declaration, trait_binary)
+                analyzer.signatures[id] = FunctionSignature(type_parameters, len(declaration.constraints) > 0, constraints_supported, requirements, capability_requirements, parameter_types, result)
+                module.functions.append(hir.FunctionDeclaration(id, definition, declaration.name, type_parameters, parameters, hir.BoundaryType(result, []), universal.Standard, hir.Severian, None))
                 ordinal += 1
 
     for item in module_ast.items:
         match item:
             case BindingItem:
-                id = analyzer.binding(binding, module.bindings)?
+                id = analyzer.binding(binding, module.bindings)
                 module.initializer.statements.append(hir.BindingStatement(id))
             case ExpressionItem:
-                module.initializer.statements.append(hir.ExpressionStatement(analyzer.expression(expression, None)?))
+                module.initializer.statements.append(hir.ExpressionStatement(analyzer.expression(expression, None)))
+
+    globals = analyzer.names.copy()
+    function_index = 0
+    for item in module_ast.items:
+        match item:
+            case Function:
+                function = module.functions[function_index]
+                function_index += 1
+                if declaration.body == None:
+                    continue
+                analyzer.names = globals.copy()
+                analyzer.declarations = set()
+                analyzer.generic_types = {}
+                analyzer.generic_binary = {}
+                generic_index: u32 = 0
+                for generic in declaration.type_parameters:
+                    analyzer.generic_types[generic] = types.parameter(universal.GenericParamId(generic_index))
+                    generic_index += 1
+                requirements = declaration_binary_requirements(declaration, trait_binary)
+                for parameter_id, capabilities in requirements:
+                    analyzer.generic_binary[parameter_id] = capabilities.copy()
+                for parameter in function.parameters:
+                    analyzer.names[parameter.name] = parameter.binding
+                    analyzer.binding_types[parameter.binding] = parameter.contract.type_id
+                    analyzer.declarations.add(parameter.name)
+                function.body = analyzer.block(declaration.body, module.bindings, function.result.type_id)
 
     return hir.Program([module])
 
@@ -263,3 +677,64 @@ def analyze_with_context(module: ast.Module, types: universal.TypeContext, conte
 
 def analyze(module: ast.Module, types: universal.TypeContext) -> hir.Program | diagnostics.Diagnostic:
     return analyze_with_context(module, types, AnalysisContext(Build, "memory"))
+
+
+test "generic calls infer and preserve substitutions":
+    types = universal.TypeContext()
+    parameter_id = universal.GenericParamId(0)
+    parameter = types.parameter(parameter_id)
+    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(1)), universal.Substitution({})))
+    types.add_binary(universal.OperatorSignature(universal.Less, universal.Exact(concrete), universal.Exact(concrete), universal.Exact(concrete)))
+    required: set[universal.BinaryOperator] = set()
+    required.add(universal.Less)
+    requirements = {parameter_id: required}
+    signature = FunctionSignature([parameter_id], true, true, requirements, {}, [parameter], parameter)
+    span = source.Span(source.SourceId(0), 0, 1)
+    argument = hir.Expression(hir.HirId(0), concrete, hir.Literal(universal.IntegerValue("1")), span)
+    substitution = infer_call_substitution(types, signature, [argument], None)
+    if substitution != None:
+        assert(types.substitute(parameter, substitution) == concrete)
+    else:
+        assert(false)
+
+
+test "generic calls reject unsatisfied trait capabilities":
+    types = universal.TypeContext()
+    parameter_id = universal.GenericParamId(0)
+    parameter = types.parameter(parameter_id)
+    concrete = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(2)), universal.Substitution({})))
+    required: set[universal.BinaryOperator] = set()
+    required.add(universal.Less)
+    signature = FunctionSignature([parameter_id], true, true, {parameter_id: required}, {}, [parameter], parameter)
+    span = source.Span(source.SourceId(0), 0, 1)
+    argument = hir.Expression(hir.HirId(0), concrete, hir.Literal(universal.IntegerValue("1")), span)
+    assert(infer_call_substitution(types, signature, [argument], None) == None)
+
+
+test "overload ranking is concrete then constrained then generic":
+    parameter_id = universal.GenericParamId(0)
+    type_id = universal.TypeId(0)
+    required: set[universal.CompilerCapability] = set()
+    required.add(universal.Send)
+    exact = FunctionSignature([], false, true, {}, {}, [type_id], type_id)
+    constrained = FunctionSignature([parameter_id], true, true, {}, {parameter_id: required}, [type_id], type_id)
+    generic = FunctionSignature([parameter_id], false, true, {}, {}, [type_id], type_id)
+    assert(overload_rank(exact) < overload_rank(constrained))
+    assert(overload_rank(constrained) < overload_rank(generic))
+
+
+test "compiler capabilities are enforced during generic calls":
+    types = universal.TypeContext()
+    parameter_id = universal.GenericParamId(0)
+    parameter = types.parameter(parameter_id)
+    transferable = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(10)), universal.Substitution({})))
+    local_only = types.intern(universal.Nominal(universal.DefId(0, 0, universal.DeclarationId(11)), universal.Substitution({})))
+    types.grant_capability(transferable, universal.Send)
+    required: set[universal.CompilerCapability] = set()
+    required.add(universal.Send)
+    signature = FunctionSignature([parameter_id], true, true, {}, {parameter_id: required}, [parameter], parameter)
+    span = source.Span(source.SourceId(0), 0, 1)
+    accepted = hir.Expression(hir.HirId(0), transferable, hir.Literal(universal.IntegerValue("1")), span)
+    rejected = hir.Expression(hir.HirId(1), local_only, hir.Literal(universal.IntegerValue("1")), span)
+    assert(infer_call_substitution(types, signature, [accepted], None) != None)
+    assert(infer_call_substitution(types, signature, [rejected], None) == None)

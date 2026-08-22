@@ -78,25 +78,25 @@ def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
             case Coverage:
                 output += "    __sev_coverage_hit(\"" + key + "\");\n"
             case ConstantValue:
-                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + c_literal(value) + ";\n"
+                output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + c_literal(value) + ";\n"
             case Unary:
                 symbol = "+"
                 if operator == lir.Negative: symbol = "-"
                 elif operator == lir.Not: symbol = "!"
-                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + symbol + "v" + string(operand.index) + ";\n"
+                output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + symbol + "v" + string(operand.index) + ";\n"
             case Binary:
-                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = v" + string(left.index) + " " + binary_operator(operator) + " v" + string(right.index) + ";\n"
+                output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = v" + string(left.index) + " " + binary_operator(operator) + " v" + string(right.index) + ";\n"
             case Call:
                 arguments_text: list[string] = []
                 for argument in arguments: arguments_text.append("v" + string(argument.index))
-                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = __sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ");\n"
+                output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = __sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ");\n"
             case RuntimeCall:
                 arguments_text: list[string] = []
                 for argument in arguments: arguments_text.append("v" + string(argument.index))
                 if result == None:
                     output += "    " + symbol + "(" + arguments_text.join(", ") + ");\n"
                 else:
-                    output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + symbol + "(" + arguments_text.join(", ") + ");\n"
+                    output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + symbol + "(" + arguments_text.join(", ") + ");\n"
             case Return:
                 output += "    return"
                 if value != None: output += " v" + string(value.index)
@@ -105,9 +105,9 @@ def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
                 output += "    if (!v" + string(condition.index) + ") { fputs(\"assertion failed\\n\", stderr); exit(1); }\n"
             case If:
                 output += "    if (v" + string(condition.index) + ") {\n"
-                output += render_block(module, then_block)?
+                output += render_block(module, then_block)
                 output += "    } else {\n"
-                output += render_block(module, else_block)?
+                output += render_block(module, else_block)
                 output += "    }\n"
             case ArtifactCall:
                 return error(UnsupportedOperation("artifact calls require MLIR composition"))
@@ -119,18 +119,18 @@ def render_c(module: lir.Module) -> string | BackendError:
     for function in module.functions:
         parameters: list[string] = []
         for parameter in function.parameters:
-            parameters.append(c_type(value_type(module, parameter)?)? + " v" + string(parameter.index))
-        output += "static " + c_type(function.result)? + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ");\n"
+            parameters.append(c_type(value_type(module, parameter)) + " v" + string(parameter.index))
+        output += "static " + c_type(function.result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ");\n"
     output += "static int __sev_init(void) {\n"
-    output += render_block(module, module.initializer)?
+    output += render_block(module, module.initializer)
     output += "    return 0;\n}\n"
     for function in module.functions:
         if function.body == None: continue
         parameters: list[string] = []
         for parameter in function.parameters:
-            parameters.append(c_type(value_type(module, parameter)?)? + " v" + string(parameter.index))
-        output += "static " + c_type(function.result)? + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
-        output += render_block(module, function.body)?
+            parameters.append(c_type(value_type(module, parameter)) + " v" + string(parameter.index))
+        output += "static " + c_type(function.result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
+        output += render_block(module, function.body)
         if function.result == lir.Unit: output += "    return;\n"
         output += "}\n"
     output += "int main(int argc, char **argv) { (void)argc; (void)argv; if (__sev_init()) return 1;"
@@ -140,7 +140,7 @@ def render_c(module: lir.Module) -> string | BackendError:
 
 
 def emit_executable(module: lir.Module, output_path: string) -> Artifact | BackendError:
-    c_source = render_c(module)?
+    c_source = render_c(module)
     result = process.run(["cc", "-x", "c", "-", "-o", output_path] + runtime.native_sources(), input = c_source)
     if result.status != 0:
         return error(CompilerFailed(result.stderr))

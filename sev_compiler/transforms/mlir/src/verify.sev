@@ -24,12 +24,12 @@ def verify_text(module: string, description: string) -> unit | MlirError:
 
 
 def verify_artifact(id: artifact.ArtifactId, generated: MlirArtifact, target_spec: target.TargetSpec) -> VerifiedMlirArtifact | MlirError:
-    verify_text(generated.module, "artifact")?
+    verify_text(generated.module, "artifact")
     return VerifiedMlirArtifact(id, generated.module, target_spec.triple)
 
 
 def compose(normal: string, artifacts: list[VerifiedMlirArtifact], target_spec: target.TargetSpec) -> string | MlirError:
-    verify_text(normal, "ordinary module")?
+    verify_text(normal, "ordinary module")
     additions = ""
     seen: set[artifact.ArtifactId] = set()
     for generated in artifacts:

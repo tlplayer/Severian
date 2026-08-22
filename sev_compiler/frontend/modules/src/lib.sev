@@ -61,7 +61,7 @@ class Resolver:
         sources = source.SourceMap()
 
     def visit(path: string, package: PackageId) -> unit | diagnostics.Diagnostic:
-        canonical = file.canonical(path)?
+        canonical = file.canonical(path)
         if canonical in visited:
             return unit
         if visiting.contains(canonical):
@@ -71,10 +71,10 @@ class Resolver:
                     return error(diagnostics.Diagnostic("E000122", "runtime module initialization cycle", None))
             return unit
 
-        source_id = sources.load(canonical)?
+        source_id = sources.load(canonical)
         source_file = sources.get(source_id)
-        tokens = lexer.scan(source_file)?
-        module = parser.parse(tokens)?
+        tokens = lexer.scan(source_file)
+        module = parser.parse(tokens)
         parsed[canonical] = module
         id = module_id(canonical, package)
         module_ids[canonical] = id
@@ -84,10 +84,10 @@ class Resolver:
         for item in module.items:
             match item:
                 case Import:
-                    dependency = source_import(canonical, package, declaration, packages)?
+                    dependency = source_import(canonical, package, declaration, packages)
                     if dependency != None:
-                        visit(dependency[0], dependency[1])?
-                        imports.append(ResolvedImport(declaration.span, module_ids[file.canonical(dependency[0])?]))
+                        visit(dependency[0], dependency[1])
+                        imports.append(ResolvedImport(declaration.span, module_ids[file.canonical(dependency[0])]))
 
         visiting.pop()
         visited.add(canonical)
@@ -133,7 +133,7 @@ def has_runtime_initializer(module: ast.Module) -> bool:
 
 def resolve_with_packages(root: string, packages: PackageGraph) -> ModuleGraph | diagnostics.Diagnostic:
     resolver = Resolver(packages)
-    resolver.visit(root, packages.root)?
+    resolver.visit(root, packages.root)
     return ModuleGraph(resolver.order)
 
 

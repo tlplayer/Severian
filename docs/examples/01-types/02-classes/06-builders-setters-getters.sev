@@ -1,0 +1,46 @@
+def invalid_age(age: int) -> Error:
+    return Error(f"invalid age: {age}")
+
+
+class User:
+    name: string {
+        len(name) == 0
+            -> Error("name cannot be empty"),
+    }
+
+    age: int {
+        age < 0
+            -> Error("age cannot be negative"),
+
+        age > 130
+            -> invalid_age(age),
+
+        age < 18 and restricted_account()
+            -> Error("restricted accounts require an adult"),
+    }
+
+
+def main():
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
+
+    print(user.name)
+    print(user.age)
+
+
+```
+# construction
+user := User {
+    name: "Alice",
+    age: 36,
+}
+
+# builder
+user := User()
+    .set(name, "Alice")
+    .set(age, 36)
+
+# mutation
+user.set(age, 37)
+```

@@ -130,6 +130,8 @@ class TypeContext:
     unary: list[tuple[UnaryOperator, TypeId, TypeId]]
     applications: map[string, TypeId]
     compile_routes: map[TypeId, CompilerId]
+    capabilities: map[TypeId, set[CompilerCapability]]
+    structural_members: map[TypeId, list[TypeId]]
 
     def TypeContext():
         interner = TyInterner()
@@ -140,6 +142,8 @@ class TypeContext:
         unary = []
         applications = {}
         compile_routes = {}
+        capabilities = {}
+        structural_members = {}
 
     def register_declaration(path: string, name: string, parameter_count: int = 0) -> TypeId | TypeError:
         if by_name.contains(name):
@@ -157,6 +161,13 @@ class TypeContext:
         primitive_id = PrimitiveId(definition.declaration)
         primitive = PrimitiveDefinition(primitive_id, type_id, category, representation, default_literal)
         definitions[type_id.index].kind = Primitive(primitive)
+        grant_capability(type_id, Send)
+        grant_capability(type_id, Sync)
+        if category == Boolean or category == Character or category == Integer or category == Float or category == Absence or category == Unit:
+            grant_capability(type_id, Copy)
+        if category == Boolean or category == Character or category == Integer or category == Float or category == Unit:
+            grant_capability(type_id, FfiSafe("C"))
+            grant_capability(type_id, DeviceSafe)
         if default_literal:
             kind: LiteralKind | None = None
             if category == Boolean: kind = LiteralKind.Boolean
@@ -190,6 +201,9 @@ class TypeContext:
 
     def parameter(id: GenericParamId) -> TypeId:
         return interner.parameter(id)
+
+    def substitute(type_id: TypeId, substitution: Substitution) -> TypeId:
+        return interner.substitute(type_id, substitution)
 
     def union(members: list[TypeId]) -> TypeId:
         return interner.union(members)
@@ -242,9 +256,85 @@ class TypeContext:
 
     def resolve_binary(operator: BinaryOperator, left: TypeId, right: TypeId) -> ResolvedBinary | TypeError:
         for signature in binary:
-            if signature.operator == operator:
-                return ResolvedBinary(left, right, pattern_type(signature.result, left, right), signature)
+            if signature.operator != operator:
+                continue
+            match signature.left:
+                case Exact:
+                    if type_id != left:
+                        continue
+                else:
+                    continue
+            expected_right = pattern_type(signature.right, left, right)
+            if expected_right != right:
+                continue
+            return ResolvedBinary(left, right, pattern_type(signature.result, left, right), signature)
         return error(OperatorNotFound)
+
+    def supports_binary(operator: BinaryOperator, operand: TypeId) -> bool:
+        for signature in binary:
+            if signature.operator != operator:
+                continue
+            match signature.left:
+                case Exact:
+                    if type_id != operand:
+                        continue
+                else:
+                    continue
+            if pattern_type(signature.right, operand, operand) == operand:
+                return true
+        return false
+
+    def grant_capability(type_id: TypeId, capability: CompilerCapability):
+        if not capabilities.contains(type_id):
+            capabilities[type_id] = set()
+        capabilities[type_id].add(capability)
+
+    def register_structural_members(type_id: TypeId, members: list[TypeId]):
+        structural_members[type_id] = members
+
+    def has_capability(type_id: TypeId, capability: CompilerCapability) -> bool:
+        return derive_capability(type_id, capability, set())
+
+    def derive_capability(
+        type_id: TypeId,
+        capability: CompilerCapability,
+        visiting: set[TypeId],
+    ) -> bool:
+        direct = capabilities.get(type_id)
+        if direct != None and direct.contains(capability):
+            return true
+        if visiting.contains(type_id):
+            return false
+        next_visiting = visiting.copy()
+        next_visiting.add(type_id)
+        member_types = structural_members.get(type_id)
+        if member_types != None:
+            for member in member_types:
+                if not derive_capability(member, capability, next_visiting):
+                    return false
+            return true
+        match kind(type_id):
+            case Tuple:
+                for element in elements:
+                    if not derive_capability(element, capability, next_visiting):
+                        return false
+                return true
+            case Union:
+                for member in members:
+                    if not derive_capability(member, capability, next_visiting):
+                        return false
+                return true
+            case Reference:
+                if capability == Copy:
+                    return not mutable
+                if capability == Send:
+                    return derive_capability(target, Send, next_visiting)
+                if capability == Sync:
+                    return derive_capability(target, Sync, next_visiting)
+                return false
+            case Resource:
+                return false
+        return false
 
 
 def pattern_type(pattern: TypePattern, left: TypeId, right: TypeId) -> TypeId:
@@ -275,5 +365,33 @@ class TypeContextBuilder:
     def add_unary(operator: UnaryOperator, operand: TypeId, result: TypeId):
         context.add_unary(operator, operand, result)
 
+    def grant_capability(type_id: TypeId, capability: CompilerCapability):
+        context.grant_capability(type_id, capability)
+
+    def register_structural_members(type_id: TypeId, members: list[TypeId]):
+        context.register_structural_members(type_id, members)
+
     def build() -> TypeContext:
         return context
+
+
+test "compiler capabilities derive structurally and remain conservative for resources":
+    types = TypeContext()
+    scalar = types.intern(Nominal(DefId(0, 0, DeclarationId(1)), Substitution({})))
+    point = types.intern(Nominal(DefId(0, 0, DeclarationId(2)), Substitution({})))
+    resource = types.intern(Resource(DefId(0, 0, DeclarationId(3)), Substitution({})))
+    file = types.intern(Nominal(DefId(0, 0, DeclarationId(4)), Substitution({})))
+    types.grant_capability(scalar, Copy)
+    types.grant_capability(scalar, Send)
+    types.grant_capability(scalar, FfiSafe("C"))
+    types.grant_capability(scalar, DeviceSafe)
+    types.register_structural_members(point, [scalar, scalar])
+    types.register_structural_members(file, [resource])
+    assert(types.has_capability(point, Copy))
+    assert(types.has_capability(point, Send))
+    assert(types.has_capability(point, FfiSafe("C")))
+    assert(types.has_capability(point, DeviceSafe))
+    assert(not types.has_capability(file, Copy))
+    assert(not types.has_capability(file, Send))
+    types.grant_capability(resource, Send)
+    assert(types.has_capability(file, Send))

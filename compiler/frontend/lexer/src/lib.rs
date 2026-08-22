@@ -22,6 +22,15 @@ mod tests {
     }
 
     #[test]
+    fn scans_error_preserving_assignment() {
+        let source = SourceFile::virtual_source("result.sev", "result ?= read()\n");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::QuestionEqual));
+    }
+
+    #[test]
     fn scans_indented_trait_members_and_typed_operators() {
         let source = SourceFile::virtual_source(
             "primitive.sev",

@@ -75,12 +75,12 @@ class PassManager:
             if metadata.accepted_stage != stage:
                 return error(PassError(metadata.name, "pass received the wrong IR stage"))
             if metadata.kind == Module:
-                pass.run_module(module, analyses)?
+                pass.run_module(module, analyses)
             else:
-                pass.run_function(module.initializer_cfg, analyses)?
+                pass.run_function(module.initializer_cfg, analyses)
                 for function in module.functions:
                     if function.cfg != None:
-                        pass.run_function(function.cfg, analyses)?
+                        pass.run_function(function.cfg, analyses)
             analyses.invalidate_except(metadata.preserved_analyses)
             stage = metadata.produced_stage
         return stage

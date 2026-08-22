@@ -84,11 +84,11 @@ def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: uni
     current_compiler: universal.CompilerId | None = None
 
     for index, operation in block.operations.enumerated():
-        route = operation_route(operation, values, types, index)?
+        route = operation_route(operation, values, types, index)
         match route:
             case Standard:
                 if len(current_custom) > 0:
-                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                     current_compiler = None
@@ -98,7 +98,7 @@ def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: uni
                     segments.append(Standard(StandardRegion(current_standard)))
                     current_standard = []
                 if current_compiler != None and current_compiler != compiler:
-                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                 current_compiler = compiler
@@ -106,7 +106,7 @@ def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: uni
 
     if len(current_standard) > 0: segments.append(Standard(StandardRegion(current_standard)))
     if len(current_custom) > 0:
-        segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+        segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
         next_region += 1
     return (PlannedBlock(segments), next_region)
 
@@ -115,13 +115,13 @@ def plan(module: mir.Module, types: universal.TypeContext) -> CompilePlan | Comp
     values: map[mir.ValueId, mir.Value] = {}
     for value in module.values: values[value.id] = value
     next_region: u32 = 0
-    initializer_result = plan_block(module.initializer, values, types, next_region)?
+    initializer_result = plan_block(module.initializer, values, types, next_region)
     next_region = initializer_result[1]
     functions: list[PlannedFunction] = []
     for function in module.functions:
         body: PlannedBlock | None = None
         if function.body != None:
-            planned = plan_block(function.body, values, types, next_region)?
+            planned = plan_block(function.body, values, types, next_region)
             body = planned[0]
             next_region = planned[1]
         functions.append(PlannedFunction(function, body))

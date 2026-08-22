@@ -8,3 +8,4 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
+source = { path = "../source" }

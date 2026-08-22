@@ -23,11 +23,11 @@ def verify_place(body: CfgBody, place: Place) -> unit | VerifyError:
 def use_operand(body: CfgBody, block: BlockId, operand: Operand, state: set[LocalId]) -> unit | VerifyError:
     match operand:
         case Copy:
-            verify_place(body, place)?
+            verify_place(body, place)
             if place.local not in state:
                 return error(UseBeforeDefinition(block.index, place.local.index))
         case Move:
-            verify_place(body, place)?
+            verify_place(body, place)
             if place.local not in state:
                 return error(UseBeforeDefinition(block.index, place.local.index))
             state.remove(place.local)
@@ -81,26 +81,26 @@ def verify_body(body: CfgBody) -> unit | VerifyError:
                 case StorageDead: state.discard(local)
                 case Assign:
                     match value:
-                        case Use: use_operand(body, block.id, operand, state)?
-                        case Unary: use_operand(body, block.id, operand, state)?
-                        case Convert: use_operand(body, block.id, operand, state)?
+                        case Use: use_operand(body, block.id, operand, state)
+                        case Unary: use_operand(body, block.id, operand, state)
+                        case Convert: use_operand(body, block.id, operand, state)
                         case Binary:
-                            use_operand(body, block.id, left, state)?
-                            use_operand(body, block.id, right, state)?
-                    verify_place(body, place)?
+                            use_operand(body, block.id, left, state)
+                            use_operand(body, block.id, right, state)
+                    verify_place(body, place)
                     state.add(place.local)
                 case Drop:
-                    verify_place(body, place)?
+                    verify_place(body, place)
                     if place.local not in state:
                         return error(InvalidOwnershipState(block.id.index, place.local.index))
                     state.remove(place.local)
                 case Assert:
-                    use_operand(body, block.id, condition, state)?
-                    if message != None: use_operand(body, block.id, message, state)?
+                    use_operand(body, block.id, condition, state)
+                    if message != None: use_operand(body, block.id, message, state)
                 case Operation:
-                    for operand in operands: use_operand(body, block.id, operand, state)?
+                    for operand in operands: use_operand(body, block.id, operand, state)
                     for result in results:
-                        verify_place(body, result)?
+                        verify_place(body, result)
                         state.add(result.local)
         for successor in successors(block.terminator):
             incoming[successor] = state.copy()
@@ -108,9 +108,9 @@ def verify_body(body: CfgBody) -> unit | VerifyError:
 
 
 def verify(module: Module, types: universal.TypeContext) -> unit | VerifyError:
-    verify_body(module.initializer_cfg)?
+    verify_body(module.initializer_cfg)
     for function in module.functions:
         if function.cfg != None:
-            verify_body(function.cfg)?
+            verify_body(function.cfg)
     return unit
 

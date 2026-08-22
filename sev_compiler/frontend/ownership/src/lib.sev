@@ -3,6 +3,6 @@ import "validate/mod.sev"
 
 def validate(program: hir.Program):
     for module in program.modules:
-        validate_module(module)?
+        validate_module(module)
     return unit
 

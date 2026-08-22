@@ -4,7 +4,9 @@ mod expression;
 mod statement;
 mod types;
 
-pub use expression::{BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, UnaryOperator};
+pub use expression::{
+    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, UnaryOperator,
+};
 pub use statement::{Binding, MatchCase, Statement};
 pub use types::{
     CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument, DecoratorValue,

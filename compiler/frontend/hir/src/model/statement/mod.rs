@@ -6,6 +6,9 @@ pub struct Binding {
     pub id: BindingId,
     pub type_id: TypeId,
     pub value: Expression,
+    /// True for `?=`. False means a fallible value is unwrapped and its error
+    /// path is propagated when result lowering is available.
+    pub preserve_error: bool,
     pub span: Span,
 }
 

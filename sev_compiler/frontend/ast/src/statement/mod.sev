@@ -7,6 +7,7 @@ class Binding:
     annotation: TypeAnnotation | None
     value: Expression
     update: bool
+    preserve_error: bool
     span: source.Span
 
 
@@ -24,4 +25,3 @@ enum Statement:
     Assert(condition: Expression, message: Expression | None, span: source.Span)
     If(condition: Expression, then_block: list[Statement], else_block: list[Statement], span: source.Span)
     Match(subject: Expression, cases: list[MatchCase], span: source.Span)
-

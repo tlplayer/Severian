@@ -1,10 +1,10 @@
 use severian_ast::{
     BinaryOperator, Binding, CallArgument, CompilerExpectation, CompilerTestCase, Decorator,
-    DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
-    GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module,
-    OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement,
-    TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
-    UnaryOperator,
+    DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration,
+    FunctionParameter, GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal,
+    MatchCase, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
+    Statement, TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+    TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -194,7 +194,9 @@ impl Parser<'_> {
                     span: Span::new(
                         parameter_span.source,
                         parameter_span.start,
-                        default.as_ref().map_or(annotation.span.end, |value| value.span.end),
+                        default
+                            .as_ref()
+                            .map_or(annotation.span.end, |value| value.span.end),
                     ),
                     annotation,
                     default,
@@ -760,6 +762,7 @@ impl Parser<'_> {
                 span: Span::new(start.source, start.start, value.span.end),
                 value,
                 update: false,
+                preserve_error: false,
             });
         }
         let (name, name_span) = self.identifier("expected a binding name")?;
@@ -792,6 +795,7 @@ impl Parser<'_> {
                 span: value.span,
                 value,
                 update: true,
+                preserve_error: false,
             });
         }
         let inferred = self.take(&TokenKind::ColonEqual).is_some();
@@ -800,8 +804,12 @@ impl Parser<'_> {
         } else {
             None
         };
-        if !inferred {
-            self.expect(&TokenKind::Equal, "expected `=` or `:=` after binding name")?;
+        let preserve_error = !inferred && self.take(&TokenKind::QuestionEqual).is_some();
+        if !inferred && !preserve_error {
+            self.expect(
+                &TokenKind::Equal,
+                "expected `=`, `?=`, or `:=` after binding name",
+            )?;
         }
         let value = self.expression(0)?;
         Ok(Binding {
@@ -810,6 +818,7 @@ impl Parser<'_> {
             span: Span::new(name_span.source, name_span.start, value.span.end),
             value,
             update: false,
+            preserve_error,
         })
     }
 
@@ -829,6 +838,7 @@ impl Parser<'_> {
                         token.kind,
                         TokenKind::Colon
                             | TokenKind::ColonEqual
+                            | TokenKind::QuestionEqual
                             | TokenKind::Equal
                             | TokenKind::PlusEqual
                             | TokenKind::MinusEqual
@@ -928,7 +938,10 @@ impl Parser<'_> {
                     loop {
                         let start = self.peek().span;
                         let name = if matches!(self.peek().kind, TokenKind::Identifier(_))
-                            && self.tokens.get(self.cursor + 1).is_some_and(|token| token.kind == TokenKind::Equal)
+                            && self
+                                .tokens
+                                .get(self.cursor + 1)
+                                .is_some_and(|token| token.kind == TokenKind::Equal)
                         {
                             let name = self.identifier("expected an argument name")?.0;
                             self.expect(&TokenKind::Equal, "expected `=` after argument name")?;
