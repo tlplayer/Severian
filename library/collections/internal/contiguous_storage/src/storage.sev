@@ -1,0 +1,82 @@
+class ContiguousStorage[T]:
+    data: *[T]
+    used: usize
+    allocated: usize
+
+    def len() -> usize:
+        return used
+
+    def capacity() -> usize:
+        return allocated
+
+    def reserve(minimum: usize):
+        if minimum <= allocated:
+            return
+        next_capacity := allocated * 2
+        if next_capacity < minimum:
+            next_capacity = minimum
+        unsafe:
+            next_data := allocate[T](next_capacity)
+            index := 0
+            while index < used:
+                next_data[index] = move data[index]
+                index += 1
+            free(data)
+            data = next_data
+        allocated = next_capacity
+
+    def get(index: usize) -> T:
+        assert(index < used, "contiguous storage index is out of bounds")
+        unsafe:
+            return data[index]
+
+    def set(index: usize, value: T):
+        assert(index < used, "contiguous storage index is out of bounds")
+        unsafe:
+            data[index] = value
+
+    def append(value: T):
+        reserve(used + 1)
+        unsafe:
+            data[used] = value
+        used += 1
+
+    def insert(index: usize, value: T):
+        assert(index <= used, "contiguous storage insertion index is out of bounds")
+        reserve(used + 1)
+        unsafe:
+            cursor := used
+            while cursor > index:
+                data[cursor] = move data[cursor - 1]
+                cursor -= 1
+            data[index] = value
+        used += 1
+
+    def remove(index: usize) -> T:
+        assert(index < used, "contiguous storage removal index is out of bounds")
+        unsafe:
+            removed := move data[index]
+            cursor := index
+            while cursor + 1 < used:
+                data[cursor] = move data[cursor + 1]
+                cursor += 1
+        used -= 1
+        return removed
+
+    def clear():
+        unsafe:
+            while used > 0:
+                used -= 1
+                drop data[used]
+
+    def drop():
+        clear()
+        unsafe:
+            free(data)
+
+
+def create[T](capacity: usize = 0) -> ContiguousStorage[T]:
+    allocated := capacity if capacity > 0 else 1
+    unsafe:
+        data := allocate[T](allocated)
+    return ContiguousStorage[T](data, 0, allocated)

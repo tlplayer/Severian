@@ -9,7 +9,6 @@ path = "src/validation.sev"
 
 [dependencies]
 core = { path = "../../../library/core" }
-collections = { path = "../../../library/collections" }
 testing = { path = "../../../library/testing" }
 compute = { path = "../../../library/compute" }
 system = { path = "../../../library/system" }
@@ -17,4 +16,3 @@ tensor = { path = "../../../library/tensor" }
 
 [build]
 backend = "auto"
-

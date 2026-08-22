@@ -1,0 +1,30 @@
+import list
+
+test "list owns contiguous growth indexing insertion and removal":
+    builder := list.builder[int](2)
+    builder.push(10)
+    builder.push(30)
+    values := builder.finish()
+    values.insert(1, 20)
+
+    assert(values.len() == 3)
+    assert(values.get(0) == 10)
+    assert(values.get(1) == 20)
+    assert(values.get(2) == 30)
+    assert(values.remove(1) == 20)
+    assert(values.pop() == 30)
+    assert(values.len() == 1)
+
+
+test "list iterator and operations preserve source order":
+    values := list.with_capacity[string](3)
+    values.append("a")
+    values.append("b")
+    values.append("c")
+
+    assert(list.contains(borrow values, "b"))
+    assert(list.index(borrow values, "c") == 2)
+    list.reverse(borrow mut values)
+    assert(values.get(0) == "c")
+    assert(values.get(1) == "b")
+    assert(values.get(2) == "a")

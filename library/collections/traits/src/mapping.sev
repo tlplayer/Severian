@@ -1,0 +1,6 @@
+import "collection.sev"
+
+trait Mapping[K, V]: Collection[(K, V)]:
+    def get(key: K) -> V | None
+    def set(key: K, value: V)
+    def remove(key: K) -> V | None

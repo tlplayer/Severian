@@ -1,0 +1,2 @@
+trait Iterator[T]:
+    def next() -> T | None

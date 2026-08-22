@@ -1,5 +1,5 @@
 core          language foundation
-collections   data structures
+collections   organizational namespace for independent collection packages
 compute       execution/computation
 network       communication
 data          structured data/storage

@@ -1,0 +1,45 @@
+import "list.sev"
+
+def extend[T](values: borrow mut list[T], additions: borrow list[T]):
+    iterator := additions.iter()
+    while true:
+        item ?= iterator.next()
+        if item is None:
+            return
+        values.append(item)
+
+
+def contains[T](values: borrow list[T], expected: T) -> bool:
+    iterator := values.iter()
+    while true:
+        item ?= iterator.next()
+        if item is None:
+            return false
+        if item == expected:
+            return true
+
+
+def index[T](values: borrow list[T], expected: T) -> usize | None:
+    position := 0
+    iterator := values.iter()
+    while true:
+        item ?= iterator.next()
+        if item is None:
+            return None
+        if item == expected:
+            return position
+        position += 1
+
+
+def reverse[T](values: borrow mut list[T]):
+    if values.len() < 2:
+        return
+    left := 0
+    right := values.len() - 1
+    while left < right:
+        right_value := values.remove(right)
+        left_value := values.remove(left)
+        values.insert(left, right_value)
+        values.insert(right, left_value)
+        left += 1
+        right -= 1
