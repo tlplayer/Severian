@@ -146,6 +146,97 @@ fn uncalled_generic_declarations_are_indexed_without_forcing_a_body_instance() {
 }
 
 #[test]
+fn one_generic_definition_collects_multiple_ordered_instances() {
+    let root = temporary();
+    let source = root.join("instances.sev");
+    std::fs::write(
+        &source,
+        "def identity[T](value: T) -> T:\n    return value\ndef number() -> int:\n    return identity(42)\ndef text() -> string:\n    return identity(\"sev\")\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    let generic = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "identity")
+        .unwrap()
+        .id;
+    let instances = typed.hir.modules[0]
+        .functions
+        .iter()
+        .filter(|function| function.definition == generic)
+        .collect::<Vec<_>>();
+    assert_eq!(instances.len(), 2);
+    assert_ne!(instances[0].id, instances[1].id);
+    assert_ne!(instances[0].substitution, instances[1].substitution);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_operator_traits_constrain_generic_instances() {
+    let root = temporary();
+    let source = root.join("ordered.sev");
+    std::fs::write(
+        &source,
+        "trait Ordered:\n    operator <(right: Self) -> bool\ndef minimum[T: Ordered](left: T, right: T) -> T:\n    if left < right:\n        return left\n    return right\ndef selected() -> int:\n    return minimum(2, 1)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+
+    std::fs::write(
+        &source,
+        "trait Ordered:\n    operator <(right: Self) -> bool\ndef minimum[T: Ordered](left: T, right: T) -> T:\n    return left\ndef selected() -> bool:\n    return minimum(true, false)\n",
+    )
+    .unwrap();
+    let error =
+        analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap_err();
+    assert_eq!(error.code, "E000217");
+    assert!(error.message.contains("bool"));
+    assert!(error.message.contains("Ordered"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn concrete_overloads_rank_ahead_of_generic_fallbacks() {
+    let root = temporary();
+    let source = root.join("ranking.sev");
+    std::fs::write(
+        &source,
+        "def encode(value: int) -> int:\n    return 1\ndef encode[T](value: T) -> int:\n    return 2\ndef selected() -> int:\n    return encode(42)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn generic_bodies_require_operator_capabilities_before_instantiation() {
+    let root = temporary();
+    let source = root.join("body-constraints.sev");
+    std::fs::write(
+        &source,
+        "def smaller[T](left: T, right: T) -> bool:\n    return left < right\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let error =
+        analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap_err();
+    assert_eq!(error.code, "E000219");
+
+    std::fs::write(
+        &source,
+        "def smaller[T: Integer[T]](left: T, right: T) -> bool:\n    return left < right\ndef selected() -> bool:\n    return smaller(1, 2)\n",
+    )
+    .unwrap();
+    analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn declaration_only_module_cycles_can_resolve_mutually_recursive_bodies() {
     let root = temporary();
     std::fs::write(

@@ -197,6 +197,16 @@ pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<
                 continue;
             };
             let mut builder = BodyBuilder::new(function.result.ty);
+            // Globals are implicit function inputs until CFG module places are
+            // introduced. Giving them explicit argument locals keeps their
+            // initialization and ownership state visible to verification.
+            for source_module in &program.modules {
+                for binding in &source_module.bindings {
+                    let local = builder.local(binding.type_id, false, true);
+                    builder.bindings.insert(binding.id, Place::local(local));
+                    builder.entry_parameters.push(local);
+                }
+            }
             for parameter in &function.parameters {
                 let local = builder.local(parameter.contract.ty, false, true);
                 builder
@@ -319,7 +329,7 @@ impl BodyBuilder {
                 self.push(Statement::StorageLive(local));
                 self.push(Statement::Assign(
                     place.clone(),
-                    Rvalue::Use(Operand::Move(value)),
+                    Rvalue::Use(Operand::Copy(value)),
                 ));
                 self.bindings.insert(*id, place);
             }
@@ -329,7 +339,7 @@ impl BodyBuilder {
             severian_hir::Statement::Return(value) => {
                 let value = value
                     .as_ref()
-                    .map(|expression| Operand::Move(self.expression(expression)));
+                    .map(|expression| Operand::Copy(self.expression(expression)));
                 self.terminate(Terminator::Return(value));
             }
             severian_hir::Statement::Assert {
@@ -443,7 +453,7 @@ impl BodyBuilder {
                 operand,
                 conversion,
             } => {
-                let operand = Operand::Move(self.expression(operand));
+                let operand = Operand::Copy(self.expression(operand));
                 self.push(Statement::Assign(
                     result.clone(),
                     Rvalue::Convert {
@@ -481,7 +491,7 @@ impl BodyBuilder {
             severian_hir::ExpressionKind::Call { callee, arguments } => {
                 let arguments = arguments
                     .iter()
-                    .map(|argument| Operand::Move(self.expression(argument)))
+                    .map(|argument| Operand::Copy(self.expression(argument)))
                     .collect();
                 let continuation = self.block();
                 let callee = self.callee(callee);

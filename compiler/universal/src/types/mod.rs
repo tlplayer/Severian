@@ -3,7 +3,7 @@ use crate::{
     LiteralValue, OperatorSignature, PrimitiveId, Substitution, TyInterner, TyKind, TypeConstraint,
     TypeId, TypePattern, UnaryOperator,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -156,7 +156,7 @@ pub struct ResolvedUnary {
 #[derive(Debug, Clone, Default)]
 pub struct TypeContext {
     interner: TyInterner,
-    definitions: Vec<TypeDefinition>,
+    definitions: BTreeMap<TypeId, TypeDefinition>,
     by_name: HashMap<String, TypeId>,
     by_declaration: BTreeMap<DeclarationId, TypeId>,
     by_primitive: BTreeMap<PrimitiveId, TypeId>,
@@ -165,6 +165,9 @@ pub struct TypeContext {
     unary: Vec<(UnaryOperator, TypeId, TypeId)>,
     compile_routes: BTreeMap<TypeId, CompilerId>,
     applications: BTreeMap<(TypeId, Vec<TypeId>), TypeId>,
+    capabilities: BTreeMap<TypeId, BTreeSet<TypeId>>,
+    trait_binary: BTreeMap<TypeId, BTreeSet<BinaryOperator>>,
+    trait_unary: BTreeMap<TypeId, BTreeSet<UnaryOperator>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -214,6 +217,26 @@ impl TypeContextBuilder {
         self.context.add_unary(operator, operand, result);
     }
 
+    pub fn add_capability(&mut self, type_id: TypeId, trait_id: TypeId) -> Result<(), TypeError> {
+        self.context.add_capability(type_id, trait_id)
+    }
+
+    pub fn add_trait_binary(&mut self, trait_id: TypeId, operator: BinaryOperator) {
+        self.context
+            .trait_binary
+            .entry(trait_id)
+            .or_default()
+            .insert(operator);
+    }
+
+    pub fn add_trait_unary(&mut self, trait_id: TypeId, operator: UnaryOperator) {
+        self.context
+            .trait_unary
+            .entry(trait_id)
+            .or_default()
+            .insert(operator);
+    }
+
     pub fn set_compile_route(
         &mut self,
         type_id: TypeId,
@@ -258,7 +281,7 @@ impl TypeContext {
         let name = name.into();
         let declaration = DeclarationId::from_path(&path);
         if let Some(existing) = self.by_declaration.get(&declaration) {
-            let known = &self.definitions[existing.0 as usize];
+            let known = &self.definitions[existing];
             return if known.path == path {
                 Ok(*existing)
             } else {
@@ -268,8 +291,7 @@ impl TypeContext {
         if self.by_name.contains_key(&name) {
             return Err(TypeError::DuplicateName(name));
         }
-        let id = TypeId(self.definitions.len() as u32);
-        let interned = self.interner.intern(TyKind::Nominal(
+        let id = self.interner.intern(TyKind::Nominal(
             DefId {
                 package: 0,
                 module: 0,
@@ -277,18 +299,17 @@ impl TypeContext {
             },
             Substitution::default(),
         ));
-        debug_assert_eq!(
-            id, interned,
-            "definition and type identities share one table"
-        );
-        self.definitions.push(TypeDefinition {
+        self.definitions.insert(
             id,
-            declaration,
-            path,
-            name: name.clone(),
-            parameter_count,
-            kind: TypeDefinitionKind::Trait,
-        });
+            TypeDefinition {
+                id,
+                declaration,
+                path,
+                name: name.clone(),
+                parameter_count,
+                kind: TypeDefinitionKind::Trait,
+            },
+        );
         self.by_name.insert(name, id);
         self.by_declaration.insert(declaration, id);
         Ok(id)
@@ -303,7 +324,7 @@ impl TypeContext {
     ) -> Result<PrimitiveId, TypeError> {
         let definition = self
             .definitions
-            .get_mut(type_id.0 as usize)
+            .get_mut(&type_id)
             .ok_or(TypeError::UnknownTypeId(type_id))?;
         if matches!(definition.kind, TypeDefinitionKind::Primitive(_)) {
             return Err(TypeError::AlreadyDefined(definition.path.clone()));
@@ -342,6 +363,52 @@ impl TypeContext {
         }
     }
 
+    fn add_capability(&mut self, type_id: TypeId, trait_id: TypeId) -> Result<(), TypeError> {
+        self.definition(type_id)
+            .ok_or(TypeError::UnknownTypeId(type_id))?;
+        self.definition(trait_id)
+            .ok_or(TypeError::UnknownTypeId(trait_id))?;
+        self.capabilities
+            .entry(type_id)
+            .or_default()
+            .insert(trait_id);
+        Ok(())
+    }
+
+    pub fn implements(&self, type_id: TypeId, trait_id: TypeId) -> bool {
+        type_id == trait_id
+            || self
+                .capabilities
+                .get(&type_id)
+                .is_some_and(|traits| traits.contains(&trait_id))
+    }
+
+    pub fn supports_binary(&self, operator: BinaryOperator, type_id: TypeId) -> bool {
+        self.binary.iter().any(|signature| {
+            signature.operator == operator
+                && matches!(signature.left, TypePattern::Exact(left) if left == type_id)
+                && matches!(signature.right, TypePattern::Exact(right) if right == type_id)
+        })
+    }
+
+    pub fn supports_unary(&self, operator: UnaryOperator, type_id: TypeId) -> bool {
+        self.unary
+            .iter()
+            .any(|(known, operand, _)| *known == operator && *operand == type_id)
+    }
+
+    pub fn trait_supports_binary(&self, trait_id: TypeId, operator: BinaryOperator) -> bool {
+        self.trait_binary
+            .get(&trait_id)
+            .is_some_and(|operators| operators.contains(&operator))
+    }
+
+    pub fn trait_supports_unary(&self, trait_id: TypeId, operator: UnaryOperator) -> bool {
+        self.trait_unary
+            .get(&trait_id)
+            .is_some_and(|operators| operators.contains(&operator))
+    }
+
     pub fn resolve_name(&self, name: &str) -> Option<TypeId> {
         self.by_name.get(name).copied()
     }
@@ -351,7 +418,7 @@ impl TypeContext {
     }
 
     pub fn definition(&self, id: TypeId) -> Option<&TypeDefinition> {
-        self.definitions.get(id.0 as usize)
+        self.definitions.get(&id)
     }
 
     pub fn kind(&self, id: TypeId) -> Option<&TyKind> {
@@ -386,7 +453,7 @@ impl TypeContext {
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = &TypeDefinition> {
-        self.definitions.iter()
+        self.definitions.values()
     }
 
     pub fn compiler_id(&self, declaration: TypeId) -> Result<CompilerId, TypeError> {
@@ -468,22 +535,20 @@ impl TypeContext {
             },
             substitution,
         ));
-        debug_assert_eq!(
-            id.0 as usize,
-            self.definitions.len(),
-            "applied definitions and interned types remain aligned"
-        );
-        self.definitions.push(TypeDefinition {
+        self.definitions.insert(
             id,
-            declaration,
-            path,
-            name,
-            parameter_count: 0,
-            kind: TypeDefinitionKind::Applied {
-                constructor,
-                arguments: arguments.clone(),
+            TypeDefinition {
+                id,
+                declaration,
+                path,
+                name,
+                parameter_count: 0,
+                kind: TypeDefinitionKind::Applied {
+                    constructor,
+                    arguments: arguments.clone(),
+                },
             },
-        });
+        );
         self.by_declaration.insert(declaration, id);
         self.applications.insert((constructor, arguments), id);
         Ok(id)
@@ -908,5 +973,22 @@ mod tests {
             types.compile_route(bf16_instance).unwrap(),
             CompileRoute::Compiler(compiler)
         );
+    }
+
+    #[test]
+    fn declaration_lookup_survives_inference_types_between_declarations() {
+        let mut types = TypeContext::default();
+        let first = types
+            .register_declaration("test.First", "First", 0)
+            .unwrap();
+        let inference = types.fresh_infer();
+        let union = types.union([first, inference]);
+        let second = types
+            .register_declaration("test.Second", "Second", 0)
+            .unwrap();
+        assert_ne!(second, union);
+        assert_eq!(types.definition(first).unwrap().name, "First");
+        assert_eq!(types.definition(second).unwrap().name, "Second");
+        assert!(matches!(types.kind(union), Some(TyKind::Union(_))));
     }
 }

@@ -124,6 +124,25 @@ fn build_from_packages<'a>(
             .map_err(|error| BootstrapError::Type(error.to_string()))?;
     }
 
+    // Every nominal declaration records the protocols it implements. Generic
+    // arguments are checked by semantic inference; capability identity is the
+    // declaration at the head of the applied trait.
+    for declaration in declarations.values() {
+        let owner = types
+            .resolve_name(&declaration.name)
+            .ok_or_else(|| BootstrapError::MissingDeclaration(declaration.name.clone()))?;
+        let mut capabilities = BTreeSet::new();
+        collect_capabilities(declaration, &declarations, &mut capabilities);
+        for capability in capabilities {
+            let trait_id = types
+                .resolve_name(&capability)
+                .ok_or_else(|| BootstrapError::MissingDeclaration(capability.clone()))?;
+            types
+                .add_capability(owner, trait_id)
+                .map_err(|error| BootstrapError::Type(error.to_string()))?;
+        }
+    }
+
     // Pass 2b: expand typed operators after all result/operand names exist.
     for declaration in declarations.values().filter(|declaration| {
         declaration
@@ -138,6 +157,23 @@ fn build_from_packages<'a>(
         collect_operators(declaration, &HashMap::new(), &declarations, &mut operators)?;
         for operator in operators {
             add_operator(&mut types, owner, operator)?;
+        }
+    }
+
+    for declaration in declarations.values() {
+        let trait_id = types
+            .resolve_name(&declaration.name)
+            .ok_or_else(|| BootstrapError::MissingDeclaration(declaration.name.clone()))?;
+        let mut operators = Vec::new();
+        collect_operators(declaration, &HashMap::new(), &declarations, &mut operators)?;
+        for operator in operators {
+            if operator.parameters.is_empty() {
+                if let Some(operator) = universal_unary(operator.operator) {
+                    types.add_trait_unary(trait_id, operator);
+                }
+            } else if let Some(operator) = universal_binary(operator.operator) {
+                types.add_trait_binary(trait_id, operator);
+            }
         }
     }
 
@@ -189,6 +225,24 @@ fn build_from_packages<'a>(
     }
 
     Ok(UniversalContext::new(types.build()))
+}
+
+fn collect_capabilities(
+    declaration: &TraitDeclaration,
+    declarations: &BTreeMap<String, TraitDeclaration>,
+    output: &mut BTreeSet<String>,
+) {
+    for base in &declaration.bases {
+        let Some((name, _)) = base.named_parts() else {
+            continue;
+        };
+        if !output.insert(name.to_owned()) {
+            continue;
+        }
+        if let Some(base) = declarations.get(name) {
+            collect_capabilities(base, declarations, output);
+        }
+    }
 }
 
 fn inherits_protocol(

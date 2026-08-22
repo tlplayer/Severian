@@ -147,22 +147,54 @@ class Parser:
             alias = identifier("expected an import alias")?[0]
         return ast.ImportDeclaration(ast.Name(first[0]), None, alias, source.Span(start.source, start.start, peek().span.start))
 
-    def type_parameters() -> list[string] | diagnostics.Diagnostic:
+    def type_parameters() -> tuple[list[string], list[ast.GenericConstraint]] | diagnostics.Diagnostic:
         parameters: list[string] = []
+        constraints: list[ast.GenericConstraint] = []
         if take(LeftBracket) == None:
-            return parameters
+            return (parameters, constraints)
         if not at_simple(RightBracket):
             while true:
-                parameters.append(identifier("expected a type parameter")?[0])
+                parameter = identifier("expected a generic parameter")?
+                parameters.append(parameter[0])
+                if take(Colon) != None:
+                    bound = type_annotation()?
+                    constraints.append(ast.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
                 if take(Comma) == None:
                     break
         expect(RightBracket, "expected closing type parameter bracket")?
-        return parameters
+        return (parameters, constraints)
+
+    def declaration_constraints() -> list[ast.GenericConstraint] | diagnostics.Diagnostic:
+        constraints: list[ast.GenericConstraint] = []
+        if not at_identifier("with"):
+            return constraints
+        next()
+        expect(LeftBrace, "expected { after declaration with")?
+        multiline = take(Newline) != None
+        if multiline:
+            expect(Indent, "expected indented declaration constraints")?
+        separators()
+        while not at_simple(RightBrace) and not at_simple(Dedent):
+            if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Colon:
+                parameter = identifier("expected constrained parameter")?
+                expect(Colon, "expected colon after constrained parameter")?
+                bound = type_annotation()?
+                constraints.append(ast.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+            else:
+                constraints.append(ast.Predicate(expression(0)?))
+            take(Comma)
+            separators()
+        if multiline:
+            expect(Dedent, "expected end of declaration constraints")?
+        expect(RightBrace, "expected } after declaration constraints")?
+        return constraints
 
     def function_declaration(decorators: list[ast.Decorator]) -> ast.FunctionDeclaration | diagnostics.Diagnostic:
         start = next().span
         name = identifier("expected a function name")?[0]
-        generics = type_parameters()?
+        generic_parts = type_parameters()?
+        generics = generic_parts[0]
+        constraints = generic_parts[1]
         expect(LeftParen, "expected opening parenthesis")?
         parameters: list[ast.FunctionParameter] = []
         while not at_simple(RightParen):
@@ -176,27 +208,34 @@ class Parser:
         result = ast.named_type("unit", [], close)
         if take(Arrow) != None:
             result = type_annotation()?
+        constraints += declaration_constraints()?
         body: list[ast.Statement] | None = None
         end = result.span.end
         if take(Colon) != None:
             block = indented_block("function")?
             body = block[0]
             end = block[1]
-        return ast.FunctionDeclaration(decorators, name, generics, parameters, result, body, source.Span(start.source, start.start, end))
+        return ast.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end))
 
     def type_declaration(decorators: list[ast.Decorator]) -> ast.TypeDeclaration | diagnostics.Diagnostic:
         start = next().span
         name = identifier("expected a type name")?[0]
-        parameters = type_parameters()?
+        generic_parts = type_parameters()?
+        parameters = generic_parts[0]
+        constraints = generic_parts[1]
         definition: ast.TypeAnnotation | None = None
         if take(Equal) != None:
             definition = type_annotation()?
-        return ast.TypeDeclaration(decorators, name, parameters, definition, source.Span(start.source, start.start, peek().span.start))
+        constraints += declaration_constraints()?
+        return ast.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, peek().span.start))
 
     def trait_declaration(decorators: list[ast.Decorator]) -> ast.TraitDeclaration | diagnostics.Diagnostic:
         start = next().span
         name = identifier("expected a trait name")?[0]
-        parameters = type_parameters()?
+        generic_parts = type_parameters()?
+        parameters = generic_parts[0]
+        constraints = generic_parts[1]
+        constraints += declaration_constraints()?
         bases: list[ast.TypeAnnotation] = []
         if take(Colon) != None and not at_simple(Newline):
             while true:
@@ -224,7 +263,7 @@ class Parser:
                     next()
                 separators()
             expect(Dedent, "expected end of trait")?
-        return ast.TraitDeclaration(decorators, name, parameters, bases, properties, operators, source.Span(start.source, start.start, peek().span.start))
+        return ast.TraitDeclaration(decorators, name, parameters, constraints, bases, properties, operators, source.Span(start.source, start.start, peek().span.start))
 
     def test_declaration() -> ast.TestDeclaration | diagnostics.Diagnostic:
         start = next().span

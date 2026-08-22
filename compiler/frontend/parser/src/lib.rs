@@ -182,6 +182,28 @@ output = f"""module {{
     }
 
     #[test]
+    fn generic_bounds_and_with_constraints_share_one_ast() {
+        let source = SourceFile::virtual_source(
+            "constraints.sev",
+            "def process[T: Ordered, N: usize](value: T) -> T with {\n    T: Clone,\n    N > 0,\n}:\n    return value\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert_eq!(function.type_parameters, ["T", "N"]);
+        assert_eq!(function.constraints.len(), 4);
+        assert!(matches!(
+            function.constraints[0],
+            severian_ast::GenericConstraint::Parameter { .. }
+        ));
+        assert!(matches!(
+            function.constraints[3],
+            severian_ast::GenericConstraint::Predicate(_)
+        ));
+    }
+
+    #[test]
     fn parses_decorated_boundary_declarations_as_normal_declarations() {
         let source = SourceFile::virtual_source(
             "ffi.sev",

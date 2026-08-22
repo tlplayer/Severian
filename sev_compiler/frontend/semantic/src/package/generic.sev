@@ -42,5 +42,4 @@ def specialize_signature(signature: FunctionDecl, substitution: map[string, stri
     parameters: list[ast.TypeAnnotation] = []
     for parameter in signature.parameters:
         parameters.append(substitute_annotation(parameter, substitution))
-    return FunctionDecl([], parameters, substitute_annotation(signature.result, substitution))
-
+    return FunctionDecl([], parameters, substitute_annotation(signature.result, substitution), signature.constraints)

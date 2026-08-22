@@ -63,6 +63,14 @@ pub struct OwnershipReport {
     pub block_outputs: BTreeMap<BlockId, OwnershipState>,
 }
 
+type OwnershipStates = BTreeMap<BlockId, OwnershipState>;
+type OwnershipSolution = (
+    OwnershipStates,
+    OwnershipStates,
+    BTreeSet<OwnershipError>,
+    BTreeSet<LocalId>,
+);
+
 pub fn analyze_ownership(
     body: &CfgBody,
     types: &TypeContext,
@@ -147,14 +155,7 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
     Ok(())
 }
 
-fn solve(
-    body: &CfgBody,
-) -> (
-    BTreeMap<BlockId, OwnershipState>,
-    BTreeMap<BlockId, OwnershipState>,
-    BTreeSet<OwnershipError>,
-    BTreeSet<LocalId>,
-) {
+fn solve(body: &CfgBody) -> OwnershipSolution {
     let predecessors = predecessors(body);
     let reachable = reachable_blocks(body);
     let entry = OwnershipState {
@@ -171,9 +172,6 @@ fn solve(
     inputs.insert(body.entry, entry);
     let mut queue = VecDeque::from_iter(reachable.iter().copied());
     let mut queued = reachable.clone();
-    let mut errors = BTreeSet::new();
-    let mut escaped = BTreeSet::new();
-
     while let Some(block_id) = queue.pop_front() {
         queued.remove(&block_id);
         let input = if block_id == body.entry {
@@ -194,7 +192,12 @@ fn solve(
             continue;
         };
         let mut output = input;
-        transfer_block(block, &mut output, &mut errors, &mut escaped);
+        transfer_block(
+            block,
+            &mut output,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+        );
         if outputs.get(&block_id) == Some(&output) {
             continue;
         }
@@ -204,6 +207,18 @@ fn solve(
                 queue.push_back(successor);
             }
         }
+    }
+    // Diagnostics are properties of the fixed-point states. Recording them
+    // during iteration reports false errors when a successor is visited before
+    // all predecessor outputs are available.
+    let mut errors = BTreeSet::new();
+    let mut escaped = BTreeSet::new();
+    for block_id in &reachable {
+        let Some(block) = body.blocks.get(block_id.0 as usize) else {
+            continue;
+        };
+        let mut state = inputs.get(block_id).cloned().unwrap_or_default();
+        transfer_block(block, &mut state, &mut errors, &mut escaped);
     }
     (inputs, outputs, errors, escaped)
 }
@@ -285,6 +300,15 @@ fn transfer_block(
     }
     for operand in terminator_operands(&block.terminator) {
         inspect_operand(operand, state, errors);
+    }
+    if let Terminator::Call {
+        destination: Some(destination),
+        ..
+    } = &block.terminator
+    {
+        state.initialized.insert(destination.local);
+        state.moved.remove(&destination.local);
+        state.consumed_resources.remove(&destination.local);
     }
     if let Terminator::Return(Some(Operand::Copy(place))) = &block.terminator {
         if state

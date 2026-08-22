@@ -34,6 +34,8 @@ pub enum TokenKind {
     RightParen,
     LeftBracket,
     RightBracket,
+    LeftBrace,
+    RightBrace,
     Pipe,
     Comma,
     Dot,

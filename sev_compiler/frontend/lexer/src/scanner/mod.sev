@@ -60,6 +60,8 @@ def punctuation(character: char, following: char | None) -> tuple[TokenKind, int
     if character == ")": return (RightParen, 1)
     if character == "[": return (LeftBracket, 1)
     if character == "]": return (RightBracket, 1)
+    if character == "{": return (LeftBrace, 1)
+    if character == "}": return (RightBrace, 1)
     if character == "|": return (Pipe, 1)
     if character == ":" and following == "=": return (ColonEqual, 2)
     if character == ":": return (Colon, 1)

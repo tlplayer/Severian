@@ -5,7 +5,7 @@ mod queries;
 
 pub use package::{
     analyze_package, analyze_package_with_context, DefKind, Definition, ExportMap, FunctionDecl,
-    ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, SignatureId,
+    ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, SignatureId, TraitDecl,
     TypedProgram, Visibility,
 };
 pub use queries::{QueryError, ScopeId, SemanticQueries};
@@ -66,6 +66,7 @@ pub(crate) struct PackageFunction {
     pub type_parameters: Vec<severian_universal::GenericParamId>,
     pub parameters: Vec<TypeId>,
     pub result: TypeId,
+    pub specificity: u8,
 }
 
 pub(crate) fn analyze_with_package_functions(
@@ -83,6 +84,7 @@ pub(crate) fn analyze_with_package_functions(
         functions: BTreeMap::new(),
         function_definitions: BTreeMap::new(),
         function_substitutions: BTreeMap::new(),
+        function_specificity: BTreeMap::new(),
         signatures: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
@@ -106,6 +108,9 @@ pub(crate) fn analyze_with_package_functions(
         analyzer
             .function_substitutions
             .insert(function.id, function.substitution.clone());
+        analyzer
+            .function_specificity
+            .insert(function.id, function.specificity);
     }
     let mut module = Module::default();
 
@@ -125,8 +130,21 @@ pub(crate) fn analyze_with_package_functions(
             .copied()
             .unwrap_or(FunctionId(module.functions.len() as u128));
         let package_function = visible_functions.iter().find(|function| function.id == id);
+        let overload_ordinal = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Function(function)
+                    if function.name == ast_function.name
+                        && function.span.start < ast_function.span.start =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .count();
         let definition = package_function.map_or_else(
-            || synthetic_definition(context.module_name, ast_function),
+            || synthetic_definition(context.module_name, ast_function, overload_ordinal),
             |function| function.definition,
         );
         let mut parameters = Vec::new();
@@ -162,6 +180,7 @@ pub(crate) fn analyze_with_package_functions(
             analyzer
                 .function_substitutions
                 .insert(id, severian_universal::Substitution::default());
+            analyzer.function_specificity.insert(id, 0);
         }
         module.functions.push(FunctionDeclaration {
             id,
@@ -407,6 +426,7 @@ struct Analyzer<'a> {
     functions: BTreeMap<String, Vec<FunctionId>>,
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
+    function_specificity: BTreeMap<FunctionId, u8>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
 }
 
@@ -802,7 +822,13 @@ impl Analyzer<'_> {
                                     .expect("resolved arguments are assignable")
                             })
                             .collect::<Vec<_>>();
-                        matches.push((conversions, function, signature.result, arguments));
+                        matches.push((
+                            conversions,
+                            self.function_specificity[&function],
+                            function,
+                            signature.result,
+                            arguments,
+                        ));
                     }
                 }
                 let best = matches
@@ -815,7 +841,12 @@ impl Analyzer<'_> {
                     })
                     .map(|(_, candidate)| candidate)
                     .collect::<Vec<_>>();
-                let [(_, function, result, arguments)] = best.as_slice() else {
+                let specificity = best.iter().map(|candidate| candidate.1).min();
+                let best = best
+                    .into_iter()
+                    .filter(|candidate| Some(candidate.1) == specificity)
+                    .collect::<Vec<_>>();
+                let [(_, _, function, result, arguments)] = best.as_slice() else {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("call to `{name}` has no unique compatible declaration"),
@@ -891,13 +922,17 @@ impl Analyzer<'_> {
     }
 }
 
-fn synthetic_definition(module: &str, function: &severian_ast::FunctionDeclaration) -> DefId {
+fn synthetic_definition(
+    module: &str,
+    function: &severian_ast::FunctionDeclaration,
+    overload_ordinal: usize,
+) -> DefId {
     DefId {
         package: 0,
         module: severian_universal::DeclarationId::from_path(module).0,
         declaration: severian_universal::DeclarationId::from_path(&format!(
-            "{module}.function.{}.{:?}",
-            function.name, function.type_parameters
+            "{module}.function.{}.{overload_ordinal}",
+            function.name
         )),
     }
 }

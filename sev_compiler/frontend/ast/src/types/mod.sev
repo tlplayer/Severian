@@ -49,10 +49,16 @@ class FunctionParameter:
     span: source.Span
 
 
+enum GenericConstraint:
+    Parameter(parameter: string, bound: TypeAnnotation, span: source.Span)
+    Predicate(expression: Expression)
+
+
 class FunctionDeclaration:
     decorators: list[Decorator]
     name: string
     type_parameters: list[string]
+    constraints: list[GenericConstraint]
     parameters: list[FunctionParameter]
     result: TypeAnnotation
     body: list[Statement] | None
@@ -63,6 +69,7 @@ class TypeDeclaration:
     decorators: list[Decorator]
     name: string
     type_parameters: list[string]
+    constraints: list[GenericConstraint]
     definition: TypeAnnotation | None
     span: source.Span
 
@@ -130,6 +137,7 @@ class TraitDeclaration:
     decorators: list[Decorator]
     name: string
     type_parameters: list[string]
+    constraints: list[GenericConstraint]
     bases: list[TypeAnnotation]
     properties: list[PropertyDeclaration]
     operators: list[OperatorDeclaration]
@@ -146,4 +154,3 @@ def simple_type_name(annotation: TypeAnnotation) -> string | None:
             if len(arguments) == 0:
                 return name
     return None
-

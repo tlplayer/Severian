@@ -85,6 +85,8 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             b')' => one(&mut cursor, TokenKind::RightParen),
             b'[' => one(&mut cursor, TokenKind::LeftBracket),
             b']' => one(&mut cursor, TokenKind::RightBracket),
+            b'{' => one(&mut cursor, TokenKind::LeftBrace),
+            b'}' => one(&mut cursor, TokenKind::RightBrace),
             b'|' => one(&mut cursor, TokenKind::Pipe),
             b'+' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;

@@ -19,7 +19,7 @@ pub enum VerifyError {
     UseBeforeDefinition { block: u32, local: u32 },
     CallTarget,
     CallArity,
-    CallArgumentType,
+    CallArgumentType { actual: TypeId, expected: TypeId },
     InvalidOwnershipState { block: u32, local: u32 },
     UnknownOperation(severian_universal::OpId),
     InvalidOperation(String),
@@ -53,7 +53,11 @@ impl fmt::Display for VerifyError {
             }
             Self::CallTarget => formatter.write_str("call refers to an unknown definition"),
             Self::CallArity => formatter.write_str("call has the wrong argument count"),
-            Self::CallArgumentType => formatter.write_str("call argument type mismatch"),
+            Self::CallArgumentType { actual, expected } => write!(
+                formatter,
+                "call argument type mismatch: {:?} is not assignable to {:?}",
+                actual, expected
+            ),
             Self::InvalidOwnershipState { block, local } => write!(
                 formatter,
                 "local {local} has an invalid ownership state in block {block}"
@@ -295,7 +299,10 @@ fn transfer(
                 }
                 for (argument, parameter) in arguments.iter().zip(parameters) {
                     if !types.assignable(operand_type(body, argument)?, *parameter) {
-                        return Err(VerifyError::CallArgumentType);
+                        return Err(VerifyError::CallArgumentType {
+                            actual: operand_type(body, argument)?,
+                            expected: *parameter,
+                        });
                     }
                 }
             }
@@ -375,7 +382,10 @@ fn operand_type(body: &CfgBody, operand: &Operand) -> Result<TypeId, VerifyError
             Ok(body.locals[place.local.0 as usize].ty)
         }
         Operand::Constant { ty, .. } => Ok(*ty),
-        Operand::Function(_) => Err(VerifyError::CallArgumentType),
+        Operand::Function(_) => Err(VerifyError::CallArgumentType {
+            actual: TypeId(u32::MAX),
+            expected: TypeId(u32::MAX),
+        }),
     }
 }
 

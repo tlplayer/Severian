@@ -1,5 +1,5 @@
 use crate::{analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageFunction};
-use severian_ast::{ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
+use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
@@ -11,8 +11,8 @@ mod generic;
 mod tests;
 
 use generic::{
-    collect_generic_specializations, specialize_function, specialize_signature, Specializations,
-    Substitution as GenericSubstitution,
+    collect_generic_specializations, specialize_function, specialize_signature,
+    validate_generic_bodies, Specializations, Substitution as GenericSubstitution,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,13 +29,21 @@ pub struct FunctionDecl {
     pub type_parameters: Vec<String>,
     pub parameters: Vec<TypeAnnotation>,
     pub result: TypeAnnotation,
+    pub constraints: Vec<GenericConstraint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDecl {
+    pub type_parameters: Vec<String>,
+    pub bases: Vec<TypeAnnotation>,
+    pub operators: Vec<severian_ast::OperatorDeclaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
     Function(FunctionDecl),
     Type,
-    Trait,
+    Trait(TraitDecl),
     Constant,
     Import,
 }
@@ -124,7 +132,8 @@ pub fn analyze_package_with_context(
 ) -> Result<TypedProgram, Diagnostic> {
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
-    let specializations = collect_generic_specializations(module_graph, &index)?;
+    validate_generic_bodies(module_graph, &index, &universal.types)?;
+    let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
 
     let mut next_binding = 0u32;
     let mut hir = Program::default();
@@ -202,6 +211,13 @@ pub fn analyze_package_with_context(
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     result: crate::resolve_type_annotation(&universal.types, &signature.result)?,
+                    specificity: if original.type_parameters.is_empty() {
+                        0
+                    } else if original.constraints.is_empty() {
+                        2
+                    } else {
+                        1
+                    },
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -415,6 +431,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                                 .map(|parameter| parameter.annotation.clone())
                                 .collect(),
                             result: function.result.clone(),
+                            constraints: function.constraints.clone(),
                         }),
                         id,
                     )
@@ -431,7 +448,11 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     module.id,
                     "trait",
                     &declaration.name,
-                    DefKind::Trait,
+                    DefKind::Trait(TraitDecl {
+                        type_parameters: declaration.type_parameters.clone(),
+                        bases: declaration.bases.clone(),
+                        operators: declaration.operators.clone(),
+                    }),
                 ),
                 Item::Binding(binding) if !binding.update => item_identity(
                     module.package,
@@ -622,11 +643,26 @@ fn function_signature_id(function: &severian_ast::FunctionDeclaration) -> Signat
         .collect::<Vec<_>>()
         .join(",");
     let generics = function.type_parameters.join(",");
+    let constraints = function
+        .constraints
+        .iter()
+        .map(constraint_key)
+        .collect::<Vec<_>>()
+        .join(",");
     SignatureId(stable_hash(&format!(
-        "function:{}[{generics}]({parameters})->{}",
+        "function:{}[{generics}]({parameters})->{} with [{constraints}]",
         function.name,
         type_key(&function.result)
     )))
+}
+
+fn constraint_key(constraint: &GenericConstraint) -> String {
+    match constraint {
+        GenericConstraint::Parameter {
+            parameter, bound, ..
+        } => format!("{parameter}:{}", type_key(bound)),
+        GenericConstraint::Predicate(expression) => format!("predicate:{:?}", expression.kind),
+    }
 }
 
 fn type_key(annotation: &TypeAnnotation) -> String {

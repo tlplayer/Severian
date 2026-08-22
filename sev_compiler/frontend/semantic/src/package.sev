@@ -11,6 +11,7 @@ class FunctionDecl:
     type_parameters: list[string]
     parameters: list[ast.TypeAnnotation]
     result: ast.TypeAnnotation
+    constraints: list[ast.GenericConstraint]
 
 
 enum DefKind:
@@ -104,7 +105,7 @@ def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
                     parameters: list[ast.TypeAnnotation] = []
                     for parameter in declaration.parameters:
                         parameters.append(parameter.annotation)
-                    kind = DefKind.Function(FunctionDecl(declaration.type_parameters, parameters, declaration.result))
+                    kind = DefKind.Function(FunctionDecl(declaration.type_parameters, parameters, declaration.result, declaration.constraints))
                 case Type:
                     name = declaration.name
                     kind = DefKind.Type
@@ -158,4 +159,3 @@ def analyze_package(graph: modules.ModuleGraph, context: universal.UniversalCont
     index = collect_declarations(graph)
     resolve_imports(graph, index)
     return TypedProgram(index, hir.empty_program())
-

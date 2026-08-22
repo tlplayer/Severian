@@ -49,6 +49,7 @@ pub struct FunctionDeclaration {
     pub decorators: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub parameters: Vec<FunctionParameter>,
     pub result: TypeAnnotation,
     /// `None` denotes an interface declaration. Source functions have an
@@ -62,6 +63,7 @@ pub struct TypeDeclaration {
     pub decorators: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub definition: Option<TypeAnnotation>,
     pub span: Span,
 }
@@ -87,6 +89,16 @@ pub struct CompilerTestCase {
 pub enum CompilerExpectation {
     Accept,
     Reject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericConstraint {
+    Parameter {
+        parameter: String,
+        bound: TypeAnnotation,
+        span: Span,
+    },
+    Predicate(Expression),
 }
 
 /// The one source-level type node used in every annotation position.
@@ -179,6 +191,7 @@ pub struct TraitDeclaration {
     pub decorators: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub bases: Vec<TypeAnnotation>,
     pub properties: Vec<PropertyDeclaration>,
     pub operators: Vec<OperatorDeclaration>,

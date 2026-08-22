@@ -1,9 +1,10 @@
 use severian_ast::{
     BinaryOperator, Binding, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
-    ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration,
-    OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration,
-    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module,
+    OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement,
+    TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
+    UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -174,7 +175,7 @@ impl Parser<'_> {
     ) -> Result<FunctionDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a function name")?;
-        let type_parameters = self.type_parameters()?;
+        let (type_parameters, mut constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
@@ -205,6 +206,7 @@ impl Parser<'_> {
         } else {
             TypeAnnotation::named("unit", vec![], close)
         };
+        constraints.extend(self.declaration_constraints()?);
         let mut end = result.span.end;
         let body = if self.take(&TokenKind::Colon).is_some() {
             let (statements, block_end) = self.indented_block("function")?;
@@ -217,6 +219,7 @@ impl Parser<'_> {
             decorators,
             name,
             type_parameters,
+            constraints,
             parameters,
             span: Span::new(start.source, start.start, end),
             result,
@@ -470,12 +473,13 @@ impl Parser<'_> {
     ) -> Result<TypeDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, name_span) = self.identifier("expected a type name")?;
-        let type_parameters = self.type_parameters()?;
+        let (type_parameters, mut constraints) = self.type_parameters()?;
         let definition = if self.take(&TokenKind::Equal).is_some() {
             Some(self.type_annotation()?)
         } else {
             None
         };
+        constraints.extend(self.declaration_constraints()?);
         let end = definition
             .as_ref()
             .map_or(name_span.end, |definition| definition.span.end);
@@ -483,6 +487,7 @@ impl Parser<'_> {
             decorators,
             name,
             type_parameters,
+            constraints,
             definition,
             span: Span::new(start.source, start.start, end),
         })
@@ -533,7 +538,8 @@ impl Parser<'_> {
     ) -> Result<TraitDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a trait name")?;
-        let type_parameters = self.type_parameters()?;
+        let (type_parameters, mut constraints) = self.type_parameters()?;
+        constraints.extend(self.declaration_constraints()?);
         self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
         let mut bases = Vec::new();
         if !self.at(&TokenKind::Newline) {
@@ -573,6 +579,7 @@ impl Parser<'_> {
             decorators,
             name,
             type_parameters,
+            constraints,
             bases,
             properties,
             operators,
@@ -580,11 +587,26 @@ impl Parser<'_> {
         })
     }
 
-    fn type_parameters(&mut self) -> Result<Vec<String>, Diagnostic> {
+    fn type_parameters(&mut self) -> Result<(Vec<String>, Vec<GenericConstraint>), Diagnostic> {
         let mut type_parameters = Vec::new();
+        let mut constraints = Vec::new();
         if self.take(&TokenKind::LeftBracket).is_some() {
             loop {
-                type_parameters.push(self.identifier("expected a type parameter")?.0);
+                let (parameter, parameter_span) =
+                    self.identifier("expected a generic parameter")?;
+                type_parameters.push(parameter.clone());
+                if self.take(&TokenKind::Colon).is_some() {
+                    let bound = self.type_annotation()?;
+                    constraints.push(GenericConstraint::Parameter {
+                        parameter,
+                        span: Span::new(
+                            parameter_span.source,
+                            parameter_span.start,
+                            bound.span.end,
+                        ),
+                        bound,
+                    });
+                }
                 if self.take(&TokenKind::Comma).is_none() {
                     break;
                 }
@@ -594,7 +616,70 @@ impl Parser<'_> {
                 "expected `]` after type parameters",
             )?;
         }
-        Ok(type_parameters)
+        Ok((type_parameters, constraints))
+    }
+
+    fn declaration_constraints(&mut self) -> Result<Vec<GenericConstraint>, Diagnostic> {
+        if !self.at_identifier("with") {
+            return Ok(Vec::new());
+        }
+        self.next();
+        self.expect(
+            &TokenKind::LeftBrace,
+            "expected `{` after declaration `with`",
+        )?;
+        let multiline = self.take(&TokenKind::Newline).is_some();
+        while self.take(&TokenKind::Newline).is_some() {}
+        if multiline {
+            self.expect(
+                &TokenKind::Indent,
+                "expected indented declaration constraints",
+            )?;
+            self.separators();
+        }
+        let mut constraints = Vec::new();
+        while !self.at(&TokenKind::RightBrace)
+            && !self.at(&TokenKind::Dedent)
+            && !self.at(&TokenKind::Eof)
+        {
+            let parameter_constraint = matches!(self.peek().kind, TokenKind::Identifier(_))
+                && self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Colon);
+            if parameter_constraint {
+                let (parameter, parameter_span) =
+                    self.identifier("expected constrained parameter")?;
+                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
+                let bound = self.type_annotation()?;
+                constraints.push(GenericConstraint::Parameter {
+                    parameter,
+                    span: Span::new(parameter_span.source, parameter_span.start, bound.span.end),
+                    bound,
+                });
+            } else {
+                constraints.push(GenericConstraint::Predicate(self.expression(0)?));
+            }
+            if self.take(&TokenKind::Comma).is_none()
+                && !self.at(&TokenKind::Newline)
+                && !self.at(&TokenKind::Dedent)
+                && !self.at(&TokenKind::RightBrace)
+            {
+                return Err(self.error("expected a comma or newline after constraint"));
+            }
+            self.separators();
+        }
+        if multiline {
+            self.expect(
+                &TokenKind::Dedent,
+                "expected end of declaration constraints",
+            )?;
+        }
+        self.expect(
+            &TokenKind::RightBrace,
+            "expected `}` after declaration constraints",
+        )?;
+        Ok(constraints)
     }
 
     fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
