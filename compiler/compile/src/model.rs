@@ -82,6 +82,7 @@ impl CompilePlan {
             functions: Vec::new(),
             entry: self.source.entry,
             tests: self.source.tests.clone(),
+            traits: self.source.traits.clone(),
         };
         for function in &self.functions {
             let mut declaration = function.declaration.clone();

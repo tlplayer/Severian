@@ -1,23 +1,34 @@
 trait Named:
-    name() -> string
+    def name() -> string
 
 trait Drawable:
     Named
-    draw()
+    def draw()
 
-class Button: Drawable
+trait Color:
+    shade: string
+
+    def paint()
+
+class Button: Drawable + Color
     label: string
-
+    shade: string
     def name() -> string:
         return label
 
     def draw():
         print(label)
 
+    def paint():
+        print(shade)
+
 def render(item: Drawable):
     print(item.name())
     item.draw()
 
 def main():
-    button = Button("Save")
+    button = Button("Save","mauve")
     render(button)
+
+test:
+    main()

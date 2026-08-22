@@ -79,9 +79,26 @@ pub fn lower(
                                 parameters: method
                                     .parameters
                                     .iter()
-                                    .map(|parameter| lower_type(*parameter, types, target))
+                                    .map(|parameter| match parameter {
+                                        severian_mir::TraitType::SelfType => {
+                                            Ok(severian_lir::TraitType::SelfType)
+                                        }
+                                        severian_mir::TraitType::Concrete(ty) => {
+                                            lower_type(*ty, types, target)
+                                                .map(severian_lir::TraitType::Concrete)
+                                        }
+                                    })
                                     .collect::<Result<Vec<_>, _>>()?,
-                                result: lower_type(method.result, types, target)?,
+                                result: match method.result {
+                                    severian_mir::TraitType::SelfType => {
+                                        severian_lir::TraitType::SelfType
+                                    }
+                                    severian_mir::TraitType::Concrete(ty) => {
+                                        severian_lir::TraitType::Concrete(lower_type(
+                                            ty, types, target,
+                                        )?)
+                                    }
+                                },
                             })
                         })
                         .collect::<Result<Vec<_>, LoweringError>>()?,

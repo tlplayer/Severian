@@ -231,7 +231,7 @@ fn parameter_allows_binary(
             .is_some_and(|trait_id| types.trait_supports_binary(trait_id, operator))
             || index.definitions.values().any(|definition| {
                 definition.name == name
-                    && matches!(&definition.kind, DefKind::Trait(declaration) if declaration.operators.iter().any(|known| ast_binary_syntax(known.operator) == Some(operator)))
+                    && matches!(&definition.kind, DefKind::Trait(declaration) if trait_supports_source_binary(declaration, operator))
             })
     })
 }
@@ -301,6 +301,40 @@ fn ast_binary_syntax(
         Ast::Or => severian_ast::BinaryOperator::Or,
         Ast::Not => return None,
     }))
+}
+
+fn trait_supports_source_binary(
+    declaration: &TraitDecl,
+    operator: severian_universal::BinaryOperator,
+) -> bool {
+    declaration
+        .operators
+        .iter()
+        .any(|known| ast_binary_syntax(known.operator) == Some(operator))
+        || declaration
+            .methods
+            .iter()
+            .any(|method| method_binary_syntax(&method.name) == Some(operator))
+}
+
+fn method_binary_syntax(name: &str) -> Option<severian_universal::BinaryOperator> {
+    use severian_universal::BinaryOperator as Operator;
+    match name {
+        "add" => Some(Operator::Add),
+        "subtract" => Some(Operator::Subtract),
+        "multiply" => Some(Operator::Multiply),
+        "divide" => Some(Operator::Divide),
+        "remainder" => Some(Operator::Remainder),
+        "power" => Some(Operator::Power),
+        "equal" => Some(Operator::Equal),
+        "not_equal" => Some(Operator::NotEqual),
+        "less_than" => Some(Operator::Less),
+        "less_equal" => Some(Operator::LessEqual),
+        "greater_than" => Some(Operator::Greater),
+        "greater_equal" => Some(Operator::GreaterEqual),
+        "contains" => Some(Operator::Contains),
+        _ => None,
+    }
 }
 
 fn ast_unary_syntax(
@@ -494,7 +528,7 @@ fn trait_is_structurally_satisfied(
             return false;
         }
     }
-    declaration.operators.iter().all(|operator| {
+    let operators_satisfied = declaration.operators.iter().all(|operator| {
         use severian_ast::OperatorSyntax as Syntax;
         use severian_universal::{BinaryOperator as Binary, UnaryOperator as Unary};
         match (operator.operator, operator.parameters.is_empty()) {
@@ -523,7 +557,12 @@ fn trait_is_structurally_satisfied(
                 types.supports_binary(operator, actual)
             }
         }
-    })
+    });
+    operators_satisfied
+        && declaration.methods.iter().all(|method| {
+            method_binary_syntax(&method.name)
+                .is_some_and(|operator| types.supports_binary(operator, actual))
+        })
 }
 
 fn specialization_count(specializations: &Specializations) -> usize {

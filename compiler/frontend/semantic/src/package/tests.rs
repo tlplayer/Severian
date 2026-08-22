@@ -200,6 +200,35 @@ fn source_operator_traits_constrain_generic_instances() {
 }
 
 #[test]
+fn source_method_traits_authorize_operators_for_each_generic_instance() {
+    let root = temporary();
+    let source = root.join("numeric.sev");
+    std::fs::write(
+        &source,
+        "trait Numeric:\n    def add(other: Self) -> Self\n    def multiply(other: Self) -> Self\n    def less_than(other: Self) -> bool\ndef affine[T: Numeric](x: T, scale: T, bias: T) -> T:\n    y := x * scale\n    y = y + bias\n    if y < bias:\n        return bias\n    return y\ndef integer() -> int:\n    return affine(4, 3, 2)\ndef floating() -> f64:\n    return affine(4.0, 0.5, 1.0)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    let generic = typed
+        .index
+        .definitions
+        .values()
+        .find(|definition| definition.name == "affine")
+        .unwrap()
+        .id;
+    let instances = typed.hir.modules[0]
+        .functions
+        .iter()
+        .filter(|function| function.definition == generic)
+        .collect::<Vec<_>>();
+    assert_eq!(instances.len(), 2);
+    assert_ne!(instances[0].substitution, instances[1].substitution);
+    assert_eq!(typed.hir.modules[0].traits[0].name, "Numeric");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn concrete_overloads_rank_ahead_of_generic_fallbacks() {
     let root = temporary();
     let source = root.join("ranking.sev");

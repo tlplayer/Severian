@@ -68,6 +68,26 @@ fn bare_source_runs_globals_before_main() {
 }
 
 #[test]
+fn constrained_generic_method_traits_specialize_to_executable_instances() {
+    let root = temporary("generic-numeric");
+    let source = root.join("generic-numeric.sev");
+    fs::write(
+        &source,
+        "trait Numeric:\n    def add(other: Self) -> Self\n    def multiply(other: Self) -> Self\n    def less_than(other: Self) -> bool\ndef affine[T: Numeric](x: T, scale: T, bias: T) -> T:\n    y := x * scale\n    y = y + bias\n    if y < bias:\n        return bias\n    return y\ndef main():\n    print(affine(4, 3, 2))\n    print(affine(4.0, 0.5, 1.0))\n",
+    )
+    .unwrap();
+    let output = sev().args(["run"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"14\n3\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn build_emits_but_does_not_execute_and_check_emits_nothing() {
     let root = temporary("build");
     let source = root.join("hello.sev");

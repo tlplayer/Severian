@@ -48,7 +48,8 @@ context.duration becomes final before without begins.
 
 The last point makes this much more than decorators. It is compiler-supported structured interception with guaranteed error unwinding.
 '''
-class HookContext:
+#Context is a core trait property which houses information for hooks, tests etc.
+class HookContext: Context
     function: string
     args: tuple
     result: Any | None

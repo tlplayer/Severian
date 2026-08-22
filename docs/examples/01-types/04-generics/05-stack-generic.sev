@@ -1,0 +1,27 @@
+class Stack[T]:
+    values: list[T]
+
+    def Stack():
+        values := []
+
+    def push(value: T):
+        values.append(value)
+
+    def pop() -> T | None:
+        if size(values) == 0:
+            return None
+
+        return values.pop()
+
+
+def main():
+    ints := Stack[int]()
+    ints.push(10)
+    ints.push(20)
+
+    strings := Stack[string]()
+    strings.push("a")
+    strings.push("b")
+
+    print(ints.pop())
+    print(strings.pop())

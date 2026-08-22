@@ -139,8 +139,14 @@ pub struct TypeDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitMethodDeclaration {
     pub name: String,
-    pub parameters: Vec<TypeId>,
-    pub result: TypeId,
+    pub parameters: Vec<TraitType>,
+    pub result: TraitType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraitType {
+    SelfType,
+    Concrete(TypeId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

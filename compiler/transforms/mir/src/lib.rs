@@ -44,8 +44,14 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitMethodDeclaration {
     pub name: String,
-    pub parameters: Vec<severian_universal::TypeId>,
-    pub result: severian_universal::TypeId,
+    pub parameters: Vec<TraitType>,
+    pub result: TraitType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraitType {
+    SelfType,
+    Concrete(severian_universal::TypeId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

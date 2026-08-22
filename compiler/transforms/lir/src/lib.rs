@@ -142,8 +142,14 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitMethodDeclaration {
     pub name: String,
-    pub parameters: Vec<LoweredType>,
-    pub result: LoweredType,
+    pub parameters: Vec<TraitType>,
+    pub result: TraitType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraitType {
+    SelfType,
+    Concrete(LoweredType),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

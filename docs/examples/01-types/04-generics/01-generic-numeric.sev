@@ -1,0 +1,32 @@
+trait Numeric:
+    def add(other: Self) -> Self
+    def multiply(other: Self) -> Self
+    def less_than(other: Self) -> bool
+
+
+def affine[T: Numeric](x: T, scale: T, bias: T) -> T:
+    y := x * scale
+    y = y + bias
+
+    if y < bias:
+        return bias
+
+    return y
+
+
+test:
+    # Must specialize T -> int.
+    integer := affine(4, 3, 2)
+    assert(integer == 14)
+
+    # Must separately specialize T -> f64.
+    floating := affine(4.0, 0.5, 1.0)
+    assert(floating == 3.0)
+
+
+def main():
+    integer := affine(4, 3, 2)
+    floating := affine(4.0, 0.5, 1.0)
+
+    print(integer)
+    print(floating)

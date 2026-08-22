@@ -117,14 +117,14 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
                 .parameters
                 .iter()
                 .copied()
-                .map(mlir_type)
+                .map(mlir_trait_type)
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ");
             output.push_str(&format!(
                 "  //   def @{}({}) -> {}\n",
                 method.name,
                 parameters,
-                mlir_type(method.result)?
+                mlir_trait_type(method.result)?
             ));
         }
     }
@@ -219,6 +219,13 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     output.push_str("    %sev_exit = arith.constant 0 : i32\n");
     output.push_str("    return %sev_exit : i32\n  }\n}\n");
     Ok(output)
+}
+
+fn mlir_trait_type(ty: severian_lir::TraitType) -> Result<String, MlirError> {
+    match ty {
+        severian_lir::TraitType::SelfType => Ok("Self".into()),
+        severian_lir::TraitType::Concrete(ty) => mlir_type(ty),
+    }
 }
 
 fn render_block(

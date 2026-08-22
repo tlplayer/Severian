@@ -19,8 +19,9 @@ use severian_ast::{
 use severian_diagnostics::Diagnostic;
 use severian_hir::{
     Binding, BindingId, Block, BoundaryType, CallType, Expression, ExpressionKind,
-    FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, Statement, TypeId,
+    FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, Statement,
     TraitDeclaration as HirTraitDeclaration, TraitMethodDeclaration as HirTraitMethodDeclaration,
+    TraitType as HirTraitType, TypeId,
 };
 use severian_universal::{
     BinaryOperator, LiteralValue, TypeConstraint, TypeContext, UnaryOperator,
@@ -138,9 +139,9 @@ pub(crate) fn analyze_with_package_functions(
                     parameters: method
                         .parameters
                         .iter()
-                        .map(|parameter| resolve_type_annotation(types, &parameter.annotation))
+                        .map(|parameter| resolve_trait_type(types, &parameter.annotation))
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
-                    result: resolve_type_annotation(types, &method.result)?,
+                    result: resolve_trait_type(types, &method.result)?,
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -515,7 +516,11 @@ impl Analyzer<'_> {
         ast_binding: &severian_ast::Binding,
         bindings: &mut Vec<Binding>,
     ) -> Result<BindingId, Diagnostic> {
-        let update_type = if ast_binding.update {
+        let inferred_update = !ast_binding.update
+            && ast_binding.annotation.is_none()
+            && self.declarations.contains(&ast_binding.name);
+        let is_update = ast_binding.update || inferred_update;
+        let update_type = if is_update {
             Some(
                 self.names
                     .get(&ast_binding.name)
@@ -531,7 +536,7 @@ impl Analyzer<'_> {
         } else {
             None
         };
-        if !ast_binding.update && !self.declarations.insert(ast_binding.name.clone()) {
+        if !is_update && !self.declarations.insert(ast_binding.name.clone()) {
             return Err(Diagnostic::new(
                 "E000203",
                 format!("binding `{}` is already defined", ast_binding.name),
@@ -1089,16 +1094,12 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     ));
                 };
                 let same_parameters = required.parameters.len() == provided.parameters.len()
-                    && required
-                        .parameters
-                        .iter()
-                        .zip(&provided.parameters)
-                        .all(|(required, provided)| {
+                    && required.parameters.iter().zip(&provided.parameters).all(
+                        |(required, provided)| {
                             same_type_annotation(&required.annotation, &provided.annotation)
-                        });
-                if !same_parameters
-                    || !same_type_annotation(&required.result, &provided.result)
-                {
+                        },
+                    );
+                if !same_parameters || !same_type_annotation(&required.result, &provided.result) {
                     return Err(Diagnostic::new(
                         "E000218",
                         format!(
@@ -1175,6 +1176,17 @@ fn resolve_type_annotation(
             Some(annotation.span),
         )
     })
+}
+
+fn resolve_trait_type(
+    types: &TypeContext,
+    annotation: &TypeAnnotation,
+) -> Result<HirTraitType, Diagnostic> {
+    if annotation.simple_name() == Some("Self") {
+        Ok(HirTraitType::SelfType)
+    } else {
+        resolve_type_annotation(types, annotation).map(HirTraitType::Concrete)
+    }
 }
 
 fn universal_boundary(type_id: TypeId) -> BoundaryType {
