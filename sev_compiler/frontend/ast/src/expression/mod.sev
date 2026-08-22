@@ -42,7 +42,7 @@ class Expression:
 
 
 class CallArgument:
-    name: string | None
+    name: string | absent
     value: Expression
     span: source.Span
 
