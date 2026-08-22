@@ -21,6 +21,9 @@ jobs:
       - name: Enforce compiler dependency layers
         run: python3 tools/quality/check_architecture.py
 
+      - name: Enforce bootstrap compiler mirror
+        run: python3 tools/quality/check_bootstrap_mirror.py
+
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Measure line and branch coverage

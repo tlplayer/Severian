@@ -2,7 +2,7 @@
 
 use severian_ast::{ImportDeclaration, ImportSubject, Item, Module};
 use severian_diagnostics::Diagnostic;
-use severian_source::SourceFile;
+use severian_source::{SourceFile, SourceMap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,8 @@ pub struct ResolvedModule {
     /// module's package-relative source path, never from traversal order.
     pub id: ModuleId,
     pub path: PathBuf,
+    /// The exact source used to produce `ast`, including its graph-unique ID.
+    pub source: SourceFile,
     pub package: PackageId,
     pub ast: Module,
     /// Source imports resolved while constructing the graph. External XXI
@@ -90,6 +92,7 @@ struct Resolver<'a> {
     order: Vec<ResolvedModule>,
     module_ids: BTreeMap<PathBuf, ModuleId>,
     import_edges: BTreeMap<PathBuf, Vec<ResolvedImport>>,
+    sources: SourceMap,
 }
 
 impl<'a> Resolver<'a> {
@@ -102,6 +105,7 @@ impl<'a> Resolver<'a> {
             order: Vec::new(),
             module_ids: BTreeMap::new(),
             import_edges: BTreeMap::new(),
+            sources: SourceMap::new(),
         }
     }
 
@@ -138,14 +142,18 @@ impl<'a> Resolver<'a> {
             return Ok(());
         }
 
-        let source = SourceFile::load(&canonical).map_err(|error| {
+        let source_id = self.sources.load(&canonical).map_err(|error| {
             Diagnostic::new(
                 "E000001",
                 format!("could not read {}: {error}", canonical.display()),
                 None,
             )
         })?;
-        let tokens = severian_lexer::scan(&source)?;
+        let source = self
+            .sources
+            .get(source_id)
+            .expect("a newly loaded source is present in its source map");
+        let tokens = severian_lexer::scan(source)?;
         let ast = severian_parser::parse(&tokens)?;
         self.parsed.insert(canonical.clone(), ast.clone());
         let module_id = module_id(&canonical, package, self.packages)?;
@@ -184,7 +192,12 @@ impl<'a> Resolver<'a> {
         let imports = self.import_edges.remove(&canonical).unwrap_or_default();
         self.order.push(ResolvedModule {
             id: module_id,
-            path: canonical,
+            path: canonical.clone(),
+            source: self
+                .sources
+                .get(source_id)
+                .expect("a resolved source remains present in its source map")
+                .clone(),
             package,
             ast,
             imports,
@@ -322,6 +335,7 @@ mod tests {
         let graph = resolve(&root.join("root.sev")).unwrap();
         assert_eq!(graph.modules.len(), 2);
         assert!(graph.modules[0].path.ends_with("dependency.sev"));
+        assert_ne!(graph.modules[0].source.id, graph.modules[1].source.id);
         std::fs::remove_dir_all(root).unwrap();
     }
 

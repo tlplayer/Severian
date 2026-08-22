@@ -434,13 +434,7 @@ impl Compiler {
         let mut sources = Vec::new();
         let mut external = Vec::new();
         for module in &mut graph.modules {
-            let source = SourceFile::load(&module.path).map_err(|error| {
-                CompileError::Diagnostic(Diagnostic::new(
-                    "E000001",
-                    format!("could not read {}: {error}", module.path.display()),
-                    None,
-                ))
-            })?;
+            let source = module.source.clone();
             module.ast = with_core_prelude(&module.ast, &self.context.types)?;
             external.push(
                 severian_xxi::resolve(

@@ -20,6 +20,25 @@ class SourceFile:
     text: string
 
 
+class SourceMap:
+    files: list[SourceFile]
+
+    def SourceMap():
+        files = []
+
+    def add_virtual(name: string, text: string) -> SourceId:
+        id = SourceId(u32(len(files)))
+        files.append(SourceFile(id, name, text))
+        return id
+
+    def load(path: string) -> SourceId | IOError:
+        text = file.read_string(path)?
+        return add_virtual(path, text)
+
+    def get(id: SourceId) -> SourceFile:
+        return files[id.index]
+
+
 def source_id(index: u32) -> SourceId:
     return SourceId(index)
 
@@ -36,4 +55,3 @@ def virtual_source(name: string, text: string) -> SourceFile:
 def load(path: string) -> SourceFile | IOError:
     text = file.read_string(path)?
     return SourceFile(SourceId(0), path, text)
-

@@ -7,3 +7,17 @@ test "program indexes start with stable empty tables":
     assert(len(index.modules) == 0)
     assert(len(index.definitions) == 0)
 
+
+test "overload sets retain both definitions":
+    first = universal.DefId(1, 2, universal.DeclarationId(3))
+    second = universal.DefId(1, 2, universal.DeclarationId(4))
+    bindings: map[string, Resolution] = {}
+    insert_resolution(bindings, "run", first)
+    insert_resolution(bindings, "run", second)
+    match bindings["run"]:
+        case OverloadSet:
+            assert(len(definitions) == 2)
+            assert(definitions[0] == first)
+            assert(definitions[1] == second)
+        case _:
+            assert(false)

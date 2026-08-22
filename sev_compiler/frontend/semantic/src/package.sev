@@ -71,22 +71,22 @@ def definition_id(package: modules.PackageId, module: modules.ModuleId, name: st
     return universal.DefId(u128(package.index), module.value, universal.DeclarationId(declaration))
 
 
-def insert_resolution(bindings: map[string, Resolution], name: string, definition: universal.DefId):
+def insert_resolution(bindings: map[string, Resolution], name: string, new_definition: universal.DefId):
     existing = bindings.get(name)
     if existing == None:
-        bindings[name] = Def(definition)
+        bindings[name] = Def(new_definition)
         return
     match existing:
         case Def:
-            bindings[name] = OverloadSet([definition, definition])
+            bindings[name] = OverloadSet([definition, new_definition])
         case OverloadSet:
-            definitions.append(definition)
+            definitions.append(new_definition)
             bindings[name] = OverloadSet(definitions)
         case Ambiguous:
-            definitions.append(definition)
+            definitions.append(new_definition)
             bindings[name] = Ambiguous(definitions)
         case Module:
-            bindings[name] = Ambiguous([definition])
+            bindings[name] = Ambiguous([new_definition])
 
 
 def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:

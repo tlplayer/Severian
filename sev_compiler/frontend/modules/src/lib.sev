@@ -20,6 +20,7 @@ class ResolvedImport:
 class ResolvedModule:
     id: ModuleId
     path: string
+    source_file: source.SourceFile
     package: PackageId
     ast_module: ast.Module
     imports: list[ResolvedImport]
@@ -48,6 +49,7 @@ class Resolver:
     visited: set[string]
     order: list[ResolvedModule]
     module_ids: map[string, ModuleId]
+    sources: source.SourceMap
 
     def Resolver(packages: PackageGraph):
         self.packages = packages
@@ -56,6 +58,7 @@ class Resolver:
         visited = set()
         order = []
         module_ids = {}
+        sources = source.SourceMap()
 
     def visit(path: string, package: PackageId) -> unit | diagnostics.Diagnostic:
         canonical = file.canonical(path)?
@@ -68,7 +71,8 @@ class Resolver:
                     return error(diagnostics.Diagnostic("E000122", "runtime module initialization cycle", None))
             return unit
 
-        source_file = source.load(canonical)?
+        source_id = sources.load(canonical)?
+        source_file = sources.get(source_id)
         tokens = lexer.scan(source_file)?
         module = parser.parse(tokens)?
         parsed[canonical] = module
@@ -87,7 +91,7 @@ class Resolver:
 
         visiting.pop()
         visited.add(canonical)
-        order.append(ResolvedModule(id, canonical, package, module, imports))
+        order.append(ResolvedModule(id, canonical, source_file, package, module, imports))
         return unit
 
 
@@ -137,4 +141,3 @@ def resolve(root: string) -> ModuleGraph | diagnostics.Diagnostic:
     package = PackageId(0)
     packages = PackageGraph(package, {package: ResolvedPackage(package, file.parent(root), root, {})})
     return resolve_with_packages(root, packages)
-
