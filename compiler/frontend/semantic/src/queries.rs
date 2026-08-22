@@ -62,7 +62,13 @@ impl<'a> SemanticQueries<'a> {
     }
 
     pub fn signature_of(&self, definition: DefId) -> Result<&FunctionDecl, QueryError> {
-        match self.program.index.definitions.get(&definition).map(|item| &item.kind) {
+        match self
+            .program
+            .index
+            .definitions
+            .get(&definition)
+            .map(|item| &item.kind)
+        {
             Some(DefKind::Function(signature)) => Ok(signature),
             _ => Err(QueryError::NotFunction(definition)),
         }

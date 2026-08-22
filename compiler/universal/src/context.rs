@@ -1,14 +1,18 @@
-use crate::TypeContext;
+use crate::{OperationRegistry, TypeContext};
 use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct UniversalContext {
     pub types: TypeContext,
+    pub operations: OperationRegistry,
 }
 
 impl UniversalContext {
     pub fn new(types: TypeContext) -> Self {
-        Self { types }
+        Self {
+            types,
+            operations: OperationRegistry::default(),
+        }
     }
 }
 

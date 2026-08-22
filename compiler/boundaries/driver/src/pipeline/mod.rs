@@ -1,7 +1,7 @@
 use severian_backend::{Artifact, BackendError};
 use severian_compile::{CompileContext, CompileHandler, CompilePlan, CompilerRegistry};
 use severian_diagnostics::Diagnostic;
-use severian_mir::{Module as MirModule, Operation as MirOperation, Value as MirValue, ValueId};
+use severian_mir::{Module as MirModule, Operation as MirOperation};
 use severian_source::SourceFile;
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
@@ -14,6 +14,8 @@ pub enum CompileError {
     Bootstrap(severian_bootstrap::BootstrapError),
     Diagnostic(Diagnostic),
     Compile(severian_compile::CompileError),
+    MirVerify(severian_mir::VerifyError),
+    MirPass(severian_mir::PassError),
     Lowering(severian_lowering::LoweringError),
     Mlir(severian_mlir::MlirError),
     Backend(BackendError),
@@ -25,6 +27,8 @@ impl fmt::Display for CompileError {
             Self::Bootstrap(error) => write!(formatter, "primitive bootstrap failed: {error}"),
             Self::Diagnostic(diagnostic) => diagnostic.fmt(formatter),
             Self::Compile(error) => write!(formatter, "CompileType dispatch failed: {error}"),
+            Self::MirVerify(error) => write!(formatter, "MIR verification failed: {error}"),
+            Self::MirPass(error) => error.fmt(formatter),
             Self::Lowering(error) => write!(formatter, "lowering failed: {error}"),
             Self::Mlir(error) => write!(formatter, "MLIR generation failed: {error}"),
             Self::Backend(error) => error.fmt(formatter),
@@ -180,9 +184,12 @@ impl Compiler {
             },
         )
         .map_err(CompileError::Diagnostic)?;
-        apply_external_calls(&ast, &external, &mut hir);
+        apply_external_calls(&ast, &external, &mut hir)?;
         severian_ownership::validate(&hir).map_err(CompileError::Diagnostic)?;
-        Ok(severian_mir::build(&hir))
+        let mut mir = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
+        severian_mir::run_required_pipeline(&mut mir, &self.context)
+            .map_err(CompileError::MirPass)?;
+        Ok(mir)
     }
 
     pub fn check_source(&self, source: &SourceFile) -> Result<(), CompileError> {
@@ -455,30 +462,27 @@ impl Compiler {
             },
         )
         .map_err(CompileError::Diagnostic)?;
-        for ((module, ast), resolved) in typed
+        for ((module, source_module), resolved) in typed
             .hir
             .modules
             .iter_mut()
-            .zip(graph.modules.iter().map(|module| &module.ast))
+            .zip(&graph.modules)
             .zip(&external)
         {
-            apply_external_calls_to_module(ast, resolved, module);
+            apply_external_calls_to_module(
+                &source_module.ast,
+                resolved,
+                module,
+                Some((&typed.index, source_module.id)),
+            )?;
         }
         severian_ownership::validate(&typed.hir).map_err(CompileError::Diagnostic)?;
-        let modules = typed
-            .hir
-            .modules
-            .into_iter()
-            .zip(&sources)
-            .map(|(module, source)| {
-                let mut mir = severian_mir::build(&severian_hir::Program {
-                    modules: vec![module],
-                });
-                attach_assertion_locations(&mut mir, source);
-                mir
-            })
-            .collect();
-        let mut merged = merge_package_modules(modules);
+        let mut merged = severian_mir::build(&typed.hir).map_err(CompileError::MirVerify)?;
+        severian_mir::run_required_pipeline(&mut merged, &self.context)
+            .map_err(CompileError::MirPass)?;
+        if let Some(source) = sources.last() {
+            attach_assertion_locations(&mut merged, source);
+        }
         if !self.coverage {
             remove_module_coverage(&mut merged);
         }
@@ -793,34 +797,62 @@ fn apply_external_calls(
     ast: &severian_ast::Module,
     external: &severian_xxi::ResolvedExternalModule,
     hir: &mut severian_hir::Program,
-) {
+) -> Result<(), CompileError> {
     let Some(module) = hir.modules.first_mut() else {
-        return;
+        return Ok(());
     };
-    apply_external_calls_to_module(ast, external, module);
+    apply_external_calls_to_module(ast, external, module, None)
 }
 
 fn apply_external_calls_to_module(
     ast: &severian_ast::Module,
     external: &severian_xxi::ResolvedExternalModule,
     module: &mut severian_hir::Module,
-) {
-    let mut foreign = external.foreign.functions.iter();
-    for (ast_function, hir_function) in ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            severian_ast::Item::Function(function) => Some(function),
-            _ => None,
-        })
-        .zip(&mut module.functions)
-    {
-        if ast_function.decorators.is_empty() {
-            continue;
+    identity: Option<(&severian_semantic::ProgramIndex, severian_modules::ModuleId)>,
+) -> Result<(), CompileError> {
+    for declaration in &external.declarations {
+        let ast_function = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Function(function) => Some(function),
+                _ => None,
+            })
+            .find(|function| {
+                function.span.start == declaration.span_start
+                    && function.span.end == declaration.span_end
+            })
+            .ok_or_else(|| external_metadata_error("XXI declaration has no source item"))?;
+        let overload_ordinal = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Function(function)
+                    if function.name == ast_function.name
+                        && function.span.start < ast_function.span.start =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .count();
+        let hir_function = if let Some((index, module_id)) = identity {
+            let definition = index
+                .function_definition(module_id, &ast_function.name, overload_ordinal)
+                .ok_or_else(|| external_metadata_error("foreign definition is not indexed"))?;
+            module
+                .functions
+                .iter_mut()
+                .find(|function| function.definition == definition)
+        } else {
+            module
+                .functions
+                .iter_mut()
+                .filter(|function| function.name == ast_function.name)
+                .nth(overload_ordinal)
         }
-        let declaration = foreign
-            .next()
-            .expect("XXI returns every decorated function in source order");
+        .ok_or_else(|| external_metadata_error("foreign definition has no typed HIR item"))?;
+        let declaration = &declaration.function;
         hir_function.call_type = severian_hir::CallType::External(severian_hir::ExternalCall {
             interface: severian_hir::InterfaceId("xxi".into()),
             symbol: severian_hir::SymbolId(declaration.symbol.name.as_str().into()),
@@ -832,165 +864,11 @@ fn apply_external_calls_to_module(
             abi: severian_hir::AbiId(format!("{:?}", declaration.abi)),
         });
     }
+    Ok(())
 }
 
-/// Combines package MIR after semantic analysis has already assigned global
-/// function identities. Only lowering-local values are rebased here.
-fn merge_package_modules(modules: Vec<MirModule>) -> MirModule {
-    let root = modules.len().saturating_sub(1);
-    let mut merged = MirModule::default();
-    for (index, module) in modules.into_iter().enumerate() {
-        let value_offset = merged.values.len() as u32;
-        merged
-            .values
-            .extend(module.values.iter().map(|value| MirValue {
-                id: ValueId(value.id.0 + value_offset),
-                type_id: value.type_id,
-            }));
-        merged.bindings.extend(
-            module
-                .bindings
-                .iter()
-                .map(|(binding, value)| (*binding, ValueId(value.0 + value_offset))),
-        );
-        merged.globals.extend(
-            module
-                .globals
-                .iter()
-                .map(|value| ValueId(value.0 + value_offset)),
-        );
-        merged.initializer.operations.extend(
-            module
-                .initializer
-                .operations
-                .iter()
-                .map(|operation| remap_operation(operation, value_offset)),
-        );
-        merged.tests.extend(module.tests);
-        for mut function in module.functions {
-            function.parameters = function
-                .parameters
-                .into_iter()
-                .map(|value| ValueId(value.0 + value_offset))
-                .collect();
-            if let Some(body) = &mut function.body {
-                body.operations = body
-                    .operations
-                    .iter()
-                    .map(|operation| remap_operation(operation, value_offset))
-                    .collect();
-            }
-            merged.functions.push(function);
-        }
-        if index == root {
-            merged.entry = module.entry;
-        }
-    }
-    merged
-}
-
-fn remap_operation(operation: &MirOperation, offset: u32) -> MirOperation {
-    let value = |value: ValueId| ValueId(value.0 + offset);
-    match operation {
-        MirOperation::Coverage { point } => MirOperation::Coverage {
-            point: point.clone(),
-        },
-        MirOperation::Constant {
-            value: literal,
-            result,
-        } => MirOperation::Constant {
-            value: literal.clone(),
-            result: value(*result),
-        },
-        MirOperation::Unary {
-            operator,
-            operand,
-            result,
-        } => MirOperation::Unary {
-            operator: *operator,
-            operand: value(*operand),
-            result: value(*result),
-        },
-        MirOperation::Binary {
-            operator,
-            left,
-            right,
-            result,
-        } => MirOperation::Binary {
-            operator: *operator,
-            left: value(*left),
-            right: value(*right),
-            result: value(*result),
-        },
-        MirOperation::Call {
-            function,
-            arguments,
-            result,
-        } => MirOperation::Call {
-            function: *function,
-            arguments: arguments.iter().copied().map(value).collect(),
-            result: value(*result),
-        },
-        MirOperation::Return { value: returned } => MirOperation::Return {
-            value: returned.map(value),
-        },
-        MirOperation::Assert {
-            condition,
-            message,
-            origin,
-        } => MirOperation::Assert {
-            condition: value(*condition),
-            message: message.map(value),
-            origin: origin.clone(),
-        },
-        MirOperation::If {
-            condition,
-            then_block,
-            else_block,
-        } => MirOperation::If {
-            condition: value(*condition),
-            then_block: severian_mir::Block {
-                operations: then_block
-                    .operations
-                    .iter()
-                    .map(|operation| remap_operation(operation, offset))
-                    .collect(),
-            },
-            else_block: severian_mir::Block {
-                operations: else_block
-                    .operations
-                    .iter()
-                    .map(|operation| remap_operation(operation, offset))
-                    .collect(),
-            },
-        },
-        MirOperation::Match { subject, arms } => MirOperation::Match {
-            subject: value(*subject),
-            arms: arms
-                .iter()
-                .map(|arm| severian_mir::MatchArm {
-                    type_id: arm.type_id,
-                    body: severian_mir::Block {
-                        operations: arm
-                            .body
-                            .operations
-                            .iter()
-                            .map(|operation| remap_operation(operation, offset))
-                            .collect(),
-                    },
-                })
-                .collect(),
-        },
-        MirOperation::CompiledRegionCall {
-            artifact,
-            inputs,
-            outputs,
-        } => MirOperation::CompiledRegionCall {
-            artifact: *artifact,
-            inputs: inputs.iter().copied().map(value).collect(),
-            outputs: outputs.iter().copied().map(value).collect(),
-        },
-    }
+fn external_metadata_error(message: &str) -> CompileError {
+    CompileError::Diagnostic(Diagnostic::new("E000701", message, None))
 }
 
 pub fn compile_source(source: &SourceFile, output: &Path) -> Result<Artifact, CompileError> {
@@ -1008,7 +886,6 @@ pub fn check_file(source: &Path) -> Result<(), CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_hir::BindingId;
     use severian_mir::{Value, ValueId};
     use severian_universal::TypeId;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1046,23 +923,6 @@ mod tests {
     }
 
     #[test]
-    fn package_merge_preserves_semantic_bindings_and_rebases_values() {
-        let source_module = |binding| MirModule {
-            values: vec![Value {
-                id: ValueId(0),
-                type_id: TypeId(0),
-            }],
-            bindings: vec![(BindingId(binding), ValueId(0))],
-            ..MirModule::default()
-        };
-        let merged = merge_package_modules(vec![source_module(4), source_module(9)]);
-        assert_eq!(
-            merged.bindings,
-            vec![(BindingId(4), ValueId(0)), (BindingId(9), ValueId(1))]
-        );
-    }
-
-    #[test]
     fn selecting_one_test_removes_other_test_functions_and_keeps_dense_value_ids() {
         let function = |id: u32, value: u32| severian_mir::Function {
             id: severian_mir::FunctionId(id.into()),
@@ -1071,6 +931,7 @@ mod tests {
                 module: 0,
                 declaration: severian_universal::DeclarationId::from_path(&format!("test.{id}")),
             },
+            substitution: severian_universal::Substitution::default(),
             name: format!("test-{id}"),
             parameters: Vec::new(),
             result: TypeId(0),

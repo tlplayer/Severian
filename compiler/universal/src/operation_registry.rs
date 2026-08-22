@@ -58,6 +58,33 @@ impl AttributeId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BackendId(pub u128);
+
+impl BackendId {
+    pub const fn from_name(name: &str) -> Self {
+        Self(hash(name))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeId(pub u128);
+
+impl RuntimeId {
+    pub const fn from_name(name: &str) -> Self {
+        Self(hash(name))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProviderId(pub u128);
+
+impl ProviderId {
+    pub const fn from_name(name: &str) -> Self {
+        Self(hash(name))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrValue {
     Integer(i128),
@@ -94,8 +121,9 @@ impl EffectSet {
 pub enum LoweringCapability {
     Standard,
     Compiler(crate::CompilerId),
-    Backend(String),
-    Runtime(String),
+    Backend(BackendId),
+    Runtime(RuntimeId),
+    Provider(ProviderId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,9 +171,18 @@ pub trait OperationInterface: Send + Sync {
     fn lowering_capabilities(&self) -> &[LoweringCapability];
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct OperationRegistry {
     interfaces: BTreeMap<OpId, Arc<dyn OperationInterface>>,
+}
+
+impl std::fmt::Debug for OperationRegistry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OperationRegistry")
+            .field("interfaces", &self.interfaces.len())
+            .finish()
+    }
 }
 
 impl OperationRegistry {

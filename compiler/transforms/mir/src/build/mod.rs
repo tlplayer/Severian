@@ -2,22 +2,29 @@ use crate::{Block, Function, Module, Operation, Value, ValueId};
 use severian_hir::{BindingId, Expression, ExpressionKind, Program as HirProgram, Statement};
 use std::collections::BTreeMap;
 
-pub fn build(hir: &HirProgram) -> Module {
+pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
     let function_ids = hir
         .modules
         .iter()
         .flat_map(|module| &module.functions)
-        .map(|function| (function.definition, function.id))
+        .map(|function| {
+            (
+                (function.definition, function.substitution.clone()),
+                function.id,
+            )
+        })
         .collect();
     let mut builder = Builder {
         module: Module::default(),
         bindings: BTreeMap::new(),
         function_ids,
     };
+    let (initializer_cfg, mut function_cfgs) = crate::cfg::lower_program(hir);
+    builder.module.initializer_cfg = initializer_cfg;
     for hir_module in &hir.modules {
-        let (initializer_cfg, mut function_cfgs) = crate::cfg::lower_module(hir_module);
-        builder.module.initializer_cfg = initializer_cfg;
-        builder.module.entry = hir_module.entry;
+        if hir_module.entry.is_some() {
+            builder.module.entry = hir_module.entry;
+        }
         builder
             .module
             .tests
@@ -27,6 +34,7 @@ pub fn build(hir: &HirProgram) -> Module {
                 function: test.function,
                 expectations: test.expectations.clone(),
             }));
+        let function_base = builder.module.functions.len();
         for function in &hir_module.functions {
             let parameters = function
                 .parameters
@@ -36,6 +44,7 @@ pub fn build(hir: &HirProgram) -> Module {
             builder.module.functions.push(Function {
                 id: function.id,
                 definition: function.definition,
+                substitution: function.substitution.clone(),
                 name: function.name.clone(),
                 parameters,
                 result: function.result.ty,
@@ -55,13 +64,11 @@ pub fn build(hir: &HirProgram) -> Module {
                 builder.statement(statement, hir_module, &mut initializer);
             }
         }
-        builder.module.initializer = initializer;
-        builder.module.globals = builder
+        builder
             .module
-            .bindings
-            .iter()
-            .map(|(_, value)| *value)
-            .collect();
+            .initializer
+            .operations
+            .extend(initializer.operations);
         let globals = builder.bindings.clone();
 
         for (index, function) in hir_module.functions.iter().enumerate() {
@@ -69,29 +76,38 @@ pub fn build(hir: &HirProgram) -> Module {
                 continue;
             };
             builder.bindings.clone_from(&globals);
-            for (parameter, value) in function
-                .parameters
-                .iter()
-                .zip(builder.module.functions[index].parameters.iter().copied())
-            {
+            for (parameter, value) in function.parameters.iter().zip(
+                builder.module.functions[function_base + index]
+                    .parameters
+                    .iter()
+                    .copied(),
+            ) {
                 builder.bindings.insert(parameter.binding, value);
             }
             let mut body = Block::default();
             for statement in &hir_body.statements {
                 builder.statement(statement, hir_module, &mut body);
             }
-            builder.module.functions[index].body = Some(body);
+            builder.module.functions[function_base + index].body = Some(body);
         }
     }
-    crate::verify::verify_structure(&builder.module)
-        .expect("MIR construction must produce a structurally valid CFG");
-    builder.module
+    builder.module.globals = builder
+        .module
+        .bindings
+        .iter()
+        .map(|(_, value)| *value)
+        .collect();
+    crate::verify::verify_structure(&builder.module)?;
+    Ok(builder.module)
 }
 
 struct Builder {
     module: Module,
     bindings: BTreeMap<BindingId, ValueId>,
-    function_ids: BTreeMap<severian_universal::DefId, severian_hir::FunctionId>,
+    function_ids: BTreeMap<
+        (severian_universal::DefId, severian_universal::Substitution),
+        severian_hir::FunctionId,
+    >,
 }
 
 impl Builder {
@@ -277,11 +293,15 @@ impl Builder {
                     .map(|argument| self.expression(argument, block))
                     .collect();
                 let result = self.value(expression.type_id);
-                let severian_hir::Callee::Direct { function, .. } = callee else {
+                let severian_hir::Callee::Direct {
+                    function,
+                    substitution,
+                } = callee
+                else {
                     panic!("non-direct calls lower through CFG MIR")
                 };
                 block.operations.push(Operation::Call {
-                    function: self.function_ids[function],
+                    function: self.function_ids[&(*function, substitution.clone())],
                     arguments,
                     result,
                 });

@@ -33,6 +33,14 @@ pub struct ResolvedExternalModule {
     pub imports: Vec<ExternalImport>,
     pub foreign: ForeignModule,
     pub plans: Vec<BoundaryPlan>,
+    pub declarations: Vec<ResolvedExternalFunction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedExternalFunction {
+    pub span_start: u32,
+    pub span_end: u32,
+    pub function: ForeignFunction,
 }
 
 /// Resolves source-facing XXI declarations into validated FFI declarations and
@@ -57,6 +65,7 @@ pub fn resolve(
         }
     }
     let mut foreign = ForeignModule::default();
+    let mut declarations = Vec::new();
     for declaration in module.items.iter().filter_map(|item| match item {
         Item::Type(declaration) if !declaration.decorators.is_empty() => Some(declaration),
         _ => None,
@@ -81,6 +90,11 @@ pub fn resolve(
         }) {
             return Err(XxiError::DuplicateDeclaration(declaration.name.clone()));
         }
+        declarations.push(ResolvedExternalFunction {
+            span_start: declaration.span.start,
+            span_end: declaration.span.end,
+            function: resolved.clone(),
+        });
         foreign.functions.push(resolved);
     }
     let plans = foreign
@@ -95,6 +109,7 @@ pub fn resolve(
         imports,
         foreign,
         plans,
+        declarations,
     })
 }
 

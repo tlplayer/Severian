@@ -284,6 +284,7 @@ mod tests {
                     module: 0,
                     declaration: severian_universal::DeclarationId::from_path("test.function"),
                 },
+                substitution: severian_universal::Substitution::default(),
                 name: "main".into(),
                 parameters: vec![],
                 result: standard,

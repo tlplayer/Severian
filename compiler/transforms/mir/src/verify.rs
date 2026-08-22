@@ -1,9 +1,13 @@
 use crate::{
-    BasicBlock, Callee, CfgBody, CfgStatement, LocalId, Module, Operand, Place, Rvalue,
-    Terminator,
+    BasicBlock, Callee, CfgBody, CfgStatement, LocalId, Module, Operand, Place, Rvalue, Terminator,
 };
-use severian_universal::{TypeContext, TypeId};
+use severian_universal::{IrContext, RegisteredOperation, TypeContext, TypeId, UniversalContext};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+type Signatures =
+    BTreeMap<(severian_universal::DefId, severian_universal::Substitution), (Vec<TypeId>, TypeId)>;
+type CallContext<'a> = (&'a TypeContext, &'a Signatures);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyError {
@@ -17,25 +21,72 @@ pub enum VerifyError {
     CallArity,
     CallArgumentType,
     InvalidOwnershipState { block: u32, local: u32 },
+    UnknownOperation(severian_universal::OpId),
+    InvalidOperation(String),
 }
 
+impl fmt::Display for VerifyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidBlock(block) => write!(formatter, "invalid basic block {block}"),
+            Self::InvalidLocal(local) => write!(formatter, "invalid local {local}"),
+            Self::MissingTerminator(block) => {
+                write!(formatter, "basic block {block} has no terminator")
+            }
+            Self::BlockArgumentArity(block) => {
+                write!(
+                    formatter,
+                    "basic block {block} has the wrong argument count"
+                )
+            }
+            Self::BlockArgumentType(block) => {
+                write!(
+                    formatter,
+                    "basic block {block} has an argument type mismatch"
+                )
+            }
+            Self::UseBeforeDefinition { block, local } => {
+                write!(
+                    formatter,
+                    "local {local} is used before definition in block {block}"
+                )
+            }
+            Self::CallTarget => formatter.write_str("call refers to an unknown definition"),
+            Self::CallArity => formatter.write_str("call has the wrong argument count"),
+            Self::CallArgumentType => formatter.write_str("call argument type mismatch"),
+            Self::InvalidOwnershipState { block, local } => write!(
+                formatter,
+                "local {local} has an invalid ownership state in block {block}"
+            ),
+            Self::UnknownOperation(operation) => write!(
+                formatter,
+                "operation {:032x}:{:032x} is not registered",
+                operation.dialect.0, operation.operation.0
+            ),
+            Self::InvalidOperation(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
 pub(crate) fn verify_structure(module: &Module) -> Result<(), VerifyError> {
-    verify_body(&module.initializer_cfg, None)?;
+    verify_body(&module.initializer_cfg, None, None)?;
     for function in &module.functions {
         if let Some(body) = &function.cfg {
-            verify_body(body, None)?;
+            verify_body(body, None, None)?;
         }
     }
     Ok(())
 }
 
-pub fn verify(module: &Module, types: &TypeContext) -> Result<(), VerifyError> {
+pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyError> {
     let signatures = module
         .functions
         .iter()
         .map(|function| {
             (
-                function.definition,
+                (function.definition, function.substitution.clone()),
                 (
                     function
                         .parameters
@@ -47,10 +98,14 @@ pub fn verify(module: &Module, types: &TypeContext) -> Result<(), VerifyError> {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    verify_body(&module.initializer_cfg, Some((types, &signatures)))?;
+    verify_body(
+        &module.initializer_cfg,
+        Some((&context.types, &signatures)),
+        Some(context),
+    )?;
     for function in &module.functions {
         if let Some(body) = &function.cfg {
-            verify_body(body, Some((types, &signatures)))?;
+            verify_body(body, Some((&context.types, &signatures)), Some(context))?;
         }
     }
     Ok(())
@@ -58,7 +113,8 @@ pub fn verify(module: &Module, types: &TypeContext) -> Result<(), VerifyError> {
 
 fn verify_body(
     body: &CfgBody,
-    calls: Option<(&TypeContext, &BTreeMap<severian_universal::DefId, (Vec<TypeId>, TypeId)>)>,
+    calls: Option<CallContext<'_>>,
+    context: Option<&UniversalContext>,
 ) -> Result<(), VerifyError> {
     if body.entry.0 as usize >= body.blocks.len() {
         return Err(VerifyError::InvalidBlock(body.entry.0));
@@ -89,7 +145,7 @@ fn verify_body(
         changed = false;
         for block in &body.blocks {
             let mut state = incoming[block.id.0 as usize].clone();
-            transfer(body, block, &mut state, calls)?;
+            transfer(body, block, &mut state, calls, context)?;
             for successor in successors(&block.terminator) {
                 let target = &mut incoming[successor.0 as usize];
                 let next = if target.is_empty() {
@@ -131,7 +187,8 @@ fn transfer(
     body: &CfgBody,
     block: &BasicBlock,
     state: &mut BTreeSet<LocalId>,
-    calls: Option<(&TypeContext, &BTreeMap<severian_universal::DefId, (Vec<TypeId>, TypeId)>)>,
+    calls: Option<CallContext<'_>>,
+    context: Option<&UniversalContext>,
 ) -> Result<(), VerifyError> {
     for statement in &block.statements {
         match statement {
@@ -170,7 +227,10 @@ fn transfer(
                 }
             }
             CfgStatement::Operation {
-                operands, results, ..
+                id,
+                operands,
+                results,
+                attributes,
             } => {
                 for operand in operands {
                     use_operand(block.id.0, body, operand, state)?;
@@ -178,6 +238,33 @@ fn transfer(
                 for result in results {
                     verify_place(body, result)?;
                     state.insert(result.local);
+                }
+                if let Some(context) = context {
+                    let interface = context
+                        .operations
+                        .interface(*id)
+                        .ok_or(VerifyError::UnknownOperation(*id))?;
+                    let operation = RegisteredOperation {
+                        id: *id,
+                        operands: operands
+                            .iter()
+                            .map(|operand| operand_type(body, operand))
+                            .collect::<Result<Vec<_>, _>>()?,
+                        results: results
+                            .iter()
+                            .map(|place| body.locals[place.local.0 as usize].ty)
+                            .collect(),
+                        attributes: attributes.clone(),
+                    };
+                    interface
+                        .verify(
+                            &operation,
+                            &IrContext {
+                                types: &context.types,
+                                operations: &context.operations,
+                            },
+                        )
+                        .map_err(|diagnostic| VerifyError::InvalidOperation(diagnostic.message))?;
                 }
             }
             CfgStatement::Coverage(_) => {}
@@ -194,8 +281,13 @@ fn transfer(
             use_operand(block.id.0, body, argument, state)?;
         }
         if let Some((types, signatures)) = calls {
-            if let Callee::Direct { function, .. } = callee {
-                let Some((parameters, _)) = signatures.get(function) else {
+            if let Callee::Direct {
+                function,
+                substitution,
+            } = callee
+            {
+                let Some((parameters, _)) = signatures.get(&(*function, substitution.clone()))
+                else {
                     return Err(VerifyError::CallTarget);
                 };
                 if parameters.len() != arguments.len() {

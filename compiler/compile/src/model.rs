@@ -78,6 +78,7 @@ impl CompilePlan {
             bindings: self.source.bindings.clone(),
             globals: self.source.globals.clone(),
             initializer: resume_block(&self.initializer),
+            initializer_cfg: self.source.initializer_cfg.clone(),
             functions: Vec::new(),
             entry: self.source.entry,
             tests: self.source.tests.clone(),

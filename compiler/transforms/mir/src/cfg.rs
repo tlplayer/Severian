@@ -177,30 +177,36 @@ impl Default for Body {
     }
 }
 
-pub(crate) fn lower_module(
-    module: &severian_hir::Module,
-) -> (Body, BTreeMap<FunctionId, Body>) {
-    let unit = module
-        .functions
-        .first()
+pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<FunctionId, Body>) {
+    let unit = program
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .next()
         .map_or(TypeId(0), |function| function.result.ty);
     let mut initializer = BodyBuilder::new(unit);
-    initializer.lower_statements(&module.initializer.statements, module);
+    for module in &program.modules {
+        initializer.lower_statements(&module.initializer.statements, module);
+    }
     let initializer = initializer.finish();
 
     let mut functions = BTreeMap::new();
-    for function in &module.functions {
-        let Some(body) = &function.body else {
-            continue;
-        };
-        let mut builder = BodyBuilder::new(function.result.ty);
-        for parameter in &function.parameters {
-            let local = builder.local(parameter.contract.ty, false, true);
-            builder.bindings.insert(parameter.binding, Place::local(local));
-            builder.entry_parameters.push(local);
+    for module in &program.modules {
+        for function in &module.functions {
+            let Some(body) = &function.body else {
+                continue;
+            };
+            let mut builder = BodyBuilder::new(function.result.ty);
+            for parameter in &function.parameters {
+                let local = builder.local(parameter.contract.ty, false, true);
+                builder
+                    .bindings
+                    .insert(parameter.binding, Place::local(local));
+                builder.entry_parameters.push(local);
+            }
+            builder.lower_statements(&body.statements, module);
+            functions.insert(function.id, builder.finish());
         }
-        builder.lower_statements(&body.statements, module);
-        functions.insert(function.id, builder.finish());
     }
     (initializer, functions)
 }
@@ -387,14 +393,14 @@ impl BodyBuilder {
                     self.current = block;
                     self.bindings.clone_from(&bindings);
                     if let Some(binding) = arm.binding {
-                        let local = self.local(
-                            arm.type_id.unwrap_or(self.body.return_type),
-                            false,
-                            false,
-                        );
+                        let local =
+                            self.local(arm.type_id.unwrap_or(self.body.return_type), false, false);
                         let place = Place::local(local);
                         self.push(Statement::StorageLive(local));
-                        self.push(Statement::Assign(place.clone(), Rvalue::Use(subject.clone())));
+                        self.push(Statement::Assign(
+                            place.clone(),
+                            Rvalue::Use(subject.clone()),
+                        ));
                         self.bindings.insert(binding, place);
                     }
                     self.lower_statements(&arm.body.statements, module);
@@ -502,9 +508,9 @@ impl BodyBuilder {
                 function: *function,
                 substitution: substitution.clone(),
             },
-            HirCallee::FunctionValue(expression) => Callee::FunctionValue(Operand::Copy(
-                self.expressions[expression].clone(),
-            )),
+            HirCallee::FunctionValue(expression) => {
+                Callee::FunctionValue(Operand::Copy(self.expressions[expression].clone()))
+            }
             HirCallee::Method {
                 implementation,
                 receiver,

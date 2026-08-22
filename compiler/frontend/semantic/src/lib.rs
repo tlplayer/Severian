@@ -5,10 +5,11 @@ mod queries;
 
 pub use package::{
     analyze_package, analyze_package_with_context, DefKind, Definition, ExportMap, FunctionDecl,
-    ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, TypedProgram, Visibility,
+    ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, SignatureId,
+    TypedProgram, Visibility,
 };
-pub use severian_universal::{DeclarationId, DefId};
 pub use queries::{QueryError, ScopeId, SemanticQueries};
+pub use severian_universal::{DeclarationId, DefId};
 
 use severian_ast::{
     BinaryOperator as AstBinaryOperator, Expression as AstExpression,
@@ -61,6 +62,7 @@ pub(crate) struct PackageFunction {
     pub lookup: String,
     pub id: FunctionId,
     pub definition: DefId,
+    pub substitution: severian_universal::Substitution,
     pub type_parameters: Vec<severian_universal::GenericParamId>,
     pub parameters: Vec<TypeId>,
     pub result: TypeId,
@@ -80,6 +82,7 @@ pub(crate) fn analyze_with_package_functions(
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
         function_definitions: BTreeMap::new(),
+        function_substitutions: BTreeMap::new(),
         signatures: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
@@ -100,6 +103,9 @@ pub(crate) fn analyze_with_package_functions(
         analyzer
             .function_definitions
             .insert(function.id, function.definition);
+        analyzer
+            .function_substitutions
+            .insert(function.id, function.substitution.clone());
     }
     let mut module = Module::default();
 
@@ -117,10 +123,8 @@ pub(crate) fn analyze_with_package_functions(
         let id = own_function_ids
             .get(ordinal)
             .copied()
-            .unwrap_or_else(|| FunctionId(module.functions.len() as u128));
-        let package_function = visible_functions
-            .iter()
-            .find(|function| function.id == id);
+            .unwrap_or(FunctionId(module.functions.len() as u128));
+        let package_function = visible_functions.iter().find(|function| function.id == id);
         let definition = package_function.map_or_else(
             || synthetic_definition(context.module_name, ast_function),
             |function| function.definition,
@@ -155,10 +159,16 @@ pub(crate) fn analyze_with_package_functions(
                 },
             );
             analyzer.function_definitions.insert(id, definition);
+            analyzer
+                .function_substitutions
+                .insert(id, severian_universal::Substitution::default());
         }
         module.functions.push(FunctionDeclaration {
             id,
             definition,
+            substitution: package_function
+                .map(|function| function.substitution.clone())
+                .unwrap_or_default(),
             name: ast_function.name.clone(),
             type_parameters: package_function
                 .map(|function| function.type_parameters.clone())
@@ -184,7 +194,7 @@ pub(crate) fn analyze_with_package_functions(
             let id = test_function_ids
                 .get(index)
                 .copied()
-                .unwrap_or_else(|| FunctionId(module.functions.len() as u128));
+                .unwrap_or(FunctionId(module.functions.len() as u128));
             let unit = types.resolve_name("unit").expect("bootstrap defines unit");
             let mode_suffix = if test.modes.is_empty() {
                 String::new()
@@ -201,6 +211,7 @@ pub(crate) fn analyze_with_package_functions(
             module.functions.push(FunctionDeclaration {
                 id,
                 definition: synthetic_test_definition(context.module_name, index),
+                substitution: severian_universal::Substitution::default(),
                 name: format!(
                     "__sev_{}_test{mode_suffix}{name_suffix}_{index}",
                     context.module_name
@@ -395,6 +406,7 @@ struct Analyzer<'a> {
     next_binding: u32,
     functions: BTreeMap<String, Vec<FunctionId>>,
     function_definitions: BTreeMap<FunctionId, DefId>,
+    function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
 }
 
@@ -816,7 +828,7 @@ impl Analyzer<'_> {
                     kind: ExpressionKind::Call {
                         callee: severian_hir::Callee::Direct {
                             function: self.function_definitions[function],
-                            substitution: severian_universal::Substitution::default(),
+                            substitution: self.function_substitutions[function].clone(),
                         },
                         arguments: (*arguments).clone(),
                     },
@@ -879,13 +891,10 @@ impl Analyzer<'_> {
     }
 }
 
-fn synthetic_definition(
-    module: &str,
-    function: &severian_ast::FunctionDeclaration,
-) -> DefId {
+fn synthetic_definition(module: &str, function: &severian_ast::FunctionDeclaration) -> DefId {
     DefId {
         package: 0,
-        module: u128::from(severian_universal::DeclarationId::from_path(module).0),
+        module: severian_universal::DeclarationId::from_path(module).0,
         declaration: severian_universal::DeclarationId::from_path(&format!(
             "{module}.function.{}.{:?}",
             function.name, function.type_parameters
@@ -896,7 +905,7 @@ fn synthetic_definition(
 fn synthetic_test_definition(module: &str, ordinal: usize) -> DefId {
     DefId {
         package: 0,
-        module: u128::from(severian_universal::DeclarationId::from_path(module).0),
+        module: severian_universal::DeclarationId::from_path(module).0,
         declaration: severian_universal::DeclarationId::from_path(&format!(
             "{module}.test.{ordinal}"
         )),

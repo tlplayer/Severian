@@ -5,8 +5,8 @@ mod expression;
 #[path = "model/statement/mod.rs"]
 mod statement;
 
-pub use expression::{Expression, ExpressionKind};
 pub use expression::{Callee, Conversion, ConversionKind};
+pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{
     CompileRoute, CompilerId, DefId, GenericParamId, OpId, Substitution, TypeId,
 };
@@ -76,6 +76,7 @@ pub struct FunctionParameter {
 pub struct FunctionDeclaration {
     pub id: FunctionId,
     pub definition: DefId,
+    pub substitution: Substitution,
     pub name: String,
     pub type_parameters: Vec<GenericParamId>,
     pub parameters: Vec<FunctionParameter>,

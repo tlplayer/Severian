@@ -1,17 +1,19 @@
 use super::*;
+use std::collections::BTreeSet;
 
 pub(super) type Substitution = BTreeMap<String, String>;
+pub(super) type Specializations = BTreeMap<DefId, BTreeSet<Substitution>>;
 
 pub(super) fn collect_generic_specializations(
     module_graph: &ModuleGraph,
     index: &ProgramIndex,
-) -> Result<BTreeMap<DefId, Substitution>, Diagnostic> {
+) -> Result<Specializations, Diagnostic> {
     let mut specializations = BTreeMap::new();
     // A specialization can make calls inside another generic body concrete,
     // so walk to a fixed point. This is declaration-driven and independent of
     // module initialization order.
     loop {
-        let before = specializations.len();
+        let before = specialization_count(&specializations);
         for module in &module_graph.modules {
             let mut globals = BTreeMap::new();
             for item in &module.ast.items {
@@ -41,11 +43,13 @@ pub(super) fn collect_generic_specializations(
                         &mut specializations,
                     )?,
                     Item::Function(function) => {
-                        let id = function_def_id(module.package, module.id, function);
+                        let id = function_def_id(module.package, module.id, &module.ast, function);
                         let substitution = if function.type_parameters.is_empty() {
                             Some(Substitution::new())
                         } else {
-                            specializations.get(&id).cloned()
+                            specializations
+                                .get(&id)
+                                .and_then(|instances| instances.iter().next().cloned())
                         };
                         let Some(substitution) = substitution else {
                             continue;
@@ -74,11 +78,15 @@ pub(super) fn collect_generic_specializations(
                 }
             }
         }
-        if specializations.len() == before {
+        if specialization_count(&specializations) == before {
             break;
         }
     }
     Ok(specializations)
+}
+
+fn specialization_count(specializations: &Specializations) -> usize {
+    specializations.values().map(BTreeSet::len).sum()
 }
 
 fn visit_statements_for_specializations(
@@ -87,7 +95,7 @@ fn visit_statements_for_specializations(
     result: Option<&str>,
     names: &mut BTreeMap<String, String>,
     index: &ProgramIndex,
-    specializations: &mut BTreeMap<DefId, Substitution>,
+    specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     for statement in statements {
         match statement {
@@ -218,7 +226,7 @@ fn visit_expression_for_specializations(
     expected: Option<&str>,
     names: &BTreeMap<String, String>,
     index: &ProgramIndex,
-    specializations: &mut BTreeMap<DefId, Substitution>,
+    specializations: &mut Specializations,
 ) -> Result<(), Diagnostic> {
     match &expression.kind {
         severian_ast::ExpressionKind::Call { callee, arguments } => {
@@ -256,20 +264,10 @@ fn visit_expression_for_specializations(
                         .iter()
                         .all(|parameter| substitution.contains_key(parameter))
                     {
-                        if let Some(existing) = specializations.get(&definition) {
-                            if existing != &substitution {
-                                return Err(Diagnostic::new(
-                                    "E000204",
-                                    format!(
-                                        "generic function `{}` requires more than one concrete instance; multi-instance monomorphization is not implemented yet",
-                                        index.definitions[&definition].name
-                                    ),
-                                    Some(expression.span),
-                                ));
-                            }
-                        } else {
-                            specializations.insert(definition, substitution);
-                        }
+                        specializations
+                            .entry(definition)
+                            .or_default()
+                            .insert(substitution);
                     }
                 }
             }
@@ -434,6 +432,7 @@ pub(super) fn specialize_signature(
     substitution: &Substitution,
 ) -> FunctionDecl {
     FunctionDecl {
+        signature: function.signature,
         type_parameters: Vec::new(),
         parameters: function
             .parameters

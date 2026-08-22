@@ -10,15 +10,22 @@ mod generic;
 #[cfg(test)]
 mod tests;
 
-use generic::{collect_generic_specializations, specialize_function, specialize_signature};
+use generic::{
+    collect_generic_specializations, specialize_function, specialize_signature, Specializations,
+    Substitution as GenericSubstitution,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignatureId(pub u128);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDecl {
+    pub signature: SignatureId,
     pub type_parameters: Vec<String>,
     pub parameters: Vec<TypeAnnotation>,
     pub result: TypeAnnotation,
@@ -73,6 +80,23 @@ pub struct ProgramIndex {
     pub exports: BTreeMap<ModuleId, ExportMap>,
 }
 
+impl ProgramIndex {
+    pub fn function_definition(
+        &self,
+        module: ModuleId,
+        name: &str,
+        overload_ordinal: usize,
+    ) -> Option<DefId> {
+        let scope = self.modules.get(&module)?;
+        let id = DefId {
+            package: u128::from(scope.package.0),
+            module: module.0,
+            declaration: DeclarationId(stable_hash(&format!("function:{name}:{overload_ordinal}"))),
+        };
+        self.definitions.contains_key(&id).then_some(id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedProgram {
     pub index: ProgramIndex,
@@ -102,35 +126,38 @@ pub fn analyze_package_with_context(
     resolve_imports(module_graph, &mut index);
     let specializations = collect_generic_specializations(module_graph, &index)?;
 
-    // Lowering retains a stable hash of DefId. It is compact enough for the
-    // existing HIR/MIR handle while remaining independent of collection order.
-    let function_ids = index
-        .definitions
-        .iter()
-        .filter(|(_, definition)| matches!(definition.kind, DefKind::Function(_)))
-        .map(|(id, _)| (*id, stable_function_id(*id)))
-        .collect::<BTreeMap<_, _>>();
     let mut next_binding = 0u32;
     let mut hir = Program::default();
 
     for source_module in &module_graph.modules {
-        let mut own_definitions = Vec::new();
+        let mut own_instances = Vec::new();
         let mut ast = severian_ast::Module::default();
         for item in &source_module.ast.items {
             match item {
                 Item::Function(function) if !function.type_parameters.is_empty() => {
-                    let id = function_def_id(source_module.package, source_module.id, function);
-                    if let Some(substitution) = specializations.get(&id) {
-                        own_definitions.push(id);
-                        ast.items
-                            .push(Item::Function(specialize_function(function, substitution)));
+                    let id = function_def_id(
+                        source_module.package,
+                        source_module.id,
+                        &source_module.ast,
+                        function,
+                    );
+                    if let Some(instances) = specializations.get(&id) {
+                        for substitution in instances {
+                            own_instances.push((id, substitution.clone()));
+                            ast.items
+                                .push(Item::Function(specialize_function(function, substitution)));
+                        }
                     }
                 }
                 Item::Function(function) => {
-                    own_definitions.push(function_def_id(
-                        source_module.package,
-                        source_module.id,
-                        function,
+                    own_instances.push((
+                        function_def_id(
+                            source_module.package,
+                            source_module.id,
+                            &source_module.ast,
+                            function,
+                        ),
+                        GenericSubstitution::default(),
                     ));
                     ast.items.push(item.clone());
                 }
@@ -138,10 +165,15 @@ pub fn analyze_package_with_context(
             }
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
-        visible.extend(own_definitions.iter().map(|definition| FunctionBinding {
-            lookup: index.definitions[definition].name.clone(),
-            definition: *definition,
-        }));
+        visible.extend(
+            own_instances
+                .iter()
+                .map(|(definition, substitution)| FunctionBinding {
+                    lookup: index.definitions[definition].name.clone(),
+                    definition: *definition,
+                    substitution: substitution.clone(),
+                }),
+        );
         let visible = visible
             .into_iter()
             .map(|binding| {
@@ -149,14 +181,18 @@ pub fn analyze_package_with_context(
                 let DefKind::Function(original) = &definition.kind else {
                     unreachable!("only functions enter the callable environment")
                 };
-                let signature = specializations
-                    .get(&binding.definition)
-                    .map(|substitution| specialize_signature(original, substitution))
-                    .unwrap_or_else(|| original.clone());
+                let signature = if binding.substitution.is_empty() {
+                    original.clone()
+                } else {
+                    specialize_signature(original, &binding.substitution)
+                };
+                let substitution =
+                    universal_substitution(original, &binding.substitution, &universal.types)?;
                 Ok(PackageFunction {
                     lookup: binding.lookup,
-                    id: function_ids[&binding.definition],
+                    id: stable_instance_function_id(binding.definition, &binding.substitution),
                     definition: binding.definition,
+                    substitution,
                     type_parameters: Vec::new(),
                     parameters: signature
                         .parameters
@@ -176,9 +212,11 @@ pub fn analyze_package_with_context(
             AnalysisMode::Build
         };
         let module_name = module_name(&source_module.path);
-        let own_function_ids = own_definitions
+        let own_function_ids = own_instances
             .iter()
-            .map(|definition| function_ids[definition])
+            .map(|(definition, substitution)| {
+                stable_instance_function_id(*definition, substitution)
+            })
             .collect::<Vec<_>>();
         let test_function_ids = ast
             .items
@@ -231,12 +269,13 @@ pub fn analyze_package_with_context(
 struct FunctionBinding {
     lookup: String,
     definition: DefId,
+    substitution: GenericSubstitution,
 }
 
 fn imported_function_bindings(
     module: ModuleId,
     index: &ProgramIndex,
-    specializations: &BTreeMap<DefId, BTreeMap<String, String>>,
+    specializations: &Specializations,
 ) -> Vec<FunctionBinding> {
     let mut stubs = Vec::new();
     let scope = &index.modules[&module].scope;
@@ -246,10 +285,13 @@ fn imported_function_bindings(
                 if let Some(exports) = index.exports.get(target) {
                     for (export, resolution) in exports {
                         for definition in resolution_definitions(resolution) {
-                            if emit_function(definition, index, specializations) {
+                            for substitution in
+                                function_instances(definition, index, specializations)
+                            {
                                 stubs.push(FunctionBinding {
                                     lookup: format!("{name}.{export}"),
                                     definition,
+                                    substitution,
                                 });
                             }
                         }
@@ -258,33 +300,50 @@ fn imported_function_bindings(
             }
             resolution => {
                 for definition in resolution_definitions(resolution) {
-                    if definition.module != module.0
-                        && emit_function(definition, index, specializations)
-                    {
-                        stubs.push(FunctionBinding {
-                            lookup: name.clone(),
-                            definition,
-                        });
+                    if definition.module != module.0 {
+                        for substitution in function_instances(definition, index, specializations) {
+                            stubs.push(FunctionBinding {
+                                lookup: name.clone(),
+                                definition,
+                                substitution,
+                            });
+                        }
                     }
                 }
             }
         }
     }
-    stubs.sort_by_key(|stub| (stub.lookup.clone(), stub.definition));
-    stubs.dedup_by_key(|stub| (stub.lookup.clone(), stub.definition));
+    stubs.sort_by_key(|stub| {
+        (
+            stub.lookup.clone(),
+            stub.definition,
+            stub.substitution.clone(),
+        )
+    });
+    stubs.dedup_by_key(|stub| {
+        (
+            stub.lookup.clone(),
+            stub.definition,
+            stub.substitution.clone(),
+        )
+    });
     stubs
 }
 
-fn emit_function(
+fn function_instances(
     definition: DefId,
     index: &ProgramIndex,
-    specializations: &BTreeMap<DefId, BTreeMap<String, String>>,
-) -> bool {
+    specializations: &Specializations,
+) -> Vec<GenericSubstitution> {
     match &index.definitions[&definition].kind {
-        DefKind::Function(function) => {
-            function.type_parameters.is_empty() || specializations.contains_key(&definition)
+        DefKind::Function(function) if function.type_parameters.is_empty() => {
+            vec![GenericSubstitution::default()]
         }
-        _ => false,
+        DefKind::Function(_) => specializations
+            .get(&definition)
+            .map(|instances| instances.iter().cloned().collect())
+            .unwrap_or_default(),
+        _ => Vec::new(),
     }
 }
 
@@ -344,10 +403,11 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
             }
             let (name, kind, id) = match item {
                 Item::Function(function) => {
-                    let id = function_def_id(module.package, module.id, function);
+                    let id = function_def_id(module.package, module.id, &module.ast, function);
                     (
                         function.name.clone(),
                         DefKind::Function(FunctionDecl {
+                            signature: function_signature_id(function),
                             type_parameters: function.type_parameters.clone(),
                             parameters: function
                                 .parameters
@@ -530,8 +590,31 @@ fn item_identity(
 fn function_def_id(
     package: PackageId,
     module: ModuleId,
+    ast: &severian_ast::Module,
     function: &severian_ast::FunctionDeclaration,
 ) -> DefId {
+    let overload_ordinal = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Function(candidate)
+                if candidate.name == function.name
+                    && candidate.span.start < function.span.start =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+        .count();
+    let key = format!("function:{}:{overload_ordinal}", function.name);
+    DefId {
+        package: u128::from(package.0),
+        module: module.0,
+        declaration: DeclarationId(stable_hash(&key)),
+    }
+}
+
+fn function_signature_id(function: &severian_ast::FunctionDeclaration) -> SignatureId {
     let parameters = function
         .parameters
         .iter()
@@ -539,16 +622,11 @@ fn function_def_id(
         .collect::<Vec<_>>()
         .join(",");
     let generics = function.type_parameters.join(",");
-    let key = format!(
+    SignatureId(stable_hash(&format!(
         "function:{}[{generics}]({parameters})->{}",
         function.name,
         type_key(&function.result)
-    );
-    DefId {
-        package: u128::from(package.0),
-        module: module.0,
-        declaration: DeclarationId(stable_hash(&key)),
-    }
+    )))
 }
 
 fn type_key(annotation: &TypeAnnotation) -> String {
@@ -575,11 +653,43 @@ fn stable_hash(value: &str) -> u128 {
     })
 }
 
-fn stable_function_id(definition: DefId) -> FunctionId {
+fn stable_instance_function_id(
+    definition: DefId,
+    substitution: &GenericSubstitution,
+) -> FunctionId {
+    let arguments = substitution
+        .iter()
+        .map(|(parameter, ty)| format!("{parameter}={ty}"))
+        .collect::<Vec<_>>()
+        .join(",");
     FunctionId(stable_hash(&format!(
-        "function:{}:{:032x}:{:032x}",
-        definition.package, definition.module, definition.declaration.0
+        "function:{}:{:032x}:{:032x}[{arguments}]",
+        definition.package, definition.module, definition.declaration.0,
     )))
+}
+
+fn universal_substitution(
+    function: &FunctionDecl,
+    substitution: &GenericSubstitution,
+    types: &severian_universal::TypeContext,
+) -> Result<severian_universal::Substitution, Diagnostic> {
+    let arguments = function
+        .type_parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, parameter)| {
+            substitution
+                .get(parameter)
+                .map(|name| (severian_universal::GenericParamId(index as u32), name))
+        })
+        .map(|(parameter, name)| {
+            types
+                .resolve_name(name)
+                .map(|ty| (parameter, ty))
+                .ok_or_else(|| Diagnostic::new("E000204", format!("unknown type `{name}`"), None))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(severian_universal::Substitution::new(arguments))
 }
 
 fn module_name(path: &std::path::Path) -> String {

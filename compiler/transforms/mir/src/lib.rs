@@ -2,10 +2,10 @@
 
 mod build;
 mod cfg;
-mod ownership;
-mod passes;
 #[path = "model/operation/mod.rs"]
 mod operation;
+mod ownership;
+mod passes;
 #[path = "model/value/mod.rs"]
 mod value;
 mod verify;
@@ -15,13 +15,14 @@ pub use cfg::{
     BasicBlock, BlockId, Body as CfgBody, Callee, Case, LocalDecl, LocalId, Operand, Place,
     Projection, Rvalue, Statement as CfgStatement, Terminator,
 };
+pub use operation::Operation;
 pub use ownership::{
     analyze_ownership, elaborate_drops, Loan, LoanKind, OwnershipError, OwnershipReport,
 };
 pub use passes::{
-    AnalysisId, AnalysisManager, IrStage, Pass, PassError, PassKind, PassManager, PassMetadata,
+    run_required_pipeline, AnalysisId, AnalysisManager, IrStage, Pass, PassContext, PassError,
+    PassKind, PassManager, PassMetadata,
 };
-pub use operation::Operation;
 use severian_hir::BindingId;
 pub use severian_hir::{CallType, FunctionId};
 pub use value::{Value, ValueId};
@@ -96,6 +97,7 @@ pub struct Block {
 pub struct Function {
     pub id: FunctionId,
     pub definition: severian_universal::DefId,
+    pub substitution: severian_universal::Substitution,
     pub name: String,
     pub parameters: Vec<ValueId>,
     pub result: severian_universal::TypeId,
