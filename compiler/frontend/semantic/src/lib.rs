@@ -98,7 +98,16 @@ pub(crate) fn analyze_with_package_functions(
         analyzer.signatures.insert(
             function.id,
             FunctionSignature {
-                parameters: function.parameters.clone(),
+                parameters: function
+                    .parameters
+                    .iter()
+                    .copied()
+                    .map(|type_id| SignatureParameter {
+                        name: String::new(),
+                        type_id,
+                        default: None,
+                    })
+                    .collect(),
                 result: function.result,
             },
         );
@@ -172,7 +181,16 @@ pub(crate) fn analyze_with_package_functions(
             analyzer.signatures.insert(
                 id,
                 FunctionSignature {
-                    parameters: parameter_types.clone(),
+                    parameters: ast_function
+                        .parameters
+                        .iter()
+                        .zip(parameter_types.iter().copied())
+                        .map(|(parameter, type_id)| SignatureParameter {
+                            name: parameter.name.clone(),
+                            type_id,
+                            default: parameter.default.clone(),
+                        })
+                        .collect(),
                     result,
                 },
             );
@@ -432,8 +450,15 @@ struct Analyzer<'a> {
 
 #[derive(Debug, Clone)]
 struct FunctionSignature {
-    parameters: Vec<TypeId>,
+    parameters: Vec<SignatureParameter>,
     result: TypeId,
+}
+
+#[derive(Debug, Clone)]
+struct SignatureParameter {
+    name: String,
+    type_id: TypeId,
+    default: Option<AstExpression>,
 }
 
 enum Prepared {
@@ -801,24 +826,62 @@ impl Analyzer<'_> {
                 let mut matches = Vec::new();
                 for function in candidates {
                     let signature = self.signatures[&function].clone();
-                    if signature.parameters.len() != arguments.len()
-                        || expected.is_some_and(|expected| {
+                    if expected.is_some_and(|expected| {
                             !self.types.assignable(signature.result, expected)
-                        })
-                    {
+                        }) {
                         continue;
                     }
-                    let resolved = arguments
+                    let mut ordered = vec![None; signature.parameters.len()];
+                    let mut positional = 0usize;
+                    let mut named = false;
+                    let mut valid = true;
+                    for argument in arguments {
+                        let index = if let Some(argument_name) = &argument.name {
+                            named = true;
+                            signature
+                                .parameters
+                                .iter()
+                                .position(|parameter| parameter.name == *argument_name)
+                        } else if named {
+                            None
+                        } else {
+                            let index = positional;
+                            positional += 1;
+                            (index < ordered.len()).then_some(index)
+                        };
+                        let Some(index) = index else {
+                            valid = false;
+                            break;
+                        };
+                        if ordered[index].replace(&argument.value).is_some() {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if !valid {
+                        continue;
+                    }
+                    let ordered = ordered
+                        .into_iter()
+                        .zip(&signature.parameters)
+                        .map(|(argument, parameter)| argument.or(parameter.default.as_ref()))
+                        .collect::<Option<Vec<_>>>();
+                    let Some(ordered) = ordered else {
+                        continue;
+                    };
+                    let resolved = ordered
                         .iter()
                         .zip(&signature.parameters)
-                        .map(|(argument, parameter)| self.expression(argument, Some(*parameter)))
+                        .map(|(argument, parameter)| {
+                            self.expression(argument, Some(parameter.type_id))
+                        })
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
                         let conversions = arguments
                             .iter()
                             .zip(&signature.parameters)
                             .map(|(argument, parameter)| {
-                                conversion_rank(self.types, argument.type_id, *parameter)
+                                conversion_rank(self.types, argument.type_id, parameter.type_id)
                                     .expect("resolved arguments are assignable")
                             })
                             .collect::<Vec<_>>();

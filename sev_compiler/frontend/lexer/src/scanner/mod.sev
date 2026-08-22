@@ -144,7 +144,7 @@ def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
             cursor += symbol[1]
             continue
 
-        formatted = character == "f" and cursor + 3 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\"" and characters[cursor + 3] == "\""
+        formatted = character == "f" and cursor + 1 < len(characters) and characters[cursor + 1] == "\""
         if character == "\"" or formatted:
             if formatted:
                 cursor += 1

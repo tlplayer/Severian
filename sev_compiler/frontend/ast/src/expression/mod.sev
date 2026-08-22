@@ -41,11 +41,16 @@ class Expression:
     span: source.Span
 
 
+class CallArgument:
+    name: string | None
+    value: Expression
+    span: source.Span
+
+
 enum ExpressionKind:
     LiteralValue(value: Literal)
     Name(name: string)
     Member(object: Expression, name: string)
-    Call(callee: Expression, arguments: list[Expression])
+    Call(callee: Expression, arguments: list[CallArgument])
     Unary(operator: UnaryOperator, operand: Expression)
     Binary(operator: BinaryOperator, left: Expression, right: Expression)
-

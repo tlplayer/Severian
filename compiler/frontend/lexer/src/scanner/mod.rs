@@ -75,6 +75,16 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             }
             b'@' => one(&mut cursor, TokenKind::At),
             b',' => one(&mut cursor, TokenKind::Comma),
+            b'.' if bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit) => {
+                cursor += 1;
+                while bytes
+                    .get(cursor)
+                    .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_')
+                {
+                    cursor += 1;
+                }
+                TokenKind::Float(source.text[start..cursor].replace('_', ""))
+            }
             b'.' => one(&mut cursor, TokenKind::Dot),
             b':' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
@@ -157,6 +167,34 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 3;
                 TokenKind::FormattedString(value)
             }
+            b'f' if bytes.get(cursor + 1) == Some(&b'"') => {
+                cursor += 2;
+                let content_start = cursor;
+                while cursor < bytes.len() && bytes[cursor] != b'"' {
+                    if bytes[cursor] == b'\n' {
+                        return Err(Diagnostic::new(
+                            "E000101",
+                            "unterminated formatted string literal",
+                            Some(Span::new(source.id, start as u32, cursor as u32)),
+                        ));
+                    }
+                    if bytes[cursor] == b'\\' {
+                        cursor = (cursor + 2).min(bytes.len());
+                    } else {
+                        cursor += 1;
+                    }
+                }
+                if cursor == bytes.len() {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "unterminated formatted string literal",
+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+                    ));
+                }
+                let value = source.text[content_start..cursor].to_owned();
+                cursor += 1;
+                TokenKind::FormattedString(value)
+            }
             b'"' => {
                 let block = bytes.get(cursor..cursor + 3) == Some(b"\"\"\"");
                 if block {
@@ -200,6 +238,23 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 }
                 let value = source.text[content_start..cursor].to_owned();
                 cursor += 1;
+                TokenKind::String(value)
+            }
+            b'\'' if bytes.get(cursor..cursor + 3) == Some(b"'''") => {
+                cursor += 3;
+                let content_start = cursor;
+                while cursor + 2 < bytes.len() && bytes.get(cursor..cursor + 3) != Some(b"'''") {
+                    cursor += 1;
+                }
+                if cursor + 2 >= bytes.len() {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "unterminated block string literal",
+                        Some(Span::new(source.id, start as u32, bytes.len() as u32)),
+                    ));
+                }
+                let value = block_string(&source.text[content_start..cursor]);
+                cursor += 3;
                 TokenKind::String(value)
             }
             b'\'' => {

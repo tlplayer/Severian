@@ -21,6 +21,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
     };
     let (initializer_cfg, mut function_cfgs) = crate::cfg::lower_program(hir);
     builder.module.initializer_cfg = initializer_cfg;
+    let mut global_values = Vec::new();
     for hir_module in &hir.modules {
         if hir_module.entry.is_some() {
             builder.module.entry = hir_module.entry;
@@ -70,6 +71,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
             .operations
             .extend(initializer.operations);
         let globals = builder.bindings.clone();
+        global_values.extend(globals.values().copied());
 
         for (index, function) in hir_module.functions.iter().enumerate() {
             let Some(hir_body) = &function.body else {
@@ -91,12 +93,9 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
             builder.module.functions[function_base + index].body = Some(body);
         }
     }
-    builder.module.globals = builder
-        .module
-        .bindings
-        .iter()
-        .map(|(_, value)| *value)
-        .collect();
+    global_values.sort_unstable();
+    global_values.dedup();
+    builder.module.globals = global_values;
     crate::verify::verify_structure(&builder.module)?;
     Ok(builder.module)
 }

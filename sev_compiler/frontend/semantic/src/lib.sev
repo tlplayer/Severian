@@ -78,7 +78,7 @@ class Analyzer:
                 if ast_callable_name(callee) == None:
                     target = expression(callee, None)?
                     for argument in arguments:
-                        arguments_hir.append(expression(argument, None)?)
+                        arguments_hir.append(expression(argument.value, None)?)
                     result = expected if expected != None else types.resolve_name("unit")
                     return hir.Expression(new_hir_id(), result, hir.Call(hir.FunctionValue(target.id), arguments_hir), value.span)
                 name = ast_callable_name(callee)
@@ -96,7 +96,7 @@ class Analyzer:
                 signature = signatures[selected]
                 index = 0
                 for argument in arguments:
-                    arguments_hir.append(expression(argument, signature.parameters[index])?)
+                    arguments_hir.append(expression(argument.value, signature.parameters[index])?)
                     index += 1
                 return hir.Expression(
                     new_hir_id(),

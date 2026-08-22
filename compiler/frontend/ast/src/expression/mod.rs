@@ -46,6 +46,13 @@ pub struct Expression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallArgument {
+    pub name: Option<String>,
+    pub value: Expression,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpressionKind {
     Literal(Literal),
     Name(String),
@@ -55,7 +62,7 @@ pub enum ExpressionKind {
     },
     Call {
         callee: Box<Expression>,
-        arguments: Vec<Expression>,
+        arguments: Vec<CallArgument>,
     },
     Unary {
         operator: UnaryOperator,

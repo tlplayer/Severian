@@ -131,7 +131,7 @@ fn validate_generic_expression(
         Expression::Call { callee, arguments } => {
             validate_generic_expression(callee, names, function, index, types)?;
             for argument in arguments {
-                validate_generic_expression(argument, names, function, index, types)?;
+                validate_generic_expression(&argument.value, names, function, index, types)?;
             }
             Ok(None)
         }
@@ -691,7 +691,7 @@ fn visit_expression_for_specializations(
                         );
                     }
                     for (parameter, argument) in signature.parameters.iter().zip(arguments) {
-                        if let Some(actual) = expression_type_name(argument, names) {
+                        if let Some(actual) = expression_type_name(&argument.value, names) {
                             infer_substitution(
                                 parameter,
                                 &actual,
@@ -715,7 +715,7 @@ fn visit_expression_for_specializations(
             for argument in arguments {
                 visit_expression_for_specializations(
                     module,
-                    argument,
+                    &argument.value,
                     None,
                     names,
                     index,

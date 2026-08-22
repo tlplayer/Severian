@@ -1,6 +1,6 @@
 use severian_ast::{
-    BinaryOperator, Binding, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
-    DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
+    BinaryOperator, Binding, CallArgument, CompilerExpectation, CompilerTestCase, Decorator,
+    DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration, FunctionParameter,
     GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module,
     OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration, Statement,
     TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
@@ -184,14 +184,20 @@ impl Parser<'_> {
                     self.identifier("expected a parameter name")?;
                 self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
                 let annotation = self.type_annotation()?;
+                let default = if self.take(&TokenKind::Equal).is_some() {
+                    Some(self.expression(0)?)
+                } else {
+                    None
+                };
                 parameters.push(FunctionParameter {
                     name: parameter_name,
                     span: Span::new(
                         parameter_span.source,
                         parameter_span.start,
-                        annotation.span.end,
+                        default.as_ref().map_or(annotation.span.end, |value| value.span.end),
                     ),
                     annotation,
+                    default,
                 });
                 if self.take(&TokenKind::Comma).is_none() {
                     break;
@@ -920,7 +926,22 @@ impl Parser<'_> {
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {
                     loop {
-                        arguments.push(self.expression(0)?);
+                        let start = self.peek().span;
+                        let name = if matches!(self.peek().kind, TokenKind::Identifier(_))
+                            && self.tokens.get(self.cursor + 1).is_some_and(|token| token.kind == TokenKind::Equal)
+                        {
+                            let name = self.identifier("expected an argument name")?.0;
+                            self.expect(&TokenKind::Equal, "expected `=` after argument name")?;
+                            Some(name)
+                        } else {
+                            None
+                        };
+                        let value = self.expression(0)?;
+                        arguments.push(CallArgument {
+                            name,
+                            span: Span::new(start.source, start.start, value.span.end),
+                            value,
+                        });
                         if self.take(&TokenKind::Comma).is_none() {
                             break;
                         }

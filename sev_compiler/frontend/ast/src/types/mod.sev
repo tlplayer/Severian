@@ -46,6 +46,7 @@ enum TypeAnnotationKind:
 class FunctionParameter:
     name: string
     annotation: TypeAnnotation
+    default: Expression | None
     span: source.Span
 
 

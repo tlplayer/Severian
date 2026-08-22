@@ -201,7 +201,11 @@ class Parser:
             parameter = identifier("expected a parameter name")?
             expect(Colon, "expected colon after parameter")?
             annotation = type_annotation()?
-            parameters.append(ast.FunctionParameter(parameter[0], annotation, source.Span(parameter[1].source, parameter[1].start, annotation.span.end)))
+            default: ast.Expression | None = None
+            if take(Equal) != None:
+                default = expression(0)?
+            parameter_end = annotation.span.end if default == None else default.span.end
+            parameters.append(ast.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end)))
             if take(Comma) == None:
                 break
         close = expect(RightParen, "expected closing parenthesis")?.span
@@ -370,9 +374,15 @@ class Parser:
         value = primary()?
         while true:
             if take(LeftParen) != None:
-                arguments: list[ast.Expression] = []
+                arguments: list[ast.CallArgument] = []
                 while not at_simple(RightParen):
-                    arguments.append(expression(0)?)
+                    start = peek().span
+                    argument_name: string | None = None
+                    if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Equal:
+                        argument_name = identifier("expected argument name")?[0]
+                        expect(Equal, "expected = after argument name")?
+                    argument = expression(0)?
+                    arguments.append(ast.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end)))
                     if take(Comma) == None:
                         break
                 end = expect(RightParen, "expected closing parenthesis")?.span.end
