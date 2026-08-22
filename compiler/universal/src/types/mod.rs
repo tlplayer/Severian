@@ -1,6 +1,7 @@
 use crate::{
-    BinaryOperator, CompileRoute, CompilerId, DeclarationId, LiteralKind, LiteralValue,
-    OperatorSignature, PrimitiveId, TypeConstraint, TypeId, TypePattern, UnaryOperator,
+    BinaryOperator, CompileRoute, CompilerId, DeclarationId, DefId, GenericParamId, LiteralKind,
+    LiteralValue, OperatorSignature, PrimitiveId, Substitution, TyInterner, TyKind, TypeConstraint,
+    TypeId, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -154,6 +155,7 @@ pub struct ResolvedUnary {
 
 #[derive(Debug, Clone, Default)]
 pub struct TypeContext {
+    interner: TyInterner,
     definitions: Vec<TypeDefinition>,
     by_name: HashMap<String, TypeId>,
     by_declaration: BTreeMap<DeclarationId, TypeId>,
@@ -267,6 +269,18 @@ impl TypeContext {
             return Err(TypeError::DuplicateName(name));
         }
         let id = TypeId(self.definitions.len() as u32);
+        let interned = self.interner.intern(TyKind::Nominal(
+            DefId {
+                package: 0,
+                module: 0,
+                declaration,
+            },
+            Substitution::default(),
+        ));
+        debug_assert_eq!(
+            id, interned,
+            "definition and type identities share one table"
+        );
         self.definitions.push(TypeDefinition {
             id,
             declaration,
@@ -311,6 +325,7 @@ impl TypeContext {
             }
         }
         definition.kind = TypeDefinitionKind::Primitive(primitive);
+        self.interner.replace(type_id, TyKind::Primitive(id));
         self.by_primitive.insert(id, type_id);
         Ok(id)
     }
@@ -337,6 +352,30 @@ impl TypeContext {
 
     pub fn definition(&self, id: TypeId) -> Option<&TypeDefinition> {
         self.definitions.get(id.0 as usize)
+    }
+
+    pub fn kind(&self, id: TypeId) -> Option<&TyKind> {
+        self.interner.kind(id)
+    }
+
+    pub fn intern(&mut self, kind: TyKind) -> TypeId {
+        self.interner.intern(kind)
+    }
+
+    pub fn parameter(&mut self, parameter: GenericParamId) -> TypeId {
+        self.interner.parameter(parameter)
+    }
+
+    pub fn fresh_infer(&mut self) -> TypeId {
+        self.interner.fresh_infer()
+    }
+
+    pub fn union(&mut self, members: impl IntoIterator<Item = TypeId>) -> TypeId {
+        self.interner.union(members)
+    }
+
+    pub fn substitute(&mut self, ty: TypeId, substitution: &Substitution) -> TypeId {
+        self.interner.substitute(ty, substitution)
     }
 
     pub fn primitive(&self, id: TypeId) -> Option<&PrimitiveDefinition> {
@@ -414,7 +453,26 @@ impl TypeContext {
         if let Some(existing) = self.by_declaration.get(&declaration) {
             return Ok(*existing);
         }
-        let id = TypeId(self.definitions.len() as u32);
+        let substitution = Substitution::new(
+            arguments
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(index, ty)| (GenericParamId(index as u32), ty)),
+        );
+        let id = self.interner.intern(TyKind::Nominal(
+            DefId {
+                package: 0,
+                module: 0,
+                declaration,
+            },
+            substitution,
+        ));
+        debug_assert_eq!(
+            id.0 as usize,
+            self.definitions.len(),
+            "applied definitions and interned types remain aligned"
+        );
         self.definitions.push(TypeDefinition {
             id,
             declaration,
@@ -432,9 +490,20 @@ impl TypeContext {
     }
 
     pub fn compile_route(&self, type_id: TypeId) -> Result<CompileRoute, TypeError> {
-        let definition = self
-            .definition(type_id)
-            .ok_or(TypeError::UnknownTypeId(type_id))?;
+        let Some(definition) = self.definition(type_id) else {
+            return match self.kind(type_id) {
+                Some(
+                    TyKind::Parameter(_)
+                    | TyKind::Infer(_)
+                    | TyKind::Function(_)
+                    | TyKind::Tuple(_)
+                    | TyKind::Union(_)
+                    | TyKind::Reference { .. },
+                ) => Ok(CompileRoute::Standard),
+                Some(TyKind::Primitive(_) | TyKind::Nominal(_, _) | TyKind::Resource(_, _))
+                | None => Err(TypeError::UnknownTypeId(type_id)),
+            };
+        };
         let route_owner = match &definition.kind {
             TypeDefinitionKind::Applied { constructor, .. } => *constructor,
             _ => type_id,
@@ -453,6 +522,16 @@ impl TypeContext {
     pub fn assignable(&self, actual: TypeId, expected: TypeId) -> bool {
         if actual == expected {
             return true;
+        }
+        if let Some(TyKind::Union(members)) = self.kind(expected) {
+            return members
+                .iter()
+                .any(|member| self.assignable(actual, *member));
+        }
+        if let Some(TyKind::Union(members)) = self.kind(actual) {
+            return members
+                .iter()
+                .all(|member| self.assignable(*member, expected));
         }
         let (Some(actual), Some(expected)) = (self.primitive(actual), self.primitive(expected))
         else {

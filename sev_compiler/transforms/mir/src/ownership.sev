@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/transforms/mir/src/ownership.rs.
+# Flow-sensitive move, loan, resource and drop analysis runs on CFG MIR.

@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
 mod package;
+mod queries;
 
 pub use package::{
-    analyze_package, analyze_package_with_context, DeclarationId, DefId, DefKind, Definition,
-    ExportMap, FunctionDecl, ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope,
-    TypedProgram, Visibility,
+    analyze_package, analyze_package_with_context, DefKind, Definition, ExportMap, FunctionDecl,
+    ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope, TypedProgram, Visibility,
 };
+pub use severian_universal::{DeclarationId, DefId};
+pub use queries::{QueryError, ScopeId, SemanticQueries};
 
 use severian_ast::{
     BinaryOperator as AstBinaryOperator, Expression as AstExpression,
@@ -16,8 +18,7 @@ use severian_ast::{
 use severian_diagnostics::Diagnostic;
 use severian_hir::{
     Binding, BindingId, Block, BoundaryType, CallType, Expression, ExpressionKind,
-    FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, SemanticType,
-    Statement, TypeId,
+    FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, Statement, TypeId,
 };
 use severian_universal::{
     BinaryOperator, LiteralValue, TypeConstraint, TypeContext, UnaryOperator,
@@ -59,6 +60,8 @@ pub fn analyze_with_context(
 pub(crate) struct PackageFunction {
     pub lookup: String,
     pub id: FunctionId,
+    pub definition: DefId,
+    pub type_parameters: Vec<severian_universal::GenericParamId>,
     pub parameters: Vec<TypeId>,
     pub result: TypeId,
 }
@@ -76,6 +79,7 @@ pub(crate) fn analyze_with_package_functions(
         names: BTreeMap::new(),
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
+        function_definitions: BTreeMap::new(),
         signatures: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
@@ -93,6 +97,9 @@ pub(crate) fn analyze_with_package_functions(
                 result: function.result,
             },
         );
+        analyzer
+            .function_definitions
+            .insert(function.id, function.definition);
     }
     let mut module = Module::default();
 
@@ -111,6 +118,13 @@ pub(crate) fn analyze_with_package_functions(
             .get(ordinal)
             .copied()
             .unwrap_or_else(|| FunctionId(module.functions.len() as u128));
+        let package_function = visible_functions
+            .iter()
+            .find(|function| function.id == id);
+        let definition = package_function.map_or_else(
+            || synthetic_definition(context.module_name, ast_function),
+            |function| function.definition,
+        );
         let mut parameters = Vec::new();
         let mut parameter_types = Vec::new();
         for parameter in &ast_function.parameters {
@@ -140,10 +154,15 @@ pub(crate) fn analyze_with_package_functions(
                     result,
                 },
             );
+            analyzer.function_definitions.insert(id, definition);
         }
         module.functions.push(FunctionDeclaration {
             id,
+            definition,
             name: ast_function.name.clone(),
+            type_parameters: package_function
+                .map(|function| function.type_parameters.clone())
+                .unwrap_or_default(),
             parameters,
             result: universal_boundary(result),
             compile_route,
@@ -181,11 +200,13 @@ pub(crate) fn analyze_with_package_functions(
                 .unwrap_or_default();
             module.functions.push(FunctionDeclaration {
                 id,
+                definition: synthetic_test_definition(context.module_name, index),
                 name: format!(
                     "__sev_{}_test{mode_suffix}{name_suffix}_{index}",
                     context.module_name
                 ),
                 parameters: Vec::new(),
+                type_parameters: Vec::new(),
                 result: universal_boundary(unit),
                 compile_route: severian_universal::CompileRoute::Standard,
                 call_type: CallType::Severian,
@@ -243,9 +264,7 @@ pub(crate) fn analyze_with_package_functions(
         analyzer.names = globals.clone();
         analyzer.declarations.clear();
         for parameter in &function.parameters {
-            let SemanticType::Universal(type_id) = parameter.contract.ty else {
-                unreachable!("source parameters are universally resolved")
-            };
+            let type_id = parameter.contract.ty;
             if !analyzer.declarations.insert(parameter.name.clone()) {
                 return Err(Diagnostic::new(
                     "E000203",
@@ -258,9 +277,7 @@ pub(crate) fn analyze_with_package_functions(
                 .insert(parameter.name.clone(), (parameter.binding, type_id));
         }
         let mut body = Block::default();
-        let SemanticType::Universal(result_type) = function.result.ty else {
-            unreachable!("source results are universally resolved")
-        };
+        let result_type = function.result.ty;
         for statement in ast_body {
             body.statements.push(analyzer.statement(
                 statement,
@@ -282,7 +299,7 @@ pub(crate) fn analyze_with_package_functions(
             let arguments_type = types.resolve_name("args").expect("bootstrap defines args");
             let valid_parameters = match function.parameters.as_slice() {
                 [] => true,
-                [parameter] => parameter.contract.ty == SemanticType::Universal(arguments_type),
+                [parameter] => parameter.contract.ty == arguments_type,
                 _ => false,
             };
             if !valid_parameters {
@@ -377,6 +394,7 @@ struct Analyzer<'a> {
     next_hir: u32,
     next_binding: u32,
     functions: BTreeMap<String, Vec<FunctionId>>,
+    function_definitions: BTreeMap<FunctionId, DefId>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
 }
 
@@ -796,7 +814,10 @@ impl Analyzer<'_> {
                     id: self.next_id(),
                     type_id: *result,
                     kind: ExpressionKind::Call {
-                        function: *function,
+                        callee: severian_hir::Callee::Direct {
+                            function: self.function_definitions[function],
+                            substitution: severian_universal::Substitution::default(),
+                        },
                         arguments: (*arguments).clone(),
                     },
                     span: ast.span,
@@ -858,6 +879,30 @@ impl Analyzer<'_> {
     }
 }
 
+fn synthetic_definition(
+    module: &str,
+    function: &severian_ast::FunctionDeclaration,
+) -> DefId {
+    DefId {
+        package: 0,
+        module: u128::from(severian_universal::DeclarationId::from_path(module).0),
+        declaration: severian_universal::DeclarationId::from_path(&format!(
+            "{module}.function.{}.{:?}",
+            function.name, function.type_parameters
+        )),
+    }
+}
+
+fn synthetic_test_definition(module: &str, ordinal: usize) -> DefId {
+    DefId {
+        package: 0,
+        module: u128::from(severian_universal::DeclarationId::from_path(module).0),
+        declaration: severian_universal::DeclarationId::from_path(&format!(
+            "{module}.test.{ordinal}"
+        )),
+    }
+}
+
 fn callable_path(expression: &AstExpression) -> Option<String> {
     match &expression.kind {
         AstExpressionKind::Name(name) => Some(name.clone()),
@@ -890,7 +935,7 @@ fn resolve_type_annotation(
 
 fn universal_boundary(type_id: TypeId) -> BoundaryType {
     BoundaryType {
-        ty: SemanticType::Universal(type_id),
+        ty: type_id,
         modifiers: Vec::new(),
     }
 }

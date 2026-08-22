@@ -6,7 +6,10 @@ mod expression;
 mod statement;
 
 pub use expression::{Expression, ExpressionKind};
-pub use severian_universal::{CompileRoute, CompilerId, TypeId};
+pub use expression::{Callee, Conversion, ConversionKind};
+pub use severian_universal::{
+    CompileRoute, CompilerId, DefId, GenericParamId, OpId, Substitution, TypeId,
+};
 pub use statement::{Binding, Block, MatchArm, Statement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -19,7 +22,7 @@ pub struct BindingId(pub u32);
 pub struct FunctionId(pub u128);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DeclaredTypeId(pub u32);
+pub struct VariantId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InterfaceId(pub String);
@@ -52,19 +55,13 @@ pub struct ExternalCall {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SemanticType {
-    Universal(TypeId),
-    Declared(DeclaredTypeId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundaryModifier {
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundaryType {
-    pub ty: SemanticType,
+    pub ty: TypeId,
     pub modifiers: Vec<BoundaryModifier>,
 }
 
@@ -78,7 +75,9 @@ pub struct FunctionParameter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDeclaration {
     pub id: FunctionId,
+    pub definition: DefId,
     pub name: String,
+    pub type_parameters: Vec<GenericParamId>,
     pub parameters: Vec<FunctionParameter>,
     pub result: BoundaryType,
     pub compile_route: CompileRoute,
@@ -131,7 +130,7 @@ pub enum TestExpectation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDeclaration {
-    pub id: DeclaredTypeId,
+    pub id: TypeId,
     pub name: String,
     pub interface: Option<InterfaceId>,
 }

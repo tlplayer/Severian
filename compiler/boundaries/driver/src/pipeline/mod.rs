@@ -1066,6 +1066,11 @@ mod tests {
     fn selecting_one_test_removes_other_test_functions_and_keeps_dense_value_ids() {
         let function = |id: u32, value: u32| severian_mir::Function {
             id: severian_mir::FunctionId(id.into()),
+            definition: severian_universal::DefId {
+                package: 0,
+                module: 0,
+                declaration: severian_universal::DeclarationId::from_path(&format!("test.{id}")),
+            },
             name: format!("test-{id}"),
             parameters: Vec::new(),
             result: TypeId(0),
@@ -1075,6 +1080,7 @@ mod tests {
                     result: ValueId(value),
                 }],
             }),
+            cfg: None,
             call_type: severian_mir::CallType::Severian,
         };
         let module = MirModule {

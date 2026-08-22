@@ -3,7 +3,7 @@ use severian_ast::{ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
-use severian_universal::UniversalContext;
+use severian_universal::{DeclarationId, DefId, UniversalContext};
 use std::collections::BTreeMap;
 
 mod generic;
@@ -11,16 +11,6 @@ mod generic;
 mod tests;
 
 use generic::{collect_generic_specializations, specialize_function, specialize_signature};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DeclarationId(pub u128);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DefId {
-    pub package: PackageId,
-    pub module: ModuleId,
-    pub declaration: DeclarationId,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
@@ -166,6 +156,8 @@ pub fn analyze_package_with_context(
                 Ok(PackageFunction {
                     lookup: binding.lookup,
                     id: function_ids[&binding.definition],
+                    definition: binding.definition,
+                    type_parameters: Vec::new(),
                     parameters: signature
                         .parameters
                         .iter()
@@ -326,8 +318,8 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     import.source.as_deref().unwrap_or("")
                 );
                 let id = DefId {
-                    package: module.package,
-                    module: module.id,
+                    package: u128::from(module.package.0),
+                    module: module.id.0,
                     declaration: DeclarationId(stable_hash(&key)),
                 };
                 if index.definitions.contains_key(&id) {
@@ -528,8 +520,8 @@ fn item_identity(
         name.to_owned(),
         kind,
         DefId {
-            package,
-            module,
+            package: u128::from(package.0),
+            module: module.0,
             declaration: DeclarationId(stable_hash(&format!("{tag}:{name}"))),
         },
     )
@@ -553,8 +545,8 @@ fn function_def_id(
         type_key(&function.result)
     );
     DefId {
-        package,
-        module,
+        package: u128::from(package.0),
+        module: module.0,
         declaration: DeclarationId(stable_hash(&key)),
     }
 }
@@ -586,7 +578,7 @@ fn stable_hash(value: &str) -> u128 {
 fn stable_function_id(definition: DefId) -> FunctionId {
     FunctionId(stable_hash(&format!(
         "function:{}:{:032x}:{:032x}",
-        definition.package.0, definition.module.0, definition.declaration.0
+        definition.package, definition.module, definition.declaration.0
     )))
 }
 
@@ -665,6 +657,9 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
 fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
     match &mut expression.kind {
         ExpressionKind::Binding(binding) => binding.0 += offset,
+        ExpressionKind::Convert { operand, .. } => {
+            remap_expression_bindings(operand, offset);
+        }
         ExpressionKind::Call { arguments, .. } => {
             for argument in arguments {
                 remap_expression_bindings(argument, offset);
@@ -675,6 +670,6 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
             remap_expression_bindings(left, offset);
             remap_expression_bindings(right, offset);
         }
-        ExpressionKind::Literal(_) => {}
+        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
     }
 }

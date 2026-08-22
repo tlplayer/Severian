@@ -50,6 +50,32 @@ impl fmt::Display for CompilerId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeId(pub u32);
 
+/// Preferred name for the one interned type identity used by every compiler
+/// stage. `TypeId` remains as a source-compatible alias during bootstrap.
+pub type TyId = TypeId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GenericParamId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InferVarId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RegionId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DefId {
+    pub package: u128,
+    pub module: u128,
+    pub declaration: DeclarationId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InstanceId {
+    pub definition: DefId,
+    pub substitution: Vec<TyId>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/transforms/mir/src/verify.rs.
+# Verification covers CFG shape, dominance, block arguments, calls and ownership form.

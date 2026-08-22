@@ -279,6 +279,11 @@ mod tests {
             },
             functions: vec![severian_mir::Function {
                 id: severian_mir::FunctionId(0),
+                definition: severian_universal::DefId {
+                    package: 0,
+                    module: 0,
+                    declaration: severian_universal::DeclarationId::from_path("test.function"),
+                },
                 name: "main".into(),
                 parameters: vec![],
                 result: standard,
@@ -288,6 +293,7 @@ mod tests {
                         result: ValueId(2),
                     }],
                 }),
+                cfg: None,
                 call_type: severian_mir::CallType::Severian,
             }],
             entry: Some(severian_mir::FunctionId(0)),

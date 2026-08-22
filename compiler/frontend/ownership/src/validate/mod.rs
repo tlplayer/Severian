@@ -114,7 +114,7 @@ fn validate_expression(
     declared: &BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match &expression.kind {
-        ExpressionKind::Literal(_) => Ok(()),
+        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
         ExpressionKind::Binding(id) if declared.contains(id) => Ok(()),
         ExpressionKind::Binding(_) => Err(Diagnostic::new(
             "E000301",
@@ -128,6 +128,7 @@ fn validate_expression(
             Ok(())
         }
         ExpressionKind::Unary { operand, .. } => validate_expression(operand, declared),
+        ExpressionKind::Convert { operand, .. } => validate_expression(operand, declared),
         ExpressionKind::Binary { left, right, .. } => {
             validate_expression(left, declared)?;
             validate_expression(right, declared)

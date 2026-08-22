@@ -1,16 +1,31 @@
 #![forbid(unsafe_code)]
 
 mod build;
+mod cfg;
+mod ownership;
+mod passes;
 #[path = "model/operation/mod.rs"]
 mod operation;
 #[path = "model/value/mod.rs"]
 mod value;
+mod verify;
 
 pub use build::build;
+pub use cfg::{
+    BasicBlock, BlockId, Body as CfgBody, Callee, Case, LocalDecl, LocalId, Operand, Place,
+    Projection, Rvalue, Statement as CfgStatement, Terminator,
+};
+pub use ownership::{
+    analyze_ownership, elaborate_drops, Loan, LoanKind, OwnershipError, OwnershipReport,
+};
+pub use passes::{
+    AnalysisId, AnalysisManager, IrStage, Pass, PassError, PassKind, PassManager, PassMetadata,
+};
 pub use operation::Operation;
 use severian_hir::BindingId;
 pub use severian_hir::{CallType, FunctionId};
 pub use value::{Value, ValueId};
+pub use verify::{verify, VerifyError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
@@ -18,6 +33,7 @@ pub struct Module {
     pub bindings: Vec<(BindingId, ValueId)>,
     pub globals: Vec<ValueId>,
     pub initializer: Block,
+    pub initializer_cfg: CfgBody,
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
@@ -79,9 +95,11 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub id: FunctionId,
+    pub definition: severian_universal::DefId,
     pub name: String,
     pub parameters: Vec<ValueId>,
     pub result: severian_universal::TypeId,
     pub body: Option<Block>,
+    pub cfg: Option<CfgBody>,
     pub call_type: CallType,
 }

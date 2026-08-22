@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/frontend/semantic/src/queries.rs.
+# Frontend work is exposed as stable item-keyed semantic requests.

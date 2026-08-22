@@ -3,11 +3,20 @@ use severian_hir::{BindingId, Expression, ExpressionKind, Program as HirProgram,
 use std::collections::BTreeMap;
 
 pub fn build(hir: &HirProgram) -> Module {
+    let function_ids = hir
+        .modules
+        .iter()
+        .flat_map(|module| &module.functions)
+        .map(|function| (function.definition, function.id))
+        .collect();
     let mut builder = Builder {
         module: Module::default(),
         bindings: BTreeMap::new(),
+        function_ids,
     };
     for hir_module in &hir.modules {
+        let (initializer_cfg, mut function_cfgs) = crate::cfg::lower_module(hir_module);
+        builder.module.initializer_cfg = initializer_cfg;
         builder.module.entry = hir_module.entry;
         builder
             .module
@@ -22,25 +31,16 @@ pub fn build(hir: &HirProgram) -> Module {
             let parameters = function
                 .parameters
                 .iter()
-                .map(|parameter| {
-                    let severian_hir::SemanticType::Universal(type_id) = parameter.contract.ty
-                    else {
-                        panic!("declared source types must be lowered before MIR")
-                    };
-                    builder.value(type_id)
-                })
+                .map(|parameter| builder.value(parameter.contract.ty))
                 .collect();
             builder.module.functions.push(Function {
                 id: function.id,
+                definition: function.definition,
                 name: function.name.clone(),
                 parameters,
-                result: match function.result.ty {
-                    severian_hir::SemanticType::Universal(type_id) => type_id,
-                    severian_hir::SemanticType::Declared(_) => {
-                        panic!("declared result types must be lowered before MIR")
-                    }
-                },
+                result: function.result.ty,
                 body: None,
+                cfg: function_cfgs.remove(&function.id),
                 call_type: function.call_type.clone(),
             });
         }
@@ -83,12 +83,15 @@ pub fn build(hir: &HirProgram) -> Module {
             builder.module.functions[index].body = Some(body);
         }
     }
+    crate::verify::verify_structure(&builder.module)
+        .expect("MIR construction must produce a structurally valid CFG");
     builder.module
 }
 
 struct Builder {
     module: Module,
     bindings: BTreeMap<BindingId, ValueId>,
+    function_ids: BTreeMap<severian_universal::DefId, severian_hir::FunctionId>,
 }
 
 impl Builder {
@@ -268,21 +271,25 @@ impl Builder {
                 result
             }
             ExpressionKind::Binding(binding) => self.bindings[binding],
-            ExpressionKind::Call {
-                function,
-                arguments,
-            } => {
+            ExpressionKind::Call { callee, arguments } => {
                 let arguments = arguments
                     .iter()
                     .map(|argument| self.expression(argument, block))
                     .collect();
                 let result = self.value(expression.type_id);
+                let severian_hir::Callee::Direct { function, .. } = callee else {
+                    panic!("non-direct calls lower through CFG MIR")
+                };
                 block.operations.push(Operation::Call {
-                    function: *function,
+                    function: self.function_ids[function],
                     arguments,
                     result,
                 });
                 result
+            }
+            ExpressionKind::Convert { operand, .. } => self.expression(operand, block),
+            ExpressionKind::Function(_) => {
+                panic!("function values lower through CFG MIR")
             }
             ExpressionKind::Unary { operator, operand } => {
                 let operand = self.expression(operand, block);

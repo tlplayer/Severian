@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/transforms/mir/src/passes.rs.
+# Pass metadata drives lazy analysis caching and explicit invalidation.

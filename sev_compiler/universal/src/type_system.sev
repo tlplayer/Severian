@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/universal/src/type_system.rs.
+# All source, HIR, and MIR types share the TyId interner defined here.

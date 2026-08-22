@@ -1,0 +1,2 @@
+# Bootstrap counterpart of compiler/universal/src/operation_registry.rs.
+# Dialect operations register type, effect, verification and lowering interfaces.
