@@ -1,0 +1,19 @@
+import "list.sev"
+
+
+def extend[T](values: borrow mut list[T], additions: list[T]):
+    values.extend(move additions)
+
+
+def reversed[T](values: list[T]) -> list[T]:
+    result := with_capacity[T](values.len())
+    while not values.empty():
+        result.append(values.pop())
+    return result
+
+
+def concatenated[T](left: list[T], right: list[T]) -> list[T]:
+    result := with_capacity[T](left.len() + right.len())
+    result.extend(move left)
+    result.extend(move right)
+    return result

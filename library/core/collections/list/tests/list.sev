@@ -1,0 +1,54 @@
+import list
+
+
+test "append insert remove and growth preserve order":
+    values := list.with_capacity[int](2)
+    values.append(10)
+    values.append(30)
+    values.insert(1, 20)
+
+    assert(values.len() == 3)
+    assert(values.capacity() >= 3)
+    assert(values.get(0) == 10)
+    assert(values.get(1) == 20)
+    assert(values.get(2) == 30)
+    assert(values.remove(1) == 20)
+    assert(values.pop() == 30)
+    assert(values.last() == 10)
+
+
+test "left operations reverse truncate and clear retain invariants":
+    values := list.list[string]()
+    values.append("b")
+    values.append_left("a")
+    values.append("c")
+
+    assert(values.pop_left() == "a")
+    values.append("d")
+    values.reverse()
+    assert(values.get(0) == "d")
+    assert(values.get(1) == "c")
+    assert(values.get(2) == "b")
+
+    values.truncate(1)
+    assert(values.len() == 1)
+    values.clear()
+    assert(values.empty())
+
+
+test "iterator builder and standalone operations use the public list API":
+    builder := list.builder[int](3)
+    builder.push(1)
+    builder.push(2)
+    builder.push(3)
+    values := builder.finish()
+
+    iterator := values.iter()
+    assert(iterator.next() == 1)
+    assert(iterator.next() == 2)
+    assert(iterator.remaining() == 1)
+
+    reversed := list.reversed[int](move values)
+    assert(reversed.get(0) == 3)
+    assert(reversed.get(1) == 2)
+    assert(reversed.get(2) == 1)

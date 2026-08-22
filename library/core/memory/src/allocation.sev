@@ -1,0 +1,30 @@
+# Allocation is the sole raw-memory boundary used by source-owned core
+# collections. The allocate/free intrinsics are provided by the selected
+# allocator runtime and are never exposed by list, array, or deque.
+class Allocation[T]:
+    data: *[T]
+    capacity: usize
+
+    def Allocation(requested: usize):
+        unsafe:
+            this.data := allocate[T](requested)
+        this.capacity := requested
+
+    def read(index: usize) -> borrow T:
+        assert(index < capacity, "allocation read is out of bounds")
+        unsafe:
+            return borrow data[index]
+
+    def write(index: usize, item: T):
+        assert(index < capacity, "allocation write is out of bounds")
+        unsafe:
+            data[index] = item
+
+    def take(index: usize) -> T:
+        assert(index < capacity, "allocation move is out of bounds")
+        unsafe:
+            return move data[index]
+
+    def drop():
+        unsafe:
+            free(data)

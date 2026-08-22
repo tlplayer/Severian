@@ -1,0 +1,17 @@
+import "list.sev"
+
+
+class ListIterator[T]:
+    values: borrow list[T]
+    index: usize
+
+    def next() -> borrow T | None:
+        if index >= values.len():
+            return None
+
+        item := borrow values.get(index)
+        index += 1
+        return item
+
+    def remaining() -> usize:
+        return values.len() - index

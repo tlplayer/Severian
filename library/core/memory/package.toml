@@ -1,0 +1,22 @@
+[package]
+name = "core.memory"
+version = "0.1.0"
+edition = "2026"
+description = "Owned raw allocations beneath core data structures"
+publish = false
+
+[package.unsafe]
+capabilities = ["allocation", "pointers", "unsafe-blocks"]
+sources = ["src/allocation.sev"]
+
+[lib]
+path = "src/lib.sev"
+
+[dependencies]
+primitives = { path = "../primitives", version = "0.1.0" }
+
+[package.metadata.library]
+category = "memory"
+implementation = "source-and-runtime-intrinsics"
+status = "experimental"
+public = false

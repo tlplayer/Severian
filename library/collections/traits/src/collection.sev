@@ -1,7 +1,0 @@
-import "iterable.sev"
-
-trait Collection[T]: Iterable[T]:
-    def len() -> usize
-
-    def empty() -> bool:
-        return len() == 0

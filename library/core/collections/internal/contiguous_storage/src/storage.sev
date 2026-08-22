@@ -1,0 +1,94 @@
+import memory
+
+
+class ContiguousStorage[T]:
+    allocation: memory.Allocation[T]
+    used: usize
+
+    def ContiguousStorage(initial_capacity: usize):
+        capacity := initial_capacity if initial_capacity > 0 else 1
+        this.allocation := memory.Allocation[T](capacity)
+        this.used := 0
+
+    def len() -> usize:
+        return used
+
+    def capacity() -> usize:
+        return allocation.capacity
+
+    def empty() -> bool:
+        return used == 0
+
+    def reserve(minimum: usize):
+        if minimum <= capacity():
+            return
+
+        next_capacity := capacity() * 2
+        if next_capacity < minimum:
+            next_capacity = minimum
+
+        next_allocation := memory.Allocation[T](next_capacity)
+        index := 0
+        while index < used:
+            next_allocation.write(index, allocation.take(index))
+            index += 1
+        allocation = move next_allocation
+
+    def get(index: usize) -> borrow T:
+        assert(index < used, "contiguous storage index is out of bounds")
+        return allocation.read(index)
+
+    def set(index: usize, item: T):
+        assert(index < used, "contiguous storage index is out of bounds")
+        drop allocation.take(index)
+        allocation.write(index, item)
+
+    def append(item: T):
+        reserve(used + 1)
+        allocation.write(used, item)
+        used += 1
+
+    def insert(index: usize, item: T):
+        assert(index <= used, "contiguous storage insertion is out of bounds")
+        reserve(used + 1)
+
+        cursor := used
+        while cursor > index:
+            allocation.write(cursor, allocation.take(cursor - 1))
+            cursor -= 1
+        allocation.write(index, item)
+        used += 1
+
+    def remove(index: usize) -> T:
+        assert(index < used, "contiguous storage removal is out of bounds")
+        removed := allocation.take(index)
+
+        cursor := index
+        while cursor + 1 < used:
+            allocation.write(cursor, allocation.take(cursor + 1))
+            cursor += 1
+        used -= 1
+        return removed
+
+    def swap(left: usize, right: usize):
+        assert(left < used, "left swap index is out of bounds")
+        assert(right < used, "right swap index is out of bounds")
+        if left == right:
+            return
+
+        left_item := allocation.take(left)
+        right_item := allocation.take(right)
+        allocation.write(left, right_item)
+        allocation.write(right, left_item)
+
+    def truncate(length: usize):
+        while used > length:
+            used -= 1
+            drop allocation.take(used)
+
+    def clear():
+        truncate(0)
+
+
+def create[T](capacity: usize = 0) -> ContiguousStorage[T]:
+    return ContiguousStorage[T](capacity)

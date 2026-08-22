@@ -1,0 +1,95 @@
+import storage
+import "iterator.sev"
+
+
+class list[T]:
+    storage: storage.ContiguousStorage[T]
+
+    def list():
+        this.storage := storage.create[T]()
+
+    def list(initial_capacity: usize):
+        this.storage := storage.create[T](initial_capacity)
+
+    def len() -> usize:
+        return storage.len()
+
+    def size() -> usize:
+        return storage.len()
+
+    def capacity() -> usize:
+        return storage.capacity()
+
+    def empty() -> bool:
+        return storage.empty()
+
+    def reserve(minimum: usize):
+        storage.reserve(minimum)
+
+    def get(index: usize) -> borrow T:
+        return storage.get(index)
+
+    def set(index: usize, item: T):
+        storage.set(index, item)
+
+    def append(item: T):
+        storage.append(item)
+
+    def append_left(item: T):
+        storage.insert(0, item)
+
+    def insert(index: usize, item: T):
+        storage.insert(index, item)
+
+    def remove(index: usize) -> T:
+        return storage.remove(index)
+
+    def pop() -> T:
+        assert(not empty(), "cannot pop from an empty list")
+        return storage.remove(len() - 1)
+
+    def pop(index: usize) -> T:
+        return storage.remove(index)
+
+    def pop_left() -> T:
+        assert(not empty(), "cannot pop from an empty list")
+        return storage.remove(0)
+
+    def first() -> borrow T:
+        assert(not empty(), "cannot read the first item of an empty list")
+        return storage.get(0)
+
+    def last() -> borrow T:
+        assert(not empty(), "cannot read the last item of an empty list")
+        return storage.get(len() - 1)
+
+    def swap(left: usize, right: usize):
+        storage.swap(left, right)
+
+    def truncate(length: usize):
+        storage.truncate(length)
+
+    def clear():
+        storage.clear()
+
+    def extend(additions: list[T]):
+        while not additions.empty():
+            append(additions.remove(0))
+
+    def reverse():
+        if len() < 2:
+            return
+
+        left := 0
+        right := len() - 1
+        while left < right:
+            storage.swap(left, right)
+            left += 1
+            right -= 1
+
+    def iter() -> ListIterator[T]:
+        return ListIterator[T](borrow self, 0)
+
+
+def with_capacity[T](capacity: usize) -> list[T]:
+    return list[T](capacity)

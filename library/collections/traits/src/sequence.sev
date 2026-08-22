@@ -1,6 +1,0 @@
-import "collection.sev"
-
-trait Sequence[T]: Collection[T]:
-    def get(index: usize) -> T
-    def append(value: T)
-    def remove(index: usize) -> T

@@ -1,0 +1,21 @@
+import "list.sev"
+
+
+class ListBuilder[T]:
+    values: list[T]
+
+    def ListBuilder(capacity: usize):
+        this.values := with_capacity[T](capacity)
+
+    def push(item: T):
+        values.append(item)
+
+    def len() -> usize:
+        return values.len()
+
+    def finish() -> list[T]:
+        return move values
+
+
+def builder[T](capacity: usize = 0) -> ListBuilder[T]:
+    return ListBuilder[T](capacity)

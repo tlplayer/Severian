@@ -1,4 +1,0 @@
-import "iterator.sev"
-
-trait Iterable[T]:
-    def iter() -> Iterator[T]

@@ -1,6 +1,0 @@
-import "collection.sev"
-
-trait SetLike[T]: Collection[T]:
-    def contains(value: T) -> bool
-    def add(value: T)
-    def remove(value: T) -> bool

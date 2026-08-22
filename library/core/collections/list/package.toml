@@ -2,16 +2,15 @@
 name = "list"
 version = "0.1.0"
 edition = "2026"
-description = "Source-owned generic contiguous sequences"
+description = "Source-owned generic contiguous lists"
 
 [lib]
 path = "src/lib.sev"
 
 [dependencies]
-traits = { path = "../traits", version = "0.1.0" }
 storage = { path = "../internal/contiguous_storage", version = "0.1.0" }
 
 [package.metadata.library]
-category = "core-data"
+category = "core-collections"
 implementation = "source"
 status = "experimental"
