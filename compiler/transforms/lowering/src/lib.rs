@@ -373,6 +373,20 @@ fn insert_owned_string_releases(
         {
             return Err(LoweringError::OwnedStringEscapes(*value));
         }
+        // Storing the allocation in an aggregate transfers its lifetime to
+        // that aggregate. Releasing it after the insert leaves a dangling
+        // field for subsequent method/property reads. Aggregate destruction
+        // will become the corresponding release point once destructors are
+        // represented in LIR; until then, retain the allocation.
+        if operations.iter().any(|operation| match operation {
+            LirOperation::Aggregate { fields, .. } => fields.contains(value),
+            LirOperation::FieldSet {
+                value: field_value, ..
+            } => field_value == value,
+            _ => false,
+        }) {
+            continue;
+        }
         let definition = operations
             .iter()
             .position(|operation| {

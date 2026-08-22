@@ -93,7 +93,7 @@ fn boxed_generic_classes_lower_to_a_native_executable() {
     let source = root.join("boxed.sev");
     fs::write(
         &source,
-        "class Box[T]:\n    value: T\n    def value() -> T:\n        return value\n    def addition(addition: T):\n        value += addition\ndef main():\n    ints := Box[int](10)\n    floats := Box[f64](2.5)\n    ints.addition(20)\n    floats.addition(4.5)\n    print(ints.value)\n    print(floats.value)\n",
+        "class Box[T]:\n    value: T\n    def value() -> T:\n        return value\n    def addition(addition: T):\n        value += addition\ndef main():\n    ints := Box[int](10)\n    floats := Box[f64](2.5)\n    strings := Box(\"Hello,\")\n    ints.addition(20)\n    floats.addition(4.5)\n    strings.addition(\"World!\")\n    print(ints.value)\n    print(floats.value)\n    print(strings.value())\n",
     )
     .unwrap();
     let output = sev().args(["run"]).arg(&source).output().unwrap();
@@ -103,7 +103,7 @@ fn boxed_generic_classes_lower_to_a_native_executable() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"30\n7\n");
+    assert_eq!(output.stdout, b"30\n7\nHello,World!\n");
     fs::remove_dir_all(root).unwrap();
 }
 

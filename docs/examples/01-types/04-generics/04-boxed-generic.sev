@@ -18,4 +18,4 @@ def main():
     strings.addition("World!")
     print(ints.value)
     print(floats.value)
-    print(strings.vale())
+    print(strings.value())

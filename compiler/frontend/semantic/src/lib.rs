@@ -928,6 +928,17 @@ impl Analyzer<'_> {
                         ast.span,
                     );
                 }
+                if let AstExpressionKind::Name(class) = &callee.kind {
+                    if self.classes.contains_key(class) {
+                        return self
+                            .inferred_class_constructor(class, arguments, expected, ast.span);
+                    }
+                }
+                if let Some(method) =
+                    self.class_method_call(callee, arguments, expected, ast.span)?
+                {
+                    return Ok(method);
+                }
                 if matches!(callee.kind, AstExpressionKind::Member { .. }) {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -1146,6 +1157,92 @@ impl Analyzer<'_> {
         })
     }
 
+    fn inferred_class_constructor(
+        &mut self,
+        class: &str,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let declaration = self.classes.get(class).cloned().ok_or_else(|| {
+            Diagnostic::new(
+                "E000204",
+                format!("unknown generic class `{class}`"),
+                Some(span),
+            )
+        })?;
+        if arguments.len() != declaration.fields.len() {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!(
+                    "constructor `{class}` expects {} field value(s), received {}",
+                    declaration.fields.len(),
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        }
+
+        let parameters = declaration
+            .type_parameters
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut inferred = BTreeMap::<String, TypeId>::new();
+        let mut fields = Vec::with_capacity(arguments.len());
+        for (argument, field) in arguments.iter().zip(&declaration.fields) {
+            let field_type_name = field.annotation.simple_name().ok_or_else(|| {
+                Diagnostic::new(
+                    "E000204",
+                    "generic constructor inference currently requires named field types",
+                    Some(field.annotation.span),
+                )
+            })?;
+            if parameters.contains(field_type_name) {
+                let expected_field = inferred.get(field_type_name).copied();
+                let value = self.expression(&argument.value, expected_field)?;
+                inferred
+                    .entry(field_type_name.to_owned())
+                    .or_insert(value.type_id);
+                fields.push(value);
+            } else {
+                let field_type = resolve_type_annotation(self.types, &field.annotation)?;
+                fields.push(self.expression(&argument.value, Some(field_type))?);
+            }
+        }
+        let concrete = declaration
+            .type_parameters
+            .iter()
+            .map(|parameter| {
+                inferred.get(parameter).copied().ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000206",
+                        format!(
+                            "cannot infer type parameter `{parameter}` for constructor `{class}`"
+                        ),
+                        Some(span),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let instance = self.instantiate_class_types(class, &concrete, span)?;
+        if expected.is_some_and(|expected| expected != instance.ty) {
+            return Err(semantic_error(
+                "constructed class does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: instance.ty,
+            kind: ExpressionKind::Aggregate {
+                class: instance.ty,
+                fields,
+            },
+            span,
+        })
+    }
+
     fn instantiate_class(
         &mut self,
         name: &str,
@@ -1174,7 +1271,34 @@ impl Analyzer<'_> {
             .iter()
             .map(|argument| resolve_type_annotation(self.types, argument))
             .collect::<Result<Vec<_>, _>>()?;
-        let key = (name.to_owned(), concrete.clone());
+        self.instantiate_class_types(name, &concrete, span)
+    }
+
+    fn instantiate_class_types(
+        &mut self,
+        name: &str,
+        concrete: &[TypeId],
+        span: severian_source::Span,
+    ) -> Result<ClassInstance, Diagnostic> {
+        let declaration = self.classes.get(name).cloned().ok_or_else(|| {
+            Diagnostic::new(
+                "E000204",
+                format!("unknown generic class `{name}`"),
+                Some(span),
+            )
+        })?;
+        if declaration.type_parameters.len() != concrete.len() {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!(
+                    "class `{name}` expects {} type argument(s), received {}",
+                    declaration.type_parameters.len(),
+                    concrete.len()
+                ),
+                Some(span),
+            ));
+        }
+        let key = (name.to_owned(), concrete.to_vec());
         if let Some(instance) = self.class_instances.get(&key) {
             return Ok(instance.clone());
         }
@@ -1215,15 +1339,108 @@ impl Analyzer<'_> {
             name: format!(
                 "{}[{}]",
                 name,
-                arguments
+                concrete
                     .iter()
-                    .filter_map(TypeAnnotation::simple_name)
+                    .map(|ty| {
+                        self.types
+                            .definition(*ty)
+                            .map(|definition| definition.name.clone())
+                            .unwrap_or_else(|| format!("type#{}", ty.0))
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
             fields,
         });
         Ok(instance)
+    }
+
+    fn class_method_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let AstExpressionKind::Member { object, name } = &callee.kind else {
+            return Ok(None);
+        };
+        let object = self.expression(object, None)?;
+        let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
+            return Ok(None);
+        };
+        let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("class `{}` has no method `{name}`", instance.name),
+                Some(callee.span),
+            ));
+        };
+        if method.parameters.len() != arguments.len() {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!(
+                    "method `{name}` expects {} argument(s), received {}",
+                    method.parameters.len(),
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        }
+        if !arguments.is_empty() {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` cannot yet be used as a value-producing method"),
+                Some(span),
+            ));
+        }
+        let Some(body) = &method.body else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` has no implementation"),
+                Some(method.span),
+            ));
+        };
+        let field_name = body.iter().find_map(|statement| {
+            let AstStatement::Return {
+                value: Some(value), ..
+            } = statement
+            else {
+                return None;
+            };
+            let AstExpressionKind::Name(field) = &value.kind else {
+                return None;
+            };
+            Some(field.as_str())
+        });
+        let Some((field, declaration)) = field_name.and_then(|field_name| {
+            instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == field_name)
+        }) else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` is not a field-returning method"),
+                Some(method.span),
+            ));
+        };
+        if expected.is_some_and(|expected| !self.types.assignable(declaration.ty, expected)) {
+            return Err(semantic_error(
+                "method result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        Ok(Some(Expression {
+            id: self.next_id(),
+            type_id: declaration.ty,
+            kind: ExpressionKind::Field {
+                object: Box::new(object),
+                index: field as u32,
+            },
+            span,
+        }))
     }
 
     fn class_method_update(
