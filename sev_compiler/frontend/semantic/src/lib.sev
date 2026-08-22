@@ -3,5 +3,6 @@
 import ast
 import diagnostics
 import hir
+import modules
 import source
 import universal

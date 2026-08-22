@@ -1,0 +1,8 @@
+# Bootstrap counterpart of compiler/frontend/semantic/src/package.rs.
+# Package semantic analysis consumes the resolved module graph and emits the
+# declaration index together with typed HIR.
+import ast
+import diagnostics
+import hir
+import modules
+import universal

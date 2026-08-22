@@ -116,6 +116,7 @@ severian-semantic = [
     "severian-ast",
     "severian-diagnostics",
     "severian-hir",
+    "severian-modules",
     "severian-source",
     "severian-universal",
 ]

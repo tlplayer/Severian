@@ -8,9 +8,15 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
+    /// Stable within a package graph and derived from package identity plus the
+    /// module's package-relative source path, never from traversal order.
+    pub id: ModuleId,
     pub path: PathBuf,
     pub package: PackageId,
     pub ast: Module,
+    /// Source imports resolved while constructing the graph. External XXI
+    /// imports deliberately have no module edge.
+    pub imports: Vec<ResolvedImport>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,8 +25,17 @@ pub struct ModuleGraph {
     pub modules: Vec<ResolvedModule>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ModuleId(pub u128);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedImport {
+    pub span: severian_source::Span,
+    pub module: ModuleId,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPackage {
@@ -73,6 +88,8 @@ struct Resolver<'a> {
     visiting: Vec<PathBuf>,
     visited: BTreeSet<PathBuf>,
     order: Vec<ResolvedModule>,
+    module_ids: BTreeMap<PathBuf, ModuleId>,
+    import_edges: BTreeMap<PathBuf, Vec<ResolvedImport>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -83,6 +100,8 @@ impl<'a> Resolver<'a> {
             visiting: Vec::new(),
             visited: BTreeSet::new(),
             order: Vec::new(),
+            module_ids: BTreeMap::new(),
+            import_edges: BTreeMap::new(),
         }
     }
 
@@ -129,6 +148,8 @@ impl<'a> Resolver<'a> {
         let tokens = severian_lexer::scan(&source)?;
         let ast = severian_parser::parse(&tokens)?;
         self.parsed.insert(canonical.clone(), ast.clone());
+        let module_id = module_id(&canonical, package, self.packages)?;
+        self.module_ids.insert(canonical.clone(), module_id);
         self.visiting.push(canonical.clone());
         for import in ast.items.iter().filter_map(|item| match item {
             Item::Import(import) => Some(import),
@@ -138,17 +159,70 @@ impl<'a> Resolver<'a> {
                 source_import(&canonical, package, import, self.packages)?
             {
                 self.visit(&dependency, dependency_package)?;
+                let dependency = std::fs::canonicalize(&dependency).map_err(|error| {
+                    Diagnostic::new(
+                        "E000001",
+                        format!("could not read {}: {error}", dependency.display()),
+                        Some(import.span),
+                    )
+                })?;
+                let dependency_id = *self
+                    .module_ids
+                    .get(&dependency)
+                    .expect("visited source imports have module identities");
+                self.import_edges
+                    .entry(canonical.clone())
+                    .or_default()
+                    .push(ResolvedImport {
+                        span: import.span,
+                        module: dependency_id,
+                    });
             }
         }
         self.visiting.pop();
         self.visited.insert(canonical.clone());
+        let imports = self.import_edges.remove(&canonical).unwrap_or_default();
         self.order.push(ResolvedModule {
+            id: module_id,
             path: canonical,
             package,
             ast,
+            imports,
         });
         Ok(())
     }
+}
+
+fn module_id(
+    path: &Path,
+    package: PackageId,
+    packages: &PackageGraph,
+) -> Result<ModuleId, Diagnostic> {
+    let root = packages
+        .packages
+        .get(&package)
+        .map(|package| package.root.as_path())
+        .ok_or_else(|| {
+            Diagnostic::new(
+                "E000125",
+                format!("module belongs to unknown package {package:?}"),
+                None,
+            )
+        })?;
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let key = format!(
+        "{}:{}",
+        package.0,
+        relative.to_string_lossy().replace('\\', "/")
+    );
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let mut hash = OFFSET;
+    for byte in key.as_bytes() {
+        hash ^= u128::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    Ok(ModuleId(hash))
 }
 
 fn source_import(

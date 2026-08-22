@@ -9,6 +9,7 @@ repository.workspace = true
 severian-ast = { path = "../ast" }
 severian-diagnostics = { path = "../../diagnostics" }
 severian-hir = { path = "../hir" }
+severian-modules = { path = "../modules" }
 severian-universal = { path = "../../universal" }
 severian-source = { path = "../../source" }
 

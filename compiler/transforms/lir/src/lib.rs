@@ -24,7 +24,7 @@ pub enum LoweredType {
 pub struct ValueId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FunctionId(pub u32);
+pub struct FunctionId(pub u128);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Value {

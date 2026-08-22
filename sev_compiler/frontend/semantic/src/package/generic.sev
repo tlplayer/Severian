@@ -1,0 +1,5 @@
+# Bootstrap counterpart of compiler/frontend/semantic/src/package/generic.rs.
+# Concrete generic instances are discovered from package-wide resolved calls.
+import ast
+import diagnostics
+import modules

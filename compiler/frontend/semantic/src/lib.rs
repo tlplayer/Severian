@@ -1,5 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod package;
+
+pub use package::{
+    analyze_package, analyze_package_with_context, DeclarationId, DefId, DefKind, Definition,
+    ExportMap, FunctionDecl, ModuleScope, PackageAnalysisContext, ProgramIndex, Resolution, Scope,
+    TypedProgram, Visibility,
+};
+
 use severian_ast::{
     BinaryOperator as AstBinaryOperator, Expression as AstExpression,
     ExpressionKind as AstExpressionKind, Literal as AstLiteral, Statement as AstStatement,
@@ -44,24 +52,65 @@ pub fn analyze_with_context(
     types: &TypeContext,
     context: AnalysisContext<'_>,
 ) -> Result<Program, Diagnostic> {
+    analyze_with_package_functions(ast, types, context, &[], &[], &[])
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PackageFunction {
+    pub lookup: String,
+    pub id: FunctionId,
+    pub parameters: Vec<TypeId>,
+    pub result: TypeId,
+}
+
+pub(crate) fn analyze_with_package_functions(
+    ast: &severian_ast::Module,
+    types: &TypeContext,
+    context: AnalysisContext<'_>,
+    visible_functions: &[PackageFunction],
+    own_function_ids: &[FunctionId],
+    test_function_ids: &[FunctionId],
+) -> Result<Program, Diagnostic> {
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
-        signatures: Vec::new(),
+        signatures: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
     };
+    for function in visible_functions {
+        analyzer
+            .functions
+            .entry(function.lookup.clone())
+            .or_default()
+            .push(function.id);
+        analyzer.signatures.insert(
+            function.id,
+            FunctionSignature {
+                parameters: function.parameters.clone(),
+                result: function.result,
+            },
+        );
+    }
     let mut module = Module::default();
 
     // Function identities and signatures are registered before executable
     // statements are analyzed. Bodies remain ordinary analyzed blocks.
-    for ast_function in ast.items.iter().filter_map(|item| match item {
-        severian_ast::Item::Function(function) => Some(function),
-        _ => None,
-    }) {
-        let id = FunctionId(module.functions.len() as u32);
+    for (ordinal, ast_function) in ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Function(function) => Some(function),
+            _ => None,
+        })
+        .enumerate()
+    {
+        let id = own_function_ids
+            .get(ordinal)
+            .copied()
+            .unwrap_or_else(|| FunctionId(module.functions.len() as u128));
         let mut parameters = Vec::new();
         let mut parameter_types = Vec::new();
         for parameter in &ast_function.parameters {
@@ -78,15 +127,20 @@ pub fn analyze_with_context(
         let compile_route = types
             .compile_route(result)
             .map_err(|error| semantic_error(error.to_string(), ast_function.result.span))?;
-        analyzer
-            .functions
-            .entry(ast_function.name.clone())
-            .or_default()
-            .push(id);
-        analyzer.signatures.push(FunctionSignature {
-            parameters: parameter_types,
-            result,
-        });
+        if own_function_ids.is_empty() {
+            analyzer
+                .functions
+                .entry(ast_function.name.clone())
+                .or_default()
+                .push(id);
+            analyzer.signatures.insert(
+                id,
+                FunctionSignature {
+                    parameters: parameter_types.clone(),
+                    result,
+                },
+            );
+        }
         module.functions.push(FunctionDeclaration {
             id,
             name: ast_function.name.clone(),
@@ -108,7 +162,10 @@ pub fn analyze_with_context(
             })
             .enumerate()
         {
-            let id = FunctionId(module.functions.len() as u32);
+            let id = test_function_ids
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| FunctionId(module.functions.len() as u128));
             let unit = types.resolve_name("unit").expect("bootstrap defines unit");
             let mode_suffix = if test.modes.is_empty() {
                 String::new()
@@ -320,7 +377,7 @@ struct Analyzer<'a> {
     next_hir: u32,
     next_binding: u32,
     functions: BTreeMap<String, Vec<FunctionId>>,
-    signatures: Vec<FunctionSignature>,
+    signatures: BTreeMap<FunctionId, FunctionSignature>,
 }
 
 #[derive(Debug, Clone)]
@@ -683,17 +740,17 @@ impl Analyzer<'_> {
                 Some(ast.span),
             )),
             AstExpressionKind::Call { callee, arguments } => {
-                let AstExpressionKind::Name(name) = &callee.kind else {
+                let Some(name) = callable_path(callee) else {
                     return Err(Diagnostic::new(
                         "E000206",
                         "call target must resolve to a function declaration",
                         Some(callee.span),
                     ));
                 };
-                let candidates = self.functions.get(name).cloned().unwrap_or_default();
+                let candidates = self.functions.get(&name).cloned().unwrap_or_default();
                 let mut matches = Vec::new();
                 for function in candidates {
-                    let signature = self.signatures[function.0 as usize].clone();
+                    let signature = self.signatures[&function].clone();
                     if signature.parameters.len() != arguments.len()
                         || expected.is_some_and(|expected| {
                             !self.types.assignable(signature.result, expected)
@@ -798,6 +855,16 @@ impl Analyzer<'_> {
                 })
             }
         }
+    }
+}
+
+fn callable_path(expression: &AstExpression) -> Option<String> {
+    match &expression.kind {
+        AstExpressionKind::Name(name) => Some(name.clone()),
+        AstExpressionKind::Member { object, name } => {
+            Some(format!("{}.{}", callable_path(object)?, name))
+        }
+        _ => None,
     }
 }
 

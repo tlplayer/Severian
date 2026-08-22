@@ -16,7 +16,7 @@ pub struct HirId(pub u32);
 pub struct BindingId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FunctionId(pub u32);
+pub struct FunctionId(pub u128);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeclaredTypeId(pub u32);

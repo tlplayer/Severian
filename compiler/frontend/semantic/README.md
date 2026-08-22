@@ -5,8 +5,21 @@ Semantic analysis connects parsed syntax to the universal language model.
 ## Inputs and output
 
 ```text
-analyze(ast, universal_context) -> HIR | Diagnostic
+analyze_package(module_graph, universal_context) -> TypedProgram | Diagnostic
 ```
+
+`TypedProgram` contains the package-wide `ProgramIndex` and HIR. Analysis is
+two-phase: every module-level declaration receives a stable `DefId` and import
+scopes are resolved first; function bodies are then checked against that
+complete namespace. The single-AST `analyze` function remains a convenience
+for isolated compiler tests and in-memory fragments.
+
+Generic declarations are indexed without compiling their bodies eagerly. A
+reachable concrete call creates the body specialization used by HIR/MIR. The
+bootstrap currently permits one concrete specialization per generic
+definition and diagnoses a second distinct instance explicitly; representing
+multiple instances is the next `InstanceId`-level extension, not an import or
+name-resolution rewrite.
 
 The analyzer owns:
 
