@@ -1,8 +1,161 @@
-# Bootstrap counterpart of compiler/frontend/semantic/src/package.rs.
-# Package semantic analysis consumes the resolved module graph and emits the
-# declaration index together with typed HIR.
 import ast
-import diagnostics
 import hir
 import modules
 import universal
+
+enum Visibility:
+    Public
+
+
+class FunctionDecl:
+    type_parameters: list[string]
+    parameters: list[ast.TypeAnnotation]
+    result: ast.TypeAnnotation
+
+
+enum DefKind:
+    Function(signature: FunctionDecl)
+    Type
+    Trait
+    Constant
+    Import
+
+
+class Definition:
+    id: universal.DefId
+    name: string
+    module: modules.ModuleId
+    visibility: Visibility
+    kind: DefKind
+
+
+enum Resolution:
+    Def(definition: universal.DefId)
+    Module(module: modules.ModuleId)
+    OverloadSet(definitions: list[universal.DefId])
+    Ambiguous(definitions: list[universal.DefId])
+
+
+class Scope:
+    bindings: map[string, Resolution]
+
+
+class ModuleScope:
+    id: modules.ModuleId
+    package: modules.PackageId
+    items: list[universal.DefId]
+    scope: Scope
+
+
+class ProgramIndex:
+    packages: map[modules.PackageId, list[modules.ModuleId]]
+    modules: map[modules.ModuleId, ModuleScope]
+    definitions: map[universal.DefId, Definition]
+    exports: map[modules.ModuleId, map[string, Resolution]]
+
+
+class TypedProgram:
+    index: ProgramIndex
+    hir_program: hir.Program
+
+
+class PackageAnalysisContext:
+    test_package: modules.PackageId | None
+
+
+def definition_id(package: modules.PackageId, module: modules.ModuleId, name: string, ordinal: int) -> universal.DefId:
+    declaration: u128 = module.value ^ u128(ordinal + 1)
+    for character in name.characters():
+        declaration = declaration * 1099511628211 ^ u128(int(character))
+    return universal.DefId(u128(package.index), module.value, universal.DeclarationId(declaration))
+
+
+def insert_resolution(bindings: map[string, Resolution], name: string, definition: universal.DefId):
+    existing = bindings.get(name)
+    if existing == None:
+        bindings[name] = Def(definition)
+        return
+    match existing:
+        case Def:
+            bindings[name] = OverloadSet([definition, definition])
+        case OverloadSet:
+            definitions.append(definition)
+            bindings[name] = OverloadSet(definitions)
+        case Ambiguous:
+            definitions.append(definition)
+            bindings[name] = Ambiguous(definitions)
+        case Module:
+            bindings[name] = Ambiguous([definition])
+
+
+def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
+    index = ProgramIndex({}, {}, {}, {})
+    for module in graph.modules:
+        items: list[universal.DefId] = []
+        scope = Scope({})
+        exports: map[string, Resolution] = {}
+        ordinal = 0
+        for item in module.ast_module.items:
+            name: string | None = None
+            kind: DefKind | None = None
+            match item:
+                case Function:
+                    name = declaration.name
+                    parameters: list[ast.TypeAnnotation] = []
+                    for parameter in declaration.parameters:
+                        parameters.append(parameter.annotation)
+                    kind = DefKind.Function(FunctionDecl(declaration.type_parameters, parameters, declaration.result))
+                case Type:
+                    name = declaration.name
+                    kind = DefKind.Type
+                case Trait:
+                    name = declaration.name
+                    kind = DefKind.Trait
+                case BindingItem:
+                    name = binding.name
+                    kind = DefKind.Constant
+            if name != None:
+                id = definition_id(module.package, module.id, name, ordinal)
+                ordinal += 1
+                definition = Definition(id, name, module.id, Public, kind)
+                index.definitions[id] = definition
+                items.append(id)
+                insert_resolution(scope.bindings, name, id)
+                insert_resolution(exports, name, id)
+        index.modules[module.id] = ModuleScope(module.id, module.package, items, scope)
+        index.exports[module.id] = exports
+        if not index.packages.contains(module.package):
+            index.packages[module.package] = []
+        index.packages[module.package].append(module.id)
+    return index
+
+
+def resolve_imports(graph: modules.ModuleGraph, index: ProgramIndex):
+    for module in graph.modules:
+        scope = index.modules[module.id].scope
+        import_index = 0
+        for item in module.ast_module.items:
+            match item:
+                case Import:
+                    if import_index >= len(module.imports):
+                        continue
+                    imported = module.imports[import_index].module
+                    import_index += 1
+                    match declaration.subject:
+                        case Name:
+                            alias = declaration.alias if declaration.alias != None else name
+                            scope.bindings[alias] = Module(imported)
+                        case Locator:
+                            alias = declaration.alias if declaration.alias != None else locator
+                            scope.bindings[alias] = Module(imported)
+                    if declaration.source_name != None:
+                        exported = index.exports[imported].get(name)
+                        if exported != None:
+                            scope.bindings[declaration.alias if declaration.alias != None else name] = exported
+
+
+def analyze_package(graph: modules.ModuleGraph, context: universal.UniversalContext) -> TypedProgram:
+    index = collect_declarations(graph)
+    resolve_imports(graph, index)
+    return TypedProgram(index, hir.empty_program())
+

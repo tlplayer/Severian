@@ -1,5 +1,46 @@
-# Bootstrap counterpart of compiler/frontend/semantic/src/package/generic.rs.
-# Concrete generic instances are discovered from package-wide resolved calls.
 import ast
-import diagnostics
-import modules
+import universal
+import "../package.sev"
+
+class GenericInstance:
+    definition: universal.DefId
+    substitution: map[string, string]
+
+
+class MonomorphizationCollector:
+    instances: map[universal.DefId, list[GenericInstance]]
+
+    def MonomorphizationCollector():
+        instances = {}
+
+    def collect(definition: universal.DefId, substitution: map[string, string]):
+        if not instances.contains(definition):
+            instances[definition] = []
+        candidate = GenericInstance(definition, substitution)
+        if not instances[definition].contains(candidate):
+            instances[definition].append(candidate)
+
+
+def substitute_annotation(annotation: ast.TypeAnnotation, substitution: map[string, string]) -> ast.TypeAnnotation:
+    match annotation.kind:
+        case Named:
+            replacement = substitution.get(name)
+            if replacement != None and len(arguments) == 0:
+                return ast.named_type(replacement, [], annotation.span)
+            replaced: list[ast.TypeAnnotation] = []
+            for argument in arguments:
+                replaced.append(substitute_annotation(argument, substitution))
+            return ast.named_type(name, replaced, annotation.span)
+        case Union:
+            replaced: list[ast.TypeAnnotation] = []
+            for member in members:
+                replaced.append(substitute_annotation(member, substitution))
+            return ast.TypeAnnotation(ast.Union(replaced), annotation.span)
+
+
+def specialize_signature(signature: FunctionDecl, substitution: map[string, string]) -> FunctionDecl:
+    parameters: list[ast.TypeAnnotation] = []
+    for parameter in signature.parameters:
+        parameters.append(substitute_annotation(parameter, substitution))
+    return FunctionDecl([], parameters, substitute_annotation(signature.result, substitution))
+

@@ -1,2 +1,38 @@
-# Bootstrap counterpart of compiler/boundaries/driver/src/test_runner/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import "../pipeline/mod.sev"
+
+class TestResult:
+    name: string
+    passed: bool
+    duration_ms: int
+    stdout: string
+    stderr: string
+
+
+def execute_test(test: CompiledTest, arguments: list[string]) -> TestResult:
+    started = time.monotonic_milliseconds()
+    output = process.run([test.artifact.path] + arguments)
+    passed = output.status == 0
+    for expectation in test.expectations:
+        match expectation:
+            case Contains:
+                stream_value = output.stdout if stream == hir.Stdout else output.stderr
+                passed = passed and stream_value.contains(value)
+            case Equals:
+                stream_value = output.stdout if stream == hir.Stdout else output.stderr
+                passed = passed and stream_value == value
+    return TestResult(test.name, passed, time.monotonic_milliseconds() - started, output.stdout, output.stderr)
+
+
+def run_tests(tests: list[CompiledTest], arguments: list[string]) -> unit | string:
+    failures = 0
+    for test in tests:
+        result = execute_test(test, arguments)
+        print(("ok" if result.passed else "FAILED") + " " + result.name)
+        if not result.passed:
+            failures += 1
+            io.write_stdout(result.stdout)
+            io.write_stderr(result.stderr)
+    if failures > 0:
+        return error(string(failures) + " tests failed")
+    return unit
+

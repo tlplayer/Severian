@@ -1,53 +1,89 @@
-def unary_operator(spelling: string) -> string:
-    if spelling == "+":
-        return "positive"
-    if spelling == "-":
-        return "negative"
-    if spelling == "not":
-        return "not"
-    return ""
+import "ids.sev"
+import "literal.sev"
+
+enum UnaryOperator:
+    Positive
+    Negative
+    Not
 
 
-def binary_operator(spelling: string) -> string:
-    if spelling == "+":
-        return "add"
-    if spelling == "-":
-        return "subtract"
-    if spelling == "*":
-        return "multiply"
-    if spelling == "/":
-        return "divide"
-    if spelling == "%":
-        return "remainder"
-    if spelling == "**":
-        return "power"
-    if spelling == "==":
-        return "equal"
-    if spelling == "!=":
-        return "not-equal"
-    if spelling == "<":
-        return "less"
-    if spelling == "<=":
-        return "less-equal"
-    if spelling == ">":
-        return "greater"
-    if spelling == ">=":
-        return "greater-equal"
-    if spelling == "in":
-        return "contains"
-    if spelling == "and":
-        return "and"
-    if spelling == "or":
-        return "or"
-    return ""
+enum BinaryOperator:
+    Add
+    Subtract
+    Multiply
+    Divide
+    Remainder
+    Power
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Contains
+    And
+    Or
 
 
-trait OperatorSignatureBridge:
-    pass
+enum TypePattern:
+    Exact(type_id: TypeId)
+    SameAsLeft
+    SameAsRight
 
 
-test "operator spellings resolve without public type-name matching":
-    assert(unary_operator("-") == "negative")
-    assert(binary_operator("+") == "add")
-    assert(binary_operator("in") == "contains")
-    assert(binary_operator("unknown") == "")
+enum TypeConstraint:
+    Known(type_id: TypeId)
+    Literal(kind: LiteralKind)
+
+
+class OperatorSignature:
+    operator: BinaryOperator
+    left: TypePattern
+    right: TypePattern
+    result: TypePattern
+
+
+def unary_operator(spelling: string) -> UnaryOperator | None:
+    if spelling == "+": return Positive
+    if spelling == "-": return Negative
+    if spelling == "not": return Not
+    return None
+
+
+def binary_operator(spelling: string) -> BinaryOperator | None:
+    if spelling == "+": return Add
+    if spelling == "-": return Subtract
+    if spelling == "*": return Multiply
+    if spelling == "/": return Divide
+    if spelling == "%": return Remainder
+    if spelling == "**": return Power
+    if spelling == "==": return Equal
+    if spelling == "!=": return NotEqual
+    if spelling == "<": return Less
+    if spelling == "<=": return LessEqual
+    if spelling == ">": return Greater
+    if spelling == ">=": return GreaterEqual
+    if spelling == "in": return Contains
+    if spelling == "and": return And
+    if spelling == "or": return Or
+    return None
+
+
+def operator_spelling(operator: BinaryOperator) -> string:
+    match operator:
+        case Add: return "+"
+        case Subtract: return "-"
+        case Multiply: return "*"
+        case Divide: return "/"
+        case Remainder: return "%"
+        case Power: return "**"
+        case Equal: return "=="
+        case NotEqual: return "!="
+        case Less: return "<"
+        case LessEqual: return "<="
+        case Greater: return ">"
+        case GreaterEqual: return ">="
+        case Contains: return "in"
+        case And: return "and"
+        case Or: return "or"
+

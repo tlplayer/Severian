@@ -1,3 +1,114 @@
-# Bootstrap counterpart of compiler/transforms/lir/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import artifact
+
+enum LoweredFloatFormat:
+    Ieee(bits: u16)
+    BrainFloat16
+
+
+enum LoweredType:
+    Integer(bits: u16, signed: bool)
+    Float(format: LoweredFloatFormat)
+    Boolean
+    String
+    Bytes
+    NoneValue
+    Unit
+    Arguments
+
+
+class ValueId:
+    index: u32
+
+
+class FunctionId:
+    value: u128
+
+
+class Value:
+    id: ValueId
+    type_id: LoweredType
+
+
+class AssertionLocation:
+    file: string
+    line: u32
+    column: u32
+    expression: string
+
+
+enum Constant:
+    Integer(value: string)
+    Float(value: string)
+    Boolean(value: bool)
+    String(value: string)
+    Bytes(value: list[u8])
+    NoneValue
+    Unit
+
+
+enum UnaryOperation:
+    Positive
+    Negative
+    Not
+
+
+enum BinaryOperation:
+    Add
+    Subtract
+    Multiply
+    Divide
+    Remainder
+    Power
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Contains
+    And
+    Or
+
+
+enum Operation:
+    Coverage(key: string)
+    ConstantValue(value: Constant, result: ValueId)
+    Unary(operator: UnaryOperation, operand: ValueId, result: ValueId)
+    Binary(operator: BinaryOperation, left: ValueId, right: ValueId, result: ValueId)
+    Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    RuntimeCall(symbol: string, arguments: list[ValueId], result: ValueId | None)
+    Return(value: ValueId | None)
+    Assert(condition: ValueId, message: ValueId | None, location: AssertionLocation | None)
+    If(condition: ValueId, then_block: Block, else_block: Block)
+    ArtifactCall(artifact_id: artifact.ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+
+
+class Block:
+    operations: list[Operation]
+
+
+enum FunctionLinkage:
+    Internal
+    External(symbol: string)
+
+
+class Function:
+    id: FunctionId
+    name: string
+    parameters: list[ValueId]
+    result: LoweredType
+    body: Block | None
+    linkage: FunctionLinkage
+
+
+class Module:
+    values: list[Value]
+    globals: list[ValueId]
+    initializer: Block
+    functions: list[Function]
+    entry: FunctionId | None
+
+
+def empty_module() -> Module:
+    return Module([], [], Block([]), [], None)
+

@@ -1,15 +1,195 @@
-# Bootstrap counterpart of compiler/frontend/lexer/src/scanner/mod.rs.
-# The physical source walk needs collections, indexing, and source records.
-# Keep its stage-visible capability boundary executable while those mirrored
-# dependencies are translated.
+import source
+import diagnostics
+import "../token/mod.sev"
 
-def scanner_ready() -> bool:
-    return true
+def make_token(file: source.SourceFile, kind: TokenKind, start: int, end: int) -> Token:
+    return Token(kind, source.Span(file.id, u32(start), u32(end)))
 
-def block_string_diagnostic(closed: bool) -> string:
-    if closed:
-        return ""
-    return "E000101"
 
-test "block strings retain the canonical diagnostic":
-    assert(block_string_diagnostic(false) == "E000101")
+def indentation_width(line: string) -> int:
+    width = 0
+    for character in line.characters():
+        if character == " ":
+            width += 1
+        elif character == "\t":
+            width += 4
+        else:
+            break
+    return width
+
+
+def strip_indentation(line: string, width: int) -> string:
+    consumed = 0
+    offset = 0
+    characters = line.characters()
+    while offset < len(characters) and consumed < width:
+        if characters[offset] == " ":
+            consumed += 1
+        elif characters[offset] == "\t":
+            consumed += 4
+        else:
+            break
+        offset += 1
+    return characters[offset:].join("")
+
+
+def block_string(raw: string) -> string:
+    content = raw
+    if content.starts_with("\n"):
+        content = content[1:]
+    lines = content.split("\n")
+    common = -1
+    for line in lines:
+        if len(line.trim()) > 0:
+            width = indentation_width(line)
+            if common < 0 or width < common:
+                common = width
+    if common < 0:
+        common = 0
+    result: list[string] = []
+    for line in lines:
+        result.append(strip_indentation(line, common))
+    return result.join("\n")
+
+
+def punctuation(character: char, following: char | None) -> tuple[TokenKind, int] | None:
+    if character == "@": return (At, 1)
+    if character == ",": return (Comma, 1)
+    if character == ".": return (Dot, 1)
+    if character == "(": return (LeftParen, 1)
+    if character == ")": return (RightParen, 1)
+    if character == "[": return (LeftBracket, 1)
+    if character == "]": return (RightBracket, 1)
+    if character == "|": return (Pipe, 1)
+    if character == ":" and following == "=": return (ColonEqual, 2)
+    if character == ":": return (Colon, 1)
+    if character == "+" and following == "=": return (PlusEqual, 2)
+    if character == "+": return (Plus, 1)
+    if character == "-" and following == ">": return (Arrow, 2)
+    if character == "-" and following == "=": return (MinusEqual, 2)
+    if character == "-": return (Minus, 1)
+    if character == "*" and following == "*": return (Power, 2)
+    if character == "*" and following == "=": return (StarEqual, 2)
+    if character == "*": return (Star, 1)
+    if character == "/" and following == "=": return (SlashEqual, 2)
+    if character == "/": return (Slash, 1)
+    if character == "%" and following == "=": return (PercentEqual, 2)
+    if character == "%": return (Percent, 1)
+    if character == "=" and following == "=": return (EqualEqual, 2)
+    if character == "=": return (Equal, 1)
+    if character == "!" and following == "=": return (NotEqual, 2)
+    if character == "<" and following == "=": return (LessEqual, 2)
+    if character == "<": return (Less, 1)
+    if character == ">" and following == "=": return (GreaterEqual, 2)
+    if character == ">": return (Greater, 1)
+    return None
+
+
+def scan(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
+    characters = file.text.characters()
+    cursor = 0
+    line_start = true
+    indents: list[int] = [0]
+    tokens: list[Token] = []
+
+    while cursor < len(characters):
+        if line_start:
+            start = cursor
+            while cursor < len(characters) and (characters[cursor] == " " or characters[cursor] == "\t"):
+                cursor += 1
+            if cursor >= len(characters):
+                break
+            if characters[cursor] == "\n" or characters[cursor] == "#":
+                while cursor < len(characters) and characters[cursor] != "\n":
+                    cursor += 1
+                if cursor < len(characters):
+                    tokens.append(make_token(file, Newline, cursor, cursor + 1))
+                    cursor += 1
+                continue
+            width = indentation_width(characters[start:cursor].join(""))
+            if width > indents[-1]:
+                indents.append(width)
+                tokens.append(make_token(file, Indent, start, cursor))
+            elif width < indents[-1]:
+                while width < indents[-1]:
+                    indents.pop()
+                    tokens.append(make_token(file, Dedent, start, cursor))
+                if width != indents[-1]:
+                    return error(diagnostics.Diagnostic("E000102", "inconsistent indentation", source.Span(file.id, u32(start), u32(cursor))))
+            line_start = false
+
+        start = cursor
+        character = characters[cursor]
+        if character == " " or character == "\t" or character == "\r":
+            cursor += 1
+            continue
+        if character == "\n" or character == ";":
+            tokens.append(make_token(file, Newline, cursor, cursor + 1))
+            cursor += 1
+            line_start = character == "\n"
+            continue
+        if character == "#":
+            while cursor < len(characters) and characters[cursor] != "\n":
+                cursor += 1
+            continue
+
+        following: char | None = None
+        if cursor + 1 < len(characters):
+            following = characters[cursor + 1]
+        symbol = punctuation(character, following)
+        if symbol != None:
+            tokens.append(make_token(file, symbol[0], start, start + symbol[1]))
+            cursor += symbol[1]
+            continue
+
+        if character == "\"":
+            block = cursor + 2 < len(characters) and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""
+            cursor += 3 if block else 1
+            content_start = cursor
+            if block:
+                while cursor + 2 < len(characters) and not (characters[cursor] == "\"" and characters[cursor + 1] == "\"" and characters[cursor + 2] == "\""):
+                    cursor += 1
+                if cursor + 2 >= len(characters):
+                    return error(diagnostics.Diagnostic("E000101", "unterminated block string literal", source.Span(file.id, u32(start), u32(cursor))))
+                value = block_string(characters[content_start:cursor].join(""))
+                cursor += 3
+            else:
+                while cursor < len(characters) and characters[cursor] != "\"":
+                    if characters[cursor] == "\n":
+                        return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
+                    cursor += 1
+                if cursor >= len(characters):
+                    return error(diagnostics.Diagnostic("E000101", "unterminated string literal", source.Span(file.id, u32(start), u32(cursor))))
+                value = characters[content_start:cursor].join("")
+                cursor += 1
+            tokens.append(make_token(file, String(value), start, cursor))
+            continue
+
+        if character.is_digit():
+            cursor += 1
+            while cursor < len(characters) and (characters[cursor].is_digit() or characters[cursor] == "_"):
+                cursor += 1
+            floating = cursor + 1 < len(characters) and characters[cursor] == "." and characters[cursor + 1].is_digit()
+            if floating:
+                cursor += 1
+                while cursor < len(characters) and (characters[cursor].is_digit() or characters[cursor] == "_"):
+                    cursor += 1
+            spelling = characters[start:cursor].join("").replace("_", "")
+            tokens.append(make_token(file, Float(spelling) if floating else Integer(spelling), start, cursor))
+            continue
+
+        if character.is_alphabetic() or character == "_":
+            cursor += 1
+            while cursor < len(characters) and (characters[cursor].is_alphanumeric() or characters[cursor] == "_"):
+                cursor += 1
+            tokens.append(make_token(file, Identifier(characters[start:cursor].join("")), start, cursor))
+            continue
+
+        return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), source.Span(file.id, u32(start), u32(start + 1))))
+
+    while len(indents) > 1:
+        indents.pop()
+        tokens.append(make_token(file, Dedent, cursor, cursor))
+    tokens.append(make_token(file, Eof, cursor, cursor))
+    return tokens
+

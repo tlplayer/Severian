@@ -1,2 +1,149 @@
-# Bootstrap counterpart of compiler/frontend/ast/src/types/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import source
+import "../expression/mod.sev"
+import "../statement/mod.sev"
+
+enum ImportSubject:
+    Name(name: string)
+    Locator(locator: string)
+
+
+class ImportDeclaration:
+    subject: ImportSubject
+    source_name: string | None
+    alias: string | None
+    span: source.Span
+
+
+enum DecoratorValue:
+    Name(value: string)
+    String(value: string)
+    Integer(value: string)
+    Boolean(value: bool)
+
+
+class DecoratorArgument:
+    name: string | None
+    value: DecoratorValue
+    span: source.Span
+
+
+class Decorator:
+    name: string
+    arguments: list[DecoratorArgument]
+    span: source.Span
+
+
+class TypeAnnotation:
+    kind: TypeAnnotationKind
+    span: source.Span
+
+
+enum TypeAnnotationKind:
+    Named(name: string, arguments: list[TypeAnnotation])
+    Union(members: list[TypeAnnotation])
+
+
+class FunctionParameter:
+    name: string
+    annotation: TypeAnnotation
+    span: source.Span
+
+
+class FunctionDeclaration:
+    decorators: list[Decorator]
+    name: string
+    type_parameters: list[string]
+    parameters: list[FunctionParameter]
+    result: TypeAnnotation
+    body: list[Statement] | None
+    span: source.Span
+
+
+class TypeDeclaration:
+    decorators: list[Decorator]
+    name: string
+    type_parameters: list[string]
+    definition: TypeAnnotation | None
+    span: source.Span
+
+
+enum CompilerExpectation:
+    Accept
+    Reject
+
+
+class CompilerTestCase:
+    expectation: CompilerExpectation
+    diagnostic_name: string | None
+    body: list[Statement]
+    span: source.Span
+
+
+class TestDeclaration:
+    name: string | None
+    modes: list[string]
+    body: list[Statement]
+    compiler_cases: list[CompilerTestCase]
+    span: source.Span
+
+
+enum OperatorSyntax:
+    Plus
+    Minus
+    Multiply
+    Divide
+    Remainder
+    Power
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Contains
+    And
+    Or
+    Not
+
+
+class PropertyDeclaration:
+    name: string
+    annotation: TypeAnnotation
+    default: Expression | None
+    span: source.Span
+
+
+class OperatorParameter:
+    name: string
+    annotation: TypeAnnotation
+    span: source.Span
+
+
+class OperatorDeclaration:
+    operator: OperatorSyntax
+    parameters: list[OperatorParameter]
+    result: TypeAnnotation
+    span: source.Span
+
+
+class TraitDeclaration:
+    decorators: list[Decorator]
+    name: string
+    type_parameters: list[string]
+    bases: list[TypeAnnotation]
+    properties: list[PropertyDeclaration]
+    operators: list[OperatorDeclaration]
+    span: source.Span
+
+
+def named_type(name: string, arguments: list[TypeAnnotation], span: source.Span) -> TypeAnnotation:
+    return TypeAnnotation(Named(name, arguments), span)
+
+
+def simple_type_name(annotation: TypeAnnotation) -> string | None:
+    match annotation.kind:
+        case Named:
+            if len(arguments) == 0:
+                return name
+    return None
+

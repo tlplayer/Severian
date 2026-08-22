@@ -1,35 +1,47 @@
-# Bootstrap counterpart of compiler/frontend/lexer/src/token/mod.rs.
-# Token identities stay textual until source enums land, but the classification
-# behavior is executable now and follows the host token inventory.
+import source
 
-def token_model_ready() -> bool:
-    return true
+enum TokenKind:
+    Identifier(value: string)
+    Integer(value: string)
+    Float(value: string)
+    Character(value: char)
+    String(value: string)
+    At
+    Colon
+    ColonEqual
+    Equal
+    Plus
+    PlusEqual
+    Minus
+    MinusEqual
+    Star
+    StarEqual
+    Slash
+    SlashEqual
+    Percent
+    PercentEqual
+    Power
+    EqualEqual
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Arrow
+    LeftParen
+    RightParen
+    LeftBracket
+    RightBracket
+    Pipe
+    Comma
+    Dot
+    Newline
+    Indent
+    Dedent
+    Eof
 
-def is_compound_assignment(kind: string) -> bool:
-    if kind == "plus-equal":
-        return true
-    if kind == "minus-equal":
-        return true
-    if kind == "star-equal":
-        return true
-    if kind == "slash-equal":
-        return true
-    return kind == "percent-equal"
 
-def compound_operator(kind: string) -> string:
-    if kind == "plus-equal":
-        return "+"
-    if kind == "minus-equal":
-        return "-"
-    if kind == "star-equal":
-        return "*"
-    if kind == "slash-equal":
-        return "/"
-    if kind == "percent-equal":
-        return "%"
-    return ""
+class Token:
+    kind: TokenKind
+    span: source.Span
 
-test "compound token inventory mirrors stage zero":
-    assert(is_compound_assignment("plus-equal"))
-    assert(compound_operator("percent-equal") == "%")
-    assert(not is_compound_assignment("equal"))

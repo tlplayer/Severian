@@ -1,2 +1,12 @@
-# Bootstrap counterpart of compiler/compile/src/error.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import mir
+import universal
+
+enum CompileError:
+    ConflictingCompilers(operation: int, compilers: list[universal.CompilerId])
+    InvalidArtifact(message: string)
+    DuplicateHandler(compiler: universal.CompilerId)
+    MissingHandler(compiler: universal.CompilerId)
+    MissingValue(value: u32)
+    PlannerGeneratedOperation(operation: int)
+    Type(type_id: universal.TypeId, message: string)
+

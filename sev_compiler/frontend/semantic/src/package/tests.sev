@@ -1,1 +1,9 @@
-# Bootstrap counterpart of compiler/frontend/semantic/src/package/tests.rs.
+import modules
+import universal
+import "../package.sev"
+
+test "program indexes start with stable empty tables":
+    index = ProgramIndex({}, {}, {}, {})
+    assert(len(index.modules) == 0)
+    assert(len(index.definitions) == 0)
+

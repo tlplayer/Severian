@@ -1,8 +1,115 @@
-# Bootstrap counterpart of compiler/boundaries/driver/src/main.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
-# Until that translation exists, fail closed instead of presenting an empty
-# executable as a working bootstrap stage.
+import "lib.sev"
+
+class CommonOptions:
+    path: string | None
+    backend: string
+    target: string
+    binary: string | None
+    output: string | None
+    application_args: list[string]
+
+
+def parse_common(arguments: list[string]) -> CommonOptions | string:
+    options = CommonOptions(None, "c", "host", None, None, [])
+    cursor = 0
+    while cursor < len(arguments):
+        argument = arguments[cursor]
+        if argument == "--":
+            options.application_args = arguments[cursor + 1:]
+            break
+        if argument == "--backend":
+            cursor += 1
+            if cursor >= len(arguments): return error("--backend requires a value")
+            options.backend = arguments[cursor]
+        elif argument == "--target":
+            cursor += 1
+            if cursor >= len(arguments): return error("--target requires a value")
+            options.target = arguments[cursor]
+        elif argument == "--bin":
+            cursor += 1
+            if cursor >= len(arguments): return error("--bin requires a value")
+            options.binary = arguments[cursor]
+        elif argument == "-o" or argument == "--output":
+            cursor += 1
+            if cursor >= len(arguments): return error(argument + " requires a path")
+            options.output = arguments[cursor]
+        elif argument.starts_with("-"):
+            return error("unknown option " + argument)
+        elif options.path == None:
+            options.path = argument
+        else:
+            return error("unexpected argument " + argument)
+        cursor += 1
+    return options
+
+
+def discover_source(path: string | None, selected: string | None) -> tuple[string, string] | string:
+    input_path = path if path != None else process.current_directory()
+    if file.is_file(input_path):
+        return (input_path, file.stem(input_path))
+    manifest_path = file.join(input_path, "package.toml")
+    if not file.is_file(manifest_path):
+        return error("no package.toml found")
+    manifest = load_manifest(manifest_path)?
+    if selected != None:
+        target = manifest.target(selected)
+        if target == None: return error("unknown binary target " + selected)
+        match target:
+            case Binary: return (target.path, target.name)
+            case Library: return (target.path, target.name)
+    if len(manifest.binaries) > 0:
+        return (manifest.binaries[0].path, manifest.binaries[0].name)
+    if len(manifest.libraries) > 0:
+        return (manifest.libraries[0].path, manifest.libraries[0].name)
+    return error("package has no build targets")
+
+
+def help() -> string:
+    return "Severian compiler\n\nusage: sev <check|build|run|test> [path] [options]\n"
+
+
+def run(arguments: list[string]) -> unit | string:
+    if len(arguments) > 0 and (arguments[0] == "-h" or arguments[0] == "--help" or arguments[0] == "help"):
+        print(help())
+        return unit
+    if len(arguments) > 0 and (arguments[0] == "-V" or arguments[0] == "--version"):
+        print("sev 0.1.0")
+        return unit
+
+    command = "run"
+    if len(arguments) > 0 and arguments[0] in ["check", "build", "compile", "run", "test"]:
+        command = arguments.pop_front()
+    options = parse_common(arguments)?
+    target_info = discover_source(options.path, options.binary)?
+    compiler = Compiler()?
+    compiler.backend_name = options.backend
+    if options.target != "host":
+        compiler.target_spec = target.target_spec(options.target)
+
+    if command == "check":
+        compiler.check_file(target_info[0])?
+        return unit
+
+    output = options.output
+    if output == None:
+        output = file.join("target", target_info[1])
+    file.create_directories(file.parent(output))
+    artifact = compiler.compile_file(target_info[0], output)?
+    if command == "build" or command == "compile":
+        print(artifact.path)
+        return unit
+    if command == "run":
+        result = process.run([artifact.path] + options.application_args)
+        io.write_stdout(result.stdout)
+        io.write_stderr(result.stderr)
+        if result.status != 0: return error("program exited with status " + string(result.status))
+        return unit
+    return error("test runner requires test discovery")
+
 
 def main():
-    print("sev bootstrap driver is not implemented yet")
-    assert(false)
+    result = run(process.arguments()[1:])
+    if result is error:
+        io.write_stderr("error: " + result.message + "\n")
+        process.exit(1)
+

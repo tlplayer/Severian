@@ -1,2 +1,87 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/passes.rs.
-# Pass metadata drives lazy analysis caching and explicit invalidation.
+import "cfg.sev"
+
+enum IrStage:
+    Constructed
+    OwnershipChecked
+    DropElaborated
+    Optimized
+    LoweringReady
+
+
+enum PassKind:
+    Module
+    Function
+    Region
+    Operation
+
+
+class AnalysisId:
+    value: u128
+
+
+class PassMetadata:
+    name: string
+    kind: PassKind
+    accepted_stage: IrStage
+    required_analyses: set[AnalysisId]
+    preserved_analyses: set[AnalysisId]
+    produced_stage: IrStage
+    parallel: bool
+    deterministic: bool
+
+
+class PassError:
+    pass_name: string
+    message: string
+
+
+class AnalysisManager:
+    cache: map[AnalysisId, any]
+
+    def AnalysisManager():
+        cache = {}
+
+    def contains(id: AnalysisId) -> bool:
+        return cache.contains(id)
+
+    def insert(id: AnalysisId, value: any):
+        cache[id] = value
+
+    def invalidate_except(preserved: set[AnalysisId]):
+        for id in cache.keys():
+            if id not in preserved:
+                cache.remove(id)
+
+
+trait Pass:
+    metadata() -> PassMetadata
+    run_module(module: Module, analyses: AnalysisManager) -> unit | PassError
+    run_function(body: CfgBody, analyses: AnalysisManager) -> unit | PassError
+
+
+class PassManager:
+    passes: list[Pass]
+
+    def PassManager():
+        passes = []
+
+    def add(pass: Pass):
+        passes.append(pass)
+
+    def run(module: Module, stage: IrStage) -> IrStage | PassError:
+        analyses = AnalysisManager()
+        for pass in passes:
+            metadata = pass.metadata()
+            if metadata.accepted_stage != stage:
+                return error(PassError(metadata.name, "pass received the wrong IR stage"))
+            if metadata.kind == Module:
+                pass.run_module(module, analyses)?
+            else:
+                pass.run_function(module.initializer_cfg, analyses)?
+                for function in module.functions:
+                    if function.cfg != None:
+                        pass.run_function(function.cfg, analyses)?
+            analyses.invalidate_except(metadata.preserved_analyses)
+            stage = metadata.produced_stage
+        return stage
+

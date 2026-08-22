@@ -1,7 +1,140 @@
-# Bootstrap counterpart of compiler/frontend/modules/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import ast
-import diagnostics
 import lexer
 import parser
 import source
+import diagnostics
+
+class PackageId:
+    index: u32
+
+
+class ModuleId:
+    value: u128
+
+
+class ResolvedImport:
+    span: source.Span
+    module: ModuleId
+
+
+class ResolvedModule:
+    id: ModuleId
+    path: string
+    package: PackageId
+    ast_module: ast.Module
+    imports: list[ResolvedImport]
+
+
+class ModuleGraph:
+    modules: list[ResolvedModule]
+
+
+class ResolvedPackage:
+    id: PackageId
+    root: string
+    library: string
+    dependencies: map[string, PackageId]
+
+
+class PackageGraph:
+    root: PackageId
+    packages: map[PackageId, ResolvedPackage]
+
+
+class Resolver:
+    packages: PackageGraph
+    parsed: map[string, ast.Module]
+    visiting: list[string]
+    visited: set[string]
+    order: list[ResolvedModule]
+    module_ids: map[string, ModuleId]
+
+    def Resolver(packages: PackageGraph):
+        self.packages = packages
+        parsed = {}
+        visiting = []
+        visited = set()
+        order = []
+        module_ids = {}
+
+    def visit(path: string, package: PackageId) -> unit | diagnostics.Diagnostic:
+        canonical = file.canonical(path)?
+        if canonical in visited:
+            return unit
+        if visiting.contains(canonical):
+            cycle_start = visiting.index(canonical)
+            for member in visiting[cycle_start:]:
+                if has_runtime_initializer(parsed[member]):
+                    return error(diagnostics.Diagnostic("E000122", "runtime module initialization cycle", None))
+            return unit
+
+        source_file = source.load(canonical)?
+        tokens = lexer.scan(source_file)?
+        module = parser.parse(tokens)?
+        parsed[canonical] = module
+        id = module_id(canonical, package)
+        module_ids[canonical] = id
+        visiting.append(canonical)
+        imports: list[ResolvedImport] = []
+
+        for item in module.items:
+            match item:
+                case Import:
+                    dependency = source_import(canonical, package, declaration, packages)?
+                    if dependency != None:
+                        visit(dependency[0], dependency[1])?
+                        imports.append(ResolvedImport(declaration.span, module_ids[file.canonical(dependency[0])?]))
+
+        visiting.pop()
+        visited.add(canonical)
+        order.append(ResolvedModule(id, canonical, package, module, imports))
+        return unit
+
+
+def module_id(path: string, package: PackageId) -> ModuleId:
+    hash: u128 = 14695981039346656037
+    key = string(package.index) + ":" + path
+    for character in key.characters():
+        hash = (hash ^ u128(int(character))) * 1099511628211
+    return ModuleId(hash)
+
+
+def source_import(importer: string, package: PackageId, declaration: ast.ImportDeclaration, packages: PackageGraph) -> tuple[string, PackageId] | None | diagnostics.Diagnostic:
+    if declaration.source_name != None:
+        current = packages.packages.get(package)
+        dependency_id = current.dependencies.get(declaration.source_name)
+        if dependency_id == None:
+            return error(diagnostics.Diagnostic("E000124", "package import has not been resolved", declaration.span))
+        return (packages.packages[dependency_id].library, dependency_id)
+    match declaration.subject:
+        case Name:
+            current = packages.packages.get(package)
+            dependency_id = current.dependencies.get(name)
+            if dependency_id == None:
+                return error(diagnostics.Diagnostic("E000124", "package import has not been resolved", declaration.span))
+            return (packages.packages[dependency_id].library, dependency_id)
+        case Locator:
+            if locator.contains(":"):
+                return None
+            return (file.join(file.parent(importer), locator), package)
+
+
+def has_runtime_initializer(module: ast.Module) -> bool:
+    for item in module.items:
+        match item:
+            case BindingItem: return true
+            case ExpressionItem: return true
+    return false
+
+
+def resolve_with_packages(root: string, packages: PackageGraph) -> ModuleGraph | diagnostics.Diagnostic:
+    resolver = Resolver(packages)
+    resolver.visit(root, packages.root)?
+    return ModuleGraph(resolver.order)
+
+
+def resolve(root: string) -> ModuleGraph | diagnostics.Diagnostic:
+    package = PackageId(0)
+    packages = PackageGraph(package, {package: ResolvedPackage(package, file.parent(root), root, {})})
+    return resolve_with_packages(root, packages)
+

@@ -1,2 +1,39 @@
-# Bootstrap counterpart of compiler/transforms/mlir/src/ffi.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+@c(repr = "pointer")
+type MlirContext
+
+@c(repr = "pointer")
+type MlirModule
+
+@c(repr = "pointer")
+type MlirOperation
+
+@c(repr = "pointer")
+type MlirBlock
+
+@c(repr = "pointer")
+type MlirRegion
+
+@c(repr = "pointer")
+type MlirType
+
+@c(repr = "pointer")
+type MlirAttribute
+
+@c(symbol = "mlirContextCreate")
+def context_create() -> MlirContext
+
+@c(symbol = "mlirContextDestroy")
+def context_destroy(context: MlirContext)
+
+@c(symbol = "mlirModuleCreateParse")
+def module_parse(context: MlirContext, text: borrowed[string]) -> MlirModule
+
+@c(symbol = "mlirModuleDestroy")
+def module_destroy(module: MlirModule)
+
+@c(symbol = "mlirModuleGetOperation")
+def module_operation(module: MlirModule) -> MlirOperation
+
+@c(symbol = "mlirOperationVerify")
+def operation_verify(operation: MlirOperation) -> bool
+

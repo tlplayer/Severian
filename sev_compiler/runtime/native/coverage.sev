@@ -1,4 +1,3 @@
-# Source-language counterpart of compiler/runtime/native/coverage.c.
+@c(symbol = "__sev_coverage_hit")
+def coverage_hit(key: borrowed[string])
 
-def coverage_symbol() -> string:
-    return "__sev_coverage_hit"

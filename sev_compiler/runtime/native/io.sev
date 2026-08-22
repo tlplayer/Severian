@@ -1,7 +1,12 @@
-# Source-language counterpart of compiler/runtime/native/io.c.
+@c(symbol = "__sev_print_int")
+def print_int(value: int)
 
-def integer_print_symbol() -> string:
-    return "__sev_print_int"
+@c(symbol = "__sev_print_float")
+def print_float(value: float)
 
-def float_print_symbol() -> string:
-    return "__sev_print_float"
+@c(symbol = "__sev_print_bool")
+def print_bool(value: bool)
+
+@c(symbol = "__sev_print_string")
+def print_string(value: borrowed[string])
+

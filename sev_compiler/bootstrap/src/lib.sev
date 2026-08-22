@@ -1,5 +1,3 @@
-# Bootstrap counterpart of compiler/bootstrap/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import compile_protocol
 import ast
 import diagnostics
@@ -8,3 +6,72 @@ import parser
 import primitives
 import source
 import universal
+
+enum BootstrapError:
+    Parse(error: diagnostics.Diagnostic)
+    DuplicateDeclaration(name: string)
+    MissingDeclaration(name: string)
+    InvalidProperty(declaration: string, property: string)
+    InvalidCompiler(name: string)
+    GenericArity(name: string)
+    OperatorArity(name: string)
+    UnknownOperator(name: string)
+    UnsupportedTypeAnnotation(annotation: ast.TypeAnnotation)
+    Type(message: string)
+
+
+def register_primitive(
+    builder: universal.TypeContextBuilder,
+    path: string,
+    name: string,
+    category: universal.PrimitiveCategory,
+    representation: universal.PrimitiveRepresentation,
+    default_literal: bool,
+) -> universal.TypeId | BootstrapError:
+    type_id = builder.register_declaration(path, name)?
+    builder.define_primitive(type_id, category, representation, default_literal)?
+    return type_id
+
+
+def integer_representation(bits: u16, signed: bool) -> universal.PrimitiveRepresentation:
+    return universal.Integer(universal.Fixed(bits), signed)
+
+
+def load() -> universal.UniversalContext | BootstrapError:
+    builder = universal.TypeContextBuilder()
+    boolean = register_primitive(builder, "core.primitives.bool", "bool", universal.Boolean, universal.PrimitiveRepresentation.Boolean, true)?
+    character = register_primitive(builder, "core.primitives.char", "char", universal.Character, universal.PrimitiveRepresentation.Character, true)?
+    i8 = register_primitive(builder, "core.primitives.i8", "i8", universal.Integer, integer_representation(8, true), false)?
+    i16 = register_primitive(builder, "core.primitives.i16", "i16", universal.Integer, integer_representation(16, true), false)?
+    i32 = register_primitive(builder, "core.primitives.i32", "i32", universal.Integer, integer_representation(32, true), false)?
+    i64 = register_primitive(builder, "core.primitives.i64", "i64", universal.Integer, integer_representation(64, true), false)?
+    integer = register_primitive(builder, "core.primitives.int", "int", universal.Integer, universal.Integer(universal.Machine, true), true)?
+    u8 = register_primitive(builder, "core.primitives.u8", "u8", universal.Integer, integer_representation(8, false), false)?
+    u16 = register_primitive(builder, "core.primitives.u16", "u16", universal.Integer, integer_representation(16, false), false)?
+    u32 = register_primitive(builder, "core.primitives.u32", "u32", universal.Integer, integer_representation(32, false), false)?
+    u64 = register_primitive(builder, "core.primitives.u64", "u64", universal.Integer, integer_representation(64, false), false)?
+    f32 = register_primitive(builder, "core.primitives.f32", "f32", universal.Float, universal.Float(universal.Ieee(32)), false)?
+    f64 = register_primitive(builder, "core.primitives.f64", "f64", universal.Float, universal.Float(universal.Ieee(64)), false)?
+    floating = register_primitive(builder, "core.primitives.float", "float", universal.Float, universal.Float(universal.Machine), true)?
+    text = register_primitive(builder, "core.primitives.string", "string", universal.Text, universal.String, true)?
+    bytes = register_primitive(builder, "core.primitives.bytes", "bytes", universal.Bytes, universal.Bytes, true)?
+    none = register_primitive(builder, "core.primitives.None", "None", universal.Absence, universal.NoneValue, true)?
+    unit_type = register_primitive(builder, "core.primitives.unit", "unit", universal.Unit, universal.Unit, true)?
+    arguments = register_primitive(builder, "core.primitives.args", "args", universal.Arguments, universal.Arguments, false)?
+
+    numeric_types = [i8, i16, i32, i64, integer, u8, u16, u32, u64, f32, f64, floating]
+    for type_id in numeric_types:
+        builder.add_unary(universal.Positive, type_id, type_id)
+        builder.add_unary(universal.Negative, type_id, type_id)
+        for operator in [universal.Add, universal.Subtract, universal.Multiply, universal.Divide, universal.Remainder, universal.Power]:
+            builder.add_binary(universal.OperatorSignature(operator, universal.Exact(type_id), universal.Exact(type_id), universal.Exact(type_id)))
+        for operator in [universal.Equal, universal.NotEqual, universal.Less, universal.LessEqual, universal.Greater, universal.GreaterEqual]:
+            builder.add_binary(universal.OperatorSignature(operator, universal.Exact(type_id), universal.Exact(type_id), universal.Exact(boolean)))
+
+    builder.add_unary(universal.Not, boolean, boolean)
+    builder.add_binary(universal.OperatorSignature(universal.And, universal.Exact(boolean), universal.Exact(boolean), universal.Exact(boolean)))
+    builder.add_binary(universal.OperatorSignature(universal.Or, universal.Exact(boolean), universal.Exact(boolean), universal.Exact(boolean)))
+    builder.add_binary(universal.OperatorSignature(universal.Add, universal.Exact(text), universal.Exact(text), universal.Exact(text)))
+    builder.add_binary(universal.OperatorSignature(universal.Equal, universal.Exact(text), universal.Exact(text), universal.Exact(boolean)))
+    return universal.UniversalContext(builder.build())
+

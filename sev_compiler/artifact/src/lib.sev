@@ -1,23 +1,15 @@
-# CompiledRegionId and ArtifactId are transparent u32 identities in both
-# stages. Keeping construction and projection named prevents accidental mixing.
-def compiled_region_id(index: u32) -> u32:
-    return index
+class CompiledRegionId:
+    index: u32
 
 
-def compiled_region_index(region: u32) -> u32:
-    return region
+class ArtifactId:
+    index: u32
 
 
-def artifact_for_region(region: u32) -> u32:
-    return compiled_region_index(region)
+def compiled_region_id(index: u32) -> CompiledRegionId:
+    return CompiledRegionId(index)
 
 
-def artifact_index(artifact: u32) -> u32:
-    return artifact
+def artifact_for_region(region: CompiledRegionId) -> ArtifactId:
+    return ArtifactId(region.index)
 
-
-test "artifact identity is derived centrally from its region":
-    region = compiled_region_id(9)
-    artifact = artifact_for_region(region)
-    assert(compiled_region_index(region) == 9)
-    assert(artifact_index(artifact) == 9)

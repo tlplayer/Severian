@@ -1,4 +1,3 @@
-# The Rust lib.rs composes these same source modules.
 import "context.sev"
 import "ids.sev"
 import "literal.sev"
@@ -6,3 +5,8 @@ import "operator.sev"
 import "operation_registry.sev"
 import "type_system.sev"
 import "types/mod.sev"
+
+enum CompileRoute:
+    Standard
+    Compiler(compiler: CompilerId)
+

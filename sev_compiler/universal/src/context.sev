@@ -1,8 +1,16 @@
-# UniversalContext owns one TypeContext. Value classes and typed error payloads
-# are the remaining representation dependencies for this paired module.
-trait UniversalContextBridge:
-    pass
+import "types/mod.sev"
+
+class UniversalContext:
+    types: TypeContext
 
 
-trait UniversalErrorBridge:
-    pass
+class UniversalError:
+    message: string
+
+    def display() -> string:
+        return message
+
+
+def universal_context(types: TypeContext) -> UniversalContext:
+    return UniversalContext(types)
+

@@ -1,2 +1,116 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/verify.rs.
-# Verification covers CFG shape, dominance, block arguments, calls and ownership form.
+import universal
+import "cfg.sev"
+
+enum VerifyError:
+    InvalidBlock(index: u32)
+    InvalidLocal(index: u32)
+    MissingTerminator(block: u32)
+    BlockArgumentArity(block: u32)
+    BlockArgumentType(block: u32)
+    UseBeforeDefinition(block: u32, local: u32)
+    CallTarget
+    CallArity
+    CallArgumentType
+    InvalidOwnershipState(block: u32, local: u32)
+
+
+def verify_place(body: CfgBody, place: Place) -> unit | VerifyError:
+    if place.local.index >= len(body.locals):
+        return error(InvalidLocal(place.local.index))
+    return unit
+
+
+def use_operand(body: CfgBody, block: BlockId, operand: Operand, state: set[LocalId]) -> unit | VerifyError:
+    match operand:
+        case Copy:
+            verify_place(body, place)?
+            if place.local not in state:
+                return error(UseBeforeDefinition(block.index, place.local.index))
+        case Move:
+            verify_place(body, place)?
+            if place.local not in state:
+                return error(UseBeforeDefinition(block.index, place.local.index))
+            state.remove(place.local)
+    return unit
+
+
+def successors(terminator: Terminator) -> list[BlockId]:
+    match terminator:
+        case Goto: return [target]
+        case Branch: return [then_block, else_block]
+        case Switch:
+            result: list[BlockId] = [fallback]
+            for target in targets: result.append(target[1])
+            return result
+        case Call:
+            result: list[BlockId] = [target]
+            if unwind != None: result.append(unwind)
+            return result
+        else: return []
+
+
+def verify_body(body: CfgBody) -> unit | VerifyError:
+    if body.entry.index >= len(body.blocks):
+        return error(InvalidBlock(body.entry.index))
+    index: u32 = 0
+    for local in body.locals:
+        if local.id.index != index:
+            return error(InvalidLocal(local.id.index))
+        index += 1
+    index = 0
+    for block in body.blocks:
+        if block.id.index != index:
+            return error(InvalidBlock(block.id.index))
+        for successor in successors(block.terminator):
+            if successor.index >= len(body.blocks):
+                return error(InvalidBlock(successor.index))
+        index += 1
+
+    incoming: map[BlockId, set[LocalId]] = {}
+    incoming[body.entry] = set()
+    for local in body.locals:
+        if local.argument:
+            incoming[body.entry].add(local.id)
+
+    for block in body.blocks:
+        state = incoming.get(block.id)
+        if state == None: state = set()
+        for statement in block.statements:
+            match statement:
+                case StorageLive: state.add(local)
+                case StorageDead: state.discard(local)
+                case Assign:
+                    match value:
+                        case Use: use_operand(body, block.id, operand, state)?
+                        case Unary: use_operand(body, block.id, operand, state)?
+                        case Convert: use_operand(body, block.id, operand, state)?
+                        case Binary:
+                            use_operand(body, block.id, left, state)?
+                            use_operand(body, block.id, right, state)?
+                    verify_place(body, place)?
+                    state.add(place.local)
+                case Drop:
+                    verify_place(body, place)?
+                    if place.local not in state:
+                        return error(InvalidOwnershipState(block.id.index, place.local.index))
+                    state.remove(place.local)
+                case Assert:
+                    use_operand(body, block.id, condition, state)?
+                    if message != None: use_operand(body, block.id, message, state)?
+                case Operation:
+                    for operand in operands: use_operand(body, block.id, operand, state)?
+                    for result in results:
+                        verify_place(body, result)?
+                        state.add(result.local)
+        for successor in successors(block.terminator):
+            incoming[successor] = state.copy()
+    return unit
+
+
+def verify(module: Module, types: universal.TypeContext) -> unit | VerifyError:
+    verify_body(module.initializer_cfg)?
+    for function in module.functions:
+        if function.cfg != None:
+            verify_body(function.cfg)?
+    return unit
+

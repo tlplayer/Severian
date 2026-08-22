@@ -1,2 +1,8 @@
-# Bootstrap counterpart of compiler/boundaries/driver/tests/cli_contract.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+from driver import parse_common
+
+test "common options preserve the application argument boundary":
+    options = parse_common(["example.sev", "--backend", "c", "--", "one", "two"])
+    assert(options.path == "example.sev")
+    assert(options.backend == "c")
+    assert(options.application_args == ["one", "two"])
+

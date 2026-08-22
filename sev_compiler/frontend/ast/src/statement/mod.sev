@@ -1,2 +1,27 @@
-# Bootstrap counterpart of compiler/frontend/ast/src/statement/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import source
+import "../expression/mod.sev"
+import "../types/mod.sev"
+
+class Binding:
+    name: string
+    annotation: TypeAnnotation | None
+    value: Expression
+    update: bool
+    span: source.Span
+
+
+class MatchCase:
+    binding: string | None
+    annotation: TypeAnnotation | None
+    body: list[Statement]
+    span: source.Span
+
+
+enum Statement:
+    BindingStatement(binding: Binding)
+    ExpressionStatement(expression: Expression)
+    Return(value: Expression | None, span: source.Span)
+    Assert(condition: Expression, message: Expression | None, span: source.Span)
+    If(condition: Expression, then_block: list[Statement], else_block: list[Statement], span: source.Span)
+    Match(subject: Expression, cases: list[MatchCase], span: source.Span)
+

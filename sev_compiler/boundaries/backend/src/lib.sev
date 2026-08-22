@@ -1,4 +1,148 @@
-# Bootstrap counterpart of compiler/boundaries/backend/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import lir
 import runtime
+
+enum ArtifactKind:
+    Executable
+
+
+class Artifact:
+    path: string
+    kind: ArtifactKind
+
+
+enum BackendError:
+    UnsupportedType(type_id: lir.LoweredType)
+    UnsupportedOperation(message: string)
+    InvalidValue(value: lir.ValueId)
+    CompilerFailed(message: string)
+
+
+def c_type(type_id: lir.LoweredType) -> string | BackendError:
+    match type_id:
+        case Integer:
+            if bits == 8: return "int8_t" if signed else "uint8_t"
+            if bits == 16: return "int16_t" if signed else "uint16_t"
+            if bits == 32: return "int32_t" if signed else "uint32_t"
+            if bits == 64: return "int64_t" if signed else "uint64_t"
+        case Float:
+            match format:
+                case Ieee:
+                    if bits == 32: return "float"
+                    if bits == 64: return "double"
+        case Boolean: return "int"
+        case String: return "const char *"
+        case Bytes: return "const unsigned char *"
+        case NoneValue: return "void"
+        case Unit: return "void"
+        case Arguments: return "sev_args"
+    return error(UnsupportedType(type_id))
+
+
+def value_type(module: lir.Module, value: lir.ValueId) -> lir.LoweredType | BackendError:
+    if value.index >= len(module.values): return error(InvalidValue(value))
+    return module.values[value.index].type_id
+
+
+def c_literal(value: lir.Constant) -> string:
+    match value:
+        case IntegerValue: return spelling
+        case FloatValue: return spelling
+        case BooleanValue: return "1" if value else "0"
+        case StringValue: return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        case NoneValue: return "0"
+        case Unit: return "0"
+        case BytesValue: return "0"
+
+
+def binary_operator(operator: lir.BinaryOperation) -> string:
+    if operator == lir.Add: return "+"
+    if operator == lir.Subtract: return "-"
+    if operator == lir.Multiply: return "*"
+    if operator == lir.Divide: return "/"
+    if operator == lir.Remainder: return "%"
+    if operator == lir.Equal: return "=="
+    if operator == lir.NotEqual: return "!="
+    if operator == lir.Less: return "<"
+    if operator == lir.LessEqual: return "<="
+    if operator == lir.Greater: return ">"
+    if operator == lir.GreaterEqual: return ">="
+    if operator == lir.And: return "&&"
+    if operator == lir.Or: return "||"
+    return "+"
+
+
+def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
+    output = ""
+    for operation in block.operations:
+        match operation:
+            case Coverage:
+                output += "    __sev_coverage_hit(\"" + key + "\");\n"
+            case ConstantValue:
+                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + c_literal(value) + ";\n"
+            case Unary:
+                symbol = "+"
+                if operator == lir.Negative: symbol = "-"
+                elif operator == lir.Not: symbol = "!"
+                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + symbol + "v" + string(operand.index) + ";\n"
+            case Binary:
+                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = v" + string(left.index) + " " + binary_operator(operator) + " v" + string(right.index) + ";\n"
+            case Call:
+                arguments_text: list[string] = []
+                for argument in arguments: arguments_text.append("v" + string(argument.index))
+                output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = __sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ");\n"
+            case RuntimeCall:
+                arguments_text: list[string] = []
+                for argument in arguments: arguments_text.append("v" + string(argument.index))
+                if result == None:
+                    output += "    " + symbol + "(" + arguments_text.join(", ") + ");\n"
+                else:
+                    output += "    " + c_type(value_type(module, result)?)? + " v" + string(result.index) + " = " + symbol + "(" + arguments_text.join(", ") + ");\n"
+            case Return:
+                output += "    return"
+                if value != None: output += " v" + string(value.index)
+                output += ";\n"
+            case Assert:
+                output += "    if (!v" + string(condition.index) + ") { fputs(\"assertion failed\\n\", stderr); exit(1); }\n"
+            case If:
+                output += "    if (v" + string(condition.index) + ") {\n"
+                output += render_block(module, then_block)?
+                output += "    } else {\n"
+                output += render_block(module, else_block)?
+                output += "    }\n"
+            case ArtifactCall:
+                return error(UnsupportedOperation("artifact calls require MLIR composition"))
+    return output
+
+
+def render_c(module: lir.Module) -> string | BackendError:
+    output = "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\ntypedef struct { int count; char **values; } sev_args;\nvoid __sev_coverage_hit(const char *key);\n"
+    for function in module.functions:
+        parameters: list[string] = []
+        for parameter in function.parameters:
+            parameters.append(c_type(value_type(module, parameter)?)? + " v" + string(parameter.index))
+        output += "static " + c_type(function.result)? + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ");\n"
+    output += "static int __sev_init(void) {\n"
+    output += render_block(module, module.initializer)?
+    output += "    return 0;\n}\n"
+    for function in module.functions:
+        if function.body == None: continue
+        parameters: list[string] = []
+        for parameter in function.parameters:
+            parameters.append(c_type(value_type(module, parameter)?)? + " v" + string(parameter.index))
+        output += "static " + c_type(function.result)? + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
+        output += render_block(module, function.body)?
+        if function.result == lir.Unit: output += "    return;\n"
+        output += "}\n"
+    output += "int main(int argc, char **argv) { (void)argc; (void)argv; if (__sev_init()) return 1;"
+    if module.entry != None: output += " __sev_fn_" + string(module.entry.value) + "();"
+    output += " return 0; }\n"
+    return output
+
+
+def emit_executable(module: lir.Module, output_path: string) -> Artifact | BackendError:
+    c_source = render_c(module)?
+    result = process.run(["cc", "-x", "c", "-", "-o", output_path] + runtime.native_sources(), input = c_source)
+    if result.status != 0:
+        return error(CompilerFailed(result.stderr))
+    return Artifact(output_path, Executable)
+

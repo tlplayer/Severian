@@ -1,3 +1,18 @@
-# Bootstrap counterpart of compiler/diagnostics/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import source
+
+class Diagnostic:
+    code: string
+    message: string
+    span: source.Span | None
+
+    def display() -> string:
+        return code + ": " + message
+
+
+def diagnostic(code: string, message: string) -> Diagnostic:
+    return Diagnostic(code, message, None)
+
+
+def diagnostic_at(code: string, message: string, span: source.Span) -> Diagnostic:
+    return Diagnostic(code, message, span)
+

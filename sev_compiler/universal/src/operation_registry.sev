@@ -1,2 +1,94 @@
-# Bootstrap counterpart of compiler/universal/src/operation_registry.rs.
-# Dialect operations register type, effect, verification and lowering interfaces.
+import "ids.sev"
+import "type_system.sev"
+
+class DialectId:
+    value: u128
+
+
+class OperationId:
+    value: u128
+
+
+class AttributeId:
+    value: u128
+
+
+class OpId:
+    dialect: DialectId
+    operation: OperationId
+
+
+enum AttrValue:
+    Integer(value: i128)
+    Boolean(value: bool)
+    String(value: string)
+    Type(value: TypeId)
+    Types(value: list[TypeId])
+
+
+class EffectSet:
+    bits: u16
+
+    def contains(effect: EffectSet) -> bool:
+        return bits & effect.bits == effect.bits
+
+    def union(other: EffectSet) -> EffectSet:
+        return EffectSet(bits | other.bits)
+
+
+enum LoweringCapability:
+    Standard
+    Compiler(compiler: CompilerId)
+    Backend(name: string)
+    Runtime(name: string)
+
+
+class RegisteredOperation:
+    id: OpId
+    operands: list[TypeId]
+    results: list[TypeId]
+    attributes: map[AttributeId, AttrValue]
+
+
+class OperationDiagnostic:
+    operation: OpId
+    message: string
+
+
+class CanonicalRewrite:
+    replacement: OpId
+    attributes: map[AttributeId, AttrValue]
+
+
+trait OperationInterface:
+    infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
+    verify(operation: RegisteredOperation) -> unit | OperationDiagnostic
+    effects(operation: RegisteredOperation) -> EffectSet
+    canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
+    lowering_capabilities() -> list[LoweringCapability]
+
+
+class OperationRegistry:
+    interfaces: map[OpId, OperationInterface]
+
+    def OperationRegistry():
+        interfaces = {}
+
+    def register(id: OpId, interface: OperationInterface) -> unit | OperationDiagnostic:
+        if interfaces.contains(id):
+            return error(OperationDiagnostic(id, "operation interface is already registered"))
+        interfaces[id] = interface
+        return unit
+
+    def interface(id: OpId) -> OperationInterface | None:
+        return interfaces.get(id)
+
+
+def no_effects() -> EffectSet: return EffectSet(0)
+def read_effect() -> EffectSet: return EffectSet(1)
+def write_effect() -> EffectSet: return EffectSet(2)
+def allocate_effect() -> EffectSet: return EffectSet(4)
+def free_effect() -> EffectSet: return EffectSet(8)
+def throw_effect() -> EffectSet: return EffectSet(16)
+def io_effect() -> EffectSet: return EffectSet(32)
+

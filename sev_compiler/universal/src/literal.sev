@@ -1,42 +1,41 @@
-def literal_integer() -> string:
-    return "integer"
+enum LiteralKind:
+    Integer
+    Float
+    Boolean
+    Character
+    String
+    Bytes
+    NoneValue
+    Unit
 
 
-def literal_float() -> string:
-    return "float"
+enum LiteralValue:
+    IntegerValue(spelling: string)
+    FloatValue(spelling: string)
+    BooleanValue(value: bool)
+    CharacterValue(value: char)
+    StringValue(value: string)
+    BytesValue(value: list[u8])
+    NoneValue
+    UnitValue
 
 
-def literal_boolean() -> string:
-    return "boolean"
+def literal_kind(value: LiteralValue) -> LiteralKind:
+    match value:
+        case IntegerValue: return Integer
+        case FloatValue: return Float
+        case BooleanValue: return Boolean
+        case CharacterValue: return Character
+        case StringValue: return String
+        case BytesValue: return Bytes
+        case NoneValue: return LiteralKind.NoneValue
+        case UnitValue: return Unit
 
 
-def literal_character() -> string:
-    return "character"
+def literal_spelling(value: LiteralValue) -> string | None:
+    match value:
+        case IntegerValue: return spelling
+        case FloatValue: return spelling
+        case StringValue: return value
+        else: return None
 
-
-def literal_string() -> string:
-    return "string"
-
-
-def literal_bytes() -> string:
-    return "bytes"
-
-
-def literal_none() -> string:
-    return "none"
-
-
-def literal_unit() -> string:
-    return "unit"
-
-
-# Payload-bearing literal enums migrate once source-language enums can retain
-# typed payloads. Spelling remains owned by the lexer and AST until then.
-trait LiteralValueBridge:
-    pass
-
-
-test "literal kind names are stable interface data":
-    assert(literal_integer() == "integer")
-    assert(literal_string() == "string")
-    assert(literal_unit() == "unit")

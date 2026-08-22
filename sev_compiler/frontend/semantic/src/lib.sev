@@ -1,8 +1,265 @@
-# Bootstrap counterpart of compiler/frontend/semantic/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import ast
 import diagnostics
 import hir
 import modules
 import source
 import universal
+import "package.sev"
+import "queries.sev"
+
+enum AnalysisMode:
+    Build
+    Test
+
+
+class AnalysisContext:
+    mode: AnalysisMode
+    module_name: string
+
+
+class PackageFunction:
+    lookup: string
+    id: hir.FunctionId
+    definition: universal.DefId
+    type_parameters: list[universal.GenericParamId]
+    parameters: list[universal.TypeId]
+    result: universal.TypeId
+
+
+class FunctionSignature:
+    parameters: list[universal.TypeId]
+    result: universal.TypeId
+
+
+class Analyzer:
+    types: universal.TypeContext
+    names: map[string, hir.BindingId]
+    declarations: set[string]
+    functions: map[string, list[hir.FunctionId]]
+    definitions: map[hir.FunctionId, universal.DefId]
+    signatures: map[hir.FunctionId, FunctionSignature]
+    binding_types: map[hir.BindingId, universal.TypeId]
+    next_hir: u32
+    next_binding: u32
+
+    def new_hir_id() -> hir.HirId:
+        id = hir.HirId(next_hir)
+        next_hir += 1
+        return id
+
+    def new_binding_id() -> hir.BindingId:
+        id = hir.BindingId(next_binding)
+        next_binding += 1
+        return id
+
+    def expression(value: ast.Expression, expected: universal.TypeId | None) -> hir.Expression | diagnostics.Diagnostic:
+        match value.kind:
+            case LiteralValue:
+                literal = lower_literal(value)?
+                type_id = types.type_for_literal(literal)
+                if expected != None:
+                    type_id = expected
+                if type_id == None:
+                    return error(diagnostics.Diagnostic("E000200", "literal type cannot be inferred", value.span))
+                return hir.Expression(new_hir_id(), type_id, hir.Literal(literal), value.span)
+            case Name:
+                binding = names.get(name)
+                if binding == None:
+                    function_set = functions.get(name)
+                    if function_set != None and len(function_set) == 1:
+                        function = function_set[0]
+                        signature = signatures[function]
+                        function_type = types.intern(universal.Function(universal.Signature(signature.parameters, signature.result)))
+                        return hir.Expression(new_hir_id(), function_type, hir.Function(definitions[function]), value.span)
+                    return error(diagnostics.Diagnostic("E000201", "unknown name " + name, value.span))
+                return hir.Expression(new_hir_id(), binding_type(binding), hir.Binding(binding), value.span)
+            case Call:
+                arguments_hir: list[hir.Expression] = []
+                if ast_callable_name(callee) == None:
+                    target = expression(callee, None)?
+                    for argument in arguments:
+                        arguments_hir.append(expression(argument, None)?)
+                    result = expected if expected != None else types.resolve_name("unit")
+                    return hir.Expression(new_hir_id(), result, hir.Call(hir.FunctionValue(target.id), arguments_hir), value.span)
+                name = ast_callable_name(callee)
+                candidates = functions.get(name)
+                if candidates == None:
+                    return error(diagnostics.Diagnostic("E000202", "unknown callable " + name, value.span))
+                selected: hir.FunctionId | None = None
+                for candidate in candidates:
+                    signature = signatures[candidate]
+                    if len(signature.parameters) == len(arguments):
+                        selected = candidate
+                        break
+                if selected == None:
+                    return error(diagnostics.Diagnostic("E000203", "no overload matches " + name, value.span))
+                signature = signatures[selected]
+                index = 0
+                for argument in arguments:
+                    arguments_hir.append(expression(argument, signature.parameters[index])?)
+                    index += 1
+                return hir.Expression(
+                    new_hir_id(),
+                    signature.result,
+                    hir.Call(hir.Direct(definitions[selected], universal.Substitution({})), arguments_hir),
+                    value.span,
+                )
+            case Unary:
+                operand_hir = expression(operand, expected)?
+                operation = lower_unary(operator)
+                resolved = types.resolve_unary(operation, operand_hir.type_id)?
+                return hir.Expression(new_hir_id(), resolved.result, hir.Unary(operation, operand_hir), value.span)
+            case Binary:
+                left_hir = expression(left, expected)?
+                right_hir = expression(right, left_hir.type_id)?
+                operation = lower_binary(operator)
+                resolved = types.resolve_binary(operation, left_hir.type_id, right_hir.type_id)?
+                return hir.Expression(new_hir_id(), resolved.result, hir.Binary(operation, left_hir, right_hir), value.span)
+            case Member:
+                return error(diagnostics.Diagnostic("E000206", "member lookup requires a registered implementation", value.span))
+
+    def binding_type(binding: hir.BindingId) -> universal.TypeId:
+        return self.binding_types[binding]
+
+    def binding(value: ast.Binding, output: list[hir.Binding]) -> hir.BindingId | diagnostics.Diagnostic:
+        expected: universal.TypeId | None = None
+        if value.annotation != None:
+            expected = resolve_type_annotation(types, value.annotation)?
+        expression_hir = expression(value.value, expected)?
+        id = new_binding_id()
+        output.append(hir.Binding(id, expression_hir.type_id, expression_hir, value.span))
+        names[value.name] = id
+        self.binding_types[id] = expression_hir.type_id
+        declarations.add(value.name)
+        return id
+
+
+def lower_literal(expression: ast.Expression) -> universal.LiteralValue:
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case Integer: return universal.IntegerValue(spelling)
+                case Float: return universal.FloatValue(spelling)
+                case Boolean: return universal.BooleanValue(value)
+                case Character: return universal.CharacterValue(value)
+                case String: return universal.StringValue(value)
+                case Bytes: return universal.BytesValue(value)
+                case NoneValue: return universal.NoneValue
+                case Unit: return universal.UnitValue
+
+
+def lower_unary(operator: ast.UnaryOperator) -> universal.UnaryOperator:
+    if operator == ast.Positive: return universal.Positive
+    if operator == ast.Negative: return universal.Negative
+    return universal.Not
+
+
+def lower_binary(operator: ast.BinaryOperator) -> universal.BinaryOperator:
+    if operator == ast.Add: return universal.Add
+    if operator == ast.Subtract: return universal.Subtract
+    if operator == ast.Multiply: return universal.Multiply
+    if operator == ast.Divide: return universal.Divide
+    if operator == ast.Remainder: return universal.Remainder
+    if operator == ast.Power: return universal.Power
+    if operator == ast.Equal: return universal.Equal
+    if operator == ast.NotEqual: return universal.NotEqual
+    if operator == ast.Less: return universal.Less
+    if operator == ast.LessEqual: return universal.LessEqual
+    if operator == ast.Greater: return universal.Greater
+    if operator == ast.GreaterEqual: return universal.GreaterEqual
+    if operator == ast.Contains: return universal.Contains
+    if operator == ast.And: return universal.And
+    return universal.Or
+
+
+def ast_callable_name(expression: ast.Expression) -> string | None:
+    match expression.kind:
+        case Name: return name
+        case Member:
+            prefix = ast_callable_name(object)
+            if prefix != None:
+                return prefix + "." + name
+    return None
+
+
+def resolve_type_annotation(types: universal.TypeContext, annotation: ast.TypeAnnotation) -> universal.TypeId | diagnostics.Diagnostic:
+    match annotation.kind:
+        case Named:
+            constructor = types.resolve_name(name)
+            if constructor == None:
+                return error(diagnostics.Diagnostic("E000205", "unknown type " + name, annotation.span))
+            if len(arguments) == 0:
+                return constructor
+            resolved: list[universal.TypeId] = []
+            for argument in arguments:
+                resolved.append(resolve_type_annotation(types, argument)?)
+            return types.instantiate(constructor, resolved)?
+        case Union:
+            resolved: list[universal.TypeId] = []
+            for member in members:
+                resolved.append(resolve_type_annotation(types, member)?)
+            return types.union(resolved)
+
+
+def synthetic_definition(module_name: string, name: string, ordinal: int) -> universal.DefId:
+    value: u128 = u128(ordinal + 1)
+    for character in (module_name + "." + name).characters():
+        value = value * 1099511628211 ^ u128(int(character))
+    return universal.DefId(0, 0, universal.DeclarationId(value))
+
+
+def analyze_with_package_functions(
+    module_ast: ast.Module,
+    types: universal.TypeContext,
+    context: AnalysisContext,
+    visible: list[PackageFunction],
+    own_ids: list[hir.FunctionId],
+    test_ids: list[hir.FunctionId],
+) -> hir.Program | diagnostics.Diagnostic:
+    analyzer = Analyzer(types, {}, set(), {}, {}, {}, {}, 0, 0)
+
+    for function in visible:
+        if not analyzer.functions.contains(function.lookup):
+            analyzer.functions[function.lookup] = []
+        analyzer.functions[function.lookup].append(function.id)
+        analyzer.definitions[function.id] = function.definition
+        analyzer.signatures[function.id] = FunctionSignature(function.parameters, function.result)
+
+    module = hir.empty_module()
+    ordinal = 0
+    for item in module_ast.items:
+        match item:
+            case Function:
+                id = own_ids[ordinal] if ordinal < len(own_ids) else hir.FunctionId(u128(ordinal))
+                definition = synthetic_definition(context.module_name, declaration.name, ordinal)
+                parameters: list[hir.FunctionParameter] = []
+                parameter_types: list[universal.TypeId] = []
+                for parameter in declaration.parameters:
+                    type_id = resolve_type_annotation(types, parameter.annotation)?
+                    binding = analyzer.new_binding_id()
+                    parameters.append(hir.FunctionParameter(binding, parameter.name, hir.BoundaryType(type_id, [])))
+                    parameter_types.append(type_id)
+                result = resolve_type_annotation(types, declaration.result)?
+                analyzer.functions[declaration.name] = [id]
+                analyzer.definitions[id] = definition
+                analyzer.signatures[id] = FunctionSignature(parameter_types, result)
+                module.functions.append(hir.FunctionDeclaration(id, definition, declaration.name, [], parameters, hir.BoundaryType(result, []), universal.Standard, hir.Severian, None))
+                ordinal += 1
+
+    for item in module_ast.items:
+        match item:
+            case BindingItem:
+                id = analyzer.binding(binding, module.bindings)?
+                module.initializer.statements.append(hir.BindingStatement(id))
+            case ExpressionItem:
+                module.initializer.statements.append(hir.ExpressionStatement(analyzer.expression(expression, None)?))
+
+    return hir.Program([module])
+
+
+def analyze_with_context(module: ast.Module, types: universal.TypeContext, context: AnalysisContext) -> hir.Program | diagnostics.Diagnostic:
+    return analyze_with_package_functions(module, types, context, [], [], [])
+
+
+def analyze(module: ast.Module, types: universal.TypeContext) -> hir.Program | diagnostics.Diagnostic:
+    return analyze_with_context(module, types, AnalysisContext(Build, "memory"))

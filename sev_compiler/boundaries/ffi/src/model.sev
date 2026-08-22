@@ -1,2 +1,80 @@
-# Bootstrap counterpart of compiler/boundaries/ffi/src/model.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import abi
+import universal
+
+enum Lifetime:
+    Call
+    Return
+    Static
+    Named(name: string)
+
+
+enum Ownership:
+    Copy
+    Borrowed(lifetime: Lifetime)
+    Owned
+    Transferred
+
+
+enum ParameterMode:
+    In
+    Out
+    InOut
+
+
+enum ForeignTypeRef:
+    Severian(type_id: universal.TypeId)
+    External(name: string)
+    Pointer(pointee: ForeignTypeRef, mutable: bool)
+
+
+class ValueContract:
+    type_ref: ForeignTypeRef
+    ownership: Ownership
+    nullable: bool
+
+
+class ForeignParameter:
+    name: string
+    contract: ValueContract
+    mode: ParameterMode
+
+
+enum AbiSelection:
+    C
+    System
+    Rust
+    Explicit(convention: abi.CallingConvention)
+
+
+def convention(selection: AbiSelection) -> abi.CallingConvention:
+    if selection == C: return abi.C
+    if selection == System: return abi.System
+    if selection == Rust: return abi.Rust
+    match selection:
+        case Explicit: return convention
+
+
+class ForeignFunction:
+    name: string
+    provider: string | None
+    symbol: abi.Symbol
+    parameters: list[ForeignParameter]
+    result: ValueContract
+    abi_selection: AbiSelection
+    variadic: bool
+
+
+class ForeignTypeDeclaration:
+    name: string
+    representation: abi.AbiType
+
+
+class ForeignModule:
+    types: list[ForeignTypeDeclaration]
+    functions: list[ForeignFunction]
+
+    def type_declaration(name: string) -> ForeignTypeDeclaration | None:
+        for declaration in types:
+            if declaration.name == name: return declaration
+        return None
+

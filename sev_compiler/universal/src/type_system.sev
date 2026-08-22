@@ -1,2 +1,171 @@
-# Bootstrap counterpart of compiler/universal/src/type_system.rs.
-# All source, HIR, and MIR types share the TyId interner defined here.
+import "ids.sev"
+
+class Substitution:
+    arguments: map[GenericParamId, TypeId]
+
+    def get(parameter: GenericParamId) -> TypeId | None:
+        return arguments.get(parameter)
+
+    def values() -> list[TypeId]:
+        return arguments.values()
+
+
+class Signature:
+    parameters: list[TypeId]
+    result: TypeId
+
+
+enum TyKind:
+    Primitive(id: PrimitiveId)
+    Nominal(definition: DefId, substitution: Substitution)
+    Parameter(parameter: GenericParamId)
+    Infer(variable: InferVarId)
+    Function(signature: Signature)
+    Tuple(elements: list[TypeId])
+    Union(members: list[TypeId])
+    Reference(target: TypeId, mutable: bool, lifetime: RegionId)
+    Resource(definition: DefId, substitution: Substitution)
+
+
+class TyInterner:
+    kinds: list[TyKind]
+    next_infer: u32
+
+    def TyInterner():
+        kinds = []
+        next_infer = 0
+
+    def intern(kind: TyKind) -> TypeId:
+        index: u32 = 0
+        for known in kinds:
+            if known == kind:
+                return TypeId(index)
+            index += 1
+        kinds.append(kind)
+        return TypeId(u32(len(kinds) - 1))
+
+    def kind(id: TypeId) -> TyKind | None:
+        if id.index >= len(kinds):
+            return None
+        return kinds[id.index]
+
+    def fresh_infer() -> TypeId:
+        variable = InferVarId(next_infer)
+        next_infer += 1
+        return intern(Infer(variable))
+
+    def parameter(parameter: GenericParamId) -> TypeId:
+        return intern(Parameter(parameter))
+
+    def union(members: list[TypeId]) -> TypeId:
+        canonical: list[TypeId] = []
+        for member in members:
+            known = kind(member)
+            match known:
+                case Union:
+                    for nested_member in members:
+                        if not canonical.contains(nested_member):
+                            canonical.append(nested_member)
+                else:
+                    if not canonical.contains(member):
+                        canonical.append(member)
+        if len(canonical) == 1:
+            return canonical[0]
+        return intern(Union(canonical))
+
+
+enum Constraint:
+    Equal(left: TypeId, right: TypeId)
+    Implements(reference: TraitRef)
+
+
+class TraitRef:
+    trait_id: DefId
+    self_type: TypeId
+    substitution: Substitution
+
+
+enum UnifyError:
+    Mismatch(left: TypeId, right: TypeId)
+    Occurs(variable: InferVarId, type_id: TypeId)
+    Unknown(type_id: TypeId)
+
+
+class InferenceContext:
+    bindings: map[InferVarId, TypeId]
+    constraints: list[Constraint]
+
+    def InferenceContext():
+        bindings = {}
+        constraints = []
+
+    def resolve(interner: TyInterner, type_id: TypeId) -> TypeId:
+        known = interner.kind(type_id)
+        match known:
+            case Infer:
+                bound = bindings.get(variable)
+                if bound == None:
+                    return type_id
+                return resolve(interner, bound)
+            else:
+                return type_id
+
+    def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+        constraints.append(Equal(left, right))
+        return unify(interner, left, right)
+
+    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+        left = resolve(interner, left)
+        right = resolve(interner, right)
+        if left == right:
+            return unit
+        left_kind = interner.kind(left)
+        right_kind = interner.kind(right)
+        match left_kind:
+            case Infer:
+                bindings[variable] = right
+                return unit
+        match right_kind:
+            case Infer:
+                bindings[variable] = left
+                return unit
+        return error(Mismatch(left, right))
+
+
+class ImplId:
+    index: u32
+
+
+class ImplDefinition:
+    id: ImplId
+    trait_id: DefId
+    self_type: TypeId
+    substitution: Substitution
+
+
+enum ImplSelection:
+    Selected(id: ImplId)
+    Missing
+    Ambiguous(candidates: list[ImplId])
+
+
+class ImplTable:
+    implementations: list[ImplDefinition]
+
+    def ImplTable():
+        implementations = []
+
+    def register(implementation: ImplDefinition):
+        implementations.append(implementation)
+
+    def select(trait_id: DefId, self_type: TypeId) -> ImplSelection:
+        matches: list[ImplId] = []
+        for implementation in implementations:
+            if implementation.trait_id == trait_id and implementation.self_type == self_type:
+                matches.append(implementation.id)
+        if len(matches) == 0:
+            return Missing
+        if len(matches) == 1:
+            return Selected(matches[0])
+        return Ambiguous(matches)
+

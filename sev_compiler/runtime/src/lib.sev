@@ -1,7 +1,8 @@
-# Bootstrap counterpart of compiler/runtime/src/lib.rs.
+def native_sources() -> list[string]:
+    root = file.join(file.module_directory(), "native")
+    return [
+        file.join(root, "coverage.c"),
+        file.join(root, "string.c"),
+        file.join(root, "io.c"),
+    ]
 
-def runtime_abi_version() -> int:
-    return 1
-
-test "runtime ABI is versioned":
-    assert(runtime_abi_version() == 1)

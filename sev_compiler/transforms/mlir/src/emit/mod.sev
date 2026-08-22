@@ -1,2 +1,164 @@
-# Bootstrap counterpart of compiler/transforms/mlir/src/emit/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import artifact
+import lir
+
+class MlirArtifact:
+    module: string
+    inputs: list[lir.LoweredType]
+    outputs: list[lir.LoweredType]
+
+
+enum MlirError:
+    DialectNotAllowed(dialect: string, target: string)
+    DuplicateSymbol(symbol: string)
+    ArtifactSignatureConflict(artifact_id: artifact.ArtifactId)
+    EntryFunctionCount(count: int)
+    EntryFunctionIsDeclaration
+    InvalidValue(value: lir.ValueId)
+    MlirApi(message: string)
+    ParseFailed(description: string)
+    SignatureMismatch
+    TargetMismatch(artifact_target: string, composition_target: string)
+    UnsupportedType(type_id: lir.LoweredType)
+    UnsupportedOperation(message: string)
+    VerificationFailed(description: string)
+
+
+def mlir_type(type_id: lir.LoweredType) -> string | MlirError:
+    match type_id:
+        case Integer: return "i" + string(bits)
+        case Float:
+            match format:
+                case Ieee: return "f" + string(bits)
+                case BrainFloat16: return "bf16"
+        case Boolean: return "i1"
+        case String: return "!llvm.ptr"
+        case Bytes: return "!llvm.ptr"
+        case NoneValue: return "i1"
+        case Unit: return "none"
+        case Arguments: return "!llvm.ptr"
+
+
+def value_type(module: lir.Module, value: lir.ValueId) -> lir.LoweredType | MlirError:
+    if value.index >= len(module.values):
+        return error(InvalidValue(value))
+    return module.values[value.index].type_id
+
+
+def function_symbol(function: lir.Function) -> string:
+    match function.linkage:
+        case External: return symbol
+    return "__sev_fn_" + string(function.id.value)
+
+
+def render_constant(value: lir.Constant, type_id: lir.LoweredType) -> string | MlirError:
+    match value:
+        case IntegerValue: return spelling
+        case FloatValue: return spelling
+        case BooleanValue: return "true" if value else "false"
+        case NoneValue: return "false"
+        case Unit: return ""
+        else: return error(UnsupportedOperation("aggregate constants require the LLVM global route"))
+
+
+def render_block(module: lir.Module, block: lir.Block, indentation: string) -> string | MlirError:
+    output = ""
+    for operation in block.operations:
+        match operation:
+            case Coverage:
+                output += indentation + "func.call @__sev_coverage_hit() : () -> ()\n"
+            case ConstantValue:
+                type_id = value_type(module, result)?
+                output += indentation + "%v" + string(result.index) + " = arith.constant " + render_constant(value, type_id)? + " : " + mlir_type(type_id)? + "\n"
+            case Unary:
+                type_id = value_type(module, result)?
+                if operator == lir.Positive:
+                    output += indentation + "%v" + string(result.index) + " = arith.addi %v" + string(operand.index) + ", %v" + string(operand.index) + " : " + mlir_type(type_id)? + "\n"
+                elif operator == lir.Negative:
+                    output += indentation + "%v" + string(result.index) + " = arith.negi %v" + string(operand.index) + " : " + mlir_type(type_id)? + "\n"
+                else:
+                    output += indentation + "%v" + string(result.index) + " = arith.xori %v" + string(operand.index) + ", true : i1\n"
+            case Binary:
+                type_id = value_type(module, result)?
+                mnemonic = binary_mnemonic(operator, type_id)
+                output += indentation + "%v" + string(result.index) + " = " + mnemonic + " %v" + string(left.index) + ", %v" + string(right.index) + " : " + mlir_type(value_type(module, left)?)? + "\n"
+            case Call:
+                arguments_text: list[string] = []
+                argument_types: list[string] = []
+                for argument in arguments:
+                    arguments_text.append("%v" + string(argument.index))
+                    argument_types.append(mlir_type(value_type(module, argument)?)?)
+                result_type = mlir_type(value_type(module, result)?)?
+                output += indentation + "%v" + string(result.index) + " = func.call @__sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ") : (" + argument_types.join(", ") + ") -> " + result_type + "\n"
+            case RuntimeCall:
+                arguments_text: list[string] = []
+                argument_types: list[string] = []
+                for argument in arguments:
+                    arguments_text.append("%v" + string(argument.index))
+                    argument_types.append(mlir_type(value_type(module, argument)?)?)
+                prefix = ""
+                result_text = ""
+                if result != None:
+                    prefix = "%v" + string(result.index) + " = "
+                    result_text = mlir_type(value_type(module, result)?)?
+                output += indentation + prefix + "func.call @" + symbol + "(" + arguments_text.join(", ") + ") : (" + argument_types.join(", ") + ") -> " + result_text + "\n"
+            case Return:
+                if value == None:
+                    output += indentation + "return\n"
+                else:
+                    output += indentation + "return %v" + string(value.index) + " : " + mlir_type(value_type(module, value)?)? + "\n"
+            case Assert:
+                output += indentation + "cf.assert %v" + string(condition.index) + ", \"assertion failed\"\n"
+            case If:
+                output += indentation + "scf.if %v" + string(condition.index) + " {\n"
+                output += render_block(module, then_block, indentation + "  ")?
+                output += indentation + "} else {\n"
+                output += render_block(module, else_block, indentation + "  ")?
+                output += indentation + "}\n"
+            case ArtifactCall:
+                output += indentation + "func.call @__sev_artifact_" + string(artifact_id.index) + "() : () -> ()\n"
+    return output
+
+
+def binary_mnemonic(operator: lir.BinaryOperation, type_id: lir.LoweredType) -> string:
+    floating = false
+    match type_id:
+        case Float: floating = true
+    if operator == lir.Add: return "arith.addf" if floating else "arith.addi"
+    if operator == lir.Subtract: return "arith.subf" if floating else "arith.subi"
+    if operator == lir.Multiply: return "arith.mulf" if floating else "arith.muli"
+    if operator == lir.Divide: return "arith.divf" if floating else "arith.divsi"
+    if operator == lir.Remainder: return "arith.remsi"
+    if operator == lir.And: return "arith.andi"
+    if operator == lir.Or: return "arith.ori"
+    return "arith.cmpi"
+
+
+def render_function(module: lir.Module, function: lir.Function) -> string | MlirError:
+    parameters: list[string] = []
+    for parameter in function.parameters:
+        parameters.append("%v" + string(parameter.index) + ": " + mlir_type(value_type(module, parameter)?)?)
+    result = ""
+    if function.result != lir.Unit:
+        result = " -> " + mlir_type(function.result)?
+    symbol = function_symbol(function)
+    if function.body == None:
+        return "  func.func private @" + symbol + "(" + parameters.join(", ") + ")" + result + "\n"
+    output = "  func.func private @" + symbol + "(" + parameters.join(", ") + ")" + result + " {\n"
+    output += render_block(module, function.body, "    ")?
+    output += "  }\n"
+    return output
+
+
+def render(module: lir.Module) -> string | MlirError:
+    output = "module {\n"
+    for function in module.functions:
+        output += render_function(module, function)?
+    output += "  func.func @main() -> i32 {\n"
+    output += render_block(module, module.initializer, "    ")?
+    if module.entry != None:
+        output += "    func.call @__sev_fn_" + string(module.entry.value) + "() : () -> ()\n"
+    output += "    %sev_exit = arith.constant 0 : i32\n"
+    output += "    return %sev_exit : i32\n"
+    output += "  }\n}\n"
+    return output
+

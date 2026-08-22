@@ -1,2 +1,78 @@
-# Bootstrap counterpart of compiler/frontend/ownership/src/validate/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import diagnostics
+import hir
+
+def validate_expression(expression: hir.Expression, declared: set[hir.BindingId]) -> unit | diagnostics.Diagnostic:
+    match expression.kind:
+        case Literal:
+            return unit
+        case Function:
+            return unit
+        case Binding:
+            if binding in declared:
+                return unit
+            return error(diagnostics.Diagnostic("E000301", "value used before it is available", expression.span))
+        case Call:
+            for argument in arguments:
+                validate_expression(argument, declared)?
+        case Convert:
+            validate_expression(operand, declared)?
+        case Unary:
+            validate_expression(operand, declared)?
+        case Binary:
+            validate_expression(left, declared)?
+            validate_expression(right, declared)?
+    return unit
+
+
+def validate_statement(statement: hir.Statement, bindings: map[hir.BindingId, hir.Binding], declared: set[hir.BindingId]) -> unit | diagnostics.Diagnostic:
+    match statement:
+        case BindingStatement:
+            binding = bindings[binding]
+            validate_expression(binding.value, declared)?
+            declared.add(binding.id)
+        case ExpressionStatement:
+            validate_expression(expression, declared)?
+        case Return:
+            if value != None:
+                validate_expression(value, declared)?
+        case Assert:
+            validate_expression(condition, declared)?
+            if message != None:
+                validate_expression(message, declared)?
+        case If:
+            validate_expression(condition, declared)?
+            then_declared = declared.copy()
+            for nested in then_block.statements:
+                validate_statement(nested, bindings, then_declared)?
+            else_declared = declared.copy()
+            for nested in else_block.statements:
+                validate_statement(nested, bindings, else_declared)?
+        case Match:
+            validate_expression(subject, declared)?
+            for arm in arms:
+                arm_declared = declared.copy()
+                if arm.binding != None:
+                    arm_declared.add(arm.binding)
+                for nested in arm.body.statements:
+                    validate_statement(nested, bindings, arm_declared)?
+    return unit
+
+
+def validate_module(module: hir.Module) -> unit | diagnostics.Diagnostic:
+    bindings: map[hir.BindingId, hir.Binding] = {}
+    for binding in module.bindings:
+        bindings[binding.id] = binding
+    declared: set[hir.BindingId] = set()
+    for statement in module.initializer.statements:
+        validate_statement(statement, bindings, declared)?
+    globals = declared.copy()
+    for function in module.functions:
+        if function.body == None:
+            continue
+        declared = globals.copy()
+        for parameter in function.parameters:
+            declared.add(parameter.binding)
+        for statement in function.body.statements:
+            validate_statement(statement, bindings, declared)?
+    return unit
+

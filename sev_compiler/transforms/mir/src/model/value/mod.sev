@@ -1,2 +1,10 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/model/value/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import universal
+
+class ValueId:
+    index: u32
+
+
+class Value:
+    id: ValueId
+    type_id: universal.TypeId
+

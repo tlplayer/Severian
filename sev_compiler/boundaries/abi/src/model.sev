@@ -1,2 +1,109 @@
-# Bootstrap counterpart of compiler/boundaries/abi/src/model.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+enum CallingConvention:
+    C
+    System
+    SysV64
+    Win64
+    Aapcs64
+    Rust
+
+
+enum AbiFloatFormat:
+    Ieee(bits: u16)
+    BrainFloat16
+
+
+enum ScalarType:
+    Integer(bits: u16, signed: bool)
+    Float(format: AbiFloatFormat)
+    Boolean
+
+
+class Field:
+    name: string
+    type_id: AbiType
+
+
+enum RecordRepresentation:
+    C
+    Packed(alignment: u32)
+    Transparent
+
+
+class RecordType:
+    name: string | None
+    fields: list[Field]
+    representation: RecordRepresentation
+
+
+class EnumType:
+    name: string | None
+    underlying: ScalarType
+
+
+class FunctionType:
+    convention: CallingConvention
+    parameters: list[AbiType]
+    result: AbiType
+    variadic: bool
+
+
+enum AbiType:
+    Void
+    Scalar(type_id: ScalarType)
+    Pointer(pointee: AbiType, mutable: bool)
+    Array(element: AbiType, length: u64)
+    Record(record: RecordType)
+    Union(record: RecordType)
+    Enum(enumeration: EnumType)
+    Function(function: FunctionType)
+    Opaque(name: string)
+
+
+class SymbolName:
+    value: string
+
+
+enum Linkage:
+    Internal
+    External
+    Weak
+    LinkOnce
+
+
+enum Visibility:
+    Default
+    Hidden
+    Protected
+
+
+enum DllStorage:
+    Default
+    Import
+    Export
+
+
+enum SymbolKind:
+    Function
+    Data
+    ThreadLocal
+
+
+class Symbol:
+    name: SymbolName
+    linkage: Linkage
+    visibility: Visibility
+    dll_storage: DllStorage
+    kind: SymbolKind
+
+
+def integer(bits: u16, signed: bool) -> AbiType:
+    return Scalar(Integer(bits, signed))
+
+
+def float_type(bits: u16) -> AbiType:
+    return Scalar(Float(Ieee(bits)))
+
+
+def pointer_to(type_id: AbiType, mutable: bool) -> AbiType:
+    return Pointer(type_id, mutable)
+

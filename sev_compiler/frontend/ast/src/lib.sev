@@ -1,3 +1,21 @@
-# Bootstrap counterpart of compiler/frontend/ast/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
-import source
+import "expression/mod.sev"
+import "statement/mod.sev"
+import "types/mod.sev"
+
+class Module:
+    items: list[Item]
+
+
+enum Item:
+    Import(declaration: ImportDeclaration)
+    Trait(declaration: TraitDeclaration)
+    BindingItem(binding: Binding)
+    ExpressionItem(expression: Expression)
+    Function(declaration: FunctionDeclaration)
+    Type(declaration: TypeDeclaration)
+    Test(declaration: TestDeclaration)
+
+
+def empty_module() -> Module:
+    return Module([])
+

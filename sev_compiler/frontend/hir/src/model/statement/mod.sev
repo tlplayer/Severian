@@ -1,2 +1,33 @@
-# Bootstrap counterpart of compiler/frontend/hir/src/model/statement/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import source
+import universal
+import "../expression/mod.sev"
+
+class Binding:
+    id: BindingId
+    type_id: universal.TypeId
+    value: Expression
+    span: source.Span
+
+
+class Block:
+    statements: list[Statement]
+
+
+class MatchArm:
+    binding: BindingId | None
+    type_id: universal.TypeId | None
+    body: Block
+
+
+enum Statement:
+    BindingStatement(binding: BindingId)
+    ExpressionStatement(expression: Expression)
+    Return(value: Expression | None)
+    Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
+    If(condition: Expression, then_block: Block, else_block: Block)
+    Match(subject: Expression, arms: list[MatchArm])
+
+
+def empty_block() -> Block:
+    return Block([])
+

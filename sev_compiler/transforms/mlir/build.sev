@@ -1,2 +1,11 @@
-# Bootstrap counterpart of compiler/transforms/mlir/build.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+class MlirBuildConfiguration:
+    llvm_config: string
+    include_directory: string
+    library_directory: string
+
+
+def configuration(llvm_config: string) -> MlirBuildConfiguration:
+    include_directory = process.output([llvm_config, "--includedir"]).trim()
+    library_directory = process.output([llvm_config, "--libdir"]).trim()
+    return MlirBuildConfiguration(llvm_config, include_directory, library_directory)
+

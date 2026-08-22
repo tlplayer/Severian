@@ -1,2 +1,78 @@
-# Bootstrap counterpart of compiler/boundaries/driver/src/config.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+class BinaryTarget:
+    name: string
+    path: string
+
+
+class LibraryTarget:
+    name: string
+    path: string
+    crate_types: list[string]
+
+
+enum DeclaredTarget:
+    Binary(target: BinaryTarget)
+    Library(target: LibraryTarget)
+
+
+class Manifest:
+    path: string
+    root: string
+    name: string
+    binaries: list[BinaryTarget]
+    libraries: list[LibraryTarget]
+    dependencies: map[string, string]
+    values: map[string, string]
+
+    def target(name: string) -> DeclaredTarget | None:
+        for binary in binaries:
+            if binary.name == name: return Binary(binary)
+        for library in libraries:
+            if library.name == name: return Library(library)
+        return None
+
+
+class OptionSpec:
+    path: string
+    kind: string
+    default: string
+    values: list[string]
+    help: string
+
+
+class Catalog:
+    options: list[OptionSpec]
+
+    def validate(path: string, value: string) -> unit | string:
+        for option in options:
+            if option.path == path:
+                if len(option.values) > 0 and value not in option.values:
+                    return error("invalid value for " + path)
+                return unit
+        return error("unknown configuration option " + path)
+
+
+def default_catalog() -> Catalog:
+    return Catalog([
+        OptionSpec("build.profile", "choice", "debug", ["debug", "release"], "build profile"),
+        OptionSpec("build.backend", "choice", "c", ["c", "mlir"], "code generation backend"),
+        OptionSpec("build.target", "string", "host", [], "target triple"),
+    ])
+
+
+def load_manifest(path: string) -> Manifest | string:
+    document = toml.parse(file.read_string(path)?)
+    root = file.parent(path)
+    name = document["package"]["name"]
+    binaries: list[BinaryTarget] = []
+    libraries: list[LibraryTarget] = []
+    for target in document.get("bin", []):
+        binaries.append(BinaryTarget(target["name"], file.join(root, target["path"])))
+    library = document.get("lib")
+    if library != None:
+        libraries.append(LibraryTarget(name, file.join(root, library["path"]), library.get("crate-type", [])))
+    dependencies: map[string, string] = {}
+    for dependency_name, declaration in document.get("dependencies", {}):
+        dependency_path = declaration["path"] if declaration is map else declaration
+        dependencies[dependency_name] = file.join(root, dependency_path)
+    return Manifest(path, root, name, binaries, libraries, dependencies, {})
+

@@ -1,2 +1,66 @@
-# Bootstrap counterpart of compiler/boundaries/abi/src/classify.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import "layout.sev"
+import "model.sev"
+import "target.sev"
+
+enum RegisterClass:
+    Integer
+    Float
+    Vector
+
+
+enum PassMode:
+    Ignore
+    Direct(classes: list[RegisterClass])
+    Indirect(alignment: u32, by_value: bool)
+
+
+class ClassifiedValue:
+    type_id: AbiType
+    mode: PassMode
+
+
+class AbiSignature:
+    convention: CallingConvention
+    parameters: list[AbiType]
+    result: AbiType
+    variadic: bool
+
+
+class ClassifiedSignature:
+    convention: CallingConvention
+    arguments: list[ClassifiedValue]
+    result: ClassifiedValue
+    variadic: bool
+
+
+def classify(type_id: AbiType, convention: CallingConvention, target: AbiTarget, result: bool) -> ClassifiedValue | LayoutError:
+    layout = layout_of(type_id, target.data_layout)?
+    if layout.size == 0:
+        return ClassifiedValue(type_id, Ignore)
+    match type_id:
+        case Scalar:
+            match type_id:
+                case Float: return ClassifiedValue(type_id, Direct([RegisterClass.Float]))
+            return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
+        case Pointer: return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
+        case Function: return ClassifiedValue(type_id, Direct([RegisterClass.Integer]))
+    limit: u64 = 16
+    if convention == Win64 or convention == C or convention == System:
+        limit = 8
+    if layout.size > limit:
+        return ClassifiedValue(type_id, Indirect(layout.alignment, not result))
+    chunks = int((layout.size + 7) / 8)
+    classes: list[RegisterClass] = []
+    for index in range(max(1, chunks)):
+        classes.append(RegisterClass.Integer)
+    return ClassifiedValue(type_id, Direct(classes))
+
+
+def classify_signature(signature: AbiSignature, target: AbiTarget) -> ClassifiedSignature | LayoutError:
+    convention = target.resolve_convention(signature.convention)
+    arguments: list[ClassifiedValue] = []
+    for parameter in signature.parameters:
+        arguments.append(classify(parameter, convention, target, false)?)
+    result = classify(signature.result, convention, target, true)?
+    return ClassifiedSignature(convention, arguments, result, signature.variadic)
+

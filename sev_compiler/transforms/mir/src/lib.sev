@@ -1,5 +1,84 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import artifact
 import hir
 import universal
+import "cfg.sev"
+import "model/operation/mod.sev"
+import "model/value/mod.sev"
+import "ownership.sev"
+import "passes.sev"
+import "verify.sev"
+import "build/mod.sev"
+
+class AssertionLocation:
+    file: string
+    line: u32
+    column: u32
+    expression: string
+
+
+class AssertionOrigin:
+    statement_start: u32
+    condition_start: u32
+    condition_end: u32
+    location: AssertionLocation | None
+
+
+enum CoverageKind:
+    Line
+    Branch
+
+
+class CoveragePoint:
+    span_start: u32
+    kind: CoverageKind
+    ordinal: u32
+    key: string | None
+    file: string | None
+    line: u32 | None
+
+
+class MatchArm:
+    type_id: universal.TypeId | None
+    body: Block
+
+
+class Block:
+    operations: list[Operation]
+
+
+class Function:
+    id: hir.FunctionId
+    definition: universal.DefId
+    name: string
+    parameters: list[ValueId]
+    result: universal.TypeId
+    body: Block | None
+    cfg: CfgBody | None
+    call_type: hir.CallType
+
+
+class TestDeclaration:
+    name: string
+    modes: list[hir.TestMode]
+    function: hir.FunctionId
+    expectations: list[hir.TestExpectation]
+
+
+class Module:
+    values: list[Value]
+    bindings: list[tuple[hir.BindingId, ValueId]]
+    globals: list[ValueId]
+    initializer: Block
+    initializer_cfg: CfgBody
+    functions: list[Function]
+    entry: hir.FunctionId | None
+    tests: list[TestDeclaration]
+
+
+def empty_block() -> Block:
+    return Block([])
+
+
+def empty_module() -> Module:
+    return Module([], [], [], empty_block(), empty_cfg(universal.TypeId(0)), [], None, [])
+

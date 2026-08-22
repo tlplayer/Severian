@@ -1,63 +1,279 @@
-def primitive_category(contract: string) -> string:
-    if contract == "boolean":
-        return "boolean"
-    if contract == "character":
-        return "character"
-    if contract == "integer":
-        return "integer"
-    if contract == "float":
-        return "float"
-    if contract == "text":
-        return "text"
-    if contract == "bytes":
-        return "bytes"
-    if contract == "absence":
-        return "absence"
-    if contract == "unit":
-        return "unit"
-    if contract == "arguments":
-        return "arguments"
-    return ""
+import "../ids.sev"
+import "../literal.sev"
+import "../operator.sev"
+import "../type_system.sev"
+
+enum PrimitiveCategory:
+    Boolean
+    Character
+    Integer
+    Float
+    Text
+    Bytes
+    Absence
+    Unit
+    Arguments
 
 
-def primitive_representation(contract: string) -> string:
-    if contract == "fixed-integer":
-        return "fixed-integer"
-    if contract == "machine-signed":
-        return "machine-signed"
-    if contract == "pointer-integer":
-        return "pointer-integer"
-    if contract == "machine-float":
-        return "machine-float"
-    if contract == "ieee-float":
-        return "ieee-float"
-    if contract == "brain-float":
-        return "brain-float"
-    if contract == "i1":
-        return "i1"
-    if contract == "unicode-scalar":
-        return "unicode-scalar"
-    if contract == "string":
-        return "string"
-    if contract == "byte-string":
-        return "byte-string"
-    if contract == "none":
-        return "none"
-    if contract == "unit":
-        return "unit"
-    if contract == "arguments":
-        return "arguments"
-    return ""
+enum IntegerWidth:
+    Fixed(bits: u16)
+    Machine
 
 
-# Definitions, maps, generic applications, defaults, constraints, and compile
-# routes remain paired behind this boundary until value classes, maps, and
-# payload enums are supported by the source-language frontend.
-trait TypeContextBridge:
-    pass
+enum FloatFormat:
+    Ieee(bits: u16)
+    BrainFloat16
+    Machine
 
 
-test "primitive contracts retain canonical categories and representations":
-    assert(primitive_category("integer") == "integer")
-    assert(primitive_category("unknown") == "")
-    assert(primitive_representation("brain-float") == "brain-float")
+enum PrimitiveRepresentation:
+    Integer(bits: IntegerWidth, signed: bool)
+    Float(format: FloatFormat)
+    PointerInteger(signed: bool)
+    Boolean
+    Character
+    String
+    Bytes
+    NoneValue
+    Unit
+    Arguments
+
+
+class PrimitiveDefinition:
+    id: PrimitiveId
+    type_id: TypeId
+    category: PrimitiveCategory
+    representation: PrimitiveRepresentation
+    default_literal: bool
+
+
+enum TypeDefinitionKind:
+    Primitive(definition: PrimitiveDefinition)
+    Trait
+    Applied(constructor: TypeId, arguments: list[TypeId])
+
+
+class TypeDefinition:
+    id: TypeId
+    declaration: DeclarationId
+    path: string
+    name: string
+    parameter_count: int
+    kind: TypeDefinitionKind
+
+
+class ResolvedBinary:
+    left: TypeId
+    right: TypeId
+    result: TypeId
+    signature: OperatorSignature
+
+
+class ResolvedUnary:
+    operand: TypeId
+    result: TypeId
+
+
+enum TypeError:
+    UnknownCategory(value: string)
+    UnknownRepresentation(value: string)
+    MissingBitWidth
+    DuplicateName(name: string)
+    UnknownTypeId(type_id: TypeId)
+    AlreadyDefined(path: string)
+    DuplicateDefault(kind: LiteralKind)
+    InvalidDefaultLiteralCategory
+    WrongArgumentCount(expected: int, actual: int)
+    OperatorNotFound
+
+
+def primitive_category(value: string) -> PrimitiveCategory | TypeError:
+    if value == "boolean": return Boolean
+    if value == "character": return Character
+    if value == "integer": return Integer
+    if value == "float": return Float
+    if value == "text": return Text
+    if value == "bytes": return Bytes
+    if value == "absence": return Absence
+    if value == "unit": return Unit
+    if value == "arguments": return Arguments
+    return error(UnknownCategory(value))
+
+
+def primitive_representation(value: string, bits: u16 | None, signed: bool) -> PrimitiveRepresentation | TypeError:
+    if value == "fixed-integer":
+        if bits == None: return error(MissingBitWidth)
+        return Integer(Fixed(bits), signed)
+    if value == "machine-signed": return Integer(Machine, true)
+    if value == "pointer-integer": return PointerInteger(signed)
+    if value == "machine-float": return Float(FloatFormat.Machine)
+    if value == "ieee-float":
+        if bits == None: return error(MissingBitWidth)
+        return Float(Ieee(bits))
+    if value == "brain-float" and bits == 16: return Float(BrainFloat16)
+    if value == "i1": return PrimitiveRepresentation.Boolean
+    if value == "unicode-scalar": return PrimitiveRepresentation.Character
+    if value == "string": return PrimitiveRepresentation.String
+    if value == "byte-string": return PrimitiveRepresentation.Bytes
+    if value == "none": return NoneValue
+    if value == "unit": return PrimitiveRepresentation.Unit
+    if value == "arguments": return PrimitiveRepresentation.Arguments
+    return error(UnknownRepresentation(value))
+
+
+class TypeContext:
+    interner: TyInterner
+    definitions: list[TypeDefinition]
+    by_name: map[string, TypeId]
+    defaults: map[LiteralKind, TypeId]
+    binary: list[OperatorSignature]
+    unary: list[tuple[UnaryOperator, TypeId, TypeId]]
+    applications: map[string, TypeId]
+    compile_routes: map[TypeId, CompilerId]
+
+    def TypeContext():
+        interner = TyInterner()
+        definitions = []
+        by_name = {}
+        defaults = {}
+        binary = []
+        unary = []
+        applications = {}
+        compile_routes = {}
+
+    def register_declaration(path: string, name: string, parameter_count: int = 0) -> TypeId | TypeError:
+        if by_name.contains(name):
+            return error(DuplicateName(name))
+        id = interner.intern(Nominal(DefId(0, 0, DeclarationId(u128(len(definitions) + 1))), Substitution({})))
+        definition = TypeDefinition(id, DeclarationId(u128(len(definitions) + 1)), path, name, parameter_count, Trait)
+        definitions.append(definition)
+        by_name[name] = id
+        return id
+
+    def define_primitive(type_id: TypeId, category: PrimitiveCategory, representation: PrimitiveRepresentation, default_literal: bool) -> PrimitiveId | TypeError:
+        definition = definition(type_id)
+        if definition == None:
+            return error(UnknownTypeId(type_id))
+        primitive_id = PrimitiveId(definition.declaration)
+        primitive = PrimitiveDefinition(primitive_id, type_id, category, representation, default_literal)
+        definitions[type_id.index].kind = Primitive(primitive)
+        if default_literal:
+            kind: LiteralKind | None = None
+            if category == Boolean: kind = LiteralKind.Boolean
+            elif category == Character: kind = LiteralKind.Character
+            elif category == Integer: kind = LiteralKind.Integer
+            elif category == Float: kind = LiteralKind.Float
+            elif category == Text: kind = LiteralKind.String
+            elif category == Bytes: kind = LiteralKind.Bytes
+            elif category == Absence: kind = LiteralKind.NoneValue
+            elif category == Unit: kind = LiteralKind.Unit
+            if kind != None:
+                defaults[kind] = type_id
+        return primitive_id
+
+    def resolve_name(name: string) -> TypeId | None:
+        return by_name.get(name)
+
+    def definition(id: TypeId) -> TypeDefinition | None:
+        if id.index >= len(definitions):
+            return None
+        return definitions[id.index]
+
+    def kind(id: TypeId) -> TyKind | None:
+        return interner.kind(id)
+
+    def fresh_infer() -> TypeId:
+        return interner.fresh_infer()
+
+    def intern(kind: TyKind) -> TypeId:
+        return interner.intern(kind)
+
+    def parameter(id: GenericParamId) -> TypeId:
+        return interner.parameter(id)
+
+    def union(members: list[TypeId]) -> TypeId:
+        return interner.union(members)
+
+    def instantiate(constructor: TypeId, arguments: list[TypeId]) -> TypeId | TypeError:
+        definition = definition(constructor)
+        if definition == None:
+            return error(UnknownTypeId(constructor))
+        if definition.parameter_count != len(arguments):
+            return error(WrongArgumentCount(definition.parameter_count, len(arguments)))
+        key = string(constructor.index) + ":" + string(arguments)
+        known = applications.get(key)
+        if known != None:
+            return known
+        parameters: map[GenericParamId, TypeId] = {}
+        index: u32 = 0
+        for argument in arguments:
+            parameters[GenericParamId(index)] = argument
+            index += 1
+        id = interner.intern(Nominal(DefId(0, 0, definition.declaration), Substitution(parameters)))
+        applications[key] = id
+        return id
+
+    def set_compile_route(type_id: TypeId, compiler: CompilerId):
+        compile_routes[type_id] = compiler
+
+    def compile_route(type_id: TypeId) -> CompileRoute:
+        compiler = compile_routes.get(type_id)
+        if compiler == None:
+            return Standard
+        return Compiler(compiler)
+
+    def add_binary(signature: OperatorSignature):
+        if not binary.contains(signature):
+            binary.append(signature)
+
+    def add_unary(operator: UnaryOperator, operand: TypeId, result: TypeId):
+        candidate = (operator, operand, result)
+        if not unary.contains(candidate):
+            unary.append(candidate)
+
+    def type_for_literal(value: LiteralValue) -> TypeId | None:
+        return defaults.get(literal_kind(value))
+
+    def resolve_unary(operator: UnaryOperator, operand: TypeId) -> ResolvedUnary | TypeError:
+        for candidate in unary:
+            if candidate[0] == operator and candidate[1] == operand:
+                return ResolvedUnary(operand, candidate[2])
+        return error(OperatorNotFound)
+
+    def resolve_binary(operator: BinaryOperator, left: TypeId, right: TypeId) -> ResolvedBinary | TypeError:
+        for signature in binary:
+            if signature.operator == operator:
+                return ResolvedBinary(left, right, pattern_type(signature.result, left, right), signature)
+        return error(OperatorNotFound)
+
+
+def pattern_type(pattern: TypePattern, left: TypeId, right: TypeId) -> TypeId:
+    match pattern:
+        case Exact: return type_id
+        case SameAsLeft: return left
+        case SameAsRight: return right
+
+
+class TypeContextBuilder:
+    context: TypeContext
+
+    def TypeContextBuilder():
+        context = TypeContext()
+
+    def register_declaration(path: string, name: string) -> TypeId | TypeError:
+        return context.register_declaration(path, name)
+
+    def register_generic_declaration(path: string, name: string, parameter_count: int) -> TypeId | TypeError:
+        return context.register_declaration(path, name, parameter_count)
+
+    def define_primitive(type_id: TypeId, category: PrimitiveCategory, representation: PrimitiveRepresentation, default_literal: bool) -> PrimitiveId | TypeError:
+        return context.define_primitive(type_id, category, representation, default_literal)
+
+    def add_binary(signature: OperatorSignature):
+        context.add_binary(signature)
+
+    def add_unary(operator: UnaryOperator, operand: TypeId, result: TypeId):
+        context.add_unary(operator, operand, result)
+
+    def build() -> TypeContext:
+        return context

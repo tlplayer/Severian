@@ -1,4 +1,8 @@
-# Bootstrap counterpart of compiler/frontend/ownership/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
-import diagnostics
 import hir
+import "validate/mod.sev"
+
+def validate(program: hir.Program):
+    for module in program.modules:
+        validate_module(module)?
+    return unit
+

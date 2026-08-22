@@ -1,2 +1,104 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/cfg.rs.
-# MIR control flow is represented by basic blocks and typed terminators.
+import hir
+import universal
+
+class BlockId:
+    index: u32
+
+
+class LocalId:
+    index: u32
+
+
+class LocalDecl:
+    id: LocalId
+    type_id: universal.TypeId
+    mutable: bool
+    argument: bool
+
+
+enum Projection:
+    Field(index: u32)
+    Index(local: LocalId)
+    Dereference
+    Downcast(variant: u32)
+
+
+class Place:
+    local: LocalId
+    projection: list[Projection]
+
+
+def local_place(local: LocalId) -> Place:
+    return Place(local, [])
+
+
+enum Operand:
+    Copy(place: Place)
+    Move(place: Place)
+    Constant(value: universal.LiteralValue, type_id: universal.TypeId)
+    Function(definition: universal.DefId)
+
+
+enum Callee:
+    Direct(function: universal.DefId, substitution: universal.Substitution)
+    FunctionValue(operand: Operand)
+    Method(implementation: universal.DefId, receiver: Operand, substitution: universal.Substitution)
+    Constructor(type_definition: universal.DefId, variant: hir.VariantId | None)
+    Intrinsic(operation: universal.OpId)
+
+
+enum Rvalue:
+    Use(operand: Operand)
+    Unary(operator: universal.UnaryOperator, operand: Operand)
+    Binary(operator: universal.BinaryOperator, left: Operand, right: Operand)
+    BorrowShared(place: Place)
+    BorrowExclusive(place: Place)
+    Convert(operand: Operand, conversion: hir.Conversion)
+    Aggregate(type_id: universal.TypeId, fields: list[Operand])
+
+
+enum Statement:
+    Assign(place: Place, value: Rvalue)
+    Drop(place: Place)
+    StorageLive(local: LocalId)
+    StorageDead(local: LocalId)
+    Assert(condition: Operand, message: Operand | None)
+    Coverage(point: CoveragePoint)
+    Operation(id: universal.OpId, operands: list[Operand], results: list[Place], attributes: map[universal.AttributeId, universal.AttrValue])
+
+
+enum Case:
+    Integer(value: i128)
+    Boolean(value: bool)
+    Variant(index: u32)
+    Type(type_id: universal.TypeId)
+
+
+enum Terminator:
+    Goto(target: BlockId, arguments: list[Operand])
+    Branch(condition: Operand, then_block: BlockId, else_block: BlockId)
+    Switch(discriminant: Operand, targets: list[tuple[Case, BlockId]], fallback: BlockId)
+    Call(callee: Callee, arguments: list[Operand], destination: Place | None, target: BlockId, unwind: BlockId | None)
+    Return(value: Operand | None)
+    Throw(value: Operand)
+    Unreachable
+
+
+class BasicBlock:
+    id: BlockId
+    parameters: list[LocalId]
+    statements: list[Statement]
+    terminator: Terminator
+
+
+class CfgBody:
+    entry: BlockId
+    blocks: list[BasicBlock]
+    locals: list[LocalDecl]
+    return_type: universal.TypeId
+
+
+def empty_cfg(return_type: universal.TypeId) -> CfgBody:
+    entry = BlockId(0)
+    return CfgBody(entry, [BasicBlock(entry, [], [], Return(None))], [], return_type)
+

@@ -1,2 +1,17 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/model/operation/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import artifact
+import hir
+import universal
+import "../../cfg.sev"
+
+enum Operation:
+    Coverage(point: CoveragePoint)
+    Constant(value: universal.LiteralValue, result: ValueId)
+    Unary(operator: universal.UnaryOperator, operand: ValueId, result: ValueId)
+    Binary(operator: universal.BinaryOperator, left: ValueId, right: ValueId, result: ValueId)
+    Call(function: hir.FunctionId, arguments: list[ValueId], result: ValueId)
+    Return(value: ValueId | None)
+    Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
+    If(condition: ValueId, then_block: Block, else_block: Block)
+    Match(subject: ValueId, arms: list[MatchArm])
+    CompiledRegionCall(artifact_id: artifact.ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+

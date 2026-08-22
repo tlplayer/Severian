@@ -1,2 +1,40 @@
-# Bootstrap counterpart of compiler/frontend/hir/src/model/expression/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import source
+import universal
+
+class Expression:
+    id: HirId
+    type_id: universal.TypeId
+    kind: ExpressionKind
+    span: source.Span
+
+
+enum Callee:
+    Direct(function: universal.DefId, substitution: universal.Substitution)
+    FunctionValue(expression: HirId)
+    Method(implementation: universal.DefId, receiver: HirId, substitution: universal.Substitution)
+    Constructor(type_definition: universal.DefId, variant: VariantId | None)
+    Intrinsic(operation: universal.OpId)
+
+
+enum ConversionKind:
+    NumericWidening
+    UnionInjection
+    Borrow
+    User(function: universal.DefId)
+
+
+class Conversion:
+    from_type: universal.TypeId
+    to_type: universal.TypeId
+    kind: ConversionKind
+
+
+enum ExpressionKind:
+    Literal(value: universal.LiteralValue)
+    Binding(binding: BindingId)
+    Function(definition: universal.DefId)
+    Call(callee: Callee, arguments: list[Expression])
+    Convert(operand: Expression, conversion: Conversion)
+    Unary(operator: universal.UnaryOperator, operand: Expression)
+    Binary(operator: universal.BinaryOperator, left: Expression, right: Expression)
+

@@ -1,2 +1,51 @@
-# Bootstrap counterpart of compiler/frontend/ast/src/expression/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import source
+
+enum Literal:
+    Integer(spelling: string)
+    Float(spelling: string)
+    Boolean(value: bool)
+    Character(value: char)
+    String(value: string)
+    Bytes(value: list[u8])
+    NoneValue
+    Unit
+
+
+enum UnaryOperator:
+    Positive
+    Negative
+    Not
+    Move
+
+
+enum BinaryOperator:
+    Add
+    Subtract
+    Multiply
+    Divide
+    Remainder
+    Power
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    Contains
+    And
+    Or
+
+
+class Expression:
+    kind: ExpressionKind
+    span: source.Span
+
+
+enum ExpressionKind:
+    LiteralValue(value: Literal)
+    Name(name: string)
+    Member(object: Expression, name: string)
+    Call(callee: Expression, arguments: list[Expression])
+    Unary(operator: UnaryOperator, operand: Expression)
+    Binary(operator: BinaryOperator, left: Expression, right: Expression)
+

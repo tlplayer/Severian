@@ -1,2 +1,88 @@
-# Bootstrap counterpart of compiler/compile/src/model.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import artifact
+import mir
+import target
+import universal
+
+class EffectSet:
+    reads_memory: bool
+    writes_memory: bool
+    may_trap: bool
+
+
+class CompileRegion:
+    id: artifact.CompiledRegionId
+    compiler: universal.CompilerId
+    operations: list[mir.Operation]
+    inputs: list[mir.Value]
+    outputs: list[mir.Value]
+    effects: EffectSet
+
+
+class StandardRegion:
+    operations: list[mir.Operation]
+
+
+enum PlanSegment:
+    Standard(region: StandardRegion)
+    Compiler(region: CompileRegion)
+
+
+class PlannedBlock:
+    segments: list[PlanSegment]
+
+
+class PlannedFunction:
+    declaration: mir.Function
+    body: PlannedBlock | None
+
+
+class CompilePlan:
+    source: mir.Module
+    initializer: PlannedBlock
+    functions: list[PlannedFunction]
+    nested_regions: list[CompileRegion]
+
+    def has_custom_regions() -> bool:
+        if len(nested_regions) > 0:
+            return true
+        for segment in initializer.segments:
+            match segment:
+                case Compiler: return true
+        for function in functions:
+            if function.body != None:
+                for segment in function.body.segments:
+                    match segment:
+                        case Compiler: return true
+        return false
+
+    def resumed_mir() -> mir.Module:
+        module = source
+        module.initializer = resume_block(initializer)
+        module.functions = []
+        for function in functions:
+            declaration = function.declaration
+            if function.body != None:
+                declaration.body = resume_block(function.body)
+            module.functions.append(declaration)
+        return module
+
+
+class CompileContext:
+    types: universal.TypeContext
+    target_spec: target.TargetSpec
+
+
+def resume_block(block: PlannedBlock) -> mir.Block:
+    operations: list[mir.Operation] = []
+    for segment in block.segments:
+        match segment:
+            case Standard:
+                for operation in region.operations: operations.append(operation)
+            case Compiler:
+                inputs: list[mir.ValueId] = []
+                outputs: list[mir.ValueId] = []
+                for value in region.inputs: inputs.append(value.id)
+                for value in region.outputs: outputs.append(value.id)
+                operations.append(mir.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
+    return mir.Block(operations)
+

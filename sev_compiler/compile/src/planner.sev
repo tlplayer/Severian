@@ -1,2 +1,129 @@
-# Bootstrap counterpart of compiler/compile/src/planner.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import artifact
+import mir
+import universal
+import "error.sev"
+import "model.sev"
+
+def operation_inputs(operation: mir.Operation) -> list[mir.ValueId]:
+    match operation:
+        case Unary: return [operand]
+        case Binary: return [left, right]
+        case Call: return arguments
+        case Return: return [value] if value != None else []
+        case Assert:
+            return [condition, message] if message != None else [condition]
+        case If:
+            result: list[mir.ValueId] = [condition]
+            for nested in then_block.operations:
+                for value in operation_inputs(nested): result.append(value)
+            for nested in else_block.operations:
+                for value in operation_inputs(nested): result.append(value)
+            return result
+        case Match: return [subject]
+        case CompiledRegionCall: return inputs
+        else: return []
+
+
+def operation_outputs(operation: mir.Operation) -> list[mir.ValueId]:
+    match operation:
+        case Constant: return [result]
+        case Unary: return [result]
+        case Binary: return [result]
+        case Call: return [result]
+        case CompiledRegionCall: return outputs
+        else: return []
+
+
+def operation_route(operation: mir.Operation, values: map[mir.ValueId, mir.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
+    match operation:
+        case CompiledRegionCall: return error(PlannerGeneratedOperation(index))
+        case Coverage: return universal.Standard
+        case Return: return universal.Standard
+        case Assert: return universal.Standard
+        case If: return universal.Standard
+        case Match: return universal.Standard
+    compilers: set[universal.CompilerId] = set()
+    all_values = operation_inputs(operation) + operation_outputs(operation)
+    for value_id in all_values:
+        value = values.get(value_id)
+        if value == None:
+            return error(MissingValue(value_id.index))
+        route = types.compile_route(value.type_id)
+        match route:
+            case Compiler: compilers.add(compiler)
+    if len(compilers) == 0: return universal.Standard
+    if len(compilers) == 1: return universal.Compiler(compilers.values()[0])
+    return error(ConflictingCompilers(index, compilers.values()))
+
+
+def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, operations: list[mir.Operation], values: map[mir.ValueId, mir.Value]) -> CompileRegion | CompileError:
+    produced: set[mir.ValueId] = set()
+    for operation in operations:
+        for output in operation_outputs(operation): produced.add(output)
+    inputs: list[mir.Value] = []
+    for operation in operations:
+        for input in operation_inputs(operation):
+            if input not in produced and not inputs.contains(values[input]):
+                inputs.append(values[input])
+    outputs: list[mir.Value] = []
+    for output in produced: outputs.append(values[output])
+    effects = EffectSet(false, false, false)
+    for operation in operations:
+        match operation:
+            case Call:
+                effects.reads_memory = true
+                effects.writes_memory = true
+                effects.may_trap = true
+    return CompileRegion(id, compiler, operations, inputs, outputs, effects)
+
+
+def plan_block(block: mir.Block, values: map[mir.ValueId, mir.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
+    segments: list[PlanSegment] = []
+    current_standard: list[mir.Operation] = []
+    current_custom: list[mir.Operation] = []
+    current_compiler: universal.CompilerId | None = None
+
+    for index, operation in block.operations.enumerated():
+        route = operation_route(operation, values, types, index)?
+        match route:
+            case Standard:
+                if len(current_custom) > 0:
+                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+                    next_region += 1
+                    current_custom = []
+                    current_compiler = None
+                current_standard.append(operation)
+            case Compiler:
+                if len(current_standard) > 0:
+                    segments.append(Standard(StandardRegion(current_standard)))
+                    current_standard = []
+                if current_compiler != None and current_compiler != compiler:
+                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+                    next_region += 1
+                    current_custom = []
+                current_compiler = compiler
+                current_custom.append(operation)
+
+    if len(current_standard) > 0: segments.append(Standard(StandardRegion(current_standard)))
+    if len(current_custom) > 0:
+        segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)?))
+        next_region += 1
+    return (PlannedBlock(segments), next_region)
+
+
+def plan(module: mir.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
+    values: map[mir.ValueId, mir.Value] = {}
+    for value in module.values: values[value.id] = value
+    next_region: u32 = 0
+    initializer_result = plan_block(module.initializer, values, types, next_region)?
+    next_region = initializer_result[1]
+    functions: list[PlannedFunction] = []
+    for function in module.functions:
+        body: PlannedBlock | None = None
+        if function.body != None:
+            planned = plan_block(function.body, values, types, next_region)?
+            body = planned[0]
+            next_region = planned[1]
+        functions.append(PlannedFunction(function, body))
+    return CompilePlan(module, initializer_result[0], functions, [])
+

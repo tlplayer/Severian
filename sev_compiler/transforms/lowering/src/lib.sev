@@ -1,7 +1,140 @@
-# Bootstrap counterpart of compiler/transforms/lowering/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
-import artifact
 import lir
 import mir
 import target
 import universal
+
+enum LoweringError:
+    NotPrimitive(type_id: universal.TypeId)
+    UnknownValue(value: mir.ValueId)
+    NonExhaustiveMatch(type_id: universal.TypeId)
+    UnsupportedStringOperation(operator: universal.BinaryOperator)
+    OwnedStringEscapes(value: lir.ValueId)
+
+
+def lower_constant(value: universal.LiteralValue) -> lir.Constant:
+    match value:
+        case IntegerValue: return lir.IntegerValue(spelling)
+        case FloatValue: return lir.FloatValue(spelling)
+        case BooleanValue: return lir.BooleanValue(value)
+        case CharacterValue: return lir.IntegerValue(string(int(value)))
+        case StringValue: return lir.StringValue(value)
+        case BytesValue: return lir.BytesValue(value)
+        case NoneValue: return lir.NoneValue
+        case UnitValue: return lir.Unit
+
+
+def lower_unary(operator: universal.UnaryOperator) -> lir.UnaryOperation:
+    if operator == universal.Positive: return lir.Positive
+    if operator == universal.Negative: return lir.Negative
+    return lir.Not
+
+
+def lower_binary(operator: universal.BinaryOperator) -> lir.BinaryOperation:
+    if operator == universal.Add: return lir.Add
+    if operator == universal.Subtract: return lir.Subtract
+    if operator == universal.Multiply: return lir.Multiply
+    if operator == universal.Divide: return lir.Divide
+    if operator == universal.Remainder: return lir.Remainder
+    if operator == universal.Power: return lir.Power
+    if operator == universal.Equal: return lir.Equal
+    if operator == universal.NotEqual: return lir.NotEqual
+    if operator == universal.Less: return lir.Less
+    if operator == universal.LessEqual: return lir.LessEqual
+    if operator == universal.Greater: return lir.Greater
+    if operator == universal.GreaterEqual: return lir.GreaterEqual
+    if operator == universal.Contains: return lir.Contains
+    if operator == universal.And: return lir.And
+    return lir.Or
+
+
+def lower_type(id: universal.TypeId, types: universal.TypeContext, target_spec: target.TargetSpec) -> lir.LoweredType | LoweringError:
+    definition = types.definition(id)
+    if definition == None:
+        return error(NotPrimitive(id))
+    match definition.kind:
+        case Primitive:
+            match definition.representation:
+                case Integer:
+                    match bits:
+                        case Fixed: return lir.Integer(bits, signed)
+                        case Machine: return lir.Integer(target_spec.machine_integer_bits(), signed)
+                case PointerInteger: return lir.Integer(target_spec.pointer_bits(), signed)
+                case Float:
+                    match format:
+                        case Ieee: return lir.Float(lir.Ieee(bits))
+                        case BrainFloat16: return lir.Float(lir.BrainFloat16)
+                        case Machine: return lir.Float(lir.Ieee(target_spec.machine_float_bits()))
+                case Boolean: return lir.Boolean
+                case Character: return lir.Integer(32, false)
+                case String: return lir.String
+                case Bytes: return lir.Bytes
+                case NoneValue: return lir.NoneValue
+                case Unit: return lir.Unit
+                case Arguments: return lir.Arguments
+    return error(NotPrimitive(id))
+
+
+def lower_block(block: mir.Block, module: mir.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> lir.Block | LoweringError:
+    operations: list[lir.Operation] = []
+    for operation in block.operations:
+        match operation:
+            case Coverage:
+                operations.append(lir.Coverage(point.key if point.key != None else string(point.span_start)))
+            case Constant:
+                operations.append(lir.ConstantValue(lower_constant(value), lir.ValueId(result.index)))
+            case Unary:
+                operations.append(lir.Unary(lower_unary(operator), lir.ValueId(operand.index), lir.ValueId(result.index)))
+            case Binary:
+                operations.append(lir.Binary(lower_binary(operator), lir.ValueId(left.index), lir.ValueId(right.index), lir.ValueId(result.index)))
+            case Call:
+                arguments_lir: list[lir.ValueId] = []
+                for argument in arguments: arguments_lir.append(lir.ValueId(argument.index))
+                operations.append(lir.Call(lir.FunctionId(function.value), arguments_lir, lir.ValueId(result.index)))
+            case Return:
+                operations.append(lir.Return(lir.ValueId(value.index) if value != None else None))
+            case Assert:
+                location: lir.AssertionLocation | None = None
+                if origin.location != None:
+                    location = lir.AssertionLocation(origin.location.file, origin.location.line, origin.location.column, origin.location.expression)
+                operations.append(lir.Assert(lir.ValueId(condition.index), lir.ValueId(message.index) if message != None else None, location))
+            case If:
+                operations.append(lir.If(lir.ValueId(condition.index), lower_block(then_block, module, types, target_spec)?, lower_block(else_block, module, types, target_spec)?))
+            case Match:
+                selected: mir.MatchArm | None = None
+                subject_type = module.values[subject.index].type_id
+                for arm in arms:
+                    if arm.type_id == subject_type or arm.type_id == None:
+                        selected = arm
+                        break
+                if selected == None:
+                    return error(NonExhaustiveMatch(subject_type))
+                nested = lower_block(selected.body, module, types, target_spec)?
+                for nested_operation in nested.operations: operations.append(nested_operation)
+            case CompiledRegionCall:
+                inputs_lir: list[lir.ValueId] = []
+                outputs_lir: list[lir.ValueId] = []
+                for input in inputs: inputs_lir.append(lir.ValueId(input.index))
+                for output in outputs: outputs_lir.append(lir.ValueId(output.index))
+                operations.append(lir.ArtifactCall(artifact_id, inputs_lir, outputs_lir))
+    return lir.Block(operations)
+
+
+def lower(module: mir.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> lir.Module | LoweringError:
+    result = lir.empty_module()
+    for value in module.values:
+        result.values.append(lir.Value(lir.ValueId(value.id.index), lower_type(value.type_id, types, target_spec)?))
+    result.initializer = lower_block(module.initializer, module, types, target_spec)?
+    for global_value in module.globals:
+        result.globals.append(lir.ValueId(global_value.index))
+    for function in module.functions:
+        parameters: list[lir.ValueId] = []
+        for parameter in function.parameters: parameters.append(lir.ValueId(parameter.index))
+        body: lir.Block | None = None
+        if function.body != None: body = lower_block(function.body, module, types, target_spec)?
+        linkage = lir.Internal
+        match function.call_type:
+            case External: linkage = lir.External(call.symbol.value)
+        result.functions.append(lir.Function(lir.FunctionId(function.id.value), function.name, parameters, lower_type(function.result, types, target_spec)?, body, linkage))
+    if module.entry != None: result.entry = lir.FunctionId(module.entry.value)
+    return result
+

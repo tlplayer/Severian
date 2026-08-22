@@ -1,12 +1,2 @@
-# Bootstrap counterpart of compiler/frontend/lexer/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
-import diagnostics
-import source
 import "scanner/mod.sev"
 import "token/mod.sev"
-
-def lexer_ready() -> bool:
-    return true
-
-test "mirrored lexer modules are linked":
-    assert(lexer_ready())

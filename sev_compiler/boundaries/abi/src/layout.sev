@@ -1,2 +1,91 @@
-# Bootstrap counterpart of compiler/boundaries/abi/src/layout.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import "model.sev"
+import "target.sev"
+
+class FieldLayout:
+    name: string
+    offset: u64
+    layout: Layout
+
+
+enum LayoutKind:
+    Scalar
+    Pointer
+    Array(stride: u64, length: u64)
+    Record(fields: list[FieldLayout])
+    Union(fields: list[FieldLayout])
+    Function
+
+
+class Layout:
+    size: u64
+    alignment: u32
+    kind: LayoutKind
+
+
+enum LayoutError:
+    InvalidAlignment(alignment: u32)
+    InvalidEnumRepresentation
+    InvalidPacking
+    InvalidTransparentRecord
+    Overflow
+    UnsizedOpaque(name: string)
+    ZeroWidthScalar
+
+
+def align_to(value: u64, alignment: u32) -> u64 | LayoutError:
+    if alignment == 0 or alignment & (alignment - 1) != 0:
+        return error(InvalidAlignment(alignment))
+    mask = u64(alignment - 1)
+    return (value + mask) & ~mask
+
+
+def layout_of(type_id: AbiType, target: TargetDataLayout) -> Layout | LayoutError:
+    match type_id:
+        case Void: return Layout(0, 1, Scalar)
+        case Scalar:
+            match type_id:
+                case Boolean: return scalar_layout(1, false, target)
+                case Integer: return scalar_layout(bits, false, target)
+                case Float:
+                    match format:
+                        case Ieee: return scalar_layout(bits, true, target)
+                        case BrainFloat16: return scalar_layout(16, true, target)
+        case Pointer: return Layout(target.pointer.size, target.pointer.alignment, Pointer)
+        case Function: return Layout(target.pointer.size, target.pointer.alignment, LayoutKind.Function)
+        case Array:
+            element_layout = layout_of(element, target)?
+            stride = align_to(element_layout.size, element_layout.alignment)?
+            return Layout(stride * length, element_layout.alignment, LayoutKind.Array(stride, length))
+        case Record: return record_layout(record, target)
+        case Union:
+            size: u64 = 0
+            alignment: u32 = 1
+            fields: list[FieldLayout] = []
+            for field in record.fields:
+                field_layout = layout_of(field.type_id, target)?
+                size = max(size, field_layout.size)
+                alignment = max(alignment, field_layout.alignment)
+                fields.append(FieldLayout(field.name, 0, field_layout))
+            return Layout(align_to(size, alignment)?, alignment, LayoutKind.Union(fields))
+        case Opaque: return error(UnsizedOpaque(name))
+    return error(InvalidEnumRepresentation)
+
+
+def scalar_layout(bits: u16, floating: bool, target: TargetDataLayout) -> Layout | LayoutError:
+    if bits == 0: return error(ZeroWidthScalar)
+    scalar = target.scalar(bits, floating)
+    return Layout(scalar.size, scalar.alignment, Scalar)
+
+
+def record_layout(record: RecordType, target: TargetDataLayout) -> Layout | LayoutError:
+    fields: list[FieldLayout] = []
+    offset: u64 = 0
+    alignment: u32 = 1
+    for field in record.fields:
+        field_layout = layout_of(field.type_id, target)?
+        offset = align_to(offset, field_layout.alignment)?
+        fields.append(FieldLayout(field.name, offset, field_layout))
+        offset += field_layout.size
+        alignment = max(alignment, field_layout.alignment)
+    return Layout(align_to(offset, alignment)?, alignment, Record(fields))
+

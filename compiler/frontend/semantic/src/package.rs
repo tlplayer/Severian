@@ -258,7 +258,7 @@ fn imported_function_bindings(
             }
             resolution => {
                 for definition in resolution_definitions(resolution) {
-                    if definition.module != module
+                    if definition.module != module.0
                         && emit_function(definition, index, specializations)
                     {
                         stubs.push(FunctionBinding {

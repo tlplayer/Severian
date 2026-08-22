@@ -235,7 +235,8 @@ impl BodyBuilder {
     }
 
     fn finish(mut self) -> Body {
-        self.body.blocks[self.body.entry.0 as usize].parameters = self.entry_parameters;
+        self.body.blocks[self.body.entry.0 as usize].parameters =
+            std::mem::take(&mut self.entry_parameters);
         if self.open(self.current) {
             self.terminate(Terminator::Return(None));
         }

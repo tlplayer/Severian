@@ -1,2 +1,113 @@
-# Bootstrap counterpart of compiler/transforms/mir/src/ownership.rs.
-# Flow-sensitive move, loan, resource and drop analysis runs on CFG MIR.
+import universal
+import "cfg.sev"
+
+enum LoanKind:
+    Shared
+    Exclusive
+
+
+class Loan:
+    place: Place
+    kind: LoanKind
+    block: BlockId
+
+
+enum OwnershipError:
+    UseAfterMove(local: LocalId)
+    DoubleMove(local: LocalId)
+    ConflictingLoan(local: LocalId)
+    EscapingBorrow(local: LocalId)
+    ResourceNotConsumed(local: LocalId)
+    DoubleDrop(local: LocalId)
+
+
+class OwnershipReport:
+    initialized: set[LocalId]
+    moved: set[LocalId]
+    loans: list[Loan]
+    escaped: set[LocalId]
+    consumed_resources: set[LocalId]
+    call_effects: map[BlockId, universal.EffectSet]
+
+
+def inspect_operand(operand: Operand, report: OwnershipReport, errors: list[OwnershipError]):
+    match operand:
+        case Copy:
+            if place.local not in report.initialized or place.local in report.moved:
+                errors.append(UseAfterMove(place.local))
+        case Move:
+            if place.local not in report.initialized or place.local in report.moved:
+                errors.append(UseAfterMove(place.local))
+            if place.local in report.moved:
+                errors.append(DoubleMove(place.local))
+            report.moved.add(place.local)
+
+
+def add_loan(place: Place, kind: LoanKind, block: BlockId, report: OwnershipReport, errors: list[OwnershipError]):
+    for loan in report.loans:
+        if loan.place.local == place.local and (loan.kind == Exclusive or kind == Exclusive):
+            errors.append(ConflictingLoan(place.local))
+            return
+    report.loans.append(Loan(place, kind, block))
+
+
+def inspect_rvalue(value: Rvalue, block: BlockId, report: OwnershipReport, errors: list[OwnershipError]):
+    match value:
+        case Use: inspect_operand(operand, report, errors)
+        case Unary: inspect_operand(operand, report, errors)
+        case Convert: inspect_operand(operand, report, errors)
+        case Binary:
+            inspect_operand(left, report, errors)
+            inspect_operand(right, report, errors)
+        case BorrowShared: add_loan(place, Shared, block, report, errors)
+        case BorrowExclusive: add_loan(place, Exclusive, block, report, errors)
+        case Aggregate:
+            for field in fields:
+                inspect_operand(field, report, errors)
+
+
+def analyze_ownership(body: CfgBody, types: universal.TypeContext) -> OwnershipReport | list[OwnershipError]:
+    report = OwnershipReport(set(), set(), [], set(), set(), {})
+    errors: list[OwnershipError] = []
+    for local in body.locals:
+        if local.argument:
+            report.initialized.add(local.id)
+    for block in body.blocks:
+        for statement in block.statements:
+            match statement:
+                case Assign:
+                    inspect_rvalue(value, block.id, report, errors)
+                    report.initialized.add(place.local)
+                    report.moved.discard(place.local)
+                case Drop:
+                    if place.local not in report.initialized or place.local in report.consumed_resources:
+                        errors.append(DoubleDrop(place.local))
+                    report.initialized.discard(place.local)
+                    report.consumed_resources.add(place.local)
+                case StorageDead:
+                    report.initialized.discard(local)
+                case Assert:
+                    inspect_operand(condition, report, errors)
+                    if message != None: inspect_operand(message, report, errors)
+                case Operation:
+                    for operand in operands: inspect_operand(operand, report, errors)
+                    for result in results: report.initialized.add(result.local)
+    if len(errors) > 0:
+        return error(errors)
+    return report
+
+
+def elaborate_drops(body: CfgBody, types: universal.TypeContext):
+    resources: list[LocalId] = []
+    for local in body.locals:
+        match types.kind(local.type_id):
+            case Resource: resources.append(local.id)
+    for block in body.blocks:
+        match block.terminator:
+            case Return:
+                for local in resources.reversed():
+                    block.statements.append(Drop(local_place(local)))
+            case Throw:
+                for local in resources.reversed():
+                    block.statements.append(Drop(local_place(local)))
+

@@ -1,2 +1,126 @@
-# Bootstrap counterpart of compiler/boundaries/driver/src/pipeline/mod.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import backend
+import bootstrap
+import compile
+import hir
+import lexer
+import lowering
+import mir
+import mlir
+import modules
+import ownership
+import parser
+import semantic
+import source
+import target
+import universal
+
+enum CompileError:
+    Bootstrap(message: string)
+    Diagnostic(message: string)
+    Ownership(message: string)
+    Lowering(message: string)
+    Backend(message: string)
+    Compile(message: string)
+    Mlir(message: string)
+
+
+class CompiledTest:
+    name: string
+    modes: list[hir.TestMode]
+    artifact: backend.Artifact
+    expectations: list[hir.TestExpectation]
+
+
+enum TestExecution:
+    Passed
+    Failed(message: string)
+
+
+class Compiler:
+    context: universal.UniversalContext
+    target_spec: target.TargetSpec
+    registry: compile.CompilerRegistry
+    backend_name: string
+
+    def Compiler() -> Compiler | CompileError:
+        context = bootstrap.load()?
+        return Compiler(context, target.target_spec(platform.target_triple()), compile.CompilerRegistry(), "c")
+
+    def register_compile_handler(id: universal.CompilerId, handler: compile.CompileHandler):
+        return registry.register(id, handler)
+
+    def analyze_source(source_file: source.SourceFile) -> hir.Program | CompileError:
+        tokens = lexer.scan(source_file)?
+        module = parser.parse(tokens)?
+        program = semantic.analyze(module, context.types)?
+        ownership.validate(program)?
+        return program
+
+    def analyze_file(path: string) -> hir.Program | CompileError:
+        graph = modules.resolve(path)?
+        combined = hir.empty_program()
+        for resolved in graph.modules:
+            program = semantic.analyze_with_context(
+                resolved.ast_module,
+                context.types,
+                semantic.AnalysisContext(semantic.Build, resolved.path),
+            )?
+            for module in program.modules:
+                combined.modules.append(module)
+        ownership.validate(combined)?
+        return combined
+
+    def compile_mir_to_mlir(module: mir.Module) -> string | CompileError:
+        plan = compile.plan(module, context.types)?
+        artifacts = registry.compile(plan, compile.CompileContext(context.types, target_spec))?
+        resumed = plan.resumed_mir()
+        lowered = lowering.lower(resumed, context.types, target_spec)?
+        ordinary = mlir.render(lowered)?
+        return mlir.compose(ordinary, artifacts, target_spec)?
+
+    def compile_source(source_file: source.SourceFile, output: string) -> backend.Artifact | CompileError:
+        program = analyze_source(source_file)?
+        mir_module = mir.build(program)
+        plan = compile.plan(mir_module, context.types)?
+        if plan.has_custom_regions() or backend_name == "mlir":
+            text = compile_mir_to_mlir(mir_module)?
+            return emit_mlir(text, output)?
+        lowered = lowering.lower(plan.resumed_mir(), context.types, target_spec)?
+        return backend.emit_executable(lowered, output)?
+
+    def compile_file(path: string, output: string) -> backend.Artifact | CompileError:
+        program = analyze_file(path)?
+        mir_module = mir.build(program)
+        plan = compile.plan(mir_module, context.types)?
+        if plan.has_custom_regions() or backend_name == "mlir":
+            return emit_mlir(compile_mir_to_mlir(mir_module)?, output)?
+        return backend.emit_executable(lowering.lower(plan.resumed_mir(), context.types, target_spec)?, output)?
+
+    def check_file(path: string) -> unit | CompileError:
+        analyze_file(path)?
+        return unit
+
+
+def emit_mlir(module: string, output: string) -> backend.Artifact | CompileError:
+    object = output + ".o"
+    compile_result = process.run(["mlir-opt", "-", "--verify-each"], input = module)
+    if compile_result.status != 0: return error(Mlir(compile_result.stderr))
+    translate = process.run(["mlir-translate", "--mlir-to-llvmir", "-"], input = compile_result.stdout)
+    if translate.status != 0: return error(Mlir(translate.stderr))
+    object_result = process.run(["clang", "-x", "ir", "-", "-c", "-o", object], input = translate.stdout)
+    if object_result.status != 0: return error(Mlir(object_result.stderr))
+    link_result = process.run(["cc", object, "-o", output])
+    if link_result.status != 0: return error(Backend(link_result.stderr))
+    return backend.Artifact(output, backend.Executable)
+
+
+def compile_source(source_file: source.SourceFile, output: string) -> backend.Artifact | CompileError:
+    return Compiler()?.compile_source(source_file, output)
+
+
+def compile_file(path: string, output: string) -> backend.Artifact | CompileError:
+    return Compiler()?.compile_file(path, output)
+
+
+def check_file(path: string) -> unit | CompileError:
+    return Compiler()?.check_file(path)

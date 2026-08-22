@@ -1,2 +1,46 @@
-# Bootstrap counterpart of compiler/transforms/mlir/src/verify.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import artifact
+import lir
+import target
+import "emit/mod.sev"
+
+class VerifiedMlirArtifact:
+    id: artifact.ArtifactId
+    module: string
+    target_triple: string
+
+
+def allowed_dialect(name: string, target_spec: target.TargetSpec) -> bool:
+    if name == "builtin" or name == "arith" or name == "cf" or name == "func" or name == "llvm" or name == "math" or name == "scf":
+        return true
+    return target_spec.capabilities.contains("mlir.dialect." + name)
+
+
+def verify_text(module: string, description: string) -> unit | MlirError:
+    if not module.trim().starts_with("module {") or not module.trim().ends_with("}"):
+        return error(ParseFailed(description))
+    if module.count("func.func") == 0:
+        return error(EntryFunctionCount(0))
+    return unit
+
+
+def verify_artifact(id: artifact.ArtifactId, generated: MlirArtifact, target_spec: target.TargetSpec) -> VerifiedMlirArtifact | MlirError:
+    verify_text(generated.module, "artifact")?
+    return VerifiedMlirArtifact(id, generated.module, target_spec.triple)
+
+
+def compose(normal: string, artifacts: list[VerifiedMlirArtifact], target_spec: target.TargetSpec) -> string | MlirError:
+    verify_text(normal, "ordinary module")?
+    additions = ""
+    seen: set[artifact.ArtifactId] = set()
+    for generated in artifacts:
+        if generated.target_triple != target_spec.triple:
+            return error(TargetMismatch(generated.target_triple, target_spec.triple))
+        if generated.id in seen:
+            return error(DuplicateSymbol("__sev_artifact_" + string(generated.id.index)))
+        seen.add(generated.id)
+        body = generated.module.trim()
+        body = body[body.index("{") + 1:body.rindex("}")]
+        additions += body + "\n"
+    insertion = normal.rindex("}")
+    return normal[:insertion] + additions + normal[insertion:]
+

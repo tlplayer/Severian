@@ -1,2 +1,33 @@
-# Bootstrap counterpart of compiler/boundaries/driver/src/example_validation.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+class CoverageSummary:
+    discovered: int
+    executed: int
+    passed: int
+    failed: int
+
+
+def discover_examples(root: string) -> list[string]:
+    examples: list[string] = []
+    for path in file.walk(root):
+        if file.extension(path) == "sev":
+            examples.append(path)
+    examples.sort()
+    return examples
+
+
+def validate_examples(root: string, compiler: Compiler) -> CoverageSummary:
+    sources = discover_examples(root)
+    summary = CoverageSummary(len(sources), 0, 0, 0)
+    for path in sources:
+        output = file.temporary_path("sev-example")
+        artifact = compiler.compile_file(path, output)
+        summary.executed += 1
+        if artifact is error:
+            summary.failed += 1
+            continue
+        result = process.run([artifact.path])
+        if result.status == 0:
+            summary.passed += 1
+        else:
+            summary.failed += 1
+    return summary
+

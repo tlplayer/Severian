@@ -1,2 +1,53 @@
-# Bootstrap counterpart of compiler/boundaries/abi/src/target.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import target
+import "model.sev"
+
+enum Endianness:
+    Little
+    Big
+
+
+class ScalarLayout:
+    size: u64
+    alignment: u32
+
+
+class TargetDataLayout:
+    endianness: Endianness
+    pointer: ScalarLayout
+    integer_alignments: list[tuple[u16, u32]]
+    float_alignments: list[tuple[u16, u32]]
+    aggregate_alignment: u32
+    stack_alignment: u32
+    machine_integer_bits: u16
+    machine_float_bits: u16
+
+    def scalar(bits: u16, floating: bool) -> ScalarLayout:
+        bytes = u64((bits + 7) / 8)
+        table = float_alignments if floating else integer_alignments
+        for entry in table:
+            if entry[0] >= bits:
+                return ScalarLayout(bytes, entry[1])
+        return ScalarLayout(bytes, u32(bytes))
+
+
+class AbiTarget:
+    triple: string
+    architecture: target.Architecture
+    operating_system: target.OperatingSystem
+    data_layout: TargetDataLayout
+    default_convention: CallingConvention
+
+    def resolve_convention(convention: CallingConvention) -> CallingConvention:
+        if convention == System:
+            return default_convention
+        return convention
+
+
+def derive(specification: target.TargetSpec) -> AbiTarget:
+    convention = SysV64
+    if specification.operating_system == target.Windows: convention = Win64
+    elif specification.architecture == target.Aarch64: convention = Aapcs64
+    pointer = ScalarLayout(u64(specification.pointer_bits() / 8), u32(specification.pointer_bits() / 8))
+    layout = TargetDataLayout(Little, pointer, [(8,1),(16,2),(32,4),(64,8)], [(16,2),(32,4),(64,8)], 1, 16, specification.machine_integer_bits(), specification.machine_float_bits())
+    return AbiTarget(specification.triple, specification.architecture, specification.operating_system, layout, convention)
+

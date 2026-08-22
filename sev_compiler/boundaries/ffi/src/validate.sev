@@ -1,2 +1,46 @@
-# Bootstrap counterpart of compiler/boundaries/ffi/src/validate.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import abi
+import "model.sev"
+
+enum FfiError:
+    Abi(message: string)
+    BorrowedOutput(parameter: string)
+    DuplicateParameter(parameter: string)
+    InvalidOwnership(message: string)
+    NotPrimitive(type_id: universal.TypeId)
+    OutputMustCrossByReference(parameter: string)
+    ReturnCannotBorrowCall
+    UnknownExternalType(name: string)
+    UnsupportedRepresentation(message: string)
+
+
+def validate_type_ref(type_ref: ForeignTypeRef, module: ForeignModule) -> unit | FfiError:
+    match type_ref:
+        case Severian: return unit
+        case External:
+            if module.type_declaration(name) == None:
+                return error(UnknownExternalType(name))
+        case Pointer:
+            return validate_type_ref(pointee, module)
+    return unit
+
+
+def validate_function(function: ForeignFunction, module: ForeignModule, target: abi.AbiTarget) -> unit | FfiError:
+    names: set[string] = set()
+    for parameter in function.parameters:
+        if parameter.name in names:
+            return error(DuplicateParameter(parameter.name))
+        names.add(parameter.name)
+        validate_type_ref(parameter.contract.type_ref, module)?
+        if (parameter.mode == Out or parameter.mode == InOut) and parameter.contract.ownership == Copy:
+            return error(OutputMustCrossByReference(parameter.name))
+        match parameter.contract.ownership:
+            case Borrowed:
+                if parameter.mode == Out:
+                    return error(BorrowedOutput(parameter.name))
+    validate_type_ref(function.result.type_ref, module)?
+    match function.result.ownership:
+        case Borrowed:
+            if lifetime == Call:
+                return error(ReturnCannotBorrowCall)
+    return unit
+

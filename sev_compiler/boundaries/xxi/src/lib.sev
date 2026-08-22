@@ -1,6 +1,121 @@
-# Bootstrap counterpart of compiler/boundaries/xxi/src/lib.rs.
-# These imports preserve the Rust package dependency direction.
 import abi
 import ast
 import ffi
 import universal
+
+enum ExternalLanguage:
+    C
+    Rust
+    System
+    Custom(name: string)
+
+
+class ExternalImport:
+    language: ExternalLanguage
+    provider: string
+    alias: string
+
+
+class ResolvedExternalModule:
+    imports: list[ExternalImport]
+    foreign: ffi.ForeignModule
+    plans: list[ffi.BoundaryPlan]
+
+
+enum XxiError:
+    DuplicateDeclaration(name: string)
+    GenericExternalType(name: string)
+    MissingLanguageAttribute
+    MultipleLanguageAttributes
+    UnknownLanguage(name: string)
+    UnknownRepresentation(name: string)
+    UnknownType(name: string)
+    Ffi(message: string)
+    Symbol(message: string)
+
+
+def language_from_name(name: string) -> ExternalLanguage | XxiError:
+    if name == "c": return C
+    if name == "rust": return Rust
+    if name == "system": return System
+    if len(name) > 0: return Custom(name)
+    return error(UnknownLanguage(name))
+
+
+def language_abi(language: ExternalLanguage) -> ffi.AbiSelection:
+    if language == C: return ffi.C
+    if language == Rust: return ffi.Rust
+    return ffi.System
+
+
+def external_import(locator: string, alias: string) -> ExternalImport | None | XxiError:
+    if not locator.contains(":"): return None
+    parts = locator.split(":", 1)
+    return ExternalImport(language_from_name(parts[0])?, parts[1], alias)
+
+
+def resolve_contract(annotation: ast.TypeAnnotation, foreign: ffi.ForeignModule, types: universal.TypeContext, result: bool) -> tuple[ffi.ValueContract, ffi.ParameterMode] | XxiError:
+    ownership: ffi.Ownership = ffi.Copy
+    mode = ffi.In
+    nullable = false
+    current = annotation
+    while true:
+        match current.kind:
+            case Named:
+                if len(arguments) != 1: break
+                if name == "borrowed":
+                    ownership = ffi.Borrowed(ffi.Return if result else ffi.Call)
+                elif name == "owned": ownership = ffi.Owned
+                elif name == "transferred": ownership = ffi.Transferred
+                elif name == "out":
+                    ownership = ffi.Owned
+                    mode = ffi.Out
+                elif name == "inout":
+                    ownership = ffi.Owned
+                    mode = ffi.InOut
+                elif name == "nullable": nullable = true
+                else: break
+                current = arguments[0]
+            else: break
+    match current.kind:
+        case Named:
+            if len(arguments) != 0: return error(UnknownType(name))
+            semantic_type = types.resolve_name(name)
+            if semantic_type != None:
+                return (ffi.ValueContract(ffi.Severian(semantic_type), ownership, nullable), mode)
+            if foreign.type_declaration(name) != None:
+                return (ffi.ValueContract(ffi.External(name), ownership, nullable), mode)
+    return error(UnknownType(string(current)))
+
+
+def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTarget) -> ResolvedExternalModule | XxiError:
+    imports: list[ExternalImport] = []
+    foreign = ffi.ForeignModule([], [])
+    for item in module.items:
+        match item:
+            case Import:
+                match declaration.subject:
+                    case Locator:
+                        if declaration.alias != None:
+                            resolved = external_import(locator, declaration.alias)?
+                            if resolved != None: imports.append(resolved)
+            case Type:
+                if len(declaration.decorators) > 0:
+                    if len(declaration.type_parameters) > 0: return error(GenericExternalType(declaration.name))
+                    foreign.types.append(ffi.ForeignTypeDeclaration(declaration.name, abi.Opaque(declaration.name)))
+            case Function:
+                if len(declaration.decorators) > 0:
+                    attribute = declaration.decorators[0]
+                    language = language_from_name(attribute.name)?
+                    parameters: list[ffi.ForeignParameter] = []
+                    for parameter in declaration.parameters:
+                        contract = resolve_contract(parameter.annotation, foreign, types, false)?
+                        parameters.append(ffi.ForeignParameter(parameter.name, contract[0], contract[1]))
+                    result = resolve_contract(declaration.result, foreign, types, true)?[0]
+                    symbol = abi.Symbol(abi.SymbolName(declaration.name), abi.External, abi.Default, abi.Import, abi.Function)
+                    foreign.functions.append(ffi.ForeignFunction(declaration.name, None, symbol, parameters, result, language_abi(language), false))
+    plans: list[ffi.BoundaryPlan] = []
+    for function in foreign.functions:
+        plans.append(ffi.lower_function(function, foreign, types, target)?)
+    return ResolvedExternalModule(imports, foreign, plans)
+

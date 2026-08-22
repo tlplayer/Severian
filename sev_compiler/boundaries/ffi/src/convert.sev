@@ -1,2 +1,87 @@
-# Bootstrap counterpart of compiler/boundaries/ffi/src/convert.rs.
-# Translate the Rust behavior here; parity is checked with shared fixtures.
+import abi
+import universal
+import "model.sev"
+import "validate.sev"
+
+enum Conversion:
+    Direct
+    Boolean
+    Utf8View
+    BytesView
+    OpaquePointer
+    OutPointer
+
+
+class LoweredParameter:
+    name: string
+    abi_type: abi.AbiType
+    conversion: Conversion
+
+
+class BoundaryPlan:
+    provider: string | None
+    symbol: abi.Symbol
+    signature: abi.AbiSignature
+    parameters: list[LoweredParameter]
+    result_type: abi.AbiType
+    result_conversion: Conversion
+
+
+def lower_semantic(type_id: universal.TypeId, types: universal.TypeContext, target: abi.AbiTarget, result: bool) -> tuple[abi.AbiType, Conversion] | FfiError:
+    definition = types.definition(type_id)
+    if definition == None:
+        return error(NotPrimitive(type_id))
+    match definition.kind:
+        case Primitive:
+            representation = definition.representation
+            match representation:
+                case Integer:
+                    match bits:
+                        case Fixed: return (abi.integer(bits, signed), Direct)
+                        case Machine: return (abi.integer(target.data_layout.machine_integer_bits, signed), Direct)
+                case PointerInteger: return (abi.integer(u16(target.data_layout.pointer.size * 8), signed), Direct)
+                case Float:
+                    match format:
+                        case Ieee: return (abi.float_type(bits), Direct)
+                        case BrainFloat16: return (abi.Scalar(abi.Float(abi.BrainFloat16)), Direct)
+                        case Machine: return (abi.float_type(target.data_layout.machine_float_bits), Direct)
+                case Boolean: return (abi.Scalar(abi.Boolean), Conversion.Boolean)
+                case Character: return (abi.integer(32, false), Direct)
+                case String: return (abi.pointer_to(abi.integer(8, false), false), Utf8View)
+                case Bytes: return (abi.pointer_to(abi.integer(8, false), false), BytesView)
+                case NoneValue:
+                    if result: return (abi.Void, Direct)
+                case Unit:
+                    if result: return (abi.Void, Direct)
+    return error(UnsupportedRepresentation("type cannot cross the foreign boundary"))
+
+
+def lower_type_ref(type_ref: ForeignTypeRef, module: ForeignModule, types: universal.TypeContext, target: abi.AbiTarget, result: bool) -> tuple[abi.AbiType, Conversion] | FfiError:
+    match type_ref:
+        case Severian: return lower_semantic(type_id, types, target, result)
+        case External:
+            declaration = module.type_declaration(name)
+            if declaration == None: return error(UnknownExternalType(name))
+            return (declaration.representation, Direct)
+        case Pointer:
+            lowered = lower_type_ref(pointee, module, types, target, false)?
+            return (abi.pointer_to(lowered[0], mutable), Direct)
+
+
+def lower_function(function: ForeignFunction, module: ForeignModule, types: universal.TypeContext, target: abi.AbiTarget) -> BoundaryPlan | FfiError:
+    validate_function(function, module, target)?
+    parameters: list[LoweredParameter] = []
+    abi_parameters: list[abi.AbiType] = []
+    for parameter in function.parameters:
+        lowered = lower_type_ref(parameter.contract.type_ref, module, types, target, false)?
+        conversion = lowered[1]
+        type_id = lowered[0]
+        if parameter.mode == Out or parameter.mode == InOut:
+            type_id = abi.pointer_to(type_id, true)
+            conversion = OutPointer
+        parameters.append(LoweredParameter(parameter.name, type_id, conversion))
+        abi_parameters.append(type_id)
+    result = lower_type_ref(function.result.type_ref, module, types, target, true)?
+    signature = abi.AbiSignature(convention(function.abi_selection), abi_parameters, result[0], function.variadic)
+    return BoundaryPlan(function.provider, function.symbol, signature, parameters, result[0], result[1])
+
