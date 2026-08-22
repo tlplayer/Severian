@@ -56,6 +56,7 @@ pub struct CallArgument {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpressionKind {
     Literal(Literal),
+    List(Vec<Expression>),
     Name(String),
     Member {
         object: Box<Expression>,

@@ -1155,6 +1155,25 @@ impl Parser<'_> {
                 ExpressionKind::Literal(Literal::None)
             }
             TokenKind::Identifier(name) => ExpressionKind::Name(name),
+            TokenKind::LeftBracket => {
+                let mut values = Vec::new();
+                if !self.at(&TokenKind::RightBracket) {
+                    loop {
+                        values.push(self.expression(0)?);
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                let end = self
+                    .expect(&TokenKind::RightBracket, "expected `]` after list literal")?
+                    .span
+                    .end;
+                return Ok(Expression {
+                    kind: ExpressionKind::List(values),
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
+            }
             TokenKind::LeftParen => {
                 let expression = self.expression(0)?;
                 self.expect(&TokenKind::RightParen, "expected `)`")?;

@@ -125,6 +125,12 @@ fn validate_generic_expression(
     match &expression.kind {
         Expression::Name(name) => Ok(names.get(name).cloned()),
         Expression::Literal(_) => Ok(None),
+        Expression::List(values) => {
+            for value in values {
+                validate_generic_expression(value, names, function, index, types)?;
+            }
+            Ok(None)
+        }
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
         }
@@ -813,6 +819,18 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
+        severian_ast::ExpressionKind::List(values) => {
+            for value in values {
+                visit_expression_for_specializations(
+                    module,
+                    value,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+        }
         severian_ast::ExpressionKind::Literal(_) | severian_ast::ExpressionKind::Name(_) => {}
     }
     Ok(())
@@ -886,6 +904,7 @@ fn expression_type_name(
             }
             .to_owned(),
         ),
+        severian_ast::ExpressionKind::List(_) => None,
         _ => None,
     }
 }

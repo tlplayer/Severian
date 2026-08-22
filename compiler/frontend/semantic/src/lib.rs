@@ -103,7 +103,11 @@ pub(crate) fn analyze_with_package_functions(
             .collect(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
+        list_types: BTreeMap::new(),
+        list_elements: BTreeMap::new(),
         lowered_classes: Vec::new(),
+        runtime_functions: Vec::new(),
+        runtime_definitions: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
         next_class_type: u32::MAX,
@@ -473,6 +477,7 @@ pub(crate) fn analyze_with_package_functions(
             module.functions[source_function_count + offset].body = Some(body);
         }
     }
+    module.functions.extend(analyzer.runtime_functions.clone());
     module.classes = analyzer.lowered_classes.clone();
     Ok(Program {
         modules: vec![module],
@@ -495,7 +500,11 @@ struct Analyzer<'a> {
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
+    list_types: BTreeMap<TypeId, TypeId>,
+    list_elements: BTreeMap<TypeId, TypeId>,
     lowered_classes: Vec<HirClassDeclaration>,
+    runtime_functions: Vec<FunctionDeclaration>,
+    runtime_definitions: BTreeMap<String, DefId>,
     next_class_type: u32,
 }
 
@@ -504,6 +513,7 @@ struct ClassInstance {
     ty: TypeId,
     name: String,
     fields: Vec<HirClassFieldDeclaration>,
+    constructors: Vec<severian_ast::FunctionDeclaration>,
     methods: Vec<severian_ast::FunctionDeclaration>,
 }
 
@@ -854,6 +864,24 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
+            AstExpressionKind::List(values) => {
+                let Some(list_type) = expected.filter(|ty| self.list_elements.contains_key(ty))
+                else {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "a list literal requires an expected `list[T]` type",
+                        Some(ast.span),
+                    ));
+                };
+                if !values.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "non-empty list literal lowering is not implemented on this path",
+                        Some(ast.span),
+                    ));
+                }
+                self.empty_list_expression(list_type, ast.span)
+            }
             AstExpressionKind::Name(name) => {
                 let Some((binding, type_id)) = self.names.get(name).copied() else {
                     return Err(Diagnostic::new(
@@ -1130,7 +1158,15 @@ impl Analyzer<'_> {
                 span,
             ));
         }
-        if arguments.len() != instance.fields.len() {
+        let fields = if arguments.is_empty()
+            && !instance.fields.is_empty()
+            && instance
+                .constructors
+                .iter()
+                .any(|constructor| constructor.parameters.is_empty())
+        {
+            self.class_constructor_defaults(&instance, span)?
+        } else if arguments.len() != instance.fields.len() {
             return Err(Diagnostic::new(
                 "E000221",
                 format!(
@@ -1140,12 +1176,13 @@ impl Analyzer<'_> {
                 ),
                 Some(span),
             ));
-        }
-        let fields = arguments
-            .iter()
-            .zip(&instance.fields)
-            .map(|(argument, field)| self.expression(&argument.value, Some(field.ty)))
-            .collect::<Result<Vec<_>, _>>()?;
+        } else {
+            arguments
+                .iter()
+                .zip(&instance.fields)
+                .map(|(argument, field)| self.expression(&argument.value, Some(field.ty)))
+                .collect::<Result<Vec<_>, _>>()?
+        };
         Ok(Expression {
             id: self.next_id(),
             type_id: instance.ty,
@@ -1308,28 +1345,21 @@ impl Analyzer<'_> {
             .cloned()
             .zip(concrete.iter().copied())
             .collect::<BTreeMap<_, _>>();
-        let fields = declaration
-            .fields
-            .iter()
-            .map(|field| {
-                let ty = field
-                    .annotation
-                    .simple_name()
-                    .and_then(|name| substitution.get(name).copied())
-                    .map(Ok)
-                    .unwrap_or_else(|| resolve_type_annotation(self.types, &field.annotation))?;
-                Ok(HirClassFieldDeclaration {
-                    name: field.name.clone(),
-                    ty,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let mut fields = Vec::with_capacity(declaration.fields.len());
+        for field in &declaration.fields {
+            let ty = self.resolve_instantiated_type(&field.annotation, &substitution)?;
+            fields.push(HirClassFieldDeclaration {
+                name: field.name.clone(),
+                ty,
+            });
+        }
         let ty = TypeId(self.next_class_type);
         self.next_class_type = self.next_class_type.saturating_sub(1);
         let instance = ClassInstance {
             ty,
             name: name.to_owned(),
             fields: fields.clone(),
+            constructors: declaration.constructors.clone(),
             methods: declaration.methods.clone(),
         };
         self.class_instances.insert(key, instance.clone());
@@ -1353,6 +1383,229 @@ impl Analyzer<'_> {
             fields,
         });
         Ok(instance)
+    }
+
+    fn resolve_instantiated_type(
+        &mut self,
+        annotation: &TypeAnnotation,
+        substitution: &BTreeMap<String, TypeId>,
+    ) -> Result<TypeId, Diagnostic> {
+        let Some((name, arguments)) = annotation.named_parts() else {
+            return Err(Diagnostic::new(
+                "E000204",
+                "union class fields are not yet supported",
+                Some(annotation.span),
+            ));
+        };
+        if arguments.is_empty() {
+            if let Some(ty) = substitution.get(name) {
+                return Ok(*ty);
+            }
+            return resolve_type_annotation(self.types, annotation);
+        }
+        if name == "list" && arguments.len() == 1 {
+            let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
+            return Ok(self.instantiate_list_type(element));
+        }
+        Err(Diagnostic::new(
+            "E000204",
+            format!("generic field type `{name}` is not yet supported"),
+            Some(annotation.span),
+        ))
+    }
+
+    fn instantiate_list_type(&mut self, element: TypeId) -> TypeId {
+        if let Some(ty) = self.list_types.get(&element) {
+            return *ty;
+        }
+        let ty = TypeId(self.next_class_type);
+        self.next_class_type = self.next_class_type.saturating_sub(1);
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let element_name = self
+            .types
+            .definition(element)
+            .map(|definition| definition.name.clone())
+            .unwrap_or_else(|| format!("type#{}", element.0));
+        self.list_types.insert(element, ty);
+        self.list_elements.insert(ty, element);
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("list[{element_name}]"),
+            fields: vec![HirClassFieldDeclaration {
+                name: "storage".into(),
+                ty: storage,
+            }],
+        });
+        ty
+    }
+
+    fn class_constructor_defaults(
+        &mut self,
+        instance: &ClassInstance,
+        span: severian_source::Span,
+    ) -> Result<Vec<Expression>, Diagnostic> {
+        let constructor = instance
+            .constructors
+            .iter()
+            .find(|constructor| constructor.parameters.is_empty())
+            .expect("caller selected a zero-argument constructor");
+        let body = constructor.body.as_ref().ok_or_else(|| {
+            Diagnostic::new(
+                "E000211",
+                format!("constructor `{}` has no implementation", constructor.name),
+                Some(constructor.span),
+            )
+        })?;
+        let mut values = Vec::with_capacity(instance.fields.len());
+        for field in &instance.fields {
+            let initializer = body.iter().find_map(|statement| {
+                let AstStatement::Binding(binding) = statement else {
+                    return None;
+                };
+                (binding.name == field.name).then_some(&binding.value)
+            });
+            let Some(initializer) = initializer else {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    format!(
+                        "constructor `{}` does not initialize field `{}`",
+                        constructor.name, field.name
+                    ),
+                    Some(span),
+                ));
+            };
+            values.push(self.expression(initializer, Some(field.ty))?);
+        }
+        Ok(values)
+    }
+
+    fn empty_list_expression(
+        &mut self,
+        list_type: TypeId,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let storage = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: list_type,
+            kind: ExpressionKind::Aggregate {
+                class: list_type,
+                fields: vec![storage],
+            },
+            span,
+        })
+    }
+
+    fn list_storage_expression(
+        &mut self,
+        list: Expression,
+        span: severian_source::Span,
+    ) -> Expression {
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        Expression {
+            id: self.next_id(),
+            type_id: storage_type,
+            kind: ExpressionKind::Field {
+                object: Box::new(list),
+                index: 0,
+            },
+            span,
+        }
+    }
+
+    fn list_runtime_suffix(
+        &self,
+        element: TypeId,
+        span: severian_source::Span,
+    ) -> Result<&'static str, Diagnostic> {
+        let name = self
+            .types
+            .definition(element)
+            .map(|definition| definition.name.as_str());
+        match name {
+            Some("int") | Some("i64") | Some("usize") => Ok("i64"),
+            Some("string") => Ok("ptr"),
+            _ => Err(Diagnostic::new(
+                "E000211",
+                "native list lowering currently supports `int`, `i64`, `usize`, and `string` elements",
+                Some(span),
+            )),
+        }
+    }
+
+    fn runtime_call(
+        &mut self,
+        symbol: &str,
+        parameter_types: &[TypeId],
+        result_type: TypeId,
+        arguments: Vec<Expression>,
+        span: severian_source::Span,
+    ) -> Expression {
+        let definition = self.ensure_runtime_function(symbol, parameter_types, result_type);
+        Expression {
+            id: self.next_id(),
+            type_id: result_type,
+            kind: ExpressionKind::Call {
+                callee: severian_hir::Callee::Direct {
+                    function: definition,
+                    substitution: severian_universal::Substitution::default(),
+                },
+                arguments,
+            },
+            span,
+        }
+    }
+
+    fn ensure_runtime_function(
+        &mut self,
+        symbol: &str,
+        parameter_types: &[TypeId],
+        result_type: TypeId,
+    ) -> DefId {
+        if let Some(definition) = self.runtime_definitions.get(symbol) {
+            return *definition;
+        }
+        let definition = synthetic_runtime_definition(symbol);
+        let id = FunctionId(u128::MAX - self.runtime_functions.len() as u128);
+        let parameters = parameter_types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| FunctionParameter {
+                binding: self.new_binding_id(),
+                name: format!("argument{index}"),
+                contract: universal_boundary(*ty),
+            })
+            .collect();
+        self.runtime_functions.push(FunctionDeclaration {
+            id,
+            definition,
+            substitution: severian_universal::Substitution::default(),
+            name: symbol.into(),
+            type_parameters: Vec::new(),
+            parameters,
+            result: universal_boundary(result_type),
+            compile_route: severian_universal::CompileRoute::Standard,
+            call_type: severian_hir::CallType::External(severian_hir::ExternalCall {
+                interface: severian_hir::InterfaceId("native-runtime".into()),
+                symbol: severian_hir::SymbolId(symbol.into()),
+                provider: None,
+                ffi: severian_hir::FfiId("c".into()),
+                abi: severian_hir::AbiId("native".into()),
+            }),
+            body: None,
+        });
+        self.runtime_definitions.insert(symbol.into(), definition);
+        definition
     }
 
     fn class_method_call(
@@ -1401,6 +1654,74 @@ impl Analyzer<'_> {
                 Some(method.span),
             ));
         };
+        if let Some(field_name) = body.iter().find_map(|statement| {
+            let AstStatement::Return {
+                value: Some(value), ..
+            } = statement
+            else {
+                return None;
+            };
+            let AstExpressionKind::Call { callee, arguments } = &value.kind else {
+                return None;
+            };
+            let AstExpressionKind::Member {
+                object: field,
+                name: operation,
+            } = &callee.kind
+            else {
+                return None;
+            };
+            let AstExpressionKind::Name(field) = &field.kind else {
+                return None;
+            };
+            (operation == "pop" && arguments.is_empty()).then_some(field.as_str())
+        }) {
+            let Some((field, declaration)) = instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == field_name)
+            else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("class `{}` has no field `{field_name}`", instance.name),
+                    Some(method.span),
+                ));
+            };
+            let Some(element) = self.list_elements.get(&declaration.ty).copied() else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("field `{field_name}` is not a list"),
+                    Some(method.span),
+                ));
+            };
+            if expected.is_some_and(|expected| !self.types.assignable(element, expected)) {
+                return Err(semantic_error(
+                    "method result does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            let list = Expression {
+                id: self.next_id(),
+                type_id: declaration.ty,
+                kind: ExpressionKind::Field {
+                    object: Box::new(object),
+                    index: field as u32,
+                },
+                span,
+            };
+            let storage = self.list_storage_expression(list, span);
+            let storage_type = storage.type_id;
+            let suffix = self.list_runtime_suffix(element, span)?;
+            let symbol = format!("__sev_list_pop_{suffix}");
+            return Ok(Some(self.runtime_call(
+                &symbol,
+                &[storage_type],
+                element,
+                vec![storage],
+                span,
+            )));
+        }
         let field_name = body.iter().find_map(|statement| {
             let AstStatement::Return {
                 value: Some(value), ..
@@ -1483,6 +1804,87 @@ impl Analyzer<'_> {
                 Some(method.span),
             ));
         };
+        if let Some(field_name) = body.iter().find_map(|statement| {
+            let AstStatement::Expression(expression) = statement else {
+                return None;
+            };
+            let AstExpressionKind::Call {
+                callee,
+                arguments: method_arguments,
+            } = &expression.kind
+            else {
+                return None;
+            };
+            let AstExpressionKind::Member {
+                object: field,
+                name: operation,
+            } = &callee.kind
+            else {
+                return None;
+            };
+            let AstExpressionKind::Name(field) = &field.kind else {
+                return None;
+            };
+            let [argument] = method_arguments.as_slice() else {
+                return None;
+            };
+            let AstExpressionKind::Name(argument_name) = &argument.value.kind else {
+                return None;
+            };
+            (operation == "append" && argument_name == &method.parameters[0].name)
+                .then_some(field.as_str())
+        }) {
+            let Some((field, declaration)) = instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == field_name)
+            else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("class `{}` has no field `{field_name}`", instance.name),
+                    Some(method.span),
+                ));
+            };
+            let Some(element) = self.list_elements.get(&declaration.ty).copied() else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("field `{field_name}` is not a list"),
+                    Some(method.span),
+                ));
+            };
+            let receiver = Expression {
+                id: self.next_id(),
+                type_id: ty,
+                kind: ExpressionKind::Binding(binding),
+                span: object.span,
+            };
+            let list = Expression {
+                id: self.next_id(),
+                type_id: declaration.ty,
+                kind: ExpressionKind::Field {
+                    object: Box::new(receiver),
+                    index: field as u32,
+                },
+                span: object.span,
+            };
+            let storage = self.list_storage_expression(list, expression.span);
+            let storage_type = storage.type_id;
+            let value = self.expression(&arguments[0].value, Some(element))?;
+            let suffix = self.list_runtime_suffix(element, expression.span)?;
+            let symbol = format!("__sev_list_push_{suffix}");
+            let unit = self
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit");
+            return Ok(Some(Statement::Expression(self.runtime_call(
+                &symbol,
+                &[storage_type, element],
+                unit,
+                vec![storage, value],
+                expression.span,
+            ))));
+        }
         let Some((field_name, operator, parameter_name)) = body.iter().find_map(|statement| {
             let severian_ast::Statement::Binding(update) = statement else {
                 return None;
@@ -1569,6 +1971,16 @@ fn synthetic_test_definition(module: &str, ordinal: usize) -> DefId {
         module: severian_universal::DeclarationId::from_path(module).0,
         declaration: severian_universal::DeclarationId::from_path(&format!(
             "{module}.test.{ordinal}"
+        )),
+    }
+}
+
+fn synthetic_runtime_definition(symbol: &str) -> DefId {
+    DefId {
+        package: 0,
+        module: severian_universal::DeclarationId::from_path("severian.runtime").0,
+        declaration: severian_universal::DeclarationId::from_path(&format!(
+            "severian.runtime.{symbol}"
         )),
     }
 }

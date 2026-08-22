@@ -108,6 +108,26 @@ fn boxed_generic_classes_lower_to_a_native_executable() {
 }
 
 #[test]
+fn generic_stack_with_list_storage_lowers_to_a_native_executable() {
+    let root = temporary("stack-generic");
+    let source = root.join("stack.sev");
+    fs::write(
+        &source,
+        "class Stack[T]:\n    values: list[T]\n    def Stack():\n        values := []\n    def push(value: T):\n        values.append(value)\n    def pop() -> T | None:\n        if size(values) == 0:\n            return None\n        return values.pop()\ndef main():\n    ints := Stack[int]()\n    ints.push(10)\n    ints.push(20)\n    strings := Stack[string]()\n    strings.push(\"a\")\n    strings.push(\"b\")\n    print(ints.pop())\n    print(strings.pop())\n",
+    )
+    .unwrap();
+    let output = sev().args(["run"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"20\nb\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn build_emits_but_does_not_execute_and_check_emits_nothing() {
     let root = temporary("build");
     let source = root.join("hello.sev");
