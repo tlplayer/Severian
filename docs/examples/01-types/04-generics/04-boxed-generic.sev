@@ -11,9 +11,11 @@ class Box[T]:
 def main():
     ints := Box[int](10)
     floats := Box[f64](2.5)
+    strings := Box("Hello,")
 
     ints.addition(20)
     floats.addition(4.5)
-
+    strings.addition("World!")
     print(ints.value)
     print(floats.value)
+    print(strings.vale())
