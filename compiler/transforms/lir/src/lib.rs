@@ -18,6 +18,7 @@ pub enum LoweredType {
     None,
     Unit,
     Arguments,
+    Aggregate(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -97,6 +98,22 @@ pub enum Operation {
         right: ValueId,
         result: ValueId,
     },
+    Aggregate {
+        class: u32,
+        fields: Vec<ValueId>,
+        result: ValueId,
+    },
+    FieldGet {
+        object: ValueId,
+        field: u32,
+        result: ValueId,
+    },
+    FieldSet {
+        object: ValueId,
+        field: u32,
+        value: ValueId,
+        result: ValueId,
+    },
     Call {
         function: FunctionId,
         arguments: Vec<ValueId>,
@@ -137,6 +154,20 @@ pub struct Module {
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
     pub traits: Vec<TraitDeclaration>,
+    pub classes: Vec<ClassDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassFieldDeclaration {
+    pub name: String,
+    pub ty: LoweredType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDeclaration {
+    pub id: u32,
+    pub name: String,
+    pub fields: Vec<ClassFieldDeclaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

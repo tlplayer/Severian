@@ -103,7 +103,20 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         })
         .collect::<Vec<_>>();
 
-    let mut output = String::from("module {\n");
+    let mut output = String::new();
+    for declaration in &module.classes {
+        let fields = declaration
+            .fields
+            .iter()
+            .map(|field| mlir_type(field.ty))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        output.push_str(&format!(
+            "!sev_class_{} = !llvm.struct<({fields})>\n",
+            declaration.id
+        ));
+    }
+    output.push_str("module {\n");
     for declaration in &module.traits {
         output.push_str(&format!(
             "  // severian trait @{} [{:032x}:{:032x}:{:032x}] (compile-time only)\n",
@@ -296,6 +309,63 @@ fn render_block(
                 output.push_str(&format!(
                     "{indentation}%v{} = {instruction} %v{}, %v{} : {spelling}\n",
                     result.0, left.0, right.0
+                ));
+            }
+            Operation::Aggregate {
+                class,
+                fields,
+                result,
+            } => {
+                let ty = mlir_type(LoweredType::Aggregate(*class))?;
+                if fields.is_empty() {
+                    output.push_str(&format!(
+                        "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
+                        result.0
+                    ));
+                    continue;
+                }
+                output.push_str(&format!(
+                    "{indentation}%v{}_aggregate_0 = llvm.mlir.undef : {ty}\n",
+                    result.0
+                ));
+                for (index, field) in fields.iter().enumerate() {
+                    let input = if index == 0 {
+                        format!("%v{}_aggregate_0", result.0)
+                    } else {
+                        format!("%v{}_aggregate_{index}", result.0)
+                    };
+                    let result_name = if index + 1 == fields.len() {
+                        format!("%v{}", result.0)
+                    } else {
+                        format!("%v{}_aggregate_{}", result.0, index + 1)
+                    };
+                    output.push_str(&format!(
+                        "{indentation}{result_name} = llvm.insertvalue %v{}, {input}[{index}] : {ty}\n",
+                        field.0
+                    ));
+                }
+            }
+            Operation::FieldGet {
+                object,
+                field,
+                result,
+            } => {
+                let ty = mlir_type(value_type(module, *object)?)?;
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.extractvalue %v{}[{field}] : {ty}\n",
+                    result.0, object.0
+                ));
+            }
+            Operation::FieldSet {
+                object,
+                field,
+                value,
+                result,
+            } => {
+                let ty = mlir_type(value_type(module, *object)?)?;
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.insertvalue %v{}, %v{}[{field}] : {ty}\n",
+                    result.0, value.0, object.0
                 ));
             }
             Operation::Call {
@@ -654,6 +724,7 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
         } => "bf16".into(),
         LoweredType::Boolean => "i1".into(),
         LoweredType::String => "!llvm.ptr".into(),
+        LoweredType::Aggregate(id) => format!("!sev_class_{id}"),
         unsupported => return Err(MlirError::UnsupportedType(unsupported)),
     })
 }
@@ -842,6 +913,7 @@ mod tests {
             functions: vec![],
             entry: None,
             traits: vec![],
+            classes: vec![],
         })
         .unwrap();
         let artifact = verify_artifact(
@@ -889,6 +961,7 @@ mod tests {
             functions: vec![],
             entry: None,
             traits: vec![],
+            classes: vec![],
         })
         .unwrap();
 

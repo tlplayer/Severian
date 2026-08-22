@@ -25,6 +25,23 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
     for hir_module in &hir.modules {
         builder
             .module
+            .classes
+            .extend(hir_module.classes.iter().map(|declaration| {
+                crate::ClassDeclaration {
+                    id: declaration.id,
+                    name: declaration.name.clone(),
+                    fields: declaration
+                        .fields
+                        .iter()
+                        .map(|field| crate::ClassFieldDeclaration {
+                            name: field.name.clone(),
+                            ty: field.ty,
+                        })
+                        .collect(),
+                }
+            }));
+        builder
+            .module
             .traits
             .extend(hir_module.traits.iter().map(|declaration| {
                 crate::TraitDeclaration {
@@ -149,6 +166,7 @@ impl Builder {
         block: &mut Block,
     ) {
         let span_start = match statement {
+            Statement::FieldUpdate { value, .. } => Some(value.span.start),
             Statement::Binding(id) => module
                 .bindings
                 .iter()
@@ -176,6 +194,45 @@ impl Builder {
             });
         }
         match statement {
+            Statement::FieldUpdate {
+                binding,
+                field,
+                operator,
+                value,
+            } => {
+                let object = self.bindings[binding];
+                let object_type = self.module.values[object.0 as usize].type_id;
+                let field_type = self
+                    .module
+                    .classes
+                    .iter()
+                    .find(|class| class.id == object_type)
+                    .and_then(|class| class.fields.get(*field as usize))
+                    .expect("typed field update references class field")
+                    .ty;
+                let old_field = self.value(field_type);
+                block.operations.push(Operation::FieldGet {
+                    object,
+                    field: *field,
+                    result: old_field,
+                });
+                let value = self.expression(value, block);
+                let updated_field = self.value(field_type);
+                block.operations.push(Operation::Binary {
+                    operator: *operator,
+                    left: old_field,
+                    right: value,
+                    result: updated_field,
+                });
+                let updated_object = self.value(object_type);
+                block.operations.push(Operation::FieldSet {
+                    object,
+                    field: *field,
+                    value: updated_field,
+                    result: updated_object,
+                });
+                self.bindings.insert(*binding, updated_object);
+            }
             Statement::Binding(id) => {
                 let binding = module
                     .bindings
@@ -309,6 +366,29 @@ impl Builder {
 
     fn expression(&mut self, expression: &Expression, block: &mut Block) -> ValueId {
         match &expression.kind {
+            ExpressionKind::Aggregate { class, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| self.expression(field, block))
+                    .collect();
+                let result = self.value(expression.type_id);
+                block.operations.push(Operation::Aggregate {
+                    class: *class,
+                    fields,
+                    result,
+                });
+                result
+            }
+            ExpressionKind::Field { object, index } => {
+                let object = self.expression(object, block);
+                let result = self.value(expression.type_id);
+                block.operations.push(Operation::FieldGet {
+                    object,
+                    field: *index,
+                    result,
+                });
+                result
+            }
             ExpressionKind::Literal(value) => {
                 let result = self.value(expression.type_id);
                 block.operations.push(Operation::Constant {

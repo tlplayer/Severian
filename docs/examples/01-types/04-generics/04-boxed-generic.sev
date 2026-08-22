@@ -1,19 +1,19 @@
 class Box[T]:
     value: T
 
-    def get() -> T:
+    def value() -> T:
         return value
 
-    def set(value: T):
-        self.value = value
+    def addition(addition: T):
+        value += addition
 
 
 def main():
     ints := Box[int](10)
     floats := Box[f64](2.5)
 
-    ints.set(20)
-    floats.set(4.5)
+    ints.addition(20)
+    floats.addition(4.5)
 
-    print(ints.get())
-    print(floats.get())
+    print(ints.value)
+    print(floats.value)

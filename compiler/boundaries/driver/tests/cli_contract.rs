@@ -88,6 +88,26 @@ fn constrained_generic_method_traits_specialize_to_executable_instances() {
 }
 
 #[test]
+fn boxed_generic_classes_lower_to_a_native_executable() {
+    let root = temporary("boxed-generic");
+    let source = root.join("boxed.sev");
+    fs::write(
+        &source,
+        "class Box[T]:\n    value: T\n    def value() -> T:\n        return value\n    def addition(addition: T):\n        value += addition\ndef main():\n    ints := Box[int](10)\n    floats := Box[f64](2.5)\n    ints.addition(20)\n    floats.addition(4.5)\n    print(ints.value)\n    print(floats.value)\n",
+    )
+    .unwrap();
+    let output = sev().args(["run"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"30\n7\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn build_emits_but_does_not_execute_and_check_emits_nothing() {
     let root = temporary("build");
     let source = root.join("hello.sev");

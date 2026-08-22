@@ -1063,6 +1063,31 @@ impl Parser<'_> {
                         member_span.end,
                     ),
                 };
+            } else if self.take(&TokenKind::LeftBracket).is_some() {
+                let mut arguments = Vec::new();
+                if !self.at(&TokenKind::RightBracket) {
+                    loop {
+                        arguments.push(self.type_annotation()?);
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                let end = self
+                    .expect(
+                        &TokenKind::RightBracket,
+                        "expected `]` after type arguments",
+                    )?
+                    .span
+                    .end;
+                let span = Span::new(expression.span.source, expression.span.start, end);
+                expression = Expression {
+                    kind: ExpressionKind::TypeApplication {
+                        callee: Box::new(expression),
+                        arguments,
+                    },
+                    span,
+                };
             } else if self.take(&TokenKind::LeftParen).is_some() {
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {

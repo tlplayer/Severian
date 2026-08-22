@@ -56,6 +56,16 @@ fn validate_statement(
     declared: &mut BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match statement {
+        Statement::FieldUpdate { binding, value, .. } => {
+            if !declared.contains(binding) {
+                return Err(Diagnostic::new(
+                    "E000301",
+                    "class value updated before it is available",
+                    Some(value.span),
+                ));
+            }
+            validate_expression(value, declared)
+        }
         Statement::Binding(id) => {
             let binding = bindings
                 .get(id)
@@ -114,6 +124,13 @@ fn validate_expression(
     declared: &BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match &expression.kind {
+        ExpressionKind::Aggregate { fields, .. } => {
+            for field in fields {
+                validate_expression(field, declared)?;
+            }
+            Ok(())
+        }
+        ExpressionKind::Field { object, .. } => validate_expression(object, declared),
         ExpressionKind::Literal(_) | ExpressionKind::Function(_) => Ok(()),
         ExpressionKind::Binding(id) if declared.contains(id) => Ok(()),
         ExpressionKind::Binding(_) => Err(Diagnostic::new(

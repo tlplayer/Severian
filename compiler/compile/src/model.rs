@@ -83,6 +83,7 @@ impl CompilePlan {
             entry: self.source.entry,
             tests: self.source.tests.clone(),
             traits: self.source.traits.clone(),
+            classes: self.source.classes.clone(),
         };
         for function in &self.functions {
             let mut declaration = function.declaration.clone();

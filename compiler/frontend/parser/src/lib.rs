@@ -189,6 +189,28 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_generic_class_construction_and_field_update_methods() {
+        let source = SourceFile::virtual_source(
+            "box.sev",
+            "class Box[T]:\n    value: T\n    def addition(addition: T):\n        value += addition\ndef main():\n    boxed := Box[int](10)\n    boxed.addition(20)\n    print(boxed.value)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(main) = &module.items[1] else {
+            panic!("expected main")
+        };
+        let severian_ast::Statement::Binding(binding) = &main.body.as_ref().unwrap()[0] else {
+            panic!("expected constructed binding")
+        };
+        let severian_ast::ExpressionKind::Call { callee, .. } = &binding.value.kind else {
+            panic!("expected constructor call")
+        };
+        assert!(matches!(
+            callee.kind,
+            severian_ast::ExpressionKind::TypeApplication { .. }
+        ));
+    }
+
+    #[test]
     fn trait_free_class_keeps_the_terminal_colon() {
         let source = SourceFile::virtual_source("point.sev", "class Point:\n    x: int\n");
         let module = parse(&scan(&source).unwrap()).unwrap();

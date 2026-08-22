@@ -317,6 +317,24 @@ impl BodyBuilder {
         module: &severian_hir::Module,
     ) {
         match statement {
+            severian_hir::Statement::FieldUpdate {
+                binding,
+                field,
+                operator,
+                value,
+            } => {
+                let mut place = self.bindings[binding].clone();
+                place.projection.push(Projection::Field(*field));
+                let right = Operand::Copy(self.expression(value));
+                self.push(Statement::Assign(
+                    place.clone(),
+                    Rvalue::Binary {
+                        operator: *operator,
+                        left: Operand::Copy(place),
+                        right,
+                    },
+                ));
+            }
             severian_hir::Statement::Binding(id) => {
                 let binding = module
                     .bindings
@@ -431,6 +449,27 @@ impl BodyBuilder {
         let result = Place::local(self.local(expression.type_id, false, false));
         self.push(Statement::StorageLive(result.local));
         match &expression.kind {
+            severian_hir::ExpressionKind::Aggregate { class, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| Operand::Copy(self.expression(field)))
+                    .collect();
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Aggregate {
+                        type_id: *class,
+                        fields,
+                    },
+                ));
+            }
+            severian_hir::ExpressionKind::Field { object, index } => {
+                let mut field = self.expression(object);
+                field.projection.push(Projection::Field(*index));
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Use(Operand::Copy(field)),
+                ));
+            }
             severian_hir::ExpressionKind::Literal(value) => self.push(Statement::Assign(
                 result.clone(),
                 Rvalue::Use(Operand::Constant {

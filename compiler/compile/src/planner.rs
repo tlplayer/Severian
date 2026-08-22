@@ -8,6 +8,11 @@ use severian_universal::{BinaryOperator, CompileRoute, CompilerId, TypeContext};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, CompileError> {
+    let class_types = module
+        .classes
+        .iter()
+        .map(|class| class.id)
+        .collect::<BTreeSet<_>>();
     let values = module
         .values
         .iter()
@@ -20,6 +25,7 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
         &values,
         &module.globals.iter().copied().collect(),
         types,
+        &class_types,
         &mut next_region,
         &mut nested_regions,
     )?;
@@ -38,6 +44,7 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
                             &values,
                             &BTreeSet::new(),
                             types,
+                            &class_types,
                             &mut next_region,
                             &mut nested_regions,
                         )
@@ -59,6 +66,7 @@ fn plan_block(
     values: &BTreeMap<ValueId, Value>,
     retained: &BTreeSet<ValueId>,
     types: &TypeContext,
+    class_types: &BTreeSet<severian_universal::TypeId>,
     next_region: &mut u32,
     nested_regions: &mut Vec<CompileRegion>,
 ) -> Result<PlannedBlock, CompileError> {
@@ -74,6 +82,7 @@ fn plan_block(
             values,
             &nested_retained,
             types,
+            class_types,
             next_region,
             nested_regions,
         )?);
@@ -81,7 +90,7 @@ fn plan_block(
     let routes = operations
         .iter()
         .enumerate()
-        .map(|(index, operation)| operation_route(index, operation, values, types))
+        .map(|(index, operation)| operation_route(index, operation, values, types, class_types))
         .collect::<Result<Vec<_>, _>>()?;
     let mut segments = Vec::new();
     let mut start = 0usize;
@@ -120,6 +129,7 @@ fn rewrite_nested_control_flow(
     values: &BTreeMap<ValueId, Value>,
     retained: &BTreeSet<ValueId>,
     types: &TypeContext,
+    class_types: &BTreeSet<severian_universal::TypeId>,
     next_region: &mut u32,
     nested_regions: &mut Vec<CompileRegion>,
 ) -> Result<Operation, CompileError> {
@@ -135,6 +145,7 @@ fn rewrite_nested_control_flow(
                 values,
                 retained,
                 types,
+                class_types,
                 next_region,
                 nested_regions,
             )?,
@@ -143,6 +154,7 @@ fn rewrite_nested_control_flow(
                 values,
                 retained,
                 types,
+                class_types,
                 next_region,
                 nested_regions,
             )?,
@@ -158,6 +170,7 @@ fn rewrite_nested_control_flow(
                         values,
                         retained,
                         types,
+                        class_types,
                         next_region,
                         nested_regions,
                     )?;
@@ -174,10 +187,19 @@ fn plan_nested_block(
     values: &BTreeMap<ValueId, Value>,
     retained: &BTreeSet<ValueId>,
     types: &TypeContext,
+    class_types: &BTreeSet<severian_universal::TypeId>,
     next_region: &mut u32,
     nested_regions: &mut Vec<CompileRegion>,
 ) -> Result<Block, CompileError> {
-    let planned = plan_block(block, values, retained, types, next_region, nested_regions)?;
+    let planned = plan_block(
+        block,
+        values,
+        retained,
+        types,
+        class_types,
+        next_region,
+        nested_regions,
+    )?;
     nested_regions.extend(planned.segments.iter().filter_map(|segment| match segment {
         PlanSegment::Compiler(region) => Some(region.clone()),
         PlanSegment::Standard(_) => None,
@@ -190,6 +212,7 @@ fn operation_route(
     operation: &Operation,
     values: &BTreeMap<ValueId, Value>,
     types: &TypeContext,
+    class_types: &BTreeSet<severian_universal::TypeId>,
 ) -> Result<CompileRoute, CompileError> {
     if matches!(operation, Operation::CompiledRegionCall { .. }) {
         return Err(CompileError::PlannerGeneratedOperation(index));
@@ -212,6 +235,9 @@ fn operation_route(
         let value = values
             .get(&value_id)
             .ok_or(CompileError::MissingValue(value_id.0))?;
+        if class_types.contains(&value.type_id) {
+            continue;
+        }
         match types
             .compile_route(value.type_id)
             .map_err(|error| CompileError::Type(value.type_id, error.to_string()))?
@@ -304,6 +330,9 @@ fn value(values: &BTreeMap<ValueId, Value>, id: ValueId) -> Result<Value, Compil
 fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
         Operation::Coverage { .. } | Operation::Constant { .. } => Vec::new(),
+        Operation::Aggregate { fields, .. } => fields.clone(),
+        Operation::FieldGet { object, .. } => vec![*object],
+        Operation::FieldSet { object, value, .. } => vec![*object, *value],
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
         Operation::Call { arguments, .. } => arguments.clone(),
@@ -337,6 +366,9 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Constant { result, .. }
         | Operation::Unary { result, .. }
         | Operation::Binary { result, .. }
+        | Operation::Aggregate { result, .. }
+        | Operation::FieldGet { result, .. }
+        | Operation::FieldSet { result, .. }
         | Operation::Call { result, .. } => vec![*result],
         Operation::Return { .. } | Operation::Assert { .. } => Vec::new(),
         Operation::If {

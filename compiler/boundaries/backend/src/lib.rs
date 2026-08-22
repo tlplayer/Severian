@@ -275,6 +275,13 @@ fn render_block(
                     &format!("v{} {} v{}", left.0, c_binary(*operator)?, right.0),
                 )?;
             }
+            Operation::Aggregate { .. }
+            | Operation::FieldGet { .. }
+            | Operation::FieldSet { .. } => {
+                return Err(BackendError::UnsupportedOperation(
+                    "aggregate classes require the MLIR backend".into(),
+                ));
+            }
             Operation::Call {
                 function: target,
                 arguments,
@@ -755,6 +762,7 @@ mod tests {
             functions: vec![],
             entry: None,
             traits: vec![],
+            classes: vec![],
         };
         assert!(render_c(&module).unwrap().contains("int32_t v0 = 10;"));
     }

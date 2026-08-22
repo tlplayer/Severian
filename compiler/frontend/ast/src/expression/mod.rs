@@ -1,3 +1,4 @@
+use crate::TypeAnnotation;
 use severian_source::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +60,10 @@ pub enum ExpressionKind {
     Member {
         object: Box<Expression>,
         name: String,
+    },
+    TypeApplication {
+        callee: Box<Expression>,
+        arguments: Vec<TypeAnnotation>,
     },
     Call {
         callee: Box<Expression>,

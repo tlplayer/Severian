@@ -137,6 +137,19 @@ pub struct TypeDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassFieldDeclaration {
+    pub name: String,
+    pub ty: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDeclaration {
+    pub id: TypeId,
+    pub name: String,
+    pub fields: Vec<ClassFieldDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitMethodDeclaration {
     pub name: String,
     pub parameters: Vec<TraitType>,
@@ -171,6 +184,7 @@ pub struct Module {
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
     pub types: Vec<TypeDeclaration>,
+    pub classes: Vec<ClassDeclaration>,
     /// Compile-time capability contracts. These survive lowering so every
     /// stage can validate its input, then are erased before MLIR emission.
     pub traits: Vec<TraitDeclaration>,

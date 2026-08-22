@@ -22,6 +22,22 @@ pub enum Operation {
         right: ValueId,
         result: ValueId,
     },
+    Aggregate {
+        class: severian_universal::TypeId,
+        fields: Vec<ValueId>,
+        result: ValueId,
+    },
+    FieldGet {
+        object: ValueId,
+        field: u32,
+        result: ValueId,
+    },
+    FieldSet {
+        object: ValueId,
+        field: u32,
+        value: ValueId,
+        result: ValueId,
+    },
     Call {
         function: severian_hir::FunctionId,
         arguments: Vec<ValueId>,

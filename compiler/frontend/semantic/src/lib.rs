@@ -18,7 +18,8 @@ use severian_ast::{
 };
 use severian_diagnostics::Diagnostic;
 use severian_hir::{
-    Binding, BindingId, Block, BoundaryType, CallType, Expression, ExpressionKind,
+    Binding, BindingId, Block, BoundaryType, CallType, ClassDeclaration as HirClassDeclaration,
+    ClassFieldDeclaration as HirClassFieldDeclaration, Expression, ExpressionKind,
     FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, Statement,
     TraitDeclaration as HirTraitDeclaration, TraitMethodDeclaration as HirTraitMethodDeclaration,
     TraitType as HirTraitType, TypeId,
@@ -80,6 +81,7 @@ pub(crate) fn analyze_with_package_functions(
     test_function_ids: &[FunctionId],
 ) -> Result<Program, Diagnostic> {
     validate_trait_implementations(ast)?;
+    validate_class_declarations(ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -89,8 +91,22 @@ pub(crate) fn analyze_with_package_functions(
         function_substitutions: BTreeMap::new(),
         function_specificity: BTreeMap::new(),
         signatures: BTreeMap::new(),
+        classes: ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Class(declaration) => {
+                    Some((declaration.name.clone(), declaration.clone()))
+                }
+                _ => None,
+            })
+            .collect(),
+        class_instances: BTreeMap::new(),
+        class_instances_by_type: BTreeMap::new(),
+        lowered_classes: Vec::new(),
         next_hir: 0,
         next_binding: 0,
+        next_class_type: u32::MAX,
     };
     for function in visible_functions {
         analyzer
@@ -457,6 +473,7 @@ pub(crate) fn analyze_with_package_functions(
             module.functions[source_function_count + offset].body = Some(body);
         }
     }
+    module.classes = analyzer.lowered_classes.clone();
     Ok(Program {
         modules: vec![module],
     })
@@ -475,6 +492,19 @@ struct Analyzer<'a> {
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     function_specificity: BTreeMap<FunctionId, u8>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
+    classes: BTreeMap<String, severian_ast::ClassDeclaration>,
+    class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
+    class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
+    lowered_classes: Vec<HirClassDeclaration>,
+    next_class_type: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ClassInstance {
+    ty: TypeId,
+    name: String,
+    fields: Vec<HirClassFieldDeclaration>,
+    methods: Vec<severian_ast::FunctionDeclaration>,
 }
 
 #[derive(Debug, Clone)]
@@ -580,9 +610,10 @@ impl Analyzer<'_> {
             AstStatement::Binding(binding) => {
                 Ok(Statement::Binding(self.binding(binding, bindings)?))
             }
-            AstStatement::Expression(expression) => {
-                Ok(Statement::Expression(self.expression(expression, None)?))
-            }
+            AstStatement::Expression(expression) => match self.class_method_update(expression)? {
+                Some(update) => Ok(update),
+                None => Ok(Statement::Expression(self.expression(expression, None)?)),
+            },
             AstStatement::Return { value, span } => {
                 let unit = self
                     .types
@@ -844,12 +875,66 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
-            AstExpressionKind::Member { .. } => Err(Diagnostic::new(
+            AstExpressionKind::Member { object, name } => {
+                let object = self.expression(object, None)?;
+                let Some(instance) = self.class_instances_by_type.get(&object.type_id) else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("type has no field `{name}`"),
+                        Some(ast.span),
+                    ));
+                };
+                let Some((index, field)) = instance
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, field)| field.name == *name)
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("class `{}` has no field `{name}`", instance.name),
+                        Some(ast.span),
+                    ));
+                };
+                let field_type = field.ty;
+                if expected.is_some_and(|expected| !self.types.assignable(field_type, expected)) {
+                    return Err(semantic_error(
+                        "field type does not satisfy the expected type".into(),
+                        ast.span,
+                    ));
+                }
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: field_type,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(object),
+                        index: index as u32,
+                    },
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::TypeApplication { .. } => Err(Diagnostic::new(
                 "E000211",
-                "member access is not implemented yet",
+                "a generic type application must be constructed",
                 Some(ast.span),
             )),
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some((class, type_arguments)) = class_application(callee) {
+                    return self.class_constructor(
+                        class,
+                        type_arguments,
+                        arguments,
+                        expected,
+                        ast.span,
+                    );
+                }
+                if matches!(callee.kind, AstExpressionKind::Member { .. }) {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "class method is unknown or cannot be used as a value",
+                        Some(callee.span),
+                    ));
+                }
                 let Some(name) = callable_path(callee) else {
                     return Err(Diagnostic::new(
                         "E000206",
@@ -1018,6 +1103,232 @@ impl Analyzer<'_> {
             }
         }
     }
+
+    fn class_constructor(
+        &mut self,
+        class: &str,
+        type_arguments: &[TypeAnnotation],
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let instance = self.instantiate_class(class, type_arguments, span)?;
+        if expected.is_some_and(|expected| expected != instance.ty) {
+            return Err(semantic_error(
+                "constructed class does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        if arguments.len() != instance.fields.len() {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!(
+                    "constructor `{class}` expects {} field value(s), received {}",
+                    instance.fields.len(),
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        }
+        let fields = arguments
+            .iter()
+            .zip(&instance.fields)
+            .map(|(argument, field)| self.expression(&argument.value, Some(field.ty)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: instance.ty,
+            kind: ExpressionKind::Aggregate {
+                class: instance.ty,
+                fields,
+            },
+            span,
+        })
+    }
+
+    fn instantiate_class(
+        &mut self,
+        name: &str,
+        arguments: &[TypeAnnotation],
+        span: severian_source::Span,
+    ) -> Result<ClassInstance, Diagnostic> {
+        let Some(declaration) = self.classes.get(name).cloned() else {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("unknown generic class `{name}`"),
+                Some(span),
+            ));
+        };
+        if declaration.type_parameters.len() != arguments.len() {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!(
+                    "class `{name}` expects {} type argument(s), received {}",
+                    declaration.type_parameters.len(),
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        }
+        let concrete = arguments
+            .iter()
+            .map(|argument| resolve_type_annotation(self.types, argument))
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = (name.to_owned(), concrete.clone());
+        if let Some(instance) = self.class_instances.get(&key) {
+            return Ok(instance.clone());
+        }
+        let substitution = declaration
+            .type_parameters
+            .iter()
+            .cloned()
+            .zip(concrete.iter().copied())
+            .collect::<BTreeMap<_, _>>();
+        let fields = declaration
+            .fields
+            .iter()
+            .map(|field| {
+                let ty = field
+                    .annotation
+                    .simple_name()
+                    .and_then(|name| substitution.get(name).copied())
+                    .map(Ok)
+                    .unwrap_or_else(|| resolve_type_annotation(self.types, &field.annotation))?;
+                Ok(HirClassFieldDeclaration {
+                    name: field.name.clone(),
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let ty = TypeId(self.next_class_type);
+        self.next_class_type = self.next_class_type.saturating_sub(1);
+        let instance = ClassInstance {
+            ty,
+            name: name.to_owned(),
+            fields: fields.clone(),
+            methods: declaration.methods.clone(),
+        };
+        self.class_instances.insert(key, instance.clone());
+        self.class_instances_by_type.insert(ty, instance.clone());
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!(
+                "{}[{}]",
+                name,
+                arguments
+                    .iter()
+                    .filter_map(TypeAnnotation::simple_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            fields,
+        });
+        Ok(instance)
+    }
+
+    fn class_method_update(
+        &mut self,
+        expression: &AstExpression,
+    ) -> Result<Option<Statement>, Diagnostic> {
+        let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
+            return Ok(None);
+        };
+        let AstExpressionKind::Member { object, name } = &callee.kind else {
+            return Ok(None);
+        };
+        let AstExpressionKind::Name(receiver) = &object.kind else {
+            return Ok(None);
+        };
+        let Some((binding, ty)) = self.names.get(receiver).copied() else {
+            return Ok(None);
+        };
+        let Some(instance) = self.class_instances_by_type.get(&ty).cloned() else {
+            return Ok(None);
+        };
+        let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("class `{}` has no method `{name}`", instance.name),
+                Some(callee.span),
+            ));
+        };
+        if method.parameters.len() != 1 || arguments.len() != 1 {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("method `{name}` requires exactly one argument"),
+                Some(expression.span),
+            ));
+        }
+        let Some(body) = &method.body else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` has no implementation"),
+                Some(method.span),
+            ));
+        };
+        let Some((field_name, operator, parameter_name)) = body.iter().find_map(|statement| {
+            let severian_ast::Statement::Binding(update) = statement else {
+                return None;
+            };
+            if !update.update {
+                return None;
+            }
+            let AstExpressionKind::Binary {
+                operator,
+                left,
+                right,
+            } = &update.value.kind
+            else {
+                return None;
+            };
+            let (AstExpressionKind::Name(left), AstExpressionKind::Name(right)) =
+                (&left.kind, &right.kind)
+            else {
+                return None;
+            };
+            (left == &update.name).then(|| (update.name.as_str(), *operator, right.as_str()))
+        }) else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` is not a field-update method"),
+                Some(method.span),
+            ));
+        };
+        if parameter_name != method.parameters[0].name {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` update does not use its parameter"),
+                Some(method.span),
+            ));
+        }
+        let Some((field, declaration)) = instance
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.name == field_name)
+        else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("class `{}` has no field `{field_name}`", instance.name),
+                Some(method.span),
+            ));
+        };
+        let value = self.expression(&arguments[0].value, Some(declaration.ty))?;
+        let operator = universal_binary(operator);
+        if !self.types.supports_binary(operator, declaration.ty) {
+            return Err(Diagnostic::new(
+                "E000202",
+                format!("field `{field_name}` does not support this update operator"),
+                Some(method.span),
+            ));
+        }
+        Ok(Some(Statement::FieldUpdate {
+            binding,
+            field: field as u32,
+            operator,
+            value,
+        }))
+    }
 }
 
 fn synthetic_definition(
@@ -1115,6 +1426,36 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
     Ok(())
 }
 
+fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
+    for class in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Class(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        let fields = class
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<BTreeSet<_>>();
+        for method in class.constructors.iter().chain(&class.methods) {
+            if let Some(parameter) = method
+                .parameters
+                .iter()
+                .find(|parameter| fields.contains(parameter.name.as_str()))
+            {
+                return Err(Diagnostic::new(
+                    "E000220",
+                    format!(
+                        "parameter `{}` shadows a field of class `{}`",
+                        parameter.name, class.name
+                    ),
+                    Some(parameter.span),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn same_type_annotation(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
     match (&left.kind, &right.kind) {
         (
@@ -1156,6 +1497,16 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn class_application(expression: &AstExpression) -> Option<(&str, &[TypeAnnotation])> {
+    let AstExpressionKind::TypeApplication { callee, arguments } = &expression.kind else {
+        return None;
+    };
+    let AstExpressionKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    Some((name, arguments))
 }
 
 fn resolve_type_annotation(
@@ -1461,6 +1812,43 @@ mod tests {
             program.modules[0].bindings[1].type_id,
             context.types.resolve_name("int").unwrap()
         );
+    }
+
+    #[test]
+    fn generic_class_instances_keep_distinct_layouts_and_field_updates() {
+        let source = "class Box[T]:\n    value: T\n    def addition(addition: T):\n        value += addition\ndef main():\n    ints := Box[int](10)\n    floats := Box[f64](2.5)\n    ints.addition(20)\n    floats.addition(4.5)\n    observed_int := ints.value\n    observed_float := floats.value\n";
+        let (program, _) = analyze_source(source);
+        let module = &program.modules[0];
+        assert_eq!(module.classes.len(), 2);
+        assert_ne!(module.classes[0].id, module.classes[1].id);
+        let main = module
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        assert_eq!(
+            main.body
+                .as_ref()
+                .unwrap()
+                .statements
+                .iter()
+                .filter(|statement| matches!(statement, Statement::FieldUpdate { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn class_parameters_cannot_shadow_fields() {
+        let source = SourceFile::virtual_source(
+            "shadow.sev",
+            "class Box[T]:\n    value: T\n    def invalid(value: T):\n        pass\n",
+        );
+        let universal = severian_bootstrap::load().unwrap();
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &universal.types).unwrap_err();
+        assert_eq!(error.code, "E000220");
+        assert!(error.message.contains("shadows a field"));
     }
 
     #[test]

@@ -128,6 +128,9 @@ fn validate_generic_expression(
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
         }
+        Expression::TypeApplication { callee, .. } => {
+            validate_generic_expression(callee, names, function, index, types)
+        }
         Expression::Call { callee, arguments } => {
             validate_generic_expression(callee, names, function, index, types)?;
             for argument in arguments {
@@ -767,6 +770,16 @@ fn visit_expression_for_specializations(
                 module,
                 object,
                 None,
+                names,
+                index,
+                specializations,
+            )?;
+        }
+        severian_ast::ExpressionKind::TypeApplication { callee, .. } => {
+            visit_expression_for_specializations(
+                module,
+                callee,
+                expected,
                 names,
                 index,
                 specializations,

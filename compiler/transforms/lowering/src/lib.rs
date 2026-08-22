@@ -24,7 +24,7 @@ pub fn lower(
         .map(|value| {
             Ok(Value {
                 id: ValueId(value.id.0),
-                ty: lower_type(value.type_id, types, target)?,
+                ty: lower_mir_type(value.type_id, mir, types, target)?,
             })
         })
         .collect::<Result<Vec<_>, LoweringError>>()?;
@@ -99,6 +99,27 @@ pub fn lower(
                                         )?)
                                     }
                                 },
+                            })
+                        })
+                        .collect::<Result<Vec<_>, LoweringError>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>, LoweringError>>()?,
+        classes: mir
+            .classes
+            .iter()
+            .enumerate()
+            .map(|(id, declaration)| {
+                Ok(severian_lir::ClassDeclaration {
+                    id: id as u32,
+                    name: declaration.name.clone(),
+                    fields: declaration
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            Ok(severian_lir::ClassFieldDeclaration {
+                                name: field.name.clone(),
+                                ty: lower_mir_type(field.ty, mir, types, target)?,
                             })
                         })
                         .collect::<Result<Vec<_>, LoweringError>>()?,
@@ -205,6 +226,39 @@ fn lower_block(
                     }
                 }
             }
+            MirOperation::Aggregate {
+                class,
+                fields,
+                result,
+            } => LirOperation::Aggregate {
+                class: module
+                    .classes
+                    .iter()
+                    .position(|known| known.id == *class)
+                    .ok_or(LoweringError::NotPrimitive(*class))? as u32,
+                fields: fields.iter().map(|value| ValueId(value.0)).collect(),
+                result: ValueId(result.0),
+            },
+            MirOperation::FieldGet {
+                object,
+                field,
+                result,
+            } => LirOperation::FieldGet {
+                object: ValueId(object.0),
+                field: *field,
+                result: ValueId(result.0),
+            },
+            MirOperation::FieldSet {
+                object,
+                field,
+                value,
+                result,
+            } => LirOperation::FieldSet {
+                object: ValueId(object.0),
+                field: *field,
+                value: ValueId(value.0),
+                result: ValueId(result.0),
+            },
             MirOperation::Call {
                 function,
                 arguments,
@@ -286,6 +340,19 @@ fn mir_value_type(
         .ok_or(LoweringError::UnknownValue(value))
 }
 
+fn lower_mir_type(
+    type_id: TypeId,
+    module: &MirModule,
+    types: &TypeContext,
+    target: &TargetSpec,
+) -> Result<LoweredType, LoweringError> {
+    if let Some(id) = module.classes.iter().position(|class| class.id == type_id) {
+        Ok(LoweredType::Aggregate(id as u32))
+    } else {
+        lower_type(type_id, types, target)
+    }
+}
+
 fn new_value(values: &mut Vec<Value>, ty: LoweredType) -> ValueId {
     let id = ValueId(values.len() as u32);
     values.push(Value { id, ty });
@@ -337,6 +404,13 @@ fn insert_owned_string_releases(
 
 fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
     match operation {
+        LirOperation::Aggregate { fields, .. } => fields.contains(&value),
+        LirOperation::FieldGet { object, .. } => *object == value,
+        LirOperation::FieldSet {
+            object,
+            value: field_value,
+            ..
+        } => *object == value || *field_value == value,
         LirOperation::Unary { operand, .. } => *operand == value,
         LirOperation::Binary { left, right, .. } => *left == value || *right == value,
         LirOperation::Call { arguments, .. } | LirOperation::RuntimeCall { arguments, .. } => {

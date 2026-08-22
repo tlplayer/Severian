@@ -39,6 +39,20 @@ pub struct Module {
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
     pub traits: Vec<TraitDeclaration>,
+    pub classes: Vec<ClassDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassFieldDeclaration {
+    pub name: String,
+    pub ty: severian_universal::TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDeclaration {
+    pub id: severian_universal::TypeId,
+    pub name: String,
+    pub fields: Vec<ClassFieldDeclaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

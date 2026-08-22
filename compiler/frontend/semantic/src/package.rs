@@ -779,6 +779,10 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
     for statement in &mut block.statements {
         match statement {
             Statement::Binding(binding) => binding.0 += offset,
+            Statement::FieldUpdate { binding, value, .. } => {
+                binding.0 += offset;
+                remap_expression_bindings(value, offset);
+            }
             Statement::Expression(expression) | Statement::Return(Some(expression)) => {
                 remap_expression_bindings(expression, offset)
             }
@@ -816,6 +820,12 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
 fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
     match &mut expression.kind {
         ExpressionKind::Binding(binding) => binding.0 += offset,
+        ExpressionKind::Aggregate { fields, .. } => {
+            for field in fields {
+                remap_expression_bindings(field, offset);
+            }
+        }
+        ExpressionKind::Field { object, .. } => remap_expression_bindings(object, offset),
         ExpressionKind::Convert { operand, .. } => {
             remap_expression_bindings(operand, offset);
         }

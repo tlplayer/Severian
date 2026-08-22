@@ -15,6 +15,14 @@ pub enum ExpressionKind {
     Literal(LiteralValue),
     Binding(BindingId),
     Function(DefId),
+    Aggregate {
+        class: TypeId,
+        fields: Vec<Expression>,
+    },
+    Field {
+        object: Box<Expression>,
+        index: u32,
+    },
     Call {
         callee: Callee,
         arguments: Vec<Expression>,
