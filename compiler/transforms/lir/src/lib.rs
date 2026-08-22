@@ -136,6 +136,28 @@ pub struct Module {
     pub initializer: Block,
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
+    pub traits: Vec<TraitDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitMethodDeclaration {
+    pub name: String,
+    pub parameters: Vec<LoweredType>,
+    pub result: LoweredType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDeclaration {
+    pub id: TraitId,
+    pub name: String,
+    pub methods: Vec<TraitMethodDeclaration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TraitId {
+    pub package: u128,
+    pub module: u128,
+    pub declaration: u128,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

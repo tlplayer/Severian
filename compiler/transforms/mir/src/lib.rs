@@ -38,6 +38,21 @@ pub struct Module {
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
+    pub traits: Vec<TraitDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitMethodDeclaration {
+    pub name: String,
+    pub parameters: Vec<severian_universal::TypeId>,
+    pub result: severian_universal::TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDeclaration {
+    pub definition: severian_universal::DefId,
+    pub name: String,
+    pub methods: Vec<TraitMethodDeclaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -104,6 +104,30 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         .collect::<Vec<_>>();
 
     let mut output = String::from("module {\n");
+    for declaration in &module.traits {
+        output.push_str(&format!(
+            "  // severian trait @{} [{:032x}:{:032x}:{:032x}] (compile-time only)\n",
+            declaration.name,
+            declaration.id.package,
+            declaration.id.module,
+            declaration.id.declaration
+        ));
+        for method in &declaration.methods {
+            let parameters = method
+                .parameters
+                .iter()
+                .copied()
+                .map(mlir_type)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            output.push_str(&format!(
+                "  //   def @{}({}) -> {}\n",
+                method.name,
+                parameters,
+                mlir_type(method.result)?
+            ));
+        }
+    }
     for (symbol, (inputs, result)) in runtime_signatures {
         let inputs = inputs
             .into_iter()
@@ -810,6 +834,7 @@ mod tests {
             },
             functions: vec![],
             entry: None,
+            traits: vec![],
         })
         .unwrap();
         let artifact = verify_artifact(
@@ -856,6 +881,7 @@ mod tests {
             },
             functions: vec![],
             entry: None,
+            traits: vec![],
         })
         .unwrap();
 

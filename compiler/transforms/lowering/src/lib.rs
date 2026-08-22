@@ -59,6 +59,35 @@ pub fn lower(
         initializer,
         functions,
         entry: mir.entry.map(|entry| FunctionId(entry.0)),
+        traits: mir
+            .traits
+            .iter()
+            .map(|declaration| {
+                Ok(severian_lir::TraitDeclaration {
+                    id: severian_lir::TraitId {
+                        package: declaration.definition.package,
+                        module: declaration.definition.module,
+                        declaration: declaration.definition.declaration.0,
+                    },
+                    name: declaration.name.clone(),
+                    methods: declaration
+                        .methods
+                        .iter()
+                        .map(|method| {
+                            Ok(severian_lir::TraitMethodDeclaration {
+                                name: method.name.clone(),
+                                parameters: method
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| lower_type(*parameter, types, target))
+                                    .collect::<Result<Vec<_>, _>>()?,
+                                result: lower_type(method.result, types, target)?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, LoweringError>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>, LoweringError>>()?,
     })
 }
 

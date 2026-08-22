@@ -136,6 +136,20 @@ pub struct TypeDeclaration {
     pub interface: Option<InterfaceId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitMethodDeclaration {
+    pub name: String,
+    pub parameters: Vec<TypeId>,
+    pub result: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDeclaration {
+    pub definition: DefId,
+    pub name: String,
+    pub methods: Vec<TraitMethodDeclaration>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Program {
     pub modules: Vec<Module>,
@@ -151,4 +165,7 @@ pub struct Module {
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
     pub types: Vec<TypeDeclaration>,
+    /// Compile-time capability contracts. These survive lowering so every
+    /// stage can validate its input, then are erased before MLIR emission.
+    pub traits: Vec<TraitDeclaration>,
 }

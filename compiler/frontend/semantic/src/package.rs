@@ -35,7 +35,10 @@ pub struct FunctionDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitDecl {
     pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
     pub bases: Vec<TypeAnnotation>,
+    pub properties: Vec<severian_ast::PropertyDeclaration>,
+    pub methods: Vec<severian_ast::FunctionDeclaration>,
     pub operators: Vec<severian_ast::OperatorDeclaration>,
 }
 
@@ -450,9 +453,19 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     &declaration.name,
                     DefKind::Trait(TraitDecl {
                         type_parameters: declaration.type_parameters.clone(),
+                        constraints: declaration.constraints.clone(),
                         bases: declaration.bases.clone(),
+                        properties: declaration.properties.clone(),
+                        methods: declaration.methods.clone(),
                         operators: declaration.operators.clone(),
                     }),
+                ),
+                Item::Class(declaration) => item_identity(
+                    module.package,
+                    module.id,
+                    "class",
+                    &declaration.name,
+                    DefKind::Type,
                 ),
                 Item::Binding(binding) if !binding.update => item_identity(
                     module.package,

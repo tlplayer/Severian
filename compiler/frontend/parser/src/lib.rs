@@ -151,6 +151,59 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_canonical_trait_methods_and_composed_traits() {
+        let source = SourceFile::virtual_source(
+            "drawable.sev",
+            "trait Named:\n    def name() -> string\n\ntrait Drawable:\n    Named\n    def draw()\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(drawable) = &module.items[1] else {
+            panic!("expected Drawable trait")
+        };
+        assert_eq!(drawable.bases[0].simple_name(), Some("Named"));
+        assert_eq!(drawable.methods[0].name, "draw");
+        assert!(drawable.methods[0].body.is_none());
+    }
+
+    #[test]
+    fn rejects_trait_method_shorthand() {
+        let source = SourceFile::virtual_source("invalid.sev", "trait Drawable:\n    draw()\n");
+        assert!(parse(&scan(&source).unwrap()).is_err());
+    }
+
+    #[test]
+    fn parses_class_fields_constructors_methods_and_traits() {
+        let source = SourceFile::virtual_source(
+            "point.sev",
+            "class Point[T]: Drawable[T] + Copy\n    x: T\n    y: T = 0\n\n    def Point(x: T, y: T):\n        pass\n\n    def draw():\n        pass\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Class(point) = &module.items[0] else {
+            panic!("expected Point class")
+        };
+        assert_eq!(point.type_parameters, ["T"]);
+        assert_eq!(point.traits.len(), 2);
+        assert_eq!(point.fields.len(), 2);
+        assert_eq!(point.constructors.len(), 1);
+        assert_eq!(point.methods.len(), 1);
+    }
+
+    #[test]
+    fn trait_free_class_keeps_the_terminal_colon() {
+        let source = SourceFile::virtual_source("point.sev", "class Point:\n    x: int\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert!(matches!(module.items[0], severian_ast::Item::Class(_)));
+    }
+
+    #[test]
+    fn implemented_trait_header_rejects_a_terminal_colon() {
+        let source =
+            SourceFile::virtual_source("invalid.sev", "class Point: Drawable:\n    x: int\n");
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert!(error.message.contains("do not take a trailing `:`"));
+    }
+
+    #[test]
     fn one_recursive_type_parser_serves_every_annotation_position() {
         let source = SourceFile::virtual_source(
             "types.sev",

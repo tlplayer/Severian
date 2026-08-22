@@ -195,6 +195,20 @@ pub struct TraitDeclaration {
     pub constraints: Vec<GenericConstraint>,
     pub bases: Vec<TypeAnnotation>,
     pub properties: Vec<PropertyDeclaration>,
+    pub methods: Vec<FunctionDeclaration>,
     pub operators: Vec<OperatorDeclaration>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDeclaration {
+    pub decorators: Vec<Decorator>,
+    pub name: String,
+    pub type_parameters: Vec<String>,
+    pub constraints: Vec<GenericConstraint>,
+    pub traits: Vec<TypeAnnotation>,
+    pub fields: Vec<PropertyDeclaration>,
+    pub constructors: Vec<FunctionDeclaration>,
+    pub methods: Vec<FunctionDeclaration>,
     pub span: Span,
 }

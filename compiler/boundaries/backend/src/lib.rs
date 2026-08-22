@@ -754,6 +754,7 @@ mod tests {
             },
             functions: vec![],
             entry: None,
+            traits: vec![],
         };
         assert!(render_c(&module).unwrap().contains("int32_t v0 = 10;"));
     }

@@ -23,6 +23,21 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
     builder.module.initializer_cfg = initializer_cfg;
     let mut global_values = Vec::new();
     for hir_module in &hir.modules {
+        builder.module.traits.extend(hir_module.traits.iter().map(|declaration| {
+            crate::TraitDeclaration {
+                definition: declaration.definition,
+                name: declaration.name.clone(),
+                methods: declaration
+                    .methods
+                    .iter()
+                    .map(|method| crate::TraitMethodDeclaration {
+                        name: method.name.clone(),
+                        parameters: method.parameters.clone(),
+                        result: method.result,
+                    })
+                    .collect(),
+            }
+        }));
         if hir_module.entry.is_some() {
             builder.module.entry = hir_module.entry;
         }

@@ -20,6 +20,7 @@ use severian_diagnostics::Diagnostic;
 use severian_hir::{
     Binding, BindingId, Block, BoundaryType, CallType, Expression, ExpressionKind,
     FunctionDeclaration, FunctionId, FunctionParameter, HirId, Module, Program, Statement, TypeId,
+    TraitDeclaration as HirTraitDeclaration, TraitMethodDeclaration as HirTraitMethodDeclaration,
 };
 use severian_universal::{
     BinaryOperator, LiteralValue, TypeConstraint, TypeContext, UnaryOperator,
@@ -77,6 +78,7 @@ pub(crate) fn analyze_with_package_functions(
     own_function_ids: &[FunctionId],
     test_function_ids: &[FunctionId],
 ) -> Result<Program, Diagnostic> {
+    validate_trait_implementations(ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -122,6 +124,32 @@ pub(crate) fn analyze_with_package_functions(
             .insert(function.id, function.specificity);
     }
     let mut module = Module::default();
+
+    for declaration in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        let methods = declaration
+            .methods
+            .iter()
+            .map(|method| {
+                Ok(HirTraitMethodDeclaration {
+                    name: method.name.clone(),
+                    parameters: method
+                        .parameters
+                        .iter()
+                        .map(|parameter| resolve_type_annotation(types, &parameter.annotation))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    result: resolve_type_annotation(types, &method.result)?,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        module.traits.push(HirTraitDeclaration {
+            definition: synthetic_trait_definition(context.module_name, &declaration.name),
+            name: declaration.name.clone(),
+            methods,
+        });
+    }
 
     // Function identities and signatures are registered before executable
     // statements are analyzed. Bodies remain ordinary analyzed blocks.
@@ -1009,6 +1037,113 @@ fn synthetic_test_definition(module: &str, ordinal: usize) -> DefId {
         declaration: severian_universal::DeclarationId::from_path(&format!(
             "{module}.test.{ordinal}"
         )),
+    }
+}
+
+fn synthetic_trait_definition(module: &str, name: &str) -> DefId {
+    DefId {
+        package: 0,
+        module: severian_universal::DeclarationId::from_path(module).0,
+        declaration: severian_universal::DeclarationId::from_path(&format!(
+            "{module}.trait.{name}"
+        )),
+    }
+}
+
+fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
+    let traits = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Trait(declaration) => {
+                Some((declaration.name.as_str(), declaration))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for class in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Class(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        for implemented in &class.traits {
+            let Some((trait_name, _)) = implemented.named_parts() else {
+                continue;
+            };
+            let Some(contract) = traits.get(trait_name) else {
+                continue;
+            };
+            for required in &contract.methods {
+                let Some(provided) = class
+                    .methods
+                    .iter()
+                    .find(|method| method.name == required.name)
+                else {
+                    return Err(Diagnostic::new(
+                        "E000218",
+                        format!(
+                            "class `{}` does not implement required method `{}.{}`",
+                            class.name, trait_name, required.name
+                        ),
+                        Some(class.span),
+                    ));
+                };
+                let same_parameters = required.parameters.len() == provided.parameters.len()
+                    && required
+                        .parameters
+                        .iter()
+                        .zip(&provided.parameters)
+                        .all(|(required, provided)| {
+                            same_type_annotation(&required.annotation, &provided.annotation)
+                        });
+                if !same_parameters
+                    || !same_type_annotation(&required.result, &provided.result)
+                {
+                    return Err(Diagnostic::new(
+                        "E000218",
+                        format!(
+                            "method `{}.{}` does not match trait `{}`",
+                            class.name, provided.name, trait_name
+                        ),
+                        Some(provided.span),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn same_type_annotation(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
+    match (&left.kind, &right.kind) {
+        (
+            severian_ast::TypeAnnotationKind::Named {
+                name: left_name,
+                arguments: left_arguments,
+            },
+            severian_ast::TypeAnnotationKind::Named {
+                name: right_name,
+                arguments: right_arguments,
+            },
+        ) => {
+            left_name == right_name
+                && left_arguments.len() == right_arguments.len()
+                && left_arguments
+                    .iter()
+                    .zip(right_arguments)
+                    .all(|(left, right)| same_type_annotation(left, right))
+        }
+        (
+            severian_ast::TypeAnnotationKind::Union(left),
+            severian_ast::TypeAnnotationKind::Union(right),
+        ) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| same_type_annotation(left, right))
+        }
+        _ => false,
     }
 }
 

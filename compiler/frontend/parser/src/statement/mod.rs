@@ -1,6 +1,6 @@
 use severian_ast::{
-    BinaryOperator, Binding, CallArgument, CompilerExpectation, CompilerTestCase, Decorator,
-    DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration,
+    BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
+    Decorator, DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration,
     FunctionParameter, GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal,
     MatchCase, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
     Statement, TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
@@ -33,6 +33,12 @@ impl Parser<'_> {
                 module
                     .items
                     .push(Item::Trait(self.trait_declaration(decorators)?));
+                self.separators();
+                continue;
+            } else if self.at_identifier("class") {
+                module
+                    .items
+                    .push(Item::Class(self.class_declaration(decorators)?));
                 self.separators();
                 continue;
             } else if self.at_identifier("def") {
@@ -563,19 +569,38 @@ impl Parser<'_> {
         while self.take(&TokenKind::Newline).is_some() {}
         self.expect(&TokenKind::Indent, "expected an indented trait body")?;
         let mut properties = Vec::new();
+        let mut methods = Vec::new();
         let mut operators = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            if self.at_identifier("property") {
+            let mut member_has_body = false;
+            let member_decorators = if self.at(&TokenKind::At) {
+                self.decorators()?
+            } else {
+                Vec::new()
+            };
+            if self.at_identifier("def") {
+                let method = self.function_declaration(member_decorators)?;
+                member_has_body = method.body.is_some();
+                methods.push(method);
+            } else if !member_decorators.is_empty() {
+                return Err(self.error("expected `def` after trait method decorator"));
+            } else if self.at_identifier("property") {
                 properties.push(self.property()?);
             } else if self.at_identifier("operator") {
                 operators.push(self.operator()?);
             } else if self.at_identifier("pass") {
                 self.next();
+            } else if self.looks_like_member_property() {
+                properties.push(self.member_property()?);
+            } else if matches!(self.peek().kind, TokenKind::Identifier(_)) {
+                bases.push(self.type_annotation()?);
             } else {
-                return Err(self.error("expected `property`, `operator`, or `pass` in trait body"));
+                return Err(self.error(
+                    "expected a property, `def`, `operator`, composed trait, or `pass` in trait body",
+                ));
             }
-            if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+            if !member_has_body && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
                 return Err(self.error("expected a newline after trait member"));
             }
             self.separators();
@@ -590,7 +615,93 @@ impl Parser<'_> {
             constraints,
             bases,
             properties,
+            methods,
             operators,
+            span: Span::new(start.source, start.start, end.end),
+        })
+    }
+
+    fn class_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<ClassDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, _) = self.identifier("expected a class name")?;
+        let (type_parameters, mut constraints) = self.type_parameters()?;
+        constraints.extend(self.declaration_constraints()?);
+        self.expect(&TokenKind::Colon, "expected `:` after class name")?;
+
+        let mut traits = Vec::new();
+        if !self.at(&TokenKind::Newline) {
+            loop {
+                traits.push(self.type_annotation()?);
+                if self.take(&TokenKind::Plus).is_none() {
+                    break;
+                }
+            }
+            constraints.extend(self.declaration_constraints()?);
+        }
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after class header; implemented traits do not take a trailing `:`",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected an indented class body")?;
+
+        let mut fields = Vec::new();
+        let mut constructors = Vec::new();
+        let mut methods = Vec::new();
+        self.separators();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let mut member_has_body = false;
+            let member_decorators = if self.at(&TokenKind::At) {
+                self.decorators()?
+            } else {
+                Vec::new()
+            };
+            if self.at_identifier("def") {
+                let function = self.function_declaration(member_decorators)?;
+                if function.body.is_none() {
+                    return Err(Diagnostic::new(
+                        "E000122",
+                        "class methods require a body",
+                        Some(function.span),
+                    ));
+                }
+                member_has_body = true;
+                if function.name == name {
+                    constructors.push(function);
+                } else {
+                    methods.push(function);
+                }
+            } else if !member_decorators.is_empty() {
+                return Err(self.error("expected `def` after class method decorator"));
+            } else if self.at_identifier("pass") {
+                self.next();
+            } else if self.looks_like_member_property() {
+                fields.push(self.member_property()?);
+            } else {
+                return Err(
+                    self.error("expected a field, method, constructor, or `pass` in class body")
+                );
+            }
+            if !member_has_body && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                return Err(self.error("expected a newline after class member"));
+            }
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of class body")?
+            .span;
+        Ok(ClassDeclaration {
+            decorators,
+            name,
+            type_parameters,
+            constraints,
+            traits,
+            fields,
+            constructors,
+            methods,
             span: Span::new(start.source, start.start, end.end),
         })
     }
@@ -692,6 +803,18 @@ impl Parser<'_> {
 
     fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
         let start = self.next().span;
+        self.member_property_after_start(start)
+    }
+
+    fn member_property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
+        let start = self.peek().span;
+        self.member_property_after_start(start)
+    }
+
+    fn member_property_after_start(
+        &mut self,
+        start: Span,
+    ) -> Result<PropertyDeclaration, Diagnostic> {
         let (name, _) = self.identifier("expected a property name")?;
         self.expect(&TokenKind::Colon, "expected `:` after property name")?;
         let annotation = self.type_annotation()?;
@@ -709,6 +832,14 @@ impl Parser<'_> {
             default,
             span: Span::new(start.source, start.start, end),
         })
+    }
+
+    fn looks_like_member_property(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Colon)
     }
 
     fn operator(&mut self) -> Result<OperatorDeclaration, Diagnostic> {
