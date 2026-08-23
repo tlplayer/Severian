@@ -282,6 +282,9 @@ fn render_block(
                     "aggregate classes require the MLIR backend".into(),
                 ));
             }
+            Operation::Assign { target, value } => {
+                output.push_str(&format!("    v{} = v{};\n", target.0, value.0));
+            }
             Operation::Call {
                 function: target,
                 arguments,
@@ -368,6 +371,19 @@ fn render_block(
                     output.push_str("    }\n");
                 }
             }
+            Operation::While {
+                condition_block,
+                condition,
+                body,
+            } => {
+                output.push_str("    while (1) {\n");
+                render_block(output, module, condition_block)?;
+                output.push_str(&format!("        if (!v{}) break;\n", condition.0));
+                render_block(output, module, body)?;
+                output.push_str("    }\n");
+            }
+            Operation::Break => output.push_str("    break;\n"),
+            Operation::Continue => output.push_str("    continue;\n"),
             Operation::ArtifactCall { artifact, .. } => {
                 return Err(BackendError::UnsupportedOperation(format!(
                     "artifact call `{artifact:?}` requires the MLIR composition pipeline"
@@ -428,6 +444,14 @@ fn collect_operations<'a>(block: &'a Block, operations: &mut Vec<&'a Operation>)
         {
             collect_operations(then_block, operations);
             collect_operations(else_block, operations);
+        } else if let Operation::While {
+            condition_block,
+            body,
+            ..
+        } = operation
+        {
+            collect_operations(condition_block, operations);
+            collect_operations(body, operations);
         }
     }
 }

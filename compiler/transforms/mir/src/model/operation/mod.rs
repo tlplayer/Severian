@@ -38,6 +38,10 @@ pub enum Operation {
         value: ValueId,
         result: ValueId,
     },
+    Assign {
+        target: ValueId,
+        value: ValueId,
+    },
     Call {
         function: severian_hir::FunctionId,
         arguments: Vec<ValueId>,
@@ -56,6 +60,13 @@ pub enum Operation {
         then_block: Block,
         else_block: Block,
     },
+    While {
+        condition_block: Block,
+        condition: ValueId,
+        body: Block,
+    },
+    Break,
+    Continue,
     Match {
         subject: ValueId,
         arms: Vec<MatchArm>,

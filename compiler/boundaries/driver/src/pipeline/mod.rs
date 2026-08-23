@@ -666,6 +666,14 @@ fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &So
                     attach_block_assertion_locations(&mut arm.body, source);
                 }
             }
+            MirOperation::While {
+                condition_block,
+                body,
+                ..
+            } => {
+                attach_block_assertion_locations(condition_block, source);
+                attach_block_assertion_locations(body, source);
+            }
             _ => {}
         }
     }
@@ -689,6 +697,14 @@ fn remove_coverage(block: &mut severian_mir::Block) {
                 for arm in arms {
                     remove_coverage(&mut arm.body);
                 }
+            }
+            MirOperation::While {
+                condition_block,
+                body,
+                ..
+            } => {
+                remove_coverage(condition_block);
+                remove_coverage(body);
             }
             _ => {}
         }
@@ -727,6 +743,14 @@ fn collect_coverage_points(
                 for arm in arms {
                     collect_coverage_points(&arm.body, output);
                 }
+            }
+            MirOperation::While {
+                condition_block,
+                body,
+                ..
+            } => {
+                collect_coverage_points(condition_block, output);
+                collect_coverage_points(body, output);
             }
             _ => {}
         }

@@ -137,13 +137,19 @@ fn verify_body(
         }
         verify_targets(body, block)?;
     }
-    let mut incoming = vec![BTreeSet::new(); body.blocks.len()];
-    incoming[body.entry.0 as usize].extend(
-        body.locals
-            .iter()
-            .filter(|local| local.argument)
-            .map(|local| local.id),
-    );
+    // Definite initialization is a forward must-analysis. Non-entry blocks
+    // begin at the lattice top and predecessor intersections monotonically
+    // remove locals. Beginning at the empty set validates loop bodies before
+    // their preheaders have propagated and produces false use-before-definition
+    // failures on backedges and call continuation blocks.
+    let all_locals = body.locals.iter().map(|local| local.id).collect::<BTreeSet<_>>();
+    let mut incoming = vec![all_locals; body.blocks.len()];
+    incoming[body.entry.0 as usize] = body
+        .locals
+        .iter()
+        .filter(|local| local.argument)
+        .map(|local| local.id)
+        .collect();
     let mut changed = true;
     while changed {
         changed = false;
@@ -152,11 +158,7 @@ fn verify_body(
             transfer(body, block, &mut state, calls, context)?;
             for successor in successors(&block.terminator) {
                 let target = &mut incoming[successor.0 as usize];
-                let next = if target.is_empty() {
-                    state.clone()
-                } else {
-                    target.intersection(&state).copied().collect()
-                };
+                let next = target.intersection(&state).copied().collect();
                 if *target != next {
                     *target = next;
                     changed = true;

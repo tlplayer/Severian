@@ -259,6 +259,10 @@ fn lower_block(
                 value: ValueId(value.0),
                 result: ValueId(result.0),
             },
+            MirOperation::Assign { target, value } => LirOperation::Assign {
+                target: ValueId(target.0),
+                value: ValueId(value.0),
+            },
             MirOperation::Call {
                 function,
                 arguments,
@@ -296,6 +300,17 @@ fn lower_block(
                 then_block: lower_block(then_block, module, types, target, values)?,
                 else_block: lower_block(else_block, module, types, target, values)?,
             },
+            MirOperation::While {
+                condition_block,
+                condition,
+                body,
+            } => LirOperation::While {
+                condition_block: lower_block(condition_block, module, types, target, values)?,
+                condition: ValueId(condition.0),
+                body: lower_block(body, module, types, target, values)?,
+            },
+            MirOperation::Break => LirOperation::Break,
+            MirOperation::Continue => LirOperation::Continue,
             MirOperation::Match { subject, arms } => {
                 let subject_type = module
                     .values
@@ -425,6 +440,10 @@ fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
             value: field_value,
             ..
         } => *object == value || *field_value == value,
+        LirOperation::Assign {
+            target,
+            value: assigned,
+        } => *target == value || *assigned == value,
         LirOperation::Unary { operand, .. } => *operand == value,
         LirOperation::Binary { left, right, .. } => *left == value || *right == value,
         LirOperation::Call { arguments, .. } | LirOperation::RuntimeCall { arguments, .. } => {
@@ -449,10 +468,28 @@ fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
                     .iter()
                     .any(|operation| operation_uses_value(operation, value))
         }
+        LirOperation::While {
+            condition_block,
+            condition,
+            body,
+        } => {
+            *condition == value
+                || condition_block
+                    .operations
+                    .iter()
+                    .any(|operation| operation_uses_value(operation, value))
+                || body
+                    .operations
+                    .iter()
+                    .any(|operation| operation_uses_value(operation, value))
+        }
         LirOperation::ArtifactCall {
             inputs, outputs, ..
         } => inputs.contains(&value) || outputs.contains(&value),
-        LirOperation::Coverage { .. } | LirOperation::Constant { .. } => false,
+        LirOperation::Coverage { .. }
+        | LirOperation::Constant { .. }
+        | LirOperation::Break
+        | LirOperation::Continue => false,
     }
 }
 
@@ -469,6 +506,15 @@ fn returns_value(operation: &LirOperation, value: ValueId) -> bool {
             .operations
             .iter()
             .chain(&else_block.operations)
+            .any(|operation| returns_value(operation, value)),
+        LirOperation::While {
+            condition_block,
+            body,
+            ..
+        } => condition_block
+            .operations
+            .iter()
+            .chain(&body.operations)
             .any(|operation| returns_value(operation, value)),
         _ => false,
     }

@@ -178,6 +178,31 @@ fn rewrite_nested_control_flow(
                 })
                 .collect::<Result<Vec<_>, CompileError>>()?,
         },
+        Operation::While {
+            condition_block,
+            condition,
+            body,
+        } => Operation::While {
+            condition_block: plan_nested_block(
+                condition_block,
+                values,
+                retained,
+                types,
+                class_types,
+                next_region,
+                nested_regions,
+            )?,
+            condition: *condition,
+            body: plan_nested_block(
+                body,
+                values,
+                retained,
+                types,
+                class_types,
+                next_region,
+                nested_regions,
+            )?,
+        },
         operation => operation.clone(),
     })
 }
@@ -224,6 +249,9 @@ fn operation_route(
             | Operation::Assert { .. }
             | Operation::If { .. }
             | Operation::Match { .. }
+            | Operation::While { .. }
+            | Operation::Break
+            | Operation::Continue
     ) {
         return Ok(CompileRoute::Standard);
     }
@@ -329,10 +357,14 @@ fn value(values: &BTreeMap<ValueId, Value>, id: ValueId) -> Result<Value, Compil
 
 fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
-        Operation::Coverage { .. } | Operation::Constant { .. } => Vec::new(),
+        Operation::Coverage { .. }
+        | Operation::Constant { .. }
+        | Operation::Break
+        | Operation::Continue => Vec::new(),
         Operation::Aggregate { fields, .. } => fields.clone(),
         Operation::FieldGet { object, .. } => vec![*object],
         Operation::FieldSet { object, value, .. } => vec![*object, *value],
+        Operation::Assign { target, value } => vec![*target, *value],
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
         Operation::Call { arguments, .. } => arguments.clone(),
@@ -356,13 +388,21 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
                     .flat_map(|arm| arm.body.operations.iter().flat_map(operation_inputs)),
             )
             .collect(),
+        Operation::While {
+            condition_block,
+            condition,
+            body,
+        } => std::iter::once(*condition)
+            .chain(condition_block.operations.iter().flat_map(operation_inputs))
+            .chain(body.operations.iter().flat_map(operation_inputs))
+            .collect(),
         Operation::CompiledRegionCall { inputs, .. } => inputs.clone(),
     }
 }
 
 fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
-        Operation::Coverage { .. } => Vec::new(),
+        Operation::Coverage { .. } | Operation::Break | Operation::Continue => Vec::new(),
         Operation::Constant { result, .. }
         | Operation::Unary { result, .. }
         | Operation::Binary { result, .. }
@@ -370,6 +410,7 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         | Operation::FieldGet { result, .. }
         | Operation::FieldSet { result, .. }
         | Operation::Call { result, .. } => vec![*result],
+        Operation::Assign { target, .. } => vec![*target],
         Operation::Return { .. } | Operation::Assert { .. } => Vec::new(),
         Operation::If {
             then_block,
@@ -384,6 +425,16 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Match { arms, .. } => arms
             .iter()
             .flat_map(|arm| arm.body.operations.iter().flat_map(operation_outputs))
+            .collect(),
+        Operation::While {
+            condition_block,
+            body,
+            ..
+        } => condition_block
+            .operations
+            .iter()
+            .flat_map(operation_outputs)
+            .chain(body.operations.iter().flat_map(operation_outputs))
             .collect(),
         Operation::CompiledRegionCall { outputs, .. } => outputs.clone(),
     }

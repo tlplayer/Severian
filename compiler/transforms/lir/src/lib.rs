@@ -114,6 +114,10 @@ pub enum Operation {
         value: ValueId,
         result: ValueId,
     },
+    Assign {
+        target: ValueId,
+        value: ValueId,
+    },
     Call {
         function: FunctionId,
         arguments: Vec<ValueId>,
@@ -139,6 +143,13 @@ pub enum Operation {
         then_block: Block,
         else_block: Block,
     },
+    While {
+        condition_block: Block,
+        condition: ValueId,
+        body: Block,
+    },
+    Break,
+    Continue,
     ArtifactCall {
         artifact: ArtifactId,
         inputs: Vec<ValueId>,

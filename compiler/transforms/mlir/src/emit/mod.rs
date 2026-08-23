@@ -387,6 +387,13 @@ fn render_block(
                     result.0, value.0, object.0
                 ));
             }
+            Operation::Assign { target, value } => {
+                let ty = mlir_type(value_type(module, *target)?)?;
+                output.push_str(&format!(
+                    "{indentation}%v{}_assigned = builtin.unrealized_conversion_cast %v{} : {ty} to {ty}\n",
+                    target.0, value.0
+                ));
+            }
             Operation::Call {
                 function: target,
                 arguments,
@@ -505,6 +512,39 @@ fn render_block(
                     output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
                     output.push_str(&format!("{indentation}}}\n"));
                 }
+            }
+            Operation::While {
+                condition_block,
+                condition,
+                body,
+            } => {
+                if block_contains_return(body) {
+                    return Err(MlirError::UnsupportedOperation(
+                        "return inside while requires CFG lowering".into(),
+                    ));
+                }
+                output.push_str(&format!("{indentation}scf.while : () -> () {{\n"));
+                render_block(
+                    output,
+                    module,
+                    condition_block,
+                    indent + 2,
+                    function_result,
+                )?;
+                output.push_str(&format!(
+                    "{}scf.condition(%v{})\n",
+                    " ".repeat(indent + 2),
+                    condition.0
+                ));
+                output.push_str(&format!("{indentation}}} do {{\n"));
+                render_block(output, module, body, indent + 2, function_result)?;
+                output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
+                output.push_str(&format!("{indentation}}}\n"));
+            }
+            Operation::Break | Operation::Continue => {
+                return Err(MlirError::UnsupportedOperation(
+                    "loop control requires CFG-to-MLIR branch lowering".into(),
+                ));
             }
             Operation::ArtifactCall {
                 artifact,
@@ -670,6 +710,14 @@ fn collect_operations<'a>(block: &'a Block, operations: &mut Vec<&'a Operation>)
         {
             collect_operations(then_block, operations);
             collect_operations(else_block, operations);
+        } else if let Operation::While {
+            condition_block,
+            body,
+            ..
+        } = operation
+        {
+            collect_operations(condition_block, operations);
+            collect_operations(body, operations);
         }
     }
 }
@@ -682,6 +730,11 @@ fn block_contains_return(block: &Block) -> bool {
             else_block,
             ..
         } => block_contains_return(then_block) || block_contains_return(else_block),
+        Operation::While {
+            condition_block,
+            body,
+            ..
+        } => block_contains_return(condition_block) || block_contains_return(body),
         _ => false,
     })
 }
@@ -698,6 +751,7 @@ fn block_terminates(block: &Block) -> bool {
                 && block_terminates(then_block)
                 && block_terminates(else_block)
         }
+        Operation::While { .. } => false,
         _ => false,
     })
 }

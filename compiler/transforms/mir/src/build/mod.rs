@@ -17,6 +17,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
     let mut builder = Builder {
         module: Module::default(),
         bindings: BTreeMap::new(),
+        variables: BTreeMap::new(),
         function_ids,
     };
     let (initializer_cfg, mut function_cfgs) = crate::cfg::lower_program(hir);
@@ -120,6 +121,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
             .operations
             .extend(initializer.operations);
         let globals = builder.bindings.clone();
+        let global_variables = builder.variables.clone();
         global_values.extend(globals.values().copied());
 
         for (index, function) in hir_module.functions.iter().enumerate() {
@@ -127,6 +129,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
                 continue;
             };
             builder.bindings.clone_from(&globals);
+            builder.variables.clone_from(&global_variables);
             for (parameter, value) in function.parameters.iter().zip(
                 builder.module.functions[function_base + index]
                     .parameters
@@ -134,6 +137,10 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
                     .copied(),
             ) {
                 builder.bindings.insert(parameter.binding, value);
+                builder.variables.insert(
+                    severian_hir::VariableId(parameter.binding.0),
+                    value,
+                );
             }
             let mut body = Block::default();
             for statement in &hir_body.statements {
@@ -152,6 +159,7 @@ pub fn build(hir: &HirProgram) -> Result<Module, crate::VerifyError> {
 struct Builder {
     module: Module,
     bindings: BTreeMap<BindingId, ValueId>,
+    variables: BTreeMap<severian_hir::VariableId, ValueId>,
     function_ids: BTreeMap<
         (severian_universal::DefId, severian_universal::Substitution),
         severian_hir::FunctionId,
@@ -242,7 +250,10 @@ impl Builder {
                     value: updated_field,
                     result: updated_object,
                 });
-                self.bindings.insert(*binding, updated_object);
+                block.operations.push(Operation::Assign {
+                    target: object,
+                    value: updated_object,
+                });
             }
             Statement::FieldSet {
                 binding,
@@ -259,7 +270,10 @@ impl Builder {
                     value,
                     result: updated_object,
                 });
-                self.bindings.insert(*binding, updated_object);
+                block.operations.push(Operation::Assign {
+                    target: object,
+                    value: updated_object,
+                });
             }
             Statement::Binding(id) => {
                 let binding = module
@@ -305,6 +319,7 @@ impl Builder {
                 let condition_span = condition.span.start;
                 let condition = self.expression(condition, block);
                 let outer_bindings = self.bindings.clone();
+                let outer_variables = self.variables.clone();
                 let mut then_mir = Block::default();
                 then_mir.operations.push(Operation::Coverage {
                     point: crate::CoveragePoint {
@@ -320,6 +335,7 @@ impl Builder {
                     self.statement(statement, module, &mut then_mir);
                 }
                 self.bindings.clone_from(&outer_bindings);
+                self.variables.clone_from(&outer_variables);
                 let mut else_mir = Block::default();
                 else_mir.operations.push(Operation::Coverage {
                     point: crate::CoveragePoint {
@@ -335,19 +351,43 @@ impl Builder {
                     self.statement(statement, module, &mut else_mir);
                 }
                 self.bindings = outer_bindings;
+                self.variables = outer_variables;
                 block.operations.push(Operation::If {
                     condition,
                     then_block: then_mir,
                     else_block: else_mir,
                 });
             }
+            Statement::While {
+                condition, body, ..
+            } => {
+                let mut condition_block = Block::default();
+                let condition = self.expression(condition, &mut condition_block);
+                let outer_bindings = self.bindings.clone();
+                let outer_variables = self.variables.clone();
+                let mut body_mir = Block::default();
+                for statement in &body.statements {
+                    self.statement(statement, module, &mut body_mir);
+                }
+                self.bindings = outer_bindings;
+                self.variables = outer_variables;
+                block.operations.push(Operation::While {
+                    condition_block,
+                    condition,
+                    body: body_mir,
+                });
+            }
+            Statement::Break { .. } => block.operations.push(Operation::Break),
+            Statement::Continue { .. } => block.operations.push(Operation::Continue),
             Statement::Match { subject, arms } => {
                 let subject_span = subject.span.start;
                 let subject = self.expression(subject, block);
                 let outer_bindings = self.bindings.clone();
+                let outer_variables = self.variables.clone();
                 let mut mir_arms = Vec::new();
                 for (ordinal, arm) in arms.iter().enumerate() {
                     self.bindings.clone_from(&outer_bindings);
+                    self.variables.clone_from(&outer_variables);
                     if let Some(binding) = arm.binding {
                         self.bindings.insert(binding, subject);
                         self.module.bindings.push((binding, subject));
@@ -372,6 +412,7 @@ impl Builder {
                     });
                 }
                 self.bindings = outer_bindings;
+                self.variables = outer_variables;
                 block.operations.push(Operation::Match {
                     subject,
                     arms: mir_arms,
@@ -381,14 +422,20 @@ impl Builder {
             // body built above. This legacy structured body has no edge model;
             // duplicating loop lowering here would recreate the old split
             // semantics rather than preserving a single control-flow source.
-            Statement::While { .. } | Statement::Break { .. } | Statement::Continue { .. } => {}
         }
     }
 
     fn binding(&mut self, binding: &severian_hir::Binding, block: &mut Block) {
         let value = self.expression(&binding.value, block);
-        self.bindings.insert(binding.id, value);
-        self.module.bindings.push((binding.id, value));
+        let target = if let Some(target) = self.variables.get(&binding.variable).copied() {
+            block.operations.push(Operation::Assign { target, value });
+            target
+        } else {
+            self.variables.insert(binding.variable, value);
+            value
+        };
+        self.bindings.insert(binding.id, target);
+        self.module.bindings.push((binding.id, target));
     }
 
     fn value(&mut self, type_id: severian_universal::TypeId) -> ValueId {
