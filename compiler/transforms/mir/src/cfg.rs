@@ -202,16 +202,25 @@ pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<
             // initialization and ownership state visible to verification.
             for source_module in &program.modules {
                 for binding in &source_module.bindings {
-                    let local = builder.local(binding.type_id, false, true);
-                    builder.bindings.insert(binding.id, Place::local(local));
-                    builder.entry_parameters.push(local);
+                    let place = if let Some(place) = builder.variables.get(&binding.variable) {
+                        place.clone()
+                    } else {
+                        let local = builder.local(binding.type_id, true, true);
+                        let place = Place::local(local);
+                        builder.variables.insert(binding.variable, place.clone());
+                        builder.entry_parameters.push(local);
+                        place
+                    };
+                    builder.bindings.insert(binding.id, place);
                 }
             }
             for parameter in &function.parameters {
                 let local = builder.local(parameter.contract.ty, false, true);
+                let place = Place::local(local);
+                builder.bindings.insert(parameter.binding, place.clone());
                 builder
-                    .bindings
-                    .insert(parameter.binding, Place::local(local));
+                    .variables
+                    .insert(severian_hir::VariableId(parameter.binding.0), place);
                 builder.entry_parameters.push(local);
             }
             builder.lower_statements(&body.statements, module);
@@ -225,8 +234,16 @@ struct BodyBuilder {
     body: Body,
     current: BlockId,
     bindings: BTreeMap<severian_hir::BindingId, Place>,
+    variables: BTreeMap<severian_hir::VariableId, Place>,
     expressions: BTreeMap<severian_hir::HirId, Place>,
     entry_parameters: Vec<LocalId>,
+    loops: Vec<LoopTargets>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LoopTargets {
+    break_target: BlockId,
+    continue_target: BlockId,
 }
 
 impl BodyBuilder {
@@ -245,8 +262,10 @@ impl BodyBuilder {
             },
             current: BlockId(0),
             bindings: BTreeMap::new(),
+            variables: BTreeMap::new(),
             expressions: BTreeMap::new(),
             entry_parameters: Vec::new(),
+            loops: Vec::new(),
         }
     }
 
@@ -355,9 +374,15 @@ impl BodyBuilder {
                     .find(|binding| binding.id == *id)
                     .expect("typed HIR binding exists");
                 let value = self.expression(&binding.value);
-                let local = self.local(binding.type_id, true, false);
-                let place = Place::local(local);
-                self.push(Statement::StorageLive(local));
+                let place = if let Some(place) = self.variables.get(&binding.variable) {
+                    place.clone()
+                } else {
+                    let local = self.local(binding.type_id, true, false);
+                    let place = Place::local(local);
+                    self.push(Statement::StorageLive(local));
+                    self.variables.insert(binding.variable, place.clone());
+                    place
+                };
                 self.push(Statement::Assign(
                     place.clone(),
                     Rvalue::Use(Operand::Copy(value)),
@@ -410,6 +435,50 @@ impl BodyBuilder {
                 }
                 self.bindings = bindings;
                 self.current = join;
+            }
+            severian_hir::Statement::While {
+                condition, body, ..
+            } => {
+                let header = self.block();
+                let body_block = self.block();
+                let exit = self.block();
+                self.terminate(Terminator::Goto(header, Vec::new()));
+
+                self.current = header;
+                let condition = Operand::Copy(self.expression(condition));
+                self.terminate(Terminator::Branch {
+                    condition,
+                    then_block: body_block,
+                    else_block: exit,
+                });
+
+                self.loops.push(LoopTargets {
+                    break_target: exit,
+                    continue_target: header,
+                });
+                self.current = body_block;
+                self.lower_statements(&body.statements, module);
+                if self.open(self.current) {
+                    self.terminate(Terminator::Goto(header, Vec::new()));
+                }
+                self.loops.pop();
+                self.current = exit;
+            }
+            severian_hir::Statement::Break { .. } => {
+                let target = self
+                    .loops
+                    .last()
+                    .expect("semantic analysis rejects break outside loops")
+                    .break_target;
+                self.terminate(Terminator::Goto(target, Vec::new()));
+            }
+            severian_hir::Statement::Continue { .. } => {
+                let target = self
+                    .loops
+                    .last()
+                    .expect("semantic analysis rejects continue outside loops")
+                    .continue_target;
+                self.terminate(Terminator::Goto(target, Vec::new()));
             }
             severian_hir::Statement::Match { subject, arms } => {
                 let subject = Operand::Copy(self.expression(subject));

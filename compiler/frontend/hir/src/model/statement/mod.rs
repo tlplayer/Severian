@@ -1,10 +1,11 @@
-use crate::{BindingId, Expression, TypeId};
+use crate::{BindingId, Expression, TypeId, VariableId};
 use severian_source::Span;
 use severian_universal::BinaryOperator;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
     pub id: BindingId,
+    pub variable: VariableId,
     pub type_id: TypeId,
     pub value: Expression,
     /// True for `?=`. False means a fallible value is unwrapped and its error
@@ -40,6 +41,17 @@ pub enum Statement {
         condition: Expression,
         then_block: Block,
         else_block: Block,
+    },
+    While {
+        condition: Expression,
+        body: Block,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
     },
     Match {
         subject: Expression,

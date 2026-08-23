@@ -912,6 +912,7 @@ fn remap_module_bindings(module: &mut severian_hir::Module, offset: u32) {
     }
     for binding in &mut module.bindings {
         binding.id.0 += offset;
+        binding.variable.0 += offset;
         remap_expression_bindings(&mut binding.value, offset);
     }
     remap_block_bindings(&mut module.initializer, offset);
@@ -959,6 +960,13 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
                 remap_block_bindings(then_block, offset);
                 remap_block_bindings(else_block, offset);
             }
+            Statement::While {
+                condition, body, ..
+            } => {
+                remap_expression_bindings(condition, offset);
+                remap_block_bindings(body, offset);
+            }
+            Statement::Break { .. } | Statement::Continue { .. } => {}
             Statement::Match { subject, arms } => {
                 remap_expression_bindings(subject, offset);
                 for arm in arms {

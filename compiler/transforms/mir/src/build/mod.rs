@@ -183,6 +183,9 @@ impl Builder {
             | Statement::Match {
                 subject: condition, ..
             } => Some(condition.span.start),
+            Statement::While { span, .. }
+            | Statement::Break { span }
+            | Statement::Continue { span } => Some(span.start),
         };
         if let Some(span_start) = span_start {
             block.operations.push(Operation::Coverage {
@@ -374,6 +377,11 @@ impl Builder {
                     arms: mir_arms,
                 });
             }
+            // Loops and their control transfers are represented by the CFG
+            // body built above. This legacy structured body has no edge model;
+            // duplicating loop lowering here would recreate the old split
+            // semantics rather than preserving a single control-flow source.
+            Statement::While { .. } | Statement::Break { .. } | Statement::Continue { .. } => {}
         }
     }
 

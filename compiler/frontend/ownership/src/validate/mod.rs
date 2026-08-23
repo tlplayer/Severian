@@ -110,6 +110,17 @@ fn validate_statement(
             }
             Ok(())
         }
+        Statement::While {
+            condition, body, ..
+        } => {
+            validate_expression(condition, declared)?;
+            let mut body_declared = declared.clone();
+            for statement in &body.statements {
+                validate_statement(statement, bindings, &mut body_declared)?;
+            }
+            Ok(())
+        }
+        Statement::Break { .. } | Statement::Continue { .. } => Ok(()),
         Statement::Match { subject, arms } => {
             validate_expression(subject, declared)?;
             for arm in arms {

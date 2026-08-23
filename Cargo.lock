@@ -290,6 +290,7 @@ dependencies = [
  "severian-diagnostics",
  "severian-hir",
  "severian-lexer",
+ "severian-mir",
  "severian-modules",
  "severian-parser",
  "severian-source",

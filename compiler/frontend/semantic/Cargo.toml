@@ -21,3 +21,4 @@ severian-source = { path = "../../source" }
 severian-bootstrap = { path = "../../bootstrap" }
 severian-lexer = { path = "../lexer" }
 severian-parser = { path = "../parser" }
+severian-mir = { path = "../../transforms/mir" }

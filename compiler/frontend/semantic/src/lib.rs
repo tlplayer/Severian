@@ -132,6 +132,7 @@ pub(crate) fn analyze_with_package_functions(
         runtime_definitions: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
+        loop_depth: 0,
         next_class_type: u32::MAX,
     };
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
@@ -397,9 +398,14 @@ pub(crate) fn analyze_with_package_functions(
                     Some(ast_function.span),
                 ));
             }
-            analyzer
-                .names
-                .insert(parameter.name.clone(), (parameter.binding, type_id));
+            analyzer.names.insert(
+                parameter.name.clone(),
+                (
+                    parameter.binding,
+                    severian_hir::VariableId(parameter.binding.0),
+                    type_id,
+                ),
+            );
         }
         let mut body = Block::default();
         let result_type = function.result.ty;
@@ -514,13 +520,14 @@ pub(crate) fn analyze_with_package_functions(
 
 struct Analyzer<'a> {
     types: &'a TypeContext,
-    names: BTreeMap<String, (BindingId, TypeId)>,
+    names: BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
     value_substitutions: BTreeMap<String, Expression>,
     /// Names declared in the current lexical scope. `names` also contains
     /// readable parent bindings, which may be shadowed by this set.
     declarations: BTreeSet<String>,
     next_hir: u32,
     next_binding: u32,
+    loop_depth: usize,
     functions: BTreeMap<String, Vec<FunctionId>>,
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
@@ -797,7 +804,7 @@ impl Analyzer<'_> {
             Some(
                 self.names
                     .get(&ast_binding.name)
-                    .map(|(_, type_id)| *type_id)
+                    .map(|(_, _, type_id)| *type_id)
                     .ok_or_else(|| {
                         Diagnostic::new(
                             "E000201",
@@ -832,9 +839,16 @@ impl Analyzer<'_> {
             ));
         }
         let id = self.new_binding_id();
-        self.names.insert(ast_binding.name.clone(), (id, type_id));
+        let variable = if is_update {
+            self.names[&ast_binding.name].1
+        } else {
+            severian_hir::VariableId(id.0)
+        };
+        self.names
+            .insert(ast_binding.name.clone(), (id, variable, type_id));
         bindings.push(Binding {
             id,
+            variable,
             type_id,
             value,
             preserve_error: ast_binding.preserve_error,
@@ -856,36 +870,30 @@ impl Analyzer<'_> {
                 body,
                 span,
             } => {
-                let Some(initializer) = initializer else {
-                    return Err(Diagnostic::new(
-                        "E000211",
-                        "runtime while loops without an initializer are not lowered yet",
-                        Some(*span),
-                    ));
-                };
-                let initial = static_integer(&initializer.value).ok_or_else(|| {
-                    Diagnostic::new(
-                        "E000211",
-                        "while lowering currently requires a literal initializer",
-                        Some(*span),
-                    )
-                })?;
                 let mut sequence = Block::default();
-                sequence
-                    .statements
-                    .push(Statement::Binding(self.binding(initializer, bindings)?));
-                let mut environment = BTreeMap::from([(initializer.name.clone(), initial)]);
-                for _ in 0..10_000 {
-                    if static_boolean(condition, &environment) != Some(true) {
-                        break;
-                    }
-                    let (specialized, control) = specialize_loop_body(body, &mut environment);
-                    let lowered = self.block(&specialized, bindings, result_type)?;
-                    sequence.statements.extend(lowered.statements);
-                    if control == StaticLoopControl::Break {
-                        break;
-                    }
+                if let Some(initializer) = initializer {
+                    sequence
+                        .statements
+                        .push(Statement::Binding(self.binding(initializer, bindings)?));
                 }
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let condition = self.expression(condition, Some(boolean))?;
+                let outer_names = self.names.clone();
+                let outer_declarations = self.declarations.clone();
+                self.loop_depth += 1;
+                let lowered = self.block(body, bindings, result_type);
+                self.loop_depth -= 1;
+                let body = lowered?;
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                sequence.statements.push(Statement::While {
+                    condition,
+                    body,
+                    span: *span,
+                });
                 Ok(Statement::Sequence(sequence))
             }
             AstStatement::For {
@@ -928,11 +936,26 @@ impl Analyzer<'_> {
                 }
                 Ok(Statement::Sequence(sequence))
             }
-            AstStatement::Break { span } | AstStatement::Continue { span } => Err(Diagnostic::new(
-                "E000211",
-                "loop control must be lowered by its enclosing finite loop",
-                Some(*span),
-            )),
+            AstStatement::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "`break` is only valid inside a loop",
+                        Some(*span),
+                    ));
+                }
+                Ok(Statement::Break { span: *span })
+            }
+            AstStatement::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "`continue` is only valid inside a loop",
+                        Some(*span),
+                    ));
+                }
+                Ok(Statement::Continue { span: *span })
+            }
             AstStatement::Binding(binding) => {
                 Ok(Statement::Binding(self.binding(binding, bindings)?))
             }
@@ -973,10 +996,13 @@ impl Analyzer<'_> {
                         }
                     }
                     let id = self.new_binding_id();
-                    self.names.insert(object_name.clone(), (id, instance.ty));
+                    let variable = severian_hir::VariableId(id.0);
+                    self.names
+                        .insert(object_name.clone(), (id, variable, instance.ty));
                     self.declarations.insert(object_name.clone());
                     bindings.push(Binding {
                         id,
+                        variable,
                         type_id: instance.ty,
                         value: Expression {
                             id: self.next_id(),
@@ -992,7 +1018,7 @@ impl Analyzer<'_> {
                     });
                     return Ok(Statement::Binding(id));
                 }
-                let (binding, object_type) = existing.unwrap();
+                let (binding, _, object_type) = existing.unwrap();
                 let instance = self
                     .class_instances_by_type
                     .get(&object_type)
@@ -1167,10 +1193,13 @@ impl Analyzer<'_> {
             let binding = if let Some(name) = &case.binding {
                 let id = self.new_binding_id();
                 let binding_type = type_id.unwrap_or(subject_type);
-                self.names.insert(name.clone(), (id, binding_type));
+                let variable = severian_hir::VariableId(id.0);
+                self.names
+                    .insert(name.clone(), (id, variable, binding_type));
                 self.declarations.insert(name.clone());
                 bindings.push(Binding {
                     id,
+                    variable,
                     type_id: binding_type,
                     value: subject.clone(),
                     preserve_error: true,
@@ -1589,7 +1618,7 @@ impl Analyzer<'_> {
                     }
                     return Ok(value);
                 }
-                let Some((binding, type_id)) = self.names.get(name).copied() else {
+                let Some((binding, _, type_id)) = self.names.get(name).copied() else {
                     return Err(Diagnostic::new(
                         "E000201",
                         format!("unknown binding `{name}`"),
@@ -3194,7 +3223,7 @@ impl Analyzer<'_> {
         let AstExpressionKind::Name(receiver) = &object.kind else {
             return Ok(None);
         };
-        let Some((binding, ty)) = self.names.get(receiver).copied() else {
+        let Some((binding, _, ty)) = self.names.get(receiver).copied() else {
             return Ok(None);
         };
         let Some(instance) = self.class_instances_by_type.get(&ty).cloned() else {
@@ -4022,6 +4051,100 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn while_survives_hir_and_updates_keep_variable_identity() {
+        let (program, _) = analyze_source(
+            "def main():\n    while count < 3 with count := 0:\n        count += 1\n",
+        );
+        let module = &program.modules[0];
+        let body = module.functions[0].body.as_ref().unwrap();
+        let Statement::Sequence(sequence) = &body.statements[0] else {
+            panic!("while with an initializer lowers to a sequence");
+        };
+        let Statement::Binding(initial) = sequence.statements[0] else {
+            panic!("initializer remains an ordered binding");
+        };
+        let Statement::While {
+            condition, body, ..
+        } = &sequence.statements[1]
+        else {
+            panic!("runtime while remains in HIR");
+        };
+        assert!(matches!(
+            &condition.kind,
+            severian_hir::ExpressionKind::Binary { left, .. }
+                if matches!(left.kind, severian_hir::ExpressionKind::Binding(id) if id == initial)
+        ));
+        let Statement::Binding(update) = body.statements[0] else {
+            panic!("loop update remains a binding version");
+        };
+        let initial = module
+            .bindings
+            .iter()
+            .find(|binding| binding.id == initial)
+            .unwrap();
+        let update = module
+            .bindings
+            .iter()
+            .find(|binding| binding.id == update)
+            .unwrap();
+        assert_eq!(initial.variable, update.variable);
+        assert_ne!(initial.id, update.id);
+
+        let mir = severian_mir::build(&program).unwrap();
+        let cfg = mir.functions[0].cfg.as_ref().unwrap();
+        assert_eq!(cfg.blocks.len(), 4);
+        assert_eq!(cfg.locals.iter().filter(|local| local.mutable).count(), 1);
+        assert!(matches!(
+            cfg.blocks[0].terminator,
+            severian_mir::Terminator::Goto(severian_mir::BlockId(1), ref arguments)
+                if arguments.is_empty()
+        ));
+        assert!(matches!(
+            cfg.blocks[1].terminator,
+            severian_mir::Terminator::Branch {
+                then_block: severian_mir::BlockId(2),
+                else_block: severian_mir::BlockId(3),
+                ..
+            }
+        ));
+        assert!(matches!(
+            cfg.blocks[2].terminator,
+            severian_mir::Terminator::Goto(severian_mir::BlockId(1), ref arguments)
+                if arguments.is_empty()
+        ));
+    }
+
+    #[test]
+    fn loop_control_is_rejected_outside_a_loop() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("test.sev", "def main():\n    break\n");
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000211");
+        assert!(error.message.contains("inside a loop"));
+    }
+
+    #[test]
+    fn break_and_continue_lower_to_cfg_edges() {
+        let (program, _) = analyze_source(
+            "def main():\n    while count < 5 with count := 0:\n        count += 1\n        if count == 2:\n            continue\n        if count == 4:\n            break\n",
+        );
+        let mir = severian_mir::build(&program).unwrap();
+        let cfg = mir.functions[0].cfg.as_ref().unwrap();
+        let gotos = cfg
+            .blocks
+            .iter()
+            .filter_map(|block| match block.terminator {
+                severian_mir::Terminator::Goto(target, _) => Some(target),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(gotos.iter().filter(|target| target.0 == 1).count() >= 2);
+        assert!(gotos.iter().any(|target| target.0 == 3));
     }
 
     #[test]
