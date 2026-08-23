@@ -162,7 +162,9 @@ fn validate_expression(
             }
             Ok(())
         }
-        ExpressionKind::Unary { operand, .. } => validate_expression(operand, declared),
+        ExpressionKind::Unary { operand, .. }
+        | ExpressionKind::Borrow { operand, .. }
+        | ExpressionKind::Move(operand) => validate_expression(operand, declared),
         ExpressionKind::Convert { operand, .. } => validate_expression(operand, declared),
         ExpressionKind::Binary { left, right, .. } => {
             validate_expression(left, declared)?;

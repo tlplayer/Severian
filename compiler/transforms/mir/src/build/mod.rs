@@ -452,6 +452,9 @@ impl Builder {
                 result
             }
             ExpressionKind::Convert { operand, .. } => self.expression(operand, block),
+            ExpressionKind::Borrow { operand, .. } | ExpressionKind::Move(operand) => {
+                self.expression(operand, block)
+            }
             ExpressionKind::Function(_) => {
                 panic!("function values lower through CFG MIR")
             }

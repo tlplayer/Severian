@@ -902,39 +902,199 @@ impl Analyzer<'_> {
                 body,
                 span,
             } => {
-                let values = static_range_values(iterable).ok_or_else(|| {
-                    Diagnostic::new(
-                        "E000211",
-                        "for lowering currently requires `range` with literal bounds",
-                        Some(*span),
-                    )
-                })?;
-                let mut sequence = Block::default();
-                for value in values {
-                    let mut environment = BTreeMap::from([(binding.clone(), value)]);
-                    let (specialized, control) = specialize_loop_body(body, &mut environment);
-                    let value = AstExpression {
-                        kind: AstExpressionKind::Literal(AstLiteral::Integer(value.to_string())),
-                        span: iterable.span,
-                    };
-                    let loop_binding = severian_ast::Binding {
-                        name: binding.clone(),
-                        annotation: None,
-                        value,
-                        update: self.declarations.contains(binding),
-                        preserve_error: false,
-                        span: iterable.span,
-                    };
-                    sequence
-                        .statements
-                        .push(Statement::Binding(self.binding(&loop_binding, bindings)?));
-                    let lowered = self.block(&specialized, bindings, result_type)?;
-                    sequence.statements.extend(lowered.statements);
-                    if control == StaticLoopControl::Break {
-                        break;
+                if let Some(values) = static_range_values(iterable) {
+                    let mut sequence = Block::default();
+                    for value in values {
+                        let mut environment = BTreeMap::from([(binding.clone(), value)]);
+                        let (specialized, control) = specialize_loop_body(body, &mut environment);
+                        let value = AstExpression {
+                            kind: AstExpressionKind::Literal(AstLiteral::Integer(
+                                value.to_string(),
+                            )),
+                            span: iterable.span,
+                        };
+                        let loop_binding = severian_ast::Binding {
+                            name: binding.clone(),
+                            annotation: None,
+                            value,
+                            update: self.declarations.contains(binding),
+                            preserve_error: false,
+                            span: iterable.span,
+                        };
+                        sequence
+                            .statements
+                            .push(Statement::Binding(self.binding(&loop_binding, bindings)?));
+                        let lowered = self.block(&specialized, bindings, result_type)?;
+                        sequence.statements.extend(lowered.statements);
+                        if control == StaticLoopControl::Break {
+                            break;
+                        }
                     }
+                    return Ok(Statement::Sequence(sequence));
                 }
-                Ok(Statement::Sequence(sequence))
+
+                let iterable_value = self.expression(iterable, None)?;
+                let Some(element_type) = self.list_elements.get(&iterable_value.type_id).copied()
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "for iteration is currently implemented for lists and literal ranges",
+                        Some(*span),
+                    ));
+                };
+                let list_type = iterable_value.type_id;
+                let usize_type = self
+                    .types
+                    .resolve_name("usize")
+                    .expect("bootstrap defines usize");
+                let bool_type = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+
+                let iterable_id = self.new_binding_id();
+                bindings.push(Binding {
+                    id: iterable_id,
+                    variable: severian_hir::VariableId(iterable_id.0),
+                    type_id: list_type,
+                    value: iterable_value,
+                    preserve_error: false,
+                    span: iterable.span,
+                });
+                let iterable_reference = Expression {
+                    id: self.next_id(),
+                    type_id: list_type,
+                    kind: ExpressionKind::Binding(iterable_id),
+                    span: iterable.span,
+                };
+
+                let index_id = self.new_binding_id();
+                let index_variable = severian_hir::VariableId(index_id.0);
+                bindings.push(Binding {
+                    id: index_id,
+                    variable: index_variable,
+                    type_id: usize_type,
+                    value: self.integer_expression("0", usize_type, iterable.span),
+                    preserve_error: false,
+                    span: iterable.span,
+                });
+                let index_reference = Expression {
+                    id: self.next_id(),
+                    type_id: usize_type,
+                    kind: ExpressionKind::Binding(index_id),
+                    span: iterable.span,
+                };
+
+                let storage = self.list_storage_expression(iterable_reference.clone(), *span);
+                let storage_type = storage.type_id;
+                let length = self.runtime_call(
+                    "__sev_list_len",
+                    &[storage_type],
+                    usize_type,
+                    vec![storage],
+                    *span,
+                );
+                let condition = Expression {
+                    id: self.next_id(),
+                    type_id: bool_type,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Less,
+                        left: Box::new(index_reference.clone()),
+                        right: Box::new(length),
+                    },
+                    span: *span,
+                };
+
+                let suffix = self.list_runtime_suffix(element_type, *span)?;
+                let body_iterable_reference = Expression {
+                    id: self.next_id(),
+                    type_id: list_type,
+                    kind: ExpressionKind::Binding(iterable_id),
+                    span: iterable.span,
+                };
+                let body_index_reference = Expression {
+                    id: self.next_id(),
+                    type_id: usize_type,
+                    kind: ExpressionKind::Binding(index_id),
+                    span: iterable.span,
+                };
+                let storage = self.list_storage_expression(body_iterable_reference, *span);
+                let item = self.runtime_call(
+                    &format!("__sev_list_get_{suffix}"),
+                    &[storage_type, usize_type],
+                    element_type,
+                    vec![storage, body_index_reference],
+                    *span,
+                );
+                let loop_binding_id = self.new_binding_id();
+                let loop_variable = severian_hir::VariableId(loop_binding_id.0);
+                bindings.push(Binding {
+                    id: loop_binding_id,
+                    variable: loop_variable,
+                    type_id: element_type,
+                    value: item,
+                    preserve_error: false,
+                    span: *span,
+                });
+
+                let outer_names = self.names.clone();
+                let outer_declarations = self.declarations.clone();
+                self.names.insert(
+                    binding.clone(),
+                    (loop_binding_id, loop_variable, element_type),
+                );
+                self.declarations.insert(binding.clone());
+                self.loop_depth += 1;
+                let lowered = self.block(body, bindings, result_type);
+                self.loop_depth -= 1;
+                let mut loop_body = lowered?;
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                loop_body
+                    .statements
+                    .insert(0, Statement::Binding(loop_binding_id));
+
+                let next_index_id = self.new_binding_id();
+                let one = self.integer_expression("1", usize_type, *span);
+                let increment_index_reference = Expression {
+                    id: self.next_id(),
+                    type_id: usize_type,
+                    kind: ExpressionKind::Binding(index_id),
+                    span: iterable.span,
+                };
+                let next_index = Expression {
+                    id: self.next_id(),
+                    type_id: usize_type,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Add,
+                        left: Box::new(increment_index_reference),
+                        right: Box::new(one),
+                    },
+                    span: *span,
+                };
+                bindings.push(Binding {
+                    id: next_index_id,
+                    variable: index_variable,
+                    type_id: usize_type,
+                    value: next_index,
+                    preserve_error: false,
+                    span: *span,
+                });
+                let increment = Statement::Binding(next_index_id);
+                increment_before_continue(&mut loop_body, &increment);
+                loop_body.statements.push(increment);
+
+                Ok(Statement::Sequence(Block {
+                    statements: vec![
+                        Statement::Binding(iterable_id),
+                        Statement::Binding(index_id),
+                        Statement::While {
+                            condition,
+                            body: loop_body,
+                            span: *span,
+                        },
+                    ],
+                }))
             }
             AstStatement::Break { span } => {
                 if self.loop_depth == 0 {
@@ -2040,6 +2200,21 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Unary { operator, operand } => {
+                if matches!(
+                    operator,
+                    AstUnaryOperator::Borrow | AstUnaryOperator::BorrowMut
+                ) {
+                    let operand = self.expression(operand, expected)?;
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: operand.type_id,
+                        kind: ExpressionKind::Borrow {
+                            operand: Box::new(operand),
+                            exclusive: *operator == AstUnaryOperator::BorrowMut,
+                        },
+                        span: ast.span,
+                    });
+                }
                 if *operator == AstUnaryOperator::Copy {
                     let operand = self.expression(operand, expected)?;
                     let Some(element) = self.list_elements.get(&operand.type_id).copied() else {
@@ -2067,11 +2242,13 @@ impl Analyzer<'_> {
                     });
                 }
                 if *operator == AstUnaryOperator::Move {
-                    return Err(Diagnostic::new(
-                        "E000302",
-                        "move checking is not implemented yet",
-                        Some(ast.span),
-                    ));
+                    let operand = self.expression(operand, expected)?;
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: operand.type_id,
+                        kind: ExpressionKind::Move(Box::new(operand)),
+                        span: ast.span,
+                    });
                 }
                 let operator = universal_unary(*operator);
                 let prepared = self.prepare(operand)?;
@@ -3031,6 +3208,29 @@ impl Analyzer<'_> {
                 span,
             )));
         }
+        if self.list_elements.contains_key(&object.type_id) {
+            let usize_type = self
+                .types
+                .resolve_name("usize")
+                .expect("bootstrap defines usize");
+            if name == "length" && arguments.is_empty() {
+                if expected.is_some_and(|expected| !self.types.assignable(usize_type, expected)) {
+                    return Err(semantic_error(
+                        "method result does not satisfy the expected type".into(),
+                        span,
+                    ));
+                }
+                let storage = self.list_storage_expression(object, span);
+                let storage_type = storage.type_id;
+                return Ok(Some(self.runtime_call(
+                    "__sev_list_len",
+                    &[storage_type],
+                    usize_type,
+                    vec![storage],
+                    span,
+                )));
+            }
+        }
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);
         };
@@ -3732,6 +3932,33 @@ fn static_range_values(iterable: &AstExpression) -> Option<Vec<i64>> {
     (count <= 10_000).then(|| (start..end).collect())
 }
 
+fn increment_before_continue(block: &mut Block, increment: &Statement) {
+    let statements = std::mem::take(&mut block.statements);
+    for mut statement in statements {
+        match &mut statement {
+            Statement::Continue { .. } => block.statements.push(increment.clone()),
+            Statement::Sequence(sequence) => increment_before_continue(sequence, increment),
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                increment_before_continue(then_block, increment);
+                increment_before_continue(else_block, increment);
+            }
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    increment_before_continue(&mut arm.body, increment);
+                }
+            }
+            // A continue in a nested loop belongs to that nested loop.
+            Statement::While { .. } => {}
+            _ => {}
+        }
+        block.statements.push(statement);
+    }
+}
+
 fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
@@ -4007,8 +4234,11 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
         AstUnaryOperator::Positive => UnaryOperator::Positive,
         AstUnaryOperator::Negative => UnaryOperator::Negative,
         AstUnaryOperator::Not => UnaryOperator::Not,
+        AstUnaryOperator::Borrow | AstUnaryOperator::BorrowMut => {
+            unreachable!("borrows are lowered before universal resolution")
+        }
         AstUnaryOperator::Copy => unreachable!("copy is lowered before universal resolution"),
-        AstUnaryOperator::Move => unreachable!("move is rejected before universal resolution"),
+        AstUnaryOperator::Move => unreachable!("moves are lowered before universal resolution"),
     }
 }
 

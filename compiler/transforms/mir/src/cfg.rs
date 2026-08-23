@@ -583,6 +583,34 @@ impl BodyBuilder {
                     },
                 ));
             }
+            severian_hir::ExpressionKind::Borrow { operand, exclusive } => {
+                let source = match &operand.kind {
+                    severian_hir::ExpressionKind::Binding(binding) => {
+                        self.bindings[binding].clone()
+                    }
+                    _ => self.expression(operand),
+                };
+                self.push(Statement::Assign(
+                    result.clone(),
+                    if *exclusive {
+                        Rvalue::BorrowExclusive(source)
+                    } else {
+                        Rvalue::BorrowShared(source)
+                    },
+                ));
+            }
+            severian_hir::ExpressionKind::Move(operand) => {
+                let source = match &operand.kind {
+                    severian_hir::ExpressionKind::Binding(binding) => {
+                        self.bindings[binding].clone()
+                    }
+                    _ => self.expression(operand),
+                };
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Use(Operand::Move(source)),
+                ));
+            }
             severian_hir::ExpressionKind::Unary { operator, operand } => {
                 let operand = Operand::Copy(self.expression(operand));
                 self.push(Statement::Assign(

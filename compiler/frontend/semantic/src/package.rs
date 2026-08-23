@@ -387,17 +387,34 @@ fn collect_package_lists(
 ) -> Vec<PackageList> {
     let mut uses = BTreeMap::<TypeId, ModuleId>::new();
     for module in &module_graph.modules {
-        for function in module.ast.items.iter().filter_map(|item| match item {
-            Item::Function(function) => Some(function),
-            _ => None,
-        }) {
-            for annotation in function
-                .parameters
-                .iter()
-                .map(|parameter| &parameter.annotation)
-                .chain(std::iter::once(&function.result))
-            {
-                collect_list_elements(annotation, types, module.id, &mut uses);
+        for item in &module.ast.items {
+            match item {
+                Item::Function(function) => {
+                    collect_function_lists(function, types, module.id, &mut uses);
+                }
+                Item::Class(class) => {
+                    for field in &class.fields {
+                        collect_list_elements(&field.annotation, types, module.id, &mut uses);
+                    }
+                    for function in class.constructors.iter().chain(&class.methods) {
+                        collect_function_lists(function, types, module.id, &mut uses);
+                    }
+                }
+                Item::Enum(declaration) => {
+                    for field in declaration
+                        .variants
+                        .iter()
+                        .flat_map(|variant| &variant.fields)
+                    {
+                        collect_list_elements(&field.annotation, types, module.id, &mut uses);
+                    }
+                }
+                Item::Binding(binding) => {
+                    if let Some(annotation) = &binding.annotation {
+                        collect_list_elements(annotation, types, module.id, &mut uses);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -413,6 +430,22 @@ fn collect_package_lists(
             element,
         })
         .collect()
+}
+
+fn collect_function_lists(
+    function: &severian_ast::FunctionDeclaration,
+    types: &severian_universal::TypeContext,
+    module: ModuleId,
+    output: &mut BTreeMap<TypeId, ModuleId>,
+) {
+    for annotation in function
+        .parameters
+        .iter()
+        .map(|parameter| &parameter.annotation)
+        .chain(std::iter::once(&function.result))
+    {
+        collect_list_elements(annotation, types, module, output);
+    }
 }
 
 fn collect_list_elements(
@@ -997,7 +1030,9 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
                 remap_expression_bindings(argument, offset);
             }
         }
-        ExpressionKind::Unary { operand, .. } => remap_expression_bindings(operand, offset),
+        ExpressionKind::Unary { operand, .. }
+        | ExpressionKind::Borrow { operand, .. }
+        | ExpressionKind::Move(operand) => remap_expression_bindings(operand, offset),
         ExpressionKind::Binary { left, right, .. } => {
             remap_expression_bindings(left, offset);
             remap_expression_bindings(right, offset);

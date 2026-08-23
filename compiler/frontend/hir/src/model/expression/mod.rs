@@ -31,6 +31,11 @@ pub enum ExpressionKind {
         operand: Box<Expression>,
         conversion: Conversion,
     },
+    Borrow {
+        operand: Box<Expression>,
+        exclusive: bool,
+    },
+    Move(Box<Expression>),
     Unary {
         operator: UnaryOperator,
         operand: Box<Expression>,

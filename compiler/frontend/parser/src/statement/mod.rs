@@ -195,6 +195,7 @@ impl Parser<'_> {
         let (name, _) = self.identifier("expected a function name")?;
         let (type_parameters, mut constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
+        self.line_breaks();
         let mut parameters = Vec::new();
         if !self.at(&TokenKind::RightParen) {
             loop {
@@ -219,7 +220,12 @@ impl Parser<'_> {
                     annotation,
                     default,
                 });
+                self.line_breaks();
                 if self.take(&TokenKind::Comma).is_none() {
+                    break;
+                }
+                self.line_breaks();
+                if self.at(&TokenKind::RightParen) {
                     break;
                 }
             }
@@ -1223,12 +1229,31 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<Expression, Diagnostic> {
+        if self.at_identifier("borrow") {
+            let start = self.next().span;
+            let operator = if self.at_identifier("mut") {
+                self.next();
+                UnaryOperator::BorrowMut
+            } else {
+                UnaryOperator::Borrow
+            };
+            let operand = self.unary()?;
+            return Ok(Expression {
+                span: Span::new(start.source, start.start, operand.span.end),
+                kind: ExpressionKind::Unary {
+                    operator,
+                    operand: Box::new(operand),
+                },
+            });
+        }
         let operator = match &self.peek().kind {
             TokenKind::Plus => Some(UnaryOperator::Positive),
             TokenKind::Minus => Some(UnaryOperator::Negative),
             TokenKind::Bang => Some(UnaryOperator::Not),
             TokenKind::Identifier(value) if value == "not" => Some(UnaryOperator::Not),
-            TokenKind::Identifier(value) if value == "copy" => Some(UnaryOperator::Copy),
+            TokenKind::Identifier(value) if value == "copy" || value == "clone" => {
+                Some(UnaryOperator::Copy)
+            }
             TokenKind::Identifier(value) if value == "move" => Some(UnaryOperator::Move),
             _ => None,
         };
@@ -1340,6 +1365,7 @@ impl Parser<'_> {
                     };
                 }
             } else if self.take(&TokenKind::LeftParen).is_some() {
+                self.line_breaks();
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {
                     loop {
@@ -1362,7 +1388,12 @@ impl Parser<'_> {
                             span: Span::new(start.source, start.start, value.span.end),
                             value,
                         });
+                        self.line_breaks();
                         if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        self.line_breaks();
+                        if self.at(&TokenKind::RightParen) {
                             break;
                         }
                     }
@@ -1436,10 +1467,16 @@ impl Parser<'_> {
             TokenKind::Identifier(name) => ExpressionKind::Name(name),
             TokenKind::LeftBracket => {
                 let mut values = Vec::new();
+                self.line_breaks();
                 if !self.at(&TokenKind::RightBracket) {
                     loop {
                         values.push(self.expression(0)?);
+                        self.line_breaks();
                         if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        self.line_breaks();
+                        if self.at(&TokenKind::RightBracket) {
                             break;
                         }
                     }
@@ -1454,6 +1491,7 @@ impl Parser<'_> {
                 });
             }
             TokenKind::LeftParen => {
+                self.line_breaks();
                 if self.take(&TokenKind::RightParen).is_some() {
                     return Ok(Expression {
                         kind: ExpressionKind::Literal(Literal::Unit),
@@ -1461,16 +1499,20 @@ impl Parser<'_> {
                     });
                 }
                 let first = self.expression(0)?;
+                self.line_breaks();
                 if self.take(&TokenKind::Comma).is_none() {
                     self.expect(&TokenKind::RightParen, "expected `)`")?;
                     return Ok(first);
                 }
                 let mut values = vec![first];
+                self.line_breaks();
                 while !self.at(&TokenKind::RightParen) {
                     values.push(self.expression(0)?);
+                    self.line_breaks();
                     if self.take(&TokenKind::Comma).is_none() {
                         break;
                     }
+                    self.line_breaks();
                 }
                 let end = self
                     .expect(&TokenKind::RightParen, "expected `)` after tuple literal")?
@@ -1516,6 +1558,15 @@ impl Parser<'_> {
     }
 
     fn type_primary(&mut self) -> Result<TypeAnnotation, Diagnostic> {
+        if self.at_identifier("borrow") || self.at_identifier("move") {
+            let start = self.next().span;
+            if self.at_identifier("mut") {
+                self.next();
+            }
+            let mut annotation = self.type_primary()?;
+            annotation.span = Span::new(start.source, start.start, annotation.span.end);
+            return Ok(annotation);
+        }
         let (name, start) = self.identifier("expected a type")?;
         let mut arguments = Vec::new();
         let mut end = start.end;
@@ -1545,6 +1596,15 @@ impl Parser<'_> {
 
     fn separators(&mut self) {
         while self.at(&TokenKind::Newline) || self.at(&TokenKind::Comma) {
+            self.cursor += 1;
+        }
+    }
+
+    fn line_breaks(&mut self) {
+        while self.at(&TokenKind::Newline)
+            || self.at(&TokenKind::Indent)
+            || self.at(&TokenKind::Dedent)
+        {
             self.cursor += 1;
         }
     }

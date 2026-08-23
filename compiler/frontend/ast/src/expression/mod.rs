@@ -18,6 +18,8 @@ pub enum UnaryOperator {
     Positive,
     Negative,
     Not,
+    Borrow,
+    BorrowMut,
     Copy,
     Move,
 }

@@ -203,9 +203,10 @@ fn validate_generic_expression(
                         severian_universal::UnaryOperator::Negative
                     }
                     severian_ast::UnaryOperator::Not => severian_universal::UnaryOperator::Not,
-                    severian_ast::UnaryOperator::Copy | severian_ast::UnaryOperator::Move => {
-                        return Ok(parameter.clone().into())
-                    }
+                    severian_ast::UnaryOperator::Borrow
+                    | severian_ast::UnaryOperator::BorrowMut
+                    | severian_ast::UnaryOperator::Copy
+                    | severian_ast::UnaryOperator::Move => return Ok(parameter.clone().into()),
                 };
                 if !parameter_allows_unary(parameter, operator, function, index, types) {
                     return Err(missing_operator_constraint(

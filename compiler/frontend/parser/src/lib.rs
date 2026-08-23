@@ -21,6 +21,20 @@ mod tests {
     }
 
     #[test]
+    fn multiline_delimiters_ignore_layout_tokens_and_allow_trailing_commas() {
+        let source = SourceFile::virtual_source(
+            "multiline.sev",
+            "def matrix(\n    rows: list[int],\n) -> list[int]:\n    return build(\n        [1, 2,\n         3, 4,\n        ],\n    )\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert_eq!(function.parameters.len(), 1);
+        assert!(function.body.is_some());
+    }
+
+    #[test]
     fn compound_assignment_is_an_explicit_binding_update() {
         let source = SourceFile::virtual_source("update.sev", "value := 1\nvalue += 2\n");
         let module = parse(&scan(&source).unwrap()).unwrap();
