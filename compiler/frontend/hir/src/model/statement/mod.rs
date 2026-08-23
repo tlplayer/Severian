@@ -40,6 +40,11 @@ pub enum Statement {
         span: Span,
         condition_span: Span,
     },
+    ExpectThrow {
+        expression: Expression,
+        boolean_type: TypeId,
+        span: Span,
+    },
     If {
         condition: Expression,
         then_block: Block,

@@ -101,6 +101,13 @@ pub enum ExpressionKind {
     Await {
         expression: Box<Expression>,
     },
+    Fallback {
+        value: Box<Expression>,
+        fallback: Box<Expression>,
+    },
+    Throw {
+        error: Box<Expression>,
+    },
     Unary {
         operator: UnaryOperator,
         operand: Box<Expression>,

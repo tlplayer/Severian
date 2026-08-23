@@ -86,6 +86,14 @@ uintptr_t __sev_string_length(const char *value) {
     return strlen(value);
 }
 
+_Bool __sev_string_is_present(const char *value) {
+    return value != NULL && value[0] != '\0';
+}
+
+_Bool __sev_string_is_empty(const char *value) {
+    return value == NULL || value[0] == '\0';
+}
+
 const char *__sev_string_upper(const char *value) {
     size_t length = strlen(value);
     char *result = sev_string_allocation(length);

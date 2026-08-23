@@ -534,10 +534,16 @@ fn compiler(
     } else {
         TargetSpec::new(config.target.clone())
     };
+    let max_errors = config.values["diagnostics.max-errors"]
+        .value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid diagnostics.max-errors: {error}"))?;
     Compiler::new(target)
         .map(|compiler| match manifest {
-            Some(manifest) => compiler.with_packages(manifest.module_graph(include_root_dev)),
-            None => compiler,
+            Some(manifest) => compiler
+                .with_max_errors(max_errors)
+                .with_packages(manifest.module_graph(include_root_dev)),
+            None => compiler.with_max_errors(max_errors),
         })
         .map_err(|error| error.to_string())
 }

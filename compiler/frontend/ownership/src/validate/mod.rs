@@ -94,6 +94,7 @@ fn validate_statement(
             }
             Ok(())
         }
+        Statement::ExpectThrow { expression, .. } => validate_expression(expression, declared),
         Statement::If {
             condition,
             then_block,
@@ -165,6 +166,16 @@ fn validate_expression(
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
             validate_expression(expression, declared)
         }
+        ExpressionKind::Fallback {
+            condition,
+            value,
+            fallback,
+        } => {
+            validate_expression(condition, declared)?;
+            validate_expression(value, declared)?;
+            validate_expression(fallback, declared)
+        }
+        ExpressionKind::Throw(error) => validate_expression(error, declared),
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Borrow { operand, .. }
         | ExpressionKind::Move(operand) => validate_expression(operand, declared),

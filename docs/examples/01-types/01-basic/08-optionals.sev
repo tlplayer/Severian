@@ -15,13 +15,15 @@ def main():
     handled_name: string = find_name(false) else "default name"
 
 
-    if not name:
+    if not optional_name:
         print("No name found")
     else:
         throw Error("name is not to be found")
     print(known_name)
 
+
 test with integ:
     main()
     assert("No name found" in stdout)
     assert("Severian" in stdout)
+    throws(find_name(false) else throw Error("name is not to be found"))

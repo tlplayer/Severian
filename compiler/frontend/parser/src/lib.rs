@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod statement;
-pub use statement::parse;
+pub use statement::{parse, parse_with_max_errors};
 
 #[cfg(test)]
 mod tests {
@@ -462,5 +462,44 @@ output = f"""module {{
         let source = SourceFile::virtual_source("invalid.sev", "return 1\n");
         let error = parse(&scan(&source).unwrap()).unwrap_err();
         assert_eq!(error.code, "E000121");
+    }
+
+    #[test]
+    fn parses_fallback_throw_and_throws_expectation_forms() {
+        let source = SourceFile::virtual_source(
+            "optional.sev",
+            "test:\n    value = maybe() else \"fallback\"\n    throws(maybe() else throw Error(\"missing\"))\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Binding(binding) = &test.body[0] else {
+            panic!("expected fallback binding")
+        };
+        assert!(matches!(
+            binding.value.kind,
+            severian_ast::ExpressionKind::Fallback { .. }
+        ));
+        let severian_ast::Statement::Expression(expectation) = &test.body[1] else {
+            panic!("expected throws expression")
+        };
+        assert!(matches!(
+            expectation.kind,
+            severian_ast::ExpressionKind::Call { .. }
+        ));
+    }
+
+    #[test]
+    fn reports_multiple_syntax_errors_from_one_source() {
+        let source = SourceFile::virtual_source(
+            "invalid.sev",
+            "def main():\n    first = )\n    second = )\n",
+        );
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.additional.len(), 1, "{error:#?}");
+        let rendered = error.with_source(source).to_string();
+        assert!(rendered.contains("invalid.sev:2"), "{rendered}");
+        assert!(rendered.contains("invalid.sev:3"), "{rendered}");
     }
 }

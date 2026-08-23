@@ -348,6 +348,7 @@ struct BodyBuilder {
     expressions: BTreeMap<severian_hir::HirId, Place>,
     entry_parameters: Vec<LocalId>,
     loops: Vec<LoopTargets>,
+    catch_targets: Vec<BlockId>,
     terminated: BTreeSet<BlockId>,
     current_span: Option<Span>,
 }
@@ -384,6 +385,7 @@ impl BodyBuilder {
             expressions: BTreeMap::new(),
             entry_parameters: Vec::new(),
             loops: Vec::new(),
+            catch_targets: Vec::new(),
             terminated: BTreeSet::new(),
             current_span: None,
         }
@@ -470,6 +472,7 @@ impl BodyBuilder {
                 .find(|binding| binding.id == *id)
                 .map(|binding| binding.span),
             severian_hir::Statement::Assert { span, .. }
+            | severian_hir::Statement::ExpectThrow { span, .. }
             | severian_hir::Statement::While { span, .. }
             | severian_hir::Statement::Break { span }
             | severian_hir::Statement::Continue { span } => Some(*span),
@@ -572,6 +575,48 @@ impl BodyBuilder {
                         location: None,
                     },
                 });
+            }
+            severian_hir::Statement::ExpectThrow {
+                expression,
+                boolean_type,
+                span,
+            } => {
+                let caught = self.block();
+                let completed = self.block();
+                let join = self.block();
+                self.catch_targets.push(caught);
+                self.expression(expression);
+                self.catch_targets.pop();
+                if self.open(self.current) {
+                    self.terminate(Terminator::Goto(completed, Vec::new()));
+                }
+
+                self.current = caught;
+                self.terminate(Terminator::Goto(join, Vec::new()));
+
+                self.current = completed;
+                let failed = self.local(*boolean_type, false, false);
+                let failed_place = Place::local(failed);
+                self.push(Statement::StorageLive(failed));
+                self.push(Statement::Assign(
+                    failed_place.clone(),
+                    Rvalue::Use(Operand::Constant {
+                        value: severian_universal::LiteralValue::Boolean(false),
+                        ty: *boolean_type,
+                    }),
+                ));
+                self.push(Statement::Assert {
+                    condition: Operand::Copy(failed_place),
+                    message: None,
+                    origin: AssertionOrigin {
+                        statement_start: span.start,
+                        condition_start: expression.span.start,
+                        condition_end: expression.span.end,
+                        location: None,
+                    },
+                });
+                self.terminate(Terminator::Goto(join, Vec::new()));
+                self.current = join;
             }
             severian_hir::Statement::If {
                 condition,
@@ -814,6 +859,50 @@ impl BodyBuilder {
                         conversion: conversion.clone(),
                     },
                 ));
+            }
+            severian_hir::ExpressionKind::Fallback {
+                condition,
+                value,
+                fallback,
+            } => {
+                let condition = Operand::Copy(self.expression(condition));
+                let present = self.block();
+                let absent = self.block();
+                let join = self.block();
+                self.terminate(Terminator::Branch {
+                    condition,
+                    then_block: present,
+                    else_block: absent,
+                });
+
+                self.current = present;
+                let selected = self.expression(value);
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Use(Operand::Copy(selected)),
+                ));
+                self.terminate(Terminator::Goto(join, Vec::new()));
+
+                self.current = absent;
+                let selected = self.expression(fallback);
+                if self.open(self.current) {
+                    self.push(Statement::Assign(
+                        result.clone(),
+                        Rvalue::Use(Operand::Copy(selected)),
+                    ));
+                    self.terminate(Terminator::Goto(join, Vec::new()));
+                }
+                self.current = join;
+            }
+            severian_hir::ExpressionKind::Throw(error) => {
+                let error = Operand::Copy(self.expression(error));
+                if let Some(catch) = self.catch_targets.last().copied() {
+                    self.terminate(Terminator::Goto(catch, Vec::new()));
+                } else {
+                    self.terminate(Terminator::Throw(error));
+                }
+                self.current = self.block();
+                self.terminate(Terminator::Unreachable);
             }
             severian_hir::ExpressionKind::Borrow { operand, exclusive } => {
                 let source = match &operand.kind {

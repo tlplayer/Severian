@@ -149,6 +149,70 @@ fn diagnostics_include_source_context_notes_and_help() {
 }
 
 #[test]
+fn diagnostics_default_to_five_and_honor_the_package_limit() {
+    let invalid_body = "def main():\n    one = )\n    two = )\n    three = )\n    four = )\n    five = )\n    six = )\n";
+
+    let bare_root = temporary("diagnostic-default-limit");
+    let bare = bare_root.join("invalid.sev");
+    fs::write(&bare, invalid_body).unwrap();
+    let output = sev().args(["check"]).arg(&bare).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.matches("E000111:").count(), 5, "{stderr}");
+    assert!(stderr.contains("additional diagnostics omitted after 5 errors"));
+    fs::remove_dir_all(bare_root).unwrap();
+
+    let package = temporary("diagnostic-package-limit");
+    fs::create_dir(package.join("src")).unwrap();
+    fs::write(
+        package.join("package.toml"),
+        "[package]\nname = \"diagnostics\"\n\n[[bin]]\nname = \"diagnostics\"\npath = \"src/main.sev\"\n\n[diagnostics]\nmax-errors = 2\n",
+    )
+    .unwrap();
+    fs::write(package.join("src/main.sev"), invalid_body).unwrap();
+    let output = sev().args(["check"]).arg(&package).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.matches("E000111:").count(), 2, "{stderr}");
+    assert!(stderr.contains("additional diagnostics omitted after 2 errors"));
+    fs::remove_dir_all(package).unwrap();
+}
+
+#[test]
+fn optional_fallback_and_throws_are_executable_test_control_flow() {
+    let root = temporary("optional-fallback");
+    let passing = root.join("passing.sev");
+    fs::write(
+        &passing,
+        "def maybe(found: bool) -> string | None:\n    if found:\n        return \"value\"\n    return None\n\ntest:\n    selected = maybe(false) else \"fallback\"\n    assert(selected == \"fallback\")\n    throws(maybe(false) else throw Error(\"missing\"))\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&passing).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let failing = root.join("failing.sev");
+    fs::write(
+        &failing,
+        "def maybe() -> string | None:\n    return \"value\"\n\ntest:\n    throws(maybe() else throw Error(\"missing\"))\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&failing).output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("FAILED"),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn constrained_generic_method_traits_specialize_to_executable_instances() {
     let root = temporary("generic-numeric");
     let source = root.join("generic-numeric.sev");

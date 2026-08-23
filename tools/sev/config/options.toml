@@ -58,7 +58,7 @@ description = "Diagnostic output format."
 path = "diagnostics.max-errors"
 group = "Diagnostics"
 type = "integer"
-default = "20"
+default = "5"
 description = "Maximum diagnostics emitted before checking stops."
 
 [[option]]

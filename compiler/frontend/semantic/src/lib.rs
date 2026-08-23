@@ -1270,10 +1270,32 @@ impl Analyzer<'_> {
                     value: self.expression(value, Some(declaration.ty))?,
                 })
             }
-            AstStatement::Expression(expression) => match self.class_method_update(expression)? {
-                Some(update) => Ok(update),
-                None => Ok(Statement::Expression(self.expression(expression, None)?)),
-            },
+            AstStatement::Expression(expression) => {
+                if let AstExpressionKind::Call { callee, arguments } = &expression.kind {
+                    if callable_path(callee).as_deref() == Some("throws") {
+                        let [argument] = arguments.as_slice() else {
+                            return Err(Diagnostic::new(
+                                "E000217",
+                                "`throws` requires exactly one expression",
+                                Some(expression.span),
+                            ));
+                        };
+                        let boolean_type = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(Statement::ExpectThrow {
+                            expression: self.expression(&argument.value, None)?,
+                            boolean_type,
+                            span: expression.span,
+                        });
+                    }
+                }
+                match self.class_method_update(expression)? {
+                    Some(update) => Ok(update),
+                    None => Ok(Statement::Expression(self.expression(expression, None)?)),
+                }
+            }
             AstStatement::Return { value, span } => {
                 let unit = self
                     .types
@@ -1790,6 +1812,68 @@ impl Analyzer<'_> {
                     id: self.next_id(),
                     type_id: expression.type_id,
                     kind: ExpressionKind::Await(Box::new(expression)),
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::Fallback { value, fallback } => {
+                let value = self.expression(value, expected)?;
+                let is_string = self
+                    .types
+                    .definition(value.type_id)
+                    .is_some_and(|definition| definition.name == "string");
+                if !is_string {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "`else` fallback currently requires an optional string value",
+                        Some(ast.span),
+                    ));
+                }
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let condition = self.runtime_call(
+                    "__sev_string_is_present",
+                    &[value.type_id],
+                    boolean,
+                    vec![value.clone()],
+                    ast.span,
+                );
+                let fallback = self.expression(fallback, Some(value.type_id))?;
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: value.type_id,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(value),
+                        fallback: Box::new(fallback),
+                    },
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::Throw { error } => {
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                let error = match &error.kind {
+                    AstExpressionKind::Call { callee, arguments }
+                        if callable_path(callee).as_deref() == Some("Error")
+                            && arguments.len() == 1 =>
+                    {
+                        self.expression(&arguments[0].value, Some(string))?
+                    }
+                    _ => self.expression(error, None)?,
+                };
+                let type_id = expected.unwrap_or_else(|| {
+                    self.types
+                        .resolve_name("unit")
+                        .expect("bootstrap defines unit")
+                });
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id,
+                    kind: ExpressionKind::Throw(Box::new(error)),
                     span: ast.span,
                 })
             }
@@ -2488,6 +2572,26 @@ impl Analyzer<'_> {
                         kind: ExpressionKind::Move(Box::new(operand)),
                         span: ast.span,
                     });
+                }
+                if *operator == AstUnaryOperator::Not {
+                    let operand = self.expression(operand, None)?;
+                    if self
+                        .types
+                        .definition(operand.type_id)
+                        .is_some_and(|definition| definition.name == "string")
+                    {
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(self.runtime_call(
+                            "__sev_string_is_empty",
+                            &[operand.type_id],
+                            boolean,
+                            vec![operand],
+                            ast.span,
+                        ));
+                    }
                 }
                 let operator = universal_unary(*operator);
                 let prepared = self.prepare(operand)?;

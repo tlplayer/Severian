@@ -64,6 +64,7 @@ pub struct Compiler {
     compile_handlers: CompilerRegistry,
     packages: Option<severian_modules::PackageGraph>,
     coverage: bool,
+    max_errors: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +100,7 @@ impl Compiler {
             compile_handlers: CompilerRegistry::new(),
             packages: None,
             coverage: false,
+            max_errors: 5,
         }
     }
 
@@ -109,6 +111,11 @@ impl Compiler {
 
     pub fn with_coverage(mut self) -> Self {
         self.coverage = true;
+        self
+    }
+
+    pub fn with_max_errors(mut self, max_errors: usize) -> Self {
+        self.max_errors = max_errors.max(1);
         self
     }
 
@@ -615,7 +622,12 @@ impl Compiler {
         source: &Path,
     ) -> Result<severian_modules::ModuleGraph, CompileError> {
         let packages = self.standard_package_graph(source)?;
-        severian_modules::resolve_with_packages(source, &packages).map_err(CompileError::Diagnostic)
+        severian_modules::resolve_with_packages_and_max_errors(
+            source,
+            &packages,
+            self.max_errors,
+        )
+        .map_err(CompileError::Diagnostic)
     }
 
     fn standard_package_graph(

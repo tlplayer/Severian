@@ -996,6 +996,9 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
                     remap_expression_bindings(message, offset);
                 }
             }
+            Statement::ExpectThrow { expression, .. } => {
+                remap_expression_bindings(expression, offset);
+            }
             Statement::If {
                 condition,
                 then_block,
@@ -1045,6 +1048,16 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
             remap_expression_bindings(expression, offset)
         }
+        ExpressionKind::Fallback {
+            condition,
+            value,
+            fallback,
+        } => {
+            remap_expression_bindings(condition, offset);
+            remap_expression_bindings(value, offset);
+            remap_expression_bindings(fallback, offset);
+        }
+        ExpressionKind::Throw(error) => remap_expression_bindings(error, offset),
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Borrow { operand, .. }
         | ExpressionKind::Move(operand) => remap_expression_bindings(operand, offset),

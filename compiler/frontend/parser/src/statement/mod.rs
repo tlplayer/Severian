@@ -11,7 +11,88 @@ use severian_lexer::{scan, Token, TokenKind};
 use severian_source::{SourceFile, Span};
 
 pub fn parse(tokens: &[Token]) -> Result<Module, Diagnostic> {
-    Parser { tokens, cursor: 0 }.module()
+    parse_with_max_errors(tokens, 5)
+}
+
+pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Module, Diagnostic> {
+    let max_errors = max_errors.max(1);
+    let first = match (Parser { tokens, cursor: 0 }).module() {
+        Ok(module) => return Ok(module),
+        Err(diagnostic) => diagnostic,
+    };
+    let mut diagnostics = vec![first];
+    let mut recovered = tokens.to_vec();
+    let mut omitted = false;
+    loop {
+        let Some(span) = diagnostics.last().and_then(|diagnostic| diagnostic.span) else {
+            break;
+        };
+        if !suppress_diagnostic_line(&mut recovered, span) {
+            break;
+        }
+        match (Parser {
+            tokens: &recovered,
+            cursor: 0,
+        })
+        .module()
+        {
+            Ok(_) => break,
+            Err(diagnostic) => {
+                if diagnostics.iter().any(|known| {
+                    known.code == diagnostic.code
+                        && known.message == diagnostic.message
+                        && known.span == diagnostic.span
+                }) {
+                    break;
+                }
+                if diagnostics.len() == max_errors {
+                    omitted = true;
+                    break;
+                }
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+    let mut first = diagnostics.remove(0).with_additional(diagnostics);
+    if omitted {
+        first = first.with_note(format!(
+            "additional diagnostics omitted after {max_errors} errors"
+        ));
+    }
+    Err(first)
+}
+
+fn suppress_diagnostic_line(tokens: &mut Vec<Token>, span: Span) -> bool {
+    let Some(target) = tokens.iter().position(|token| {
+        token.span.source == span.source
+            && (token.span.start <= span.start && token.span.end >= span.start
+                || token.span.start >= span.start)
+    }) else {
+        return false;
+    };
+    let start = tokens[..target]
+        .iter()
+        .rposition(|token| token.kind == TokenKind::Newline)
+        .map_or(0, |index| index + 1);
+    let end = tokens[target..]
+        .iter()
+        .position(|token| token.kind == TokenKind::Newline)
+        .map_or(tokens.len(), |index| target + index);
+    let removable = (start..end)
+        .filter(|index| {
+            !matches!(
+                tokens[*index].kind,
+                TokenKind::Indent | TokenKind::Dedent | TokenKind::Eof
+            )
+        })
+        .collect::<Vec<_>>();
+    if removable.is_empty() {
+        return false;
+    }
+    for index in removable.into_iter().rev() {
+        tokens.remove(index);
+    }
+    true
 }
 
 struct Parser<'a> {
@@ -1363,10 +1444,36 @@ impl Parser<'_> {
                 combined
             };
         }
+        if minimum_precedence == 0 && self.at_identifier("else") {
+            self.next();
+            let fallback = self.expression(0)?;
+            let span = Span::new(
+                expression.span.source,
+                expression.span.start,
+                fallback.span.end,
+            );
+            expression = Expression {
+                kind: ExpressionKind::Fallback {
+                    value: Box::new(expression),
+                    fallback: Box::new(fallback),
+                },
+                span,
+            };
+        }
         Ok(expression)
     }
 
     fn unary(&mut self) -> Result<Expression, Diagnostic> {
+        if self.at_identifier("throw") {
+            let start = self.next().span;
+            let error = self.expression(0)?;
+            return Ok(Expression {
+                span: Span::new(start.source, start.start, error.span.end),
+                kind: ExpressionKind::Throw {
+                    error: Box::new(error),
+                },
+            });
+        }
         if self.at_identifier("async") {
             let start = self.next().span;
             let expression = self.postfix()?;
@@ -2087,6 +2194,10 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await { expression } => {
             expression_mentions(expression, expected)
         }
+        ExpressionKind::Fallback { value, fallback } => {
+            expression_mentions(value, expected) || expression_mentions(fallback, expected)
+        }
+        ExpressionKind::Throw { error } => expression_mentions(error, expected),
         ExpressionKind::Unary { operand, .. } => expression_mentions(operand, expected),
         ExpressionKind::Binary { left, right, .. } => {
             expression_mentions(left, expected) || expression_mentions(right, expected)

@@ -18,6 +18,7 @@ pub struct Diagnostic {
     pub notes: Vec<String>,
     pub help: Option<String>,
     pub sources: Vec<SourceFile>,
+    pub additional: Vec<Diagnostic>,
 }
 
 impl Diagnostic {
@@ -30,6 +31,7 @@ impl Diagnostic {
             notes: Vec::new(),
             help: None,
             sources: Vec::new(),
+            additional: Vec::new(),
         }
     }
 
@@ -53,7 +55,12 @@ impl Diagnostic {
 
     pub fn with_source(mut self, source: SourceFile) -> Self {
         if !self.sources.iter().any(|known| known.id == source.id) {
-            self.sources.push(source);
+            self.sources.push(source.clone());
+        }
+        for diagnostic in &mut self.additional {
+            if !diagnostic.sources.iter().any(|known| known.id == source.id) {
+                diagnostic.sources.push(source.clone());
+            }
         }
         self
     }
@@ -61,9 +68,19 @@ impl Diagnostic {
     pub fn with_sources(mut self, sources: impl IntoIterator<Item = SourceFile>) -> Self {
         for source in sources {
             if !self.sources.iter().any(|known| known.id == source.id) {
-                self.sources.push(source);
+                self.sources.push(source.clone());
+            }
+            for diagnostic in &mut self.additional {
+                if !diagnostic.sources.iter().any(|known| known.id == source.id) {
+                    diagnostic.sources.push(source.clone());
+                }
             }
         }
+        self
+    }
+
+    pub fn with_additional(mut self, diagnostics: impl IntoIterator<Item = Diagnostic>) -> Self {
+        self.additional.extend(diagnostics);
         self
     }
 }
@@ -113,6 +130,9 @@ impl fmt::Display for Diagnostic {
         }
         if let Some(help) = &self.help {
             write!(formatter, "\n help: {help}")?;
+        }
+        for diagnostic in &self.additional {
+            write!(formatter, "\n\n{diagnostic}")?;
         }
         Ok(())
     }

@@ -40,6 +40,12 @@ pub enum ExpressionKind {
         locked: bool,
     },
     Await(Box<Expression>),
+    Fallback {
+        condition: Box<Expression>,
+        value: Box<Expression>,
+        fallback: Box<Expression>,
+    },
+    Throw(Box<Expression>),
     Convert {
         operand: Box<Expression>,
         conversion: Conversion,

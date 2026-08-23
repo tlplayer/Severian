@@ -77,7 +77,15 @@ pub fn resolve_with_packages(
     root: &Path,
     packages: &PackageGraph,
 ) -> Result<ModuleGraph, Diagnostic> {
-    let mut resolver = Resolver::new(packages);
+    resolve_with_packages_and_max_errors(root, packages, 5)
+}
+
+pub fn resolve_with_packages_and_max_errors(
+    root: &Path,
+    packages: &PackageGraph,
+    max_errors: usize,
+) -> Result<ModuleGraph, Diagnostic> {
+    let mut resolver = Resolver::new(packages, max_errors);
     resolver.visit(root, packages.root)?;
     Ok(ModuleGraph {
         modules: resolver.order,
@@ -93,10 +101,11 @@ struct Resolver<'a> {
     module_ids: BTreeMap<PathBuf, ModuleId>,
     import_edges: BTreeMap<PathBuf, Vec<ResolvedImport>>,
     sources: SourceMap,
+    max_errors: usize,
 }
 
 impl<'a> Resolver<'a> {
-    fn new(packages: &'a PackageGraph) -> Self {
+    fn new(packages: &'a PackageGraph, max_errors: usize) -> Self {
         Self {
             packages,
             parsed: BTreeMap::new(),
@@ -106,6 +115,7 @@ impl<'a> Resolver<'a> {
             module_ids: BTreeMap::new(),
             import_edges: BTreeMap::new(),
             sources: SourceMap::new(),
+            max_errors: max_errors.max(1),
         }
     }
 
@@ -156,7 +166,7 @@ impl<'a> Resolver<'a> {
             .clone();
         let tokens = severian_lexer::scan(&source)
             .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
-        let ast = severian_parser::parse(&tokens)
+        let ast = severian_parser::parse_with_max_errors(&tokens, self.max_errors)
             .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
         self.parsed.insert(canonical.clone(), ast.clone());
         let module_id = module_id(&canonical, package, self.packages)?;

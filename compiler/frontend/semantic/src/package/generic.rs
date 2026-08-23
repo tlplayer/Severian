@@ -198,6 +198,16 @@ fn validate_generic_expression(
         Expression::Async { expression, .. } | Expression::Await { expression } => {
             validate_generic_expression(expression, names, function, index, types)
         }
+        Expression::Fallback { value, fallback } => {
+            let value = validate_generic_expression(value, names, function, index, types)?;
+            let fallback =
+                validate_generic_expression(fallback, names, function, index, types)?;
+            Ok(value.or(fallback))
+        }
+        Expression::Throw { error } => {
+            validate_generic_expression(error, names, function, index, types)?;
+            Ok(None)
+        }
         Expression::Unary { operator, operand } => {
             let parameter = validate_generic_expression(operand, names, function, index, types)?;
             if let Some(parameter) = &parameter {
@@ -914,6 +924,34 @@ fn visit_expression_for_specializations(
                 module,
                 expression,
                 expected,
+                names,
+                index,
+                specializations,
+            )?;
+        }
+        severian_ast::ExpressionKind::Fallback { value, fallback } => {
+            visit_expression_for_specializations(
+                module,
+                value,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+            visit_expression_for_specializations(
+                module,
+                fallback,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+        }
+        severian_ast::ExpressionKind::Throw { error } => {
+            visit_expression_for_specializations(
+                module,
+                error,
+                None,
                 names,
                 index,
                 specializations,
