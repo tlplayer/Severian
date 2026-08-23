@@ -1,0 +1,20 @@
+@c(repr = "pointer")
+type NativeList
+
+@c(symbol = "__sev_list_create")
+def list_create() -> NativeList
+
+@c(symbol = "__sev_list_len")
+def list_len(list: borrowed[NativeList]) -> usize
+
+@c(symbol = "__sev_list_push_i64")
+def list_push_i64(list: borrowed[NativeList], value: i64)
+
+@c(symbol = "__sev_list_push_ptr")
+def list_push_ptr(list: borrowed[NativeList], value: borrowed[string])
+
+@c(symbol = "__sev_list_get_i64")
+def list_get_i64(list: borrowed[NativeList], index: i64) -> i64
+
+@c(symbol = "__sev_list_get_ptr")
+def list_get_ptr(list: borrowed[NativeList], index: i64) -> borrowed[string]

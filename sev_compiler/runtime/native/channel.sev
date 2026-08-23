@@ -1,0 +1,17 @@
+@c(repr = "pointer")
+type NativeChannel
+
+@c(symbol = "__sev_channel_create")
+def channel_create(capacity: usize) -> NativeChannel
+
+@c(symbol = "__sev_channel_send_i64")
+def channel_send_i64(channel: borrowed[NativeChannel], value: i64)
+
+@c(symbol = "__sev_channel_send_ptr")
+def channel_send_ptr(channel: borrowed[NativeChannel], value: borrowed[string])
+
+@c(symbol = "__sev_channel_recv_i64")
+def channel_recv_i64(channel: borrowed[NativeChannel]) -> i64
+
+@c(symbol = "__sev_channel_recv_ptr")
+def channel_recv_ptr(channel: borrowed[NativeChannel]) -> borrowed[string]

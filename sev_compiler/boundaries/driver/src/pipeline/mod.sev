@@ -104,13 +104,17 @@ class Compiler:
 def emit_mlir(module: string, output: string) -> backend.Artifact | CompileError:
     object = output + ".o"
     compile_result = process.run(["mlir-opt", "-", "--verify-each"], input = module)
-    if compile_result.status != 0: return error(Mlir(compile_result.stderr))
+    if compile_result.status != 0:
+        return error(Mlir(compile_result.stderr))
     translate = process.run(["mlir-translate", "--mlir-to-llvmir", "-"], input = compile_result.stdout)
-    if translate.status != 0: return error(Mlir(translate.stderr))
+    if translate.status != 0:
+        return error(Mlir(translate.stderr))
     object_result = process.run(["clang", "-x", "ir", "-", "-c", "-o", object], input = translate.stdout)
-    if object_result.status != 0: return error(Mlir(object_result.stderr))
+    if object_result.status != 0:
+        return error(Mlir(object_result.stderr))
     link_result = process.run(["cc", object, "-o", output])
-    if link_result.status != 0: return error(Backend(link_result.stderr))
+    if link_result.status != 0:
+        return error(Backend(link_result.stderr))
     return backend.Artifact(output, backend.Executable)
 
 

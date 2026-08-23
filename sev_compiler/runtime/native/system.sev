@@ -1,0 +1,20 @@
+@c(symbol = "__sev_process_run")
+def process_run(command: borrowed[string]) -> i64
+
+@c(symbol = "__sev_process_spawn")
+def process_spawn(command: borrowed[string]) -> i64
+
+@c(symbol = "__sev_process_kill")
+def process_kill(process: i64) -> bool
+
+@c(symbol = "__sev_process_wait")
+def process_wait(process: i64) -> i64
+
+@c(symbol = "__sev_environment_get")
+def environment_get(name: borrowed[string]) -> borrowed[string]
+
+@c(symbol = "__sev_environment_set")
+def environment_set(name: borrowed[string], value: borrowed[string]) -> bool
+
+@c(symbol = "__sev_pow_f64_i64")
+def pow_f64_i64(base: f64, exponent: i64) -> f64

@@ -1,0 +1,23 @@
+@c(symbol = "__sev_path_join")
+def path_join(left: borrowed[string], right: borrowed[string]) -> borrowed[string]
+
+@c(symbol = "__sev_path_basename")
+def path_basename(value: borrowed[string]) -> borrowed[string]
+
+@c(symbol = "__sev_path_dirname")
+def path_dirname(value: borrowed[string]) -> borrowed[string]
+
+@c(symbol = "__sev_path_extension")
+def path_extension(value: borrowed[string]) -> borrowed[string]
+
+@c(symbol = "__sev_path_exists")
+def path_exists(value: borrowed[string]) -> bool
+
+@c(symbol = "__sev_path_is_dir")
+def path_is_dir(value: borrowed[string]) -> bool
+
+@c(symbol = "__sev_file_write_text")
+def file_write_text(path: borrowed[string], contents: borrowed[string]) -> i32
+
+@c(symbol = "__sev_file_read_text")
+def file_read_text(path: borrowed[string]) -> borrowed[string]

@@ -25,9 +25,11 @@ class Manifest:
 
     def target(name: string) -> DeclaredTarget | None:
         for binary in binaries:
-            if binary.name == name: return Binary(binary)
+            if binary.name == name:
+                return Binary(binary)
         for library in libraries:
-            if library.name == name: return Library(library)
+            if library.name == name:
+                return Library(library)
         return None
 
 
@@ -75,4 +77,3 @@ def load_manifest(path: string) -> Manifest | string:
         dependency_path = declaration["path"] if declaration is map else declaration
         dependencies[dependency_name] = file.join(root, dependency_path)
     return Manifest(path, root, name, binaries, libraries, dependencies, {})
-

@@ -19,23 +19,35 @@ def parse_common(arguments: list[string]) -> CommonOptions | string:
             break
         if argument == "--backend":
             cursor += 1
-            if cursor >= len(arguments): return error("--backend requires a value")
+            if cursor >= len(arguments):
+                return error("--backend requires a value")
             options.backend = arguments[cursor]
-        elif argument == "--target":
             cursor += 1
-            if cursor >= len(arguments): return error("--target requires a value")
+            continue
+        if argument == "--target":
+            cursor += 1
+            if cursor >= len(arguments):
+                return error("--target requires a value")
             options.target = arguments[cursor]
-        elif argument == "--bin":
             cursor += 1
-            if cursor >= len(arguments): return error("--bin requires a value")
+            continue
+        if argument == "--bin":
+            cursor += 1
+            if cursor >= len(arguments):
+                return error("--bin requires a value")
             options.binary = arguments[cursor]
-        elif argument == "-o" or argument == "--output":
             cursor += 1
-            if cursor >= len(arguments): return error(argument + " requires a path")
+            continue
+        if argument == "-o" or argument == "--output":
+            cursor += 1
+            if cursor >= len(arguments):
+                return error(argument + " requires a path")
             options.output = arguments[cursor]
-        elif argument.starts_with("-"):
+            cursor += 1
+            continue
+        if argument.starts_with("-"):
             return error("unknown option " + argument)
-        elif options.path == None:
+        if options.path == None:
             options.path = argument
         else:
             return error("unexpected argument " + argument)
@@ -53,7 +65,8 @@ def discover_source(path: string | None, selected: string | None) -> tuple[strin
     manifest = load_manifest(manifest_path)
     if selected != None:
         target = manifest.target(selected)
-        if target == None: return error("unknown binary target " + selected)
+        if target == None:
+            return error("unknown binary target " + selected)
         match target:
             case Binary: return (target.path, target.name)
             case Library: return (target.path, target.name)
@@ -102,7 +115,8 @@ def run(arguments: list[string]) -> unit | string:
         result = process.run([artifact.path] + options.application_args)
         io.write_stdout(result.stdout)
         io.write_stderr(result.stderr)
-        if result.status != 0: return error("program exited with status " + string(result.status))
+        if result.status != 0:
+            return error("program exited with status " + string(result.status))
         return unit
     return error("test runner requires test discovery")
 
@@ -112,4 +126,3 @@ def main():
     if result is error:
         io.write_stderr("error: " + result.message + "\n")
         process.exit(1)
-
