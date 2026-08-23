@@ -5,22 +5,35 @@ Rust-like safety, Go-style concurrency, and MLIR/XLA-backed execution.
 
 ## Install
 
+```sh
 git clone https://github.com/tlplayer/Severian.git
 cd Severian
-cargo install --path compiler/driver
+cargo install \
+    --path compiler/boundaries/driver \
+    --force
 
 sev doctor
+```
+## Nightly Bootstrapped compiler
+
+```sh
+sev build \
+    sev_compiler/boundaries/driver \
+    --bin sev-bootstrap-driver
+```
 
 ## Try Severian
 
+```sh
 sev docs/examples/00-getting-started/01-hello.sev
+```
 
 Or create a project:
-
+```sh
 sev new hello
 cd hello
 sev run
-
+```
 ## Examples
 
 Start with [`docs/examples`](docs/examples/README.md).
