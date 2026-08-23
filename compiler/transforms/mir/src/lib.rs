@@ -12,8 +12,8 @@ mod verify;
 
 pub use build::build;
 pub use cfg::{
-    BasicBlock, BlockId, Body as CfgBody, Callee, Case, LocalDecl, LocalId, Operand, Place,
-    Projection, Rvalue, Statement as CfgStatement, Terminator,
+    BasicBlock, BlockId, Body as CfgBody, Callee, Case, GlobalDecl, GlobalId, LocalDecl, LocalId,
+    Operand, Place, PlaceBase, Projection, Rvalue, Statement as CfgStatement, Terminator,
 };
 pub use operation::Operation;
 pub use ownership::{
@@ -23,18 +23,14 @@ pub use passes::{
     run_required_pipeline, AnalysisId, AnalysisManager, IrStage, Pass, PassContext, PassError,
     PassKind, PassManager, PassMetadata,
 };
-use severian_hir::BindingId;
 pub use severian_hir::{CallType, FunctionId, TaskOwner};
 pub use value::{Value, ValueId};
 pub use verify::{verify, VerifyError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
-    pub values: Vec<Value>,
-    pub bindings: Vec<(BindingId, ValueId)>,
-    pub globals: Vec<ValueId>,
-    pub initializer: Block,
-    pub initializer_cfg: CfgBody,
+    pub globals: Vec<GlobalDecl>,
+    pub initializer: CfgBody,
     pub functions: Vec<Function>,
     pub entry: Option<FunctionId>,
     pub tests: Vec<TestDeclaration>,
@@ -134,9 +130,8 @@ pub struct Function {
     pub definition: severian_universal::DefId,
     pub substitution: severian_universal::Substitution,
     pub name: String,
-    pub parameters: Vec<ValueId>,
+    pub parameters: Vec<severian_universal::TypeId>,
     pub result: severian_universal::TypeId,
-    pub body: Option<Block>,
-    pub cfg: Option<CfgBody>,
+    pub body: Option<CfgBody>,
     pub call_type: CallType,
 }

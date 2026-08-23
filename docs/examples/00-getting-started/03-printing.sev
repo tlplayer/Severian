@@ -1,5 +1,15 @@
 print("You can print in global scope before main starts.")
 
+
+value := "one"
+global_fun(value)
+value = "two"
+global_fun(value)
+
+
+def global_func(value):
+    print(f"Call functions in global or allocate values like python call:{value}")
+
 def main():
     print("Or inside main")
 

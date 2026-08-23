@@ -1,4 +1,4 @@
-use crate::{CoveragePoint, FunctionId};
+use crate::{AssertionOrigin, CoverageKind, CoveragePoint, FunctionId, TaskOwner};
 use severian_hir::{Callee as HirCallee, Conversion};
 use severian_universal::{
     Attrs, BinaryOperator, DefId, LiteralValue, OpId, Substitution, TypeId, UnaryOperator,
@@ -11,6 +11,16 @@ pub struct BlockId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocalId(pub u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GlobalId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalDecl {
+    pub id: GlobalId,
+    pub ty: TypeId,
+    pub mutable: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalDecl {
     pub id: LocalId,
@@ -19,17 +29,37 @@ pub struct LocalDecl {
     pub argument: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlaceBase {
+    Local(LocalId),
+    Global(GlobalId),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Place {
-    pub local: LocalId,
+    pub base: PlaceBase,
     pub projection: Vec<Projection>,
 }
 
 impl Place {
     pub const fn local(local: LocalId) -> Self {
         Self {
-            local,
+            base: PlaceBase::Local(local),
             projection: Vec::new(),
+        }
+    }
+
+    pub const fn global(global: GlobalId) -> Self {
+        Self {
+            base: PlaceBase::Global(global),
+            projection: Vec::new(),
+        }
+    }
+
+    pub const fn local_id(&self) -> Option<LocalId> {
+        match self.base {
+            PlaceBase::Local(local) => Some(local),
+            PlaceBase::Global(_) => None,
         }
     }
 }
@@ -102,6 +132,7 @@ pub enum Statement {
     Assert {
         condition: Operand,
         message: Option<Operand>,
+        origin: AssertionOrigin,
     },
     Coverage(CoveragePoint),
     Operation {
@@ -177,14 +208,34 @@ impl Default for Body {
     }
 }
 
-pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<FunctionId, Body>) {
+pub(crate) fn lower_program(
+    program: &severian_hir::Program,
+) -> (Vec<GlobalDecl>, Body, BTreeMap<FunctionId, Body>) {
     let unit = program
         .modules
         .iter()
         .flat_map(|module| &module.functions)
         .next()
         .map_or(TypeId(0), |function| function.result.ty);
-    let mut initializer = BodyBuilder::new(unit);
+    let mut globals = Vec::new();
+    let mut global_bindings = BTreeMap::new();
+    let mut global_variables = BTreeMap::new();
+    for module in &program.modules {
+        for statement in &module.initializer.statements {
+            collect_global_bindings(
+                statement,
+                module,
+                &mut globals,
+                &mut global_bindings,
+                &mut global_variables,
+            );
+        }
+    }
+    let mut initializer = BodyBuilder::new(
+        unit,
+        global_bindings.clone(),
+        global_variables.clone(),
+    );
     for module in &program.modules {
         initializer.lower_statements(&module.initializer.statements, module);
     }
@@ -196,24 +247,11 @@ pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<
             let Some(body) = &function.body else {
                 continue;
             };
-            let mut builder = BodyBuilder::new(function.result.ty);
-            // Globals are implicit function inputs until CFG module places are
-            // introduced. Giving them explicit argument locals keeps their
-            // initialization and ownership state visible to verification.
-            for source_module in &program.modules {
-                for binding in &source_module.bindings {
-                    let place = if let Some(place) = builder.variables.get(&binding.variable) {
-                        place.clone()
-                    } else {
-                        let local = builder.local(binding.type_id, true, true);
-                        let place = Place::local(local);
-                        builder.variables.insert(binding.variable, place.clone());
-                        builder.entry_parameters.push(local);
-                        place
-                    };
-                    builder.bindings.insert(binding.id, place);
-                }
-            }
+            let mut builder = BodyBuilder::new(
+                function.result.ty,
+                global_bindings.clone(),
+                global_variables.clone(),
+            );
             for parameter in &function.parameters {
                 let local = builder.local(parameter.contract.ty, false, true);
                 let place = Place::local(local);
@@ -227,7 +265,45 @@ pub(crate) fn lower_program(program: &severian_hir::Program) -> (Body, BTreeMap<
             functions.insert(function.id, builder.finish());
         }
     }
-    (initializer, functions)
+    (globals, initializer, functions)
+}
+
+fn collect_global_bindings(
+    statement: &severian_hir::Statement,
+    module: &severian_hir::Module,
+    globals: &mut Vec<GlobalDecl>,
+    bindings: &mut BTreeMap<severian_hir::BindingId, Place>,
+    variables: &mut BTreeMap<severian_hir::VariableId, Place>,
+) {
+    match statement {
+        severian_hir::Statement::Sequence(block) => {
+            for statement in &block.statements {
+                collect_global_bindings(statement, module, globals, bindings, variables);
+            }
+        }
+        severian_hir::Statement::Binding(id) => {
+            let binding = module
+                .bindings
+                .iter()
+                .find(|binding| binding.id == *id)
+                .expect("typed HIR global binding exists");
+            let place = if let Some(place) = variables.get(&binding.variable) {
+                place.clone()
+            } else {
+                let id = GlobalId(globals.len() as u32);
+                globals.push(GlobalDecl {
+                    id,
+                    ty: binding.type_id,
+                    mutable: true,
+                });
+                let place = Place::global(id);
+                variables.insert(binding.variable, place.clone());
+                place
+            };
+            bindings.insert(*id, place);
+        }
+        _ => {}
+    }
 }
 
 struct BodyBuilder {
@@ -247,7 +323,11 @@ struct LoopTargets {
 }
 
 impl BodyBuilder {
-    fn new(return_type: TypeId) -> Self {
+    fn new(
+        return_type: TypeId,
+        bindings: BTreeMap<severian_hir::BindingId, Place>,
+        variables: BTreeMap<severian_hir::VariableId, Place>,
+    ) -> Self {
         Self {
             body: Body {
                 entry: BlockId(0),
@@ -261,8 +341,8 @@ impl BodyBuilder {
                 return_type,
             },
             current: BlockId(0),
-            bindings: BTreeMap::new(),
-            variables: BTreeMap::new(),
+            bindings,
+            variables,
             expressions: BTreeMap::new(),
             entry_parameters: Vec::new(),
             loops: Vec::new(),
@@ -335,6 +415,36 @@ impl BodyBuilder {
         statement: &severian_hir::Statement,
         module: &severian_hir::Module,
     ) {
+        let span_start = match statement {
+            severian_hir::Statement::Sequence(_) | severian_hir::Statement::Return(None) => None,
+            severian_hir::Statement::FieldUpdate { value, .. }
+            | severian_hir::Statement::FieldSet { value, .. }
+            | severian_hir::Statement::Expression(value)
+            | severian_hir::Statement::Return(Some(value)) => Some(value.span.start),
+            severian_hir::Statement::Binding(id) => module
+                .bindings
+                .iter()
+                .find(|binding| binding.id == *id)
+                .map(|binding| binding.span.start),
+            severian_hir::Statement::Assert { span, .. }
+            | severian_hir::Statement::While { span, .. }
+            | severian_hir::Statement::Break { span }
+            | severian_hir::Statement::Continue { span } => Some(span.start),
+            severian_hir::Statement::If { condition, .. }
+            | severian_hir::Statement::Match {
+                subject: condition, ..
+            } => Some(condition.span.start),
+        };
+        if let Some(span_start) = span_start {
+            self.push(Statement::Coverage(CoveragePoint {
+                span_start,
+                kind: CoverageKind::Line,
+                ordinal: 0,
+                key: None,
+                file: None,
+                line: None,
+            }));
+        }
         match statement {
             severian_hir::Statement::Sequence(block) => {
                 self.lower_statements(&block.statements, module);
@@ -399,13 +509,25 @@ impl BodyBuilder {
                 self.terminate(Terminator::Return(value));
             }
             severian_hir::Statement::Assert {
-                condition, message, ..
+                condition,
+                message,
+                span,
+                condition_span,
             } => {
                 let condition = Operand::Copy(self.expression(condition));
                 let message = message
                     .as_ref()
                     .map(|message| Operand::Copy(self.expression(message)));
-                self.push(Statement::Assert { condition, message });
+                self.push(Statement::Assert {
+                    condition,
+                    message,
+                    origin: AssertionOrigin {
+                        statement_start: span.start,
+                        condition_start: condition_span.start,
+                        condition_end: condition_span.end,
+                        location: None,
+                    },
+                });
             }
             severian_hir::Statement::If {
                 condition,
@@ -529,7 +651,9 @@ impl BodyBuilder {
             return place.clone();
         }
         let result = Place::local(self.local(expression.type_id, false, false));
-        self.push(Statement::StorageLive(result.local));
+        self.push(Statement::StorageLive(
+            result.local_id().expect("expression results are local places"),
+        ));
         match &expression.kind {
             severian_hir::ExpressionKind::Aggregate { class, fields } => {
                 let fields = fields
