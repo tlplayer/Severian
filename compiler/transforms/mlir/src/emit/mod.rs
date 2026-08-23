@@ -979,10 +979,16 @@ fn render_cfg_unary(
                 mlir_type(ty)?
             ));
         }
-        UnaryOperation::Not => output.push_str(&format!(
-            "{indentation}%v{} = arith.xori %v{}, true : i1\n",
-            result.0, operand.0
-        )),
+        UnaryOperation::Not => {
+            output.push_str(&format!(
+                "{indentation}%v{}_not = arith.constant true\n",
+                result.0
+            ));
+            output.push_str(&format!(
+                "{indentation}%v{} = arith.xori %v{}, %v{}_not : i1\n",
+                result.0, operand.0, result.0
+            ));
+        }
     }
     Ok(())
 }
@@ -2140,6 +2146,36 @@ mod tests {
     fn leading_dot_float_literals_are_normalized_for_mlir() {
         assert_eq!(mlir_float_literal(".5"), "0.5");
         assert_eq!(mlir_float_literal("1.5"), "1.5");
+    }
+
+    #[test]
+    fn cfg_boolean_not_uses_an_ssa_constant_operand() {
+        let boolean = LoweredType::Boolean;
+        let module = Module {
+            values: vec![
+                severian_lir::Value {
+                    id: ValueId(0),
+                    ty: boolean,
+                },
+                severian_lir::Value {
+                    id: ValueId(1),
+                    ty: boolean,
+                },
+            ],
+            ..Module::default()
+        };
+        let mut rendered = String::new();
+        render_cfg_unary(
+            &mut rendered,
+            &module,
+            UnaryOperation::Not,
+            ValueId(0),
+            ValueId(1),
+            4,
+        )
+        .unwrap();
+        assert!(rendered.contains("%v1_not = arith.constant true"));
+        assert!(rendered.contains("arith.xori %v0, %v1_not : i1"));
     }
 
     #[test]
