@@ -1,9 +1,12 @@
-use crate::{analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageFunction};
+use crate::{
+    analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageClass, PackageFunction,
+    PackageList,
+};
 use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
-use severian_universal::{DeclarationId, DefId, UniversalContext};
+use severian_universal::{DeclarationId, DefId, TypeId, UniversalContext};
 use std::collections::BTreeMap;
 
 mod generic;
@@ -137,6 +140,12 @@ pub fn analyze_package_with_context(
     resolve_imports(module_graph, &mut index);
     validate_generic_bodies(module_graph, &index, &universal.types)?;
     let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
+    let package_classes = collect_package_classes(module_graph);
+    let package_lists = collect_package_lists(
+        module_graph,
+        &universal.types,
+        u32::try_from(package_classes.len()).unwrap_or(u32::MAX),
+    );
 
     let mut next_binding = 0u32;
     let mut hir = Program::default();
@@ -210,10 +219,22 @@ pub fn analyze_package_with_context(
                         .parameters
                         .iter()
                         .map(|annotation| {
-                            crate::resolve_type_annotation(&universal.types, annotation)
+                            resolve_package_type(
+                                &universal.types,
+                                annotation,
+                                definition.module,
+                                &package_classes,
+                                &package_lists,
+                            )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    result: crate::resolve_type_annotation(&universal.types, &signature.result)?,
+                    result: resolve_package_type(
+                        &universal.types,
+                        &signature.result,
+                        definition.module,
+                        &package_classes,
+                        &package_lists,
+                    )?,
                     specificity: if original.type_parameters.is_empty() {
                         0
                     } else if original.constraints.is_empty() {
@@ -259,6 +280,9 @@ pub fn analyze_package_with_context(
             &visible,
             &own_function_ids,
             &test_function_ids,
+            &package_classes,
+            &package_lists,
+            Some(source_module.id),
         )?
         .modules
         .pop()
@@ -282,6 +306,103 @@ pub fn analyze_package_with_context(
     }
 
     Ok(TypedProgram { index, hir })
+}
+
+fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
+    module_graph
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module.ast.items.iter().filter_map(move |item| match item {
+                Item::Class(declaration) => Some((module.id, declaration.clone())),
+                _ => None,
+            })
+        })
+        .enumerate()
+        .map(|(ordinal, (module, declaration))| PackageClass {
+            module,
+            ty: TypeId(u32::MAX.saturating_sub(ordinal as u32)),
+            declaration,
+        })
+        .collect()
+}
+
+fn resolve_package_type(
+    types: &severian_universal::TypeContext,
+    annotation: &TypeAnnotation,
+    module: ModuleId,
+    classes: &[PackageClass],
+    lists: &[PackageList],
+) -> Result<TypeId, Diagnostic> {
+    if let Some(("list", [element])) = annotation.named_parts() {
+        let element = crate::resolve_type_annotation(types, element)?;
+        if let Some(list) = lists.iter().find(|list| list.element == element) {
+            return Ok(list.ty);
+        }
+    }
+    if let Some(name) = annotation.simple_name() {
+        if let Some(class) = classes
+            .iter()
+            .find(|class| class.module == module && class.declaration.name == name)
+        {
+            return Ok(class.ty);
+        }
+    }
+    crate::resolve_type_annotation(types, annotation)
+}
+
+fn collect_package_lists(
+    module_graph: &ModuleGraph,
+    types: &severian_universal::TypeContext,
+    class_count: u32,
+) -> Vec<PackageList> {
+    let mut uses = BTreeMap::<TypeId, ModuleId>::new();
+    for module in &module_graph.modules {
+        for function in module.ast.items.iter().filter_map(|item| match item {
+            Item::Function(function) => Some(function),
+            _ => None,
+        }) {
+            for annotation in function
+                .parameters
+                .iter()
+                .map(|parameter| &parameter.annotation)
+                .chain(std::iter::once(&function.result))
+            {
+                collect_list_elements(annotation, types, module.id, &mut uses);
+            }
+        }
+    }
+    uses.into_iter()
+        .enumerate()
+        .map(|(ordinal, (element, module))| PackageList {
+            module,
+            ty: TypeId(
+                u32::MAX
+                    .saturating_sub(class_count)
+                    .saturating_sub(ordinal as u32),
+            ),
+            element,
+        })
+        .collect()
+}
+
+fn collect_list_elements(
+    annotation: &TypeAnnotation,
+    types: &severian_universal::TypeContext,
+    module: ModuleId,
+    output: &mut BTreeMap<TypeId, ModuleId>,
+) {
+    let Some((name, arguments)) = annotation.named_parts() else {
+        return;
+    };
+    if name == "list" && arguments.len() == 1 {
+        if let Ok(element) = crate::resolve_type_annotation(types, &arguments[0]) {
+            output.entry(element).or_insert(module);
+        }
+    }
+    for argument in arguments {
+        collect_list_elements(argument, types, module, output);
+    }
 }
 
 #[derive(Debug)]

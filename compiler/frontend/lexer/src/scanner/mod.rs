@@ -320,6 +320,9 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                         cursor += 1;
                     }
                     TokenKind::Float(source.text[start..cursor].replace('_', ""))
+                } else if let Some((end, value)) = data_size_literal(&source.text, start, cursor) {
+                    cursor = end;
+                    TokenKind::Integer(value)
                 } else {
                     TokenKind::Integer(source.text[start..cursor].replace('_', ""))
                 }
@@ -349,6 +352,34 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
     }
     tokens.push(token(source, TokenKind::Eof, cursor, cursor));
     Ok(tokens)
+}
+
+fn data_size_literal(source: &str, start: usize, suffix_start: usize) -> Option<(usize, String)> {
+    let remaining = source.get(suffix_start..)?;
+    let (suffix, scale) = [
+        ("KiB", 1024u128),
+        ("MiB", 1024u128.pow(2)),
+        ("GiB", 1024u128.pow(3)),
+        ("TiB", 1024u128.pow(4)),
+        ("KB", 1000u128),
+        ("MB", 1000u128.pow(2)),
+        ("GB", 1000u128.pow(3)),
+        ("TB", 1000u128.pow(4)),
+        ("B", 1u128),
+    ]
+    .into_iter()
+    .find(|(suffix, _)| remaining.starts_with(suffix))?;
+    let end = suffix_start + suffix.len();
+    if source
+        .as_bytes()
+        .get(end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        return None;
+    }
+    let magnitude = source.get(start..suffix_start)?.replace('_', "");
+    let value = magnitude.parse::<u128>().ok()?.checked_mul(scale)?;
+    Some((end, value.to_string()))
 }
 
 fn character_error(source: &SourceFile, start: usize, cursor: usize) -> Diagnostic {

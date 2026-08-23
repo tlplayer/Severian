@@ -1,0 +1,17 @@
+@c(symbol = "__sev_path_join")
+def join(left: string, right: string) -> string
+
+@c(symbol = "__sev_path_basename")
+def basename(value: string) -> string
+
+@c(symbol = "__sev_path_dirname")
+def dirname(value: string) -> string
+
+@c(symbol = "__sev_path_extension")
+def extension(value: string) -> string
+
+@c(symbol = "__sev_path_exists")
+def exists(value: string) -> bool
+
+@c(symbol = "__sev_path_is_dir")
+def is_dir(value: string) -> bool

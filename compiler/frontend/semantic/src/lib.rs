@@ -57,7 +57,7 @@ pub fn analyze_with_context(
     types: &TypeContext,
     context: AnalysisContext<'_>,
 ) -> Result<Program, Diagnostic> {
-    analyze_with_package_functions(ast, types, context, &[], &[], &[])
+    analyze_with_package_functions(ast, types, context, &[], &[], &[], &[], &[], None)
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +72,20 @@ pub(crate) struct PackageFunction {
     pub specificity: u8,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PackageClass {
+    pub module: severian_modules::ModuleId,
+    pub ty: TypeId,
+    pub declaration: severian_ast::ClassDeclaration,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PackageList {
+    pub module: severian_modules::ModuleId,
+    pub ty: TypeId,
+    pub element: TypeId,
+}
+
 pub(crate) fn analyze_with_package_functions(
     ast: &severian_ast::Module,
     types: &TypeContext,
@@ -79,6 +93,9 @@ pub(crate) fn analyze_with_package_functions(
     visible_functions: &[PackageFunction],
     own_function_ids: &[FunctionId],
     test_function_ids: &[FunctionId],
+    package_classes: &[PackageClass],
+    package_lists: &[PackageList],
+    source_module: Option<severian_modules::ModuleId>,
 ) -> Result<Program, Diagnostic> {
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
@@ -112,6 +129,7 @@ pub(crate) fn analyze_with_package_functions(
         next_binding: 0,
         next_class_type: u32::MAX,
     };
+    analyzer.install_package_types(package_classes, package_lists, source_module)?;
     for function in visible_functions {
         analyzer
             .functions
@@ -208,7 +226,7 @@ pub(crate) fn analyze_with_package_functions(
         let mut parameters = Vec::new();
         let mut parameter_types = Vec::new();
         for parameter in &ast_function.parameters {
-            let type_id = resolve_type_annotation(types, &parameter.annotation)?;
+            let type_id = analyzer.resolve_source_type(&parameter.annotation)?;
             let binding = analyzer.new_binding_id();
             parameter_types.push(type_id);
             parameters.push(FunctionParameter {
@@ -217,10 +235,14 @@ pub(crate) fn analyze_with_package_functions(
                 contract: universal_boundary(type_id),
             });
         }
-        let result = resolve_type_annotation(types, &ast_function.result)?;
-        let compile_route = types
-            .compile_route(result)
-            .map_err(|error| semantic_error(error.to_string(), ast_function.result.span))?;
+        let result = analyzer.resolve_source_type(&ast_function.result)?;
+        let compile_route = if types.definition(result).is_some() {
+            types
+                .compile_route(result)
+                .map_err(|error| semantic_error(error.to_string(), ast_function.result.span))?
+        } else {
+            severian_universal::CompileRoute::Standard
+        };
         if own_function_ids.is_empty() {
             analyzer
                 .functions
@@ -545,6 +567,88 @@ impl Prepared {
 }
 
 impl Analyzer<'_> {
+    fn install_package_types(
+        &mut self,
+        classes: &[PackageClass],
+        lists: &[PackageList],
+        source_module: Option<severian_modules::ModuleId>,
+    ) -> Result<(), Diagnostic> {
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        for list in lists {
+            self.list_types.insert(list.element, list.ty);
+            self.list_elements.insert(list.ty, list.element);
+            if source_module == Some(list.module) {
+                self.lowered_classes.push(HirClassDeclaration {
+                    id: list.ty,
+                    name: format!("list[type#{}]", list.element.0),
+                    fields: vec![HirClassFieldDeclaration {
+                        name: "storage".into(),
+                        ty: storage,
+                    }],
+                });
+            }
+            self.next_class_type = self.next_class_type.min(list.ty.0.saturating_sub(1));
+        }
+        for package_class in classes {
+            if !package_class.declaration.type_parameters.is_empty() {
+                continue;
+            }
+            let fields = package_class
+                .declaration
+                .fields
+                .iter()
+                .map(|field| {
+                    Ok(HirClassFieldDeclaration {
+                        name: field.name.clone(),
+                        ty: self.resolve_source_type(&field.annotation)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            let instance = ClassInstance {
+                ty: package_class.ty,
+                name: package_class.declaration.name.clone(),
+                fields: fields.clone(),
+                constructors: package_class.declaration.constructors.clone(),
+                methods: package_class.declaration.methods.clone(),
+            };
+            self.class_instances_by_type
+                .insert(package_class.ty, instance.clone());
+            if source_module == Some(package_class.module) {
+                self.class_instances.insert(
+                    (package_class.declaration.name.clone(), Vec::new()),
+                    instance,
+                );
+                self.lowered_classes.push(HirClassDeclaration {
+                    id: package_class.ty,
+                    name: package_class.declaration.name.clone(),
+                    fields,
+                });
+            }
+            self.next_class_type = self
+                .next_class_type
+                .min(package_class.ty.0.saturating_sub(1));
+        }
+        Ok(())
+    }
+
+    fn resolve_source_type(&self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let Some(("list", [element])) = annotation.named_parts() {
+            let element = resolve_type_annotation(self.types, element)?;
+            if let Some(list) = self.list_types.get(&element) {
+                return Ok(*list);
+            }
+        }
+        if let Some(name) = annotation.simple_name() {
+            if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
+                return Ok(instance.ty);
+            }
+        }
+        resolve_type_annotation(self.types, annotation)
+    }
+
     fn new_binding_id(&mut self) -> BindingId {
         let id = BindingId(self.next_binding);
         self.next_binding += 1;
@@ -962,12 +1066,32 @@ impl Analyzer<'_> {
                             .inferred_class_constructor(class, arguments, expected, ast.span);
                     }
                 }
+                if callable_path(callee).as_deref() == Some("size") && arguments.len() == 1 {
+                    let value = self.expression(&arguments[0].value, None)?;
+                    if self.list_elements.contains_key(&value.type_id) {
+                        let storage = self.list_storage_expression(value, ast.span);
+                        let storage_type = storage.type_id;
+                        let result = self
+                            .types
+                            .resolve_name("usize")
+                            .expect("bootstrap defines usize");
+                        return Ok(self.runtime_call(
+                            "__sev_list_len",
+                            &[storage_type],
+                            result,
+                            vec![storage],
+                            ast.span,
+                        ));
+                    }
+                }
                 if let Some(method) =
                     self.class_method_call(callee, arguments, expected, ast.span)?
                 {
                     return Ok(method);
                 }
-                if matches!(callee.kind, AstExpressionKind::Member { .. }) {
+                if matches!(callee.kind, AstExpressionKind::Member { .. })
+                    && !callable_path(callee).is_some_and(|path| self.functions.contains_key(&path))
+                {
                     return Err(Diagnostic::new(
                         "E000211",
                         "class method is unknown or cannot be used as a value",
@@ -1576,7 +1700,7 @@ impl Analyzer<'_> {
             return *definition;
         }
         let definition = synthetic_runtime_definition(symbol);
-        let id = FunctionId(u128::MAX - self.runtime_functions.len() as u128);
+        let id = FunctionId(definition.declaration.0);
         let parameters = parameter_types
             .iter()
             .enumerate()
@@ -1618,6 +1742,9 @@ impl Analyzer<'_> {
         let AstExpressionKind::Member { object, name } = &callee.kind else {
             return Ok(None);
         };
+        if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
+            return Ok(None);
+        }
         let object = self.expression(object, None)?;
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);

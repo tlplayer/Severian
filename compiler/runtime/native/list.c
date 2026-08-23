@@ -23,6 +23,11 @@ void *__sev_list_create(void) {
     return list;
 }
 
+uintptr_t __sev_list_len(void *storage) {
+    sev_list *list = storage;
+    return list->length;
+}
+
 void __sev_list_push_i64(void *storage, int64_t value) {
     sev_list *list = storage;
     sev_list_reserve(list);

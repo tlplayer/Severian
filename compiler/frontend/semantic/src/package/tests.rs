@@ -44,6 +44,35 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
 }
 
 #[test]
+fn imported_classes_and_list_results_keep_package_wide_types() {
+    let root = temporary();
+    std::fs::write(
+        root.join("filesystem.sev"),
+        "class Metadata:\n    path: string\n    size: int\ndef stat(path: string) -> Metadata:\n    return Metadata(path, 8)\ndef entries() -> list[string]:\n    return []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"filesystem.sev\" as filesystem\ndef selected() -> int:\n    information = filesystem.stat(\"/tmp/example\")\n    values = filesystem.entries()\n    assert(size(values) == 0)\n    return information.size\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    assert_eq!(typed.hir.modules.len(), 2);
+    assert_eq!(
+        typed
+            .hir
+            .modules
+            .iter()
+            .flat_map(|module| &module.classes)
+            .count(),
+        2
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn declaration_identity_does_not_depend_on_unrelated_source_items() {
     let root = temporary();
     let source = root.join("identity.sev");

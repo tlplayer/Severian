@@ -2,6 +2,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+int32_t __sev_print_string(const char *value) {
+    return puts(value);
+}
+
 static int32_t __sev_print_u128_digits(unsigned __int128 value) {
     char digits[39];
     size_t length = 0;

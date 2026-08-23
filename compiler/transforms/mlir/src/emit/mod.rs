@@ -3,7 +3,7 @@ use severian_lir::{
     BinaryOperation, Block, Constant, Function, FunctionId, FunctionLinkage, LoweredFloatFormat,
     LoweredType, Module, Operation, UnaryOperation, ValueId,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +141,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             ));
         }
     }
+    let mut declared_external_symbols = BTreeSet::new();
     for (symbol, (inputs, result)) in runtime_signatures {
         let inputs = inputs
             .into_iter()
@@ -155,6 +156,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         output.push_str(&format!(
             "  func.func private @{symbol}({inputs}){result}\n"
         ));
+        declared_external_symbols.insert(symbol);
     }
     if !coverage.is_empty() {
         output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
@@ -206,7 +208,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         .iter()
         .filter(|function| matches!(function.linkage, FunctionLinkage::External { .. }))
     {
-        render_function_declaration(&mut output, module, function)?;
+        if declared_external_symbols.insert(function_symbol(function)) {
+            render_function_declaration(&mut output, module, function)?;
+        }
     }
     for function in module
         .functions
@@ -291,11 +295,26 @@ fn render_block(
                 operand,
                 result,
             } => {
-                let ty = mlir_type(value_type(module, *result)?)?;
-                return Err(MlirError::UnsupportedOperation(format!(
-                    "MLIR unary {operator:?} for %v{} -> %v{} : {ty} requires a dedicated lowering",
-                    operand.0, result.0
-                )));
+                let lowered_type = value_type(module, *result)?;
+                let ty = mlir_type(lowered_type)?;
+                match (operator, lowered_type) {
+                    (UnaryOperation::Not, LoweredType::Boolean) => {
+                        output.push_str(&format!(
+                            "{indentation}%v{}_not = arith.constant true\n",
+                            result.0
+                        ));
+                        output.push_str(&format!(
+                            "{indentation}%v{} = arith.xori %v{}, %v{}_not : i1\n",
+                            result.0, operand.0, result.0
+                        ));
+                    }
+                    _ => {
+                        return Err(MlirError::UnsupportedOperation(format!(
+                            "MLIR unary {operator:?} for %v{} -> %v{} : {ty} requires a dedicated lowering",
+                            operand.0, result.0
+                        )));
+                    }
+                }
             }
             Operation::Binary {
                 operator,
@@ -445,9 +464,24 @@ fn render_block(
                     _ => return Err(MlirError::SignatureMismatch),
                 }
             }
-            Operation::Assert { .. } => {
-                return Err(MlirError::UnsupportedOperation(
-                    "assert requires the standard test runtime lowering path".into(),
+            Operation::Assert {
+                condition,
+                message: _,
+                location,
+            } => {
+                let failure = location.as_ref().map_or_else(
+                    || "assertion failed".to_owned(),
+                    |location| {
+                        format!(
+                            "{}:{}:{}: assertion failed: {}",
+                            location.file, location.line, location.column, location.expression
+                        )
+                    },
+                );
+                output.push_str(&format!(
+                    "{indentation}cf.assert %v{}, \"{}\"\n",
+                    condition.0,
+                    mlir_string(&failure)
                 ));
             }
             Operation::If {

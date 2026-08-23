@@ -1,0 +1,5 @@
+@c(symbol = "__sev_file_write_text")
+def write(path: string, contents: string) -> i32
+
+@c(symbol = "__sev_file_read_text")
+def read(path: string) -> string

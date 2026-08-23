@@ -39,7 +39,7 @@ pub fn lower(
                 .iter()
                 .map(|value| ValueId(value.0))
                 .collect(),
-            result: lower_type(function.result, types, target)?,
+            result: lower_mir_type(function.result, mir, types, target)?,
             body: function
                 .body
                 .as_ref()

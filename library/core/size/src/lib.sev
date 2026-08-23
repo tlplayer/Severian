@@ -1,0 +1,4 @@
+# Bootstrap string-size declaration. Collection overloads remain owned by their
+# collection packages as those packages enter the compiler's standard context.
+@c(symbol = "strlen")
+def size(value: string) -> usize

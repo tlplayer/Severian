@@ -5,7 +5,7 @@ use severian_mir::{Module as MirModule, Operation as MirOperation};
 use severian_source::SourceFile;
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -504,11 +504,77 @@ impl Compiler {
         &self,
         source: &Path,
     ) -> Result<severian_modules::ModuleGraph, CompileError> {
-        match &self.packages {
-            Some(packages) => severian_modules::resolve_with_packages(source, packages),
-            None => severian_modules::resolve(source),
+        let packages = self.standard_package_graph(source)?;
+        severian_modules::resolve_with_packages(source, &packages).map_err(CompileError::Diagnostic)
+    }
+
+    fn standard_package_graph(
+        &self,
+        source: &Path,
+    ) -> Result<severian_modules::PackageGraph, CompileError> {
+        let mut packages = self.packages.clone().unwrap_or_else(|| {
+            let root = severian_modules::PackageId(0);
+            severian_modules::PackageGraph {
+                root,
+                packages: BTreeMap::from([(
+                    root,
+                    severian_modules::ResolvedPackage {
+                        id: root,
+                        root: source.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
+                        library: source.to_owned(),
+                        dependencies: BTreeMap::new(),
+                    },
+                )]),
+            }
+        });
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("the driver crate is nested below the repository root");
+        let standard = [
+            ("file", repository.join("library/system/file")),
+            ("os", repository.join("library/system/os")),
+            ("path", repository.join("library/system/path")),
+        ];
+        let mut next = packages
+            .packages
+            .keys()
+            .map(|id| id.0)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let mut standard_ids = BTreeMap::new();
+        for (name, root) in standard {
+            let library = root.join("src/lib.sev");
+            if !library.is_file() {
+                return Err(CompileError::Diagnostic(Diagnostic::new(
+                    "C001001",
+                    format!(
+                        "compiler standard package `{name}` is missing {}",
+                        library.display()
+                    ),
+                    None,
+                )));
+            }
+            let id = severian_modules::PackageId(next);
+            next = next.saturating_add(1);
+            standard_ids.insert(name.to_owned(), id);
+            packages.packages.insert(
+                id,
+                severian_modules::ResolvedPackage {
+                    id,
+                    root,
+                    library,
+                    dependencies: BTreeMap::new(),
+                },
+            );
         }
-        .map_err(CompileError::Diagnostic)
+        for package in packages.packages.values_mut() {
+            for (name, id) in &standard_ids {
+                package.dependencies.entry(name.clone()).or_insert(*id);
+            }
+        }
+        Ok(packages)
     }
 
     fn routes(&self, plan: &CompilePlan) -> BTreeSet<String> {
@@ -762,6 +828,24 @@ fn with_core_prelude(
         }
         _ => true,
     });
+
+    let size = SourceFile::virtual_source(
+        "core/size/src/lib.sev",
+        include_str!("../../../../../library/core/size/src/lib.sev"),
+    );
+    let tokens = severian_lexer::scan(&size).map_err(CompileError::Diagnostic)?;
+    let mut size = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    size.items.retain(|item| match item {
+        severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
+            function
+                .parameters
+                .iter()
+                .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
+                && boundary_type_is_available(&function.result, types)
+        }
+        _ => true,
+    });
+    module.items.extend(size.items);
 
     let prelude = SourceFile::virtual_source(
         "core/prelude.sev",

@@ -1,0 +1,12 @@
+[package]
+name = "path"
+version = "0.1.0"
+edition = "2026"
+description = "Lexical filesystem path operations"
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]
+
+[lib]
+path = "src/lib.sev"

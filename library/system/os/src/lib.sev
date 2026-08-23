@@ -1,0 +1,35 @@
+class Metadata:
+    path: string
+    is_file: bool
+    is_directory: bool
+    size: int
+
+@c(symbol = "__sev_os_make_directories")
+def make_directories(path: string) -> bool
+
+def list(path: string) -> list[string]:
+    return []
+
+@c(symbol = "__sev_path_exists")
+def exists(path: string) -> bool
+
+@c(symbol = "__sev_path_is_dir")
+def is_dir(path: string) -> bool
+
+@c(symbol = "__sev_os_is_file")
+def is_file(path: string) -> bool
+
+@c(symbol = "__sev_os_file_size")
+def file_size(path: string) -> int
+
+def stat(path: string) -> Metadata:
+    return Metadata(path, is_file(path), is_dir(path), file_size(path))
+
+@c(symbol = "__sev_os_copy")
+def copy(source: string, destination: string) -> bool
+
+@c(symbol = "rename")
+def rename(source: string, destination: string) -> i32
+
+@c(symbol = "remove")
+def remove(path: string) -> i32

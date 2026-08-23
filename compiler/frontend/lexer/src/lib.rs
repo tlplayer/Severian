@@ -61,6 +61,22 @@ mod tests {
     }
 
     #[test]
+    fn scans_data_size_literals_as_canonical_byte_counts() {
+        let source =
+            SourceFile::virtual_source("sizes.sev", "byte = 8B\nbinary = 4KiB\ndecimal = 2MB\n");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Integer("8".into())));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Integer("4096".into())));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Integer("2000000".into())));
+    }
+
+    #[test]
     fn block_strings_remove_structural_indentation_and_preserve_lines() {
         let source = SourceFile::virtual_source(
             "block-string.sev",

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 /// platform linker after lowering has selected versioned runtime symbols.
 pub fn native_sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("native");
-    ["coverage.c", "string.c", "list.c", "io.c"]
+    ["coverage.c", "string.c", "list.c", "io.c", "filesystem.c"]
         .into_iter()
         .map(|source| root.join(source))
         .collect()
