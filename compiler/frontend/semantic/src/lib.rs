@@ -25,7 +25,7 @@ use severian_hir::{
     TraitType as HirTraitType, TypeId,
 };
 use severian_universal::{
-    BinaryOperator, LiteralValue, TypeConstraint, TypeContext, UnaryOperator,
+    BinaryOperator, LiteralValue, TypeConstraint, TypeContext, TypeError, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -2569,10 +2569,20 @@ impl Analyzer<'_> {
                 // selected; neither side gets an early default literal type.
                 let left = self.prepare(left)?;
                 let right = self.prepare(right)?;
+                let left_constraint = left.constraint();
+                let right_constraint = right.constraint();
                 let resolved = self
                     .types
-                    .resolve_binary(operator, left.constraint(), right.constraint(), expected)
-                    .map_err(|error| semantic_error(error.to_string(), ast.span))?;
+                    .resolve_binary(operator, left_constraint, right_constraint, expected)
+                    .map_err(|error| {
+                        self.binary_operator_error(
+                            error,
+                            operator,
+                            left_constraint,
+                            right_constraint,
+                            ast.span,
+                        )
+                    })?;
                 let left = self.finish(left, resolved.left)?;
                 let right = self.finish(right, resolved.right)?;
                 Ok(Expression {
@@ -2586,6 +2596,39 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
+        }
+    }
+
+    fn binary_operator_error(
+        &self,
+        error: TypeError,
+        operator: BinaryOperator,
+        left: TypeConstraint,
+        right: TypeConstraint,
+        span: severian_source::Span,
+    ) -> Diagnostic {
+        if error == TypeError::NoMatchingOperator(operator) {
+            let left = self.constraint_name(left);
+            let right = self.constraint_name(right);
+            return Diagnostic::new(
+                "E000202",
+                format!("no `{operator}` operator accepts `{left}` and `{right}`"),
+                Some(span),
+            )
+            .with_label(span, "these operands have no compatible operator overload")
+            .with_note(format!("left operand: `{left}`; right operand: `{right}`"))
+            .with_help("convert one operand explicitly or use operands with compatible types");
+        }
+        semantic_error(error.to_string(), span)
+    }
+
+    fn constraint_name(&self, constraint: TypeConstraint) -> String {
+        match constraint {
+            TypeConstraint::Known(ty) => self
+                .types
+                .definition(ty)
+                .map_or_else(|| format!("{ty:?}"), |definition| definition.name.clone()),
+            TypeConstraint::Literal(kind) => format!("{kind:?} literal").to_lowercase(),
         }
     }
 
@@ -4629,6 +4672,14 @@ mod tests {
         assert_eq!(mir.globals.len(), 2);
         assert!(!mir.globals[0].mutable);
         assert!(mir.globals[1].mutable);
+        assert!(mir
+            .globals
+            .iter()
+            .all(|global| global.span.end > global.span.start));
+        for block in &mir.initializer.blocks {
+            assert_eq!(block.statements.len(), block.statement_spans.len());
+            assert!(block.statement_spans.iter().all(Option::is_some));
+        }
     }
 
     #[test]

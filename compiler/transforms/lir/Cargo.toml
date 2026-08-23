@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 severian-artifact = { path = "../../artifact" }
+severian-source = { path = "../../source" }
 
 [lib]
 path = "src/lib.rs"

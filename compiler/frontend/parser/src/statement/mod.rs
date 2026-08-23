@@ -1701,12 +1701,23 @@ impl Parser<'_> {
                     span: Span::new(token.span.source, token.span.start, end),
                 });
             }
-            _ => {
-                return Err(Diagnostic::new(
+            unexpected => {
+                let diagnostic = Diagnostic::new(
                     "E000111",
                     "expected a literal or binding name",
                     Some(token.span),
-                ))
+                )
+                .with_label(token.span, "an expression must start here")
+                .with_note(
+                    "expressions may start with a literal, binding name, `(`, or list literal",
+                );
+                return Err(if unexpected == TokenKind::Dot {
+                    diagnostic.with_help(
+                        "float literals require a leading digit; write `0.5` instead of `.5`",
+                    )
+                } else {
+                    diagnostic.with_help("check for a missing expression or an extra delimiter")
+                });
             }
         };
         Ok(Expression {

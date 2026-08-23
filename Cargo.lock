@@ -213,6 +213,7 @@ name = "severian-lir"
 version = "0.1.0"
 dependencies = [
  "severian-artifact",
+ "severian-source",
 ]
 
 [[package]]
@@ -232,6 +233,7 @@ version = "0.1.0"
 dependencies = [
  "severian-artifact",
  "severian-hir",
+ "severian-source",
  "severian-universal",
 ]
 

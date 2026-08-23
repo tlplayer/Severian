@@ -66,6 +66,7 @@ pub fn lower(
                 id: severian_lir::GlobalId(global.id.0),
                 ty: context.lower_mir_type(global.ty)?,
                 mutable: global.mutable,
+                span: global.span,
             })
         })
         .collect::<Result<Vec<_>, LoweringError>>()?;
@@ -171,20 +172,33 @@ impl CfgLowering<'_> {
                     ty: self.lower_mir_type(local.ty)?,
                     mutable: local.mutable,
                     argument: local.argument,
+                    span: local.span,
                 })
             })
             .collect::<Result<Vec<_>, LoweringError>>()?;
         let mut blocks = Vec::with_capacity(body.blocks.len());
         for block in &body.blocks {
             let mut operations = Vec::new();
-            for statement in &block.statements {
+            let mut operation_spans = Vec::new();
+            for (index, statement) in block.statements.iter().enumerate() {
+                let start = operations.len();
                 self.lower_statement(body, statement, &mut operations)?;
+                operation_spans.extend(
+                    std::iter::repeat(block.statement_spans.get(index).copied().flatten())
+                        .take(operations.len() - start),
+                );
             }
+            let start = operations.len();
             let terminator = self.lower_terminator(body, &block.terminator, &mut operations)?;
+            operation_spans.extend(
+                std::iter::repeat(block.terminator_span).take(operations.len() - start),
+            );
             blocks.push(severian_lir::BasicBlock {
                 id: severian_lir::BlockId(block.id.0),
                 operations,
+                operation_spans,
                 terminator,
+                terminator_span: block.terminator_span,
             });
         }
         Ok(severian_lir::CfgBody {

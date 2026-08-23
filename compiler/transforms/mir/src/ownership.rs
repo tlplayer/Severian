@@ -149,6 +149,7 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
                 block
                     .statements
                     .push(CfgStatement::Drop(Place::local(*local)));
+                block.statement_spans.push(None);
             }
         }
     }

@@ -89,6 +89,8 @@ fn global_constant_survives_mutable_string_addition_in_main() {
     let mir = String::from_utf8(mir.stdout).unwrap();
     assert!(mir.contains("GlobalDecl"), "{mir}");
     assert!(mir.contains("base: Global"), "{mir}");
+    assert!(mir.contains("statement_spans: ["), "{mir}");
+    assert!(mir.contains("terminator_span: Some"), "{mir}");
 
     let lir = sev().arg(&source).args(["--emit", "lir"]).output().unwrap();
     assert!(lir.status.success());
@@ -96,6 +98,8 @@ fn global_constant_survives_mutable_string_addition_in_main() {
     assert!(lir.contains("storage_globals: ["), "{lir}");
     assert!(lir.contains("base: Global"), "{lir}");
     assert!(lir.contains("Store"), "{lir}");
+    assert!(lir.contains("operation_spans: ["), "{lir}");
+    assert!(lir.contains("terminator_span: Some"), "{lir}");
 
     let mlir = sev()
         .arg(&source)
@@ -108,6 +112,39 @@ fn global_constant_survives_mutable_string_addition_in_main() {
     assert!(mlir.contains("llvm.store"), "{mlir}");
     assert!(mlir.contains("llvm.load"), "{mlir}");
     assert!(!mlir.contains("_assigned"), "{mlir}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn diagnostics_include_source_context_notes_and_help() {
+    let root = temporary("diagnostic-source-context");
+    let source = root.join("invalid.sev");
+    fs::write(
+        &source,
+        "def main():\n    count = 10\n    ratio = 0.5\n    combined: string = count + ratio\n",
+    )
+    .unwrap();
+    let output = sev().arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("E000202: no `+` operator accepts `int` and `float`"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("invalid.sev:4:24"), "{stderr}");
+    assert!(
+        stderr.contains("combined: string = count + ratio"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("^"), "{stderr}");
+    assert!(
+        stderr.contains("note: left operand: `int`; right operand: `float`"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("help: convert one operand explicitly"),
+        "{stderr}"
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

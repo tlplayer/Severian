@@ -25,6 +25,13 @@ pub struct SourceFile {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub line: u32,
+    pub column: u32,
+    pub byte: u32,
+}
+
 /// Owns the sources for one compilation and assigns each one a distinct,
 /// deterministic identity in insertion order.
 #[derive(Debug, Clone, Default)]
@@ -83,6 +90,36 @@ impl SourceFile {
             path: name.into(),
             text: text.into(),
         }
+    }
+
+    pub fn location(&self, byte: u32) -> Option<SourceLocation> {
+        let byte = usize::try_from(byte).ok()?;
+        if byte > self.text.len() || !self.text.is_char_boundary(byte) {
+            return None;
+        }
+        let line_start = self.text[..byte].rfind('\n').map_or(0, |index| index + 1);
+        let line = self.text[..line_start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        Some(SourceLocation {
+            line: u32::try_from(line).ok()?,
+            column: u32::try_from(self.text[line_start..byte].chars().count() + 1).ok()?,
+            byte: u32::try_from(byte).ok()?,
+        })
+    }
+
+    pub fn line(&self, line: u32) -> Option<&str> {
+        let line = usize::try_from(line.checked_sub(1)?).ok()?;
+        self.text
+            .split_terminator('\n')
+            .nth(line)
+            .map(|text| text.trim_end_matches('\r'))
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.text.lines().count().max(1)
     }
 }
 

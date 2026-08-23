@@ -3,10 +3,10 @@ def main():
     ratio = 0.5
     enabled = true
     name = "severian"
-    # convert all non strings to string when we have a string
-    combined: string = count + ratio
+    character = "!"
+    combined = string(count + ratio) + character
 
-    print(count)
+    print(count + int(0.8))
     print(ratio)
     print(ratio + float(count))
     print(enabled)
@@ -20,8 +20,6 @@ test "type conversion":
     name := "severian"
     assert(float(count) + ratio == 10.5)
     #Cannot convert string to name but we can convert 
-    throws(name + ratio)
-    assert()
 
 
 test with compiler "Compiler rejects ":

@@ -152,9 +152,12 @@ impl<'a> Resolver<'a> {
         let source = self
             .sources
             .get(source_id)
-            .expect("a newly loaded source is present in its source map");
-        let tokens = severian_lexer::scan(source)?;
-        let ast = severian_parser::parse(&tokens)?;
+            .expect("a newly loaded source is present in its source map")
+            .clone();
+        let tokens = severian_lexer::scan(&source)
+            .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
+        let ast = severian_parser::parse(&tokens)
+            .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
         self.parsed.insert(canonical.clone(), ast.clone());
         let module_id = module_id(&canonical, package, self.packages)?;
         self.module_ids.insert(canonical.clone(), module_id);
@@ -164,7 +167,8 @@ impl<'a> Resolver<'a> {
             _ => None,
         }) {
             if let Some((dependency, dependency_package)) =
-                source_import(&canonical, package, import, self.packages)?
+                source_import(&canonical, package, import, self.packages)
+                    .map_err(|diagnostic| diagnostic.with_source(source.clone()))?
             {
                 self.visit(&dependency, dependency_package)?;
                 let dependency = std::fs::canonicalize(&dependency).map_err(|error| {
@@ -173,6 +177,7 @@ impl<'a> Resolver<'a> {
                         format!("could not read {}: {error}", dependency.display()),
                         Some(import.span),
                     )
+                    .with_source(source.clone())
                 })?;
                 let dependency_id = *self
                     .module_ids

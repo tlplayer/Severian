@@ -15,6 +15,7 @@ pub enum VerifyError {
     InvalidBlock(u32),
     InvalidLocal(u32),
     InvalidGlobal(u32),
+    SourceInfoArity(u32),
     MissingTerminator(u32),
     BlockArgumentArity(u32),
     BlockArgumentType(u32),
@@ -33,6 +34,12 @@ impl fmt::Display for VerifyError {
             Self::InvalidBlock(block) => write!(formatter, "invalid basic block {block}"),
             Self::InvalidLocal(local) => write!(formatter, "invalid local {local}"),
             Self::InvalidGlobal(global) => write!(formatter, "invalid global {global}"),
+            Self::SourceInfoArity(block) => {
+                write!(
+                    formatter,
+                    "basic block {block} has mismatched source provenance"
+                )
+            }
             Self::MissingTerminator(block) => {
                 write!(formatter, "basic block {block} has no terminator")
             }
@@ -137,6 +144,9 @@ fn verify_body(
     for (index, block) in body.blocks.iter().enumerate() {
         if block.id.0 as usize != index {
             return Err(VerifyError::InvalidBlock(block.id.0));
+        }
+        if block.statement_spans.len() != block.statements.len() {
+            return Err(VerifyError::SourceInfoArity(block.id.0));
         }
         if matches!(&block.terminator, Terminator::Unreachable) && !block.statements.is_empty() {
             return Err(VerifyError::MissingTerminator(block.id.0));

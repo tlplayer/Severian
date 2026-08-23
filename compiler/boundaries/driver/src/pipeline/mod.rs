@@ -49,6 +49,15 @@ impl fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+impl CompileError {
+    fn with_source(self, source: SourceFile) -> Self {
+        match self {
+            Self::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic.with_source(source)),
+            error => error,
+        }
+    }
+}
+
 pub struct Compiler {
     context: UniversalContext,
     target: TargetSpec,
@@ -157,10 +166,15 @@ impl Compiler {
     }
 
     fn check_source_to_mir(&self, source: &SourceFile) -> Result<MirModule, CompileError> {
-        let tokens = severian_lexer::scan(source).map_err(CompileError::Diagnostic)?;
-        let ast = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
-        let mut mir =
-            self.check_ast_to_mir(&ast, CompileMode::Build, &module_name(&source.path))?;
+        let tokens = severian_lexer::scan(source).map_err(|diagnostic| {
+            CompileError::Diagnostic(diagnostic.with_source(source.clone()))
+        })?;
+        let ast = severian_parser::parse(&tokens).map_err(|diagnostic| {
+            CompileError::Diagnostic(diagnostic.with_source(source.clone()))
+        })?;
+        let mut mir = self
+            .check_ast_to_mir(&ast, CompileMode::Build, &module_name(&source.path))
+            .map_err(|error| error.with_source(source.clone()))?;
         attach_assertion_locations(&mut mir, source);
         if !self.coverage {
             remove_module_coverage(&mut mir);
@@ -538,7 +552,9 @@ impl Compiler {
                 test_package: (mode == CompileMode::Test).then_some(root_package),
             },
         )
-        .map_err(CompileError::Diagnostic)?;
+        .map_err(|diagnostic| {
+            CompileError::Diagnostic(diagnostic.with_sources(sources.iter().cloned()))
+        })?;
         for ((module, source_module), resolved) in typed
             .hir
             .modules
@@ -553,7 +569,9 @@ impl Compiler {
                 Some((&typed.index, source_module.id)),
             )?;
         }
-        severian_ownership::validate(&typed.hir).map_err(CompileError::Diagnostic)?;
+        severian_ownership::validate(&typed.hir).map_err(|diagnostic| {
+            CompileError::Diagnostic(diagnostic.with_sources(sources.iter().cloned()))
+        })?;
         Ok((typed.hir, sources))
     }
 
@@ -754,9 +772,14 @@ fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &S
 
 fn remove_coverage(body: &mut severian_mir::CfgBody) {
     for block in &mut body.blocks {
-        block
-            .statements
-            .retain(|statement| !matches!(statement, CfgStatement::Coverage(_)));
+        let statements = std::mem::take(&mut block.statements);
+        let spans = std::mem::take(&mut block.statement_spans);
+        for (statement, span) in statements.into_iter().zip(spans) {
+            if !matches!(statement, CfgStatement::Coverage(_)) {
+                block.statements.push(statement);
+                block.statement_spans.push(span);
+            }
+        }
     }
 }
 

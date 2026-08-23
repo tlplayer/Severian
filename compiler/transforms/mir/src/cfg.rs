@@ -1,5 +1,6 @@
 use crate::{AssertionOrigin, CoverageKind, CoveragePoint, FunctionId, TaskOwner};
 use severian_hir::{Callee as HirCallee, Conversion};
+use severian_source::Span;
 use severian_universal::{
     Attrs, BinaryOperator, DefId, LiteralValue, OpId, Substitution, TypeId, UnaryOperator,
 };
@@ -19,6 +20,7 @@ pub struct GlobalDecl {
     pub id: GlobalId,
     pub ty: TypeId,
     pub mutable: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +29,7 @@ pub struct LocalDecl {
     pub ty: TypeId,
     pub mutable: bool,
     pub argument: bool,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -192,7 +195,9 @@ pub struct BasicBlock {
     pub id: BlockId,
     pub parameters: Vec<LocalId>,
     pub statements: Vec<Statement>,
+    pub statement_spans: Vec<Option<Span>>,
     pub terminator: Terminator,
+    pub terminator_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +216,9 @@ impl Default for Body {
                 id: BlockId(0),
                 parameters: Vec::new(),
                 statements: Vec::new(),
+                statement_spans: Vec::new(),
                 terminator: Terminator::Return(None),
+                terminator_span: None,
             }],
             locals: Vec::new(),
             return_type: TypeId(0),
@@ -249,6 +256,7 @@ pub(crate) fn lower_program(
                     id,
                     ty: binding.type_id,
                     mutable: binding.mutable,
+                    span: binding.span,
                 });
                 global_bindings.insert(binding.id, place.clone());
                 global_variables.insert(binding.variable, place);
@@ -320,6 +328,7 @@ fn collect_global_bindings(
                     id,
                     ty: binding.type_id,
                     mutable: binding.mutable,
+                    span: binding.span,
                 });
                 let place = Place::global(id);
                 variables.insert(binding.variable, place.clone());
@@ -340,6 +349,7 @@ struct BodyBuilder {
     entry_parameters: Vec<LocalId>,
     loops: Vec<LoopTargets>,
     terminated: BTreeSet<BlockId>,
+    current_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -361,7 +371,9 @@ impl BodyBuilder {
                     id: BlockId(0),
                     parameters: Vec::new(),
                     statements: Vec::new(),
+                    statement_spans: Vec::new(),
                     terminator: Terminator::Unreachable,
+                    terminator_span: None,
                 }],
                 locals: Vec::new(),
                 return_type,
@@ -373,6 +385,7 @@ impl BodyBuilder {
             entry_parameters: Vec::new(),
             loops: Vec::new(),
             terminated: BTreeSet::new(),
+            current_span: None,
         }
     }
 
@@ -391,7 +404,9 @@ impl BodyBuilder {
             id,
             parameters: Vec::new(),
             statements: Vec::new(),
+            statement_spans: Vec::new(),
             terminator: Terminator::Unreachable,
+            terminator_span: None,
         });
         id
     }
@@ -403,6 +418,7 @@ impl BodyBuilder {
             ty,
             mutable,
             argument,
+            span: self.current_span,
         });
         id
     }
@@ -412,14 +428,16 @@ impl BodyBuilder {
     }
 
     fn terminate(&mut self, terminator: Terminator) {
-        self.body.blocks[self.current.0 as usize].terminator = terminator;
+        let block = &mut self.body.blocks[self.current.0 as usize];
+        block.terminator = terminator;
+        block.terminator_span = self.current_span;
         self.terminated.insert(self.current);
     }
 
     fn push(&mut self, statement: Statement) {
-        self.body.blocks[self.current.0 as usize]
-            .statements
-            .push(statement);
+        let block = &mut self.body.blocks[self.current.0 as usize];
+        block.statements.push(statement);
+        block.statement_spans.push(self.current_span);
     }
 
     fn lower_statements(
@@ -440,29 +458,30 @@ impl BodyBuilder {
         statement: &severian_hir::Statement,
         module: &severian_hir::Module,
     ) {
-        let span_start = match statement {
+        let span = match statement {
             severian_hir::Statement::Sequence(_) | severian_hir::Statement::Return(None) => None,
             severian_hir::Statement::FieldUpdate { value, .. }
             | severian_hir::Statement::FieldSet { value, .. }
             | severian_hir::Statement::Expression(value)
-            | severian_hir::Statement::Return(Some(value)) => Some(value.span.start),
+            | severian_hir::Statement::Return(Some(value)) => Some(value.span),
             severian_hir::Statement::Binding(id) => module
                 .bindings
                 .iter()
                 .find(|binding| binding.id == *id)
-                .map(|binding| binding.span.start),
+                .map(|binding| binding.span),
             severian_hir::Statement::Assert { span, .. }
             | severian_hir::Statement::While { span, .. }
             | severian_hir::Statement::Break { span }
-            | severian_hir::Statement::Continue { span } => Some(span.start),
+            | severian_hir::Statement::Continue { span } => Some(*span),
             severian_hir::Statement::If { condition, .. }
             | severian_hir::Statement::Match {
                 subject: condition, ..
-            } => Some(condition.span.start),
+            } => Some(condition.span),
         };
-        if let Some(span_start) = span_start {
+        self.current_span = span;
+        if let Some(span) = span {
             self.push(Statement::Coverage(CoveragePoint {
-                span_start,
+                span_start: span.start,
                 kind: CoverageKind::Line,
                 ordinal: 0,
                 key: None,
@@ -697,6 +716,7 @@ impl BodyBuilder {
         if let Some(place) = self.expressions.get(&expression.id) {
             return place.clone();
         }
+        self.current_span = Some(expression.span);
         if let severian_hir::ExpressionKind::Async {
             expression: task,
             owner,

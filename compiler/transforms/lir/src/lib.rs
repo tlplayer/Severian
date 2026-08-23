@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use severian_artifact::ArtifactId;
+use severian_source::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoweredFloatFormat {
@@ -61,6 +62,7 @@ pub struct GlobalDecl {
     pub id: GlobalId,
     pub ty: LoweredType,
     pub mutable: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +71,7 @@ pub struct LocalDecl {
     pub ty: LoweredType,
     pub mutable: bool,
     pub argument: bool,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,7 +261,9 @@ pub enum Case {
 pub struct BasicBlock {
     pub id: BlockId,
     pub operations: Vec<Operation>,
+    pub operation_spans: Vec<Option<Span>>,
     pub terminator: Terminator,
+    pub terminator_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -67,6 +67,16 @@ mod tests {
     }
 
     #[test]
+    fn invalid_expression_reports_a_label_note_and_help() {
+        let source = SourceFile::virtual_source("invalid.sev", "value = .\n");
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.code, "E000111");
+        assert_eq!(error.labels.len(), 1);
+        assert!(!error.notes.is_empty());
+        assert!(error.help.as_deref().unwrap().contains("`0.5`"));
+    }
+
+    #[test]
     fn prefix_typed_constants_use_the_same_binding_ast() {
         let source = SourceFile::virtual_source(
             "constants.sev",
