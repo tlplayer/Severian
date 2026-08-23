@@ -1,10 +1,10 @@
 use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
-    ExpressionKind, FunctionDeclaration, FunctionParameter, GenericConstraint, ImportDeclaration,
+    ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint, ImportDeclaration,
     ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration, OperatorParameter,
     OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration, TraitDeclaration,
-    TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    TaskOwner, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -94,6 +94,7 @@ impl Parser<'_> {
                     Statement::Return { .. }
                     | Statement::FieldAssignment { .. }
                     | Statement::Assert { .. }
+                    | Statement::Unsafe { .. }
                     | Statement::If { .. }
                     | Statement::While { .. }
                     | Statement::For { .. }
@@ -238,7 +239,8 @@ impl Parser<'_> {
         } else {
             TypeAnnotation::named("unit", vec![], close)
         };
-        constraints.extend(self.declaration_constraints()?);
+        let (additional_constraints, contracts) = self.function_contracts(&type_parameters)?;
+        constraints.extend(additional_constraints);
         let mut end = result.span.end;
         let body = if self.take(&TokenKind::Colon).is_some() {
             let (statements, block_end) = self.indented_block("function")?;
@@ -252,6 +254,7 @@ impl Parser<'_> {
             name,
             type_parameters,
             constraints,
+            contracts,
             parameters,
             span: Span::new(start.source, start.start, end),
             result,
@@ -364,7 +367,8 @@ impl Parser<'_> {
             let compound = self.at_identifier("if")
                 || self.at_identifier("match")
                 || self.at_identifier("while")
-                || self.at_identifier("for");
+                || self.at_identifier("for")
+                || self.at_identifier("unsafe");
             if self.at_identifier("pass") {
                 self.next();
             } else {
@@ -383,6 +387,15 @@ impl Parser<'_> {
     }
 
     fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.at_identifier("unsafe") {
+            let start = self.next().span;
+            self.expect(&TokenKind::Colon, "expected `:` after `unsafe`")?;
+            let (body, end) = self.indented_block("unsafe")?;
+            return Ok(Statement::Unsafe {
+                body,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         if self.at_identifier("return") {
             let start = self.next().span;
             let value = if self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent) {
@@ -952,6 +965,98 @@ impl Parser<'_> {
         Ok(constraints)
     }
 
+    fn function_contracts(
+        &mut self,
+        type_parameters: &[String],
+    ) -> Result<(Vec<GenericConstraint>, Vec<FunctionContract>), Diagnostic> {
+        if !self.at_identifier("with") {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        self.next();
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::LeftBrace, "expected `{` after function `with`")?;
+        let multiline = self.take(&TokenKind::Newline).is_some();
+        while self.take(&TokenKind::Newline).is_some() {}
+        if multiline {
+            self.expect(&TokenKind::Indent, "expected indented function contracts")?;
+            self.separators();
+        }
+        let mut contracts = Vec::new();
+        let mut constraints = Vec::new();
+        while !self.at(&TokenKind::RightBrace)
+            && !self.at(&TokenKind::Dedent)
+            && !self.at(&TokenKind::Eof)
+        {
+            let start = self.peek().span;
+            let parameter_constraint = matches!(self.peek().kind, TokenKind::Identifier(_))
+                && self
+                    .tokens
+                    .get(self.cursor + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Colon);
+            if parameter_constraint {
+                let (parameter, parameter_span) =
+                    self.identifier("expected constrained parameter")?;
+                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
+                let bound = self.type_annotation()?;
+                constraints.push(GenericConstraint::Parameter {
+                    parameter,
+                    span: Span::new(parameter_span.source, parameter_span.start, bound.span.end),
+                    bound,
+                });
+                if self.take(&TokenKind::Comma).is_none()
+                    && !self.at(&TokenKind::Newline)
+                    && !self.at(&TokenKind::Dedent)
+                    && !self.at(&TokenKind::RightBrace)
+                {
+                    return Err(self.error("expected a comma or newline after constraint"));
+                }
+                self.separators();
+                continue;
+            }
+            let deferred = if self.at_identifier("defer") {
+                self.next();
+                true
+            } else {
+                false
+            };
+            let condition = self.expression(0)?;
+            let failure = if self.take(&TokenKind::Arrow).is_some() {
+                Some(self.expression(0)?)
+            } else {
+                None
+            };
+            if !deferred
+                && failure.is_none()
+                && type_parameters
+                    .iter()
+                    .any(|parameter| expression_mentions(&condition, parameter))
+            {
+                constraints.push(GenericConstraint::Predicate(condition));
+            } else {
+            let end = failure.as_ref().map_or(condition.span.end, |value| value.span.end);
+            contracts.push(FunctionContract {
+                condition,
+                deferred,
+                failure,
+                span: Span::new(start.source, start.start, end),
+            });
+            }
+            if self.take(&TokenKind::Comma).is_none()
+                && !self.at(&TokenKind::Newline)
+                && !self.at(&TokenKind::Dedent)
+                && !self.at(&TokenKind::RightBrace)
+            {
+                return Err(self.error("expected a comma or newline after function contract"));
+            }
+            self.separators();
+        }
+        if multiline {
+            self.expect(&TokenKind::Dedent, "expected end of function contracts")?;
+        }
+        self.expect(&TokenKind::RightBrace, "expected `}` after function contracts")?;
+        Ok((constraints, contracts))
+    }
+
     fn property(&mut self) -> Result<PropertyDeclaration, Diagnostic> {
         let start = self.next().span;
         self.member_property_after_start(start)
@@ -1136,7 +1241,37 @@ impl Parser<'_> {
         } else if self.looks_like_binding() {
             Ok(Statement::Binding(self.binding()?))
         } else {
-            Ok(Statement::Expression(self.expression(0)?))
+            let first = self.expression(0)?;
+            if matches!(first.kind, ExpressionKind::Await { .. })
+                && self.take(&TokenKind::Comma).is_some()
+            {
+                let start = first.span;
+                let mut awaits = vec![first];
+                loop {
+                    let task = self.expression(0)?;
+                    let end = task.span.end;
+                    awaits.push(if matches!(task.kind, ExpressionKind::Await { .. }) {
+                        task
+                    } else {
+                        Expression {
+                            kind: ExpressionKind::Await {
+                                expression: Box::new(task),
+                            },
+                            span: Span::new(start.source, start.start, end),
+                        }
+                    });
+                    if self.take(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                let end = awaits.last().expect("await list is nonempty").span.end;
+                Ok(Statement::Expression(Expression {
+                    kind: ExpressionKind::Tuple(awaits),
+                    span: Span::new(start.source, start.start, end),
+                }))
+            } else {
+                Ok(Statement::Expression(first))
+            }
         }
     }
 
@@ -1229,6 +1364,46 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<Expression, Diagnostic> {
+        if self.at_identifier("async") {
+            let start = self.next().span;
+            let expression = self.postfix()?;
+            let mut owner = TaskOwner::Inferred;
+            let mut locked = false;
+            if self.at_identifier("with") {
+                self.next();
+                loop {
+                    let (modifier, _) = self.identifier("expected a task owner or `lock`")?;
+                    match modifier.as_str() {
+                        "self" => owner = TaskOwner::SelfScope,
+                        "runtime" => owner = TaskOwner::Runtime,
+                        "lock" => locked = true,
+                        _ => return Err(self.error("unknown async task modifier")),
+                    }
+                    if !self.at_identifier("and") {
+                        break;
+                    }
+                    self.next();
+                }
+            }
+            return Ok(Expression {
+                span: Span::new(start.source, start.start, expression.span.end),
+                kind: ExpressionKind::Async {
+                    expression: Box::new(expression),
+                    owner,
+                    locked,
+                },
+            });
+        }
+        if self.at_identifier("await") {
+            let start = self.next().span;
+            let expression = self.unary()?;
+            return Ok(Expression {
+                span: Span::new(start.source, start.start, expression.span.end),
+                kind: ExpressionKind::Await {
+                    expression: Box::new(expression),
+                },
+            });
+        }
         if self.at_identifier("borrow") {
             let start = self.next().span;
             let operator = if self.at_identifier("mut") {
@@ -1567,6 +1742,26 @@ impl Parser<'_> {
             annotation.span = Span::new(start.source, start.start, annotation.span.end);
             return Ok(annotation);
         }
+        if let Some(open) = self.take(&TokenKind::LeftParen) {
+            self.line_breaks();
+            let mut elements = Vec::new();
+            if !self.at(&TokenKind::RightParen) {
+                loop {
+                    elements.push(self.type_annotation()?);
+                    self.line_breaks();
+                    if self.take(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    self.line_breaks();
+                }
+            }
+            let close = self.expect(&TokenKind::RightParen, "expected `)` after tuple type")?;
+            return Ok(TypeAnnotation::named(
+                "tuple",
+                elements,
+                Span::new(open.span.source, open.span.start, close.span.end),
+            ));
+        }
         let (name, start) = self.identifier("expected a type")?;
         let mut arguments = Vec::new();
         let mut end = start.end;
@@ -1844,6 +2039,46 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
         OperatorSyntax::Or => BinaryOperator::Or,
         OperatorSyntax::Not => return None,
     })
+}
+
+fn expression_mentions(expression: &Expression, expected: &str) -> bool {
+    match &expression.kind {
+        ExpressionKind::Name(name) => name == expected,
+        ExpressionKind::List(values) | ExpressionKind::Tuple(values) => values
+            .iter()
+            .any(|value| expression_mentions(value, expected)),
+        ExpressionKind::Member { object, .. } => expression_mentions(object, expected),
+        ExpressionKind::Index { object, index } => {
+            expression_mentions(object, expected) || expression_mentions(index, expected)
+        }
+        ExpressionKind::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            expression_mentions(object, expected)
+                || [start, end, step]
+                    .into_iter()
+                    .flatten()
+                    .any(|value| expression_mentions(value, expected))
+        }
+        ExpressionKind::TypeApplication { callee, .. } => expression_mentions(callee, expected),
+        ExpressionKind::Call { callee, arguments } => {
+            expression_mentions(callee, expected)
+                || arguments
+                    .iter()
+                    .any(|argument| expression_mentions(&argument.value, expected))
+        }
+        ExpressionKind::Async { expression, .. } | ExpressionKind::Await { expression } => {
+            expression_mentions(expression, expected)
+        }
+        ExpressionKind::Unary { operand, .. } => expression_mentions(operand, expected),
+        ExpressionKind::Binary { left, right, .. } => {
+            expression_mentions(left, expected) || expression_mentions(right, expected)
+        }
+        ExpressionKind::Literal(_) => false,
+    }
 }
 
 fn precedence(operator: BinaryOperator) -> u8 {

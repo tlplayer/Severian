@@ -47,6 +47,17 @@ pub enum Operation {
         arguments: Vec<ValueId>,
         result: ValueId,
     },
+    Spawn {
+        function: severian_hir::FunctionId,
+        arguments: Vec<ValueId>,
+        result: ValueId,
+        owner: severian_hir::TaskOwner,
+        locked: bool,
+    },
+    Await {
+        task: ValueId,
+        result: ValueId,
+    },
     Return {
         value: Option<ValueId>,
     },

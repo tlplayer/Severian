@@ -303,6 +303,11 @@ fn render_block(
                     define_value(output, module, *result, &call)?;
                 }
             }
+            Operation::Spawn { .. } | Operation::Await { .. } => {
+                return Err(BackendError::UnsupportedOperation(
+                    "task operations require the MLIR async lowering".into(),
+                ));
+            }
             Operation::RuntimeCall {
                 symbol,
                 arguments,
@@ -679,6 +684,10 @@ pub fn emit_mlir_executable(
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
         &[
             "--verify-each",
+            "--async-to-async-runtime",
+            "--async-runtime-ref-counting",
+            "--async-runtime-ref-counting-opt",
+            "--convert-async-to-llvm",
             "--convert-scf-to-cf",
             "--convert-math-to-llvm",
             "--convert-arith-to-llvm",
@@ -698,6 +707,7 @@ pub fn emit_mlir_executable(
     let output_path = output.to_string_lossy().into_owned();
     let mut clang_arguments = vec![
         target,
+        "-pthread".into(),
         "-x".into(),
         "ir".into(),
         "-".into(),
@@ -709,6 +719,32 @@ pub fn emit_mlir_executable(
             .into_iter()
             .map(|source| source.to_string_lossy().into_owned()),
     );
+    if module.contains("async.") {
+        let llvm_config = tool("SEVERIAN_LLVM_CONFIG", "llvm-config-21");
+        let libdir_output = Command::new(&llvm_config)
+            .arg("--libdir")
+            .output()
+            .map_err(|source| BackendError::ToolSpawn {
+                tool: "llvm-config",
+                source,
+            })?;
+        if !libdir_output.status.success() {
+            return Err(BackendError::ToolFailed {
+                tool: "llvm-config",
+                diagnostic: String::from_utf8_lossy(&libdir_output.stderr)
+                    .trim()
+                    .to_owned(),
+            });
+        }
+        let libdir = String::from_utf8_lossy(&libdir_output.stdout)
+            .trim()
+            .to_owned();
+        clang_arguments.extend([
+            format!("-L{libdir}"),
+            format!("-Wl,-rpath,{libdir}"),
+            "-lmlir_async_runtime".into(),
+        ]);
+    }
     clang_arguments.extend(["-o".into(), output_path]);
     let clang_arguments = clang_arguments
         .iter()

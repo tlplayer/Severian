@@ -142,6 +142,53 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_task_ownership_locking_and_await() {
+        let source = SourceFile::virtual_source(
+            "tasks.sev",
+            "def work(value: int) -> int:\n    return value\n\ndef main():\n    task = async work(1) with self and lock\n    result = await task\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(main) = &module.items[1] else {
+            panic!("expected main")
+        };
+        let body = main.body.as_ref().unwrap();
+        let severian_ast::Statement::Binding(task) = &body[0] else {
+            panic!("expected task binding")
+        };
+        assert!(matches!(
+            task.value.kind,
+            severian_ast::ExpressionKind::Async {
+                owner: severian_ast::TaskOwner::SelfScope,
+                locked: true,
+                ..
+            }
+        ));
+        let severian_ast::Statement::Binding(result) = &body[1] else {
+            panic!("expected result binding")
+        };
+        assert!(matches!(
+            result.value.kind,
+            severian_ast::ExpressionKind::Await { .. }
+        ));
+    }
+
+    #[test]
+    fn parses_entry_and_deferred_function_contracts() {
+        let source = SourceFile::virtual_source(
+            "contracts.sev",
+            "def bounded(value: int) -> int with\n{\n    value >= 0,\n    defer value <= 10 -> Error(\"too large\"),\n}:\n    return value\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert_eq!(function.contracts.len(), 2);
+        assert!(!function.contracts[0].deferred);
+        assert!(function.contracts[1].deferred);
+        assert!(function.contracts[1].failure.is_some());
+    }
+
+    #[test]
     fn parses_primitive_trait_contract() {
         let source = SourceFile::virtual_source(
             "i32.sev",

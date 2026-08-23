@@ -5,7 +5,7 @@ mod expression;
 #[path = "model/statement/mod.rs"]
 mod statement;
 
-pub use expression::{Callee, Conversion, ConversionKind};
+pub use expression::{Callee, Conversion, ConversionKind, TaskOwner};
 pub use expression::{Expression, ExpressionKind};
 pub use severian_universal::{
     CompileRoute, CompilerId, DefId, GenericParamId, OpId, Substitution, TypeId,

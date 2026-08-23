@@ -2,6 +2,13 @@ use crate::{BindingId, DefId, HirId, OpId, Substitution, TypeId, VariantId};
 use severian_source::Span;
 use severian_universal::{BinaryOperator, LiteralValue, UnaryOperator};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOwner {
+    SelfScope,
+    Runtime,
+    Inferred,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expression {
     pub id: HirId,
@@ -27,6 +34,12 @@ pub enum ExpressionKind {
         callee: Callee,
         arguments: Vec<Expression>,
     },
+    Async {
+        expression: Box<Expression>,
+        owner: TaskOwner,
+        locked: bool,
+    },
+    Await(Box<Expression>),
     Convert {
         operand: Box<Expression>,
         conversion: Conversion,

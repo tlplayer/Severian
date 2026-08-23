@@ -24,7 +24,7 @@ pub use passes::{
     PassKind, PassManager, PassMetadata,
 };
 use severian_hir::BindingId;
-pub use severian_hir::{CallType, FunctionId};
+pub use severian_hir::{CallType, FunctionId, TaskOwner};
 pub use value::{Value, ValueId};
 pub use verify::{verify, VerifyError};
 

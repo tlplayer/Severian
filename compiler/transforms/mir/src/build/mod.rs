@@ -498,6 +498,41 @@ impl Builder {
                 });
                 result
             }
+            ExpressionKind::Async {
+                expression: task,
+                owner,
+                locked,
+            } => {
+                let ExpressionKind::Call { callee, arguments } = &task.kind else {
+                    panic!("async expressions are required to contain a call")
+                };
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.expression(argument, block))
+                    .collect();
+                let severian_hir::Callee::Direct {
+                    function,
+                    substitution,
+                } = callee
+                else {
+                    panic!("non-direct async calls lower through CFG MIR")
+                };
+                let result = self.value(expression.type_id);
+                block.operations.push(Operation::Spawn {
+                    function: self.function_ids[&(*function, substitution.clone())],
+                    arguments,
+                    result,
+                    owner: *owner,
+                    locked: *locked,
+                });
+                result
+            }
+            ExpressionKind::Await(task) => {
+                let task = self.expression(task, block);
+                let result = self.value(expression.type_id);
+                block.operations.push(Operation::Await { task, result });
+                result
+            }
             ExpressionKind::Convert { operand, .. } => self.expression(operand, block),
             ExpressionKind::Borrow { operand, .. } | ExpressionKind::Move(operand) => {
                 self.expression(operand, block)

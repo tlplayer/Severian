@@ -56,6 +56,7 @@ fn build_linux_bridge(libdir: &str, llvm_library: &str) {
     let capi_archives = [
         "libMLIRCAPIIR.a",
         "libMLIRCAPIArith.a",
+        "libMLIRCAPIAsync.a",
         "libMLIRCAPIControlFlow.a",
         "libMLIRCAPIFunc.a",
         "libMLIRCAPILLVM.a",

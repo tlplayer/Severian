@@ -125,6 +125,8 @@ pub(crate) fn analyze_with_package_functions(
         class_instances_by_type: BTreeMap::new(),
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
+        channel_types: BTreeMap::new(),
+        channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
         tuple_elements: BTreeMap::new(),
         lowered_classes: Vec::new(),
@@ -133,6 +135,7 @@ pub(crate) fn analyze_with_package_functions(
         next_hir: 0,
         next_binding: 0,
         loop_depth: 0,
+        unsafe_depth: 0,
         next_class_type: u32::MAX,
     };
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
@@ -409,12 +412,27 @@ pub(crate) fn analyze_with_package_functions(
         }
         let mut body = Block::default();
         let result_type = function.result.ty;
+        for contract in ast_function.contracts.iter().filter(|contract| !contract.deferred) {
+            body.statements.push(analyzer.contract_assertion(contract)?);
+        }
         for statement in ast_body {
             body.statements.push(analyzer.statement(
                 statement,
                 &mut module.bindings,
                 result_type,
             )?);
+        }
+        let deferred = ast_function
+            .contracts
+            .iter()
+            .filter(|contract| contract.deferred)
+            .map(|contract| analyzer.contract_assertion(contract))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !deferred.is_empty() {
+            insert_before_returns(&mut body, &deferred);
+            if block_flow(ast_body) == ControlFlow::FallsThrough {
+                body.statements.extend(deferred);
+            }
         }
         if result_type != types.resolve_name("unit").expect("bootstrap defines unit")
             && block_flow(ast_body) == ControlFlow::FallsThrough
@@ -528,6 +546,7 @@ struct Analyzer<'a> {
     next_hir: u32,
     next_binding: u32,
     loop_depth: usize,
+    unsafe_depth: usize,
     functions: BTreeMap<String, Vec<FunctionId>>,
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
@@ -540,6 +559,8 @@ struct Analyzer<'a> {
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
+    channel_types: BTreeMap<TypeId, TypeId>,
+    channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
     tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
     lowered_classes: Vec<HirClassDeclaration>,
@@ -770,12 +791,19 @@ impl Analyzer<'_> {
         Ok(())
     }
 
-    fn resolve_source_type(&self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+    fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
         if let Some(("list", [element])) = annotation.named_parts() {
             let element = resolve_type_annotation(self.types, element)?;
             if let Some(list) = self.list_types.get(&element) {
                 return Ok(*list);
             }
+        }
+        if let Some(("tuple", elements)) = annotation.named_parts() {
+            let elements = elements
+                .iter()
+                .map(|element| resolve_type_annotation(self.types, element))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(self.instantiate_tuple_type(&elements));
         }
         if let Some(name) = annotation.simple_name() {
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
@@ -864,6 +892,12 @@ impl Analyzer<'_> {
         result_type: TypeId,
     ) -> Result<Statement, Diagnostic> {
         match statement {
+            AstStatement::Unsafe { body, .. } => {
+                self.unsafe_depth += 1;
+                let lowered = self.block(body, bindings, result_type);
+                self.unsafe_depth -= 1;
+                Ok(Statement::Sequence(lowered?))
+            }
             AstStatement::While {
                 condition,
                 initializer,
@@ -1591,6 +1625,29 @@ impl Analyzer<'_> {
         Ok(block)
     }
 
+    fn contract_assertion(
+        &mut self,
+        contract: &severian_ast::FunctionContract,
+    ) -> Result<Statement, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let message = contract_failure_expression(contract.failure.as_ref()).map(|message| {
+            self.expression(message, Some(string))
+        }).transpose()?;
+        Ok(Statement::Assert {
+            condition: self.expression(&contract.condition, Some(boolean))?,
+            message,
+            span: contract.span,
+            condition_span: contract.condition.span,
+        })
+    }
+
     fn next_id(&mut self) -> HirId {
         let id = HirId(self.next_hir);
         self.next_hir += 1;
@@ -1638,6 +1695,62 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Async {
+                expression,
+                owner,
+                locked,
+            } => {
+                if !matches!(expression.kind, AstExpressionKind::Call { .. }) {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "`async` requires a function or method call",
+                        Some(ast.span),
+                    ));
+                }
+                if *owner == severian_ast::TaskOwner::Runtime && self.unsafe_depth == 0 {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "runtime-owned tasks require an `unsafe` scope",
+                        Some(ast.span),
+                    ));
+                }
+                let expression = self.expression(expression, expected)?;
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: expression.type_id,
+                    kind: ExpressionKind::Async {
+                        expression: Box::new(expression),
+                        owner: match owner {
+                            severian_ast::TaskOwner::SelfScope => severian_hir::TaskOwner::SelfScope,
+                            severian_ast::TaskOwner::Runtime => severian_hir::TaskOwner::Runtime,
+                            severian_ast::TaskOwner::Inferred => severian_hir::TaskOwner::Inferred,
+                        },
+                        locked: *locked,
+                    },
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::Await { expression } => {
+                let expression = self.expression(expression, expected)?;
+                if let Some(element) = self.channel_elements.get(&expression.type_id).copied() {
+                    let storage = self.channel_storage_expression(expression, ast.span);
+                    let storage_type = storage.type_id;
+                    let suffix = self.list_runtime_suffix(element, ast.span)?;
+                    return Ok(self.runtime_call(
+                        &format!("__sev_channel_recv_{suffix}"),
+                        &[storage_type],
+                        element,
+                        vec![storage],
+                        ast.span,
+                    ));
+                }
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: expression.type_id,
+                    kind: ExpressionKind::Await(Box::new(expression)),
+                    span: ast.span,
+                })
+            }
             AstExpressionKind::Literal(value) => {
                 let value = if matches!(value, AstLiteral::None)
                     && expected.is_some_and(|expected| {
@@ -2000,12 +2113,74 @@ impl Analyzer<'_> {
                     ast.span,
                 ))
             }
-            AstExpressionKind::TypeApplication { .. } => Err(Diagnostic::new(
-                "E000211",
-                "a generic type application must be constructed",
-                Some(ast.span),
-            )),
+            AstExpressionKind::TypeApplication { callee, arguments } => {
+                if matches!(&callee.kind, AstExpressionKind::Name(name) if matches!(name.as_str(), "channel" | "Channel"))
+                    && arguments.len() == 1
+                {
+                    return self.channel_constructor(&arguments[0], None, ast.span);
+                }
+                Err(Diagnostic::new(
+                    "E000211",
+                    "a generic type application must be constructed",
+                    Some(ast.span),
+                ))
+            }
             AstExpressionKind::Call { callee, arguments } => {
+                if let AstExpressionKind::Member { object, name } = &callee.kind {
+                    if name == "send" && arguments.len() == 1 {
+                        let channel = self.expression(object, None)?;
+                        if let Some(element) = self.channel_elements.get(&channel.type_id).copied() {
+                            let value = self.expression(&arguments[0].value, Some(element))?;
+                            let storage = self.channel_storage_expression(channel, ast.span);
+                            let storage_type = storage.type_id;
+                            let suffix = self.list_runtime_suffix(element, ast.span)?;
+                            let unit = self
+                                .types
+                                .resolve_name("unit")
+                                .expect("bootstrap defines unit");
+                            return Ok(self.runtime_call(
+                                &format!("__sev_channel_send_{suffix}"),
+                                &[storage_type, element],
+                                unit,
+                                vec![storage, value],
+                                ast.span,
+                            ));
+                        }
+                    }
+                    if name == "size" && arguments.is_empty() {
+                        let value = self.expression(object, None)?;
+                        if self.list_elements.contains_key(&value.type_id) {
+                            let storage = self.list_storage_expression(value, ast.span);
+                            let storage_type = storage.type_id;
+                            let result = self
+                                .types
+                                .resolve_name("usize")
+                                .expect("bootstrap defines usize");
+                            return Ok(self.runtime_call(
+                                "__sev_list_len",
+                                &[storage_type],
+                                result,
+                                vec![storage],
+                                ast.span,
+                            ));
+                        }
+                    }
+                }
+                if let AstExpressionKind::TypeApplication {
+                    callee: application,
+                    arguments: type_arguments,
+                } = &callee.kind
+                {
+                    if matches!(&application.kind, AstExpressionKind::Name(name) if matches!(name.as_str(), "channel" | "Channel"))
+                        && type_arguments.len() == 1
+                    {
+                        return self.channel_constructor(
+                            &type_arguments[0],
+                            arguments.first().map(|argument| &argument.value),
+                            ast.span,
+                        );
+                    }
+                }
                 if let Some(path) = callable_path(callee) {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
@@ -2698,12 +2873,72 @@ impl Analyzer<'_> {
         ty
     }
 
-    fn instantiate_tuple_type(&mut self, elements: &[TypeId]) -> TypeId {
-        if let Some(ty) = self.tuple_types.get(elements) {
+    fn channel_constructor(
+        &mut self,
+        element: &TypeAnnotation,
+        capacity: Option<&AstExpression>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let element = self.resolve_source_type(element)?;
+        let channel_type = self.instantiate_channel_type(element);
+        let usize_type = self
+            .types
+            .resolve_name("usize")
+            .expect("bootstrap defines usize");
+        let capacity = match capacity {
+            Some(capacity) => self.expression(capacity, Some(usize_type))?,
+            None => self.integer_expression("0", usize_type, span),
+        };
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let storage = self.runtime_call(
+            "__sev_channel_create",
+            &[usize_type],
+            storage_type,
+            vec![capacity],
+            span,
+        );
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: channel_type,
+            kind: ExpressionKind::Aggregate {
+                class: channel_type,
+                fields: vec![storage],
+            },
+            span,
+        })
+    }
+
+    fn instantiate_channel_type(&mut self, element: TypeId) -> TypeId {
+        if let Some(ty) = self.channel_types.get(&element) {
             return *ty;
         }
         let ty = TypeId(self.next_class_type);
         self.next_class_type = self.next_class_type.saturating_sub(1);
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        self.channel_types.insert(element, ty);
+        self.channel_elements.insert(ty, element);
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("channel[type#{}]", element.0),
+            fields: vec![HirClassFieldDeclaration {
+                name: "storage".into(),
+                ty: storage,
+            }],
+        });
+        ty
+    }
+
+    fn instantiate_tuple_type(&mut self, elements: &[TypeId]) -> TypeId {
+        if let Some(ty) = self.tuple_types.get(elements) {
+            return *ty;
+        }
+        let ty = tuple_type_id(elements);
         let element_names = elements
             .iter()
             .map(|element| {
@@ -3011,6 +3246,26 @@ impl Analyzer<'_> {
             type_id: storage_type,
             kind: ExpressionKind::Field {
                 object: Box::new(list),
+                index: 0,
+            },
+            span,
+        }
+    }
+
+    fn channel_storage_expression(
+        &mut self,
+        channel: Expression,
+        span: severian_source::Span,
+    ) -> Expression {
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        Expression {
+            id: self.next_id(),
+            type_id: storage,
+            kind: ExpressionKind::Field {
+                object: Box::new(channel),
                 index: 0,
             },
             span,
@@ -3603,6 +3858,51 @@ impl Analyzer<'_> {
     }
 }
 
+pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
+    // Reserve the upper quarter of synthetic IDs for structural tuples. The
+    // stable fold makes package signature collection and body analysis agree
+    // without introducing tuple identities into the universal type catalog.
+    let hash = elements.iter().fold(0x811c_9dc5u32, |hash, element| {
+        (hash ^ element.0).wrapping_mul(0x0100_0193)
+    });
+    TypeId(0xc000_0000 | (hash & 0x3fff_ffff))
+}
+
+fn contract_failure_expression(
+    failure: Option<&AstExpression>,
+) -> Option<&AstExpression> {
+    let failure = failure?;
+    if let AstExpressionKind::Call { callee, arguments } = &failure.kind {
+        if callable_path(callee).as_deref() == Some("Error") {
+            return arguments.first().map(|argument| &argument.value);
+        }
+    }
+    Some(failure)
+}
+
+fn insert_before_returns(block: &mut Block, assertions: &[Statement]) {
+    let mut lowered = Vec::with_capacity(block.statements.len() + assertions.len());
+    for mut statement in std::mem::take(&mut block.statements) {
+        match &mut statement {
+            Statement::Sequence(nested) => insert_before_returns(nested, assertions),
+            Statement::If { then_block, else_block, .. } => {
+                insert_before_returns(then_block, assertions);
+                insert_before_returns(else_block, assertions);
+            }
+            Statement::While { body, .. } => insert_before_returns(body, assertions),
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    insert_before_returns(&mut arm.body, assertions);
+                }
+            }
+            Statement::Return(_) => lowered.extend_from_slice(assertions),
+            _ => {}
+        }
+        lowered.push(statement);
+    }
+    block.statements = lowered;
+}
+
 fn synthetic_definition(
     module: &str,
     function: &severian_ast::FunctionDeclaration,
@@ -4131,10 +4431,14 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             {
                 ControlFlow::Returns
             }
+            AstStatement::Unsafe { body, .. } if block_flow(body) == ControlFlow::Returns => {
+                ControlFlow::Returns
+            }
             AstStatement::Binding(_)
             | AstStatement::FieldAssignment { .. }
             | AstStatement::Expression(_)
             | AstStatement::Assert { .. }
+            | AstStatement::Unsafe { .. }
             | AstStatement::If { .. }
             | AstStatement::While { .. }
             | AstStatement::For { .. }
@@ -4345,6 +4649,26 @@ mod tests {
             severian_mir::Terminator::Goto(severian_mir::BlockId(1), ref arguments)
                 if arguments.is_empty()
         ));
+    }
+
+    #[test]
+    fn function_contracts_become_entry_and_exit_assertions() {
+        let (program, _) = analyze_source(
+            "def bounded(value: int) -> int with { value >= 0, defer value <= 10 -> Error(\"too large\") }:\n    return value\n",
+        );
+        let body = program.modules[0].functions[0].body.as_ref().unwrap();
+        assert!(matches!(body.statements[0], Statement::Assert { .. }));
+        assert!(matches!(body.statements[1], Statement::Assert { .. }));
+        assert!(matches!(body.statements[2], Statement::Return(_)));
+        let mir = severian_mir::build(&program).unwrap();
+        let operations = &mir.functions[0].body.as_ref().unwrap().operations;
+        assert_eq!(
+            operations
+                .iter()
+                .filter(|operation| matches!(operation, severian_mir::Operation::Assert { .. }))
+                .count(),
+            2
+        );
     }
 
     #[test]

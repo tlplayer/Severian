@@ -653,6 +653,14 @@ impl BodyBuilder {
                 });
                 self.current = continuation;
             }
+            severian_hir::ExpressionKind::Async { expression, .. }
+            | severian_hir::ExpressionKind::Await(expression) => {
+                let source = self.expression(expression);
+                self.push(Statement::Assign(
+                    result.clone(),
+                    Rvalue::Use(Operand::Copy(source)),
+                ));
+            }
         }
         self.expressions.insert(expression.id, result.clone());
         result

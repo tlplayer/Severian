@@ -138,6 +138,7 @@ fn lower_block(
 ) -> Result<LirBlock, LoweringError> {
     let mut operations = Vec::new();
     let mut owned_strings = Vec::new();
+    let mut scoped_tasks = Vec::new();
     for operation in &block.operations {
         let operation = match operation {
             MirOperation::Coverage { point } => LirOperation::Coverage {
@@ -272,6 +273,27 @@ fn lower_block(
                 arguments: arguments.iter().map(|value| ValueId(value.0)).collect(),
                 result: ValueId(result.0),
             },
+            MirOperation::Spawn {
+                function,
+                arguments,
+                result,
+                owner,
+                locked,
+            } => LirOperation::Spawn {
+                function: FunctionId(function.0),
+                arguments: arguments.iter().map(|value| ValueId(value.0)).collect(),
+                result: ValueId(result.0),
+                owner: match owner {
+                    severian_mir::TaskOwner::SelfScope => severian_lir::TaskOwner::SelfScope,
+                    severian_mir::TaskOwner::Runtime => severian_lir::TaskOwner::Runtime,
+                    severian_mir::TaskOwner::Inferred => severian_lir::TaskOwner::Inferred,
+                },
+                locked: *locked,
+            },
+            MirOperation::Await { task, result } => LirOperation::Await {
+                task: ValueId(task.0),
+                result: ValueId(result.0),
+            },
             MirOperation::Return { value } => LirOperation::Return {
                 value: value.map(|value| ValueId(value.0)),
             },
@@ -337,7 +359,36 @@ fn lower_block(
                 outputs: outputs.iter().map(|value| ValueId(value.0)).collect(),
             },
         };
+        match &operation {
+            LirOperation::Spawn { result, owner, .. }
+                if *owner != severian_lir::TaskOwner::Runtime =>
+            {
+                scoped_tasks.push(*result);
+            }
+            LirOperation::Await { task, .. } => {
+                scoped_tasks.retain(|known| known != task);
+            }
+            LirOperation::Return { .. } => {
+                for task in scoped_tasks.drain(..) {
+                    let ty = values
+                        .get(task.0 as usize)
+                        .expect("task result references a lowered value")
+                        .ty;
+                    let result = new_value(values, ty);
+                    operations.push(LirOperation::Await { task, result });
+                }
+            }
+            _ => {}
+        }
         operations.push(operation);
+    }
+    for task in scoped_tasks {
+        let ty = values
+            .get(task.0 as usize)
+            .expect("task result references a lowered value")
+            .ty;
+        let result = new_value(values, ty);
+        operations.push(LirOperation::Await { task, result });
     }
     insert_owned_string_releases(&mut operations, &owned_strings, module)?;
     Ok(LirBlock { operations })
@@ -449,6 +500,8 @@ fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
         LirOperation::Call { arguments, .. } | LirOperation::RuntimeCall { arguments, .. } => {
             arguments.contains(&value)
         }
+        LirOperation::Spawn { arguments, .. } => arguments.contains(&value),
+        LirOperation::Await { task, .. } => *task == value,
         LirOperation::Return { value: returned } => *returned == Some(value),
         LirOperation::Assert {
             condition, message, ..

@@ -98,6 +98,7 @@ impl Context {
             let registry = ffi::mlirDialectRegistryCreate();
             for dialect in [
                 ffi::mlirGetDialectHandle__arith__(),
+                ffi::mlirGetDialectHandle__async__(),
                 ffi::mlirGetDialectHandle__cf__(),
                 ffi::mlirGetDialectHandle__func__(),
                 ffi::mlirGetDialectHandle__llvm__(),
@@ -182,7 +183,7 @@ impl<'context> Module<'context> {
     }
 
     fn verify_allowed_dialects(&self, target: &TargetSpec) -> Result<(), MlirError> {
-        let mut allowed = ["builtin", "arith", "cf", "func", "llvm", "scf"]
+        let mut allowed = ["builtin", "arith", "async", "cf", "func", "llvm", "scf"]
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();

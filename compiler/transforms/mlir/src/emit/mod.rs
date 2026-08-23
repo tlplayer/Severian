@@ -420,6 +420,77 @@ fn render_block(
                     ));
                 }
             }
+            Operation::Spawn {
+                function: target,
+                arguments,
+                result,
+                owner,
+                locked,
+            } => {
+                let target = function(module, *target)?;
+                let arguments_text = arguments
+                    .iter()
+                    .map(|value| format!("%v{}", value.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let argument_types = argument_types(module, target)?;
+                let owner = match owner {
+                    severian_lir::TaskOwner::SelfScope => "self",
+                    severian_lir::TaskOwner::Runtime => "runtime",
+                    severian_lir::TaskOwner::Inferred => "inferred",
+                };
+                output.push_str(&format!(
+                    "{indentation}// severian.task owner={owner} locked={locked}\n"
+                ));
+                let attributes = format!(
+                    "attributes {{severian.owner = \"{owner}\", severian.locked = {locked}}}"
+                );
+                if target.result == LoweredType::Unit {
+                    output.push_str(&format!(
+                        "{indentation}%task{} = async.execute {attributes} {{\n",
+                        result.0,
+                    ));
+                    output.push_str(&format!(
+                        "{}func.call @{}({arguments_text}) : ({argument_types}) -> ()\n",
+                        " ".repeat(indent + 2),
+                        function_symbol(target),
+                    ));
+                    output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
+                    output.push_str(&format!("{indentation}}}\n"));
+                } else {
+                    let result_type = mlir_type(value_type(module, *result)?)?;
+                    output.push_str(&format!(
+                        "{indentation}%task_token{}, %task{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
+                        result.0, result.0,
+                    ));
+                    output.push_str(&format!(
+                        "{}%task_value{} = func.call @{}({arguments_text}) : ({argument_types}) -> {result_type}\n",
+                        " ".repeat(indent + 2),
+                        result.0,
+                        function_symbol(target),
+                    ));
+                    output.push_str(&format!(
+                        "{}async.yield %task_value{} : {result_type}\n",
+                        " ".repeat(indent + 2), result.0
+                    ));
+                    output.push_str(&format!("{indentation}}}\n"));
+                }
+            }
+            Operation::Await { task, result } => {
+                let ty = value_type(module, *result)?;
+                if ty == LoweredType::Unit {
+                    output.push_str(&format!(
+                        "{indentation}async.await %task{} : !async.token\n",
+                        task.0
+                    ));
+                } else {
+                    let spelling = mlir_type(ty)?;
+                    output.push_str(&format!(
+                        "{indentation}%v{} = async.await %task{} : !async.value<{spelling}>\n",
+                        result.0, task.0
+                    ));
+                }
+            }
             Operation::RuntimeCall {
                 symbol,
                 arguments,
@@ -473,16 +544,22 @@ fn render_block(
             }
             Operation::Assert {
                 condition,
-                message: _,
+                message,
                 location,
             } => {
+                let custom = message.and_then(|message| constant_string(module, message));
                 let failure = location.as_ref().map_or_else(
-                    || "assertion failed".to_owned(),
+                    || custom.unwrap_or("assertion failed").to_owned(),
                     |location| {
-                        format!(
+                        let mut failure = format!(
                             "{}:{}:{}: assertion failed: {}",
                             location.file, location.line, location.column, location.expression
-                        )
+                        );
+                        if let Some(custom) = custom {
+                            failure.push_str(": ");
+                            failure.push_str(custom);
+                        }
+                        failure
                     },
                 );
                 output.push_str(&format!(
@@ -795,6 +872,16 @@ fn value_type(module: &Module, id: ValueId) -> Result<LoweredType, MlirError> {
         .ok_or(MlirError::InvalidValue(id))
 }
 
+fn constant_string(module: &Module, id: ValueId) -> Option<&str> {
+    all_operations(module).into_iter().find_map(|operation| match operation {
+        Operation::Constant {
+            value: Constant::String(value),
+            result,
+        } if *result == id => Some(value.as_str()),
+        _ => None,
+    })
+}
+
 pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
     Ok(match ty {
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
@@ -896,6 +983,59 @@ mod tests {
     #[test]
     fn strings_use_llvm_globals_without_changing_their_bytes() {
         assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
+    }
+
+    #[test]
+    fn tasks_render_with_the_async_dialect_and_preserve_policy() {
+        let integer = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let module = Module {
+            values: vec![
+                severian_lir::Value { id: ValueId(0), ty: integer },
+                severian_lir::Value { id: ValueId(1), ty: integer },
+                severian_lir::Value { id: ValueId(2), ty: integer },
+                severian_lir::Value { id: ValueId(3), ty: integer },
+            ],
+            functions: vec![
+                Function {
+                    id: FunctionId(1),
+                    name: "work".into(),
+                    parameters: vec![ValueId(3)],
+                    result: integer,
+                    body: Some(Block { operations: vec![Operation::Return { value: Some(ValueId(3)) }] }),
+                    linkage: FunctionLinkage::Internal,
+                },
+                Function {
+                    id: FunctionId(2),
+                    name: "main".into(),
+                    parameters: vec![],
+                    result: LoweredType::Unit,
+                    body: Some(Block {
+                        operations: vec![
+                            Operation::Constant { value: Constant::Integer("21".into()), result: ValueId(0) },
+                            Operation::Spawn {
+                                function: FunctionId(1),
+                                arguments: vec![ValueId(0)],
+                                result: ValueId(1),
+                                owner: severian_lir::TaskOwner::SelfScope,
+                                locked: true,
+                            },
+                            Operation::Await { task: ValueId(1), result: ValueId(2) },
+                            Operation::Return { value: None },
+                        ],
+                    }),
+                    linkage: FunctionLinkage::Internal,
+                },
+            ],
+            entry: Some(FunctionId(2)),
+            ..Module::default()
+        };
+        let rendered = render(&module).unwrap();
+        assert!(rendered.contains("severian.task owner=self locked=true"));
+        assert!(rendered.contains("async.execute"));
+        assert!(rendered.contains("async.await"));
     }
 
     #[test]

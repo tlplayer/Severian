@@ -79,6 +79,9 @@ fn validate_generic_statements(
                     validate_generic_expression(message, names, function, index, types)?;
                 }
             }
+            severian_ast::Statement::Unsafe { body, .. } => {
+                validate_generic_statements(body, &mut names.clone(), function, index, types)?;
+            }
             severian_ast::Statement::If {
                 condition,
                 then_block,
@@ -191,6 +194,9 @@ fn validate_generic_expression(
                 validate_generic_expression(&argument.value, names, function, index, types)?;
             }
             Ok(None)
+        }
+        Expression::Async { expression, .. } | Expression::Await { expression } => {
+            validate_generic_expression(expression, names, function, index, types)
         }
         Expression::Unary { operator, operand } => {
             let parameter = validate_generic_expression(operand, names, function, index, types)?;
@@ -716,6 +722,16 @@ fn visit_statements_for_specializations(
                     )?;
                 }
             }
+            severian_ast::Statement::Unsafe { body, .. } => {
+                visit_statements_for_specializations(
+                    module,
+                    body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+            }
             severian_ast::Statement::If {
                 condition,
                 then_block,
@@ -891,6 +907,17 @@ fn visit_expression_for_specializations(
                     specializations,
                 )?;
             }
+        }
+        severian_ast::ExpressionKind::Async { expression, .. }
+        | severian_ast::ExpressionKind::Await { expression } => {
+            visit_expression_for_specializations(
+                module,
+                expression,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
         }
         severian_ast::ExpressionKind::Member { object, .. } => {
             visit_expression_for_specializations(

@@ -51,11 +51,22 @@ pub struct FunctionDeclaration {
     pub name: String,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,
+    /// Executable entry and exit conditions, kept separate from generic
+    /// constraints because they survive into runtime IR.
+    pub contracts: Vec<FunctionContract>,
     pub parameters: Vec<FunctionParameter>,
     pub result: TypeAnnotation,
     /// `None` denotes an interface declaration. Source functions have an
     /// ordered body, including an explicitly empty body.
     pub body: Option<Vec<Statement>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionContract {
+    pub condition: Expression,
+    pub deferred: bool,
+    pub failure: Option<Expression>,
     pub span: Span,
 }
 

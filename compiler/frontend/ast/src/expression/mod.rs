@@ -44,6 +44,14 @@ pub enum BinaryOperator {
     Or,
 }
 
+/// The lifetime owner selected for a spawned task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOwner {
+    SelfScope,
+    Runtime,
+    Inferred,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expression {
     pub kind: ExpressionKind,
@@ -84,6 +92,14 @@ pub enum ExpressionKind {
     Call {
         callee: Box<Expression>,
         arguments: Vec<CallArgument>,
+    },
+    Async {
+        expression: Box<Expression>,
+        owner: TaskOwner,
+        locked: bool,
+    },
+    Await {
+        expression: Box<Expression>,
     },
     Unary {
         operator: UnaryOperator,

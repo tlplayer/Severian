@@ -12,6 +12,7 @@ pub fn native_sources() -> Vec<PathBuf> {
         "coverage.c",
         "string.c",
         "list.c",
+        "channel.c",
         "io.c",
         "filesystem.c",
         "system.c",

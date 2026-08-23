@@ -363,6 +363,13 @@ fn resolve_package_type(
     classes: &[PackageClass],
     lists: &[PackageList],
 ) -> Result<TypeId, Diagnostic> {
+    if let Some(("tuple", elements)) = annotation.named_parts() {
+        let elements = elements
+            .iter()
+            .map(|element| resolve_package_type(types, element, module, classes, lists))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(crate::tuple_type_id(&elements));
+    }
     if let Some(("list", [element])) = annotation.named_parts() {
         let element = crate::resolve_type_annotation(types, element)?;
         if let Some(list) = lists.iter().find(|list| list.element == element) {
@@ -1029,6 +1036,9 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
             for argument in arguments {
                 remap_expression_bindings(argument, offset);
             }
+        }
+        ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
+            remap_expression_bindings(expression, offset)
         }
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Borrow { operand, .. }

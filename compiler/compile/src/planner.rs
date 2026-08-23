@@ -368,6 +368,8 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
         Operation::Call { arguments, .. } => arguments.clone(),
+        Operation::Spawn { arguments, .. } => arguments.clone(),
+        Operation::Await { task, .. } => vec![*task],
         Operation::Return { value } => value.iter().copied().collect(),
         Operation::Assert {
             condition, message, ..
@@ -409,7 +411,9 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         | Operation::Aggregate { result, .. }
         | Operation::FieldGet { result, .. }
         | Operation::FieldSet { result, .. }
-        | Operation::Call { result, .. } => vec![*result],
+        | Operation::Call { result, .. }
+        | Operation::Spawn { result, .. }
+        | Operation::Await { result, .. } => vec![*result],
         Operation::Assign { target, .. } => vec![*target],
         Operation::Return { .. } | Operation::Assert { .. } => Vec::new(),
         Operation::If {

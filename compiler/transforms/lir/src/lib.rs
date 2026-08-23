@@ -78,6 +78,13 @@ pub enum BinaryOperation {
     Or,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOwner {
+    SelfScope,
+    Runtime,
+    Inferred,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation {
     Coverage {
@@ -121,6 +128,17 @@ pub enum Operation {
     Call {
         function: FunctionId,
         arguments: Vec<ValueId>,
+        result: ValueId,
+    },
+    Spawn {
+        function: FunctionId,
+        arguments: Vec<ValueId>,
+        result: ValueId,
+        owner: TaskOwner,
+        locked: bool,
+    },
+    Await {
+        task: ValueId,
         result: ValueId,
     },
     /// A call to the versioned native runtime ABI selected during lowering.

@@ -162,6 +162,9 @@ fn validate_expression(
             }
             Ok(())
         }
+        ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
+            validate_expression(expression, declared)
+        }
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Borrow { operand, .. }
         | ExpressionKind::Move(operand) => validate_expression(operand, declared),

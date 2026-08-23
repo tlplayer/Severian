@@ -5,12 +5,12 @@ mod statement;
 mod types;
 
 pub use expression::{
-    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, UnaryOperator,
+    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, TaskOwner, UnaryOperator,
 };
 pub use statement::{Binding, MatchCase, Statement};
 pub use types::{
     ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
-    DecoratorValue, EnumDeclaration, EnumVariant, FunctionDeclaration, FunctionParameter,
+    DecoratorValue, EnumDeclaration, EnumVariant, FunctionContract, FunctionDeclaration, FunctionParameter,
     GenericConstraint, ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorParameter,
     OperatorSyntax, PropertyDeclaration, TestDeclaration, TraitDeclaration, TypeAnnotation,
     TypeAnnotationKind, TypeDeclaration,

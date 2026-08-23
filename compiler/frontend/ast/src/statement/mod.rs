@@ -42,6 +42,10 @@ pub enum Statement {
         message: Option<Expression>,
         span: Span,
     },
+    Unsafe {
+        body: Vec<Statement>,
+        span: Span,
+    },
     If {
         condition: Expression,
         then_block: Vec<Statement>,
