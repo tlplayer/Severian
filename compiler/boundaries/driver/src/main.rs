@@ -2,7 +2,7 @@ mod example_validation;
 mod test_runner;
 
 use severian_driver::config::{BinaryTarget, Catalog, DeclaredTarget, LibraryTarget, Manifest};
-use severian_driver::Compiler;
+use severian_driver::{Compiler, EmitStage};
 use severian_target::TargetSpec;
 use std::collections::BTreeMap;
 use std::env;
@@ -43,9 +43,30 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
         "run".into()
     };
     match command.as_str() {
-        "check" => check(parse_common(arguments)?, &catalog),
-        "build" | "compile" => build(parse_common(arguments)?, &catalog).map(|_| ()),
-        "run" => run_program(parse_common(arguments)?, &catalog),
+        "check" => {
+            let options = parse_common(arguments)?;
+            if options.emit.is_some() {
+                emit_ir(options, &catalog)
+            } else {
+                check(options, &catalog)
+            }
+        }
+        "build" | "compile" => {
+            let options = parse_common(arguments)?;
+            if options.emit.is_some() {
+                emit_ir(options, &catalog)
+            } else {
+                build(options, &catalog).map(|_| ())
+            }
+        }
+        "run" => {
+            let options = parse_common(arguments)?;
+            if options.emit.is_some() {
+                emit_ir(options, &catalog)
+            } else {
+                run_program(options, &catalog)
+            }
+        }
         "test" => test(parse_common(arguments)?, &catalog),
         "config" => config(arguments, &catalog),
         "new" => create_project(arguments, &catalog, true),
@@ -71,7 +92,21 @@ struct CommonOptions {
     target: Option<String>,
     bin: Option<String>,
     output: Option<PathBuf>,
+    emit: Option<EmitStage>,
     application_args: Vec<String>,
+}
+
+fn parse_emit_stage(value: &str) -> Result<EmitStage, String> {
+    match value {
+        "ast" => Ok(EmitStage::Ast),
+        "hir" => Ok(EmitStage::Hir),
+        "mir" => Ok(EmitStage::Mir),
+        "lir" => Ok(EmitStage::Lir),
+        "mlir" => Ok(EmitStage::Mlir),
+        _ => Err(format!(
+            "unknown emit stage `{value}`; expected one of: ast, hir, mir, lir, mlir"
+        )),
+    }
 }
 
 fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
@@ -82,6 +117,11 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
         if argument == "--" {
             options.application_args = arguments[cursor + 1..].to_vec();
             break;
+        }
+        if let Some(value) = argument.strip_prefix("--emit=") {
+            options.emit = Some(parse_emit_stage(value)?);
+            cursor += 1;
+            continue;
         }
         let destination = match argument.as_str() {
             "--profile" => Some(&mut options.profile),
@@ -98,6 +138,12 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
                     .ok_or_else(|| format!("{argument} requires a value"))?
                     .clone(),
             );
+        } else if argument == "--emit" {
+            cursor += 1;
+            let value = arguments
+                .get(cursor)
+                .ok_or_else(|| "--emit requires a stage".to_owned())?;
+            options.emit = Some(parse_emit_stage(value)?);
         } else if matches!(argument.as_str(), "-o" | "--output") {
             cursor += 1;
             options.output = Some(PathBuf::from(
@@ -115,6 +161,37 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
         cursor += 1;
     }
     Ok(options)
+}
+
+fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+    if !options.application_args.is_empty() {
+        return Err("`--emit` does not accept application arguments".into());
+    }
+    let stage = options.emit.expect("emit dispatch requires a stage");
+    let input = discover(options.path.as_deref(), catalog)?;
+    let manifest = match &input {
+        Input::Package(manifest) => Some(manifest.as_ref()),
+        Input::Source { .. } => None,
+    };
+    let config = resolve_config(catalog, manifest, &options)?;
+    let targets = selected_targets(&input, options.bin.as_deref())?;
+    if targets.len() != 1 {
+        return Err("`--emit` requires exactly one selected target; pass `--bin NAME`".into());
+    }
+    let text = compiler(&config, manifest, false)?
+        .emit_file(targets[0].path(), stage)
+        .map_err(|error| error.to_string())?;
+    if let Some(output) = &options.output {
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        fs::write(output, text)
+            .map_err(|error| format!("could not write {}: {error}", output.display()))?;
+    } else {
+        print!("{text}");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -356,6 +433,9 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
 }
 
 fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+    if options.emit.is_some() {
+        return Err("`sev test` does not support `--emit`; emit a selected source directly".into());
+    }
     if !options.application_args.is_empty() {
         return Err("`sev test` does not accept application arguments".into());
     }
@@ -755,7 +835,9 @@ build options:\n",
             option.default
         ));
     }
-    output.push_str("  --bin NAME  Select a package binary.\n  -o PATH     Override the path for one selected artifact.\n");
+    output.push_str(
+        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir; do not execute.\n  -o PATH     Write the selected artifact or emitted IR to PATH.\n",
+    );
     output
 }
 
@@ -778,5 +860,15 @@ mod tests {
         assert_eq!(options.backend.as_deref(), Some("native"));
         assert_eq!(options.target.as_deref(), Some("wasm32-unknown-wasi"));
         assert_eq!(options.application_args, ["input.txt"]);
+    }
+
+    #[test]
+    fn emit_accepts_separate_and_equals_forms() {
+        let separate =
+            parse_common(vec!["hello.sev".into(), "--emit".into(), "lir".into()]).unwrap();
+        assert_eq!(separate.emit, Some(EmitStage::Lir));
+
+        let equals = parse_common(vec!["hello.sev".into(), "--emit=mlir".into()]).unwrap();
+        assert_eq!(equals.emit, Some(EmitStage::Mlir));
     }
 }

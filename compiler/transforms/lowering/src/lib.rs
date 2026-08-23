@@ -439,16 +439,19 @@ fn insert_owned_string_releases(
         {
             return Err(LoweringError::OwnedStringEscapes(*value));
         }
-        // Storing the allocation in an aggregate transfers its lifetime to
-        // that aggregate. Releasing it after the insert leaves a dangling
-        // field for subsequent method/property reads. Aggregate destruction
-        // will become the corresponding release point once destructors are
+        // Storing the allocation in mutable or aggregate storage transfers its
+        // lifetime to that storage. Releasing it after the store leaves a
+        // dangling value for subsequent reads. Storage destruction will
+        // become the corresponding release point once destructors are
         // represented in LIR; until then, retain the allocation.
         if operations.iter().any(|operation| match operation {
             LirOperation::Aggregate { fields, .. } => fields.contains(value),
             LirOperation::FieldSet {
                 value: field_value, ..
             } => field_value == value,
+            LirOperation::Assign {
+                value: assigned, ..
+            } => assigned == value,
             _ => false,
         }) {
             continue;
@@ -849,5 +852,53 @@ mod tests {
             lower(&mir, &context.types, &TargetSpec::host()),
             Err(LoweringError::OwnedStringEscapes(ValueId(2)))
         ));
+    }
+
+    #[test]
+    fn owned_string_assignment_does_not_release_the_stored_allocation() {
+        let (context, string, _) = string_context();
+        let mir = Module {
+            values: (0..3)
+                .map(|id| MirValue {
+                    id: MirValueId(id),
+                    type_id: string,
+                })
+                .collect(),
+            initializer: MirBlock {
+                operations: vec![
+                    MirOperation::Constant {
+                        value: LiteralValue::String("left".into()),
+                        result: MirValueId(0),
+                    },
+                    MirOperation::Constant {
+                        value: LiteralValue::String("right".into()),
+                        result: MirValueId(1),
+                    },
+                    MirOperation::Binary {
+                        operator: BinaryOperator::Add,
+                        left: MirValueId(0),
+                        right: MirValueId(1),
+                        result: MirValueId(2),
+                    },
+                    MirOperation::Assign {
+                        target: MirValueId(0),
+                        value: MirValueId(2),
+                    },
+                ],
+            },
+            ..Module::default()
+        };
+        let lir = lower(&mir, &context.types, &TargetSpec::host()).unwrap();
+        assert!(lir.initializer.operations.iter().any(|operation| matches!(
+            operation,
+            LirOperation::Assign {
+                target: ValueId(0),
+                value: ValueId(2)
+            }
+        )));
+        assert!(!lir.initializer.operations.iter().any(|operation| matches!(
+            operation,
+            LirOperation::RuntimeCall { symbol, .. } if symbol == "__sev_string_release"
+        )));
     }
 }

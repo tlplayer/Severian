@@ -6,6 +6,6 @@ def main():
     mutable_variable += " World!"
     print(CONSTANT_VARIABLE+mutable_variable)
 
-test:
+test with integ:
     main()
-    assert("Hello, Wolrd!" in stdout)
+    assert("Hello, World!" in stdout)

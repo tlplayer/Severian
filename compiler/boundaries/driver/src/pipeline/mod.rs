@@ -21,6 +21,17 @@ pub enum CompileError {
     Backend(BackendError),
 }
 
+/// A compiler representation that can be inspected without producing or
+/// executing a native artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmitStage {
+    Ast,
+    Hir,
+    Mir,
+    Lir,
+    Mlir,
+}
+
 impl fmt::Display for CompileError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -199,6 +210,78 @@ impl Compiler {
     pub fn compile_file(&self, source: &Path, output: &Path) -> Result<Artifact, CompileError> {
         let mir = self.check_file_to_mir(source, CompileMode::Build)?;
         self.compile_mir(&mir, output)
+    }
+
+    /// Run the normal checked compilation pipeline through `stage` and return
+    /// a deterministic textual representation suitable for diagnostics and
+    /// compiler tests.
+    pub fn emit_file(&self, source: &Path, stage: EmitStage) -> Result<String, CompileError> {
+        match stage {
+            EmitStage::Ast => {
+                let graph = self.resolve_modules(source)?;
+                let mut output = String::new();
+                for module in graph.modules {
+                    output.push_str(&format!(
+                        "// module {}\n{:#?}\n",
+                        module.path.display(),
+                        module.ast
+                    ));
+                }
+                Ok(output)
+            }
+            EmitStage::Hir => {
+                let (hir, _) = self.check_file_to_hir(source, CompileMode::Build)?;
+                Ok(format!("{hir:#?}\n"))
+            }
+            EmitStage::Mir => {
+                let mir = self.check_file_to_mir(source, CompileMode::Build)?;
+                Ok(format!("{mir:#?}\n"))
+            }
+            EmitStage::Lir => {
+                let mir = self.check_file_to_mir(source, CompileMode::Build)?;
+                let plan = severian_compile::plan(&mir, &self.context.types)
+                    .map_err(CompileError::Compile)?;
+                let lir = severian_lowering::lower(
+                    &plan.resumed_mir(),
+                    &self.context.types,
+                    &self.target,
+                )
+                .map_err(CompileError::Lowering)?;
+                Ok(format!("{lir:#?}\n"))
+            }
+            EmitStage::Mlir => {
+                let mir = self.check_file_to_mir(source, CompileMode::Build)?;
+                let plan = severian_compile::plan(&mir, &self.context.types)
+                    .map_err(CompileError::Compile)?;
+                let artifacts = self
+                    .compile_handlers
+                    .compile(
+                        &plan,
+                        &CompileContext {
+                            types: &self.context.types,
+                            target: &self.target,
+                        },
+                    )
+                    .map_err(CompileError::Compile)?;
+                let lir = severian_lowering::lower(
+                    &plan.resumed_mir(),
+                    &self.context.types,
+                    &self.target,
+                )
+                .map_err(CompileError::Lowering)?;
+                let ordinary = severian_mlir::render(&lir).map_err(CompileError::Mlir)?;
+                let text = if artifacts.is_empty() {
+                    // Emission is also a debugging boundary: return the
+                    // generated form even when downstream MLIR verification
+                    // is the behavior under investigation.
+                    ordinary
+                } else {
+                    severian_mlir::compose(&ordinary, &artifacts, &self.target)
+                        .map_err(CompileError::Mlir)?
+                };
+                Ok(format!("{}\n", text.trim_end()))
+            }
+        }
     }
 
     pub fn check_file(&self, source: &Path) -> Result<(), CompileError> {
@@ -420,11 +503,11 @@ impl Compiler {
         Ok(results)
     }
 
-    fn check_file_to_mir(
+    fn check_file_to_hir(
         &self,
         source: &Path,
         mode: CompileMode,
-    ) -> Result<MirModule, CompileError> {
+    ) -> Result<(severian_hir::Program, Vec<SourceFile>), CompileError> {
         let mut graph = self.resolve_modules(source)?;
         let root_package = graph
             .modules
@@ -471,7 +554,16 @@ impl Compiler {
             )?;
         }
         severian_ownership::validate(&typed.hir).map_err(CompileError::Diagnostic)?;
-        let mut merged = severian_mir::build(&typed.hir).map_err(CompileError::MirVerify)?;
+        Ok((typed.hir, sources))
+    }
+
+    fn check_file_to_mir(
+        &self,
+        source: &Path,
+        mode: CompileMode,
+    ) -> Result<MirModule, CompileError> {
+        let (hir, sources) = self.check_file_to_hir(source, mode)?;
+        let mut merged = severian_mir::build(&hir).map_err(CompileError::MirVerify)?;
         severian_mir::run_required_pipeline(&mut merged, &self.context)
             .map_err(CompileError::MirPass)?;
         if let Some(source) = sources.last() {

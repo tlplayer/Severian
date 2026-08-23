@@ -68,6 +68,25 @@ fn bare_source_runs_globals_before_main() {
 }
 
 #[test]
+fn global_constant_survives_mutable_string_addition_in_main() {
+    let root = temporary("global-string-addition");
+    let source = root.join("variables.sev");
+    fs::write(
+        &source,
+        "CONSTANT_VARIABLE = \"Hello\"\ndef main():\n    mutable_variable := \",\"\n    mutable_variable += \" World!\"\n    print(CONSTANT_VARIABLE + mutable_variable)\n",
+    )
+    .unwrap();
+    let output = sev().arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"Hello, World!\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn constrained_generic_method_traits_specialize_to_executable_instances() {
     let root = temporary("generic-numeric");
     let source = root.join("generic-numeric.sev");
@@ -148,6 +167,63 @@ fn build_emits_but_does_not_execute_and_check_emits_nothing() {
     assert!(!String::from_utf8(built.stdout)
         .unwrap()
         .contains("must not run during build"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn emit_prints_each_compiler_representation_without_building_or_running() {
+    let root = temporary("emit-ir");
+    let source = root.join("emit.sev");
+    fs::write(
+        &source,
+        "global_value = 7\ndef main():\n    print(global_value)\n",
+    )
+    .unwrap();
+
+    for (stage, marker) in [
+        ("ast", "// module "),
+        ("hir", "Program {"),
+        ("mir", "initializer: Block"),
+        ("lir", "globals: ["),
+        ("mlir", "module {"),
+    ] {
+        let output = sev().arg(&source).args(["--emit", stage]).output().unwrap();
+        assert!(
+            output.status.success(),
+            "stage {stage}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(marker),
+            "stage {stage} did not contain {marker:?}"
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn emit_writes_to_output_when_requested() {
+    let root = temporary("emit-output");
+    let source = root.join("emit.sev");
+    let emitted = root.join("debug/module.lir");
+    fs::write(&source, "value = 7\n").unwrap();
+
+    let output = sev()
+        .arg(&source)
+        .args(["--emit=lir", "-o"])
+        .arg(&emitted)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    assert!(fs::read_to_string(&emitted).unwrap().contains("Module {"));
+
     fs::remove_dir_all(root).unwrap();
 }
 

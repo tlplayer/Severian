@@ -29,3 +29,8 @@ sev test
 sev build
 ```
 sev check parses, resolves, type-checks, and checks ownership. sev test builds and runs Severian tests. sev build runs the project build policy and emits the configured artifact.
+
+To inspect the compiler pipeline without executing the program, pass
+`--emit ast`, `--emit hir`, `--emit mir`, `--emit lir`, or `--emit mlir`.
+The representation is printed to standard output by default; use `-o PATH` to
+write it to a file.
