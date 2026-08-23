@@ -146,6 +146,10 @@ pub enum Operation {
         operand: ValueId,
         result: ValueId,
     },
+    Convert {
+        operand: ValueId,
+        result: ValueId,
+    },
     Binary {
         operator: BinaryOperation,
         left: ValueId,

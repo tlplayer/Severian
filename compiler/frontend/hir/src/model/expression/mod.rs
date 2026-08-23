@@ -89,6 +89,7 @@ pub struct Conversion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversionKind {
     NumericWidening,
+    NumericCast,
     UnionInjection,
     Borrow,
     User(DefId),

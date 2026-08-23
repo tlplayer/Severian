@@ -582,10 +582,11 @@ fn render_cfg_operation(
                 ));
             } else {
                 let literal = match value {
-                    Constant::Integer(value) | Constant::Float(value) => value.as_str(),
-                    Constant::Boolean(true) => "1",
-                    Constant::Boolean(false) => "0",
-                    Constant::None | Constant::Unit => "0",
+                    Constant::Integer(value) => value.clone(),
+                    Constant::Float(value) => mlir_float_literal(value),
+                    Constant::Boolean(true) => "1".into(),
+                    Constant::Boolean(false) => "0".into(),
+                    Constant::None | Constant::Unit => "0".into(),
                     Constant::Bytes(_) | Constant::String(_) => unreachable!(),
                 };
                 output.push_str(&format!(
@@ -679,6 +680,9 @@ fn render_cfg_operation(
             operand,
             result,
         } => render_cfg_unary(output, module, *operator, *operand, *result, indent)?,
+        Operation::Convert { operand, result } => {
+            render_conversion(output, module, *operand, *result, indent)?
+        }
         Operation::Binary {
             operator,
             left,
@@ -983,6 +987,109 @@ fn render_cfg_unary(
     Ok(())
 }
 
+fn render_conversion(
+    output: &mut String,
+    module: &Module,
+    operand: ValueId,
+    result: ValueId,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let source = value_type(module, operand)?;
+    let target = value_type(module, result)?;
+    let source_type = mlir_type(source)?;
+    let target_type = mlir_type(target)?;
+
+    if source_type == target_type {
+        output.push_str(&format!(
+            "{indentation}%v{} = builtin.unrealized_conversion_cast %v{} : {source_type} to {target_type}\n",
+            result.0, operand.0
+        ));
+        return Ok(());
+    }
+
+    let instruction = match (source, target) {
+        (
+            LoweredType::Integer {
+                bits: source_bits,
+                signed,
+            },
+            LoweredType::Integer {
+                bits: target_bits, ..
+            },
+        ) if target_bits > source_bits => {
+            if signed {
+                "arith.extsi"
+            } else {
+                "arith.extui"
+            }
+        }
+        (
+            LoweredType::Integer {
+                bits: source_bits, ..
+            },
+            LoweredType::Integer {
+                bits: target_bits, ..
+            },
+        ) if target_bits < source_bits => "arith.trunci",
+        (LoweredType::Integer { signed: true, .. }, LoweredType::Float { .. }) => {
+            "arith.sitofp"
+        }
+        (LoweredType::Integer { signed: false, .. }, LoweredType::Float { .. }) => {
+            "arith.uitofp"
+        }
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: true, .. }) => {
+            "arith.fptosi"
+        }
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: false, .. }) => {
+            "arith.fptoui"
+        }
+        (
+            LoweredType::Float {
+                format: source_format,
+            },
+            LoweredType::Float {
+                format: target_format,
+            },
+        ) => {
+            let source_bits = float_bits(source_format);
+            let target_bits = float_bits(target_format);
+            if target_bits > source_bits {
+                "arith.extf"
+            } else if target_bits < source_bits {
+                "arith.truncf"
+            } else {
+                output.push_str(&format!(
+                    "{indentation}%v{}_wide = arith.extf %v{} : {source_type} to f32\n",
+                    result.0, operand.0
+                ));
+                output.push_str(&format!(
+                    "{indentation}%v{} = arith.truncf %v{}_wide : f32 to {target_type}\n",
+                    result.0, result.0
+                ));
+                return Ok(());
+            }
+        }
+        _ => {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "numeric conversion from {source:?} to {target:?}"
+            )))
+        }
+    };
+    output.push_str(&format!(
+        "{indentation}%v{} = {instruction} %v{} : {source_type} to {target_type}\n",
+        result.0, operand.0
+    ));
+    Ok(())
+}
+
+fn float_bits(format: LoweredFloatFormat) -> u16 {
+    match format {
+        LoweredFloatFormat::Ieee(bits) => bits,
+        LoweredFloatFormat::BrainFloat16 => 16,
+    }
+}
+
 fn render_runtime_call(
     output: &mut String,
     module: &Module,
@@ -1137,9 +1244,10 @@ fn render_block(
                 let ty = value_type(module, *result)?;
                 let spelling = mlir_type(ty)?;
                 let literal = match value {
-                    Constant::Integer(value) | Constant::Float(value) => value,
-                    Constant::Boolean(true) => "1",
-                    Constant::Boolean(false) => "0",
+                    Constant::Integer(value) => value.clone(),
+                    Constant::Float(value) => mlir_float_literal(value),
+                    Constant::Boolean(true) => "1".into(),
+                    Constant::Boolean(false) => "0".into(),
                     Constant::String(_) => {
                         output.push_str(&format!(
                             "{indentation}%v{} = llvm.mlir.addressof @{} : !llvm.ptr\n",
@@ -1184,6 +1292,9 @@ fn render_block(
                         )));
                     }
                 }
+            }
+            Operation::Convert { operand, result } => {
+                render_conversion(output, module, *operand, *result, indent)?;
             }
             Operation::Binary {
                 operator,
@@ -1762,6 +1873,14 @@ fn constant_string(module: &Module, id: ValueId) -> Option<&str> {
     })
 }
 
+fn mlir_float_literal(value: &str) -> String {
+    if let Some(fraction) = value.strip_prefix('.') {
+        format!("0.{fraction}")
+    } else {
+        value.to_owned()
+    }
+}
+
 pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
     Ok(match ty {
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
@@ -1977,6 +2096,50 @@ mod tests {
             .unwrap(),
             "arith.cmpi ult,"
         );
+    }
+
+    #[test]
+    fn numeric_conversions_emit_real_arithmetic_casts() {
+        let integer = LoweredType::Integer {
+            bits: 64,
+            signed: true,
+        };
+        let float = LoweredType::Float {
+            format: LoweredFloatFormat::Ieee(64),
+        };
+        let rendered = render(&Module {
+            values: vec![
+                severian_lir::Value {
+                    id: ValueId(0),
+                    ty: integer,
+                },
+                severian_lir::Value {
+                    id: ValueId(1),
+                    ty: float,
+                },
+            ],
+            initializer: Block {
+                operations: vec![
+                    Operation::Constant {
+                        value: Constant::Integer("10".into()),
+                        result: ValueId(0),
+                    },
+                    Operation::Convert {
+                        operand: ValueId(0),
+                        result: ValueId(1),
+                    },
+                ],
+            },
+            ..Module::default()
+        })
+        .unwrap();
+        assert!(rendered.contains("arith.sitofp %v0 : i64 to f64"));
+    }
+
+    #[test]
+    fn leading_dot_float_literals_are_normalized_for_mlir() {
+        assert_eq!(mlir_float_literal(".5"), "0.5");
+        assert_eq!(mlir_float_literal("1.5"), "1.5");
     }
 
     #[test]

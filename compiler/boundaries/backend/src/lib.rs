@@ -251,6 +251,14 @@ fn render_block(
                     &format!("{}v{}", c_unary(*operator), operand.0),
                 )?;
             }
+            Operation::Convert { operand, result } => {
+                define_value(
+                    output,
+                    module,
+                    *result,
+                    &format!("({})v{}", c_type(value_type(module, *result)?)?, operand.0),
+                )?;
+            }
             Operation::Binary {
                 operator,
                 left,

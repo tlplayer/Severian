@@ -281,9 +281,15 @@ impl CfgLowering<'_> {
         operations: &mut Vec<LirOperation>,
     ) -> Result<ValueId, LoweringError> {
         match rvalue {
-            severian_mir::Rvalue::Use(operand)
-            | severian_mir::Rvalue::Convert { operand, .. } => {
-                self.lower_operand(body, operand, operations)
+            severian_mir::Rvalue::Use(operand) => self.lower_operand(body, operand, operations),
+            severian_mir::Rvalue::Convert {
+                operand,
+                conversion,
+            } => {
+                let operand = self.lower_operand(body, operand, operations)?;
+                let result = self.new_value(self.lower_mir_type(conversion.to)?);
+                operations.push(LirOperation::Convert { operand, result });
+                Ok(result)
             }
             severian_mir::Rvalue::BorrowShared(place)
             | severian_mir::Rvalue::BorrowExclusive(place) => {
@@ -1284,6 +1290,7 @@ fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
             value: assigned,
         } => *target == value || *assigned == value,
         LirOperation::Unary { operand, .. } => *operand == value,
+        LirOperation::Convert { operand, .. } => *operand == value,
         LirOperation::Binary { left, right, .. } => *left == value || *right == value,
         LirOperation::Call { arguments, .. } | LirOperation::RuntimeCall { arguments, .. } => {
             arguments.contains(&value)

@@ -35,7 +35,7 @@ impl PrimitiveCategory {
         }
     }
 
-    const fn literal_kind(self) -> Option<LiteralKind> {
+    pub const fn literal_kind(self) -> Option<LiteralKind> {
         match self {
             Self::Boolean => Some(LiteralKind::Boolean),
             Self::Character => Some(LiteralKind::Character),
@@ -619,6 +619,11 @@ impl TypeContext {
             ) => float_width(a)
                 .zip(float_width(e))
                 .is_some_and(|(a, e)| a <= e),
+            (
+                PrimitiveRepresentation::Integer { .. }
+                | PrimitiveRepresentation::PointerInteger { .. },
+                PrimitiveRepresentation::Float { .. },
+            ) => true,
             _ => false,
         }
     }
@@ -689,6 +694,28 @@ impl TypeContext {
                         .collect();
                     if let [resolved] = exact.as_slice() {
                         return Ok(*resolved);
+                    }
+                }
+                let best_cost = matches
+                    .iter()
+                    .filter_map(|item| {
+                        Some(
+                            constraint_conversion_cost(self, left, item.left)?
+                                + constraint_conversion_cost(self, right, item.right)?,
+                        )
+                    })
+                    .min();
+                if let Some(best_cost) = best_cost {
+                    let best = matches
+                        .iter()
+                        .filter(|item| {
+                            constraint_conversion_cost(self, left, item.left)
+                                .zip(constraint_conversion_cost(self, right, item.right))
+                                .is_some_and(|(left, right)| left + right == best_cost)
+                        })
+                        .collect::<Vec<_>>();
+                    if let [resolved] = best.as_slice() {
+                        return Ok(**resolved);
                     }
                 }
                 // Known operands and expected results are stronger constraints. If
@@ -783,12 +810,49 @@ fn constraint_matches(
     candidate: TypeId,
 ) -> bool {
     match constraint {
-        // Operator overload selection is exact. Assignability is applied at
-        // binding/call boundaries, not as an implicit numeric promotion table.
-        TypeConstraint::Known(actual) => actual == candidate,
-        TypeConstraint::Literal(kind) => context
-            .primitive(candidate)
-            .is_some_and(|primitive| primitive.category.literal_kind() == Some(kind)),
+        TypeConstraint::Known(actual) => context.assignable(actual, candidate),
+        TypeConstraint::Literal(kind) => context.primitive(candidate).is_some_and(|primitive| {
+            primitive.category.literal_kind() == Some(kind)
+                || (kind == LiteralKind::Integer
+                    && primitive.category == PrimitiveCategory::Float)
+        }),
+    }
+}
+
+fn constraint_conversion_cost(
+    context: &TypeContext,
+    constraint: TypeConstraint,
+    candidate: TypeId,
+) -> Option<u32> {
+    match constraint {
+        TypeConstraint::Known(actual) if actual == candidate => Some(0),
+        TypeConstraint::Known(actual) if context.assignable(actual, candidate) => {
+            let actual = context.primitive(actual)?.representation;
+            let candidate = context.primitive(candidate)?.representation;
+            Some(match (actual, candidate) {
+                (
+                    PrimitiveRepresentation::Integer { .. }
+                    | PrimitiveRepresentation::PointerInteger { .. },
+                    PrimitiveRepresentation::Float { .. },
+                ) => 100,
+                _ => 1,
+            })
+        }
+        TypeConstraint::Literal(kind) => {
+            let primitive = context.primitive(candidate)?;
+            if context.defaults.get(&kind).is_some_and(|default| *default == candidate) {
+                Some(0)
+            } else if primitive.category.literal_kind() == Some(kind) {
+                Some(1)
+            } else if kind == LiteralKind::Integer
+                && primitive.category == PrimitiveCategory::Float
+            {
+                Some(100)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
@@ -879,7 +943,7 @@ impl std::error::Error for TypeError {}
 mod tests {
     use super::*;
 
-    fn numeric_context() -> (TypeContext, TypeId, TypeId) {
+    fn numeric_context() -> (TypeContext, TypeId, TypeId, TypeId) {
         let mut types = TypeContextBuilder::new();
         let int = types.register_declaration("core.int", "int").unwrap();
         types
@@ -905,7 +969,18 @@ mod tests {
                 false,
             )
             .unwrap();
-        for ty in [int, i32] {
+        let float = types.register_declaration("core.float", "float").unwrap();
+        types
+            .define_primitive(
+                float,
+                PrimitiveCategory::Float,
+                PrimitiveRepresentation::Float {
+                    format: FloatFormat::Machine,
+                },
+                true,
+            )
+            .unwrap();
+        for ty in [int, i32, float] {
             types.add_binary(OperatorSignature {
                 operator: BinaryOperator::Add,
                 left: TypePattern::Exact(ty),
@@ -913,12 +988,12 @@ mod tests {
                 result: TypePattern::Exact(ty),
             });
         }
-        (types.build(), int, i32)
+        (types.build(), int, i32, float)
     }
 
     #[test]
     fn literal_constraints_are_symmetric() {
-        let (types, _, i32) = numeric_context();
+        let (types, _, i32, _) = numeric_context();
         let left = types
             .resolve_binary(
                 BinaryOperator::Add,
@@ -937,6 +1012,22 @@ mod tests {
             .unwrap();
         assert_eq!(left.result, i32);
         assert_eq!(right.result, i32);
+    }
+
+    #[test]
+    fn mixed_integer_and_float_operators_promote_to_float() {
+        let (types, int, _, float) = numeric_context();
+        let resolved = types
+            .resolve_binary(
+                BinaryOperator::Add,
+                TypeConstraint::Known(int),
+                TypeConstraint::Known(float),
+                None,
+            )
+            .unwrap();
+        assert_eq!(resolved.left, float);
+        assert_eq!(resolved.right, float);
+        assert_eq!(resolved.result, float);
     }
 
     #[test]

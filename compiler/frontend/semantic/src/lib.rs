@@ -1695,30 +1695,43 @@ impl Analyzer<'_> {
     fn finish(&mut self, prepared: Prepared, expected: TypeId) -> Result<Expression, Diagnostic> {
         match prepared {
             Prepared::Literal(value, span) => {
+                if let Ok(type_id) = self.types.resolve_literal(&value, Some(expected)) {
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id,
+                        kind: ExpressionKind::Literal(value),
+                        span,
+                    });
+                }
                 let type_id = self
                     .types
-                    .resolve_literal(&value, Some(expected))
+                    .resolve_literal(&value, None)
                     .map_err(|error| semantic_error(error.to_string(), span))?;
-                Ok(Expression {
+                let expression = Expression {
                     id: self.next_id(),
                     type_id,
                     kind: ExpressionKind::Literal(value),
                     span,
-                })
+                };
+                self.coerce(expression, expected, false)
             }
-            Prepared::Resolved(expression)
-                if self.types.assignable(expression.type_id, expected) =>
-            {
-                Ok(expression)
-            }
-            Prepared::Resolved(expression) => Err(semantic_error(
-                "operator operand does not satisfy the selected signature".into(),
-                expression.span,
-            )),
+            Prepared::Resolved(expression) => self.coerce(expression, expected, false),
         }
     }
 
     fn expression(
+        &mut self,
+        ast: &AstExpression,
+        expected: Option<TypeId>,
+    ) -> Result<Expression, Diagnostic> {
+        let expression = self.expression_inner(ast, expected)?;
+        match expected {
+            Some(expected) => self.coerce(expression, expected, false),
+            None => Ok(expression),
+        }
+    }
+
+    fn expression_inner(
         &mut self,
         ast: &AstExpression,
         expected: Option<TypeId>,
@@ -1791,9 +1804,14 @@ impl Analyzer<'_> {
                 } else {
                     universal_literal(value)
                 };
+                let literal_expected = expected.filter(|expected| {
+                    self.types.primitive(*expected).is_some_and(|primitive| {
+                        primitive.category.literal_kind() == Some(value.kind())
+                    })
+                });
                 let type_id = self
                     .types
-                    .resolve_literal(&value, expected)
+                    .resolve_literal(&value, literal_expected)
                     .map_err(|error| semantic_error(error.to_string(), ast.span))?;
                 Ok(Expression {
                     id: self.next_id(),
@@ -2155,6 +2173,16 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if arguments.len() == 1 {
+                    if let Some(name) = callable_path(callee) {
+                        if let Some(target) = self.types.resolve_name(&name) {
+                            if self.numeric_primitive(target) {
+                                let operand = self.expression(&arguments[0].value, None)?;
+                                return self.coerce(operand, target, true);
+                            }
+                        }
+                    }
+                }
                 if let AstExpressionKind::Member { object, name } = &callee.kind {
                     if name == "send" && arguments.len() == 1 {
                         let channel = self.expression(object, None)?;
@@ -2345,7 +2373,10 @@ impl Analyzer<'_> {
                         .iter()
                         .zip(&signature.parameters)
                         .map(|(argument, parameter)| {
-                            self.expression(argument, Some(parameter.type_id))
+                            match self.prepare(argument) {
+                                Ok(prepared) => self.finish(prepared, parameter.type_id),
+                                Err(_) => self.expression(argument, Some(parameter.type_id)),
+                            }
                         })
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
@@ -2353,7 +2384,11 @@ impl Analyzer<'_> {
                             .iter()
                             .zip(&signature.parameters)
                             .map(|(argument, parameter)| {
-                                conversion_rank(self.types, argument.type_id, parameter.type_id)
+                                expression_conversion_rank(
+                                    self.types,
+                                    argument,
+                                    parameter.type_id,
+                                )
                             })
                             .collect::<Option<Vec<_>>>();
                         let Some(conversions) = conversions else {
@@ -2620,6 +2655,66 @@ impl Analyzer<'_> {
             .with_help("convert one operand explicitly or use operands with compatible types");
         }
         semantic_error(error.to_string(), span)
+    }
+
+    fn numeric_primitive(&self, ty: TypeId) -> bool {
+        self.types.primitive(ty).is_some_and(|primitive| {
+            matches!(
+                primitive.category,
+                severian_universal::PrimitiveCategory::Integer
+                    | severian_universal::PrimitiveCategory::Float
+            )
+        })
+    }
+
+    fn coerce(
+        &mut self,
+        expression: Expression,
+        expected: TypeId,
+        explicit: bool,
+    ) -> Result<Expression, Diagnostic> {
+        if expression.type_id == expected {
+            return Ok(expression);
+        }
+        let numeric = self.numeric_primitive(expression.type_id) && self.numeric_primitive(expected);
+        if !numeric {
+            if !explicit && self.types.assignable(expression.type_id, expected) {
+                return Ok(expression);
+            }
+            return Err(semantic_error(
+                if explicit {
+                    "explicit conversion requires numeric primitive types".into()
+                } else {
+                    "expression does not satisfy the expected type".into()
+                },
+                expression.span,
+            ));
+        }
+        if !explicit && !self.types.assignable(expression.type_id, expected) {
+            return Err(semantic_error(
+                "expression does not satisfy the expected type".into(),
+                expression.span,
+            ));
+        }
+        let from = expression.type_id;
+        let span = expression.span;
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: expected,
+            kind: ExpressionKind::Convert {
+                operand: Box::new(expression),
+                conversion: severian_hir::Conversion {
+                    from,
+                    to: expected,
+                    kind: if explicit {
+                        severian_hir::ConversionKind::NumericCast
+                    } else {
+                        severian_hir::ConversionKind::NumericWidening
+                    },
+                },
+            },
+            span,
+        })
     }
 
     fn constraint_name(&self, constraint: TypeConstraint) -> String {
@@ -4438,6 +4533,19 @@ fn conversion_rank(
     }
 }
 
+fn expression_conversion_rank(
+    types: &TypeContext,
+    expression: &Expression,
+    expected: TypeId,
+) -> Option<ConversionRank> {
+    match &expression.kind {
+        ExpressionKind::Convert { conversion, .. } if conversion.to == expected => {
+            conversion_rank(types, conversion.from, expected)
+        }
+        _ => conversion_rank(types, expression.type_id, expected),
+    }
+}
+
 fn dominates(left: &[ConversionRank], right: &[ConversionRank]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| left <= right)
@@ -5010,6 +5118,46 @@ mod tests {
         );
         let selected = program.modules[0].bindings.last().unwrap();
         assert_eq!(selected.type_id, context.types.resolve_name("i32").unwrap());
+    }
+
+    #[test]
+    fn numeric_promotions_and_explicit_casts_are_preserved_in_hir() {
+        let (program, context) = analyze_source(
+            "count = 10\nratio = 0.5\nmixed = count + ratio\nnarrowed = int(ratio)\nwidened = float(count)\n",
+        );
+        let bindings = &program.modules[0].bindings;
+        let float = context.types.resolve_name("float").unwrap();
+        let int = context.types.resolve_name("int").unwrap();
+
+        assert_eq!(bindings[2].type_id, float);
+        let ExpressionKind::Binary { left, .. } = &bindings[2].value.kind else {
+            panic!("mixed arithmetic must remain a binary expression");
+        };
+        assert!(matches!(
+            left.kind,
+            ExpressionKind::Convert {
+                conversion: severian_hir::Conversion {
+                    kind: severian_hir::ConversionKind::NumericWidening,
+                    ..
+                },
+                ..
+            }
+        ));
+
+        assert_eq!(bindings[3].type_id, int);
+        assert_eq!(bindings[4].type_id, float);
+        for binding in [&bindings[3], &bindings[4]] {
+            assert!(matches!(
+                binding.value.kind,
+                ExpressionKind::Convert {
+                    conversion: severian_hir::Conversion {
+                        kind: severian_hir::ConversionKind::NumericCast,
+                        ..
+                    },
+                    ..
+                }
+            ));
+        }
     }
 
     #[test]
