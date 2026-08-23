@@ -1,5 +1,6 @@
 use crate::{
-    BasicBlock, Callee, CfgBody, CfgStatement, LocalId, Module, Operand, Place, Rvalue, Terminator,
+    BasicBlock, Callee, CfgBody, CfgStatement, GlobalDecl, LocalId, Module, Operand, Place,
+    PlaceBase, Rvalue, Terminator,
 };
 use severian_universal::{IrContext, RegisteredOperation, TypeContext, TypeId, UniversalContext};
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +14,7 @@ type CallContext<'a> = (&'a TypeContext, &'a Signatures);
 pub enum VerifyError {
     InvalidBlock(u32),
     InvalidLocal(u32),
+    InvalidGlobal(u32),
     MissingTerminator(u32),
     BlockArgumentArity(u32),
     BlockArgumentType(u32),
@@ -30,6 +32,7 @@ impl fmt::Display for VerifyError {
         match self {
             Self::InvalidBlock(block) => write!(formatter, "invalid basic block {block}"),
             Self::InvalidLocal(local) => write!(formatter, "invalid local {local}"),
+            Self::InvalidGlobal(global) => write!(formatter, "invalid global {global}"),
             Self::MissingTerminator(block) => {
                 write!(formatter, "basic block {block} has no terminator")
             }
@@ -75,10 +78,10 @@ impl fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 pub(crate) fn verify_structure(module: &Module) -> Result<(), VerifyError> {
-    verify_body(&module.initializer_cfg, None, None)?;
+    verify_body(&module.initializer, &module.globals, None, None)?;
     for function in &module.functions {
-        if let Some(body) = &function.cfg {
-            verify_body(body, None, None)?;
+        if let Some(body) = &function.body {
+            verify_body(body, &module.globals, None, None)?;
         }
     }
     Ok(())
@@ -92,24 +95,26 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
             (
                 (function.definition, function.substitution.clone()),
                 (
-                    function
-                        .parameters
-                        .iter()
-                        .map(|value| module.values[value.0 as usize].type_id)
-                        .collect::<Vec<_>>(),
+                    function.parameters.clone(),
                     function.result,
                 ),
             )
         })
         .collect::<BTreeMap<_, _>>();
     verify_body(
-        &module.initializer_cfg,
+        &module.initializer,
+        &module.globals,
         Some((&context.types, &signatures)),
         Some(context),
     )?;
     for function in &module.functions {
-        if let Some(body) = &function.cfg {
-            verify_body(body, Some((&context.types, &signatures)), Some(context))?;
+        if let Some(body) = &function.body {
+            verify_body(
+                body,
+                &module.globals,
+                Some((&context.types, &signatures)),
+                Some(context),
+            )?;
         }
     }
     Ok(())
@@ -117,6 +122,7 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
 
 fn verify_body(
     body: &CfgBody,
+    globals: &[GlobalDecl],
     calls: Option<CallContext<'_>>,
     context: Option<&UniversalContext>,
 ) -> Result<(), VerifyError> {
@@ -135,7 +141,7 @@ fn verify_body(
         if matches!(&block.terminator, Terminator::Unreachable) && !block.statements.is_empty() {
             return Err(VerifyError::MissingTerminator(block.id.0));
         }
-        verify_targets(body, block)?;
+        verify_targets(body, globals, block)?;
     }
     // Definite initialization is a forward must-analysis. Non-entry blocks
     // begin at the lattice top and predecessor intersections monotonically
@@ -155,7 +161,7 @@ fn verify_body(
         changed = false;
         for block in &body.blocks {
             let mut state = incoming[block.id.0 as usize].clone();
-            transfer(body, block, &mut state, calls, context)?;
+            transfer(body, globals, block, &mut state, calls, context)?;
             for successor in successors(&block.terminator) {
                 let target = &mut incoming[successor.0 as usize];
                 let next = target.intersection(&state).copied().collect();
@@ -169,7 +175,11 @@ fn verify_body(
     Ok(())
 }
 
-fn verify_targets(body: &CfgBody, block: &BasicBlock) -> Result<(), VerifyError> {
+fn verify_targets(
+    body: &CfgBody,
+    globals: &[GlobalDecl],
+    block: &BasicBlock,
+) -> Result<(), VerifyError> {
     for target in successors(&block.terminator) {
         if target.0 as usize >= body.blocks.len() {
             return Err(VerifyError::InvalidBlock(target.0));
@@ -181,7 +191,7 @@ fn verify_targets(body: &CfgBody, block: &BasicBlock) -> Result<(), VerifyError>
             return Err(VerifyError::BlockArgumentArity(target.0));
         }
         for (argument, parameter) in arguments.iter().zip(parameters) {
-            if operand_type(body, argument)? != body.locals[parameter.0 as usize].ty {
+            if operand_type(body, globals, argument)? != body.locals[parameter.0 as usize].ty {
                 return Err(VerifyError::BlockArgumentType(target.0));
             }
         }
@@ -191,6 +201,7 @@ fn verify_targets(body: &CfgBody, block: &BasicBlock) -> Result<(), VerifyError>
 
 fn transfer(
     body: &CfgBody,
+    globals: &[GlobalDecl],
     block: &BasicBlock,
     state: &mut BTreeSet<LocalId>,
     calls: Option<CallContext<'_>>,
@@ -199,12 +210,17 @@ fn transfer(
     for statement in &block.statements {
         match statement {
             CfgStatement::Assign(place, value) => {
-                verify_rvalue(block.id.0, body, value, state)?;
-                verify_place(body, place)?;
-                state.insert(place.local);
+                verify_rvalue(block.id.0, body, globals, value, state)?;
+                verify_place(body, globals, place)?;
+                if let Some(local) = place.local_id() {
+                    state.insert(local);
+                }
             }
             CfgStatement::Drop(place) => {
-                let local = place.local;
+                verify_place(body, globals, place)?;
+                let Some(local) = place.local_id() else {
+                    continue;
+                };
                 if !state.remove(&local) {
                     return Err(VerifyError::InvalidOwnershipState {
                         block: block.id.0,
@@ -226,10 +242,12 @@ fn transfer(
                     return Err(VerifyError::InvalidLocal(local.0));
                 }
             }
-            CfgStatement::Assert { condition, message } => {
-                use_operand(block.id.0, body, condition, state)?;
+            CfgStatement::Assert {
+                condition, message, ..
+            } => {
+                use_operand(block.id.0, body, globals, condition, state)?;
                 if let Some(message) = message {
-                    use_operand(block.id.0, body, message, state)?;
+                    use_operand(block.id.0, body, globals, message, state)?;
                 }
             }
             CfgStatement::Operation {
@@ -239,11 +257,13 @@ fn transfer(
                 attributes,
             } => {
                 for operand in operands {
-                    use_operand(block.id.0, body, operand, state)?;
+                    use_operand(block.id.0, body, globals, operand, state)?;
                 }
                 for result in results {
-                    verify_place(body, result)?;
-                    state.insert(result.local);
+                    verify_place(body, globals, result)?;
+                    if let Some(local) = result.local_id() {
+                        state.insert(local);
+                    }
                 }
                 if let Some(context) = context {
                     let interface = context
@@ -254,12 +274,12 @@ fn transfer(
                         id: *id,
                         operands: operands
                             .iter()
-                            .map(|operand| operand_type(body, operand))
+                            .map(|operand| operand_type(body, globals, operand))
                             .collect::<Result<Vec<_>, _>>()?,
                         results: results
                             .iter()
-                            .map(|place| body.locals[place.local.0 as usize].ty)
-                            .collect(),
+                            .map(|place| place_type(body, globals, place))
+                            .collect::<Result<Vec<_>, _>>()?,
                         attributes: attributes.clone(),
                     };
                     interface
@@ -284,7 +304,7 @@ fn transfer(
     } = &block.terminator
     {
         for argument in arguments {
-            use_operand(block.id.0, body, argument, state)?;
+            use_operand(block.id.0, body, globals, argument, state)?;
         }
         if let Some((types, signatures)) = calls {
             if let Callee::Direct {
@@ -300,9 +320,9 @@ fn transfer(
                     return Err(VerifyError::CallArity);
                 }
                 for (argument, parameter) in arguments.iter().zip(parameters) {
-                    if !types.assignable(operand_type(body, argument)?, *parameter) {
+                    if !types.assignable(operand_type(body, globals, argument)?, *parameter) {
                         return Err(VerifyError::CallArgumentType {
-                            actual: operand_type(body, argument)?,
+                            actual: operand_type(body, globals, argument)?,
                             expected: *parameter,
                         });
                     }
@@ -310,11 +330,14 @@ fn transfer(
             }
         }
         if let Some(destination) = destination {
-            state.insert(destination.local);
+            verify_place(body, globals, destination)?;
+            if let Some(local) = destination.local_id() {
+                state.insert(local);
+            }
         }
     } else {
         for operand in terminator_operands(&block.terminator) {
-            use_operand(block.id.0, body, operand, state)?;
+            use_operand(block.id.0, body, globals, operand, state)?;
         }
     }
     Ok(())
@@ -323,27 +346,30 @@ fn transfer(
 fn verify_rvalue(
     block: u32,
     body: &CfgBody,
+    globals: &[GlobalDecl],
     value: &Rvalue,
     state: &mut BTreeSet<LocalId>,
 ) -> Result<(), VerifyError> {
     let operands = match value {
         Rvalue::Use(value) => vec![value],
-        Rvalue::Unary { operand, .. } | Rvalue::Convert { operand, .. } => vec![operand],
+        Rvalue::Unary { operand, .. }
+        | Rvalue::Convert { operand, .. }
+        | Rvalue::Await { task: operand } => vec![operand],
         Rvalue::Binary { left, right, .. } => vec![left, right],
         Rvalue::Aggregate { fields, .. } => fields.iter().collect(),
         Rvalue::BorrowShared(place) | Rvalue::BorrowExclusive(place) => {
-            verify_place(body, place)?;
-            if !state.contains(&place.local) {
+            verify_place(body, globals, place)?;
+            if let Some(local) = place.local_id().filter(|local| !state.contains(local)) {
                 return Err(VerifyError::UseBeforeDefinition {
                     block,
-                    local: place.local.0,
+                    local: local.0,
                 });
             }
             Vec::new()
         }
     };
     for operand in operands {
-        use_operand(block, body, operand, state)?;
+        use_operand(block, body, globals, operand, state)?;
     }
     Ok(())
 }
@@ -351,38 +377,63 @@ fn verify_rvalue(
 fn use_operand(
     block: u32,
     body: &CfgBody,
+    globals: &[GlobalDecl],
     operand: &Operand,
     state: &mut BTreeSet<LocalId>,
 ) -> Result<(), VerifyError> {
     if let Operand::Copy(place) | Operand::Move(place) = operand {
-        verify_place(body, place)?;
-        if !state.contains(&place.local) {
+        verify_place(body, globals, place)?;
+        let Some(local) = place.local_id() else {
+            return Ok(());
+        };
+        if !state.contains(&local) {
             return Err(VerifyError::UseBeforeDefinition {
                 block,
-                local: place.local.0,
+                local: local.0,
             });
         }
         if matches!(operand, Operand::Move(_)) {
-            state.remove(&place.local);
+            state.remove(&local);
         }
     }
     Ok(())
 }
 
-fn verify_place(body: &CfgBody, place: &Place) -> Result<(), VerifyError> {
-    if place.local.0 as usize >= body.locals.len() {
-        Err(VerifyError::InvalidLocal(place.local.0))
-    } else {
-        Ok(())
+fn verify_place(
+    body: &CfgBody,
+    globals: &[GlobalDecl],
+    place: &Place,
+) -> Result<(), VerifyError> {
+    match place.base {
+        PlaceBase::Local(local) if local.0 as usize >= body.locals.len() => {
+            Err(VerifyError::InvalidLocal(local.0))
+        }
+        PlaceBase::Global(global) if global.0 as usize >= globals.len() => {
+            Err(VerifyError::InvalidGlobal(global.0))
+        }
+        _ => Ok(()),
     }
 }
 
-fn operand_type(body: &CfgBody, operand: &Operand) -> Result<TypeId, VerifyError> {
+fn place_type(
+    body: &CfgBody,
+    globals: &[GlobalDecl],
+    place: &Place,
+) -> Result<TypeId, VerifyError> {
+    verify_place(body, globals, place)?;
+    Ok(match place.base {
+        PlaceBase::Local(local) => body.locals[local.0 as usize].ty,
+        PlaceBase::Global(global) => globals[global.0 as usize].ty,
+    })
+}
+
+fn operand_type(
+    body: &CfgBody,
+    globals: &[GlobalDecl],
+    operand: &Operand,
+) -> Result<TypeId, VerifyError> {
     match operand {
-        Operand::Copy(place) | Operand::Move(place) => {
-            verify_place(body, place)?;
-            Ok(body.locals[place.local.0 as usize].ty)
-        }
+        Operand::Copy(place) | Operand::Move(place) => place_type(body, globals, place),
         Operand::Constant { ty, .. } => Ok(*ty),
         Operand::Function(_) => Err(VerifyError::CallArgumentType {
             actual: TypeId(u32::MAX),
@@ -409,6 +460,7 @@ fn successors(terminator: &Terminator) -> Vec<crate::BlockId> {
         Terminator::Call { target, unwind, .. } => {
             [Some(*target), *unwind].into_iter().flatten().collect()
         }
+        Terminator::Spawn { target, .. } => vec![*target],
         Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
     }
 }
@@ -421,6 +473,19 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
         Terminator::Return(value) => value.iter().collect(),
         Terminator::Throw(value) => vec![value],
         Terminator::Call { arguments, .. } => arguments.iter().collect(),
+        Terminator::Spawn {
+            callee, arguments, ..
+        } => {
+            let mut operands = arguments.iter().collect::<Vec<_>>();
+            match callee {
+                Callee::FunctionValue(operand) => operands.push(operand),
+                Callee::Method { receiver, .. } => operands.push(receiver),
+                Callee::Direct { .. }
+                | Callee::Constructor { .. }
+                | Callee::Intrinsic(_) => {}
+            }
+            operands
+        }
         Terminator::Unreachable => Vec::new(),
     }
 }

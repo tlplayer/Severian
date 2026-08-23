@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{
     model::resume_block, CompileError, CompilePlan, CompileRegion, EffectSet, PlanSegment,
     PlannedBlock, PlannedFunction, StandardRegion,
@@ -13,51 +15,57 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
         .iter()
         .map(|class| class.id)
         .collect::<BTreeSet<_>>();
-    let values = module
-        .values
+    for ty in module
+        .globals
         .iter()
-        .map(|value| (value.id, *value))
-        .collect::<BTreeMap<_, _>>();
-    let mut next_region = 0u32;
-    let mut nested_regions = Vec::new();
-    let initializer = plan_block(
-        &module.initializer,
-        &values,
-        &module.globals.iter().copied().collect(),
-        types,
-        &class_types,
-        &mut next_region,
-        &mut nested_regions,
-    )?;
+        .map(|global| global.ty)
+        .chain(module.initializer.locals.iter().map(|local| local.ty))
+        .chain(module.functions.iter().flat_map(|function| {
+            function
+                .parameters
+                .iter()
+                .copied()
+                .chain([function.result])
+                .chain(
+                    function
+                        .body
+                        .iter()
+                        .flat_map(|body| body.locals.iter().map(|local| local.ty)),
+                )
+        }))
+    {
+        if class_types.contains(&ty) {
+            continue;
+        }
+        if let CompileRoute::Compiler(compiler) = types
+            .compile_route(ty)
+            .map_err(|error| CompileError::Type(ty, error.to_string()))?
+        {
+            return Err(CompileError::CfgCompileType(compiler));
+        }
+    }
+    let initializer = PlannedBlock {
+        segments: vec![PlanSegment::Standard(StandardRegion {
+            operations: Vec::new(),
+        })],
+    };
     let functions = module
         .functions
         .iter()
-        .map(|function| {
-            Ok(PlannedFunction {
-                declaration: function.clone(),
-                body: function
-                    .body
-                    .as_ref()
-                    .map(|body| {
-                        plan_block(
-                            body,
-                            &values,
-                            &BTreeSet::new(),
-                            types,
-                            &class_types,
-                            &mut next_region,
-                            &mut nested_regions,
-                        )
-                    })
-                    .transpose()?,
-            })
+        .map(|function| PlannedFunction {
+            declaration: function.clone(),
+            body: function.body.as_ref().map(|_| PlannedBlock {
+                segments: vec![PlanSegment::Standard(StandardRegion {
+                    operations: Vec::new(),
+                })],
+            }),
         })
-        .collect::<Result<Vec<_>, CompileError>>()?;
+        .collect();
     Ok(CompilePlan {
         source: module.clone(),
         initializer,
         functions,
-        nested_regions,
+        nested_regions: Vec::new(),
     })
 }
 

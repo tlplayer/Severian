@@ -83,6 +83,31 @@ fn global_constant_survives_mutable_string_addition_in_main() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"Hello, World!\n");
+
+    let mir = sev().arg(&source).args(["--emit", "mir"]).output().unwrap();
+    assert!(mir.status.success());
+    let mir = String::from_utf8(mir.stdout).unwrap();
+    assert!(mir.contains("GlobalDecl"), "{mir}");
+    assert!(mir.contains("base: Global"), "{mir}");
+
+    let lir = sev().arg(&source).args(["--emit", "lir"]).output().unwrap();
+    assert!(lir.status.success());
+    let lir = String::from_utf8(lir.stdout).unwrap();
+    assert!(lir.contains("storage_globals: ["), "{lir}");
+    assert!(lir.contains("base: Global"), "{lir}");
+    assert!(lir.contains("Store"), "{lir}");
+
+    let mlir = sev()
+        .arg(&source)
+        .args(["--emit", "mlir"])
+        .output()
+        .unwrap();
+    assert!(mlir.status.success());
+    let mlir = String::from_utf8(mlir.stdout).unwrap();
+    assert!(mlir.contains("@__sev_global_0"), "{mlir}");
+    assert!(mlir.contains("llvm.store"), "{mlir}");
+    assert!(mlir.contains("llvm.load"), "{mlir}");
+    assert!(!mlir.contains("_assigned"), "{mlir}");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -183,8 +208,8 @@ fn emit_prints_each_compiler_representation_without_building_or_running() {
     for (stage, marker) in [
         ("ast", "// module "),
         ("hir", "Program {"),
-        ("mir", "initializer: Block"),
-        ("lir", "globals: ["),
+        ("mir", "initializer: Body"),
+        ("lir", "initializer_cfg: Some"),
         ("mlir", "module {"),
     ] {
         let output = sev().arg(&source).args(["--emit", stage]).output().unwrap();

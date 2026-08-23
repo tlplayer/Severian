@@ -1,6 +1,14 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+void __sev_assert(_Bool condition, const char *message) {
+    if (condition) return;
+    fputs(message, stderr);
+    fputc('\n', stderr);
+    exit(1);
+}
 
 int32_t __sev_print_string(const char *value) {
     return puts(value);

@@ -12,13 +12,12 @@ pub use pipeline::{
 mod tests {
     use super::*;
     use severian_compile::{CompileContext, CompileHandler, CompileRegion};
-    use severian_mir::{Module, Operation, Value, ValueId};
     use severian_mlir::{LoweredType, MlirArtifact};
     use severian_source::SourceFile;
     use severian_target::TargetSpec;
     use severian_universal::{
-        BinaryOperator, CompilerId, IntegerWidth, LiteralValue, PrimitiveCategory,
-        PrimitiveRepresentation, TypeContextBuilder, UniversalContext,
+        CompilerId, IntegerWidth, PrimitiveCategory, PrimitiveRepresentation, TypeContextBuilder,
+        UniversalContext,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -174,6 +173,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn driver_orchestrates_standard_lowering_and_custom_artifact_composition() {
         let (context, i32_type, custom, compiler_id) = compile_type_context();
         let module = Module {

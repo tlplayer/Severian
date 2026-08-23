@@ -282,8 +282,10 @@ fn render_block(
                     "aggregate classes require the MLIR backend".into(),
                 ));
             }
-            Operation::Assign { target, value } => {
-                output.push_str(&format!("    v{} = v{};\n", target.0, value.0));
+            Operation::Load { .. } | Operation::Store { .. } => {
+                return Err(BackendError::UnsupportedOperation(
+                    "place-based LIR requires the CFG backend".into(),
+                ));
             }
             Operation::Call {
                 function: target,
@@ -477,7 +479,7 @@ fn c_return_type(ty: LoweredType) -> Result<&'static str, BackendError> {
 }
 
 pub fn supports_direct_lir(module: &LoweredModule) -> bool {
-    render_c(module).is_ok()
+    module.initializer_cfg.is_none() && render_c(module).is_ok()
 }
 
 fn value_type(module: &LoweredModule, id: ValueId) -> Result<LoweredType, BackendError> {
@@ -823,6 +825,8 @@ mod tests {
             entry: None,
             traits: vec![],
             classes: vec![],
+            storage_globals: vec![],
+            initializer_cfg: None,
         };
         assert!(render_c(&module).unwrap().contains("int32_t v0 = 10;"));
     }

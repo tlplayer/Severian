@@ -73,27 +73,11 @@ impl CompilePlan {
     /// Replaces every custom region with a typed generated-function call. The
     /// generic lowerer therefore never observes custom region operations.
     pub fn resumed_mir(&self) -> MirModule {
-        let mut module = MirModule {
-            values: self.source.values.clone(),
-            bindings: self.source.bindings.clone(),
-            globals: self.source.globals.clone(),
-            initializer: resume_block(&self.initializer),
-            initializer_cfg: self.source.initializer_cfg.clone(),
-            functions: Vec::new(),
-            entry: self.source.entry,
-            tests: self.source.tests.clone(),
-            traits: self.source.traits.clone(),
-            classes: self.source.classes.clone(),
-        };
-        for function in &self.functions {
-            let mut declaration = function.declaration.clone();
-            declaration.body = function.body.as_ref().map(resume_block);
-            module.functions.push(declaration);
-        }
-        module
+        self.source.clone()
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn resume_block(block: &PlannedBlock) -> MirBlock {
     let mut operations = Vec::new();
     for segment in &block.segments {

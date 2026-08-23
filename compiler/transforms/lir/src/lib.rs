@@ -27,6 +27,50 @@ pub struct ValueId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FunctionId(pub u128);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GlobalId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LocalId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BlockId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlaceBase {
+    Local(LocalId),
+    Global(GlobalId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Place {
+    pub base: PlaceBase,
+    pub projection: Vec<Projection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Projection {
+    Field(u32),
+    Index(LocalId),
+    Dereference,
+    Downcast(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalDecl {
+    pub id: GlobalId,
+    pub ty: LoweredType,
+    pub mutable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalDecl {
+    pub id: LocalId,
+    pub ty: LoweredType,
+    pub mutable: bool,
+    pub argument: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Value {
     pub id: ValueId,
@@ -121,8 +165,12 @@ pub enum Operation {
         value: ValueId,
         result: ValueId,
     },
-    Assign {
-        target: ValueId,
+    Load {
+        place: Place,
+        result: ValueId,
+    },
+    Store {
+        place: Place,
         value: ValueId,
     },
     Call {
@@ -175,8 +223,56 @@ pub enum Operation {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Terminator {
+    Goto(BlockId),
+    Branch {
+        condition: ValueId,
+        then_block: BlockId,
+        else_block: BlockId,
+    },
+    Switch {
+        discriminant: ValueId,
+        targets: Vec<(Case, BlockId)>,
+        fallback: BlockId,
+    },
+    Call {
+        function: FunctionId,
+        arguments: Vec<ValueId>,
+        destination: Option<Place>,
+        target: BlockId,
+    },
+    Return(Option<ValueId>),
+    Throw(ValueId),
+    Unreachable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Case {
+    Integer(i128),
+    Boolean(bool),
+    Variant(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BasicBlock {
+    pub id: BlockId,
+    pub operations: Vec<Operation>,
+    pub terminator: Terminator,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CfgBody {
+    pub entry: BlockId,
+    pub blocks: Vec<BasicBlock>,
+    pub locals: Vec<LocalDecl>,
+    pub return_type: LoweredType,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Module {
+    /// Structured fields remain readable while downstream emitters migrate;
+    /// CFG lowering populates `storage_globals` and `initializer_cfg`.
     pub values: Vec<Value>,
     pub globals: Vec<ValueId>,
     pub initializer: Block,
@@ -184,6 +280,8 @@ pub struct Module {
     pub entry: Option<FunctionId>,
     pub traits: Vec<TraitDeclaration>,
     pub classes: Vec<ClassDeclaration>,
+    pub storage_globals: Vec<GlobalDecl>,
+    pub initializer_cfg: Option<CfgBody>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,4 +343,8 @@ pub struct Function {
     pub result: LoweredType,
     pub body: Option<Block>,
     pub linkage: FunctionLinkage,
+    /// Physical signature and executable CFG produced by the authoritative
+    /// MIR CFG lowering path.
+    pub parameter_types: Vec<LoweredType>,
+    pub cfg: Option<CfgBody>,
 }

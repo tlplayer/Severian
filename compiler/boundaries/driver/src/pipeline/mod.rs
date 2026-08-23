@@ -1,7 +1,7 @@
 use severian_backend::{Artifact, BackendError};
 use severian_compile::{CompileContext, CompileHandler, CompilePlan, CompilerRegistry};
 use severian_diagnostics::Diagnostic;
-use severian_mir::{Module as MirModule, Operation as MirOperation};
+use severian_mir::{CfgStatement, Module as MirModule};
 use severian_source::SourceFile;
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
@@ -720,10 +720,11 @@ fn attach_assertion_locations(module: &mut MirModule, source: &SourceFile) {
     }
 }
 
-fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &SourceFile) {
-    for operation in &mut block.operations {
-        match operation {
-            MirOperation::Coverage { point } => {
+fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &SourceFile) {
+    for block in &mut body.blocks {
+        for statement in &mut block.statements {
+            match statement {
+            CfgStatement::Coverage(point) => {
                 let before = source
                     .text
                     .get(..usize::try_from(point.span_start).unwrap_or(0))
@@ -742,64 +743,20 @@ fn attach_block_assertion_locations(block: &mut severian_mir::Block, source: &So
                 point.file = Some(file);
                 point.line = Some(line);
             }
-            MirOperation::Assert { origin, .. } => {
+            CfgStatement::Assert { origin, .. } => {
                 origin.location = assertion_location(origin, source);
             }
-            MirOperation::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                attach_block_assertion_locations(then_block, source);
-                attach_block_assertion_locations(else_block, source);
-            }
-            MirOperation::Match { arms, .. } => {
-                for arm in arms {
-                    attach_block_assertion_locations(&mut arm.body, source);
-                }
-            }
-            MirOperation::While {
-                condition_block,
-                body,
-                ..
-            } => {
-                attach_block_assertion_locations(condition_block, source);
-                attach_block_assertion_locations(body, source);
-            }
             _ => {}
+            }
         }
     }
 }
 
-fn remove_coverage(block: &mut severian_mir::Block) {
-    block
-        .operations
-        .retain(|operation| !matches!(operation, MirOperation::Coverage { .. }));
-    for operation in &mut block.operations {
-        match operation {
-            MirOperation::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                remove_coverage(then_block);
-                remove_coverage(else_block);
-            }
-            MirOperation::Match { arms, .. } => {
-                for arm in arms {
-                    remove_coverage(&mut arm.body);
-                }
-            }
-            MirOperation::While {
-                condition_block,
-                body,
-                ..
-            } => {
-                remove_coverage(condition_block);
-                remove_coverage(body);
-            }
-            _ => {}
-        }
+fn remove_coverage(body: &mut severian_mir::CfgBody) {
+    for block in &mut body.blocks {
+        block
+            .statements
+            .retain(|statement| !matches!(statement, CfgStatement::Coverage(_)));
     }
 }
 
@@ -815,36 +772,14 @@ fn remove_module_coverage(module: &mut MirModule) {
 }
 
 fn collect_coverage_points(
-    block: &severian_mir::Block,
+    body: &severian_mir::CfgBody,
     output: &mut BTreeSet<severian_mir::CoveragePoint>,
 ) {
-    for operation in &block.operations {
-        match operation {
-            MirOperation::Coverage { point } => {
+    for block in &body.blocks {
+        for statement in &block.statements {
+            if let CfgStatement::Coverage(point) = statement {
                 output.insert(point.clone());
             }
-            MirOperation::If {
-                then_block,
-                else_block,
-                ..
-            } => {
-                collect_coverage_points(then_block, output);
-                collect_coverage_points(else_block, output);
-            }
-            MirOperation::Match { arms, .. } => {
-                for arm in arms {
-                    collect_coverage_points(&arm.body, output);
-                }
-            }
-            MirOperation::While {
-                condition_block,
-                body,
-                ..
-            } => {
-                collect_coverage_points(condition_block, output);
-                collect_coverage_points(body, output);
-            }
-            _ => {}
         }
     }
 }
@@ -1101,7 +1036,6 @@ pub fn check_file(source: &Path) -> Result<(), CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_mir::{Value, ValueId};
     use severian_universal::TypeId;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1155,8 +1089,8 @@ mod tests {
     }
 
     #[test]
-    fn selecting_one_test_removes_other_test_functions_and_keeps_dense_value_ids() {
-        let function = |id: u32, value: u32| severian_mir::Function {
+    fn selecting_one_test_removes_other_test_functions() {
+        let function = |id: u32| severian_mir::Function {
             id: severian_mir::FunctionId(id.into()),
             definition: severian_universal::DefId {
                 package: 0,
@@ -1167,27 +1101,11 @@ mod tests {
             name: format!("test-{id}"),
             parameters: Vec::new(),
             result: TypeId(0),
-            body: Some(severian_mir::Block {
-                operations: vec![MirOperation::Constant {
-                    value: severian_universal::LiteralValue::Integer(value.to_string()),
-                    result: ValueId(value),
-                }],
-            }),
-            cfg: None,
+            body: Some(severian_mir::CfgBody::default()),
             call_type: severian_mir::CallType::Severian,
         };
         let module = MirModule {
-            values: vec![
-                Value {
-                    id: ValueId(0),
-                    type_id: TypeId(0),
-                },
-                Value {
-                    id: ValueId(1),
-                    type_id: TypeId(0),
-                },
-            ],
-            functions: vec![function(0, 0), function(1, 1)],
+            functions: vec![function(0), function(1)],
             tests: vec![
                 severian_mir::TestDeclaration {
                     name: "first".into(),
@@ -1207,8 +1125,6 @@ mod tests {
         let selected = select_test(&module, severian_mir::FunctionId(0));
         assert_eq!(selected.functions.len(), 1);
         assert_eq!(selected.functions[0].id, severian_mir::FunctionId(0));
-        assert_eq!(selected.values.len(), 2);
-        assert_eq!(selected.values[0].id, ValueId(0));
         assert!(selected.tests.is_empty());
     }
 }

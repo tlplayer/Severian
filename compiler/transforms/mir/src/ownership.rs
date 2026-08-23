@@ -137,7 +137,7 @@ pub fn elaborate_drops(body: &mut CfgBody, types: &TypeContext) -> Result<(), Ve
             .statements
             .iter()
             .filter_map(|statement| match statement {
-                CfgStatement::Drop(place) => Some(place.local),
+                CfgStatement::Drop(place) => place.local_id(),
                 _ => None,
             })
             .collect::<BTreeSet<_>>();
@@ -257,17 +257,24 @@ fn transfer_block(
         match statement {
             CfgStatement::Assign(place, value) => {
                 inspect_rvalue(value, block.id, state, errors);
-                state.initialized.insert(place.local);
-                state.moved.remove(&place.local);
-                state.consumed_resources.remove(&place.local);
+                if let Some(local) = place.local_id() {
+                    state.initialized.insert(local);
+                    state.moved.remove(&local);
+                    state.consumed_resources.remove(&local);
+                }
             }
             CfgStatement::Drop(place) => {
-                if !state.initialized.remove(&place.local)
-                    || !state.consumed_resources.insert(place.local)
+                let Some(local) = place.local_id() else {
+                    continue;
+                };
+                if !state.initialized.remove(&local)
+                    || !state.consumed_resources.insert(local)
                 {
-                    errors.insert(OwnershipError::DoubleDrop(place.local));
+                    errors.insert(OwnershipError::DoubleDrop(local));
                 }
-                state.loans.retain(|loan| loan.place.local != place.local);
+                state
+                    .loans
+                    .retain(|loan| loan.place.local_id() != Some(local));
             }
             CfgStatement::StorageLive(local) => {
                 state.initialized.remove(local);
@@ -276,9 +283,13 @@ fn transfer_block(
             }
             CfgStatement::StorageDead(local) => {
                 state.initialized.remove(local);
-                state.loans.retain(|loan| loan.place.local != *local);
+                state
+                    .loans
+                    .retain(|loan| loan.place.local_id() != Some(*local));
             }
-            CfgStatement::Assert { condition, message } => {
+            CfgStatement::Assert {
+                condition, message, ..
+            } => {
                 inspect_operand(condition, state, errors);
                 if let Some(message) = message {
                     inspect_operand(message, state, errors);
@@ -291,8 +302,10 @@ fn transfer_block(
                     inspect_operand(operand, state, errors);
                 }
                 for result in results {
-                    state.initialized.insert(result.local);
-                    state.moved.remove(&result.local);
+                    if let Some(local) = result.local_id() {
+                        state.initialized.insert(local);
+                        state.moved.remove(&local);
+                    }
                 }
             }
             CfgStatement::Coverage(_) => {}
@@ -306,18 +319,22 @@ fn transfer_block(
         ..
     } = &block.terminator
     {
-        state.initialized.insert(destination.local);
-        state.moved.remove(&destination.local);
-        state.consumed_resources.remove(&destination.local);
+        if let Some(local) = destination.local_id() {
+            state.initialized.insert(local);
+            state.moved.remove(&local);
+            state.consumed_resources.remove(&local);
+        }
     }
     if let Terminator::Return(Some(Operand::Copy(place))) = &block.terminator {
-        if state
-            .loans
-            .iter()
-            .any(|loan| loan.place.local == place.local)
-        {
-            errors.insert(OwnershipError::EscapingBorrow(place.local));
-            escaped.insert(place.local);
+        if let Some(local) = place.local_id() {
+            if state
+                .loans
+                .iter()
+                .any(|loan| loan.place.local_id() == Some(local))
+            {
+                errors.insert(OwnershipError::EscapingBorrow(local));
+                escaped.insert(local);
+            }
         }
     }
 }
@@ -329,7 +346,10 @@ fn inspect_rvalue(
     errors: &mut BTreeSet<OwnershipError>,
 ) {
     match value {
-        Rvalue::Use(operand) | Rvalue::Unary { operand, .. } | Rvalue::Convert { operand, .. } => {
+        Rvalue::Use(operand)
+        | Rvalue::Unary { operand, .. }
+        | Rvalue::Convert { operand, .. }
+        | Rvalue::Await { task: operand } => {
             inspect_operand(operand, state, errors)
         }
         Rvalue::Binary { left, right, .. } => {
@@ -357,11 +377,14 @@ fn add_loan(
     state: &mut OwnershipState,
     errors: &mut BTreeSet<OwnershipError>,
 ) {
+    let Some(local) = place.local_id() else {
+        return;
+    };
     if state.loans.iter().any(|loan| {
-        loan.place.local == place.local
+        loan.place.local_id() == Some(local)
             && (loan.kind == LoanKind::Exclusive || kind == LoanKind::Exclusive)
     }) {
-        errors.insert(OwnershipError::ConflictingLoan(place.local));
+        errors.insert(OwnershipError::ConflictingLoan(local));
     } else {
         state.loans.insert(Loan {
             place: place.clone(),
@@ -381,16 +404,21 @@ fn inspect_operand(
         Operand::Move(place) => (place, true),
         Operand::Constant { .. } | Operand::Function(_) => return,
     };
-    if !state.initialized.contains(&place.local) || state.moved.contains(&place.local) {
-        errors.insert(OwnershipError::UseAfterMove(place.local));
+    let Some(local) = place.local_id() else {
+        return;
+    };
+    if !state.initialized.contains(&local) || state.moved.contains(&local) {
+        errors.insert(OwnershipError::UseAfterMove(local));
         return;
     }
     if moving {
-        if !state.moved.insert(place.local) {
-            errors.insert(OwnershipError::DoubleMove(place.local));
+        if !state.moved.insert(local) {
+            errors.insert(OwnershipError::DoubleMove(local));
         }
-        state.initialized.remove(&place.local);
-        state.loans.retain(|loan| loan.place.local != place.local);
+        state.initialized.remove(&local);
+        state
+            .loans
+            .retain(|loan| loan.place.local_id() != Some(local));
     }
 }
 
@@ -444,6 +472,7 @@ fn successors(terminator: &Terminator) -> Vec<BlockId> {
         Terminator::Call { target, unwind, .. } => {
             [Some(*target), *unwind].into_iter().flatten().collect()
         }
+        Terminator::Spawn { target, .. } => vec![*target],
         Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
     }
 }
@@ -454,6 +483,19 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
         Terminator::Branch { condition, .. } => vec![condition],
         Terminator::Switch { discriminant, .. } => vec![discriminant],
         Terminator::Call {
+            callee, arguments, ..
+        } => {
+            let mut operands = arguments.iter().collect::<Vec<_>>();
+            match callee {
+                crate::Callee::FunctionValue(operand) => operands.push(operand),
+                crate::Callee::Method { receiver, .. } => operands.push(receiver),
+                crate::Callee::Direct { .. }
+                | crate::Callee::Constructor { .. }
+                | crate::Callee::Intrinsic(_) => {}
+            }
+            operands
+        }
+        Terminator::Spawn {
             callee, arguments, ..
         } => {
             let mut operands = arguments.iter().collect::<Vec<_>>();

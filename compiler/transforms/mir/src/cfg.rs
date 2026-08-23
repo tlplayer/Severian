@@ -3,7 +3,7 @@ use severian_hir::{Callee as HirCallee, Conversion};
 use severian_universal::{
     Attrs, BinaryOperator, DefId, LiteralValue, OpId, Substitution, TypeId, UnaryOperator,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockId(pub u32);
@@ -121,6 +121,9 @@ pub enum Rvalue {
         type_id: TypeId,
         fields: Vec<Operand>,
     },
+    Await {
+        task: Operand,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +173,14 @@ pub enum Terminator {
         destination: Option<Place>,
         target: BlockId,
         unwind: Option<BlockId>,
+    },
+    Spawn {
+        callee: Callee,
+        arguments: Vec<Operand>,
+        destination: Place,
+        target: BlockId,
+        owner: TaskOwner,
+        locked: bool,
     },
     Return(Option<Operand>),
     Throw(Operand),
@@ -230,6 +241,19 @@ pub(crate) fn lower_program(
                 &mut global_variables,
             );
         }
+        if module.initializer.statements.is_empty() && module.functions.is_empty() {
+            for binding in &module.bindings {
+                let id = GlobalId(globals.len() as u32);
+                let place = Place::global(id);
+                globals.push(GlobalDecl {
+                    id,
+                    ty: binding.type_id,
+                    mutable: true,
+                });
+                global_bindings.insert(binding.id, place.clone());
+                global_variables.insert(binding.variable, place);
+            }
+        }
     }
     let mut initializer = BodyBuilder::new(
         unit,
@@ -237,6 +261,7 @@ pub(crate) fn lower_program(
         global_variables.clone(),
     );
     for module in &program.modules {
+        initializer.expressions.clear();
         initializer.lower_statements(&module.initializer.statements, module);
     }
     let initializer = initializer.finish();
@@ -314,6 +339,7 @@ struct BodyBuilder {
     expressions: BTreeMap<severian_hir::HirId, Place>,
     entry_parameters: Vec<LocalId>,
     loops: Vec<LoopTargets>,
+    terminated: BTreeSet<BlockId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +372,7 @@ impl BodyBuilder {
             expressions: BTreeMap::new(),
             entry_parameters: Vec::new(),
             loops: Vec::new(),
+            terminated: BTreeSet::new(),
         }
     }
 
@@ -381,14 +408,12 @@ impl BodyBuilder {
     }
 
     fn open(&self, block: BlockId) -> bool {
-        matches!(
-            &self.body.blocks[block.0 as usize].terminator,
-            Terminator::Unreachable
-        )
+        !self.terminated.contains(&block)
     }
 
     fn terminate(&mut self, terminator: Terminator) {
         self.body.blocks[self.current.0 as usize].terminator = terminator;
+        self.terminated.insert(self.current);
     }
 
     fn push(&mut self, statement: Statement) {
@@ -534,6 +559,7 @@ impl BodyBuilder {
                 then_block,
                 else_block,
             } => {
+                let condition_span = condition.span.start;
                 let condition = Operand::Copy(self.expression(condition));
                 let then_id = self.block();
                 let else_id = self.block();
@@ -545,12 +571,28 @@ impl BodyBuilder {
                 });
                 let bindings = self.bindings.clone();
                 self.current = then_id;
+                self.push(Statement::Coverage(CoveragePoint {
+                    span_start: condition_span,
+                    kind: CoverageKind::Branch,
+                    ordinal: 0,
+                    key: None,
+                    file: None,
+                    line: None,
+                }));
                 self.lower_statements(&then_block.statements, module);
                 if self.open(self.current) {
                     self.terminate(Terminator::Goto(join, Vec::new()));
                 }
                 self.bindings.clone_from(&bindings);
                 self.current = else_id;
+                self.push(Statement::Coverage(CoveragePoint {
+                    span_start: condition_span,
+                    kind: CoverageKind::Branch,
+                    ordinal: 1,
+                    key: None,
+                    file: None,
+                    line: None,
+                }));
                 self.lower_statements(&else_block.statements, module);
                 if self.open(self.current) {
                     self.terminate(Terminator::Goto(join, Vec::new()));
@@ -621,6 +663,7 @@ impl BodyBuilder {
                     fallback,
                 });
                 let bindings = self.bindings.clone();
+                let mut reaches_join = false;
                 for (block, arm) in arm_blocks {
                     self.current = block;
                     self.bindings.clone_from(&bindings);
@@ -638,10 +681,14 @@ impl BodyBuilder {
                     self.lower_statements(&arm.body.statements, module);
                     if self.open(self.current) {
                         self.terminate(Terminator::Goto(join, Vec::new()));
+                        reaches_join = true;
                     }
                 }
                 self.bindings = bindings;
                 self.current = join;
+                if !reaches_join {
+                    self.terminate(Terminator::Unreachable);
+                }
             }
         }
     }
@@ -649,6 +696,47 @@ impl BodyBuilder {
     fn expression(&mut self, expression: &severian_hir::Expression) -> Place {
         if let Some(place) = self.expressions.get(&expression.id) {
             return place.clone();
+        }
+        if let severian_hir::ExpressionKind::Async {
+            expression: task,
+            owner,
+            locked,
+        } = &expression.kind
+        {
+            let result = Place::local(self.local(expression.type_id, false, false));
+            self.push(Statement::StorageLive(
+                result.local_id().expect("task results are local places"),
+            ));
+            let severian_hir::ExpressionKind::Call { callee, arguments } = &task.kind else {
+                panic!("async expressions are required to contain a call")
+            };
+            let arguments = arguments
+                .iter()
+                .map(|argument| Operand::Copy(self.expression(argument)))
+                .collect();
+            let continuation = self.block();
+            let callee = self.callee(callee);
+            self.terminate(Terminator::Spawn {
+                callee,
+                arguments,
+                destination: result.clone(),
+                target: continuation,
+                owner: *owner,
+                locked: *locked,
+            });
+            self.current = continuation;
+            self.expressions.insert(expression.id, result.clone());
+            return result;
+        }
+        if let severian_hir::ExpressionKind::Await(task) = &expression.kind {
+            let result = Place::local(self.local(expression.type_id, false, false));
+            self.push(Statement::StorageLive(
+                result.local_id().expect("await results are local places"),
+            ));
+            let task = Operand::Copy(self.expression(task));
+            self.push(Statement::Assign(result.clone(), Rvalue::Await { task }));
+            self.expressions.insert(expression.id, result.clone());
+            return result;
         }
         let result = Place::local(self.local(expression.type_id, false, false));
         self.push(Statement::StorageLive(

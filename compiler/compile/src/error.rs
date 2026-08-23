@@ -12,6 +12,7 @@ pub enum CompileError {
     MissingHandler(CompilerId),
     MissingValue(u32),
     PlannerGeneratedOperation(usize),
+    CfgCompileType(CompilerId),
     Type(TypeId, String),
 }
 
@@ -41,6 +42,10 @@ impl fmt::Display for CompileError {
             Self::PlannerGeneratedOperation(operation) => write!(
                 formatter,
                 "MIR operation {operation} is a planner-generated region call"
+            ),
+            Self::CfgCompileType(compiler) => write!(
+                formatter,
+                "CompileType handler {compiler} cannot consume CFG MIR yet"
             ),
             Self::Type(ty, message) => write!(formatter, "cannot route type {ty:?}: {message}"),
         }

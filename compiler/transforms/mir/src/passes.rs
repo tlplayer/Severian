@@ -132,9 +132,9 @@ impl PassManager {
             match metadata.kind {
                 PassKind::Module => pass.run_module(module, context, &mut analyses)?,
                 PassKind::Function | PassKind::Region | PassKind::Operation => {
-                    pass.run_function(&mut module.initializer_cfg, context, &mut analyses)?;
+                    pass.run_function(&mut module.initializer, context, &mut analyses)?;
                     for function in &mut module.functions {
-                        if let Some(body) = &mut function.cfg {
+                        if let Some(body) = &mut function.body {
                             pass.run_function(body, context, &mut analyses)?;
                         }
                     }

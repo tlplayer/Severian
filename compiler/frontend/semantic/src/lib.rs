@@ -4628,7 +4628,7 @@ mod tests {
         assert_ne!(initial.id, update.id);
 
         let mir = severian_mir::build(&program).unwrap();
-        let cfg = mir.functions[0].cfg.as_ref().unwrap();
+        let cfg = mir.functions[0].body.as_ref().unwrap();
         assert_eq!(cfg.blocks.len(), 4);
         assert_eq!(cfg.locals.iter().filter(|local| local.mutable).count(), 1);
         assert!(matches!(
@@ -4661,11 +4661,16 @@ mod tests {
         assert!(matches!(body.statements[1], Statement::Assert { .. }));
         assert!(matches!(body.statements[2], Statement::Return(_)));
         let mir = severian_mir::build(&program).unwrap();
-        let operations = &mir.functions[0].body.as_ref().unwrap().operations;
+        let statements = mir.functions[0]
+            .body
+            .as_ref()
+            .unwrap()
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements);
         assert_eq!(
-            operations
-                .iter()
-                .filter(|operation| matches!(operation, severian_mir::Operation::Assert { .. }))
+            statements
+                .filter(|statement| matches!(statement, severian_mir::CfgStatement::Assert { .. }))
                 .count(),
             2
         );
@@ -4688,7 +4693,7 @@ mod tests {
             "def main():\n    while count < 5 with count := 0:\n        count += 1\n        if count == 2:\n            continue\n        if count == 4:\n            break\n",
         );
         let mir = severian_mir::build(&program).unwrap();
-        let cfg = mir.functions[0].cfg.as_ref().unwrap();
+        let cfg = mir.functions[0].body.as_ref().unwrap();
         let gotos = cfg
             .blocks
             .iter()

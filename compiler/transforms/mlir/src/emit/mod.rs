@@ -46,6 +46,9 @@ impl fmt::Display for MlirError {
 impl std::error::Error for MlirError {}
 
 pub fn render(module: &Module) -> Result<String, MlirError> {
+    if module.initializer_cfg.is_some() {
+        return render_cfg_module(module);
+    }
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
     let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
@@ -238,6 +241,872 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     Ok(output)
 }
 
+fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
+    let initializer = module
+        .initializer_cfg
+        .as_ref()
+        .expect("CFG rendering is selected only for a CFG module");
+    let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
+    let mut string_constants = BTreeMap::<ValueId, String>::new();
+    let mut coverage = BTreeSet::new();
+    for body in std::iter::once(initializer).chain(
+        module
+            .functions
+            .iter()
+            .filter_map(|function| function.cfg.as_ref()),
+    ) {
+        for block in &body.blocks {
+            for operation in &block.operations {
+                match operation {
+                    Operation::RuntimeCall {
+                        symbol,
+                        arguments,
+                        result,
+                    } => {
+                        let inputs = arguments
+                            .iter()
+                            .map(|value| value_type(module, *value))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let result = result.map(|value| value_type(module, value)).transpose()?;
+                        runtime_signatures.insert(symbol.clone(), (inputs, result));
+                    }
+                    Operation::Constant {
+                        value: Constant::String(value),
+                        result,
+                    } => {
+                        string_constants.insert(*result, value.clone());
+                    }
+                    Operation::Coverage { key } => {
+                        coverage.insert(key.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let mut assertion_messages = BTreeMap::new();
+    for body in std::iter::once(initializer).chain(
+        module
+            .functions
+            .iter()
+            .filter_map(|function| function.cfg.as_ref()),
+    ) {
+        for block in &body.blocks {
+            for operation in &block.operations {
+                if let Operation::Assert {
+                    condition,
+                    message,
+                    location,
+                } = operation
+                {
+                    let custom = message.and_then(|message| string_constants.get(&message));
+                    let failure = location.as_ref().map_or_else(
+                        || custom.map_or_else(|| "assertion failed".into(), Clone::clone),
+                        |location| {
+                            let mut failure = format!(
+                                "{}:{}:{}: assertion failed: {}",
+                                location.file,
+                                location.line,
+                                location.column,
+                                location.expression
+                            );
+                            if let Some(custom) = custom {
+                                failure.push_str(": ");
+                                failure.push_str(custom);
+                            }
+                            failure
+                        },
+                    );
+                    assertion_messages.insert(*condition, failure);
+                }
+            }
+        }
+    }
+
+    let mut output = String::new();
+    for declaration in &module.classes {
+        let fields = declaration
+            .fields
+            .iter()
+            .map(|field| mlir_type(field.ty))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        output.push_str(&format!(
+            "!sev_class_{} = !llvm.struct<({fields})>\n",
+            declaration.id
+        ));
+    }
+    output.push_str("module {\n");
+    for global in &module.storage_globals {
+        output.push_str(&format!(
+            "  llvm.mlir.global internal @__sev_global_{}() : {}\n",
+            global.id.0,
+            mlir_type(global.ty)?
+        ));
+    }
+    for (value, text) in &string_constants {
+        output.push_str(&format!(
+            "  llvm.mlir.global private constant @{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+            string_symbol(*value),
+            mlir_string(text),
+            text.len() + 1,
+        ));
+    }
+    if !coverage.is_empty() {
+        output.push_str("  func.func private @__sev_coverage_hit(!llvm.ptr)\n");
+        for key in &coverage {
+            output.push_str(&format!(
+                "  llvm.mlir.global private constant @{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+                coverage_symbol(key),
+                mlir_string(key),
+                key.len() + 1,
+            ));
+        }
+    }
+    if !assertion_messages.is_empty() {
+        output.push_str("  func.func private @__sev_assert(i1, !llvm.ptr)\n");
+        for (condition, message) in &assertion_messages {
+            output.push_str(&format!(
+                "  llvm.mlir.global private constant @__sev_assert_message_{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
+                condition.0,
+                mlir_string(message),
+                message.len() + 1,
+            ));
+        }
+    }
+    for (symbol, (inputs, result)) in runtime_signatures {
+        let inputs = inputs
+            .into_iter()
+            .map(mlir_type)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(", ");
+        let result = result
+            .map(mlir_type)
+            .transpose()?
+            .map(|ty| format!(" -> {ty}"))
+            .unwrap_or_default();
+        output.push_str(&format!("  func.func private @{symbol}({inputs}){result}\n"));
+    }
+    let mut declared_external_symbols = BTreeSet::new();
+    for function in module
+        .functions
+        .iter()
+        .filter(|function| matches!(function.linkage, FunctionLinkage::External { .. }))
+    {
+        if declared_external_symbols.insert(function_symbol(function)) {
+            render_cfg_function_declaration(&mut output, function)?;
+        }
+    }
+    for function in module
+        .functions
+        .iter()
+        .filter(|function| function.cfg.is_some())
+    {
+        render_cfg_function(&mut output, module, function)?;
+    }
+    render_cfg_body_function(
+        &mut output,
+        module,
+        "__sev_init",
+        &[],
+        initializer,
+    )?;
+    output.push_str("  func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {\n");
+    output.push_str("    func.call @__sev_init() : () -> ()\n");
+    if let Some(entry) = module.entry {
+        let function = function(module, entry)?;
+        match function.parameter_types.as_slice() {
+            [] => output.push_str(&format!(
+                "    func.call @{}() : () -> ()\n",
+                function_symbol(function)
+            )),
+            [LoweredType::Arguments] => {
+                output.push_str(
+                    "    %sev_args_undef = llvm.mlir.undef : !llvm.struct<(i32, !llvm.ptr)>\n",
+                );
+                output.push_str(
+                    "    %sev_args_argc = llvm.insertvalue %argc, %sev_args_undef[0] : !llvm.struct<(i32, !llvm.ptr)>\n",
+                );
+                output.push_str(
+                    "    %sev_args = llvm.insertvalue %argv, %sev_args_argc[1] : !llvm.struct<(i32, !llvm.ptr)>\n",
+                );
+                output.push_str(&format!(
+                    "    func.call @{}(%sev_args) : (!llvm.struct<(i32, !llvm.ptr)>) -> ()\n",
+                    function_symbol(function)
+                ));
+            }
+            _ => {
+                return Err(MlirError::UnsupportedOperation(
+                    "entry must be `main()` or `main(arguments: args)`".into(),
+                ));
+            }
+        }
+    }
+    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
+    output.push_str("    return %sev_exit : i32\n  }\n}\n");
+    Ok(output)
+}
+
+fn render_cfg_function_declaration(
+    output: &mut String,
+    function: &Function,
+) -> Result<(), MlirError> {
+    let parameters = function
+        .parameter_types
+        .iter()
+        .copied()
+        .map(mlir_type)
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let result = if function.result == LoweredType::Unit {
+        String::new()
+    } else {
+        format!(" -> {}", mlir_type(function.result)?)
+    };
+    output.push_str(&format!(
+        "  func.func private @{}({parameters}){result}\n",
+        function_symbol(function)
+    ));
+    Ok(())
+}
+
+fn render_cfg_function(
+    output: &mut String,
+    module: &Module,
+    function: &Function,
+) -> Result<(), MlirError> {
+    render_cfg_body_function(
+        output,
+        module,
+        &function_symbol(function),
+        &function.parameter_types,
+        function.cfg.as_ref().expect("filtered CFG function"),
+    )
+}
+
+fn render_cfg_body_function(
+    output: &mut String,
+    module: &Module,
+    symbol: &str,
+    parameter_types: &[LoweredType],
+    body: &severian_lir::CfgBody,
+) -> Result<(), MlirError> {
+    let parameters = parameter_types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| Ok(format!("%arg{index}: {}", mlir_type(*ty)?)))
+        .collect::<Result<Vec<_>, MlirError>>()?
+        .join(", ");
+    let result = if body.return_type == LoweredType::Unit {
+        String::new()
+    } else {
+        format!(" -> {}", mlir_type(body.return_type)?)
+    };
+    output.push_str(&format!("  func.func @{symbol}({parameters}){result} {{\n"));
+    for block in &body.blocks {
+        if block.id != body.entry {
+            output.push_str(&format!("  ^bb{}:\n", block.id.0));
+        }
+        if block.id == body.entry {
+            output.push_str("    %sev_one = arith.constant 1 : i64\n");
+            for global in &module.storage_globals {
+                output.push_str(&format!(
+                    "    %global{}_address = llvm.mlir.addressof @__sev_global_{} : !llvm.ptr\n",
+                    global.id.0, global.id.0
+                ));
+            }
+            for local in &body.locals {
+                output.push_str(&format!(
+                    "    %local{} = llvm.alloca %sev_one x {} : (i64) -> !llvm.ptr\n",
+                    local.id.0,
+                    mlir_type(local.ty)?
+                ));
+            }
+            for (argument, local) in body
+                .locals
+                .iter()
+                .filter(|local| local.argument)
+                .enumerate()
+            {
+                output.push_str(&format!(
+                    "    llvm.store %arg{argument}, %local{} : {}, !llvm.ptr\n",
+                    local.id.0,
+                    mlir_type(local.ty)?
+                ));
+            }
+        }
+        for (operation_index, operation) in block.operations.iter().enumerate() {
+            render_cfg_operation(
+                output,
+                module,
+                body,
+                block.id,
+                operation_index,
+                operation,
+                4,
+            )?;
+        }
+        render_cfg_terminator(output, module, &block.terminator, 4)?;
+    }
+    output.push_str("  }\n");
+    Ok(())
+}
+
+fn render_cfg_operation(
+    output: &mut String,
+    module: &Module,
+    body: &severian_lir::CfgBody,
+    block: severian_lir::BlockId,
+    operation_index: usize,
+    operation: &Operation,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    match operation {
+        Operation::Coverage { key } => {
+            let symbol = coverage_symbol(key);
+            output.push_str(&format!(
+                "{indentation}%{symbol} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}func.call @__sev_coverage_hit(%{symbol}) : (!llvm.ptr) -> ()\n"
+            ));
+        }
+        Operation::Constant { value, result } => {
+            let ty = value_type(module, *result)?;
+            if matches!(value, Constant::String(_)) {
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.mlir.addressof @{} : !llvm.ptr\n",
+                    result.0,
+                    string_symbol(*result)
+                ));
+            } else {
+                let literal = match value {
+                    Constant::Integer(value) | Constant::Float(value) => value.as_str(),
+                    Constant::Boolean(true) => "1",
+                    Constant::Boolean(false) => "0",
+                    Constant::None | Constant::Unit => "0",
+                    Constant::Bytes(_) | Constant::String(_) => unreachable!(),
+                };
+                output.push_str(&format!(
+                    "{indentation}%v{} = arith.constant {literal} : {}\n",
+                    result.0,
+                    mlir_type(ty)?
+                ));
+            }
+        }
+        Operation::Aggregate {
+            class: _,
+            fields,
+            result,
+        } => {
+            let ty = mlir_type(value_type(module, *result)?)?;
+            if fields.is_empty() {
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.mlir.undef : {ty}\n",
+                    result.0
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}%aggregate_{}_0 = llvm.mlir.undef : {ty}\n",
+                    result.0
+                ));
+                for (index, field) in fields.iter().enumerate() {
+                    let input = format!("%aggregate_{}_{}", result.0, index);
+                    let output_value = if index + 1 == fields.len() {
+                        format!("%v{}", result.0)
+                    } else {
+                        format!("%aggregate_{}_{}", result.0, index + 1)
+                    };
+                    output.push_str(&format!(
+                        "{indentation}{output_value} = llvm.insertvalue %v{}, {input}[{index}] : {ty}\n",
+                        field.0
+                    ));
+                }
+            }
+        }
+        Operation::Load { place, result } => {
+            let ty = value_type(module, *result)?;
+            if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
+                let base_type = mlir_type(cfg_place_base_type(module, body, place)?)?;
+                output.push_str(&format!(
+                    "{indentation}%load_base_b{}_o{} = llvm.load {} : !llvm.ptr -> {base_type}\n",
+                    block.0,
+                    operation_index,
+                    cfg_place_base_address(place)
+                ));
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.extractvalue %load_base_b{}_o{}[{}] : {base_type}\n",
+                    result.0, block.0, operation_index, field
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}%v{} = llvm.load {} : !llvm.ptr -> {}\n",
+                    result.0,
+                    cfg_place_address(place)?,
+                    mlir_type(ty)?
+                ));
+            }
+        }
+        Operation::Store { place, value } => {
+            let ty = value_type(module, *value)?;
+            if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
+                let base_type = mlir_type(cfg_place_base_type(module, body, place)?)?;
+                let address = cfg_place_base_address(place);
+                output.push_str(&format!(
+                    "{indentation}%store_base_b{}_o{} = llvm.load {address} : !llvm.ptr -> {base_type}\n",
+                    block.0, operation_index
+                ));
+                output.push_str(&format!(
+                    "{indentation}%store_value_b{}_o{} = llvm.insertvalue %v{}, %store_base_b{}_o{}[{}] : {base_type}\n",
+                    block.0, operation_index, value.0, block.0, operation_index, field
+                ));
+                output.push_str(&format!(
+                    "{indentation}llvm.store %store_value_b{}_o{}, {address} : {base_type}, !llvm.ptr\n",
+                    block.0, operation_index
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}llvm.store %v{}, {} : {}, !llvm.ptr\n",
+                    value.0,
+                    cfg_place_address(place)?,
+                    mlir_type(ty)?
+                ));
+            }
+        }
+        Operation::Unary {
+            operator,
+            operand,
+            result,
+        } => render_cfg_unary(output, module, *operator, *operand, *result, indent)?,
+        Operation::Binary {
+            operator,
+            left,
+            right,
+            result,
+        } => {
+            let input = value_type(module, *left)?;
+            output.push_str(&format!(
+                "{indentation}%v{} = {} %v{}, %v{} : {}\n",
+                result.0,
+                binary_mnemonic(*operator, input)?,
+                left.0,
+                right.0,
+                mlir_type(input)?
+            ));
+        }
+        Operation::RuntimeCall {
+            symbol,
+            arguments,
+            result,
+        } => render_runtime_call(output, module, symbol, arguments, *result, indent)?,
+        Operation::Spawn {
+            function: target,
+            arguments,
+            result,
+            owner,
+            locked,
+        } => {
+            let target = function(module, *target)?;
+            let arguments_text = arguments
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let argument_types = arguments
+                .iter()
+                .map(|value| mlir_type(value_type(module, *value)?))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            let owner = match owner {
+                severian_lir::TaskOwner::SelfScope => "self",
+                severian_lir::TaskOwner::Runtime => "runtime",
+                severian_lir::TaskOwner::Inferred => "inferred",
+            };
+            let attributes =
+                format!("attributes {{severian.owner = \"{owner}\", severian.locked = {locked}}}");
+            if target.result == LoweredType::Unit {
+                output.push_str(&format!(
+                    "{indentation}%task{} = async.execute {attributes} {{\n",
+                    result.0
+                ));
+                output.push_str(&format!(
+                    "{}func.call @{}({arguments_text}) : ({argument_types}) -> ()\n",
+                    " ".repeat(indent + 2),
+                    function_symbol(target)
+                ));
+                output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
+                output.push_str(&format!("{indentation}}}\n"));
+            } else {
+                let result_type = mlir_type(target.result)?;
+                output.push_str(&format!(
+                    "{indentation}%task_token{}, %task{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
+                    result.0, result.0
+                ));
+                output.push_str(&format!(
+                    "{}%task_value{} = func.call @{}({arguments_text}) : ({argument_types}) -> {result_type}\n",
+                    " ".repeat(indent + 2),
+                    result.0,
+                    function_symbol(target)
+                ));
+                output.push_str(&format!(
+                    "{}async.yield %task_value{} : {result_type}\n",
+                    " ".repeat(indent + 2),
+                    result.0
+                ));
+                output.push_str(&format!("{indentation}}}\n"));
+            }
+        }
+        Operation::Await { task, result } => {
+            let ty = value_type(module, *result)?;
+            if ty == LoweredType::Unit {
+                output.push_str(&format!(
+                    "{indentation}async.await %task{} : !async.token\n",
+                    task.0
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}%v{} = async.await %task{} : !async.value<{}>\n",
+                    result.0,
+                    task.0,
+                    mlir_type(ty)?
+                ));
+            }
+        }
+        Operation::Assert {
+            condition,
+            message,
+            location,
+        } => render_assert(output, module, *condition, *message, location.as_ref(), indent)?,
+        unsupported => {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "CFG operation {unsupported:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn render_cfg_terminator(
+    output: &mut String,
+    module: &Module,
+    terminator: &severian_lir::Terminator,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    match terminator {
+        severian_lir::Terminator::Goto(target) => {
+            output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+        }
+        severian_lir::Terminator::Branch {
+            condition,
+            then_block,
+            else_block,
+        } => output.push_str(&format!(
+            "{indentation}cf.cond_br %v{}, ^bb{}, ^bb{}\n",
+            condition.0, then_block.0, else_block.0
+        )),
+        severian_lir::Terminator::Switch {
+            discriminant,
+            targets,
+            fallback,
+        } => {
+            let targets = targets
+                .iter()
+                .map(|(case, target)| {
+                    let value = match case {
+                        severian_lir::Case::Integer(value) => value.to_string(),
+                        severian_lir::Case::Boolean(value) => u8::from(*value).to_string(),
+                        severian_lir::Case::Variant(value) => value.to_string(),
+                    };
+                    format!("{value}: ^bb{}", target.0)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let targets = if targets.is_empty() {
+                format!("default: ^bb{}", fallback.0)
+            } else {
+                format!("default: ^bb{}, {targets}", fallback.0)
+            };
+            output.push_str(&format!(
+                "{indentation}cf.switch %v{} : {}, [{targets}]\n",
+                discriminant.0,
+                mlir_type(value_type(module, *discriminant)?)?,
+            ));
+        }
+        severian_lir::Terminator::Call {
+            function: callee,
+            arguments,
+            destination,
+            target,
+        } => {
+            let callee = function(module, *callee)?;
+            let argument_values = arguments
+                .iter()
+                .map(|value| format!("%v{}", value.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let argument_types = arguments
+                .iter()
+                .map(|value| value_type(module, *value).and_then(mlir_type))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            if callee.result == LoweredType::Unit {
+                output.push_str(&format!(
+                    "{indentation}func.call @{}({argument_values}) : ({argument_types}) -> ()\n",
+                    function_symbol(callee)
+                ));
+                output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+                return Ok(());
+            }
+            if let Some(destination) = destination {
+                let result_type = mlir_type(callee.result)?;
+                output.push_str(&format!(
+                    "{indentation}%call_result_{} = func.call @{}({argument_values}) : ({argument_types}) -> {result_type}\n",
+                    target.0,
+                    function_symbol(callee),
+                ));
+                output.push_str(&format!(
+                    "{indentation}llvm.store %call_result_{}, {} : {result_type}, !llvm.ptr\n",
+                    target.0,
+                    cfg_place_address(destination)?
+                ));
+            } else {
+                output.push_str(&format!(
+                    "{indentation}func.call @{}({argument_values}) : ({argument_types}) -> ()\n",
+                    function_symbol(callee)
+                ));
+            }
+            output.push_str(&format!("{indentation}cf.br ^bb{}\n", target.0));
+        }
+        severian_lir::Terminator::Return(value) => {
+            if let Some(value) = value {
+                output.push_str(&format!(
+                    "{indentation}return %v{} : {}\n",
+                    value.0,
+                    mlir_type(value_type(module, *value)?)?
+                ));
+            } else {
+                output.push_str(&format!("{indentation}return\n"));
+            }
+        }
+        severian_lir::Terminator::Throw(value) => {
+            let _ = value;
+            output.push_str(&format!("{indentation}llvm.unreachable\n"));
+        }
+        severian_lir::Terminator::Unreachable => {
+            output.push_str(&format!("{indentation}llvm.unreachable\n"));
+        }
+    }
+    Ok(())
+}
+
+fn cfg_place_address(place: &severian_lir::Place) -> Result<String, MlirError> {
+    if !place.projection.is_empty() {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "projected CFG place {place:?}"
+        )));
+    }
+    Ok(match place.base {
+        severian_lir::PlaceBase::Local(local) => format!("%local{}", local.0),
+        severian_lir::PlaceBase::Global(global) => format!("%global{}_address", global.0),
+    })
+}
+
+fn cfg_place_base_address(place: &severian_lir::Place) -> String {
+    match place.base {
+        severian_lir::PlaceBase::Local(local) => format!("%local{}", local.0),
+        severian_lir::PlaceBase::Global(global) => format!("%global{}_address", global.0),
+    }
+}
+
+fn cfg_place_base_type(
+    module: &Module,
+    body: &severian_lir::CfgBody,
+    place: &severian_lir::Place,
+) -> Result<LoweredType, MlirError> {
+    match place.base {
+        severian_lir::PlaceBase::Local(local) => body
+            .locals
+            .get(local.0 as usize)
+            .map(|local| local.ty)
+            .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown local {}", local.0))),
+        severian_lir::PlaceBase::Global(global) => module
+            .storage_globals
+            .get(global.0 as usize)
+            .map(|global| global.ty)
+            .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown global {}", global.0))),
+    }
+}
+
+fn render_cfg_unary(
+    output: &mut String,
+    module: &Module,
+    operator: UnaryOperation,
+    operand: ValueId,
+    result: ValueId,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let ty = value_type(module, operand)?;
+    match operator {
+        UnaryOperation::Positive => output.push_str(&format!(
+            "{indentation}%v{} = builtin.unrealized_conversion_cast %v{} : {} to {}\n",
+            result.0,
+            operand.0,
+            mlir_type(ty)?,
+            mlir_type(ty)?
+        )),
+        UnaryOperation::Negative => {
+            let zero = format!("v{}_zero", result.0);
+            output.push_str(&format!(
+                "{indentation}%{zero} = arith.constant 0 : {}\n",
+                mlir_type(ty)?
+            ));
+            output.push_str(&format!(
+                "{indentation}%v{} = {} %{zero}, %v{} : {}\n",
+                result.0,
+                if matches!(ty, LoweredType::Float { .. }) {
+                    "arith.subf"
+                } else {
+                    "arith.subi"
+                },
+                operand.0,
+                mlir_type(ty)?
+            ));
+        }
+        UnaryOperation::Not => output.push_str(&format!(
+            "{indentation}%v{} = arith.xori %v{}, true : i1\n",
+            result.0, operand.0
+        )),
+    }
+    Ok(())
+}
+
+fn render_runtime_call(
+    output: &mut String,
+    module: &Module,
+    symbol: &str,
+    arguments: &[ValueId],
+    result: Option<ValueId>,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let arguments_text = arguments
+        .iter()
+        .map(|value| format!("%v{}", value.0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let argument_types = arguments
+        .iter()
+        .map(|value| mlir_type(value_type(module, *value)?))
+        .collect::<Result<Vec<_>, MlirError>>()?
+        .join(", ");
+    if let Some(result) = result {
+        output.push_str(&format!(
+            "{indentation}%v{} = func.call @{symbol}({arguments_text}) : ({argument_types}) -> {}\n",
+            result.0,
+            mlir_type(value_type(module, result)?)?
+        ));
+    } else {
+        output.push_str(&format!(
+            "{indentation}func.call @{symbol}({arguments_text}) : ({argument_types}) -> ()\n"
+        ));
+    }
+    Ok(())
+}
+
+fn render_assert(
+    output: &mut String,
+    module: &Module,
+    condition: ValueId,
+    _message: Option<ValueId>,
+    _location: Option<&severian_lir::AssertionLocation>,
+    indent: usize,
+) -> Result<(), MlirError> {
+    let indentation = " ".repeat(indent);
+    let _ = value_type(module, condition)?;
+    output.push_str(&format!(
+        "{indentation}%assert_message_{} = llvm.mlir.addressof @__sev_assert_message_{} : !llvm.ptr\n",
+        condition.0, condition.0
+    ));
+    output.push_str(&format!(
+        "{indentation}func.call @__sev_assert(%v{}, %assert_message_{}) : (i1, !llvm.ptr) -> ()\n",
+        condition.0, condition.0
+    ));
+    Ok(())
+}
+
+fn binary_mnemonic(
+    operator: BinaryOperation,
+    ty: LoweredType,
+) -> Result<String, MlirError> {
+    let floating = matches!(ty, LoweredType::Float { .. });
+    let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
+    Ok(match operator {
+        BinaryOperation::Add => if floating { "arith.addf" } else { "arith.addi" }.into(),
+        BinaryOperation::Subtract => if floating { "arith.subf" } else { "arith.subi" }.into(),
+        BinaryOperation::Multiply => if floating { "arith.mulf" } else { "arith.muli" }.into(),
+        BinaryOperation::Divide => if floating {
+            "arith.divf"
+        } else if signed {
+            "arith.divsi"
+        } else {
+            "arith.divui"
+        }
+        .into(),
+        BinaryOperation::Remainder => if floating {
+            "arith.remf"
+        } else if signed {
+            "arith.remsi"
+        } else {
+            "arith.remui"
+        }
+        .into(),
+        BinaryOperation::And => "arith.andi".into(),
+        BinaryOperation::Or => "arith.ori".into(),
+        BinaryOperation::Equal => if floating { "arith.cmpf oeq," } else { "arith.cmpi eq," }.into(),
+        BinaryOperation::NotEqual => if floating { "arith.cmpf one," } else { "arith.cmpi ne," }.into(),
+        BinaryOperation::Less => if floating {
+            "arith.cmpf olt,"
+        } else if signed {
+            "arith.cmpi slt,"
+        } else {
+            "arith.cmpi ult,"
+        }
+        .into(),
+        BinaryOperation::LessEqual => if floating {
+            "arith.cmpf ole,"
+        } else if signed {
+            "arith.cmpi sle,"
+        } else {
+            "arith.cmpi ule,"
+        }
+        .into(),
+        BinaryOperation::Greater => if floating {
+            "arith.cmpf ogt,"
+        } else if signed {
+            "arith.cmpi sgt,"
+        } else {
+            "arith.cmpi ugt,"
+        }
+        .into(),
+        BinaryOperation::GreaterEqual => if floating {
+            "arith.cmpf oge,"
+        } else if signed {
+            "arith.cmpi sge,"
+        } else {
+            "arith.cmpi uge,"
+        }
+        .into(),
+        unsupported => {
+            return Err(MlirError::UnsupportedOperation(format!(
+                "binary operation {unsupported:?}"
+            )));
+        }
+    })
+}
+
 fn mlir_trait_type(ty: severian_lir::TraitType) -> Result<String, MlirError> {
     match ty {
         severian_lir::TraitType::SelfType => Ok("Self".into()),
@@ -387,11 +1256,22 @@ fn render_block(
                     result.0, value.0, object.0
                 ));
             }
-            Operation::Assign { target, value } => {
-                let ty = mlir_type(value_type(module, *target)?)?;
+            Operation::Load { place, result } => {
+                let ty = value_type(module, *result)?;
                 output.push_str(&format!(
-                    "{indentation}%v{}_assigned = builtin.unrealized_conversion_cast %v{} : {ty} to {ty}\n",
-                    target.0, value.0
+                    "{indentation}%v{} = llvm.load {} : {}\n",
+                    result.0,
+                    cfg_place_address(place)?,
+                    mlir_type(ty)?
+                ));
+            }
+            Operation::Store { place, value } => {
+                let ty = value_type(module, *value)?;
+                output.push_str(&format!(
+                    "{indentation}llvm.store %v{}, {} : {}\n",
+                    value.0,
+                    cfg_place_address(place)?,
+                    mlir_type(ty)?
                 ));
             }
             Operation::Call {
@@ -898,7 +1778,9 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
             format: LoweredFloatFormat::BrainFloat16,
         } => "bf16".into(),
         LoweredType::Boolean => "i1".into(),
-        LoweredType::String => "!llvm.ptr".into(),
+        LoweredType::String | LoweredType::Bytes => "!llvm.ptr".into(),
+        LoweredType::None | LoweredType::Unit => "i8".into(),
+        LoweredType::Arguments => "!llvm.struct<(i32, !llvm.ptr)>".into(),
         LoweredType::Aggregate(id) => format!("!sev_class_{id}"),
         unsupported => return Err(MlirError::UnsupportedType(unsupported)),
     })
@@ -973,11 +1855,8 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_aggregate_is_explicit() {
-        assert!(matches!(
-            mlir_type(LoweredType::Bytes),
-            Err(MlirError::UnsupportedType(LoweredType::Bytes))
-        ));
+    fn byte_storage_uses_the_runtime_pointer_representation() {
+        assert_eq!(mlir_type(LoweredType::Bytes).unwrap(), "!llvm.ptr");
     }
 
     #[test]
@@ -1006,6 +1885,8 @@ mod tests {
                     result: integer,
                     body: Some(Block { operations: vec![Operation::Return { value: Some(ValueId(3)) }] }),
                     linkage: FunctionLinkage::Internal,
+                    parameter_types: vec![integer],
+                    cfg: None,
                 },
                 Function {
                     id: FunctionId(2),
@@ -1027,6 +1908,8 @@ mod tests {
                         ],
                     }),
                     linkage: FunctionLinkage::Internal,
+                    parameter_types: vec![],
+                    cfg: None,
                 },
             ],
             entry: Some(FunctionId(2)),
@@ -1142,6 +2025,8 @@ mod tests {
             entry: None,
             traits: vec![],
             classes: vec![],
+            storage_globals: vec![],
+            initializer_cfg: None,
         })
         .unwrap();
         let artifact = verify_artifact(
@@ -1190,6 +2075,8 @@ mod tests {
             entry: None,
             traits: vec![],
             classes: vec![],
+            storage_globals: vec![],
+            initializer_cfg: None,
         })
         .unwrap();
 

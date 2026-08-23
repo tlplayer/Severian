@@ -5,13 +5,784 @@ use severian_lir::{
     FunctionLinkage, LoweredFloatFormat, LoweredType, Module as LirModule,
     Operation as LirOperation, UnaryOperation, Value, ValueId,
 };
-use severian_mir::{Block as MirBlock, Module as MirModule, Operation as MirOperation};
+use severian_mir::Module as MirModule;
 use severian_target::TargetSpec;
 use severian_universal::{
     BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TypeContext,
     TypeId, UnaryOperator,
 };
 use std::fmt;
+
+mod cfg_lowering_entry {
+use super::*;
+
+pub fn lower(
+    mir: &MirModule,
+    types: &TypeContext,
+    target: &TargetSpec,
+) -> Result<LirModule, LoweringError> {
+    let mut context = CfgLowering {
+        mir,
+        types,
+        target,
+        values: Vec::new(),
+    };
+    let mut initializer_cfg = context.lower_cfg_body(&mir.initializer)?;
+    initializer_cfg.return_type = LoweredType::Unit;
+    let functions = mir
+        .functions
+        .iter()
+        .map(|function| {
+            Ok(LirFunction {
+                id: FunctionId(function.id.0),
+                name: function.name.clone(),
+                parameters: Vec::new(),
+                result: context.lower_mir_type(function.result)?,
+                body: None,
+                linkage: match &function.call_type {
+                    severian_mir::CallType::Severian => FunctionLinkage::Internal,
+                    severian_mir::CallType::External(call) => FunctionLinkage::External {
+                        symbol: call.symbol.0.clone(),
+                    },
+                },
+                parameter_types: function
+                    .parameters
+                    .iter()
+                    .map(|ty| context.lower_mir_type(*ty))
+                    .collect::<Result<Vec<_>, _>>()?,
+                cfg: function
+                    .body
+                    .as_ref()
+                    .map(|body| context.lower_cfg_body(body))
+                    .transpose()?,
+            })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    let storage_globals = mir
+        .globals
+        .iter()
+        .map(|global| {
+            Ok(severian_lir::GlobalDecl {
+                id: severian_lir::GlobalId(global.id.0),
+                ty: context.lower_mir_type(global.ty)?,
+                mutable: global.mutable,
+            })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    let classes = mir
+        .classes
+        .iter()
+        .enumerate()
+        .map(|(id, declaration)| {
+            Ok(severian_lir::ClassDeclaration {
+                id: id as u32,
+                name: declaration.name.clone(),
+                fields: declaration
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        Ok(severian_lir::ClassFieldDeclaration {
+                            name: field.name.clone(),
+                            ty: context.lower_mir_type(field.ty)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, LoweringError>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    let traits = mir
+        .traits
+        .iter()
+        .map(|declaration| {
+            Ok(severian_lir::TraitDeclaration {
+                id: severian_lir::TraitId {
+                    package: declaration.definition.package,
+                    module: declaration.definition.module,
+                    declaration: declaration.definition.declaration.0,
+                },
+                name: declaration.name.clone(),
+                methods: declaration
+                    .methods
+                    .iter()
+                    .map(|method| {
+                        Ok(severian_lir::TraitMethodDeclaration {
+                            name: method.name.clone(),
+                            parameters: method
+                                .parameters
+                                .iter()
+                                .map(|parameter| match parameter {
+                                    severian_mir::TraitType::SelfType => {
+                                        Ok(severian_lir::TraitType::SelfType)
+                                    }
+                                    severian_mir::TraitType::Concrete(ty) => context
+                                        .lower_mir_type(*ty)
+                                        .map(severian_lir::TraitType::Concrete),
+                                })
+                                .collect::<Result<Vec<_>, LoweringError>>()?,
+                            result: match method.result {
+                                severian_mir::TraitType::SelfType => {
+                                    severian_lir::TraitType::SelfType
+                                }
+                                severian_mir::TraitType::Concrete(ty) => {
+                                    severian_lir::TraitType::Concrete(context.lower_mir_type(ty)?)
+                                }
+                            },
+                        })
+                    })
+                    .collect::<Result<Vec<_>, LoweringError>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    Ok(LirModule {
+        values: context.values,
+        globals: Vec::new(),
+        initializer: LirBlock::default(),
+        functions,
+        entry: mir.entry.map(|entry| FunctionId(entry.0)),
+        traits,
+        classes,
+        storage_globals,
+        initializer_cfg: Some(initializer_cfg),
+    })
+}
+
+}
+
+pub use cfg_lowering_entry::lower;
+
+struct CfgLowering<'a> {
+    mir: &'a MirModule,
+    types: &'a TypeContext,
+    target: &'a TargetSpec,
+    values: Vec<Value>,
+}
+
+impl CfgLowering<'_> {
+    fn lower_cfg_body(
+        &mut self,
+        body: &severian_mir::CfgBody,
+    ) -> Result<severian_lir::CfgBody, LoweringError> {
+        let locals = body
+            .locals
+            .iter()
+            .map(|local| {
+                Ok(severian_lir::LocalDecl {
+                    id: severian_lir::LocalId(local.id.0),
+                    ty: self.lower_mir_type(local.ty)?,
+                    mutable: local.mutable,
+                    argument: local.argument,
+                })
+            })
+            .collect::<Result<Vec<_>, LoweringError>>()?;
+        let mut blocks = Vec::with_capacity(body.blocks.len());
+        for block in &body.blocks {
+            let mut operations = Vec::new();
+            for statement in &block.statements {
+                self.lower_statement(body, statement, &mut operations)?;
+            }
+            let terminator = self.lower_terminator(body, &block.terminator, &mut operations)?;
+            blocks.push(severian_lir::BasicBlock {
+                id: severian_lir::BlockId(block.id.0),
+                operations,
+                terminator,
+            });
+        }
+        Ok(severian_lir::CfgBody {
+            entry: severian_lir::BlockId(body.entry.0),
+            blocks,
+            locals,
+            return_type: self.lower_mir_type(body.return_type)?,
+        })
+    }
+
+    fn lower_statement(
+        &mut self,
+        body: &severian_mir::CfgBody,
+        statement: &severian_mir::CfgStatement,
+        operations: &mut Vec<LirOperation>,
+    ) -> Result<(), LoweringError> {
+        match statement {
+            severian_mir::CfgStatement::Assign(place, rvalue) => {
+                let value = self.lower_rvalue(body, rvalue, operations)?;
+                operations.push(LirOperation::Store {
+                    place: self.lower_place(place),
+                    value,
+                });
+            }
+            severian_mir::CfgStatement::Drop(place) => {
+                if self.place_type(body, place)? == LoweredType::String {
+                    let value = self.load_place(body, place, operations)?;
+                    operations.push(LirOperation::RuntimeCall {
+                        symbol: "__sev_string_release".into(),
+                        arguments: vec![value],
+                        result: None,
+                    });
+                }
+            }
+            severian_mir::CfgStatement::StorageLive(_)
+            | severian_mir::CfgStatement::StorageDead(_) => {}
+            severian_mir::CfgStatement::Assert {
+                condition,
+                message,
+                origin,
+            } => {
+                let condition = self.lower_operand(body, condition, operations)?;
+                let message = message
+                    .as_ref()
+                    .map(|message| self.lower_operand(body, message, operations))
+                    .transpose()?;
+                operations.push(LirOperation::Assert {
+                    condition,
+                    message,
+                    location: origin.location.as_ref().map(|location| {
+                        severian_lir::AssertionLocation {
+                            file: location.file.clone(),
+                            line: location.line,
+                            column: location.column,
+                            expression: location.expression.clone(),
+                        }
+                    }),
+                });
+            }
+            severian_mir::CfgStatement::Coverage(point) => {
+                operations.push(LirOperation::Coverage {
+                    key: point.key.clone().unwrap_or_else(|| {
+                        format!("pending:{}:{}", point.span_start, point.ordinal)
+                    }),
+                });
+            }
+            severian_mir::CfgStatement::Operation { id, .. } => {
+                return Err(LoweringError::UnsupportedCfgOperation(format!(
+                    "registered operation {id:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_rvalue(
+        &mut self,
+        body: &severian_mir::CfgBody,
+        rvalue: &severian_mir::Rvalue,
+        operations: &mut Vec<LirOperation>,
+    ) -> Result<ValueId, LoweringError> {
+        match rvalue {
+            severian_mir::Rvalue::Use(operand)
+            | severian_mir::Rvalue::Convert { operand, .. } => {
+                self.lower_operand(body, operand, operations)
+            }
+            severian_mir::Rvalue::BorrowShared(place)
+            | severian_mir::Rvalue::BorrowExclusive(place) => {
+                self.load_place(body, place, operations)
+            }
+            severian_mir::Rvalue::Unary { operator, operand } => {
+                let operand = self.lower_operand(body, operand, operations)?;
+                let result = self.new_value(self.value_type(operand));
+                operations.push(LirOperation::Unary {
+                    operator: lower_unary(*operator),
+                    operand,
+                    result,
+                });
+                Ok(result)
+            }
+            severian_mir::Rvalue::Binary {
+                operator,
+                left,
+                right,
+            } => {
+                let left = self.lower_operand(body, left, operations)?;
+                let right = self.lower_operand(body, right, operations)?;
+                let result_type = match operator {
+                    BinaryOperator::Equal
+                    | BinaryOperator::NotEqual
+                    | BinaryOperator::Less
+                    | BinaryOperator::LessEqual
+                    | BinaryOperator::Greater
+                    | BinaryOperator::GreaterEqual
+                    | BinaryOperator::Contains => self.lower_type_named("bool")?,
+                    _ => self.value_type(left),
+                };
+                let result = self.new_value(result_type);
+                if self.value_type(left) == LoweredType::String {
+                    match operator {
+                        BinaryOperator::Add => operations.push(LirOperation::RuntimeCall {
+                            symbol: "__sev_string_concat".into(),
+                            arguments: vec![left, right],
+                            result: Some(result),
+                        }),
+                        BinaryOperator::Equal
+                        | BinaryOperator::NotEqual
+                        | BinaryOperator::Less
+                        | BinaryOperator::LessEqual
+                        | BinaryOperator::Greater
+                        | BinaryOperator::GreaterEqual => {
+                            let comparison_type = self.lower_type_named("i32")?;
+                            let comparison = self.new_value(comparison_type);
+                            let zero = self.new_value(comparison_type);
+                            operations.push(LirOperation::RuntimeCall {
+                                symbol: "__sev_string_compare".into(),
+                                arguments: vec![left, right],
+                                result: Some(comparison),
+                            });
+                            operations.push(LirOperation::Constant {
+                                value: Constant::Integer("0".into()),
+                                result: zero,
+                            });
+                            operations.push(LirOperation::Binary {
+                                operator: lower_binary(*operator),
+                                left: comparison,
+                                right: zero,
+                                result,
+                            });
+                        }
+                        _ => {
+                            return Err(LoweringError::UnsupportedStringOperation(*operator));
+                        }
+                    }
+                } else {
+                    operations.push(LirOperation::Binary {
+                        operator: lower_binary(*operator),
+                        left,
+                        right,
+                        result,
+                    });
+                }
+                Ok(result)
+            }
+            severian_mir::Rvalue::Aggregate { type_id, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| self.lower_operand(body, field, operations))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.new_value(self.lower_mir_type(*type_id)?);
+                let class = self
+                    .mir
+                    .classes
+                    .iter()
+                    .position(|class| class.id == *type_id)
+                    .ok_or(LoweringError::NotPrimitive(*type_id))?
+                    as u32;
+                operations.push(LirOperation::Aggregate {
+                    class,
+                    fields,
+                    result,
+                });
+                Ok(result)
+            }
+            severian_mir::Rvalue::Await { task } => {
+                let task = self.lower_operand(body, task, operations)?;
+                let result = self.new_value(self.value_type(task));
+                operations.push(LirOperation::Await { task, result });
+                Ok(result)
+            }
+        }
+    }
+
+    fn lower_operand(
+        &mut self,
+        body: &severian_mir::CfgBody,
+        operand: &severian_mir::Operand,
+        operations: &mut Vec<LirOperation>,
+    ) -> Result<ValueId, LoweringError> {
+        match operand {
+            severian_mir::Operand::Copy(place) | severian_mir::Operand::Move(place) => {
+                self.load_place(body, place, operations)
+            }
+            severian_mir::Operand::Constant { value, ty } => {
+                let result = self.new_value(self.lower_mir_type(*ty)?);
+                operations.push(LirOperation::Constant {
+                    value: lower_constant(value),
+                    result,
+                });
+                Ok(result)
+            }
+            severian_mir::Operand::Function(definition) => Err(
+                LoweringError::UnsupportedCfgOperation(format!("function value {definition:?}")),
+            ),
+        }
+    }
+
+    fn load_place(
+        &mut self,
+        body: &severian_mir::CfgBody,
+        place: &severian_mir::Place,
+        operations: &mut Vec<LirOperation>,
+    ) -> Result<ValueId, LoweringError> {
+        let result = self.new_value(self.place_type(body, place)?);
+        operations.push(LirOperation::Load {
+            place: self.lower_place(place),
+            result,
+        });
+        Ok(result)
+    }
+
+    fn lower_terminator(
+        &mut self,
+        body: &severian_mir::CfgBody,
+        terminator: &severian_mir::Terminator,
+        operations: &mut Vec<LirOperation>,
+    ) -> Result<severian_lir::Terminator, LoweringError> {
+        match terminator {
+            severian_mir::Terminator::Goto(target, arguments) => {
+                for (argument, parameter) in arguments
+                    .iter()
+                    .zip(&body.blocks[target.0 as usize].parameters)
+                {
+                    let value = self.lower_operand(body, argument, operations)?;
+                    operations.push(LirOperation::Store {
+                        place: severian_lir::Place {
+                            base: severian_lir::PlaceBase::Local(severian_lir::LocalId(parameter.0)),
+                            projection: Vec::new(),
+                        },
+                        value,
+                    });
+                }
+                Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(
+                    target.0,
+                )))
+            }
+            severian_mir::Terminator::Branch {
+                condition,
+                then_block,
+                else_block,
+            } => Ok(severian_lir::Terminator::Branch {
+                condition: self.lower_operand(body, condition, operations)?,
+                then_block: severian_lir::BlockId(then_block.0),
+                else_block: severian_lir::BlockId(else_block.0),
+            }),
+            severian_mir::Terminator::Call {
+                callee,
+                arguments,
+                destination,
+                target,
+                ..
+            } => {
+                let function = self.resolve_callee(callee)?;
+                let mut lowered_arguments = Vec::new();
+                if let severian_mir::Callee::Method { receiver, .. } = callee {
+                    lowered_arguments.push(self.lower_operand(body, receiver, operations)?);
+                }
+                lowered_arguments.extend(
+                    arguments
+                        .iter()
+                        .map(|argument| self.lower_operand(body, argument, operations))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                Ok(severian_lir::Terminator::Call {
+                    function,
+                    arguments: lowered_arguments,
+                    destination: destination.as_ref().map(|place| self.lower_place(place)),
+                    target: severian_lir::BlockId(target.0),
+                })
+            }
+            severian_mir::Terminator::Spawn {
+                callee,
+                arguments,
+                destination,
+                target,
+                owner,
+                locked,
+            } => {
+                let function = self.resolve_callee(callee)?;
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.lower_operand(body, argument, operations))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.new_value(self.place_type(body, destination)?);
+                operations.push(LirOperation::Spawn {
+                    function,
+                    arguments,
+                    result,
+                    owner: match owner {
+                        severian_mir::TaskOwner::SelfScope => {
+                            severian_lir::TaskOwner::SelfScope
+                        }
+                        severian_mir::TaskOwner::Runtime => severian_lir::TaskOwner::Runtime,
+                        severian_mir::TaskOwner::Inferred => severian_lir::TaskOwner::Inferred,
+                    },
+                    locked: *locked,
+                });
+                operations.push(LirOperation::Store {
+                    place: self.lower_place(destination),
+                    value: result,
+                });
+                Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(
+                    target.0,
+                )))
+            }
+            severian_mir::Terminator::Return(value) => Ok(severian_lir::Terminator::Return(
+                value
+                    .as_ref()
+                    .map(|value| self.lower_operand(body, value, operations))
+                    .transpose()?,
+            )),
+            severian_mir::Terminator::Switch {
+                discriminant,
+                targets,
+                fallback,
+            } => {
+                let discriminant = self.lower_operand(body, discriminant, operations)?;
+                let mut lowered_targets = Vec::new();
+                for (case, target) in targets {
+                    match case {
+                        severian_mir::Case::Type(ty)
+                            if self.lower_mir_type(*ty)? == self.value_type(discriminant) =>
+                        {
+                            return Ok(severian_lir::Terminator::Goto(
+                                severian_lir::BlockId(target.0),
+                            ));
+                        }
+                        severian_mir::Case::Type(_) => {}
+                        severian_mir::Case::Integer(value) => lowered_targets.push((
+                            severian_lir::Case::Integer(*value),
+                            severian_lir::BlockId(target.0),
+                        )),
+                        severian_mir::Case::Boolean(value) => lowered_targets.push((
+                            severian_lir::Case::Boolean(*value),
+                            severian_lir::BlockId(target.0),
+                        )),
+                        severian_mir::Case::Variant(value) => lowered_targets.push((
+                            severian_lir::Case::Variant(*value),
+                            severian_lir::BlockId(target.0),
+                        )),
+                    }
+                }
+                Ok(severian_lir::Terminator::Switch {
+                    discriminant,
+                    targets: lowered_targets,
+                    fallback: severian_lir::BlockId(fallback.0),
+                })
+            }
+            severian_mir::Terminator::Throw(value) => Ok(severian_lir::Terminator::Throw(
+                self.lower_operand(body, value, operations)?,
+            )),
+            severian_mir::Terminator::Unreachable => Ok(severian_lir::Terminator::Unreachable),
+        }
+    }
+
+    fn resolve_callee(
+        &self,
+        callee: &severian_mir::Callee,
+    ) -> Result<FunctionId, LoweringError> {
+        let (definition, substitution) = match callee {
+            severian_mir::Callee::Direct {
+                function,
+                substitution,
+            } => (*function, substitution),
+            severian_mir::Callee::Method {
+                implementation,
+                substitution,
+                ..
+            } => (*implementation, substitution),
+            _ => {
+                return Err(LoweringError::UnsupportedCfgOperation(format!(
+                    "callee {callee:?}"
+                )));
+            }
+        };
+        self.mir
+            .functions
+            .iter()
+            .find(|function| {
+                function.definition == definition && function.substitution == *substitution
+            })
+            .map(|function| FunctionId(function.id.0))
+            .ok_or_else(|| LoweringError::UnsupportedCfgOperation(format!("callee {callee:?}")))
+    }
+
+    fn lower_place(&self, place: &severian_mir::Place) -> severian_lir::Place {
+        severian_lir::Place {
+            base: match place.base {
+                severian_mir::PlaceBase::Local(local) => {
+                    severian_lir::PlaceBase::Local(severian_lir::LocalId(local.0))
+                }
+                severian_mir::PlaceBase::Global(global) => {
+                    severian_lir::PlaceBase::Global(severian_lir::GlobalId(global.0))
+                }
+            },
+            projection: place
+                .projection
+                .iter()
+                .map(|projection| match projection {
+                    severian_mir::Projection::Field(field) => {
+                        severian_lir::Projection::Field(*field)
+                    }
+                    severian_mir::Projection::Index(local) => {
+                        severian_lir::Projection::Index(severian_lir::LocalId(local.0))
+                    }
+                    severian_mir::Projection::Dereference => {
+                        severian_lir::Projection::Dereference
+                    }
+                    severian_mir::Projection::Downcast(variant) => {
+                        severian_lir::Projection::Downcast(*variant)
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn place_type(
+        &self,
+        body: &severian_mir::CfgBody,
+        place: &severian_mir::Place,
+    ) -> Result<LoweredType, LoweringError> {
+        let mut ty = match place.base {
+            severian_mir::PlaceBase::Local(local) => body
+                .locals
+                .get(local.0 as usize)
+                .ok_or(LoweringError::UnknownLocal(local.0))?
+                .ty,
+            severian_mir::PlaceBase::Global(global) => self
+                .mir
+                .globals
+                .get(global.0 as usize)
+                .ok_or(LoweringError::UnknownGlobal(global.0))?
+                .ty,
+        };
+        for projection in &place.projection {
+            if let severian_mir::Projection::Field(field) = projection {
+                ty = self
+                    .mir
+                    .classes
+                    .iter()
+                    .find(|class| class.id == ty)
+                    .and_then(|class| class.fields.get(*field as usize))
+                    .ok_or(LoweringError::InvalidProjection)?
+                    .ty;
+            }
+        }
+        self.lower_mir_type(ty)
+    }
+
+    fn lower_mir_type(&self, type_id: TypeId) -> Result<LoweredType, LoweringError> {
+        if let Some(id) = self.mir.classes.iter().position(|class| class.id == type_id) {
+            Ok(LoweredType::Aggregate(id as u32))
+        } else {
+            lower_type(type_id, self.types, self.target)
+        }
+    }
+
+    fn lower_type_named(&self, name: &str) -> Result<LoweredType, LoweringError> {
+        let ty = self
+            .types
+            .resolve_name(name)
+            .ok_or_else(|| LoweringError::UnknownTypeName(name.into()))?;
+        self.lower_mir_type(ty)
+    }
+
+    fn new_value(&mut self, ty: LoweredType) -> ValueId {
+        let id = ValueId(self.values.len() as u32);
+        self.values.push(Value { id, ty });
+        id
+    }
+
+    fn value_type(&self, value: ValueId) -> LoweredType {
+        self.values[value.0 as usize].ty
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweringError {
+    NotPrimitive(TypeId),
+    UnknownLocal(u32),
+    UnknownGlobal(u32),
+    UnknownTypeName(String),
+    InvalidProjection,
+    UnsupportedStringOperation(BinaryOperator),
+    UnsupportedCfgOperation(String),
+}
+
+impl fmt::Display for LoweringError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for LoweringError {}
+
+fn lower_constant(value: &LiteralValue) -> Constant {
+    match value {
+        LiteralValue::Integer(value) => Constant::Integer(value.clone()),
+        LiteralValue::Float(value) => Constant::Float(value.clone()),
+        LiteralValue::Boolean(value) => Constant::Boolean(*value),
+        LiteralValue::Character(value) => Constant::Integer(u32::from(*value).to_string()),
+        LiteralValue::String(value) => Constant::String(value.clone()),
+        LiteralValue::Bytes(value) => Constant::Bytes(value.clone()),
+        LiteralValue::None => Constant::None,
+        LiteralValue::Unit => Constant::Unit,
+    }
+}
+
+fn lower_unary(operator: UnaryOperator) -> UnaryOperation {
+    match operator {
+        UnaryOperator::Positive => UnaryOperation::Positive,
+        UnaryOperator::Negative => UnaryOperation::Negative,
+        UnaryOperator::Not => UnaryOperation::Not,
+    }
+}
+
+fn lower_binary(operator: BinaryOperator) -> BinaryOperation {
+    match operator {
+        BinaryOperator::Add => BinaryOperation::Add,
+        BinaryOperator::Subtract => BinaryOperation::Subtract,
+        BinaryOperator::Multiply => BinaryOperation::Multiply,
+        BinaryOperator::Divide => BinaryOperation::Divide,
+        BinaryOperator::Remainder => BinaryOperation::Remainder,
+        BinaryOperator::Power => BinaryOperation::Power,
+        BinaryOperator::Equal => BinaryOperation::Equal,
+        BinaryOperator::NotEqual => BinaryOperation::NotEqual,
+        BinaryOperator::Less => BinaryOperation::Less,
+        BinaryOperator::LessEqual => BinaryOperation::LessEqual,
+        BinaryOperator::Greater => BinaryOperation::Greater,
+        BinaryOperator::GreaterEqual => BinaryOperation::GreaterEqual,
+        BinaryOperator::Contains => BinaryOperation::Contains,
+        BinaryOperator::And => BinaryOperation::And,
+        BinaryOperator::Or => BinaryOperation::Or,
+    }
+}
+
+fn lower_type(
+    id: TypeId,
+    types: &TypeContext,
+    target: &TargetSpec,
+) -> Result<LoweredType, LoweringError> {
+    let primitive = types.primitive(id).ok_or(LoweringError::NotPrimitive(id))?;
+    Ok(match primitive.representation {
+        PrimitiveRepresentation::Integer { bits, signed } => LoweredType::Integer {
+            bits: match bits {
+                IntegerWidth::Fixed(bits) => bits,
+                IntegerWidth::Machine => target.machine_integer_bits(),
+            },
+            signed,
+        },
+        PrimitiveRepresentation::PointerInteger { signed } => LoweredType::Integer {
+            bits: target.pointer_bits(),
+            signed,
+        },
+        PrimitiveRepresentation::Float { format } => LoweredType::Float {
+            format: match format {
+                FloatFormat::Ieee(bits) => LoweredFloatFormat::Ieee(bits),
+                FloatFormat::BrainFloat16 => LoweredFloatFormat::BrainFloat16,
+                FloatFormat::Machine => LoweredFloatFormat::Ieee(target.machine_float_bits()),
+            },
+        },
+        PrimitiveRepresentation::Boolean => LoweredType::Boolean,
+        PrimitiveRepresentation::Character => LoweredType::Integer {
+            bits: 32,
+            signed: false,
+        },
+        PrimitiveRepresentation::String => LoweredType::String,
+        PrimitiveRepresentation::Bytes => LoweredType::Bytes,
+        PrimitiveRepresentation::None => LoweredType::None,
+        PrimitiveRepresentation::Unit => LoweredType::Unit,
+        PrimitiveRepresentation::Arguments => LoweredType::Arguments,
+    })
+}
+
+#[cfg(any())]
+mod legacy_structured_lowering {
+use super::*;
+use severian_mir::{Block as MirBlock, Operation as MirOperation};
 
 pub fn lower(
     mir: &MirModule,
@@ -901,4 +1672,6 @@ mod tests {
             LirOperation::RuntimeCall { symbol, .. } if symbol == "__sev_string_release"
         )));
     }
+}
+
 }
