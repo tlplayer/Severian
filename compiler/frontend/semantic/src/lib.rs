@@ -102,6 +102,7 @@ pub(crate) fn analyze_with_package_functions(
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
+        mutable_variables: BTreeSet::new(),
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
@@ -539,6 +540,7 @@ pub(crate) fn analyze_with_package_functions(
 struct Analyzer<'a> {
     types: &'a TypeContext,
     names: BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
+    mutable_variables: BTreeSet<severian_hir::VariableId>,
     value_substitutions: BTreeMap<String, Expression>,
     /// Names declared in the current lexical scope. `names` also contains
     /// readable parent bindings, which may be shadowed by this set.
@@ -825,6 +827,7 @@ impl Analyzer<'_> {
         bindings: &mut Vec<Binding>,
     ) -> Result<BindingId, Diagnostic> {
         let inferred_update = !ast_binding.update
+            && !ast_binding.mutable
             && ast_binding.annotation.is_none()
             && self.declarations.contains(&ast_binding.name);
         let is_update = ast_binding.update || inferred_update;
@@ -844,6 +847,19 @@ impl Analyzer<'_> {
         } else {
             None
         };
+        if is_update {
+            let variable = self.names[&ast_binding.name].1;
+            if !self.mutable_variables.contains(&variable) {
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!(
+                        "cannot assign to immutable binding `{}`; declare it with `:=` to allow reassignment",
+                        ast_binding.name
+                    ),
+                    Some(ast_binding.span),
+                ));
+            }
+        }
         if !is_update && !self.declarations.insert(ast_binding.name.clone()) {
             return Err(Diagnostic::new(
                 "E000203",
@@ -872,6 +888,10 @@ impl Analyzer<'_> {
         } else {
             severian_hir::VariableId(id.0)
         };
+        if !is_update && ast_binding.mutable {
+            self.mutable_variables.insert(variable);
+        }
+        let mutable = self.mutable_variables.contains(&variable);
         self.names
             .insert(ast_binding.name.clone(), (id, variable, type_id));
         bindings.push(Binding {
@@ -879,6 +899,7 @@ impl Analyzer<'_> {
             variable,
             type_id,
             value,
+            mutable,
             preserve_error: ast_binding.preserve_error,
             span: ast_binding.span,
         });
@@ -951,6 +972,7 @@ impl Analyzer<'_> {
                             name: binding.clone(),
                             annotation: None,
                             value,
+                            mutable: !self.declarations.contains(binding),
                             update: self.declarations.contains(binding),
                             preserve_error: false,
                             span: iterable.span,
@@ -992,6 +1014,7 @@ impl Analyzer<'_> {
                     variable: severian_hir::VariableId(iterable_id.0),
                     type_id: list_type,
                     value: iterable_value,
+                    mutable: false,
                     preserve_error: false,
                     span: iterable.span,
                 });
@@ -1009,6 +1032,7 @@ impl Analyzer<'_> {
                     variable: index_variable,
                     type_id: usize_type,
                     value: self.integer_expression("0", usize_type, iterable.span),
+                    mutable: true,
                     preserve_error: false,
                     span: iterable.span,
                 });
@@ -1062,11 +1086,13 @@ impl Analyzer<'_> {
                 );
                 let loop_binding_id = self.new_binding_id();
                 let loop_variable = severian_hir::VariableId(loop_binding_id.0);
+                self.mutable_variables.insert(loop_variable);
                 bindings.push(Binding {
                     id: loop_binding_id,
                     variable: loop_variable,
                     type_id: element_type,
                     value: item,
+                    mutable: true,
                     preserve_error: false,
                     span: *span,
                 });
@@ -1111,6 +1137,7 @@ impl Analyzer<'_> {
                     variable: index_variable,
                     type_id: usize_type,
                     value: next_index,
+                    mutable: true,
                     preserve_error: false,
                     span: *span,
                 });
@@ -1207,6 +1234,7 @@ impl Analyzer<'_> {
                             },
                             span: *span,
                         },
+                        mutable: true,
                         preserve_error: false,
                         span: *span,
                     });
@@ -1396,6 +1424,7 @@ impl Analyzer<'_> {
                     variable,
                     type_id: binding_type,
                     value: subject.clone(),
+                    mutable: false,
                     preserve_error: true,
                     span: case.span,
                 });
@@ -4585,6 +4614,32 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn declaration_operator_controls_storage_mutability() {
+        let (program, _) = analyze_source("constant = 1\nvariable := 2\nvariable = 3\n");
+        let module = &program.modules[0];
+        assert!(!module.bindings[0].mutable);
+        assert!(module.bindings[1].mutable);
+        assert!(module.bindings[2].mutable);
+        assert_eq!(module.bindings[1].variable, module.bindings[2].variable);
+
+        let mir = severian_mir::build(&program).unwrap();
+        assert_eq!(mir.globals.len(), 2);
+        assert!(!mir.globals[0].mutable);
+        assert!(mir.globals[1].mutable);
+    }
+
+    #[test]
+    fn immutable_binding_cannot_be_reassigned() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("test.sev", "constant = 1\nconstant = 2\n");
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000203");
+        assert!(error.message.contains("immutable binding `constant`"));
     }
 
     #[test]

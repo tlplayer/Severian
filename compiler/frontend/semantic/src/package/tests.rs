@@ -115,6 +115,20 @@ fn declaration_identity_does_not_depend_on_unrelated_source_items() {
 }
 
 #[test]
+fn mutable_global_reassignment_is_not_indexed_as_a_second_declaration() {
+    let root = temporary();
+    let source = root.join("mutable-global.sev");
+    std::fs::write(&source, "value := \"one\"\nvalue = \"two\"\n").unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    let module = &typed.hir.modules[0];
+    assert_eq!(module.bindings.len(), 2);
+    assert_eq!(module.bindings[0].variable, module.bindings[1].variable);
+    assert!(module.bindings.iter().all(|binding| binding.mutable));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_generic_overload_is_specialized_after_declaration_collection() {
     let root = temporary();
     std::fs::write(

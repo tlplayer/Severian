@@ -38,9 +38,13 @@ mod tests {
     fn compound_assignment_is_an_explicit_binding_update() {
         let source = SourceFile::virtual_source("update.sev", "value := 1\nvalue += 2\n");
         let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(declaration) = &module.items[0] else {
+            panic!("expected mutable declaration")
+        };
         let severian_ast::Item::Binding(update) = &module.items[1] else {
             panic!("expected binding update")
         };
+        assert!(declaration.mutable);
         assert!(update.update);
         assert!(matches!(
             update.value.kind,
@@ -74,6 +78,7 @@ mod tests {
             panic!("expected a binding")
         };
         assert_eq!(first.name, "MAX_RETRIES");
+        assert!(!first.mutable);
         assert_eq!(
             first.annotation.as_ref().unwrap().simple_name(),
             Some("int")

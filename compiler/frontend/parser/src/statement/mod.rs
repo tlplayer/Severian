@@ -1148,6 +1148,7 @@ impl Parser<'_> {
                 annotation: Some(annotation),
                 span: Span::new(start.source, start.start, value.span.end),
                 value,
+                mutable: false,
                 update: false,
                 preserve_error: false,
             });
@@ -1181,6 +1182,7 @@ impl Parser<'_> {
                 annotation: None,
                 span: value.span,
                 value,
+                mutable: false,
                 update: true,
                 preserve_error: false,
             });
@@ -1204,6 +1206,7 @@ impl Parser<'_> {
             annotation,
             span: Span::new(name_span.source, name_span.start, value.span.end),
             value,
+            mutable: inferred,
             update: false,
             preserve_error,
         })

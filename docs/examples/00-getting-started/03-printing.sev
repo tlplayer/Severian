@@ -2,12 +2,12 @@ print("You can print in global scope before main starts.")
 
 
 value := "one"
-global_fun(value)
+global_func(value)
 value = "two"
-global_fun(value)
+global_func(value)
 
 
-def global_func(value):
+def global_func(value: string):
     print(f"Call functions in global or allocate values like python call:{value}")
 
 def main():
@@ -16,8 +16,8 @@ def main():
 test with integ:
     main()
     print("or in tests")
-    assert("""
-    You can print in global scope before main starts,
-    or inside main
-    or in tests
-    """ in stdout)
+    assert("You can print in global scope before main starts." in stdout)
+    assert("Call functions in global or allocate values like python call:one" in stdout)
+    assert("Call functions in global or allocate values like python call:two" in stdout)
+    assert("Or inside main" in stdout)
+    assert("or in tests" in stdout)

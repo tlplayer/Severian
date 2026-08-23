@@ -8,6 +8,9 @@ pub struct Binding {
     pub variable: VariableId,
     pub type_id: TypeId,
     pub value: Expression,
+    /// Whether the source variable was declared with `:=` and may therefore
+    /// receive later assignments.
+    pub mutable: bool,
     /// True for `?=`. False means a fallible value is unwrapped and its error
     /// path is propagated when result lowering is available.
     pub preserve_error: bool,

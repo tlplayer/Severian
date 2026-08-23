@@ -6,6 +6,9 @@ pub struct Binding {
     pub name: String,
     pub annotation: Option<TypeAnnotation>,
     pub value: Expression,
+    /// `:=` declares mutable storage. Bindings declared with `=` are
+    /// immutable after initialization.
+    pub mutable: bool,
     /// Compound assignment creates a new SSA binding for an existing source
     /// name instead of declaring a second lexical name.
     pub update: bool,

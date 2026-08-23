@@ -7,7 +7,7 @@ use severian_diagnostics::Diagnostic;
 use severian_hir::{Expression, ExpressionKind, FunctionId, Program, Statement};
 use severian_modules::{ModuleGraph, ModuleId, PackageId};
 use severian_universal::{DeclarationId, DefId, TypeId, UniversalContext};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod generic;
 #[cfg(test)]
@@ -575,6 +575,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
         let mut scope = Scope::default();
         let mut exports = ExportMap::new();
         let mut items = Vec::new();
+        let mut module_bindings = BTreeSet::new();
         for item in &module.ast.items {
             if let Item::Import(import) = item {
                 let subject = match &import.subject {
@@ -657,13 +658,17 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     &declaration.name,
                     DefKind::Type,
                 ),
-                Item::Binding(binding) if !binding.update => item_identity(
-                    module.package,
-                    module.id,
-                    "constant",
-                    &binding.name,
-                    DefKind::Constant,
-                ),
+                Item::Binding(binding)
+                    if !binding.update && module_bindings.insert(binding.name.clone()) =>
+                {
+                    item_identity(
+                        module.package,
+                        module.id,
+                        "constant",
+                        &binding.name,
+                        DefKind::Constant,
+                    )
+                }
                 Item::Import(_) => unreachable!("imports are collected above"),
                 _ => continue,
             };

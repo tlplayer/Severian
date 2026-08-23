@@ -248,7 +248,7 @@ pub(crate) fn lower_program(
                 globals.push(GlobalDecl {
                     id,
                     ty: binding.type_id,
-                    mutable: true,
+                    mutable: binding.mutable,
                 });
                 global_bindings.insert(binding.id, place.clone());
                 global_variables.insert(binding.variable, place);
@@ -319,7 +319,7 @@ fn collect_global_bindings(
                 globals.push(GlobalDecl {
                     id,
                     ty: binding.type_id,
-                    mutable: true,
+                    mutable: binding.mutable,
                 });
                 let place = Place::global(id);
                 variables.insert(binding.variable, place.clone());
@@ -512,7 +512,7 @@ impl BodyBuilder {
                 let place = if let Some(place) = self.variables.get(&binding.variable) {
                     place.clone()
                 } else {
-                    let local = self.local(binding.type_id, true, false);
+                    let local = self.local(binding.type_id, binding.mutable, false);
                     let place = Place::local(local);
                     self.push(Statement::StorageLive(local));
                     self.variables.insert(binding.variable, place.clone());
