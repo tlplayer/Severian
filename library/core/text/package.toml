@@ -1,0 +1,12 @@
+[package]
+name = "text"
+version = "0.1.0"
+edition = "2026"
+description = "Core textual conversion and type names"
+
+[package.unsafe]
+capabilities = ["native-abi"]
+sources = ["src/lib.sev"]
+
+[lib]
+path = "src/lib.sev"

@@ -1,0 +1,11 @@
+@c(symbol = "__sev_process_run")
+def run(command: string) -> int
+
+@c(symbol = "__sev_process_spawn")
+def spawn(command: string) -> int
+
+@c(symbol = "__sev_process_kill")
+def kill(process: int) -> bool
+
+@c(symbol = "__sev_process_wait")
+def wait(process: int) -> int

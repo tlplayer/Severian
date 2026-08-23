@@ -532,9 +532,12 @@ impl Compiler {
             .nth(3)
             .expect("the driver crate is nested below the repository root");
         let standard = [
+            ("environment", repository.join("library/system/environment")),
             ("file", repository.join("library/system/file")),
+            ("io", repository.join("library/system/io")),
             ("os", repository.join("library/system/os")),
             ("path", repository.join("library/system/path")),
+            ("process", repository.join("library/system/process")),
         ];
         let mut next = packages
             .packages
@@ -847,6 +850,24 @@ fn with_core_prelude(
     });
     module.items.extend(size.items);
 
+    let text = SourceFile::virtual_source(
+        "core/text/src/lib.sev",
+        include_str!("../../../../../library/core/text/src/lib.sev"),
+    );
+    let tokens = severian_lexer::scan(&text).map_err(CompileError::Diagnostic)?;
+    let mut text = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    text.items.retain(|item| match item {
+        severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
+            function
+                .parameters
+                .iter()
+                .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
+                && boundary_type_is_available(&function.result, types)
+        }
+        _ => true,
+    });
+    module.items.extend(text.items);
+
     let prelude = SourceFile::virtual_source(
         "core/prelude.sev",
         include_str!("../../../../../library/core/prelude.sev"),
@@ -997,6 +1018,23 @@ mod tests {
             .unwrap()
             .compile_file(&root.join("root.sev"), &root.join("program"))
             .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bare_sources_receive_the_compiler_standard_package_set() {
+        let root = temporary_package();
+        let source = root.join("root.sev");
+        std::fs::write(&source, "def main():\n    print(\"ready\")\n").unwrap();
+        let compiler = Compiler::new(TargetSpec::host()).unwrap();
+        let graph = compiler.standard_package_graph(&source).unwrap();
+        let dependencies = &graph.packages[&graph.root].dependencies;
+        for package in ["environment", "file", "io", "os", "path", "process"] {
+            assert!(
+                dependencies.contains_key(package),
+                "missing standard package {package}"
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

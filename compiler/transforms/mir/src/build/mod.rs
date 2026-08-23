@@ -166,7 +166,10 @@ impl Builder {
         block: &mut Block,
     ) {
         let span_start = match statement {
-            Statement::FieldUpdate { value, .. } => Some(value.span.start),
+            Statement::Sequence(_) => None,
+            Statement::FieldUpdate { value, .. } | Statement::FieldSet { value, .. } => {
+                Some(value.span.start)
+            }
             Statement::Binding(id) => module
                 .bindings
                 .iter()
@@ -194,6 +197,11 @@ impl Builder {
             });
         }
         match statement {
+            Statement::Sequence(sequence) => {
+                for statement in &sequence.statements {
+                    self.statement(statement, module, block);
+                }
+            }
             Statement::FieldUpdate {
                 binding,
                 field,
@@ -229,6 +237,23 @@ impl Builder {
                     object,
                     field: *field,
                     value: updated_field,
+                    result: updated_object,
+                });
+                self.bindings.insert(*binding, updated_object);
+            }
+            Statement::FieldSet {
+                binding,
+                field,
+                value,
+            } => {
+                let object = self.bindings[binding];
+                let object_type = self.module.values[object.0 as usize].type_id;
+                let value = self.expression(value, block);
+                let updated_object = self.value(object_type);
+                block.operations.push(Operation::FieldSet {
+                    object,
+                    field: *field,
+                    value,
                     result: updated_object,
                 });
                 self.bindings.insert(*binding, updated_object);

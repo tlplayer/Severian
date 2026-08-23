@@ -1,0 +1,8 @@
+[package]
+name = "environment"
+version = "0.1.0"
+edition = "2026"
+description = "Process environment available to every Severian compilation"
+
+[lib]
+path = "src/lib.sev"

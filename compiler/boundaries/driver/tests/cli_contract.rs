@@ -396,7 +396,7 @@ fn test_runs_compiler_expectations_and_continues_after_source_errors() {
     .unwrap();
     fs::write(
         root.join("invalid.sev"),
-        "test:\n    assert([1, 2] == [1, 2])\n",
+        "test:\n    assert([1, 2] == [\"one\", \"two\"])\n",
     )
     .unwrap();
 

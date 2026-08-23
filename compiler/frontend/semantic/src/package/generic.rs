@@ -59,6 +59,10 @@ fn validate_generic_statements(
                     names.insert(binding.name.clone(), parameter);
                 }
             }
+            severian_ast::Statement::FieldAssignment { object, value, .. } => {
+                validate_generic_expression(object, names, function, index, types)?;
+                validate_generic_expression(value, names, function, index, types)?;
+            }
             severian_ast::Statement::Expression(expression)
             | severian_ast::Statement::Return {
                 value: Some(expression),
@@ -97,6 +101,30 @@ fn validate_generic_statements(
                     types,
                 )?;
             }
+            severian_ast::Statement::While {
+                condition,
+                initializer,
+                body,
+                ..
+            } => {
+                let mut loop_names = names.clone();
+                if let Some(initializer) = initializer {
+                    validate_generic_expression(
+                        &initializer.value,
+                        &loop_names,
+                        function,
+                        index,
+                        types,
+                    )?;
+                }
+                validate_generic_expression(condition, &loop_names, function, index, types)?;
+                validate_generic_statements(body, &mut loop_names, function, index, types)?;
+            }
+            severian_ast::Statement::For { iterable, body, .. } => {
+                validate_generic_expression(iterable, names, function, index, types)?;
+                validate_generic_statements(body, &mut names.clone(), function, index, types)?;
+            }
+            severian_ast::Statement::Break { .. } | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Match { subject, cases, .. } => {
                 validate_generic_expression(subject, names, function, index, types)?;
                 for case in cases {
@@ -125,7 +153,7 @@ fn validate_generic_expression(
     match &expression.kind {
         Expression::Name(name) => Ok(names.get(name).cloned()),
         Expression::Literal(_) => Ok(None),
-        Expression::List(values) => {
+        Expression::List(values) | Expression::Tuple(values) => {
             for value in values {
                 validate_generic_expression(value, names, function, index, types)?;
             }
@@ -133,6 +161,26 @@ fn validate_generic_expression(
         }
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
+        }
+        Expression::Index {
+            object,
+            index: offset,
+        } => {
+            let object = validate_generic_expression(object, names, function, index, types)?;
+            validate_generic_expression(offset, names, function, index, types)?;
+            Ok(object)
+        }
+        Expression::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            let object = validate_generic_expression(object, names, function, index, types)?;
+            for bound in [start, end, step].into_iter().flatten() {
+                validate_generic_expression(bound, names, function, index, types)?;
+            }
+            Ok(object)
         }
         Expression::TypeApplication { callee, .. } => {
             validate_generic_expression(callee, names, function, index, types)
@@ -155,7 +203,9 @@ fn validate_generic_expression(
                         severian_universal::UnaryOperator::Negative
                     }
                     severian_ast::UnaryOperator::Not => severian_universal::UnaryOperator::Not,
-                    severian_ast::UnaryOperator::Move => return Ok(parameter.clone().into()),
+                    severian_ast::UnaryOperator::Copy | severian_ast::UnaryOperator::Move => {
+                        return Ok(parameter.clone().into())
+                    }
                 };
                 if !parameter_allows_unary(parameter, operator, function, index, types) {
                     return Err(missing_operator_constraint(
@@ -276,7 +326,7 @@ fn ast_binary(operator: severian_ast::BinaryOperator) -> severian_universal::Bin
         Ast::Divide => Universal::Divide,
         Ast::Remainder => Universal::Remainder,
         Ast::Power => Universal::Power,
-        Ast::Equal => Universal::Equal,
+        Ast::Equal | Ast::Identity => Universal::Equal,
         Ast::NotEqual => Universal::NotEqual,
         Ast::Less => Universal::Less,
         Ast::LessEqual => Universal::LessEqual,
@@ -602,6 +652,24 @@ fn visit_statements_for_specializations(
                     names.insert(binding.name.clone(), ty);
                 }
             }
+            severian_ast::Statement::FieldAssignment { object, value, .. } => {
+                visit_expression_for_specializations(
+                    module,
+                    object,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_expression_for_specializations(
+                    module,
+                    value,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
             severian_ast::Statement::Expression(expression) => {
                 visit_expression_for_specializations(
                     module,
@@ -678,6 +746,58 @@ fn visit_statements_for_specializations(
                     specializations,
                 )?;
             }
+            severian_ast::Statement::While {
+                condition,
+                initializer,
+                body,
+                ..
+            } => {
+                if let Some(initializer) = initializer {
+                    visit_expression_for_specializations(
+                        module,
+                        &initializer.value,
+                        None,
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
+                visit_expression_for_specializations(
+                    module,
+                    condition,
+                    Some("bool"),
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_statements_for_specializations(
+                    module,
+                    body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+            }
+            severian_ast::Statement::For { iterable, body, .. } => {
+                visit_expression_for_specializations(
+                    module,
+                    iterable,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_statements_for_specializations(
+                    module,
+                    body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+            }
+            severian_ast::Statement::Break { .. } | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Match { subject, cases, .. } => {
                 visit_expression_for_specializations(
                     module,
@@ -781,6 +901,52 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
+        severian_ast::ExpressionKind::Index {
+            object,
+            index: offset,
+        } => {
+            visit_expression_for_specializations(
+                module,
+                object,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+            visit_expression_for_specializations(
+                module,
+                offset,
+                None,
+                names,
+                index,
+                specializations,
+            )?;
+        }
+        severian_ast::ExpressionKind::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            visit_expression_for_specializations(
+                module,
+                object,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+            for bound in [start, end, step].into_iter().flatten() {
+                visit_expression_for_specializations(
+                    module,
+                    bound,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+        }
         severian_ast::ExpressionKind::TypeApplication { callee, .. } => {
             visit_expression_for_specializations(
                 module,
@@ -819,7 +985,8 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
-        severian_ast::ExpressionKind::List(values) => {
+        severian_ast::ExpressionKind::List(values)
+        | severian_ast::ExpressionKind::Tuple(values) => {
             for value in values {
                 visit_expression_for_specializations(
                     module,
@@ -904,7 +1071,7 @@ fn expression_type_name(
             }
             .to_owned(),
         ),
-        severian_ast::ExpressionKind::List(_) => None,
+        severian_ast::ExpressionKind::List(_) | severian_ast::ExpressionKind::Tuple(_) => None,
         _ => None,
     }
 }

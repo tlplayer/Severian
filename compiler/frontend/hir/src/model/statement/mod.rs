@@ -15,11 +15,17 @@ pub struct Binding {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
+    Sequence(Block),
     Binding(BindingId),
     FieldUpdate {
         binding: BindingId,
         field: u32,
         operator: BinaryOperator,
+        value: Expression,
+    },
+    FieldSet {
+        binding: BindingId,
+        field: u32,
         value: Expression,
     },
     Expression(Expression),

@@ -212,3 +212,18 @@ pub struct ClassDeclaration {
     pub methods: Vec<FunctionDeclaration>,
     pub span: Span,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<PropertyDeclaration>,
+    pub transitions: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDeclaration {
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}

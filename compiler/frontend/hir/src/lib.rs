@@ -126,6 +126,7 @@ pub enum TestStream {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestExpectation {
     Contains { stream: TestStream, value: String },
+    Excludes { stream: TestStream, value: String },
     Equals { stream: TestStream, value: String },
 }
 

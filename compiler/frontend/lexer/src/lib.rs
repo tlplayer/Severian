@@ -77,6 +77,30 @@ mod tests {
     }
 
     #[test]
+    fn scans_hexadecimal_literals_as_canonical_integers() {
+        let source = SourceFile::virtual_source("hex.sev", "0xFF 0xFE00_0000");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Integer("255".into())));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Integer("4261412864".into())));
+    }
+
+    #[test]
+    fn quoted_strings_decode_common_escapes() {
+        let source = SourceFile::virtual_source(
+            "escaped-string.sev",
+            "value = \"{\\\"enabled\\\": true}\\n\"\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| { token.kind == TokenKind::String("{\"enabled\": true}\n".into()) }));
+    }
+
+    #[test]
     fn block_strings_remove_structural_indentation_and_preserve_lines() {
         let source = SourceFile::virtual_source(
             "block-string.sev",

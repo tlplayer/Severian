@@ -2,3 +2,5 @@
 # foreign-provider details remain in the package that implements the function.
 import print from io
 import size from size
+import string from text
+import type from text

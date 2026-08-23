@@ -26,6 +26,7 @@ pub enum TokenKind {
     Power,
     EqualEqual,
     NotEqual,
+    Bang,
     Less,
     LessEqual,
     Greater,

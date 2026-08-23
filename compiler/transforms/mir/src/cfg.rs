@@ -317,6 +317,19 @@ impl BodyBuilder {
         module: &severian_hir::Module,
     ) {
         match statement {
+            severian_hir::Statement::Sequence(block) => {
+                self.lower_statements(&block.statements, module);
+            }
+            severian_hir::Statement::FieldSet {
+                binding,
+                field,
+                value,
+            } => {
+                let mut place = self.bindings[binding].clone();
+                place.projection.push(Projection::Field(*field));
+                let value = Operand::Copy(self.expression(value));
+                self.push(Statement::Assign(place, Rvalue::Use(value)));
+            }
             severian_hir::Statement::FieldUpdate {
                 binding,
                 field,

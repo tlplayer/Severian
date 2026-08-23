@@ -1,0 +1,35 @@
+@c(symbol = "__sev_string_identity")
+def string(value: string) -> string
+
+@c(symbol = "__sev_string_from_int")
+def string(value: int) -> string
+
+@c(symbol = "__sev_string_from_float")
+def string(value: float) -> string
+
+@c(symbol = "__sev_string_from_bool")
+def string(value: bool) -> string
+
+@c(symbol = "__sev_string_from_char")
+def string(value: char) -> string
+
+@c(symbol = "__sev_string_from_usize")
+def string(value: usize) -> string
+
+@c(symbol = "__sev_type_string")
+def type(value: string) -> string
+
+@c(symbol = "__sev_type_int")
+def type(value: int) -> string
+
+@c(symbol = "__sev_type_float")
+def type(value: float) -> string
+
+@c(symbol = "__sev_type_bool")
+def type(value: bool) -> string
+
+@c(symbol = "__sev_type_char")
+def type(value: char) -> string
+
+@c(symbol = "__sev_type_usize")
+def type(value: usize) -> string

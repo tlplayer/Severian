@@ -144,6 +144,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 2;
                 TokenKind::NotEqual
             }
+            b'!' => one(&mut cursor, TokenKind::Bang),
             b'<' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 TokenKind::LessEqual
@@ -231,7 +232,11 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                             Some(Span::new(source.id, start as u32, cursor as u32)),
                         ));
                     }
-                    cursor += 1;
+                    if bytes[cursor] == b'\\' {
+                        cursor = (cursor + 2).min(bytes.len());
+                    } else {
+                        cursor += 1;
+                    }
                 }
                 if cursor == bytes.len() {
                     return Err(Diagnostic::new(
@@ -240,7 +245,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                         Some(Span::new(source.id, start as u32, cursor as u32)),
                     ));
                 }
-                let value = source.text[content_start..cursor].to_owned();
+                let value = unescape_string(&source.text[content_start..cursor]);
                 cursor += 1;
                 TokenKind::String(value)
             }
@@ -298,6 +303,31 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                     cursor += 1;
                 }
                 continue;
+            }
+            b'0' if matches!(bytes.get(cursor + 1), Some(b'x' | b'X')) => {
+                cursor += 2;
+                let digits_start = cursor;
+                while cursor < bytes.len()
+                    && (bytes[cursor].is_ascii_hexdigit() || bytes[cursor] == b'_')
+                {
+                    cursor += 1;
+                }
+                let digits = source.text[digits_start..cursor].replace('_', "");
+                if digits.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000101",
+                        "hexadecimal literals require at least one digit",
+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+                    ));
+                }
+                let value = u128::from_str_radix(&digits, 16).map_err(|_| {
+                    Diagnostic::new(
+                        "E000101",
+                        "hexadecimal literal is too large",
+                        Some(Span::new(source.id, start as u32, cursor as u32)),
+                    )
+                })?;
+                TokenKind::Integer(value.to_string())
             }
             byte if byte.is_ascii_digit() => {
                 cursor += 1;
@@ -380,6 +410,28 @@ fn data_size_literal(source: &str, start: usize, suffix_start: usize) -> Option<
     let magnitude = source.get(start..suffix_start)?.replace('_', "");
     let value = magnitude.parse::<u128>().ok()?.checked_mul(scale)?;
     Some((end, value.to_string()))
+}
+
+fn unescape_string(raw: &str) -> String {
+    let mut characters = raw.chars();
+    let mut value = String::with_capacity(raw.len());
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            value.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('n') => value.push('\n'),
+            Some('r') => value.push('\r'),
+            Some('t') => value.push('\t'),
+            Some('0') => value.push('\0'),
+            Some('"') => value.push('"'),
+            Some('\\') => value.push('\\'),
+            Some(other) => value.push(other),
+            None => value.push('\\'),
+        }
+    }
+    value
 }
 
 fn character_error(source: &SourceFile, start: usize, cursor: usize) -> Diagnostic {

@@ -119,12 +119,16 @@ pub(crate) fn run_with_coverage(
                         TestExpectation::Contains { stream, value } => {
                             (test_stream(stream, &result), value, "contain")
                         }
+                        TestExpectation::Excludes { stream, value } => {
+                            (test_stream(stream, &result), value, "exclude")
+                        }
                         TestExpectation::Equals { stream, value } => {
                             (test_stream(stream, &result), value, "equal")
                         }
                     };
                     let matches = match expectation {
                         TestExpectation::Contains { .. } => actual.contains(expected),
+                        TestExpectation::Excludes { .. } => !actual.contains(expected),
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
                     };
                     (!matches).then(|| {

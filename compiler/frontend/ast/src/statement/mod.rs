@@ -26,6 +26,12 @@ pub struct MatchCase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Binding(Binding),
+    FieldAssignment {
+        object: Expression,
+        field: String,
+        value: Expression,
+        span: Span,
+    },
     Expression(Expression),
     Return {
         value: Option<Expression>,
@@ -40,6 +46,24 @@ pub enum Statement {
         condition: Expression,
         then_block: Vec<Statement>,
         else_block: Vec<Statement>,
+        span: Span,
+    },
+    While {
+        condition: Expression,
+        initializer: Option<Binding>,
+        body: Vec<Statement>,
+        span: Span,
+    },
+    For {
+        binding: String,
+        iterable: Expression,
+        body: Vec<Statement>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
         span: Span,
     },
     Match {

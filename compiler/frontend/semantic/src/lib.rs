@@ -102,6 +102,7 @@ pub(crate) fn analyze_with_package_functions(
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
+        value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
         function_definitions: BTreeMap::new(),
@@ -118,10 +119,14 @@ pub(crate) fn analyze_with_package_functions(
                 _ => None,
             })
             .collect(),
+        enums: BTreeMap::new(),
+        enum_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
+        tuple_types: BTreeMap::new(),
+        tuple_elements: BTreeMap::new(),
         lowered_classes: Vec::new(),
         runtime_functions: Vec::new(),
         runtime_definitions: BTreeMap::new(),
@@ -130,6 +135,7 @@ pub(crate) fn analyze_with_package_functions(
         next_class_type: u32::MAX,
     };
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
+    analyzer.install_enums(ast)?;
     for function in visible_functions {
         analyzer
             .functions
@@ -509,6 +515,7 @@ pub(crate) fn analyze_with_package_functions(
 struct Analyzer<'a> {
     types: &'a TypeContext,
     names: BTreeMap<String, (BindingId, TypeId)>,
+    value_substitutions: BTreeMap<String, Expression>,
     /// Names declared in the current lexical scope. `names` also contains
     /// readable parent bindings, which may be shadowed by this set.
     declarations: BTreeSet<String>,
@@ -520,10 +527,14 @@ struct Analyzer<'a> {
     function_specificity: BTreeMap<FunctionId, u8>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
+    enums: BTreeMap<String, EnumInstance>,
+    enum_variants: BTreeMap<String, (String, usize)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
+    tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
+    tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
     lowered_classes: Vec<HirClassDeclaration>,
     runtime_functions: Vec<FunctionDeclaration>,
     runtime_definitions: BTreeMap<String, DefId>,
@@ -537,6 +548,14 @@ struct ClassInstance {
     fields: Vec<HirClassFieldDeclaration>,
     constructors: Vec<severian_ast::FunctionDeclaration>,
     methods: Vec<severian_ast::FunctionDeclaration>,
+}
+
+#[derive(Debug, Clone)]
+struct EnumInstance {
+    ty: TypeId,
+    name: String,
+    fields: Vec<HirClassFieldDeclaration>,
+    variants: Vec<severian_ast::EnumVariant>,
 }
 
 #[derive(Debug, Clone)]
@@ -567,6 +586,116 @@ impl Prepared {
 }
 
 impl Analyzer<'_> {
+    fn install_enums(&mut self, ast: &severian_ast::Module) -> Result<(), Diagnostic> {
+        let declarations = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Enum(declaration) => Some(declaration),
+                _ => None,
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for declaration in &declarations {
+            let ty = self
+                .class_instances
+                .get(&(declaration.name.clone(), Vec::new()))
+                .map(|instance| instance.ty)
+                .unwrap_or_else(|| {
+                    let ty = TypeId(self.next_class_type);
+                    self.next_class_type = self.next_class_type.saturating_sub(1);
+                    ty
+                });
+            let placeholder = ClassInstance {
+                ty,
+                name: declaration.name.clone(),
+                fields: Vec::new(),
+                constructors: Vec::new(),
+                methods: Vec::new(),
+            };
+            self.class_instances
+                .insert((declaration.name.clone(), Vec::new()), placeholder.clone());
+            self.class_instances_by_type.insert(ty, placeholder);
+            self.enums.insert(
+                declaration.name.clone(),
+                EnumInstance {
+                    ty,
+                    name: declaration.name.clone(),
+                    fields: Vec::new(),
+                    variants: declaration.variants.clone(),
+                },
+            );
+        }
+        let integer = self
+            .types
+            .resolve_name("int")
+            .expect("bootstrap defines int");
+        for declaration in declarations {
+            let ty = self.enums[&declaration.name].ty;
+            let mut fields = vec![HirClassFieldDeclaration {
+                name: "__tag".into(),
+                ty: integer,
+            }];
+            for (ordinal, variant) in declaration.variants.iter().enumerate() {
+                self.enum_variants
+                    .insert(variant.name.clone(), (declaration.name.clone(), ordinal));
+                self.enum_variants.insert(
+                    format!("{}.{}", declaration.name, variant.name),
+                    (declaration.name.clone(), ordinal),
+                );
+                for field in &variant.fields {
+                    let field_type = self.resolve_source_type(&field.annotation)?;
+                    if let Some(existing) = fields.iter().find(|known| known.name == field.name) {
+                        if existing.ty != field_type {
+                            return Err(Diagnostic::new(
+                                "E000204",
+                                format!(
+                                    "enum payload field `{}` has conflicting types",
+                                    field.name
+                                ),
+                                Some(field.span),
+                            ));
+                        }
+                    } else {
+                        fields.push(HirClassFieldDeclaration {
+                            name: field.name.clone(),
+                            ty: field_type,
+                        });
+                    }
+                }
+            }
+            let instance = self.enums.get_mut(&declaration.name).unwrap();
+            instance.fields.clone_from(&fields);
+            self.class_instances.insert(
+                (declaration.name.clone(), Vec::new()),
+                ClassInstance {
+                    ty,
+                    name: declaration.name.clone(),
+                    fields: fields.clone(),
+                    constructors: Vec::new(),
+                    methods: Vec::new(),
+                },
+            );
+            self.class_instances_by_type.insert(
+                ty,
+                ClassInstance {
+                    ty,
+                    name: declaration.name.clone(),
+                    fields: fields.clone(),
+                    constructors: Vec::new(),
+                    methods: Vec::new(),
+                },
+            );
+            self.lowered_classes.retain(|class| class.id != ty);
+            self.lowered_classes.push(HirClassDeclaration {
+                id: ty,
+                name: declaration.name,
+                fields,
+            });
+        }
+        Ok(())
+    }
+
     fn install_package_types(
         &mut self,
         classes: &[PackageClass],
@@ -721,8 +850,177 @@ impl Analyzer<'_> {
         result_type: TypeId,
     ) -> Result<Statement, Diagnostic> {
         match statement {
+            AstStatement::While {
+                condition,
+                initializer,
+                body,
+                span,
+            } => {
+                let Some(initializer) = initializer else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "runtime while loops without an initializer are not lowered yet",
+                        Some(*span),
+                    ));
+                };
+                let initial = static_integer(&initializer.value).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000211",
+                        "while lowering currently requires a literal initializer",
+                        Some(*span),
+                    )
+                })?;
+                let mut sequence = Block::default();
+                sequence
+                    .statements
+                    .push(Statement::Binding(self.binding(initializer, bindings)?));
+                let mut environment = BTreeMap::from([(initializer.name.clone(), initial)]);
+                for _ in 0..10_000 {
+                    if static_boolean(condition, &environment) != Some(true) {
+                        break;
+                    }
+                    let (specialized, control) = specialize_loop_body(body, &mut environment);
+                    let lowered = self.block(&specialized, bindings, result_type)?;
+                    sequence.statements.extend(lowered.statements);
+                    if control == StaticLoopControl::Break {
+                        break;
+                    }
+                }
+                Ok(Statement::Sequence(sequence))
+            }
+            AstStatement::For {
+                binding,
+                iterable,
+                body,
+                span,
+            } => {
+                let values = static_range_values(iterable).ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000211",
+                        "for lowering currently requires `range` with literal bounds",
+                        Some(*span),
+                    )
+                })?;
+                let mut sequence = Block::default();
+                for value in values {
+                    let mut environment = BTreeMap::from([(binding.clone(), value)]);
+                    let (specialized, control) = specialize_loop_body(body, &mut environment);
+                    let value = AstExpression {
+                        kind: AstExpressionKind::Literal(AstLiteral::Integer(value.to_string())),
+                        span: iterable.span,
+                    };
+                    let loop_binding = severian_ast::Binding {
+                        name: binding.clone(),
+                        annotation: None,
+                        value,
+                        update: self.declarations.contains(binding),
+                        preserve_error: false,
+                        span: iterable.span,
+                    };
+                    sequence
+                        .statements
+                        .push(Statement::Binding(self.binding(&loop_binding, bindings)?));
+                    let lowered = self.block(&specialized, bindings, result_type)?;
+                    sequence.statements.extend(lowered.statements);
+                    if control == StaticLoopControl::Break {
+                        break;
+                    }
+                }
+                Ok(Statement::Sequence(sequence))
+            }
+            AstStatement::Break { span } | AstStatement::Continue { span } => Err(Diagnostic::new(
+                "E000211",
+                "loop control must be lowered by its enclosing finite loop",
+                Some(*span),
+            )),
             AstStatement::Binding(binding) => {
                 Ok(Statement::Binding(self.binding(binding, bindings)?))
+            }
+            AstStatement::FieldAssignment {
+                object,
+                field,
+                value,
+                span,
+            } => {
+                let AstExpressionKind::Name(object_name) = &object.kind else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "field assignment requires a named object",
+                        Some(*span),
+                    ));
+                };
+                let existing = self.names.get(object_name).copied();
+                if existing.is_none() {
+                    let candidates = self
+                        .class_instances_by_type
+                        .values()
+                        .filter(|instance| instance.fields.iter().any(|known| known.name == *field))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let [instance] = candidates.as_slice() else {
+                        return Err(Diagnostic::new(
+                            "E000201",
+                            format!("unknown binding `{object_name}`"),
+                            Some(object.span),
+                        ));
+                    };
+                    let mut fields = Vec::with_capacity(instance.fields.len());
+                    for declaration in &instance.fields {
+                        if declaration.name == *field {
+                            fields.push(self.expression(value, Some(declaration.ty))?);
+                        } else {
+                            fields.push(self.default_expression(declaration.ty, *span)?);
+                        }
+                    }
+                    let id = self.new_binding_id();
+                    self.names.insert(object_name.clone(), (id, instance.ty));
+                    self.declarations.insert(object_name.clone());
+                    bindings.push(Binding {
+                        id,
+                        type_id: instance.ty,
+                        value: Expression {
+                            id: self.next_id(),
+                            type_id: instance.ty,
+                            kind: ExpressionKind::Aggregate {
+                                class: instance.ty,
+                                fields,
+                            },
+                            span: *span,
+                        },
+                        preserve_error: false,
+                        span: *span,
+                    });
+                    return Ok(Statement::Binding(id));
+                }
+                let (binding, object_type) = existing.unwrap();
+                let instance = self
+                    .class_instances_by_type
+                    .get(&object_type)
+                    .cloned()
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000211",
+                            "field assignment requires a class value",
+                            Some(object.span),
+                        )
+                    })?;
+                let Some((index, declaration)) = instance
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, declaration)| declaration.name == *field)
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("class `{}` has no field `{field}`", instance.name),
+                        Some(*span),
+                    ));
+                };
+                Ok(Statement::FieldSet {
+                    binding,
+                    field: index as u32,
+                    value: self.expression(value, Some(declaration.ty))?,
+                })
             }
             AstStatement::Expression(expression) => match self.class_method_update(expression)? {
                 Some(update) => Ok(update),
@@ -819,6 +1117,13 @@ impl Analyzer<'_> {
     ) -> Result<Statement, Diagnostic> {
         let subject = self.expression(subject, None)?;
         let subject_type = subject.type_id;
+        if self
+            .enums
+            .values()
+            .any(|instance| instance.ty == subject_type)
+        {
+            return self.enum_match_statement(subject, cases, span, bindings, result_type);
+        }
         let outer_names = self.names.clone();
         let outer_declarations = self.declarations.clone();
         let mut seen_types = BTreeSet::new();
@@ -893,6 +1198,195 @@ impl Analyzer<'_> {
         Ok(Statement::Match { subject, arms })
     }
 
+    fn enum_match_statement(
+        &mut self,
+        subject: Expression,
+        cases: &[severian_ast::MatchCase],
+        span: severian_source::Span,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Statement, Diagnostic> {
+        let instance = self
+            .enums
+            .values()
+            .find(|instance| instance.ty == subject.type_id)
+            .cloned()
+            .expect("caller selected an enum subject");
+        let integer = self
+            .types
+            .resolve_name("int")
+            .expect("bootstrap defines int");
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let outer_names = self.names.clone();
+        let outer_declarations = self.declarations.clone();
+        let outer_substitutions = self.value_substitutions.clone();
+        let mut handled = BTreeSet::new();
+        let mut lowered = Vec::new();
+        let mut returned = Some(Vec::new());
+        for case in cases {
+            self.names.clone_from(&outer_names);
+            self.declarations.clone_from(&outer_declarations);
+            self.value_substitutions.clone_from(&outer_substitutions);
+            let pattern = case.binding.as_deref().unwrap_or("_");
+            let variant = instance.variants.iter().enumerate().find(|(_, variant)| {
+                pattern == variant.name || pattern == format!("{}.{}", instance.name, variant.name)
+            });
+            let (condition, selected) = if let Some((ordinal, variant)) = variant {
+                if !handled.insert(ordinal) {
+                    return Err(Diagnostic::new(
+                        "E000214",
+                        format!("enum variant `{}` is handled more than once", variant.name),
+                        Some(case.span),
+                    ));
+                }
+                for payload in &variant.fields {
+                    let index = instance
+                        .fields
+                        .iter()
+                        .position(|field| field.name == payload.name)
+                        .expect("enum payload has a lowered field");
+                    let field = &instance.fields[index];
+                    let id = self.next_id();
+                    self.value_substitutions.insert(
+                        payload.name.clone(),
+                        Expression {
+                            id,
+                            type_id: field.ty,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(subject.clone()),
+                                index: index as u32,
+                            },
+                            span: case.span,
+                        },
+                    );
+                }
+                let tag = Expression {
+                    id: self.next_id(),
+                    type_id: integer,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(subject.clone()),
+                        index: 0,
+                    },
+                    span: case.span,
+                };
+                let ordinal = self.integer_expression(&ordinal.to_string(), integer, case.span);
+                (
+                    Some(Expression {
+                        id: self.next_id(),
+                        type_id: boolean,
+                        kind: ExpressionKind::Binary {
+                            operator: BinaryOperator::Equal,
+                            left: Box::new(tag),
+                            right: Box::new(ordinal),
+                        },
+                        span: case.span,
+                    }),
+                    true,
+                )
+            } else if pattern == "_" {
+                (None, true)
+            } else {
+                return Err(Diagnostic::new(
+                    "E000215",
+                    format!("`{pattern}` is not a variant of `{}`", instance.name),
+                    Some(case.span),
+                ));
+            };
+            debug_assert!(selected);
+            if let Some(values) = &mut returned {
+                if let [AstStatement::Return {
+                    value: Some(value), ..
+                }] = case.body.as_slice()
+                {
+                    values.push((
+                        condition.clone(),
+                        self.expression(value, Some(result_type))?,
+                    ));
+                } else {
+                    returned = None;
+                }
+            }
+            lowered.push((condition, self.block(&case.body, bindings, result_type)?));
+        }
+        self.names = outer_names;
+        self.declarations = outer_declarations;
+        self.value_substitutions = outer_substitutions;
+        if handled.len() != instance.variants.len()
+            && !lowered.iter().any(|(condition, _)| condition.is_none())
+        {
+            return Err(Diagnostic::new(
+                "E000216",
+                format!("match does not cover every `{}` variant", instance.name),
+                Some(span),
+            ));
+        }
+        if let Some(mut values) = returned {
+            let Some((_, mut selected)) = values.pop() else {
+                return Err(Diagnostic::new(
+                    "E000216",
+                    "an enum match requires at least one arm",
+                    Some(span),
+                ));
+            };
+            let suffix = self.select_runtime_suffix(result_type, span)?;
+            while let Some((condition, value)) = values.pop() {
+                let Some(condition) = condition else {
+                    selected = value;
+                    continue;
+                };
+                selected = self.runtime_call(
+                    &format!("__sev_select_{suffix}"),
+                    &[boolean, result_type, result_type],
+                    result_type,
+                    vec![condition, value, selected],
+                    span,
+                );
+            }
+            return Ok(Statement::Return(Some(selected)));
+        }
+        let mut lowered = lowered.into_iter().rev();
+        let Some((_last_condition, last_body)) = lowered.next() else {
+            return Err(Diagnostic::new(
+                "E000216",
+                "an enum match requires at least one arm",
+                Some(span),
+            ));
+        };
+        let mut tail = last_body;
+        let mut nested = false;
+        for (condition, body) in lowered {
+            if let Some(condition) = condition {
+                nested = true;
+                tail = Block {
+                    statements: vec![Statement::If {
+                        condition,
+                        then_block: body,
+                        else_block: tail,
+                    }],
+                };
+            } else {
+                tail = body;
+            }
+        }
+        if nested && tail.statements.len() == 1 {
+            return Ok(tail.statements.into_iter().next().unwrap());
+        }
+        let condition = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+            span,
+        };
+        Ok(Statement::If {
+            condition,
+            then_block: tail.clone(),
+            else_block: tail,
+        })
+    }
+
     fn block(
         &mut self,
         statements: &[AstStatement],
@@ -956,7 +1450,16 @@ impl Analyzer<'_> {
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
             AstExpressionKind::Literal(value) => {
-                let value = universal_literal(value);
+                let value = if matches!(value, AstLiteral::None)
+                    && expected.is_some_and(|expected| {
+                        self.types
+                            .definition(expected)
+                            .is_some_and(|definition| definition.name == "string")
+                    }) {
+                    LiteralValue::String(String::new())
+                } else {
+                    universal_literal(value)
+                };
                 let type_id = self
                     .types
                     .resolve_literal(&value, expected)
@@ -969,24 +1472,123 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::List(values) => {
-                let Some(list_type) = expected.filter(|ty| self.list_elements.contains_key(ty))
-                else {
+                if values.is_empty()
+                    && expected.is_none_or(|ty| !self.list_elements.contains_key(&ty))
+                {
                     return Err(Diagnostic::new(
                         "E000204",
                         "a list literal requires an expected `list[T]` type",
                         Some(ast.span),
                     ));
+                }
+                let (list_type, element) = if let Some(list_type) =
+                    expected.filter(|ty| self.list_elements.contains_key(ty))
+                {
+                    (list_type, self.list_elements[&list_type])
+                } else {
+                    let first = self.expression(&values[0], None)?;
+                    let element = first.type_id;
+                    (self.instantiate_list_type(element), element)
                 };
-                if !values.is_empty() {
-                    return Err(Diagnostic::new(
-                        "E000211",
-                        "non-empty list literal lowering is not implemented on this path",
-                        Some(ast.span),
+                let list = self.empty_list_expression(list_type, ast.span)?;
+                if values.is_empty() {
+                    return Ok(list);
+                }
+                let storage_type = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines pointer-backed string");
+                let suffix = self.list_runtime_suffix(element, ast.span)?;
+                let symbol = format!("__sev_list_append_{suffix}");
+                let mut storage = self.list_storage_expression(list, ast.span);
+                for value in values {
+                    let value = self.expression(value, Some(element))?;
+                    storage = self.runtime_call(
+                        &symbol,
+                        &[storage_type, element],
+                        storage_type,
+                        vec![storage, value],
+                        ast.span,
+                    );
+                }
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: list_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: list_type,
+                        fields: vec![storage],
+                    },
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::Tuple(values) => {
+                if values.is_empty() {
+                    return self.expression(
+                        &AstExpression {
+                            kind: AstExpressionKind::Literal(AstLiteral::Unit),
+                            span: ast.span,
+                        },
+                        expected,
+                    );
+                }
+                let mut fields = Vec::with_capacity(values.len());
+                for value in values {
+                    fields.push(self.expression(value, None)?);
+                }
+                let element_types = fields.iter().map(|field| field.type_id).collect::<Vec<_>>();
+                let tuple_type = self.instantiate_tuple_type(&element_types);
+                if expected.is_some_and(|expected| expected != tuple_type) {
+                    return Err(semantic_error(
+                        "tuple does not satisfy the expected type".into(),
+                        ast.span,
                     ));
                 }
-                self.empty_list_expression(list_type, ast.span)
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: tuple_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: tuple_type,
+                        fields,
+                    },
+                    span: ast.span,
+                })
             }
             AstExpressionKind::Name(name) => {
+                if name == "absent" {
+                    let Some(expected) = expected else {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            "`absent` requires an optional expected type",
+                            Some(ast.span),
+                        ));
+                    };
+                    if self
+                        .types
+                        .definition(expected)
+                        .is_some_and(|definition| definition.name == "string")
+                    {
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: expected,
+                            kind: ExpressionKind::Literal(LiteralValue::String(String::new())),
+                            span: ast.span,
+                        });
+                    }
+                }
+                if self.enum_variants.contains_key(name) {
+                    return self.enum_constructor(name, &[], expected, ast.span);
+                }
+                if let Some(value) = self.value_substitutions.get(name).cloned() {
+                    if expected
+                        .is_some_and(|expected| !self.types.assignable(value.type_id, expected))
+                    {
+                        return Err(semantic_error(
+                            "substituted value does not satisfy the expected type".into(),
+                            ast.span,
+                        ));
+                    }
+                    return Ok(value);
+                }
                 let Some((binding, type_id)) = self.names.get(name).copied() else {
                     return Err(Diagnostic::new(
                         "E000201",
@@ -1008,6 +1610,11 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Member { object, name } => {
+                if let Some(path) = callable_path(ast) {
+                    if self.enum_variants.contains_key(&path) {
+                        return self.enum_constructor(&path, &[], expected, ast.span);
+                    }
+                }
                 let object = self.expression(object, None)?;
                 let Some(instance) = self.class_instances_by_type.get(&object.type_id) else {
                     return Err(Diagnostic::new(
@@ -1045,12 +1652,176 @@ impl Analyzer<'_> {
                     span: ast.span,
                 })
             }
+            AstExpressionKind::Index { object, index } => {
+                let object = self.expression(object, None)?;
+                if let Some(elements) = self.tuple_elements.get(&object.type_id).cloned() {
+                    let index_span = index.span;
+                    let AstExpressionKind::Literal(AstLiteral::Integer(index)) = &index.kind else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "tuple indices must be integer literals",
+                            Some(index.span),
+                        ));
+                    };
+                    let index = index.parse::<usize>().map_err(|_| {
+                        Diagnostic::new("E000211", "invalid tuple index", Some(index_span))
+                    })?;
+                    let Some(element) = elements.get(index).copied() else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "tuple index is out of bounds",
+                            Some(ast.span),
+                        ));
+                    };
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: element,
+                        kind: ExpressionKind::Field {
+                            object: Box::new(object),
+                            index: index as u32,
+                        },
+                        span: ast.span,
+                    });
+                }
+                let Some(element) = self.list_elements.get(&object.type_id).copied() else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "indexing is not implemented for this type",
+                        Some(ast.span),
+                    ));
+                };
+                if expected.is_some_and(|expected| !self.types.assignable(element, expected)) {
+                    return Err(semantic_error(
+                        "indexed value does not satisfy the expected type".into(),
+                        ast.span,
+                    ));
+                }
+                let index = self.expression(index, None)?;
+                let index_name = self
+                    .types
+                    .definition(index.type_id)
+                    .map(|definition| definition.name.as_str());
+                if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "list indices must be integers",
+                        Some(index.span),
+                    ));
+                }
+                let storage = self.list_storage_expression(object, ast.span);
+                let storage_type = storage.type_id;
+                let suffix = self.list_runtime_suffix(element, ast.span)?;
+                Ok(self.runtime_call(
+                    &format!("__sev_list_get_{suffix}"),
+                    &[storage_type, index.type_id],
+                    element,
+                    vec![storage, index],
+                    ast.span,
+                ))
+            }
+            AstExpressionKind::Slice {
+                object,
+                start,
+                end,
+                step,
+            } => {
+                let object_value = self.expression(object, None)?;
+                if let Some(elements) = self.tuple_elements.get(&object_value.type_id).cloned() {
+                    let reverse = start.is_none()
+                        && end.is_none()
+                        && step.as_deref().is_some_and(|step| {
+                            matches!(
+                                &step.kind,
+                                AstExpressionKind::Unary {
+                                    operator: AstUnaryOperator::Negative,
+                                    operand
+                                } if matches!(operand.kind, AstExpressionKind::Literal(AstLiteral::Integer(ref value)) if value == "1")
+                            )
+                        });
+                    if !reverse {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "tuple slicing currently supports `[::-1]`",
+                            Some(ast.span),
+                        ));
+                    }
+                    let reversed_types = elements.iter().rev().copied().collect::<Vec<_>>();
+                    let result_type = self.instantiate_tuple_type(&reversed_types);
+                    let mut fields = Vec::with_capacity(elements.len());
+                    for (index, element) in elements.iter().enumerate().rev() {
+                        fields.push(Expression {
+                            id: self.next_id(),
+                            type_id: *element,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(object_value.clone()),
+                                index: index as u32,
+                            },
+                            span: ast.span,
+                        });
+                    }
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: result_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: result_type,
+                            fields,
+                        },
+                        span: ast.span,
+                    });
+                }
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                if object_value.type_id != string {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "slicing is not implemented for this type",
+                        Some(ast.span),
+                    ));
+                }
+                let object = object_value;
+                if expected.is_some_and(|expected| !self.types.assignable(string, expected)) {
+                    return Err(semantic_error(
+                        "slice result does not satisfy the expected type".into(),
+                        ast.span,
+                    ));
+                }
+                let start = match start {
+                    Some(start) => self.expression(start, Some(integer))?,
+                    None => self.integer_expression("0", integer, ast.span),
+                };
+                let end = match end {
+                    Some(end) => self.expression(end, Some(integer))?,
+                    None => self.integer_expression("9223372036854775807", integer, ast.span),
+                };
+                let step = match step {
+                    Some(step) => self.expression(step, Some(integer))?,
+                    None => self.integer_expression("1", integer, ast.span),
+                };
+                Ok(self.runtime_call(
+                    "__sev_string_slice",
+                    &[string, integer, integer, integer],
+                    string,
+                    vec![object, start, end, step],
+                    ast.span,
+                ))
+            }
             AstExpressionKind::TypeApplication { .. } => Err(Diagnostic::new(
                 "E000211",
                 "a generic type application must be constructed",
                 Some(ast.span),
             )),
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(path) = callable_path(callee) {
+                    if self.enum_variants.contains_key(&path) {
+                        return self.enum_constructor(&path, arguments, expected, ast.span);
+                    }
+                }
                 if let Some((class, type_arguments)) = class_application(callee) {
                     return self.class_constructor(
                         class,
@@ -1061,9 +1832,16 @@ impl Analyzer<'_> {
                     );
                 }
                 if let AstExpressionKind::Name(class) = &callee.kind {
-                    if self.classes.contains_key(class) {
+                    if self
+                        .classes
+                        .get(class)
+                        .is_some_and(|declaration| !declaration.type_parameters.is_empty())
+                    {
                         return self
                             .inferred_class_constructor(class, arguments, expected, ast.span);
+                    }
+                    if self.classes.contains_key(class) {
+                        return self.class_constructor(class, &[], arguments, expected, ast.span);
                     }
                 }
                 if callable_path(callee).as_deref() == Some("size") && arguments.len() == 1 {
@@ -1080,6 +1858,24 @@ impl Analyzer<'_> {
                             &[storage_type],
                             result,
                             vec![storage],
+                            ast.span,
+                        ));
+                    }
+                }
+                if callable_path(callee).as_deref() == Some("print") && arguments.len() == 1 {
+                    let value = self.expression(&arguments[0].value, None)?;
+                    if self.tuple_elements.contains_key(&value.type_id) {
+                        let rendered = self.tuple_string(value, ast.span)?;
+                        let string = rendered.type_id;
+                        let result = self
+                            .types
+                            .resolve_name("i32")
+                            .expect("bootstrap defines i32");
+                        return Ok(self.runtime_call(
+                            "__sev_print_string",
+                            &[string],
+                            result,
+                            vec![rendered],
                             ast.span,
                         ));
                     }
@@ -1165,9 +1961,11 @@ impl Analyzer<'_> {
                             .zip(&signature.parameters)
                             .map(|(argument, parameter)| {
                                 conversion_rank(self.types, argument.type_id, parameter.type_id)
-                                    .expect("resolved arguments are assignable")
                             })
-                            .collect::<Vec<_>>();
+                            .collect::<Option<Vec<_>>>();
+                        let Some(conversions) = conversions else {
+                            continue;
+                        };
                         matches.push((
                             conversions,
                             self.function_specificity[&function],
@@ -1213,6 +2011,32 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Unary { operator, operand } => {
+                if *operator == AstUnaryOperator::Copy {
+                    let operand = self.expression(operand, expected)?;
+                    let Some(element) = self.list_elements.get(&operand.type_id).copied() else {
+                        return Ok(operand);
+                    };
+                    let list_type = operand.type_id;
+                    let storage = self.list_storage_expression(operand, ast.span);
+                    let storage_type = storage.type_id;
+                    let suffix = self.list_runtime_suffix(element, ast.span)?;
+                    let copied = self.runtime_call(
+                        &format!("__sev_list_copy_{suffix}"),
+                        &[storage_type],
+                        storage_type,
+                        vec![storage],
+                        ast.span,
+                    );
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: list_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: list_type,
+                            fields: vec![copied],
+                        },
+                        span: ast.span,
+                    });
+                }
                 if *operator == AstUnaryOperator::Move {
                     return Err(Diagnostic::new(
                         "E000302",
@@ -1242,6 +2066,94 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
+                if *operator == AstBinaryOperator::Power
+                    && matches!(
+                        right.kind,
+                        AstExpressionKind::Literal(AstLiteral::Integer(_))
+                    )
+                {
+                    let left = self.expression(left, None)?;
+                    let name = self
+                        .types
+                        .definition(left.type_id)
+                        .map(|definition| definition.name.as_str());
+                    if matches!(name, Some("float" | "f64")) {
+                        let integer = self
+                            .types
+                            .resolve_name("int")
+                            .expect("bootstrap defines int");
+                        let right = self.expression(right, Some(integer))?;
+                        return Ok(self.runtime_call(
+                            "__sev_pow_f64_i64",
+                            &[left.type_id, integer],
+                            left.type_id,
+                            vec![left, right],
+                            ast.span,
+                        ));
+                    }
+                }
+                if matches!(
+                    operator,
+                    AstBinaryOperator::Equal
+                        | AstBinaryOperator::NotEqual
+                        | AstBinaryOperator::Identity
+                ) {
+                    let resolved_left = self.expression(left, None)?;
+                    if let Some(element) = self.list_elements.get(&resolved_left.type_id).copied() {
+                        let list_type = resolved_left.type_id;
+                        let resolved_right = self.expression(right, Some(list_type))?;
+                        let left_storage = self.list_storage_expression(resolved_left, ast.span);
+                        let right_storage = self.list_storage_expression(resolved_right, ast.span);
+                        let storage_type = left_storage.type_id;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        let symbol = if *operator == AstBinaryOperator::Identity {
+                            "__sev_list_identity".to_owned()
+                        } else {
+                            format!(
+                                "__sev_list_equal_{}",
+                                self.list_runtime_suffix(element, ast.span)?
+                            )
+                        };
+                        let comparison = self.runtime_call(
+                            &symbol,
+                            &[storage_type, storage_type],
+                            boolean,
+                            vec![left_storage, right_storage],
+                            ast.span,
+                        );
+                        if *operator == AstBinaryOperator::NotEqual {
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Unary {
+                                    operator: UnaryOperator::Not,
+                                    operand: Box::new(comparison),
+                                },
+                                span: ast.span,
+                            });
+                        }
+                        return Ok(comparison);
+                    }
+                    if *operator == AstBinaryOperator::Identity {
+                        let resolved_right = self.expression(right, Some(resolved_left.type_id))?;
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool"),
+                            kind: ExpressionKind::Binary {
+                                operator: BinaryOperator::Equal,
+                                left: Box::new(resolved_left),
+                                right: Box::new(resolved_right),
+                            },
+                            span: ast.span,
+                        });
+                    }
+                }
                 let operator = universal_binary(*operator);
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
@@ -1282,14 +2194,28 @@ impl Analyzer<'_> {
                 span,
             ));
         }
-        let fields = if arguments.is_empty()
-            && !instance.fields.is_empty()
-            && instance
-                .constructors
+        let constructor = instance
+            .constructors
+            .iter()
+            .find(|constructor| constructor.parameters.len() == arguments.len())
+            .cloned();
+        let fields = if let Some(constructor) = constructor {
+            self.class_constructor_values(&instance, &constructor, arguments, span)?
+        } else if !instance.constructors.is_empty() {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!(
+                    "constructor `{class}` has no overload accepting {} argument(s)",
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        } else if arguments.is_empty() && !instance.fields.is_empty() {
+            instance
+                .fields
                 .iter()
-                .any(|constructor| constructor.parameters.is_empty())
-        {
-            self.class_constructor_defaults(&instance, span)?
+                .map(|field| self.default_expression(field.ty, span))
+                .collect::<Result<Vec<_>, _>>()?
         } else if arguments.len() != instance.fields.len() {
             return Err(Diagnostic::new(
                 "E000221",
@@ -1566,16 +2492,46 @@ impl Analyzer<'_> {
         ty
     }
 
-    fn class_constructor_defaults(
+    fn instantiate_tuple_type(&mut self, elements: &[TypeId]) -> TypeId {
+        if let Some(ty) = self.tuple_types.get(elements) {
+            return *ty;
+        }
+        let ty = TypeId(self.next_class_type);
+        self.next_class_type = self.next_class_type.saturating_sub(1);
+        let element_names = elements
+            .iter()
+            .map(|element| {
+                self.types
+                    .definition(*element)
+                    .map(|definition| definition.name.clone())
+                    .unwrap_or_else(|| format!("type#{}", element.0))
+            })
+            .collect::<Vec<_>>();
+        let fields = elements
+            .iter()
+            .enumerate()
+            .map(|(index, element)| HirClassFieldDeclaration {
+                name: index.to_string(),
+                ty: *element,
+            })
+            .collect::<Vec<_>>();
+        self.tuple_types.insert(elements.to_vec(), ty);
+        self.tuple_elements.insert(ty, elements.to_vec());
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("({})", element_names.join(", ")),
+            fields,
+        });
+        ty
+    }
+
+    fn class_constructor_values(
         &mut self,
         instance: &ClassInstance,
+        constructor: &severian_ast::FunctionDeclaration,
+        arguments: &[severian_ast::CallArgument],
         span: severian_source::Span,
     ) -> Result<Vec<Expression>, Diagnostic> {
-        let constructor = instance
-            .constructors
-            .iter()
-            .find(|constructor| constructor.parameters.is_empty())
-            .expect("caller selected a zero-argument constructor");
         let body = constructor.body.as_ref().ok_or_else(|| {
             Diagnostic::new(
                 "E000211",
@@ -1583,27 +2539,44 @@ impl Analyzer<'_> {
                 Some(constructor.span),
             )
         })?;
-        let mut values = Vec::with_capacity(instance.fields.len());
-        for field in &instance.fields {
-            let initializer = body.iter().find_map(|statement| {
-                let AstStatement::Binding(binding) = statement else {
-                    return None;
-                };
-                (binding.name == field.name).then_some(&binding.value)
-            });
-            let Some(initializer) = initializer else {
-                return Err(Diagnostic::new(
-                    "E000221",
-                    format!(
-                        "constructor `{}` does not initialize field `{}`",
-                        constructor.name, field.name
-                    ),
-                    Some(span),
-                ));
-            };
-            values.push(self.expression(initializer, Some(field.ty))?);
+        let resolved_arguments = arguments
+            .iter()
+            .zip(&constructor.parameters)
+            .map(|(argument, parameter)| {
+                let parameter_type = resolve_type_annotation(self.types, &parameter.annotation)?;
+                self.expression(&argument.value, Some(parameter_type))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let previous = self.value_substitutions.clone();
+        for (parameter, argument) in constructor.parameters.iter().zip(resolved_arguments) {
+            self.value_substitutions
+                .insert(parameter.name.clone(), argument);
         }
-        Ok(values)
+        let values = (|| {
+            let mut values = Vec::with_capacity(instance.fields.len());
+            for field in &instance.fields {
+                let initializer = body.iter().find_map(|statement| {
+                    let AstStatement::Binding(binding) = statement else {
+                        return None;
+                    };
+                    (binding.name == field.name).then_some(&binding.value)
+                });
+                let Some(initializer) = initializer else {
+                    return Err(Diagnostic::new(
+                        "E000221",
+                        format!(
+                            "constructor `{}` does not initialize field `{}`",
+                            constructor.name, field.name
+                        ),
+                        Some(span),
+                    ));
+                };
+                values.push(self.expression(initializer, Some(field.ty))?);
+            }
+            Ok(values)
+        })();
+        self.value_substitutions = previous;
+        values
     }
 
     fn empty_list_expression(
@@ -1625,6 +2598,197 @@ impl Analyzer<'_> {
             },
             span,
         })
+    }
+
+    fn enum_constructor(
+        &mut self,
+        path: &str,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let (enum_name, ordinal) = self.enum_variants[path].clone();
+        let instance = self.enums[&enum_name].clone();
+        let variant = &instance.variants[ordinal];
+        if arguments.len() != variant.fields.len() {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!(
+                    "enum variant `{}` expects {} payload value(s), received {}",
+                    variant.name,
+                    variant.fields.len(),
+                    arguments.len()
+                ),
+                Some(span),
+            ));
+        }
+        if expected.is_some_and(|expected| expected != instance.ty) {
+            return Err(semantic_error(
+                "enum variant does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        let integer = self
+            .types
+            .resolve_name("int")
+            .expect("bootstrap defines int");
+        let mut values = Vec::with_capacity(instance.fields.len());
+        values.push(self.integer_expression(&ordinal.to_string(), integer, span));
+        for field in instance.fields.iter().skip(1) {
+            if let Some((argument, _)) = arguments
+                .iter()
+                .zip(&variant.fields)
+                .find(|(_, payload)| payload.name == field.name)
+            {
+                values.push(self.expression(&argument.value, Some(field.ty))?);
+            } else {
+                values.push(self.default_expression(field.ty, span)?);
+            }
+        }
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: instance.ty,
+            kind: ExpressionKind::Aggregate {
+                class: instance.ty,
+                fields: values,
+            },
+            span,
+        })
+    }
+
+    fn default_expression(
+        &mut self,
+        type_id: TypeId,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        if self.list_elements.contains_key(&type_id) {
+            return self.empty_list_expression(type_id, span);
+        }
+        let name = self
+            .types
+            .definition(type_id)
+            .map(|definition| definition.name.as_str());
+        let literal = match name {
+            Some("string") => LiteralValue::String(String::new()),
+            Some("float" | "f16" | "f32" | "f64" | "bf16") => LiteralValue::Float("0.0".into()),
+            Some("bool") => LiteralValue::Boolean(false),
+            Some("char") => LiteralValue::Character('\0'),
+            Some("None") => LiteralValue::None,
+            Some("unit") => LiteralValue::Unit,
+            Some(_) => LiteralValue::Integer("0".into()),
+            None => {
+                return Err(Diagnostic::new(
+                    "E000221",
+                    "this enum payload type requires an explicit representation",
+                    Some(span),
+                ))
+            }
+        };
+        Ok(Expression {
+            id: self.next_id(),
+            type_id,
+            kind: ExpressionKind::Literal(literal),
+            span,
+        })
+    }
+
+    fn tuple_string(
+        &mut self,
+        tuple: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let elements = self.tuple_elements[&tuple.type_id].clone();
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let mut rendered = Expression {
+            id: self.next_id(),
+            type_id: string,
+            kind: ExpressionKind::Literal(LiteralValue::String("(".into())),
+            span,
+        };
+        for (index, element) in elements.iter().enumerate() {
+            if index != 0 {
+                let comma = Expression {
+                    id: self.next_id(),
+                    type_id: string,
+                    kind: ExpressionKind::Literal(LiteralValue::String(",".into())),
+                    span,
+                };
+                rendered = self.runtime_call(
+                    "__sev_string_concat",
+                    &[string, string],
+                    string,
+                    vec![rendered, comma],
+                    span,
+                );
+            }
+            let field = Expression {
+                id: self.next_id(),
+                type_id: *element,
+                kind: ExpressionKind::Field {
+                    object: Box::new(tuple.clone()),
+                    index: index as u32,
+                },
+                span,
+            };
+            let name = self
+                .types
+                .definition(*element)
+                .map(|definition| definition.name.as_str());
+            let field = match name {
+                Some("string") => field,
+                Some("int" | "i64") => self.runtime_call(
+                    "__sev_string_from_int",
+                    &[*element],
+                    string,
+                    vec![field],
+                    span,
+                ),
+                Some("usize") => self.runtime_call(
+                    "__sev_string_from_usize",
+                    &[*element],
+                    string,
+                    vec![field],
+                    span,
+                ),
+                Some("float" | "f64") => self.runtime_call(
+                    "__sev_string_from_float",
+                    &[*element],
+                    string,
+                    vec![field],
+                    span,
+                ),
+                _ => {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "tuple display does not support this element type",
+                        Some(span),
+                    ))
+                }
+            };
+            rendered = self.runtime_call(
+                "__sev_string_concat",
+                &[string, string],
+                string,
+                vec![rendered, field],
+                span,
+            );
+        }
+        let close = Expression {
+            id: self.next_id(),
+            type_id: string,
+            kind: ExpressionKind::Literal(LiteralValue::String(")".into())),
+            span,
+        };
+        Ok(self.runtime_call(
+            "__sev_string_concat",
+            &[string, string],
+            string,
+            vec![rendered, close],
+            span,
+        ))
     }
 
     fn list_storage_expression(
@@ -1667,6 +2831,29 @@ impl Analyzer<'_> {
         }
     }
 
+    fn select_runtime_suffix(
+        &self,
+        result: TypeId,
+        span: severian_source::Span,
+    ) -> Result<&'static str, Diagnostic> {
+        let name = self
+            .types
+            .definition(result)
+            .map(|definition| definition.name.as_str());
+        match name {
+            Some("string") => Ok("string"),
+            Some("float" | "f64") => Ok("f64"),
+            Some("f32") => Ok("f32"),
+            Some("bool") => Ok("bool"),
+            Some("int" | "i64" | "usize") => Ok("i64"),
+            _ => Err(Diagnostic::new(
+                "E000211",
+                "enum return selection does not yet support this result type",
+                Some(span),
+            )),
+        }
+    }
+
     fn runtime_call(
         &mut self,
         symbol: &str,
@@ -1686,6 +2873,20 @@ impl Analyzer<'_> {
                 },
                 arguments,
             },
+            span,
+        }
+    }
+
+    fn integer_expression(
+        &mut self,
+        spelling: &str,
+        type_id: TypeId,
+        span: severian_source::Span,
+    ) -> Expression {
+        Expression {
+            id: self.next_id(),
+            type_id,
+            kind: ExpressionKind::Literal(LiteralValue::Integer(spelling.into())),
             span,
         }
     }
@@ -1746,6 +2947,61 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         let object = self.expression(object, None)?;
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        if object.type_id == string {
+            let usize_type = self
+                .types
+                .resolve_name("usize")
+                .expect("bootstrap defines usize");
+            let bool_type = self
+                .types
+                .resolve_name("bool")
+                .expect("bootstrap defines bool");
+            let (symbol, parameters, result, resolved_arguments) = match name.as_str() {
+                "length" if arguments.is_empty() => (
+                    "__sev_string_length",
+                    vec![string],
+                    usize_type,
+                    vec![object],
+                ),
+                "upper" if arguments.is_empty() => {
+                    ("__sev_string_upper", vec![string], string, vec![object])
+                }
+                "contains" if arguments.len() == 1 && arguments[0].name.is_none() => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    (
+                        "__sev_string_contains",
+                        vec![string, string],
+                        bool_type,
+                        vec![object, needle],
+                    )
+                }
+                "length" | "upper" | "contains" => {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("string method `{name}` received incompatible arguments"),
+                        Some(span),
+                    ));
+                }
+                _ => return Ok(None),
+            };
+            if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+                return Err(semantic_error(
+                    "method result does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            return Ok(Some(self.runtime_call(
+                symbol,
+                &parameters,
+                result,
+                resolved_arguments,
+                span,
+            )));
+        }
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);
         };
@@ -1764,13 +3020,6 @@ impl Analyzer<'_> {
                     method.parameters.len(),
                     arguments.len()
                 ),
-                Some(span),
-            ));
-        }
-        if !arguments.is_empty() {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` cannot yet be used as a value-producing method"),
                 Some(span),
             ));
         }
@@ -1849,6 +3098,47 @@ impl Analyzer<'_> {
                 span,
             )));
         }
+        if let Some(return_value) = body.iter().find_map(|statement| match statement {
+            AstStatement::Return {
+                value: Some(value), ..
+            } if !matches!(value.kind, AstExpressionKind::Name(_)) => Some(value),
+            _ => None,
+        }) {
+            let result_type = self.resolve_source_type(&method.result)?;
+            if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+                return Err(semantic_error(
+                    "method result does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            let previous = self.value_substitutions.clone();
+            for (field, declaration) in instance.fields.iter().enumerate() {
+                let id = self.next_id();
+                self.value_substitutions.insert(
+                    declaration.name.clone(),
+                    Expression {
+                        id,
+                        type_id: declaration.ty,
+                        kind: ExpressionKind::Field {
+                            object: Box::new(object.clone()),
+                            index: field as u32,
+                        },
+                        span,
+                    },
+                );
+            }
+            let resolved = (|| {
+                for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                    let value = self.expression(&argument.value, Some(parameter_type))?;
+                    self.value_substitutions
+                        .insert(parameter.name.clone(), value);
+                }
+                self.expression(return_value, Some(result_type))
+            })();
+            self.value_substitutions = previous;
+            return resolved.map(Some);
+        }
         let field_name = body.iter().find_map(|statement| {
             let AstStatement::Return {
                 value: Some(value), ..
@@ -1917,10 +3207,14 @@ impl Analyzer<'_> {
                 Some(callee.span),
             ));
         };
-        if method.parameters.len() != 1 || arguments.len() != 1 {
+        if method.parameters.len() != arguments.len() {
             return Err(Diagnostic::new(
                 "E000206",
-                format!("method `{name}` requires exactly one argument"),
+                format!(
+                    "method `{name}` expects {} argument(s), received {}",
+                    method.parameters.len(),
+                    arguments.len()
+                ),
                 Some(expression.span),
             ));
         }
@@ -1958,8 +3252,12 @@ impl Analyzer<'_> {
             let AstExpressionKind::Name(argument_name) = &argument.value.kind else {
                 return None;
             };
-            (operation == "append" && argument_name == &method.parameters[0].name)
-                .then_some(field.as_str())
+            (operation == "append"
+                && method
+                    .parameters
+                    .first()
+                    .is_some_and(|parameter| argument_name == &parameter.name))
+            .then_some(field.as_str())
         }) {
             let Some((field, declaration)) = instance
                 .fields
@@ -2012,7 +3310,7 @@ impl Analyzer<'_> {
                 expression.span,
             ))));
         }
-        let Some((field_name, operator, parameter_name)) = body.iter().find_map(|statement| {
+        let Some((field_name, operator, update_value)) = body.iter().find_map(|statement| {
             let severian_ast::Statement::Binding(update) = statement else {
                 return None;
             };
@@ -2027,12 +3325,10 @@ impl Analyzer<'_> {
             else {
                 return None;
             };
-            let (AstExpressionKind::Name(left), AstExpressionKind::Name(right)) =
-                (&left.kind, &right.kind)
-            else {
+            let AstExpressionKind::Name(left) = &left.kind else {
                 return None;
             };
-            (left == &update.name).then(|| (update.name.as_str(), *operator, right.as_str()))
+            (left == &update.name).then(|| (update.name.as_str(), *operator, right.as_ref()))
         }) else {
             return Err(Diagnostic::new(
                 "E000211",
@@ -2040,13 +3336,6 @@ impl Analyzer<'_> {
                 Some(method.span),
             ));
         };
-        if parameter_name != method.parameters[0].name {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` update does not use its parameter"),
-                Some(method.span),
-            ));
-        }
         let Some((field, declaration)) = instance
             .fields
             .iter()
@@ -2059,7 +3348,15 @@ impl Analyzer<'_> {
                 Some(method.span),
             ));
         };
-        let value = self.expression(&arguments[0].value, Some(declaration.ty))?;
+        let previous = self.value_substitutions.clone();
+        for (parameter, argument) in method.parameters.iter().zip(arguments) {
+            let value = self.expression(&argument.value, Some(declaration.ty))?;
+            self.value_substitutions
+                .insert(parameter.name.clone(), value);
+        }
+        let value = self.expression(update_value, Some(declaration.ty));
+        self.value_substitutions = previous;
+        let value = value?;
         let operator = universal_binary(operator);
         if !self.types.supports_binary(operator, declaration.ty) {
             return Err(Diagnostic::new(
@@ -2265,10 +3562,176 @@ fn class_application(expression: &AstExpression) -> Option<(&str, &[TypeAnnotati
     Some((name, arguments))
 }
 
+fn static_integer(expression: &AstExpression) -> Option<i64> {
+    match &expression.kind {
+        AstExpressionKind::Literal(AstLiteral::Integer(value)) => value.parse().ok(),
+        AstExpressionKind::Unary {
+            operator: AstUnaryOperator::Negative,
+            operand,
+        } => static_integer(operand)?.checked_neg(),
+        _ => None,
+    }
+}
+
+fn static_integer_in(
+    expression: &AstExpression,
+    environment: &BTreeMap<String, i64>,
+) -> Option<i64> {
+    match &expression.kind {
+        AstExpressionKind::Name(name) => environment.get(name).copied(),
+        AstExpressionKind::Literal(AstLiteral::Integer(value)) => value.parse().ok(),
+        AstExpressionKind::Unary {
+            operator: AstUnaryOperator::Negative,
+            operand,
+        } => static_integer_in(operand, environment)?.checked_neg(),
+        AstExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let left = static_integer_in(left, environment)?;
+            let right = static_integer_in(right, environment)?;
+            match operator {
+                AstBinaryOperator::Add => left.checked_add(right),
+                AstBinaryOperator::Subtract => left.checked_sub(right),
+                AstBinaryOperator::Multiply => left.checked_mul(right),
+                AstBinaryOperator::Divide => (right != 0).then(|| left / right),
+                AstBinaryOperator::Remainder => (right != 0).then(|| left % right),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn static_boolean(expression: &AstExpression, environment: &BTreeMap<String, i64>) -> Option<bool> {
+    match &expression.kind {
+        AstExpressionKind::Literal(AstLiteral::Boolean(value)) => Some(*value),
+        AstExpressionKind::Unary {
+            operator: AstUnaryOperator::Not,
+            operand,
+        } => Some(!static_boolean(operand, environment)?),
+        AstExpressionKind::Binary {
+            operator: AstBinaryOperator::And,
+            left,
+            right,
+        } => Some(static_boolean(left, environment)? && static_boolean(right, environment)?),
+        AstExpressionKind::Binary {
+            operator: AstBinaryOperator::Or,
+            left,
+            right,
+        } => Some(static_boolean(left, environment)? || static_boolean(right, environment)?),
+        AstExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let left = static_integer_in(left, environment)?;
+            let right = static_integer_in(right, environment)?;
+            Some(match operator {
+                AstBinaryOperator::Equal | AstBinaryOperator::Identity => left == right,
+                AstBinaryOperator::NotEqual => left != right,
+                AstBinaryOperator::Less => left < right,
+                AstBinaryOperator::LessEqual => left <= right,
+                AstBinaryOperator::Greater => left > right,
+                AstBinaryOperator::GreaterEqual => left >= right,
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaticLoopControl {
+    Continue,
+    Break,
+    Fallthrough,
+}
+
+fn specialize_loop_body(
+    statements: &[AstStatement],
+    environment: &mut BTreeMap<String, i64>,
+) -> (Vec<AstStatement>, StaticLoopControl) {
+    let mut output = Vec::new();
+    for statement in statements {
+        match statement {
+            AstStatement::Break { .. } => return (output, StaticLoopControl::Break),
+            AstStatement::Continue { .. } => return (output, StaticLoopControl::Continue),
+            AstStatement::Binding(binding) => {
+                if let Some(value) = static_integer_in(&binding.value, environment) {
+                    environment.insert(binding.name.clone(), value);
+                }
+                output.push(statement.clone());
+            }
+            AstStatement::If {
+                condition,
+                then_block,
+                else_block,
+                ..
+            } if static_boolean(condition, environment).is_some() => {
+                let selected = if static_boolean(condition, environment) == Some(true) {
+                    then_block
+                } else {
+                    else_block
+                };
+                let (specialized, control) = specialize_loop_body(selected, environment);
+                output.extend(specialized);
+                if control != StaticLoopControl::Fallthrough {
+                    return (output, control);
+                }
+            }
+            _ => output.push(statement.clone()),
+        }
+    }
+    (output, StaticLoopControl::Fallthrough)
+}
+
+fn static_range_values(iterable: &AstExpression) -> Option<Vec<i64>> {
+    let AstExpressionKind::Call { callee, arguments } = &iterable.kind else {
+        return None;
+    };
+    if callable_path(callee).as_deref() != Some("range") {
+        return None;
+    }
+    let (start, end) = match arguments.as_slice() {
+        [end] => (0, static_integer(&end.value)?),
+        [start, end] => (static_integer(&start.value)?, static_integer(&end.value)?),
+        _ => return None,
+    };
+    let count = end.saturating_sub(start).max(0);
+    (count <= 10_000).then(|| (start..end).collect())
+}
+
 fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
+    if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
+        let mut concrete = members
+            .iter()
+            .filter_map(|member| {
+                let name = member.simple_name()?;
+                (!matches!(name, "None" | "absent")).then_some(member)
+            })
+            .map(|member| resolve_type_annotation(types, member))
+            .collect::<Result<Vec<_>, _>>()?;
+        concrete.sort();
+        concrete.dedup();
+        if let [only] = concrete.as_slice() {
+            return Ok(*only);
+        }
+        if concrete.is_empty() {
+            return types.resolve_name("None").ok_or_else(|| {
+                Diagnostic::new("E000204", "unknown type `None`", Some(annotation.span))
+            });
+        }
+        return Err(Diagnostic::new(
+            "E000204",
+            "unions with multiple concrete representations are not implemented",
+            Some(annotation.span),
+        ));
+    }
     let Some(name) = annotation.simple_name() else {
         return Err(Diagnostic::new(
             "E000204",
@@ -2276,6 +3739,7 @@ fn resolve_type_annotation(
             Some(annotation.span),
         ));
     };
+    let name = if name == "absent" { "None" } else { name };
     types.resolve_name(name).ok_or_else(|| {
         Diagnostic::new(
             "E000204",
@@ -2412,9 +3876,14 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
                 ControlFlow::Returns
             }
             AstStatement::Binding(_)
+            | AstStatement::FieldAssignment { .. }
             | AstStatement::Expression(_)
             | AstStatement::Assert { .. }
             | AstStatement::If { .. }
+            | AstStatement::While { .. }
+            | AstStatement::For { .. }
+            | AstStatement::Break { .. }
+            | AstStatement::Continue { .. }
             | AstStatement::Match { .. } => ControlFlow::FallsThrough,
         };
         if flow == ControlFlow::Returns {
@@ -2428,6 +3897,24 @@ fn integration_expectation(statement: &AstStatement) -> Option<severian_hir::Tes
     let AstStatement::Assert { condition, .. } = statement else {
         return None;
     };
+    if let AstExpressionKind::Unary {
+        operator: AstUnaryOperator::Not,
+        operand,
+    } = &condition.kind
+    {
+        let AstExpressionKind::Binary {
+            operator: AstBinaryOperator::Contains,
+            left,
+            right,
+        } = &operand.kind
+        else {
+            return None;
+        };
+        return Some(severian_hir::TestExpectation::Excludes {
+            stream: test_stream(right)?,
+            value: string_literal(left)?.to_owned(),
+        });
+    }
     let AstExpressionKind::Binary {
         operator,
         left,
@@ -2491,6 +3978,7 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
         AstUnaryOperator::Positive => UnaryOperator::Positive,
         AstUnaryOperator::Negative => UnaryOperator::Negative,
         AstUnaryOperator::Not => UnaryOperator::Not,
+        AstUnaryOperator::Copy => unreachable!("copy is lowered before universal resolution"),
         AstUnaryOperator::Move => unreachable!("move is rejected before universal resolution"),
     }
 }
@@ -2504,6 +3992,9 @@ fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
         AstBinaryOperator::Remainder => BinaryOperator::Remainder,
         AstBinaryOperator::Power => BinaryOperator::Power,
         AstBinaryOperator::Equal => BinaryOperator::Equal,
+        AstBinaryOperator::Identity => {
+            unreachable!("identity is lowered before universal resolution")
+        }
         AstBinaryOperator::NotEqual => BinaryOperator::NotEqual,
         AstBinaryOperator::Less => BinaryOperator::Less,
         AstBinaryOperator::LessEqual => BinaryOperator::LessEqual,

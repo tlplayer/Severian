@@ -1,10 +1,10 @@
 use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
-    Decorator, DecoratorArgument, DecoratorValue, Expression, ExpressionKind, FunctionDeclaration,
-    FunctionParameter, GenericConstraint, ImportDeclaration, ImportSubject, Item, Literal,
-    MatchCase, Module, OperatorDeclaration, OperatorParameter, OperatorSyntax, PropertyDeclaration,
-    Statement, TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
-    TypeDeclaration, UnaryOperator,
+    Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
+    ExpressionKind, FunctionDeclaration, FunctionParameter, GenericConstraint, ImportDeclaration,
+    ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration, OperatorParameter,
+    OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration, TraitDeclaration,
+    TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -39,6 +39,13 @@ impl Parser<'_> {
                 module
                     .items
                     .push(Item::Class(self.class_declaration(decorators)?));
+                self.separators();
+                continue;
+            } else if self.at_identifier("enum") {
+                if !decorators.is_empty() {
+                    return Err(self.error("decorators may not precede an enum declaration"));
+                }
+                module.items.push(Item::Enum(self.enum_declaration()?));
                 self.separators();
                 continue;
             } else if self.at_identifier("def") {
@@ -85,8 +92,13 @@ impl Parser<'_> {
                         module.items.push(Item::Expression(expression))
                     }
                     Statement::Return { .. }
+                    | Statement::FieldAssignment { .. }
                     | Statement::Assert { .. }
                     | Statement::If { .. }
+                    | Statement::While { .. }
+                    | Statement::For { .. }
+                    | Statement::Break { .. }
+                    | Statement::Continue { .. }
                     | Statement::Match { .. } => {
                         unreachable!("module parsing only requests simple statements")
                     }
@@ -343,7 +355,10 @@ impl Parser<'_> {
         let mut statements = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            let compound = self.at_identifier("if") || self.at_identifier("match");
+            let compound = self.at_identifier("if")
+                || self.at_identifier("match")
+                || self.at_identifier("while")
+                || self.at_identifier("for");
             if self.at_identifier("pass") {
                 self.next();
             } else {
@@ -415,11 +430,51 @@ impl Parser<'_> {
                 span: Span::new(start.source, start.start, end),
             });
         }
+        if self.at_identifier("while") {
+            let start = self.next().span;
+            let condition = self.expression(0)?;
+            let initializer = if self.at_identifier("with") {
+                self.next();
+                Some(self.binding()?)
+            } else {
+                None
+            };
+            self.expect(&TokenKind::Colon, "expected `:` after while condition")?;
+            let (body, end) = self.indented_block("while")?;
+            return Ok(Statement::While {
+                condition,
+                initializer,
+                body,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("for") {
+            let start = self.next().span;
+            let (binding, _) = self.identifier("expected a loop binding")?;
+            if !self.at_identifier("in") {
+                return Err(self.error("expected `in` after loop binding"));
+            }
+            self.next();
+            let iterable = self.expression(0)?;
+            self.expect(&TokenKind::Colon, "expected `:` after for iterable")?;
+            let (body, end) = self.indented_block("for")?;
+            return Ok(Statement::For {
+                binding,
+                iterable,
+                body,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         if self.at_identifier("match") {
             return self.match_statement();
         }
-        if self.at_identifier("break") || self.at_identifier("continue") {
-            return Err(self.error("loop control is not implemented yet"));
+        if self.at_identifier("break") {
+            let span = self.next().span;
+            return Ok(Statement::Break { span });
+        }
+        if self.at_identifier("continue") {
+            let span = self.next().span;
+            return Ok(Statement::Continue { span });
         }
         self.statement()
     }
@@ -434,16 +489,22 @@ impl Parser<'_> {
         self.separators();
         let mut cases = Vec::new();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
-            if !self.at_identifier("case") {
-                return Err(self.error("match arms must start with `case`"));
-            }
-            let case_start = self.next().span;
+            let case_start = if self.at_identifier("case") {
+                self.next().span
+            } else {
+                self.peek().span
+            };
             let pattern_start = self.cursor;
             let (first, _) = self.identifier("expected a case binding, `_`, or type")?;
             let (binding, annotation) = if self.at(&TokenKind::Colon) {
                 self.next();
                 let binding = (first != "_").then_some(first);
-                let annotation = if self.at(&TokenKind::Newline) {
+                let annotation = if self.at(&TokenKind::Newline)
+                    || self.at_identifier("return")
+                    || self.at_identifier("assert")
+                    || self.at_identifier("if")
+                    || self.at_identifier("match")
+                {
                     None
                 } else {
                     let annotation = self.type_annotation()?;
@@ -458,7 +519,13 @@ impl Parser<'_> {
                 self.expect(&TokenKind::Colon, "expected `:` after the case binding")?;
                 ((name != "_").then_some(name), Some(annotation))
             };
-            let (body, end) = self.indented_block("case")?;
+            let (body, end) = if self.at(&TokenKind::Newline) {
+                self.indented_block("case")?
+            } else {
+                let statement = self.block_statement()?;
+                let end = self.tokens[self.cursor.saturating_sub(1)].span.end;
+                (vec![statement], end)
+            };
             cases.push(MatchCase {
                 binding,
                 annotation,
@@ -703,6 +770,84 @@ impl Parser<'_> {
             constructors,
             methods,
             span: Span::new(start.source, start.start, end.end),
+        })
+    }
+
+    fn enum_declaration(&mut self) -> Result<EnumDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, _) = self.identifier("expected an enum name")?;
+        self.expect(&TokenKind::Colon, "expected `:` after enum name")?;
+        self.expect(&TokenKind::Newline, "expected a newline after enum header")?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected an indented enum body")?;
+        self.separators();
+        let mut variants = Vec::new();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let (variant_name, variant_start) = self.identifier("expected an enum variant")?;
+            let mut fields = Vec::new();
+            let mut end = variant_start.end;
+            if self.take(&TokenKind::LeftParen).is_some() {
+                if !self.at(&TokenKind::RightParen) {
+                    loop {
+                        let field_start = self.peek().span;
+                        let (field_name, _) = self.identifier("expected a payload field name")?;
+                        self.expect(&TokenKind::Colon, "expected `:` after payload field")?;
+                        let annotation = self.type_annotation()?;
+                        end = annotation.span.end;
+                        fields.push(PropertyDeclaration {
+                            name: field_name,
+                            annotation,
+                            default: None,
+                            span: Span::new(field_start.source, field_start.start, end),
+                        });
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                end = self
+                    .expect(&TokenKind::RightParen, "expected `)` after enum payload")?
+                    .span
+                    .end;
+            }
+            let mut transitions = Vec::new();
+            if self.take(&TokenKind::Arrow).is_some() {
+                loop {
+                    let (transition, transition_span) =
+                        self.identifier("expected a transition variant")?;
+                    end = transition_span.end;
+                    transitions.push(transition);
+                    if self.take(&TokenKind::Pipe).is_none() {
+                        break;
+                    }
+                }
+            }
+            variants.push(EnumVariant {
+                name: variant_name,
+                fields,
+                transitions,
+                span: Span::new(variant_start.source, variant_start.start, end),
+            });
+            if !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
+                return Err(self.error("expected a newline after enum variant"));
+            }
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of enum body")?
+            .span
+            .end;
+        if variants.is_empty() {
+            return Err(Diagnostic::new(
+                "E000123",
+                "an enum requires at least one variant",
+                Some(Span::new(start.source, start.start, end)),
+            ));
+        }
+        Ok(EnumDeclaration {
+            name,
+            variants,
+            span: Span::new(start.source, start.start, end),
         })
     }
 
@@ -954,7 +1099,35 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
-        if self.looks_like_binding() {
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Dot)
+            && matches!(
+                self.tokens.get(self.cursor + 2).map(|token| &token.kind),
+                Some(TokenKind::Identifier(_))
+            )
+            && self
+                .tokens
+                .get(self.cursor + 3)
+                .is_some_and(|token| token.kind == TokenKind::Equal)
+        {
+            let (object, object_span) = self.identifier("expected an assignment object")?;
+            self.next();
+            let (field, _) = self.identifier("expected an assigned field")?;
+            self.next();
+            let value = self.expression(0)?;
+            Ok(Statement::FieldAssignment {
+                object: Expression {
+                    kind: ExpressionKind::Name(object),
+                    span: object_span,
+                },
+                field,
+                span: Span::new(object_span.source, object_span.start, value.span.end),
+                value,
+            })
+        } else if self.looks_like_binding() {
             Ok(Statement::Binding(self.binding()?))
         } else {
             Ok(Statement::Expression(self.expression(0)?))
@@ -995,12 +1168,26 @@ impl Parser<'_> {
 
     fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
         let mut expression = self.unary()?;
-        while let Some(operator) = binary_operator(&self.peek().kind) {
+        loop {
+            let negated_contains = self.at_identifier("not")
+                && self.tokens.get(self.cursor + 1).is_some_and(
+                    |token| matches!(&token.kind, TokenKind::Identifier(value) if value == "in"),
+                );
+            let Some(operator) = (if negated_contains {
+                Some(BinaryOperator::Contains)
+            } else {
+                binary_operator(&self.peek().kind)
+            }) else {
+                break;
+            };
             let precedence = precedence(operator);
             if precedence < minimum_precedence {
                 break;
             }
             self.next();
+            if negated_contains {
+                self.next();
+            }
             let right_precedence = if operator == BinaryOperator::Power {
                 precedence
             } else {
@@ -1012,13 +1199,24 @@ impl Parser<'_> {
                 expression.span.start,
                 right.span.end,
             );
-            expression = Expression {
+            let combined = Expression {
                 kind: ExpressionKind::Binary {
                     operator,
                     left: Box::new(expression),
                     right: Box::new(right),
                 },
                 span,
+            };
+            expression = if negated_contains {
+                Expression {
+                    kind: ExpressionKind::Unary {
+                        operator: UnaryOperator::Not,
+                        operand: Box::new(combined),
+                    },
+                    span,
+                }
+            } else {
+                combined
             };
         }
         Ok(expression)
@@ -1028,7 +1226,9 @@ impl Parser<'_> {
         let operator = match &self.peek().kind {
             TokenKind::Plus => Some(UnaryOperator::Positive),
             TokenKind::Minus => Some(UnaryOperator::Negative),
+            TokenKind::Bang => Some(UnaryOperator::Not),
             TokenKind::Identifier(value) if value == "not" => Some(UnaryOperator::Not),
+            TokenKind::Identifier(value) if value == "copy" => Some(UnaryOperator::Copy),
             TokenKind::Identifier(value) if value == "move" => Some(UnaryOperator::Move),
             _ => None,
         };
@@ -1063,7 +1263,8 @@ impl Parser<'_> {
                         member_span.end,
                     ),
                 };
-            } else if self.take(&TokenKind::LeftBracket).is_some() {
+            } else if self.at(&TokenKind::LeftBracket) && self.type_application_follows() {
+                self.next();
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightBracket) {
                     loop {
@@ -1088,6 +1289,56 @@ impl Parser<'_> {
                     },
                     span,
                 };
+            } else if self.take(&TokenKind::LeftBracket).is_some() {
+                let start = if self.at(&TokenKind::Colon) {
+                    None
+                } else {
+                    Some(Box::new(self.expression(0)?))
+                };
+                if self.take(&TokenKind::Colon).is_some() {
+                    let end = if self.at(&TokenKind::Colon) || self.at(&TokenKind::RightBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.expression(0)?))
+                    };
+                    let step = if self.take(&TokenKind::Colon).is_some() {
+                        if self.at(&TokenKind::RightBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.expression(0)?))
+                        }
+                    } else {
+                        None
+                    };
+                    let end_span = self
+                        .expect(&TokenKind::RightBracket, "expected `]` after slice")?
+                        .span
+                        .end;
+                    let span = Span::new(expression.span.source, expression.span.start, end_span);
+                    expression = Expression {
+                        kind: ExpressionKind::Slice {
+                            object: Box::new(expression),
+                            start,
+                            end,
+                            step,
+                        },
+                        span,
+                    };
+                } else {
+                    let index = start.ok_or_else(|| self.error("expected an index expression"))?;
+                    let end = self
+                        .expect(&TokenKind::RightBracket, "expected `]` after index")?
+                        .span
+                        .end;
+                    let span = Span::new(expression.span.source, expression.span.start, end);
+                    expression = Expression {
+                        kind: ExpressionKind::Index {
+                            object: Box::new(expression),
+                            index,
+                        },
+                        span,
+                    };
+                }
             } else if self.take(&TokenKind::LeftParen).is_some() {
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {
@@ -1135,6 +1386,34 @@ impl Parser<'_> {
         Ok(expression)
     }
 
+    fn type_application_follows(&self) -> bool {
+        let mut cursor = self.cursor + 1;
+        let mut depth = 1usize;
+        while let Some(token) = self.tokens.get(cursor) {
+            match token.kind {
+                TokenKind::LeftBracket => depth += 1,
+                TokenKind::RightBracket => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(cursor + 1)
+                            .is_some_and(|token| token.kind == TokenKind::LeftParen);
+                    }
+                }
+                TokenKind::Colon if depth == 1 => return false,
+                TokenKind::Integer(_) | TokenKind::Float(_) | TokenKind::String(_)
+                    if depth == 1 =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+            cursor += 1;
+        }
+        false
+    }
+
     fn primary(&mut self) -> Result<Expression, Diagnostic> {
         let token = self.next();
         let kind = match token.kind {
@@ -1175,9 +1454,32 @@ impl Parser<'_> {
                 });
             }
             TokenKind::LeftParen => {
-                let expression = self.expression(0)?;
-                self.expect(&TokenKind::RightParen, "expected `)`")?;
-                return Ok(expression);
+                if self.take(&TokenKind::RightParen).is_some() {
+                    return Ok(Expression {
+                        kind: ExpressionKind::Literal(Literal::Unit),
+                        span: token.span,
+                    });
+                }
+                let first = self.expression(0)?;
+                if self.take(&TokenKind::Comma).is_none() {
+                    self.expect(&TokenKind::RightParen, "expected `)`")?;
+                    return Ok(first);
+                }
+                let mut values = vec![first];
+                while !self.at(&TokenKind::RightParen) {
+                    values.push(self.expression(0)?);
+                    if self.take(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                let end = self
+                    .expect(&TokenKind::RightParen, "expected `)` after tuple literal")?
+                    .span
+                    .end;
+                return Ok(Expression {
+                    kind: ExpressionKind::Tuple(values),
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
             }
             _ => {
                 return Err(Diagnostic::new(
@@ -1322,7 +1624,21 @@ fn formatted_string_expression(value: &str, span: Span) -> Result<Expression, Di
                         Some(span),
                     ));
                 }
-                parts.push(parse_interpolation(source, span)?);
+                let value = parse_interpolation(source, span)?;
+                parts.push(Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(Expression {
+                            kind: ExpressionKind::Name("string".into()),
+                            span,
+                        }),
+                        arguments: vec![CallArgument {
+                            name: None,
+                            value,
+                            span,
+                        }],
+                    },
+                    span,
+                });
                 cursor = end + 1;
             }
             b'}' => {
@@ -1447,6 +1763,9 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
 }
 
 fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
+    if matches!(kind, TokenKind::Identifier(value) if value == "is") {
+        return Some(BinaryOperator::Identity);
+    }
     Some(match operator_syntax(kind)? {
         OperatorSyntax::Plus => BinaryOperator::Add,
         OperatorSyntax::Minus => BinaryOperator::Subtract,
@@ -1472,6 +1791,7 @@ fn precedence(operator: BinaryOperator) -> u8 {
         BinaryOperator::Or => 1,
         BinaryOperator::And => 2,
         BinaryOperator::Equal
+        | BinaryOperator::Identity
         | BinaryOperator::NotEqual
         | BinaryOperator::Less
         | BinaryOperator::LessEqual

@@ -1,0 +1,11 @@
+@c(symbol = "__sev_environment_get")
+def get(name: string) -> string
+
+@c(symbol = "__sev_environment_get_default")
+def get(name: string, fallback: string) -> string
+
+@c(symbol = "__sev_environment_set")
+def set(name: string, value: string) -> bool
+
+@c(symbol = "__sev_environment_remove")
+def remove(name: string) -> bool

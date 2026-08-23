@@ -18,6 +18,7 @@ pub enum UnaryOperator {
     Positive,
     Negative,
     Not,
+    Copy,
     Move,
 }
 
@@ -30,6 +31,7 @@ pub enum BinaryOperator {
     Remainder,
     Power,
     Equal,
+    Identity,
     NotEqual,
     Less,
     LessEqual,
@@ -57,10 +59,21 @@ pub struct CallArgument {
 pub enum ExpressionKind {
     Literal(Literal),
     List(Vec<Expression>),
+    Tuple(Vec<Expression>),
     Name(String),
     Member {
         object: Box<Expression>,
         name: String,
+    },
+    Index {
+        object: Box<Expression>,
+        index: Box<Expression>,
+    },
+    Slice {
+        object: Box<Expression>,
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+        step: Option<Box<Expression>>,
     },
     TypeApplication {
         callee: Box<Expression>,

@@ -315,6 +315,35 @@ fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
         .flat_map(|module| {
             module.ast.items.iter().filter_map(move |item| match item {
                 Item::Class(declaration) => Some((module.id, declaration.clone())),
+                Item::Enum(declaration) => {
+                    let mut fields = vec![severian_ast::PropertyDeclaration {
+                        name: "__tag".into(),
+                        annotation: TypeAnnotation::named("int", Vec::new(), declaration.span),
+                        default: None,
+                        span: declaration.span,
+                    }];
+                    for variant in &declaration.variants {
+                        for field in &variant.fields {
+                            if !fields.iter().any(|known| known.name == field.name) {
+                                fields.push(field.clone());
+                            }
+                        }
+                    }
+                    Some((
+                        module.id,
+                        severian_ast::ClassDeclaration {
+                            decorators: Vec::new(),
+                            name: declaration.name.clone(),
+                            type_parameters: Vec::new(),
+                            constraints: Vec::new(),
+                            traits: Vec::new(),
+                            fields,
+                            constructors: Vec::new(),
+                            methods: Vec::new(),
+                            span: declaration.span,
+                        },
+                    ))
+                }
                 _ => None,
             })
         })
@@ -899,8 +928,13 @@ fn remap_module_bindings(module: &mut severian_hir::Module, offset: u32) {
 fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
     for statement in &mut block.statements {
         match statement {
+            Statement::Sequence(block) => remap_block_bindings(block, offset),
             Statement::Binding(binding) => binding.0 += offset,
             Statement::FieldUpdate { binding, value, .. } => {
+                binding.0 += offset;
+                remap_expression_bindings(value, offset);
+            }
+            Statement::FieldSet { binding, value, .. } => {
                 binding.0 += offset;
                 remap_expression_bindings(value, offset);
             }

@@ -56,7 +56,14 @@ fn validate_statement(
     declared: &mut BTreeSet<BindingId>,
 ) -> Result<(), Diagnostic> {
     match statement {
-        Statement::FieldUpdate { binding, value, .. } => {
+        Statement::Sequence(block) => {
+            for statement in &block.statements {
+                validate_statement(statement, bindings, declared)?;
+            }
+            Ok(())
+        }
+        Statement::FieldUpdate { binding, value, .. }
+        | Statement::FieldSet { binding, value, .. } => {
             if !declared.contains(binding) {
                 return Err(Diagnostic::new(
                     "E000301",
