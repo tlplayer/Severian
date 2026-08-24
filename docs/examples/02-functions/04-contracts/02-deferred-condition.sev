@@ -2,7 +2,7 @@ def consume(items: list[i64]) -> i64 with
 {
     defer items.size() <= 10,
 }:
-    total := 0
+    total := i64(0)
 
     for item in items:
         total += item
@@ -14,13 +14,13 @@ def fill(buffer: list[i64]) with
 {
     defer buffer.size() <= 4,
 }:
-    buffer.push(1)
-    buffer.push(2)
-    buffer.push(3)
-    buffer.push(4)
+    buffer.append(1)
+    buffer.append(2)
+    buffer.append(3)
+    buffer.append(4)
 
 test:
-    items = [1, 2, 3, 4]
+    items: list[i64] = [1, 2, 3, 4]
 
     result = consume(items)
 
