@@ -1,5 +1,9 @@
-def main():
-    print("hello, severian")
+import "lib.sev" as building
 
-test "entrypoint":
-    main()
+
+def main():
+    print(building.calculate())
+
+
+test "binary imports its library root":
+    assert(building.calculate() == 42)

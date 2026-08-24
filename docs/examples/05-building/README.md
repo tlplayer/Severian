@@ -1,627 +1,268 @@
-Direction or idea of how packages should work
+# Building and packaging
 
-I would document `05-building` as two layouts: the checked-in package source and the unpacked contents of the generated `package.pkg`.
+This directory is the executable specification for Severian packages. A change
+to manifest discovery, dependency resolution, build output placement, or the
+`.pkg` format should update this example and its tests in the same change.
+
+The design keeps four things separate:
+
+| Object | Meaning | Authored by |
+| --- | --- | --- |
+| `package.toml` | Desired package, targets, dependencies, and policy | Developer |
+| `package.lock` | Exact dependency resolution (format fixture today) | `sev` |
+| `target/` | Local build cache and development outputs | `sev build` / `sev test` |
+| `.pkg` | Versioned distributable realization of a library | `sev build` |
+
+`target/` is disposable. A `.pkg` is the versioned distribution boundary; the
+current compiler writes version 1 library bundles but does not consume them yet.
+Neither object is a substitute for the manifest or lockfile.
+
+## Vocabulary
+
+- A **package** is the unit described by one `package.toml`.
+- A **declared target** is something the package produces: `[lib]` or `[[bin]]`.
+- A **module** is one `.sev` source file in a package.
+- An **interface** is the public identity and type information consumers need.
+- An **implementation** supplies bodies for an interface.
+- A **platform** is a compilation destination such as `x86_64-linux-gnu`.
+- An **artifact** is one realization of a declared target for a platform and
+  profile.
+
+Using “target” for both a binary and a platform makes resolution ambiguous, so
+manifests and metadata retain this distinction.
+
+## Checked-in source layout
 
 ```text
-/home/tplayer/Documents/Severian/docs/examples/05-building/
-│
+05-building/
 ├── README.md
-│   # Explains this example:
-│   #   sev build
-│   #   sev run
-│   #   sev test
-│   #   package.pkg contents
-│   #   compatibility resolution
-│   #   container fallback
-│
 ├── package.toml
-│   # Human-authored package manifest.
-│   #
-│   # Defines:
-│   #   package name/version/edition
-│   #   source targets
-│   #   binaries
-│   #   build outputs
-│   #   supported targets
-│   #   package distribution policy
-│   #   container fallback policy
-│
 ├── package.lock
-│   # Machine-generated dependency lock.
-│   #
-│   # Locks:
-│   #   Severian dependencies
-│   #   versions
-│   #   package hashes
-│   #   native/build-tool dependencies
-│   #
-│   # Does NOT describe the machine used to build the package.
-│
 └── src/
-    │
     ├── lib.sev
-    │   # Small library API used to demonstrate that source is packaged.
-    │
     ├── math.sev
-    │   # Secondary module showing normal multi-file package structure.
-    │
     └── main.sev
-        # Executable entry point.
-        # Imports package code and prints a deterministic result.
 ```
 
-After:
+The library root imports its private modules. The binary imports the library
+root. A dependency imports another package through the alias declared in
+`[dependencies]`; that alias is also the namespace used by qualified names such
+as `geometry.Point`.
+
+## Manifest contract
+
+The checked-in [package.toml](package.toml) intentionally uses the complete
+configuration vocabulary currently understood by `sev`. Unknown compiler
+configuration keys are rejected. `sev config defaults` prints the catalog and
+`sev config sync` adds newly introduced settings without replacing explicit
+choices.
+
+The structural part is:
+
+```toml
+[package]
+name = "05-building"
+version = "0.1.0"
+edition = "2026"
+default-run = "05-building"
+
+[[bin]]
+name = "05-building"
+path = "src/main.sev"
+
+[lib]
+name = "building"
+path = "src/lib.sev"
+
+[dependencies]
+# geometry = { path = "../geometry", version = "0.3.1" }
+
+[dev-dependencies]
+# test-support = { path = "../test-support", version = "0.1.0" }
+```
+
+Rules:
+
+1. Package names identify published packages; dependency keys are local aliases.
+2. Every `[[bin]]` has an explicit unique name and source path.
+3. `[lib]` has one public module root. Its name defaults to the package name.
+4. `package.default-run` is required when more than one binary exists.
+5. A dependency must expose `[lib]`. Binaries are not importable interfaces.
+6. Path dependencies resolve relative to the manifest containing them.
+7. Runtime builds use `[dependencies]`; root-package tests may additionally use
+   `[dev-dependencies]`.
+8. Source paths and package archive entries may not escape their package root.
+
+Registry and Git dependency declarations are reserved by the schema, but the
+current resolver deliberately requires a local `path`. It must report that
+limitation rather than silently selecting unrelated source.
+
+## Lockfile contract
+
+Lockfile generation and consumption are not implemented yet. The checked-in
+`package.lock` is therefore a format fixture, not an input used by today’s
+resolver. Once implemented, it is tool-owned generated data and should be
+committed for applications. It records exact package identities, versions,
+sources, revisions, checksums, features, and dependency edges. It does not
+record the build machine, current profile, output path, credentials, or
+environment variables.
+
+Resolution must be deterministic:
+
+- entries have one canonical record per package identity;
+- dependency edges refer to locked identities, not loose names;
+- checksums cover fetched package content;
+- path dependencies are canonicalized before cycle detection;
+- normal builds do not rewrite a lockfile whose resolution is unchanged.
+
+This example has no external dependencies, so its lockfile contains only the
+root package. Invented registry entries do not belong in an executable example.
+
+## Commands and local output
+
+From this directory:
 
 ```bash
+sev check
+sev test
 sev build
+sev run
+sev run --bin 05-building
+sev build --profile release
+sev check --emit mir --bin 05-building
 ```
 
-the build system produces something conceptually like:
+The current local output layout is:
 
 ```text
 target/
-└── package.pkg
+└── <platform>/
+    └── <profile>/
+        ├── bin/
+        │   └── 05-building
+        ├── pkg/
+        │   └── building-0.1.0.pkg
+        └── tests/
+            └── run-<invocation>/
 ```
 
-`package.pkg` is an archive/container owned by Severian. Its unpacked layout should be:
+The platform is `host` unless overridden by `build.target` or `--target`; the
+profile is `dev` unless overridden by `build.profile` or `--profile`.
+
+## `.pkg` compatibility boundary
+
+The current `SEVPKG` version 1 writer emits a deterministic library source
+bundle containing the library name and every reachable module owned by that
+package. Executable artifacts remain in `target/<platform>/<profile>/bin`.
+This small writer is implemented today. Its magic, version, and byte-level test
+fixtures define the compatibility contract for the future reader.
+
+The intended next archive version is a logical container with these sections:
 
 ```text
-package.pkg/
-│
-├── src/
-│   │
+building.pkg/
+├── metadata/
+│   ├── package.toml       # frozen source manifest
+│   ├── package.lock       # exact dependency graph
+│   ├── build.toml         # compiler, profile, and reproducibility data
+│   ├── artifacts.toml     # artifact index and compatibility requirements
+│   └── checksums.toml     # digest for every indexed object
+├── interface/
+│   └── building.pkgi      # public declarations and stable identities
+├── source/                # optional; controlled by publish.include-source
 │   ├── lib.sev
-│   │   # Original Severian source.
-│   │
-│   ├── math.sev
-│   │   # Original Severian source.
-│   │
-│   └── main.sev
-│       # Original executable entry point.
-│
-│
-├── bin/
-│   │
-│   ├── x86_64-linux-gnu/
-│   │   └── 05-building
-│   │       # Ready-to-run native executable for this target.
-│   │
-│   └── aarch64-linux-gnu/
-│       └── 05-building
-│           # Optional executable produced for another target.
-│
-│
+│   └── math.sev
 ├── artifacts/
-│   │
-│   ├── mir/
-│   │   └── 05-building.mir
-│   │       # Optional Severian MIR retained for inspection/recompilation.
-│   │
-│   ├── mlir/
-│   │   └── 05-building.mlir
-│   │       # MLIR generated during compilation.
-│   │
-│   ├── llvm/
-│   │   └── 05-building.bc
-│   │       # Optional LLVM bitcode/native backend artifact.
-│   │
-│   └── stablehlo/
-│       └── model.mlir
-│           # Placeholder for packages containing StableHLO/XLA workloads.
-│           # This file need not exist for ordinary CPU applications.
-│
-│
-├── debug/
-│   │
-│   ├── symbols/
-│   │   └── 05-building.debug
-│   │       # Debug information separated from the production executable.
-│   │
-│   ├── tests/
-│   │   └── results.toml
-│   │       # Results of package tests executed during the build.
-│   │
-│   ├── coverage/
-│   │   └── coverage.toml
-│   │       # Source/test coverage data.
-│   │
-│   └── profile/
-│       └── build.toml
-│           # Compilation/runtime profiling information when requested.
-│
-│
-├── metadata/
-│   │
-│   ├── package.toml
-│   │   # Frozen copy of the package manifest used for this build.
-│   │
-│   ├── package.lock
-│   │   # Exact dependency resolution used for this build.
-│   │
-│   ├── build.toml
-│   │   # Describes this particular build.
-│   │   #
-│   │   # Compiler version
-│   │   # build profile
-│   │   # optimization level
-│   │   # timestamp
-│   │   # source hash
-│   │   # reproducibility information
-│   │
-│   ├── targets.toml
-│   │   # Enumerates executable/artifact targets contained in the package.
-│   │   #
-│   │   # Example:
-│   │   # x86_64-linux-gnu
-│   │   # aarch64-linux-gnu
-│   │
-│   ├── hardware.toml
-│   │   # Hardware requirements rather than build-machine identity.
-│   │   #
-│   │   # CPU architecture/features
-│   │   # GPU vendor/family
-│   │   # required accelerators
-│   │   # minimum memory
-│   │   # driver/runtime requirements
-│   │
-│   ├── runtime.toml
-│   │   # Runtime requirements.
-│   │   #
-│   │   # libc requirements
-│   │   # Severian runtime ABI
-│   │   # PJRT/runtime providers
-│   │   # system libraries
-│   │
-│   ├── artifacts.toml
-│   │   # Index of artifacts contained in package.pkg.
-│   │   #
-│   │   # Connects:
-│   │   #   artifact
-│   │   #   target
-│   │   #   backend
-│   │   #   entry point
-│   │   #   requirements
-│   │
-│   ├── checksums.toml
-│   │   # Cryptographic hash of every important package object.
-│   │
-│   └── provenance.toml
-│       # Records where the package came from and how it was built.
-│       #
-│       # Source revision
-│       # compiler identity
-│       # dependency resolution
-│       # build-tool identity
-│       # optional signature information
-│
-│
-└── container/
-    │
-    ├── container.toml
-    │   # Severian container policy.
-    │   #
-    │   # Containers are a fallback execution mechanism.
-    │   # This describes whether one may be constructed/used.
-    │
-    ├── runtime.toml
-    │   # Host/container boundary.
-    │   #
-    │   # Network access
-    │   # filesystem mounts
-    │   # writable directories
-    │   # environment
-    │   # CPU/memory limits
-    │   # GPU/device access
-    │   # host-provided drivers
-    │
-    └── oci/
-        │
-        ├── oci-layout
-        │   # Standard OCI image-layout marker.
-        │
-        ├── index.json
-        │   # Standard OCI image index.
-        │   # Can reference multiple architecture manifests.
-        │
-        └── blobs/
-            └── sha256/
-                └── ...
-                    # OCI manifests/config/layers.
-                    #
-                    # Absent unless the package was actually built
-                    # with a pre-materialized container fallback.
+│   └── <platform>/
+│       └── <profile>/
+│           ├── native/
+│           ├── llvm/
+│           ├── mlir/
+│           └── stablehlo/
+├── evidence/              # optional test, coverage, profile, and debug data
+└── policy/                # optional runtime requirements
+    ├── network.toml
+    └── container.toml
 ```
 
-I would keep `container/` present conceptually but not require an OCI filesystem image in every package. Three useful states are:
+This is a logical layout; an implementation may use a binary index rather than
+a ZIP filesystem. Archive paths are normalized UTF-8, relative,
+slash-separated, sorted before encoding, and forbidden from containing `..`,
+absolute roots, or escaping symlinks. Checksums cover canonical bytes, not
+extraction metadata.
+
+The interface is first-class because consumers should not need implementation
+source merely to type-check imports. Source inclusion and interface inclusion
+are separate publication choices. A package that omits source must include a
+compatible artifact for every platform it claims to support.
+
+## Artifact selection
+
+Running or consuming a `.pkg` follows one deterministic order:
 
 ```text
+1. Select the declared target by name and kind.
+2. Select an exact compatible native artifact for the requested platform.
+3. Otherwise select a compatible compiler/backend artifact.
+4. Otherwise rebuild from included source using the included lockfile.
+5. Otherwise use an explicitly permitted container recipe or embedded OCI image.
+6. Otherwise report each rejected candidate and the missing requirement.
+```
+
+Selection considers the platform triple, Severian runtime ABI, backend format
+version, CPU/GPU features, required system libraries, and package capabilities.
+It must not silently run an incompatible artifact or weaken package policy.
+
+## Runtime policy and containers
+
+The `network` library describes how source performs I/O. Package network policy
+describes what a particular executable needs from its environment. It belongs
+beside container policy because native processes, VMs, remote jobs, and
+containers all share the same requirements.
+
+Network policy may declare named ingress and egress endpoints, DNS/TLS/proxy
+requirements, timeouts, retry policy, and resource limits. Container policy has
+three explicit modes:
+
+```toml
 [container]
-mode = "none"
+mode = "none"       # no fallback
+# mode = "recipe"   # construction metadata is present
+# mode = "embedded" # an OCI image is present in the package
 ```
 
-No container support needed.
-
-```text
-[container]
-mode = "recipe"
-```
-
-Metadata exists so Severian can construct a fallback container.
-
-```text
-[container]
-mode = "embedded"
-```
-
-`container/oci/` contains a ready OCI image.
-
-The resolver then has a defined order:
-
-```text
-sev run package.pkg
-
-1. Find compatible bin/<target>/ executable
-               │
-               ↓ none
-2. Find compatible artifacts/ representation
-               │
-               ↓ none
-3. Rebuild from src/ using package.lock
-               │
-               ↓ cannot build
-4. Use/build container fallback
-               │
-               ↓ unavailable
-5. Report exact compatibility failure
-```
-
-That gives a clean conceptual boundary:
-
-```text
-package.toml    = desired package
-package.lock    = resolved dependencies
-src/            = authoritative program
-
-package.pkg     = distributable realization
-
-bin/            = immediately runnable forms
-artifacts/      = compiler/backend forms
-debug/          = development evidence
-metadata/       = resolution/reproducibility information
-container/      = portability fallback
-src/            = rebuild fallback
-```
-
-
-
-General goals:
-1. Package building, testing, installing, and publishing should be easy and understandable
-2. Packages should be safe and configurable. Don't force everyone through a rule for a minor benefit to yourself and a detriment to all
-3. Packages are portable and installing/using them should be hassle free if sev install x then sev build should always produce the program the user wants even at the expense of security while still putting security as a strong desire.
-
-.pkg = consumable unit
-target = thing the package can produce
-interface = what another package may use
-source = optional implementation disclosure
-
-source                    compiled distribution
-
-src/
-├── lib.sev         ─┐
-├── file.sev         │
-└── main.sev         │
-                     ▼
-                  file.pkg
-                  ├── manifest
-                  ├── interface
-                  ├── implementations
-                  ├── artifacts
-                  └── targets
-
-file.pkg
-├── package
-│   name = file
-│   version = 1.4.0
-│
-├── interface
-│   File
-│   File.read(path: string) -> string
-│
-├── implementations
-│   LuaFile: File
-│   JsonFile: File
-│
-├── targets
-│   lib
-│   bin:file
-|   debug/ (testing, temp objects, code coverage etc useful for development)
-│
-└── artifacts
-    native-x86_64
-    native-aarch64
-    xla
-    ...
-
-Later:
-server.pkg
-
-provides:
-    library:
-        Server
-        Server.start(...)
-        Server.stop(...)
-
-    commands:
-        serve(port: int = 8080)
-        migrate()
-        status()
-
-requires:
-    network
-    filesystem:/data
-
-artifacts:
-    native linux/x86_64
-    native linux/aarch64
-    OCI linux/x86_64
-
-does-not-provide:
-    windows native
-
-Severian package semantics
-        ↓
-.pkg
-        ↓
-artifact selection
-   ↙      ↓       ↘
-native    VM       OCI
-                   ↓
-           Docker / Podman /
-           containerd / etc.
-
-
-Yes. I would make `network/` a first-class section of `package.pkg`, separate from the Severian `network` library.
-
-Its job is not implementing sockets. Its job is declaring the package's communication contract so `sev run`, containers, VMs, orchestration, and deployment tooling know what the process needs.
-
-```text
-package.pkg/
-├── src/
-├── bin/
-├── artifacts/
-├── debug/
-├── metadata/
-├── network/
-└── container/
-```
-
-I would give it this structure:
-
-```text
-network/
-├── network.toml
-│   # Overall networking policy.
-│   #
-│   # offline / client / server / peer
-│   # whether networking is required
-│   # default deny/allow behavior
-│   # startup behavior if network unavailable
-│
-├── endpoints.toml
-│   # Named services this package communicates with.
-│   #
-│   # Example:
-│   # model-store
-│   # postgres
-│   # telemetry
-│   # coordinator
-│
-├── ingress.toml
-│   # Connections allowed INTO the application.
-│   #
-│   # protocols
-│   # ports
-│   # interfaces
-│   # public/private exposure
-│
-├── egress.toml
-│   # Connections the application needs to make.
-│   #
-│   # destinations
-│   # protocols
-│   # ports
-│   # DNS requirements
-│
-├── dns.toml
-│   # Name-resolution requirements and policy.
-│   #
-│   # DNS needed?
-│   # search domains
-│   # service discovery
-│   # caching behavior
-│
-├── tls.toml
-│   # Transport security requirements.
-│   #
-│   # certificate requirements
-│   # trust stores
-│   # minimum TLS version
-│   # mTLS requirements
-│
-├── proxy.toml
-│   # Proxy behavior.
-│   #
-│   # inherit system proxy
-│   # explicit proxy support
-│   # no-proxy destinations
-│
-├── resilience.toml
-│   # What happens when communication fails.
-│   #
-│   # connect timeout
-│   # request timeout
-│   # idle timeout
-│   # retry limits
-│   # backoff
-│   # circuit breaking
-│   # reconnect behavior
-│
-└── resources.toml
-    # Network resource limits.
-    #
-    # max sockets
-    # connection pools
-    # max idle connections
-    # buffers
-    # concurrent requests
-```
-
-For example:
-
-```toml
-# network/network.toml
-
-[network]
-mode = "client"
-required = true
-default = "deny"
-
-[startup]
-network_required = false
-degraded_mode = true
-```
-
-Then explicitly name dependencies instead of just saying "needs internet":
-
-```toml
-# network/endpoints.toml
-
-[[endpoint]]
-name = "model-store"
-protocol = "https"
-host = "models.example.com"
-port = 443
-required = true
-
-[[endpoint]]
-name = "telemetry"
-protocol = "https"
-host = "telemetry.example.com"
-port = 443
-required = false
-```
-
-Egress:
-
-```toml
-# network/egress.toml
-
-[[allow]]
-endpoint = "model-store"
-
-[[allow]]
-endpoint = "telemetry"
-```
-
-Ingress for a service:
-
-```toml
-# network/ingress.toml
-
-[[listen]]
-name = "api"
-protocol = "tcp"
-port = 8080
-interface = "any"
-required = true
-
-[[listen]]
-name = "health"
-protocol = "tcp"
-port = 8081
-interface = "local"
-```
-
-And the part people routinely omit:
-
-```toml
-# network/resilience.toml
-
-[connect]
-timeout = "5s"
-
-[request]
-timeout = "30s"
-
-[idle]
-timeout = "60s"
-
-[retry]
-attempts = 3
-backoff = "exponential"
-maximum = "10s"
-
-[pool]
-maximum_connections = 128
-maximum_idle = 32
-idle_timeout = "30s"
-```
-
-This becomes valuable because `sev` can reason about it before launching anything.
-
-```text
-sev run package.pkg
-        │
-        ├── Does it require networking?
-        ├── Which endpoints?
-        ├── Does DNS work?
-        ├── Are required ports available?
-        ├── Does container policy permit egress?
-        ├── Does it need inbound ports exposed?
-        ├── Are TLS/runtime requirements available?
-        └── What happens when communication fails?
-```
-
-Then container generation is mechanical rather than guesswork:
-
-```text
-package.pkg/network/
-        ↓
-Severian execution policy
-        ↓
-container network namespace
-firewall/egress rules
-port publishing
-service discovery
-DNS
-proxy environment
-health checking
-```
-
-The distinction I would enforce is:
-
-```text
-library/network/
-    = how Severian programs perform networking
-
-package.pkg/network/
-    = what this particular program requires from its environment
-```
-
-And I would put `network/` alongside `container/`, not inside it. A native process, container, VM, remote job, GPU worker, or cluster task all have networking requirements. Containers are only one execution environment.
-
-This also gives you a strong eventual `sev doctor package.pkg` story:
-
-```text
-Network
-  DNS                 ok
-  model-store:443     reachable
-  telemetry:443       unavailable (optional)
-  ingress :8080       available
-  ingress :8081       available
-  TLS trust store     ok
-  proxy               inherited
-  socket limit        4096 / required >= 128
-```
-
-That is worth designing into `.pkg` now. Network configuration is part of whether software can actually run, just like architecture, libraries, drivers, and memory.
+Package installation never gains host access merely because a fallback exists.
+Native tools, network access, filesystem mounts, devices, and credentials remain
+declared capabilities. A force option may acknowledge a compatibility or trust
+warning, but it does not silently bypass the program's safety model.
+
+## Versioning invariants
+
+- Manifest additions are backward-compatible only when old readers can ignore
+  them safely; otherwise the manifest format needs an explicit version.
+- `.pkg` and `.pkgi` carry independent format versions.
+- Public declaration identities do not depend on source order or build paths.
+- Package archives do not contain absolute host paths or build credentials.
+- Reproducible builds keep timestamps and machine observations out of hashed
+  artifact identity.
+- Readers reject unknown mandatory capabilities and malformed indexes before
+  extracting or executing content.
+
+## Implementation status
+
+| Capability | Status |
+| --- | --- |
+| Manifest discovery and local path dependency graph | Implemented |
+| Binary and library targets | Implemented |
+| Dev dependencies for root tests | Implemented |
+| Catalog-backed configuration and profile overlays | Implemented |
+| Local target layout shown above | Implemented |
+| `SEVPKG` v1 reachable-source library writer | Implemented |
+| Consuming an emitted `.pkg` as a dependency | Not implemented |
+| General package interfaces (`.pkgi`) | Partial; primitive interface records exist |
+| Registry/Git resolution and lockfile generation | Reserved, not implemented |
+| Rich indexed `.pkg` archive and artifact selection | Design contract |
+| Network/container policy enforcement | Design contract |
+
+Keeping this table honest is part of the example. Documentation must not claim
+that a future distribution feature is produced by today’s `sev build`.

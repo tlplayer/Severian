@@ -1,8 +1,9 @@
-from "src/math" import add
+import "math.sev" as math
+
 
 def calculate() -> int:
-    return add(20, 22)
+    return math.add(20, 22)
 
 
-test "Add 2+2 == 4":
-    assert(add(2,2) ==4)
+test "library target imports a private module":
+    assert(calculate() == 42)
