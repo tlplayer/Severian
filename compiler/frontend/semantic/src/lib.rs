@@ -4998,8 +4998,8 @@ impl Analyzer<'_> {
                     let left_value = self.expression(left, None)?;
                     let right_value = self.expression(right, None)?;
                     if left_value.type_id != right_value.type_id
-                        && self.numeric_primitive(left_value.type_id)
-                        && self.numeric_primitive(right_value.type_id)
+                        && self.integer_primitive(left_value.type_id)
+                        && self.integer_primitive(right_value.type_id)
                     {
                         let right_value = self.coerce(right_value, left_value.type_id, true)?;
                         let boolean = self
@@ -5084,6 +5084,12 @@ impl Analyzer<'_> {
                     | severian_universal::PrimitiveCategory::Float
                     | severian_universal::PrimitiveCategory::Measured
             )
+        })
+    }
+
+    fn integer_primitive(&self, ty: TypeId) -> bool {
+        self.types.primitive(ty).is_some_and(|primitive| {
+            primitive.category == severian_universal::PrimitiveCategory::Integer
         })
     }
 
@@ -10572,6 +10578,27 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let error = analyze(&ast, &context.types).unwrap_err();
         assert_eq!(error.code, "E000206");
+    }
+
+    #[test]
+    fn mixed_integer_comparisons_do_not_coerce_distinct_unit_dimensions() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "units.sev",
+            "test:\n    assert(10ms < 20MB)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "units",
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "E000202");
     }
 
     #[test]
