@@ -1,57 +1,65 @@
-import bits
-import regex
+# Two traits claim the exact same operator signature:
+#
+#     string | string -> string
+#
+# The active trait namespace determines which implementation is selected.
 
-# Apply bit operations directly to binary strings without converting them
-# into an integer representation first.
-@bits(|, &, ^)
-def combine(left: string, right: string) -> string with
-{
-    len(left) != len(right) ->
-        Error("bit strings must have equal length"),
 
-    !bits.valid(left) ->
-        Error("left must contain only 0 or 1"),
+trait BinaryStringOperator:
+    @binary_strings
 
-    !bits.valid(right) ->
-        Error("right must contain only 0 or 1"),
-}:
-    return (left | right) ^ (left & right)
+    operator |(left: string, right: string) -> string
 
-@regex(|)
-def regex_or(left: string, right: string) -> string:
+
+class BinaryString:
+    trait BinaryStringOperator
+
+    operator |(left: string, right: string) -> string:
+        return "binary:" + left + ":" + right
+
+
+trait AlternativeOperator:
+    @alternatives
+
+    operator |(left: string, right: string) -> string
+
+
+class AlternativeString:
+    trait AlternativeOperator
+
+    operator |(left: string, right: string) -> string:
+        return "alternative:" + left + ":" + right
+
+
+@binary_strings(|)
+def binary_or(left: string, right: string) -> string:
     return left | right
 
 
-test with integ "1000-bit string XOR":
-    left = char(1b) * 500
-    right = char(2b) * 500
+@alternatives(|)
+def alternative_or(left: string, right: string) -> string:
+    return left | right
 
-    result = combine(left, right)
 
-    assert(len(result) == 1000)
-    assert(result == "1" * 1000)
+test "same operator dispatches through different traits":
+    binary = binary_or("left", "right")
+    alternative = alternative_or("left", "right")
 
-test "operator namespace isolation":
-    assert(bit_or("1010", "0101") == "1111")
+    assert(binary == "binary:left:right")
+    assert(alternative == "alternative:left:right")
 
-    pattern = regex_or("cat", "dog")
-    assert(regex.match(pattern, "cat"))
-    assert(regex.match(pattern, "dog"))
 
-    files = glob_union("*.sev", "*.toml")
-    assert(glob.match(files, "main.sev"))
-    assert(glob.match(files, "package.toml"))
-
-test with compiler "string operator requires a namespace":
+test with compiler "string operator requires a trait namespace":
     reject:
-        left: string = "1010"
-        right: string = "0101"
+        left: string = "left"
+        right: string = "right"
 
         result = left | right
 
-test with compiler "operator namespace cannot be ambiguous":
+
+test with compiler "operator trait namespace cannot be ambiguous":
     reject:
-        @bits(|)
-        @regex(|)
+        @binary_strings(|)
+        @alternatives(|)
         def ambiguous(left: string, right: string) -> string:
             return left | right

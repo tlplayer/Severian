@@ -100,6 +100,7 @@ pub(crate) fn analyze_with_package_functions(
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
     let namespace_methods = collect_trait_namespace_methods(ast)?;
+    let namespace_operators = collect_trait_namespace_operators(ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -127,6 +128,8 @@ pub(crate) fn analyze_with_package_functions(
         function_substitutions: BTreeMap::new(),
         function_specificity: BTreeMap::new(),
         namespace_methods,
+        namespace_operators,
+        active_operator_namespaces: BTreeMap::new(),
         signatures: BTreeMap::new(),
         classes: ast
             .items
@@ -412,6 +415,7 @@ pub(crate) fn analyze_with_package_functions(
         analyzer.names = globals.clone();
         analyzer.declarations.clear();
         analyzer.mocks.clear();
+        analyzer.active_operator_namespaces = operator_namespaces(&ast_function.decorators);
         for parameter in &function.parameters {
             let type_id = parameter.contract.ty;
             if !analyzer.declarations.insert(parameter.name.clone()) {
@@ -500,6 +504,7 @@ pub(crate) fn analyze_with_package_functions(
             analyzer.names = globals.clone();
             analyzer.declarations.clear();
             analyzer.mocks.clear();
+            analyzer.active_operator_namespaces.clear();
             let unit = types.resolve_name("unit").expect("bootstrap defines unit");
             let mut body = Block::default();
             if module.tests[offset]
@@ -570,6 +575,8 @@ struct Analyzer<'a> {
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     function_specificity: BTreeMap<FunctionId, u8>,
     namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
+    namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
+    active_operator_namespaces: BTreeMap<String, Vec<String>>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
@@ -593,6 +600,13 @@ struct NamespaceTraitMethod {
     trait_name: String,
     declaration: severian_ast::FunctionDeclaration,
     implementations: Vec<(String, severian_ast::FunctionDeclaration)>,
+}
+
+#[derive(Debug, Clone)]
+struct NamespaceTraitOperator {
+    trait_name: String,
+    declaration: severian_ast::OperatorDeclaration,
+    implementations: Vec<(String, severian_ast::OperatorImplementation)>,
 }
 
 #[derive(Debug, Clone)]
@@ -2852,6 +2866,20 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
+                let operator_spelling = ast_binary_spelling(*operator);
+                if *operator == AstBinaryOperator::Pipe
+                    || self
+                        .active_operator_namespaces
+                        .contains_key(operator_spelling)
+                {
+                    return self.trait_namespace_operator(
+                        operator_spelling,
+                        left,
+                        right,
+                        expected,
+                        ast.span,
+                    );
+                }
                 if *operator == AstBinaryOperator::Contains {
                     let string = self
                         .types
@@ -4708,6 +4736,163 @@ impl Analyzer<'_> {
         Ok(Some(selected))
     }
 
+    fn trait_namespace_operator(
+        &mut self,
+        operator: &str,
+        left: &AstExpression,
+        right: &AstExpression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let namespaces = self
+            .active_operator_namespaces
+            .get(operator)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let namespace = match namespaces.iter().collect::<Vec<_>>().as_slice() {
+            [] => {
+                return Err(Diagnostic::new(
+                    "E000202",
+                    format!("operator `{operator}` requires an active trait namespace"),
+                    Some(span),
+                )
+                .with_help(format!(
+                    "decorate the containing function with `@namespace({operator})`"
+                )));
+            }
+            [namespace] => (*namespace).clone(),
+            _ => {
+                return Err(Diagnostic::new(
+                    "E000210",
+                    format!(
+                        "operator `{operator}` is ambiguous between namespaces: {}",
+                        namespaces.into_iter().collect::<Vec<_>>().join(", ")
+                    ),
+                    Some(span),
+                )
+                .with_help("activate exactly one trait namespace for this operator"));
+            }
+        };
+        let path = format!("{namespace}.{operator}");
+        let namespace_operator = self
+            .namespace_operators
+            .get(&path)
+            .cloned()
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000202",
+                    format!("active trait namespace does not declare operator `{operator}`"),
+                    Some(span),
+                )
+            })?;
+        let [left_parameter, right_parameter] = namespace_operator.declaration.parameters.as_slice()
+        else {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("namespace operator `{path}` must declare two parameters"),
+                Some(namespace_operator.declaration.span),
+            ));
+        };
+        let result = self.resolve_source_type(&namespace_operator.declaration.result)?;
+        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+            return Err(semantic_error(
+                "namespace operator result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        let left_type = self.resolve_source_type(&left_parameter.annotation)?;
+        let right_type = self.resolve_source_type(&right_parameter.annotation)?;
+        let arguments = vec![
+            self.expression(left, Some(left_type))?,
+            self.expression(right, Some(right_type))?,
+        ];
+        if namespace_operator.implementations.is_empty() {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!(
+                    "namespace operator `{path}` has no implementation of trait `{}`",
+                    namespace_operator.trait_name
+                ),
+                Some(namespace_operator.declaration.span),
+            ));
+        }
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let mut selected = self.throw_expression(
+            format!("no applicable implementation for `{path}`"),
+            result,
+            span,
+        );
+        for (class_name, implementation) in namespace_operator.implementations.iter().rev() {
+            let previous = self.value_substitutions.clone();
+            let candidate = (|| {
+                for (parameter, value) in implementation.parameters.iter().zip(&arguments) {
+                    self.value_substitutions
+                        .insert(parameter.name.clone(), value.clone());
+                }
+                let mut conditions = implementation
+                    .contracts
+                    .iter()
+                    .filter(|contract| !contract.deferred)
+                    .map(|contract| self.expression(&contract.condition, Some(boolean)))
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                let condition = if conditions.is_empty() {
+                    Expression {
+                        id: self.next_id(),
+                        type_id: boolean,
+                        kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+                        span: implementation.span,
+                    }
+                } else {
+                    let mut condition = conditions.remove(0);
+                    for next in conditions {
+                        condition = Expression {
+                            id: self.next_id(),
+                            type_id: boolean,
+                            kind: ExpressionKind::Binary {
+                                operator: BinaryOperator::And,
+                                left: Box::new(condition),
+                                right: Box::new(next),
+                            },
+                            span: implementation.span,
+                        };
+                    }
+                    condition
+                };
+                let [AstStatement::Return {
+                    value: Some(value), ..
+                }] = implementation.body.as_slice()
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!(
+                            "operator implementation `{class_name}.{operator}` must currently be a single return expression"
+                        ),
+                        Some(implementation.span),
+                    ));
+                };
+                Ok((condition, self.expression(value, Some(result))?))
+            })();
+            self.value_substitutions = previous;
+            let (condition, value) = candidate?;
+            selected = Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(value),
+                    fallback: Box::new(selected),
+                },
+                span,
+            };
+        }
+        Ok(selected)
+    }
+
     fn class_method_call(
         &mut self,
         callee: &AstExpression,
@@ -5589,6 +5774,66 @@ fn collect_trait_namespace_methods(
     Ok(methods)
 }
 
+fn collect_trait_namespace_operators(
+    ast: &severian_ast::Module,
+) -> Result<BTreeMap<String, NamespaceTraitOperator>, Diagnostic> {
+    let classes = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Class(declaration) => Some(declaration),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut operators = BTreeMap::new();
+    for declaration in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        for operator in &declaration.operators {
+            for decorator in &operator.decorators {
+                if !decorator.arguments.is_empty() {
+                    continue;
+                }
+                let spelling = ast_operator_spelling(operator.operator);
+                let path = format!("{}.{spelling}", decorator.name);
+                let implementations = classes
+                    .iter()
+                    .filter(|class| {
+                        class.traits.iter().any(|implemented| {
+                            implemented.simple_name() == Some(declaration.name.as_str())
+                        })
+                    })
+                    .filter_map(|class| {
+                        class
+                            .operators
+                            .iter()
+                            .find(|candidate| candidate.operator == operator.operator)
+                            .cloned()
+                            .map(|implementation| (class.name.clone(), implementation))
+                    })
+                    .collect();
+                let namespace_operator = NamespaceTraitOperator {
+                    trait_name: declaration.name.clone(),
+                    declaration: operator.clone(),
+                    implementations,
+                };
+                if operators
+                    .insert(path.clone(), namespace_operator)
+                    .is_some()
+                {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("namespace operator `{path}` is declared more than once"),
+                        Some(decorator.span),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(operators)
+}
+
 fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
     let traits = ast
         .items
@@ -5644,6 +5889,42 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     ));
                 }
             }
+            for required in &contract.operators {
+                let Some(provided) = class
+                    .operators
+                    .iter()
+                    .find(|operator| operator.operator == required.operator)
+                else {
+                    return Err(Diagnostic::new(
+                        "E000218",
+                        format!(
+                            "class `{}` does not implement required operator `{}.{}`",
+                            class.name,
+                            trait_name,
+                            ast_operator_spelling(required.operator)
+                        ),
+                        Some(class.span),
+                    ));
+                };
+                let same_parameters = required.parameters.len() == provided.parameters.len()
+                    && required.parameters.iter().zip(&provided.parameters).all(
+                        |(required, provided)| {
+                            same_type_annotation(&required.annotation, &provided.annotation)
+                        },
+                    );
+                if !same_parameters || !same_type_annotation(&required.result, &provided.result) {
+                    return Err(Diagnostic::new(
+                        "E000218",
+                        format!(
+                            "operator `{}.{}` does not match trait `{}`",
+                            class.name,
+                            ast_operator_spelling(provided.operator),
+                            trait_name
+                        ),
+                        Some(provided.span),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -5661,6 +5942,22 @@ fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnos
             .collect::<BTreeSet<_>>();
         for method in class.constructors.iter().chain(&class.methods) {
             if let Some(parameter) = method
+                .parameters
+                .iter()
+                .find(|parameter| fields.contains(parameter.name.as_str()))
+            {
+                return Err(Diagnostic::new(
+                    "E000220",
+                    format!(
+                        "parameter `{}` shadows a field of class `{}`",
+                        parameter.name, class.name
+                    ),
+                    Some(parameter.span),
+                ));
+            }
+        }
+        for operator in &class.operators {
+            if let Some(parameter) = operator
                 .parameters
                 .iter()
                 .find(|parameter| fields.contains(parameter.name.as_str()))
@@ -5719,6 +6016,89 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
             Some(format!("{}.{}", callable_path(object)?, name))
         }
         _ => None,
+    }
+}
+
+fn operator_namespaces(decorators: &[severian_ast::Decorator]) -> BTreeMap<String, Vec<String>> {
+    let mut namespaces = BTreeMap::<String, Vec<String>>::new();
+    for decorator in decorators {
+        for argument in &decorator.arguments {
+            let severian_ast::DecoratorValue::Name(operator) = &argument.value else {
+                continue;
+            };
+            if argument.name.is_none() && is_binary_operator_spelling(operator) {
+                namespaces
+                    .entry(operator.clone())
+                    .or_default()
+                    .push(decorator.name.clone());
+            }
+        }
+    }
+    namespaces
+}
+
+fn is_binary_operator_spelling(operator: &str) -> bool {
+    matches!(
+        operator,
+        "|" | "+"
+            | "-"
+            | "*"
+            | "/"
+            | "%"
+            | "**"
+            | "=="
+            | "!="
+            | "<"
+            | "<="
+            | ">"
+            | ">="
+            | "in"
+            | "and"
+            | "or"
+    )
+}
+
+fn ast_binary_spelling(operator: AstBinaryOperator) -> &'static str {
+    match operator {
+        AstBinaryOperator::Pipe => "|",
+        AstBinaryOperator::Add => "+",
+        AstBinaryOperator::Subtract => "-",
+        AstBinaryOperator::Multiply => "*",
+        AstBinaryOperator::Divide => "/",
+        AstBinaryOperator::Remainder => "%",
+        AstBinaryOperator::Power => "**",
+        AstBinaryOperator::Equal | AstBinaryOperator::Identity => "==",
+        AstBinaryOperator::NotEqual => "!=",
+        AstBinaryOperator::Less => "<",
+        AstBinaryOperator::LessEqual => "<=",
+        AstBinaryOperator::Greater => ">",
+        AstBinaryOperator::GreaterEqual => ">=",
+        AstBinaryOperator::Contains => "in",
+        AstBinaryOperator::And => "and",
+        AstBinaryOperator::Or => "or",
+    }
+}
+
+fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str {
+    use severian_ast::OperatorSyntax as Operator;
+    match operator {
+        Operator::Pipe => "|",
+        Operator::Plus => "+",
+        Operator::Minus => "-",
+        Operator::Multiply => "*",
+        Operator::Divide => "/",
+        Operator::Remainder => "%",
+        Operator::Power => "**",
+        Operator::Equal => "==",
+        Operator::NotEqual => "!=",
+        Operator::Less => "<",
+        Operator::LessEqual => "<=",
+        Operator::Greater => ">",
+        Operator::GreaterEqual => ">=",
+        Operator::Contains => "in",
+        Operator::And => "and",
+        Operator::Or => "or",
+        Operator::Not => "not",
     }
 }
 
@@ -6286,6 +6666,9 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
 
 fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
     match operator {
+        AstBinaryOperator::Pipe => {
+            unreachable!("namespace operators are resolved before universal lookup")
+        }
         AstBinaryOperator::Add => BinaryOperator::Add,
         AstBinaryOperator::Subtract => BinaryOperator::Subtract,
         AstBinaryOperator::Multiply => BinaryOperator::Multiply,
@@ -6582,6 +6965,25 @@ mod tests {
             .unwrap();
         assert!(matches!(
             selected.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Return(Some(Expression {
+                kind: ExpressionKind::Fallback { .. },
+                ..
+            }))]
+        ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn function_decorator_selects_trait_owned_pipe_operator() {
+        let source = "trait StringOperator:\n    @strings\n    operator |(left: string, right: string) -> string\nclass Strings:\n    trait StringOperator\n    operator |(left: string, right: string) -> string:\n        return \"selected:\" + left + right\n@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\n";
+        let (program, _) = analyze_source(source);
+        let combine = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "combine")
+            .unwrap();
+        assert!(matches!(
+            combine.body.as_ref().unwrap().statements.as_slice(),
             [Statement::Return(Some(Expression {
                 kind: ExpressionKind::Fallback { .. },
                 ..

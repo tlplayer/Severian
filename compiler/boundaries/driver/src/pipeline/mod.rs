@@ -479,6 +479,7 @@ impl Compiler {
                     let mut ast = severian_ast::Module {
                         items: declarations.clone(),
                     };
+                    ast.items.extend(case.items.clone());
                     let mut body = test.body.clone();
                     body.extend(case.body.clone());
                     ast.items.push(severian_ast::Item::Test(

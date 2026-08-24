@@ -407,6 +407,7 @@ fn universal_unary(operator: OperatorSyntax) -> Option<UnaryOperator> {
 
 fn universal_binary(operator: OperatorSyntax) -> Option<BinaryOperator> {
     Some(match operator {
+        OperatorSyntax::Pipe => return None,
         OperatorSyntax::Plus => BinaryOperator::Add,
         OperatorSyntax::Minus => BinaryOperator::Subtract,
         OperatorSyntax::Multiply => BinaryOperator::Multiply,

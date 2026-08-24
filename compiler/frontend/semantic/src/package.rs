@@ -405,6 +405,7 @@ fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
                             fields,
                             constructors: Vec::new(),
                             methods: Vec::new(),
+                            operators: Vec::new(),
                             span: declaration.span,
                         },
                     ))

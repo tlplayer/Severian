@@ -12,9 +12,10 @@ pub use statement::{Binding, MatchCase, Statement};
 pub use types::{
     ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, EnumDeclaration, EnumVariant, FunctionContract, FunctionDeclaration, FunctionParameter,
-    GenericConstraint, ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorParameter,
-    OperatorSyntax, PropertyConstraint, PropertyDeclaration, TestDeclaration, TraitDeclaration,
-    TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
+    GenericConstraint, ImportDeclaration, ImportSubject, OperatorDeclaration,
+    OperatorImplementation, OperatorParameter, OperatorSyntax, PropertyConstraint,
+    PropertyDeclaration, TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
+    TypeDeclaration,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

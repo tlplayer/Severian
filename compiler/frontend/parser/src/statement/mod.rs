@@ -1,10 +1,11 @@
 use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
-    ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint, ImportDeclaration,
-    ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration, OperatorParameter,
-    OperatorSyntax, PropertyConstraint, PropertyDeclaration, Statement, TestDeclaration,
-    TraitDeclaration, TaskOwner, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
+    ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration,
+    OperatorImplementation, OperatorParameter, OperatorSyntax, PropertyConstraint,
+    PropertyDeclaration, Statement, TaskOwner, TestDeclaration, TraitDeclaration, TypeAnnotation,
+    TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -231,22 +232,28 @@ impl Parser<'_> {
                             None
                         };
                         let value_token = self.next();
-                        let value = match value_token.kind {
-                            TokenKind::String(value) => DecoratorValue::String(value),
-                            TokenKind::Integer(value) => DecoratorValue::Integer(value),
-                            TokenKind::Identifier(value) if value == "true" => {
-                                DecoratorValue::Boolean(true)
-                            }
-                            TokenKind::Identifier(value) if value == "false" => {
-                                DecoratorValue::Boolean(false)
-                            }
-                            TokenKind::Identifier(value) => DecoratorValue::Name(value),
-                            _ => {
-                                return Err(Diagnostic::new(
-                                    "E000120",
-                                    "expected an attribute value",
-                                    Some(value_token.span),
-                                ))
+                        let operator_value = operator_syntax(&value_token.kind)
+                            .map(|operator| operator_spelling(operator).to_owned());
+                        let value = if let Some(operator) = operator_value {
+                            DecoratorValue::Name(operator)
+                        } else {
+                            match value_token.kind {
+                                TokenKind::String(value) => DecoratorValue::String(value),
+                                TokenKind::Integer(value) => DecoratorValue::Integer(value),
+                                TokenKind::Identifier(value) if value == "true" => {
+                                    DecoratorValue::Boolean(true)
+                                }
+                                TokenKind::Identifier(value) if value == "false" => {
+                                    DecoratorValue::Boolean(false)
+                                }
+                                TokenKind::Identifier(value) => DecoratorValue::Name(value),
+                                _ => {
+                                    return Err(Diagnostic::new(
+                                        "E000120",
+                                        "expected an attribute value",
+                                        Some(value_token.span),
+                                    ))
+                                }
                             }
                         };
                         arguments.push(DecoratorArgument {
@@ -418,10 +425,11 @@ impl Parser<'_> {
                     None
                 };
                 self.expect(&TokenKind::Colon, "expected `:` after compiler expectation")?;
-                let (case_body, end) = self.indented_block("compiler expectation")?;
+                let (case_items, case_body, end) = self.compiler_case_block()?;
                 cases.push(CompilerTestCase {
                     expectation,
                     diagnostic_name,
+                    items: case_items,
                     body: case_body,
                     span: Span::new(token.span.source, token.span.start, end),
                 });
@@ -438,6 +446,44 @@ impl Parser<'_> {
             .span
             .end;
         Ok((body, cases, end))
+    }
+
+    fn compiler_case_block(&mut self) -> Result<(Vec<Item>, Vec<Statement>, u32), Diagnostic> {
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after compiler expectation",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(
+            &TokenKind::Indent,
+            "expected an indented compiler expectation body",
+        )?;
+        let mut items = Vec::new();
+        let mut statements = Vec::new();
+        self.separators();
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let decorators = if self.at(&TokenKind::At) {
+                self.decorators()?
+            } else {
+                Vec::new()
+            };
+            if self.at_identifier("def") {
+                items.push(Item::Function(self.function_declaration(decorators)?));
+            } else if !decorators.is_empty() {
+                return Err(self.error("expected `def` after compiler-case decorator"));
+            } else {
+                statements.push(self.block_statement()?);
+            }
+            self.statement_separators();
+        }
+        let end = self
+            .expect(
+                &TokenKind::Dedent,
+                "expected end of compiler expectation body",
+            )?
+            .span
+            .end;
+        Ok((items, statements, end))
     }
 
     fn indented_block(&mut self, owner: &str) -> Result<(Vec<Statement>, u32), Diagnostic> {
@@ -780,12 +826,12 @@ impl Parser<'_> {
                 let method = self.function_declaration(member_decorators)?;
                 member_has_body = method.body.is_some();
                 methods.push(method);
+            } else if self.at_identifier("operator") {
+                operators.push(self.operator_declaration(member_decorators)?);
             } else if !member_decorators.is_empty() {
-                return Err(self.error("expected `def` after trait method decorator"));
+                return Err(self.error("expected `def` or `operator` after trait member decorator"));
             } else if self.at_identifier("property") {
                 properties.push(self.property()?);
-            } else if self.at_identifier("operator") {
-                operators.push(self.operator()?);
             } else if self.at_identifier("pass") {
                 self.next();
             } else if self.looks_like_member_property() {
@@ -848,6 +894,7 @@ impl Parser<'_> {
         let mut fields = Vec::new();
         let mut constructors = Vec::new();
         let mut methods = Vec::new();
+        let mut operators = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let mut member_has_body = false;
@@ -871,8 +918,14 @@ impl Parser<'_> {
                 } else {
                     methods.push(function);
                 }
+            } else if self.at_identifier("operator") {
+                operators.push(self.operator_implementation(member_decorators)?);
+                member_has_body = true;
             } else if !member_decorators.is_empty() {
-                return Err(self.error("expected `def` after class method decorator"));
+                return Err(self.error("expected `def` or `operator` after class member decorator"));
+            } else if self.at_identifier("trait") {
+                self.next();
+                traits.push(self.type_annotation()?);
             } else if self.at_identifier("pass") {
                 self.next();
             } else if self.looks_like_member_property() {
@@ -899,6 +952,7 @@ impl Parser<'_> {
             fields,
             constructors,
             methods,
+            operators,
             span: Span::new(start.source, start.start, end.end),
         })
     }
@@ -1287,7 +1341,42 @@ impl Parser<'_> {
                 .is_some_and(|token| token.kind == TokenKind::Colon)
     }
 
-    fn operator(&mut self) -> Result<OperatorDeclaration, Diagnostic> {
+    fn operator_declaration(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<OperatorDeclaration, Diagnostic> {
+        let (start, operator, parameters, result) = self.operator_signature()?;
+        Ok(OperatorDeclaration {
+            decorators,
+            operator,
+            parameters,
+            span: Span::new(start.source, start.start, result.span.end),
+            result,
+        })
+    }
+
+    fn operator_implementation(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<OperatorImplementation, Diagnostic> {
+        let (start, operator, parameters, result) = self.operator_signature()?;
+        let (_, contracts) = self.function_contracts(&[])?;
+        self.expect(&TokenKind::Colon, "expected `:` after operator signature")?;
+        let (body, end) = self.indented_block("operator")?;
+        Ok(OperatorImplementation {
+            decorators,
+            operator,
+            parameters,
+            contracts,
+            result,
+            body,
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
+    fn operator_signature(
+        &mut self,
+    ) -> Result<(Span, OperatorSyntax, Vec<OperatorParameter>, TypeAnnotation), Diagnostic> {
         let start = self.next().span;
         let operator_token = self.next();
         let operator = operator_syntax(&operator_token.kind).ok_or_else(|| {
@@ -1317,12 +1406,7 @@ impl Parser<'_> {
         self.expect(&TokenKind::RightParen, "expected `)` after parameters")?;
         self.expect(&TokenKind::Arrow, "expected `->` after operator parameters")?;
         let result = self.type_annotation()?;
-        Ok(OperatorDeclaration {
-            operator,
-            parameters,
-            span: Span::new(start.source, start.start, result.span.end),
-            result,
-        })
+        Ok((start, operator, parameters, result))
     }
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
@@ -2428,6 +2512,7 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
 
 fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     Some(match kind {
+        TokenKind::Pipe => OperatorSyntax::Pipe,
         TokenKind::Identifier(value) if value == "and" => OperatorSyntax::And,
         TokenKind::Identifier(value) if value == "or" => OperatorSyntax::Or,
         TokenKind::Identifier(value) if value == "not" => OperatorSyntax::Not,
@@ -2448,11 +2533,34 @@ fn operator_syntax(kind: &TokenKind) -> Option<OperatorSyntax> {
     })
 }
 
+fn operator_spelling(operator: OperatorSyntax) -> &'static str {
+    match operator {
+        OperatorSyntax::Pipe => "|",
+        OperatorSyntax::Plus => "+",
+        OperatorSyntax::Minus => "-",
+        OperatorSyntax::Multiply => "*",
+        OperatorSyntax::Divide => "/",
+        OperatorSyntax::Remainder => "%",
+        OperatorSyntax::Power => "**",
+        OperatorSyntax::Equal => "==",
+        OperatorSyntax::NotEqual => "!=",
+        OperatorSyntax::Less => "<",
+        OperatorSyntax::LessEqual => "<=",
+        OperatorSyntax::Greater => ">",
+        OperatorSyntax::GreaterEqual => ">=",
+        OperatorSyntax::Contains => "in",
+        OperatorSyntax::And => "and",
+        OperatorSyntax::Or => "or",
+        OperatorSyntax::Not => "not",
+    }
+}
+
 fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
     if matches!(kind, TokenKind::Identifier(value) if value == "is") {
         return Some(BinaryOperator::Identity);
     }
     Some(match operator_syntax(kind)? {
+        OperatorSyntax::Pipe => BinaryOperator::Pipe,
         OperatorSyntax::Plus => BinaryOperator::Add,
         OperatorSyntax::Minus => BinaryOperator::Subtract,
         OperatorSyntax::Multiply => BinaryOperator::Multiply,
@@ -2541,6 +2649,7 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
 
 fn precedence(operator: BinaryOperator) -> u8 {
     match operator {
+        BinaryOperator::Pipe => 1,
         BinaryOperator::Or => 1,
         BinaryOperator::And => 2,
         BinaryOperator::Equal

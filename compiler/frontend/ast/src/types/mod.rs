@@ -93,6 +93,7 @@ pub struct TestDeclaration {
 pub struct CompilerTestCase {
     pub expectation: CompilerExpectation,
     pub diagnostic_name: Option<String>,
+    pub items: Vec<crate::Item>,
     pub body: Vec<crate::Statement>,
     pub span: Span,
 }
@@ -157,6 +158,7 @@ impl TypeAnnotation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorSyntax {
+    Pipe,
     Plus,
     Minus,
     Multiply,
@@ -203,9 +205,21 @@ pub struct OperatorParameter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperatorDeclaration {
+    pub decorators: Vec<Decorator>,
     pub operator: OperatorSyntax,
     pub parameters: Vec<OperatorParameter>,
     pub result: TypeAnnotation,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorImplementation {
+    pub decorators: Vec<Decorator>,
+    pub operator: OperatorSyntax,
+    pub parameters: Vec<OperatorParameter>,
+    pub contracts: Vec<FunctionContract>,
+    pub result: TypeAnnotation,
+    pub body: Vec<crate::Statement>,
     pub span: Span,
 }
 
@@ -232,6 +246,7 @@ pub struct ClassDeclaration {
     pub fields: Vec<PropertyDeclaration>,
     pub constructors: Vec<FunctionDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
+    pub operators: Vec<OperatorImplementation>,
     pub span: Span,
 }
 

@@ -257,6 +257,9 @@ fn validate_generic_expression(
         } => {
             let left = validate_generic_expression(left, names, function, index, types)?;
             let right = validate_generic_expression(right, names, function, index, types)?;
+            if *operator == severian_ast::BinaryOperator::Pipe {
+                return Ok(left.or(right));
+            }
             let universal = ast_binary(*operator);
             for parameter in [&left, &right].into_iter().flatten() {
                 if !parameter_allows_binary(parameter, universal, function, index, types) {
@@ -352,6 +355,7 @@ fn ast_binary(operator: severian_ast::BinaryOperator) -> severian_universal::Bin
     use severian_ast::BinaryOperator as Ast;
     use severian_universal::BinaryOperator as Universal;
     match operator {
+        Ast::Pipe => unreachable!("namespace operators are resolved before universal lookup"),
         Ast::Add => Universal::Add,
         Ast::Subtract => Universal::Subtract,
         Ast::Multiply => Universal::Multiply,
@@ -375,6 +379,7 @@ fn ast_binary_syntax(
 ) -> Option<severian_universal::BinaryOperator> {
     use severian_ast::OperatorSyntax as Ast;
     Some(ast_binary(match operator {
+        Ast::Pipe => return None,
         Ast::Plus => severian_ast::BinaryOperator::Add,
         Ast::Minus => severian_ast::BinaryOperator::Subtract,
         Ast::Multiply => severian_ast::BinaryOperator::Multiply,
@@ -688,6 +693,7 @@ fn trait_is_structurally_satisfied(
             (Syntax::Not, _) => types.supports_unary(Unary::Not, actual),
             (syntax, _) => {
                 let operator = match syntax {
+                    Syntax::Pipe => return false,
                     Syntax::Plus => Binary::Add,
                     Syntax::Minus => Binary::Subtract,
                     Syntax::Multiply => Binary::Multiply,

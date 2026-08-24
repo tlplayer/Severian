@@ -598,4 +598,60 @@ output = f"""module {{
             severian_ast::ExpressionKind::Mock { ref cases, .. } if cases.len() == 2
         ));
     }
+
+    #[test]
+    fn parses_trait_owned_pipe_operators_and_compiler_case_functions() {
+        let source = SourceFile::virtual_source(
+            "operators.sev",
+            "trait StringOperator:\n    @strings\n    operator |(left: string, right: string) -> string\nclass Strings:\n    trait StringOperator\n    operator |(left: string, right: string) -> string:\n        return left + right\n@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\ntest with compiler:\n    reject:\n        @strings(|)\n        @other(|)\n        def ambiguous(left: string, right: string) -> string:\n            return left | right\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(trait_declaration) = &module.items[0] else {
+            panic!("expected trait")
+        };
+        assert!(trait_declaration.methods.is_empty());
+        assert_eq!(
+            trait_declaration.operators[0].operator,
+            severian_ast::OperatorSyntax::Pipe
+        );
+        assert_eq!(trait_declaration.operators[0].decorators[0].name, "strings");
+        let severian_ast::Item::Class(class) = &module.items[1] else {
+            panic!("expected class")
+        };
+        assert_eq!(class.traits[0].simple_name(), Some("StringOperator"));
+        assert!(class.methods.is_empty());
+        assert_eq!(class.operators[0].operator, severian_ast::OperatorSyntax::Pipe);
+        assert_eq!(class.operators[0].body.len(), 1);
+        let severian_ast::Item::Function(function) = &module.items[2] else {
+            panic!("expected function")
+        };
+        assert!(matches!(
+            function.body.as_ref().unwrap()[0],
+            severian_ast::Statement::Return {
+                value: Some(severian_ast::Expression {
+                    kind: severian_ast::ExpressionKind::Binary {
+                        operator: severian_ast::BinaryOperator::Pipe,
+                        ..
+                    },
+                    ..
+                }),
+                ..
+            }
+        ));
+        let severian_ast::Item::Test(test) = &module.items[3] else {
+            panic!("expected test")
+        };
+        assert_eq!(test.compiler_cases[0].items.len(), 1);
+    }
+
+    #[test]
+    fn symbolic_operators_are_not_function_names() {
+        let source = SourceFile::virtual_source(
+            "invalid-operator.sev",
+            "trait Invalid:\n    def |(left: string, right: string) -> string\n",
+        );
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.code, "E000110");
+        assert!(error.message.contains("function name"));
+    }
 }

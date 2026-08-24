@@ -80,7 +80,12 @@ pub fn resolve(
         foreign.types.push(resolve_external_type(declaration)?);
     }
     for declaration in module.items.iter().filter_map(|item| match item {
-        Item::Function(declaration) if !declaration.decorators.is_empty() => Some(declaration),
+        Item::Function(declaration)
+            if !declaration.decorators.is_empty()
+                && !semantic_operator_declaration(declaration) =>
+        {
+            Some(declaration)
+        }
         _ => None,
     }) {
         let resolved = resolve_function(declaration, &foreign, &imports, types)?;
@@ -110,6 +115,17 @@ pub fn resolve(
         foreign,
         plans,
         declarations,
+    })
+}
+
+fn semantic_operator_declaration(declaration: &ExternalFunctionDeclaration) -> bool {
+    declaration.decorators.iter().any(|decorator| {
+        decorator.arguments.iter().any(|argument| {
+            argument.name.is_none()
+                && matches!(&argument.value, AttributeValue::Name(value) if matches!(value.as_str(),
+                    "|" | "+" | "-" | "*" | "/" | "%" | "**" | "==" | "!=" | "<"
+                        | "<=" | ">" | ">=" | "in" | "and" | "or"))
+        })
     })
 }
 
@@ -483,6 +499,19 @@ mod tests {
             resolve(&module, &context.types, &target()).unwrap_err(),
             XxiError::DuplicateDeclaration("print".into())
         );
+    }
+
+    #[test]
+    fn semantic_operator_decorators_do_not_create_foreign_functions() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "operators.sev",
+            "@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.foreign.functions.is_empty());
+        assert!(resolved.plans.is_empty());
     }
 
     #[test]
