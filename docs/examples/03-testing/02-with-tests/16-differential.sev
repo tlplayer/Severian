@@ -1,0 +1,25 @@
+'''
+Differential tests execute equivalent code through multiple compiler
+backends and compare the results.
+'''
+
+
+def compute(a: f32, b: f32) -> f32:
+    return (a * b) + a
+
+
+test compute with differential
+{
+    native,
+    xla,
+}:
+    result := compute(3.5, 7.25)
+
+    expect(
+        approximate(
+            result.native,
+            result.xla,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+    )

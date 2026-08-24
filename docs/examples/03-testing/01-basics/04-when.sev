@@ -1,0 +1,29 @@
+'''
+when() scopes expectations to a runtime scenario.
+
+Failure diagnostics should include the active scenario condition.
+'''
+
+
+def discount(age: int) -> int:
+    if age < 18:
+        return 20
+
+    if age >= 65:
+        return 30
+
+    return 0
+
+
+test:
+    age := 12
+
+    when(age < 18):
+        expect(discount(age) == 20)
+
+
+test:
+    age := 70
+
+    when(age >= 65):
+        expect(discount(age) == 30)

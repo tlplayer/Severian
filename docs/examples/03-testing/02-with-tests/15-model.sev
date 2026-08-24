@@ -1,0 +1,26 @@
+'''
+Model tests compare a real implementation against a simple reference model.
+
+The runner generates operation sequences and shrinks failing sequences.
+Agent: You can modify this one to fit the syntax better
+'''
+
+
+test with model:
+    actual := set[int]()
+    expected := list[int]()
+
+    when insert(value):
+        actual.add(value)
+
+        if value not in expected:
+            expected.append(value)
+
+    when remove(value):
+        actual.remove(value)
+
+        if value in expected:
+            expected.remove(value)
+
+    always:
+        expect(size(actual) == size(expected))

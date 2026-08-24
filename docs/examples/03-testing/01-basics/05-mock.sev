@@ -1,0 +1,38 @@
+'''
+mock() replaces behavior only for the current test.
+
+Unmatched calls fail by default.
+'''
+
+
+def fetch_price(id: int) -> int:
+    return 0
+
+
+def total(id: int, quantity: int) -> int:
+    return fetch_price(id) * quantity
+
+
+test:
+    mock(
+        fetch_price(10) -> 25
+    )
+
+    assert(fetch_price(10) == 25)
+    expect(total(10, 4) == 100)
+
+
+test:
+    mock(
+        fetch_price(10) -> 25,
+        fetch_price(20) -> 50,
+        else throw Error("unexpected product")
+    )
+
+    expect(fetch_price(10) == 25)
+    expect(fetch_price(20) == 50)
+
+    throws(
+        fetch_price(30)
+        -> Error
+    )

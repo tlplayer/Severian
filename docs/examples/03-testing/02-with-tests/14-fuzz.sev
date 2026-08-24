@@ -1,0 +1,21 @@
+'''
+Fuzz tests search arbitrary inputs and preserve failing inputs for replay.
+
+The runner should report a seed, minimized input, and reproduction command.
+'''
+
+
+def parse_integer(value: string) -> int | Error:
+    return 0
+
+
+test with fuzz:
+    input: string
+
+    result ?= parse_integer(input)
+
+    when result is int:
+        formatted := string(result)
+        reparsed := parse_integer(formatted)
+
+        expect(reparsed == result)
