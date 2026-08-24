@@ -116,6 +116,12 @@ test with integ:
     assert("timer duration: " in stdout)
     assert("(tuple:,10)" in stdout)
 
+test with integ:
+    result = composed_hook()
+    assert("timer start: composed_hook" in stdout)
+    assert("doing stuff" in stdout)
+    assert("timer duration: " in stdout)
+
 
 test:
     result = search([10, 20, 30], 30)
