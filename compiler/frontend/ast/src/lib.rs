@@ -8,7 +8,7 @@ pub use expression::{
     BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, MapEntry, MockCase,
     TaskOwner, UnaryOperator,
 };
-pub use statement::{Binding, LoopGuard, LoopGuardAction, MatchCase, Statement};
+pub use statement::{Binding, LoopGuard, LoopGuardAction, MatchCase, SelectCase, Statement};
 pub use types::{
     ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, EnumDeclaration, EnumVariant, FunctionContract, FunctionDeclaration,

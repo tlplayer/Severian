@@ -2431,7 +2431,230 @@ impl Analyzer<'_> {
                 cases,
                 span,
             } => self.match_statement(subject, cases, *span, bindings, result_type),
+            AstStatement::Select {
+                limit,
+                cases,
+                error_body,
+                span,
+            } => self.select_statement(limit, cases, error_body, *span, bindings, result_type),
         }
+    }
+
+    fn select_statement(
+        &mut self,
+        limit: &AstExpression,
+        cases: &[severian_ast::SelectCase],
+        error_body: &[AstStatement],
+        span: severian_source::Span,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Statement, Diagnostic> {
+        let usize_type = self
+            .types
+            .resolve_name("usize")
+            .expect("bootstrap defines usize");
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let unit = self
+            .types
+            .resolve_name("unit")
+            .expect("bootstrap defines unit");
+        let limit = self.expression(limit, Some(usize_type))?;
+
+        // `limit` counts successful receives, independently of bindings used by
+        // the program inside a case. Keeping this counter compiler-owned makes
+        // select useful without requiring a magic source-level variable.
+        let counter = self.new_binding_id();
+        let counter_variable = severian_hir::VariableId(counter.0);
+        self.mutable_variables.insert(counter_variable);
+        bindings.push(Binding {
+            id: counter,
+            variable: counter_variable,
+            type_id: usize_type,
+            value: self.integer_expression("0", usize_type, span),
+            mutable: true,
+            preserve_error: false,
+            span,
+        });
+        let condition = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Binary {
+                operator: BinaryOperator::Less,
+                left: Box::new(Expression {
+                    id: self.next_id(),
+                    type_id: usize_type,
+                    kind: ExpressionKind::Binding(counter),
+                    span,
+                }),
+                right: Box::new(limit),
+            },
+            span,
+        };
+
+        let outer_names = self.names.clone();
+        let outer_declarations = self.declarations.clone();
+        let mut lowered_cases = Vec::with_capacity(cases.len());
+        let mut channel_storages = Vec::with_capacity(cases.len());
+        for case in cases {
+            self.names.clone_from(&outer_names);
+            self.declarations.clone_from(&outer_declarations);
+
+            let channel = self.expression(&case.channel, None)?;
+            let Some(element) = self.channel_elements.get(&channel.type_id).copied() else {
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                return Err(Diagnostic::new(
+                    "E000205",
+                    "a select case requires a channel after `from`",
+                    Some(case.channel.span),
+                ));
+            };
+            let storage = self.channel_storage_expression(channel, case.channel.span);
+            let storage_type = storage.type_id;
+            channel_storages.push(storage.clone());
+            let ready = self.runtime_call(
+                "__sev_channel_claim",
+                &[storage_type],
+                boolean,
+                vec![storage.clone()],
+                case.span,
+            );
+            let suffix = self.list_runtime_suffix(element, case.span)?;
+            let value = self.runtime_call(
+                &format!("__sev_channel_recv_{suffix}"),
+                &[storage_type],
+                element,
+                vec![storage],
+                case.span,
+            );
+
+            let case_binding = self.new_binding_id();
+            let case_variable = severian_hir::VariableId(case_binding.0);
+            if !self.declarations.insert(case.binding.clone()) {
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                return Err(Diagnostic::new(
+                    "E000203",
+                    format!("binding `{}` is already defined", case.binding),
+                    Some(case.span),
+                ));
+            }
+            self.names
+                .insert(case.binding.clone(), (case_binding, case_variable, element));
+            bindings.push(Binding {
+                id: case_binding,
+                variable: case_variable,
+                type_id: element,
+                value,
+                mutable: false,
+                preserve_error: false,
+                span: case.span,
+            });
+
+            self.loop_depth += 1;
+            let lowered_body = self.block(&case.body, bindings, result_type);
+            self.loop_depth -= 1;
+            let mut body = lowered_body?;
+            body.statements.insert(0, Statement::Binding(case_binding));
+
+            let next_counter = self.new_binding_id();
+            let increment = Expression {
+                id: self.next_id(),
+                type_id: usize_type,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Add,
+                    left: Box::new(Expression {
+                        id: self.next_id(),
+                        type_id: usize_type,
+                        kind: ExpressionKind::Binding(counter),
+                        span: case.span,
+                    }),
+                    right: Box::new(self.integer_expression("1", usize_type, case.span)),
+                },
+                span: case.span,
+            };
+            bindings.push(Binding {
+                id: next_counter,
+                variable: counter_variable,
+                type_id: usize_type,
+                value: increment,
+                mutable: true,
+                preserve_error: false,
+                span: case.span,
+            });
+            let increment = Statement::Binding(next_counter);
+            increment_before_continue(&mut body, &increment);
+            body.statements.push(increment);
+            lowered_cases.push((ready, body));
+        }
+
+        self.names.clone_from(&outer_names);
+        self.declarations.clone_from(&outer_declarations);
+        let yield_call = self.runtime_call("__sev_channel_yield", &[], unit, Vec::new(), span);
+        let mut otherwise = Block {
+            statements: vec![Statement::Expression(yield_call)],
+        };
+        if !error_body.is_empty() {
+            let closed = channel_storages
+                .into_iter()
+                .map(|storage| {
+                    self.runtime_call(
+                        "__sev_channel_is_closed",
+                        &[storage.type_id],
+                        boolean,
+                        vec![storage],
+                        span,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut closed = closed.into_iter();
+            let mut all_closed = closed.next().expect("select has at least one case");
+            for next in closed {
+                all_closed = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::And,
+                        left: Box::new(all_closed),
+                        right: Box::new(next),
+                    },
+                    span,
+                };
+            }
+            let error_body = self.block(error_body, bindings, result_type)?;
+            otherwise = Block {
+                statements: vec![Statement::If {
+                    condition: all_closed,
+                    then_block: error_body,
+                    else_block: otherwise,
+                }],
+            };
+        }
+        for (ready, body) in lowered_cases.into_iter().rev() {
+            otherwise = Block {
+                statements: vec![Statement::If {
+                    condition: ready,
+                    then_block: body,
+                    else_block: otherwise,
+                }],
+            };
+        }
+        self.names = outer_names;
+        self.declarations = outer_declarations;
+
+        Ok(Statement::Sequence(Block {
+            statements: vec![
+                Statement::Binding(counter),
+                Statement::While {
+                    condition,
+                    body: otherwise,
+                    span,
+                },
+            ],
+        }))
     }
 
     fn match_statement(
@@ -9725,7 +9948,8 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             | AstStatement::For { .. }
             | AstStatement::Break { .. }
             | AstStatement::Continue { .. }
-            | AstStatement::Match { .. } => ControlFlow::FallsThrough,
+            | AstStatement::Match { .. }
+            | AstStatement::Select { .. } => ControlFlow::FallsThrough,
         };
         if flow == ControlFlow::Returns {
             return flow;
@@ -10084,6 +10308,37 @@ mod tests {
         assert!(error
             .message
             .contains("Status.Received -> Status.Connecting"));
+    }
+
+    #[test]
+    fn select_lowers_to_a_bounded_receive_loop() {
+        let (program, _) = analyze_source(
+            "def main():\n    commands = channel[string]\n    received := 0\n    select with limit=1:\n        case command from commands:\n            received += 1\n        case error:\n            assert(false)\n",
+        );
+        let module = &program.modules[0];
+        let main = module
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        let body = main.body.as_ref().unwrap();
+        let Statement::Sequence(select) = &body.statements[2] else {
+            panic!("select lowers to an ordered counter and loop")
+        };
+        assert!(matches!(select.statements[0], Statement::Binding(_)));
+        assert!(matches!(select.statements[1], Statement::While { .. }));
+        for symbol in [
+            "__sev_channel_claim",
+            "__sev_channel_recv_ptr",
+            "__sev_channel_is_closed",
+            "__sev_channel_yield",
+        ] {
+            assert!(module
+                .functions
+                .iter()
+                .any(|function| function.name == symbol));
+        }
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

@@ -1148,10 +1148,10 @@ mod tests {
             .emit_file(&source, EmitStage::Mlir)
             .unwrap();
         assert_eq!(mlir.matches("async.execute").count(), 2);
-        assert_eq!(mlir.matches("async.await %task").count(), 2);
+        assert_eq!(mlir.matches("async.await %v").count(), 2);
         assert_eq!(mlir.matches("func.call @__sev_task_lock").count(), 2);
         assert_eq!(mlir.matches("func.call @__sev_task_unlock").count(), 2);
-        let last_await = mlir.rfind("async.await %task").unwrap();
+        let last_await = mlir.rfind("async.await %v").unwrap();
         let function_return = mlir[last_await..].find("return").unwrap() + last_await;
         assert!(last_await < function_return);
         std::fs::remove_dir_all(root).unwrap();

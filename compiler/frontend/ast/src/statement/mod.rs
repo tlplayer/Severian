@@ -27,6 +27,14 @@ pub struct MatchCase {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectCase {
+    pub binding: String,
+    pub channel: Expression,
+    pub body: Vec<Statement>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopGuard {
     pub condition: Expression,
     pub action: LoopGuardAction,
@@ -114,6 +122,12 @@ pub enum Statement {
     Match {
         subject: Expression,
         cases: Vec<MatchCase>,
+        span: Span,
+    },
+    Select {
+        limit: Expression,
+        cases: Vec<SelectCase>,
+        error_body: Vec<Statement>,
         span: Span,
     },
 }

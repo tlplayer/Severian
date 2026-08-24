@@ -209,6 +209,44 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_bounded_channel_select_cases() {
+        let source = SourceFile::virtual_source(
+            "select.sev",
+            "def main():\n    commands = channel[string]\n    select with limit=2:\n        case command from commands:\n            handle(command)\n        case message from messages:\n            process(message)\n        case error:\n            panic(\"closed\")\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(main) = &module.items[0] else {
+            panic!("expected main")
+        };
+        let body = main.body.as_ref().unwrap();
+        let severian_ast::Statement::Binding(commands) = &body[0] else {
+            panic!("expected channel binding")
+        };
+        assert!(matches!(
+            commands.value.kind,
+            severian_ast::ExpressionKind::TypeApplication { .. }
+        ));
+        let severian_ast::Statement::Select {
+            limit,
+            cases,
+            error_body,
+            ..
+        } = &body[1]
+        else {
+            panic!("expected select statement")
+        };
+        assert!(matches!(
+            limit.kind,
+            severian_ast::ExpressionKind::Literal(severian_ast::Literal::Integer(ref value))
+                if value == "2"
+        ));
+        assert_eq!(cases.len(), 2);
+        assert_eq!(cases[0].binding, "command");
+        assert_eq!(cases[1].binding, "message");
+        assert_eq!(error_body.len(), 1);
+    }
+
+    #[test]
     fn parses_entry_and_deferred_function_contracts() {
         let source = SourceFile::virtual_source(
             "contracts.sev",

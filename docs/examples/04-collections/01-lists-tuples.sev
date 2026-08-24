@@ -3,7 +3,12 @@ def main():
     origin = (0.0, 0.0)
 
     first = names[0]
+    #Ranges can be expressed with (:) exclusive, or inclusive [:] or partial [:) or (:]
+    first_second = names[0:-1)
+    second_third = names(0:-1]
     x = origin[0]
 
     print(first)
+    print(first_second)
+    print(second_third)
     print(x)

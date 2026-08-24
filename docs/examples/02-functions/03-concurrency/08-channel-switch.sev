@@ -6,21 +6,23 @@ def handle(command: string):
 
 def main():
     messages = channel[string](16) #buffer size 16
-    commands = channel[string] #unbounded channnel
+    commands = channel[string] # unbounded channel
 
     message_producer = async messages.send("hello")
     command_producer = async commands.send("refresh")
+    received := 0
 
     select with limit=2:
-        command from commands:
-            await handle(command) with { runtime, lock}
+        case command from commands:
+            handle(command)
             received += 1
 
-        message from messages:
+        case message from messages:
             process(message)
             received += 1
 
-        fail error:
-            panic("Channels collapsed", error)
+        case error:
+            panic("Channels collapsed")
 
-    await message_producer, command_producer
+    await message_producer
+    await command_producer

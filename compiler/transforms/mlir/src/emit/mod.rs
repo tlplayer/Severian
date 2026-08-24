@@ -767,7 +767,7 @@ fn render_cfg_operation(
                 format!("attributes {{severian.owner = \"{owner}\", severian.locked = {locked}}}");
             if target.result == LoweredType::Unit {
                 output.push_str(&format!(
-                    "{indentation}%task{} = async.execute {attributes} {{\n",
+                    "{indentation}%v{} = async.execute {attributes} {{\n",
                     result.0
                 ));
                 if *locked {
@@ -825,8 +825,12 @@ fn render_cfg_operation(
             let ty = value_type(module, *result)?;
             if ty == LoweredType::Unit {
                 output.push_str(&format!(
-                    "{indentation}async.await %task{} : !async.token\n",
+                    "{indentation}async.await %v{} : !async.token\n",
                     task.0
+                ));
+                output.push_str(&format!(
+                    "{indentation}%v{} = arith.constant 0 : i8\n",
+                    result.0
                 ));
             } else {
                 let result_type = value_type(module, *task)?.task_result().ok_or_else(|| {
@@ -1513,7 +1517,7 @@ fn render_block(
                 );
                 if target.result == LoweredType::Unit {
                     output.push_str(&format!(
-                        "{indentation}%task{} = async.execute {attributes} {{\n",
+                        "{indentation}%v{} = async.execute {attributes} {{\n",
                         result.0,
                     ));
                     if *locked {
@@ -1538,7 +1542,7 @@ fn render_block(
                 } else {
                     let result_type = mlir_type(value_type(module, *result)?)?;
                     output.push_str(&format!(
-                        "{indentation}%task_token{}, %task{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
+                        "{indentation}%task_token{}, %v{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
                         result.0, result.0,
                     ));
                     if *locked {
@@ -1571,13 +1575,17 @@ fn render_block(
                 let ty = value_type(module, *result)?;
                 if ty == LoweredType::Unit {
                     output.push_str(&format!(
-                        "{indentation}async.await %task{} : !async.token\n",
+                        "{indentation}async.await %v{} : !async.token\n",
                         task.0
+                    ));
+                    output.push_str(&format!(
+                        "{indentation}%v{} = arith.constant 0 : i8\n",
+                        result.0
                     ));
                 } else {
                     let spelling = mlir_type(ty)?;
                     output.push_str(&format!(
-                        "{indentation}%v{} = async.await %task{} : !async.value<{spelling}>\n",
+                        "{indentation}%v{} = async.await %v{} : !async.value<{spelling}>\n",
                         result.0, task.0
                     ));
                 }

@@ -183,6 +183,33 @@ fn validate_generic_statements(
                     )?;
                 }
             }
+            severian_ast::Statement::Select {
+                limit,
+                cases,
+                error_body,
+                ..
+            } => {
+                validate_generic_expression(limit, names, function, index, types)?;
+                for case in cases {
+                    validate_generic_expression(&case.channel, names, function, index, types)?;
+                    let mut case_names = names.clone();
+                    case_names.remove(&case.binding);
+                    validate_generic_statements(
+                        &case.body,
+                        &mut case_names,
+                        function,
+                        index,
+                        types,
+                    )?;
+                }
+                validate_generic_statements(
+                    error_body,
+                    &mut names.clone(),
+                    function,
+                    index,
+                    types,
+                )?;
+            }
         }
     }
     Ok(())
@@ -1046,6 +1073,47 @@ fn visit_statements_for_specializations(
                         specializations,
                     )?;
                 }
+            }
+            severian_ast::Statement::Select {
+                limit,
+                cases,
+                error_body,
+                ..
+            } => {
+                visit_expression_for_specializations(
+                    module,
+                    limit,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                for case in cases {
+                    visit_expression_for_specializations(
+                        module,
+                        &case.channel,
+                        None,
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                    visit_statements_for_specializations(
+                        module,
+                        &case.body,
+                        result,
+                        &mut names.clone(),
+                        index,
+                        specializations,
+                    )?;
+                }
+                visit_statements_for_specializations(
+                    module,
+                    error_body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
             }
         }
     }

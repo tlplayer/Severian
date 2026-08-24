@@ -4,8 +4,9 @@ use severian_ast::{
     ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
     HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, LoopGuard, LoopGuardAction,
     MatchCase, Module, OperatorDeclaration, OperatorImplementation, OperatorParameter,
-    OperatorSyntax, PropertyConstraint, PropertyDeclaration, Statement, TaskOwner, TestDeclaration,
-    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    OperatorSyntax, PropertyConstraint, PropertyDeclaration, SelectCase, Statement, TaskOwner,
+    TestDeclaration, TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
+    UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -194,7 +195,8 @@ impl Parser<'_> {
                     | Statement::For { .. }
                     | Statement::Break { .. }
                     | Statement::Continue { .. }
-                    | Statement::Match { .. } => {
+                    | Statement::Match { .. }
+                    | Statement::Select { .. } => {
                         unreachable!("module parsing only requests simple statements")
                     }
                 }
@@ -622,6 +624,7 @@ impl Parser<'_> {
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let compound = self.at_identifier("if")
                 || self.at_identifier("match")
+                || self.at_identifier("select")
                 || self.at_identifier("while")
                 || self.at_identifier("for")
                 || self.at_identifier("unsafe")
@@ -845,6 +848,9 @@ impl Parser<'_> {
         if self.at_identifier("match") {
             return self.match_statement();
         }
+        if self.at_identifier("select") {
+            return self.select_statement();
+        }
         if self.at_identifier("break") {
             let span = self.next().span;
             return Ok(Statement::Break { span });
@@ -946,6 +952,77 @@ impl Parser<'_> {
         Ok(Statement::Match {
             subject,
             cases,
+            span: Span::new(start.source, start.start, end),
+        })
+    }
+
+    fn select_statement(&mut self) -> Result<Statement, Diagnostic> {
+        let start = self.next().span;
+        if !self.at_identifier("with") {
+            return Err(self.error("expected `with` after `select`"));
+        }
+        self.next();
+        if !self.at_identifier("limit") {
+            return Err(self.error("expected `limit` after `select with`"));
+        }
+        self.next();
+        self.expect(&TokenKind::Equal, "expected `=` after select limit")?;
+        let limit = self.expression(0)?;
+        self.expect(&TokenKind::Colon, "expected `:` after select declaration")?;
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after select header",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected indented select cases")?;
+        self.separators();
+        let mut cases = Vec::new();
+        let mut error_body = Vec::new();
+        let mut end = limit.span.end;
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            if !self.at_identifier("case") {
+                return Err(self.error("expected `case` in select body"));
+            }
+            let case_start = self.next().span;
+            let (binding, _) = self.identifier("expected a select case binding")?;
+            if self.at_identifier("from") {
+                self.next();
+                let channel = self.expression(0)?;
+                self.expect(&TokenKind::Colon, "expected `:` after select channel")?;
+                let (body, case_end) = self.indented_block("select case")?;
+                end = case_end;
+                cases.push(SelectCase {
+                    binding,
+                    channel,
+                    body,
+                    span: Span::new(case_start.source, case_start.start, case_end),
+                });
+            } else {
+                if binding != "error" {
+                    return Err(self.error("expected `from` after select case binding"));
+                }
+                if !error_body.is_empty() {
+                    return Err(self.error("a select may contain only one error case"));
+                }
+                self.expect(&TokenKind::Colon, "expected `:` after select error case")?;
+                let (body, case_end) = self.indented_block("select error case")?;
+                end = case_end;
+                error_body = body;
+            }
+            self.separators();
+        }
+        self.expect(&TokenKind::Dedent, "expected end of select cases")?;
+        if cases.is_empty() {
+            return Err(Diagnostic::new(
+                "E000112",
+                "a select requires at least one channel case",
+                Some(start),
+            ));
+        }
+        Ok(Statement::Select {
+            limit,
+            cases,
+            error_body,
             span: Span::new(start.source, start.start, end),
         })
     }
@@ -2222,7 +2299,13 @@ impl Parser<'_> {
                         member_span.end,
                     ),
                 };
-            } else if self.at(&TokenKind::LeftBracket) && self.type_application_follows() {
+            } else if self.at(&TokenKind::LeftBracket)
+                && (self.type_application_follows()
+                    || matches!(
+                        &expression.kind,
+                        ExpressionKind::Name(name) if matches!(name.as_str(), "channel" | "Channel")
+                    ))
+            {
                 self.next();
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightBracket) {
