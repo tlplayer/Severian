@@ -157,6 +157,9 @@ pub(crate) fn analyze_with_package_functions(
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
         tuple_elements: BTreeMap::new(),
+        fallible_types: BTreeMap::new(),
+        error_types: BTreeSet::new(),
+        preserve_error_depth: 0,
         lowered_classes: Vec::new(),
         runtime_functions: Vec::new(),
         runtime_definitions: BTreeMap::new(),
@@ -626,6 +629,9 @@ struct Analyzer<'a> {
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
     tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
+    fallible_types: BTreeMap<TypeId, FallibleType>,
+    error_types: BTreeSet<TypeId>,
+    preserve_error_depth: usize,
     lowered_classes: Vec<HirClassDeclaration>,
     runtime_functions: Vec<FunctionDeclaration>,
     runtime_definitions: BTreeMap<String, DefId>,
@@ -684,6 +690,12 @@ struct EnumInstance {
     name: String,
     fields: Vec<HirClassFieldDeclaration>,
     variants: Vec<severian_ast::EnumVariant>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FallibleType {
+    success: TypeId,
+    error: TypeId,
 }
 
 #[derive(Debug, Clone)]
@@ -965,6 +977,14 @@ impl Analyzer<'_> {
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
             };
+            if package_class
+                .declaration
+                .traits
+                .iter()
+                .any(|implemented| implemented.simple_name() == Some("Error"))
+            {
+                self.error_types.insert(package_class.ty);
+            }
             self.class_instances_by_type
                 .insert(package_class.ty, instance.clone());
             if source_module == Some(package_class.module) {
@@ -986,6 +1006,36 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
+            let mut success = Vec::new();
+            let mut errors = Vec::new();
+            for member in members {
+                if matches!(member.simple_name(), Some("None" | "absent")) {
+                    continue;
+                }
+                let ty = self.resolve_source_type(member)?;
+                if self.is_error_type(ty) {
+                    errors.push(ty);
+                } else {
+                    success.push(ty);
+                }
+            }
+            success.sort();
+            success.dedup();
+            errors.sort();
+            errors.dedup();
+            if let ([success], [error]) = (success.as_slice(), errors.as_slice()) {
+                return Ok(self.instantiate_fallible_type(*success, *error));
+            }
+            if errors.is_empty() && success.len() == 1 {
+                return Ok(success[0]);
+            }
+            return Err(Diagnostic::new(
+                "E000204",
+                "fallible unions currently require one success type and one error type",
+                Some(annotation.span),
+            ));
+        }
         if let Some(("list", [element])) = annotation.named_parts() {
             let element = resolve_type_annotation(self.types, element)?;
             if let Some(list) = self.list_types.get(&element) {
@@ -1010,6 +1060,10 @@ impl Analyzer<'_> {
             }
         }
         resolve_type_annotation(self.types, annotation)
+    }
+
+    fn is_error_type(&self, ty: TypeId) -> bool {
+        self.types.resolve_name("Error") == Some(ty) || self.error_types.contains(&ty)
     }
 
     fn resolve_trait_type(
@@ -1096,10 +1150,17 @@ impl Analyzer<'_> {
         let expected = ast_binding
             .annotation
             .as_ref()
-            .map(|annotation| resolve_type_annotation(self.types, annotation))
+            .map(|annotation| self.resolve_source_type(annotation))
             .transpose()?
             .or(update_type);
-        let value = self.expression(&ast_binding.value, expected)?;
+        if ast_binding.preserve_error {
+            self.preserve_error_depth += 1;
+        }
+        let value = self.expression(&ast_binding.value, expected);
+        if ast_binding.preserve_error {
+            self.preserve_error_depth -= 1;
+        }
+        let value = value?;
         let type_id = expected.unwrap_or(value.type_id);
         if !self.types.assignable(value.type_id, type_id) {
             return Err(Diagnostic::new(
@@ -1550,6 +1611,18 @@ impl Analyzer<'_> {
                 })
             }
             AstStatement::Expression(expression) => {
+                if let AstExpressionKind::Throw { error } = &expression.kind {
+                    if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                        let error = self.expression(error, Some(fallible.error))?;
+                        let result = self.fallible_error_expression(
+                            result_type,
+                            fallible,
+                            error,
+                            expression.span,
+                        )?;
+                        return Ok(Statement::Return(Some(result)));
+                    }
+                }
                 if let AstExpressionKind::Mock { cases, fallback } = &expression.kind {
                     let Some(name) = cases.first().and_then(|case| match &case.call.kind {
                         AstExpressionKind::Call { callee, .. } => callable_path(callee),
@@ -1644,7 +1717,19 @@ impl Analyzer<'_> {
                             Some(*span),
                         ))
                     }
-                    Some(value) => Some(self.expression(value, Some(result_type))?),
+                    Some(value) => {
+                        if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                            let value = self.expression(value, Some(fallible.success))?;
+                            Some(self.fallible_success_expression(
+                                result_type,
+                                fallible,
+                                value,
+                                *span,
+                            )?)
+                        } else {
+                            Some(self.expression(value, Some(result_type))?)
+                        }
+                    }
                     None if result_type != unit => {
                         return Err(Diagnostic::new(
                             "E000210",
@@ -2738,6 +2823,36 @@ impl Analyzer<'_> {
                     }
                 }
                 let object = self.expression(object, None)?;
+                if let Some(fallible) = self.fallible_types.get(&object.type_id).copied() {
+                    if let Some(instance) = self.class_instances_by_type.get(&fallible.error) {
+                        if let Some((index, field)) = instance
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, field)| field.name == *name)
+                        {
+                            let field_type = field.ty;
+                            let error = Expression {
+                                id: self.next_id(),
+                                type_id: fallible.error,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(object),
+                                    index: 2,
+                                },
+                                span: ast.span,
+                            };
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: field_type,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(error),
+                                    index: index as u32,
+                                },
+                                span: ast.span,
+                            });
+                        }
+                    }
+                }
                 let Some(instance) = self.class_instances_by_type.get(&object.type_id) else {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -3018,6 +3133,47 @@ impl Analyzer<'_> {
                     }
                 }
                 if let AstExpressionKind::Member { object, name } = &callee.kind {
+                    if name == "default" && arguments.len() == 1 && arguments[0].name.is_none() {
+                        let result = self.expression(object, None)?;
+                        if let Some(fallible) = self.fallible_types.get(&result.type_id).copied() {
+                            let boolean = self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool");
+                            let condition = Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(result.clone()),
+                                    index: 0,
+                                },
+                                span: ast.span,
+                            };
+                            let value = Expression {
+                                id: self.next_id(),
+                                type_id: fallible.success,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(result),
+                                    index: 1,
+                                },
+                                span: ast.span,
+                            };
+                            let fallback = self.expression(
+                                &arguments[0].value,
+                                Some(fallible.success),
+                            )?;
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: fallible.success,
+                                kind: ExpressionKind::Fallback {
+                                    condition: Box::new(condition),
+                                    value: Box::new(value),
+                                    fallback: Box::new(fallback),
+                                },
+                                span: ast.span,
+                            });
+                        }
+                    }
                     if name == "zero" && arguments.is_empty() {
                         if let AstExpressionKind::Name(type_name) = &object.kind {
                             if let Some(type_id) = self
@@ -3296,8 +3452,12 @@ impl Analyzer<'_> {
                 let mut matches = Vec::new();
                 for function in candidates {
                     let signature = self.signatures[&function].clone();
+                    let exposed_result = self
+                        .fallible_types
+                        .get(&signature.result)
+                        .map_or(signature.result, |fallible| fallible.success);
                     if expected
-                        .is_some_and(|expected| !self.types.assignable(signature.result, expected))
+                        .is_some_and(|expected| !self.types.assignable(exposed_result, expected))
                     {
                         continue;
                     }
@@ -3395,7 +3555,7 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
-                Ok(Expression {
+                let call = Expression {
                     id: self.next_id(),
                     type_id: *result,
                     kind: ExpressionKind::Call {
@@ -3406,7 +3566,13 @@ impl Analyzer<'_> {
                         arguments: (*arguments).clone(),
                     },
                     span: ast.span,
-                })
+                };
+                if self.preserve_error_depth == 0 {
+                    if let Some(fallible) = self.fallible_types.get(result).copied() {
+                        return Ok(self.unwrap_fallible_expression(call, fallible, ast.span));
+                    }
+                }
+                Ok(call)
             }
             AstExpressionKind::Unary { operator, operand } => {
                 if matches!(
@@ -3515,6 +3681,55 @@ impl Analyzer<'_> {
                         ast.span,
                     );
                 }
+                if *operator == AstBinaryOperator::Identity {
+                    if let AstExpressionKind::Name(type_name) = &right.kind {
+                        let target = self
+                            .class_instances
+                            .get(&(type_name.clone(), Vec::new()))
+                            .map(|instance| instance.ty)
+                            .or_else(|| self.types.resolve_name(type_name));
+                        if let Some(target) = target {
+                            let left = self.expression(left, None)?;
+                            if let Some(fallible) =
+                                self.fallible_types.get(&left.type_id).copied()
+                            {
+                                let boolean = self
+                                    .types
+                                    .resolve_name("bool")
+                                    .expect("bootstrap defines bool");
+                                let ok = Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Field {
+                                        object: Box::new(left),
+                                        index: 0,
+                                    },
+                                    span: ast.span,
+                                };
+                                if target == fallible.success {
+                                    return Ok(ok);
+                                }
+                                if target == fallible.error {
+                                    return Ok(Expression {
+                                        id: self.next_id(),
+                                        type_id: boolean,
+                                        kind: ExpressionKind::Unary {
+                                            operator: UnaryOperator::Not,
+                                            operand: Box::new(ok),
+                                        },
+                                        span: ast.span,
+                                    });
+                                }
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Literal(LiteralValue::Boolean(false)),
+                                    span: ast.span,
+                                });
+                            }
+                        }
+                    }
+                }
                 if *operator == AstBinaryOperator::Contains {
                     let string = self
                         .types
@@ -3603,6 +3818,67 @@ impl Analyzer<'_> {
                         | AstBinaryOperator::Identity
                 ) {
                     let resolved_left = self.expression(left, None)?;
+                    if matches!(operator, AstBinaryOperator::Equal | AstBinaryOperator::NotEqual) {
+                        if let Some(fallible) =
+                            self.fallible_types.get(&resolved_left.type_id).copied()
+                        {
+                            let boolean = self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool");
+                            let ok = Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(resolved_left.clone()),
+                                    index: 0,
+                                },
+                                span: ast.span,
+                            };
+                            let value = Expression {
+                                id: self.next_id(),
+                                type_id: fallible.success,
+                                kind: ExpressionKind::Field {
+                                    object: Box::new(resolved_left),
+                                    index: 1,
+                                },
+                                span: ast.span,
+                            };
+                            let right = self.expression(right, Some(fallible.success))?;
+                            let equal = Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Binary {
+                                    operator: BinaryOperator::Equal,
+                                    left: Box::new(value),
+                                    right: Box::new(right),
+                                },
+                                span: ast.span,
+                            };
+                            let successful_equal = Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Binary {
+                                    operator: BinaryOperator::And,
+                                    left: Box::new(ok),
+                                    right: Box::new(equal),
+                                },
+                                span: ast.span,
+                            };
+                            if *operator == AstBinaryOperator::NotEqual {
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Unary {
+                                        operator: UnaryOperator::Not,
+                                        operand: Box::new(successful_equal),
+                                    },
+                                    span: ast.span,
+                                });
+                            }
+                            return Ok(successful_equal);
+                        }
+                    }
                     if let Some(element) = self.list_elements.get(&resolved_left.type_id).copied() {
                         let list_type = resolved_left.type_id;
                         let resolved_right = self.expression(right, Some(list_type))?;
@@ -4231,6 +4507,38 @@ impl Analyzer<'_> {
         ty
     }
 
+    fn instantiate_fallible_type(&mut self, success: TypeId, error: TypeId) -> TypeId {
+        let ty = fallible_type_id(success, error);
+        if self.fallible_types.contains_key(&ty) {
+            return ty;
+        }
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        self.fallible_types
+            .insert(ty, FallibleType { success, error });
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("result[type#{}, type#{}]", success.0, error.0),
+            fields: vec![
+                HirClassFieldDeclaration {
+                    name: "ok".into(),
+                    ty: boolean,
+                },
+                HirClassFieldDeclaration {
+                    name: "value".into(),
+                    ty: success,
+                },
+                HirClassFieldDeclaration {
+                    name: "error".into(),
+                    ty: error,
+                },
+            ],
+        });
+        ty
+    }
+
     fn channel_constructor(
         &mut self,
         element: &TypeAnnotation,
@@ -4478,6 +4786,22 @@ impl Analyzer<'_> {
                 span,
             });
         }
+        if let Some(instance) = self.class_instances_by_type.get(&type_id).cloned() {
+            let fields = instance
+                .fields
+                .iter()
+                .map(|field| self.default_expression(field.ty, span))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id,
+                kind: ExpressionKind::Aggregate {
+                    class: type_id,
+                    fields,
+                },
+                span,
+            });
+        }
         let literal = match self
             .types
             .primitive(type_id)
@@ -4515,6 +4839,119 @@ impl Analyzer<'_> {
             kind: ExpressionKind::Literal(literal),
             span,
         })
+    }
+
+    fn fallible_success_expression(
+        &mut self,
+        result_type: TypeId,
+        fallible: FallibleType,
+        value: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let ok = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+            span,
+        };
+        let error = self.default_expression(fallible.error, span)?;
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: result_type,
+            kind: ExpressionKind::Aggregate {
+                class: result_type,
+                fields: vec![ok, value, error],
+            },
+            span,
+        })
+    }
+
+    fn fallible_error_expression(
+        &mut self,
+        result_type: TypeId,
+        fallible: FallibleType,
+        error: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let ok = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(false)),
+            span,
+        };
+        let value = self.default_expression(fallible.success, span)?;
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: result_type,
+            kind: ExpressionKind::Aggregate {
+                class: result_type,
+                fields: vec![ok, value, error],
+            },
+            span,
+        })
+    }
+
+    fn unwrap_fallible_expression(
+        &mut self,
+        result: Expression,
+        fallible: FallibleType,
+        span: severian_source::Span,
+    ) -> Expression {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let condition = Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Field {
+                object: Box::new(result.clone()),
+                index: 0,
+            },
+            span,
+        };
+        let value = Expression {
+            id: self.next_id(),
+            type_id: fallible.success,
+            kind: ExpressionKind::Field {
+                object: Box::new(result.clone()),
+                index: 1,
+            },
+            span,
+        };
+        let error = Expression {
+            id: self.next_id(),
+            type_id: fallible.error,
+            kind: ExpressionKind::Field {
+                object: Box::new(result),
+                index: 2,
+            },
+            span,
+        };
+        let fallback = Expression {
+            id: self.next_id(),
+            type_id: fallible.success,
+            kind: ExpressionKind::Throw(Box::new(error)),
+            span,
+        };
+        Expression {
+            id: self.next_id(),
+            type_id: fallible.success,
+            kind: ExpressionKind::Fallback {
+                condition: Box::new(condition),
+                value: Box::new(value),
+                fallback: Box::new(fallback),
+            },
+            span,
+        }
     }
 
     fn tuple_string(
@@ -6384,6 +6821,15 @@ pub(crate) fn map_type_id(key: TypeId, value: TypeId) -> TypeId {
         (hash ^ element.0).wrapping_mul(0x0100_0193)
     });
     TypeId(0x8000_0000 | (hash & 0x3fff_ffff))
+}
+
+pub(crate) fn fallible_type_id(success: TypeId, error: TypeId) -> TypeId {
+    let hash = [success, error]
+        .iter()
+        .fold(0x811c_9dc5u32, |hash, element| {
+            (hash ^ element.0).wrapping_mul(0x0100_0193)
+        });
+    TypeId(0x4000_0000 | (hash & 0x3fff_ffff))
 }
 
 fn contract_failure_expression(

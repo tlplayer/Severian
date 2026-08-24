@@ -429,6 +429,47 @@ fn resolve_package_type(
     classes: &[PackageClass],
     lists: &[PackageList],
 ) -> Result<TypeId, Diagnostic> {
+    if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
+        let mut success = Vec::new();
+        let mut errors = Vec::new();
+        for member in members {
+            if matches!(member.simple_name(), Some("None" | "absent")) {
+                continue;
+            }
+            let ty = resolve_package_type(types, member, module, classes, lists)?;
+            let source_error = member.simple_name().is_some_and(|name| {
+                classes.iter().any(|class| {
+                    class.module == module
+                        && class.declaration.name == name
+                        && class
+                            .declaration
+                            .traits
+                            .iter()
+                            .any(|implemented| implemented.simple_name() == Some("Error"))
+                })
+            });
+            if types.resolve_name("Error") == Some(ty) || source_error {
+                errors.push(ty);
+            } else {
+                success.push(ty);
+            }
+        }
+        success.sort();
+        success.dedup();
+        errors.sort();
+        errors.dedup();
+        if let ([success], [error]) = (success.as_slice(), errors.as_slice()) {
+            return Ok(crate::fallible_type_id(*success, *error));
+        }
+        if errors.is_empty() && success.len() == 1 {
+            return Ok(success[0]);
+        }
+        return Err(Diagnostic::new(
+            "E000204",
+            "fallible unions currently require one success type and one error type",
+            Some(annotation.span),
+        ));
+    }
     if let Some(("tuple", elements)) = annotation.named_parts() {
         let elements = elements
             .iter()

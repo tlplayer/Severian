@@ -213,6 +213,25 @@ fn optional_fallback_and_throws_are_executable_test_control_flow() {
 }
 
 #[test]
+fn fallible_error_subclasses_preserve_and_propagate_typed_results() {
+    let root = temporary("typed-error-result");
+    let source = root.join("typed-error-result.sev");
+    fs::write(
+        &source,
+        "class ValidationError: Error\n    field: string\n    def ValidationError(field_name: string):\n        field := field_name\ndef require_positive(value: int) -> int | ValidationError:\n    if value <= 0:\n        throw ValidationError(\"value\")\n    return value\ntest:\n    assert(require_positive(10) == 10)\ntest:\n    result ?= require_positive(-1)\n    assert(result is ValidationError)\n    assert(result.field == \"value\")\n    throws(require_positive(-1) -> ValidationError)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn constrained_generic_method_traits_specialize_to_executable_instances() {
     let root = temporary("generic-numeric");
     let source = root.join("generic-numeric.sev");
