@@ -185,6 +185,15 @@ pub enum Terminator {
         owner: TaskOwner,
         locked: bool,
     },
+    SpawnFieldUpdate {
+        place: Place,
+        operator: BinaryOperator,
+        value: Operand,
+        destination: Place,
+        target: BlockId,
+        owner: TaskOwner,
+        locked: bool,
+    },
     Return(Option<Operand>),
     Throw(Operand),
     Unreachable,
@@ -839,6 +848,37 @@ impl BodyBuilder {
                 .insert((self.current, expression.id), result.clone());
             return result;
         }
+        if let severian_hir::ExpressionKind::AsyncFieldUpdate {
+            binding,
+            field,
+            operator,
+            value,
+            owner,
+            locked,
+        } = &expression.kind
+        {
+            let result = Place::local(self.local(expression.type_id, false, false));
+            self.push(Statement::StorageLive(
+                result.local_id().expect("task results are local places"),
+            ));
+            let mut place = self.bindings[binding].clone();
+            place.projection.push(Projection::Field(*field));
+            let value = Operand::Copy(self.expression(value));
+            let continuation = self.block();
+            self.terminate(Terminator::SpawnFieldUpdate {
+                place,
+                operator: *operator,
+                value,
+                destination: result.clone(),
+                target: continuation,
+                owner: *owner,
+                locked: *locked,
+            });
+            self.current = continuation;
+            self.expressions
+                .insert((self.current, expression.id), result.clone());
+            return result;
+        }
         if let severian_hir::ExpressionKind::Await(task) = &expression.kind {
             let result = Place::local(self.local(expression.type_id, false, false));
             self.push(Statement::StorageLive(
@@ -1037,6 +1077,9 @@ impl BodyBuilder {
                     result.clone(),
                     Rvalue::Use(Operand::Copy(source)),
                 ));
+            }
+            severian_hir::ExpressionKind::AsyncFieldUpdate { .. } => {
+                unreachable!("async field updates are lowered before ordinary expressions")
             }
         }
         self.expressions

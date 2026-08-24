@@ -208,11 +208,16 @@ impl CfgLowering<'_> {
                 severian_mir::Terminator::Spawn {
                     owner: severian_mir::TaskOwner::Runtime,
                     ..
+                } | severian_mir::Terminator::SpawnFieldUpdate {
+                    owner: severian_mir::TaskOwner::Runtime,
+                    ..
                 }
             ) {
-                if let Some(LirOperation::Spawn { result, .. }) = operations[start..]
-                    .iter()
-                    .find(|operation| matches!(operation, LirOperation::Spawn { .. }))
+                if let Some(result) = operations[start..].iter().find_map(|operation| match operation {
+                    LirOperation::Spawn { result, .. }
+                    | LirOperation::SpawnFieldUpdate { result, .. } => Some(result),
+                    _ => None,
+                })
                 {
                     scoped_spawns.push((block.id, *result));
                 }
@@ -591,6 +596,39 @@ impl CfgLowering<'_> {
                     target.0,
                 )))
             }
+            severian_mir::Terminator::SpawnFieldUpdate {
+                place,
+                operator,
+                value,
+                destination,
+                target,
+                owner,
+                locked,
+            } => {
+                let value = self.lower_operand(body, value, operations)?;
+                let result = self.new_value(self.place_type(body, destination)?);
+                operations.push(LirOperation::SpawnFieldUpdate {
+                    place: self.lower_place(place),
+                    operator: lower_binary(*operator),
+                    value,
+                    result,
+                    owner: match owner {
+                        severian_mir::TaskOwner::SelfScope => {
+                            severian_lir::TaskOwner::SelfScope
+                        }
+                        severian_mir::TaskOwner::Runtime => severian_lir::TaskOwner::Runtime,
+                        severian_mir::TaskOwner::Inferred => severian_lir::TaskOwner::Inferred,
+                    },
+                    locked: *locked,
+                });
+                operations.push(LirOperation::Store {
+                    place: self.lower_place(destination),
+                    value: result,
+                });
+                Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(
+                    target.0,
+                )))
+            }
             severian_mir::Terminator::Return(value) => Ok(severian_lir::Terminator::Return(
                 value
                     .as_ref()
@@ -836,7 +874,8 @@ fn cfg_successors(terminator: &severian_mir::Terminator) -> Vec<severian_mir::Bl
     match terminator {
         severian_mir::Terminator::Goto(target, _)
         | severian_mir::Terminator::Call { target, .. }
-        | severian_mir::Terminator::Spawn { target, .. } => vec![*target],
+        | severian_mir::Terminator::Spawn { target, .. }
+        | severian_mir::Terminator::SpawnFieldUpdate { target, .. } => vec![*target],
         severian_mir::Terminator::Branch {
             then_block,
             else_block,
@@ -860,7 +899,10 @@ fn task_locals(body: &severian_mir::CfgBody) -> BTreeSet<severian_mir::LocalId> 
         .blocks
         .iter()
         .filter_map(|block| match &block.terminator {
-            severian_mir::Terminator::Spawn { destination, .. } => destination.local_id(),
+            severian_mir::Terminator::Spawn { destination, .. }
+            | severian_mir::Terminator::SpawnFieldUpdate { destination, .. } => {
+                destination.local_id()
+            }
             _ => None,
         })
         .collect::<BTreeSet<_>>();
@@ -1538,6 +1580,9 @@ fn operation_uses_value(operation: &LirOperation, value: ValueId) -> bool {
             arguments.contains(&value)
         }
         LirOperation::Spawn { arguments, .. } => arguments.contains(&value),
+        LirOperation::SpawnFieldUpdate {
+            value: update, ..
+        } => *update == value,
         LirOperation::Await { task, .. } => *task == value,
         LirOperation::Return { value: returned } => *returned == Some(value),
         LirOperation::Assert {

@@ -313,7 +313,9 @@ fn render_block(
                     define_value(output, module, *result, &call)?;
                 }
             }
-            Operation::Spawn { .. } | Operation::Await { .. } => {
+            Operation::Spawn { .. }
+            | Operation::SpawnFieldUpdate { .. }
+            | Operation::Await { .. } => {
                 return Err(BackendError::UnsupportedOperation(
                     "task operations require the MLIR async lowering".into(),
                 ));

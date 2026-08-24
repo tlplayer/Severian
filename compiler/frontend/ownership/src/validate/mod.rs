@@ -189,6 +189,16 @@ fn validate_expression(
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
             validate_expression(expression, declared)
         }
+        ExpressionKind::AsyncFieldUpdate { binding, value, .. } => {
+            if !declared.contains(binding) {
+                return Err(Diagnostic::new(
+                    "E000301",
+                    "class value updated before it is available",
+                    Some(expression.span),
+                ));
+            }
+            validate_expression(value, declared)
+        }
         ExpressionKind::Fallback {
             condition,
             value,

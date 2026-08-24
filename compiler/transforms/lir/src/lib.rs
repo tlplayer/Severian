@@ -240,6 +240,14 @@ pub enum Operation {
         owner: TaskOwner,
         locked: bool,
     },
+    SpawnFieldUpdate {
+        place: Place,
+        operator: BinaryOperation,
+        value: ValueId,
+        result: ValueId,
+        owner: TaskOwner,
+        locked: bool,
+    },
     Await {
         task: ValueId,
         result: ValueId,

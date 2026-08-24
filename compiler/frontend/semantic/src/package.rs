@@ -1288,6 +1288,10 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await(expression) => {
             remap_expression_bindings(expression, offset)
         }
+        ExpressionKind::AsyncFieldUpdate { binding, value, .. } => {
+            binding.0 += offset;
+            remap_expression_bindings(value, offset);
+        }
         ExpressionKind::Fallback {
             condition,
             value,

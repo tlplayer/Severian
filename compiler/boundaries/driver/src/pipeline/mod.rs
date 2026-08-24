@@ -1158,6 +1158,26 @@ mod tests {
     }
 
     #[test]
+    fn locked_async_class_updates_mutate_the_captured_storage() {
+        let root = temporary_package();
+        let source = root.join("locked-update.sev");
+        std::fs::write(
+            &source,
+            "class Counter:\n    value: int\n    def increment():\n        value += 1\ndef main():\n    counter := Counter(0)\n    task = async counter.increment() with self and lock\n    await task\n    assert(counter.value == 1)\n",
+        )
+        .unwrap();
+        let mlir = Compiler::new(TargetSpec::host())
+            .unwrap()
+            .emit_file(&source, EmitStage::Mlir)
+            .unwrap();
+        assert!(mlir.contains("async.execute"));
+        assert!(mlir.contains("func.call @__sev_task_lock"));
+        assert!(mlir.contains("%update_old_"));
+        assert!(mlir.contains("llvm.store %update_result_"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn bare_sources_receive_the_compiler_standard_package_set() {
         let root = temporary_package();
         let source = root.join("root.sev");

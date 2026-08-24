@@ -53,7 +53,11 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
     let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
     let uses_task_lock = all_operations(module).into_iter().any(|operation| {
-        matches!(operation, Operation::Spawn { locked: true, .. })
+        matches!(
+            operation,
+            Operation::Spawn { locked: true, .. }
+                | Operation::SpawnFieldUpdate { locked: true, .. }
+        )
     });
     for operation in all_operations(module) {
         match operation {
@@ -266,7 +270,8 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         for block in &body.blocks {
             for operation in &block.operations {
                 match operation {
-                    Operation::Spawn { locked: true, .. } => {
+                    Operation::Spawn { locked: true, .. }
+                    | Operation::SpawnFieldUpdate { locked: true, .. } => {
                         uses_task_lock = true;
                     }
                     Operation::RuntimeCall {
@@ -820,6 +825,71 @@ fn render_cfg_operation(
                 ));
                 output.push_str(&format!("{indentation}}}\n"));
             }
+        }
+        Operation::SpawnFieldUpdate {
+            place,
+            operator,
+            value,
+            result,
+            owner,
+            locked,
+        } => {
+            let [severian_lir::Projection::Field(field)] = place.projection.as_slice() else {
+                return Err(MlirError::UnsupportedOperation(format!(
+                    "async update requires one field projection, got {place:?}"
+                )));
+            };
+            let owner = match owner {
+                severian_lir::TaskOwner::SelfScope => "self",
+                severian_lir::TaskOwner::Runtime => "runtime",
+                severian_lir::TaskOwner::Inferred => "inferred",
+            };
+            let attributes =
+                format!("attributes {{severian.owner = \"{owner}\", severian.locked = {locked}}}");
+            let nested = " ".repeat(indent + 2);
+            let base_type = mlir_type(cfg_place_base_type(module, body, place)?)?;
+            let field_type = value_type(module, *value)?;
+            let field_spelling = mlir_type(field_type)?;
+            let address = cfg_place_base_address(place);
+            output.push_str(&format!(
+                "{indentation}%v{} = async.execute {attributes} {{\n",
+                result.0
+            ));
+            if *locked {
+                output.push_str(&format!(
+                    "{nested}func.call @__sev_task_lock() : () -> ()\n"
+                ));
+            }
+            output.push_str(&format!(
+                "{nested}%update_base_{} = llvm.load {address} : !llvm.ptr -> {base_type}\n",
+                result.0
+            ));
+            output.push_str(&format!(
+                "{nested}%update_old_{} = llvm.extractvalue %update_base_{}[{}] : {base_type}\n",
+                result.0, result.0, field
+            ));
+            output.push_str(&format!(
+                "{nested}%update_new_{} = {} %update_old_{}, %v{} : {field_spelling}\n",
+                result.0,
+                binary_mnemonic(*operator, field_type)?,
+                result.0,
+                value.0
+            ));
+            output.push_str(&format!(
+                "{nested}%update_result_{} = llvm.insertvalue %update_new_{}, %update_base_{}[{}] : {base_type}\n",
+                result.0, result.0, result.0, field
+            ));
+            output.push_str(&format!(
+                "{nested}llvm.store %update_result_{}, {address} : {base_type}, !llvm.ptr\n",
+                result.0
+            ));
+            if *locked {
+                output.push_str(&format!(
+                    "{nested}func.call @__sev_task_unlock() : () -> ()\n"
+                ));
+            }
+            output.push_str(&format!("{nested}async.yield\n"));
+            output.push_str(&format!("{indentation}}}\n"));
         }
         Operation::Await { task, result } => {
             let ty = value_type(module, *result)?;
@@ -1570,6 +1640,11 @@ fn render_block(
                     ));
                     output.push_str(&format!("{indentation}}}\n"));
                 }
+            }
+            Operation::SpawnFieldUpdate { .. } => {
+                return Err(MlirError::UnsupportedOperation(
+                    "async field updates require CFG lowering".into(),
+                ));
             }
             Operation::Await { task, result } => {
                 let ty = value_type(module, *result)?;

@@ -39,6 +39,14 @@ pub enum ExpressionKind {
         owner: TaskOwner,
         locked: bool,
     },
+    AsyncFieldUpdate {
+        binding: BindingId,
+        field: u32,
+        operator: BinaryOperator,
+        value: Box<Expression>,
+        owner: TaskOwner,
+        locked: bool,
+    },
     Await(Box<Expression>),
     Fallback {
         condition: Box<Expression>,

@@ -223,7 +223,8 @@ fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
             destination: Some(destination),
             ..
         }
-        | Terminator::Spawn { destination, .. } => Some(destination),
+        | Terminator::Spawn { destination, .. }
+        | Terminator::SpawnFieldUpdate { destination, .. } => Some(destination),
         _ => None,
     };
     if let Some(destination) = destination {
@@ -398,7 +399,12 @@ fn transfer(
             use_operand(block.id.0, body, globals, operand, state)?;
         }
     }
-    if let Terminator::Spawn { destination, .. } = &block.terminator {
+    if let Terminator::SpawnFieldUpdate { place, .. } = &block.terminator {
+        verify_place(body, globals, place)?;
+    }
+    if let Terminator::Spawn { destination, .. }
+    | Terminator::SpawnFieldUpdate { destination, .. } = &block.terminator
+    {
         verify_place(body, globals, destination)?;
         if let Some(local) = destination.local_id() {
             state.insert(local);
@@ -520,7 +526,9 @@ fn successors(terminator: &Terminator) -> Vec<crate::BlockId> {
         Terminator::Call { target, unwind, .. } => {
             [Some(*target), *unwind].into_iter().flatten().collect()
         }
-        Terminator::Spawn { target, .. } => vec![*target],
+        Terminator::Spawn { target, .. } | Terminator::SpawnFieldUpdate { target, .. } => {
+            vec![*target]
+        }
         Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
     }
 }
@@ -544,6 +552,7 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
             }
             operands
         }
+        Terminator::SpawnFieldUpdate { value, .. } => vec![value],
         Terminator::Unreachable => Vec::new(),
     }
 }

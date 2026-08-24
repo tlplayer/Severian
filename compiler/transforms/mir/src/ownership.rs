@@ -331,7 +331,8 @@ fn transfer_block(
             destination: Some(destination),
             ..
         }
-        | Terminator::Spawn { destination, .. } => Some(destination),
+        | Terminator::Spawn { destination, .. }
+        | Terminator::SpawnFieldUpdate { destination, .. } => Some(destination),
         _ => None,
     };
     if let Some(destination) = destination {
@@ -486,7 +487,9 @@ fn successors(terminator: &Terminator) -> Vec<BlockId> {
         Terminator::Call { target, unwind, .. } => {
             [Some(*target), *unwind].into_iter().flatten().collect()
         }
-        Terminator::Spawn { target, .. } => vec![*target],
+        Terminator::Spawn { target, .. } | Terminator::SpawnFieldUpdate { target, .. } => {
+            vec![*target]
+        }
         Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
     }
 }
@@ -522,6 +525,7 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
             }
             operands
         }
+        Terminator::SpawnFieldUpdate { value, .. } => vec![value],
         Terminator::Return(value) => value.iter().collect(),
         Terminator::Throw(value) => vec![value],
         Terminator::Unreachable => Vec::new(),

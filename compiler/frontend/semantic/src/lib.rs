@@ -3462,6 +3462,48 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 }
+                if let Some(update) = self.class_method_update(expression)? {
+                    let Statement::FieldUpdate {
+                        binding,
+                        field,
+                        operator,
+                        value,
+                    } = update
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "async class methods currently require one field update",
+                            Some(expression.span),
+                        ));
+                    };
+                    let unit = self
+                        .types
+                        .resolve_name("unit")
+                        .expect("bootstrap defines unit");
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: unit,
+                        kind: ExpressionKind::AsyncFieldUpdate {
+                            binding,
+                            field,
+                            operator,
+                            value: Box::new(value),
+                            owner: match owner {
+                                severian_ast::TaskOwner::SelfScope => {
+                                    severian_hir::TaskOwner::SelfScope
+                                }
+                                severian_ast::TaskOwner::Runtime => {
+                                    severian_hir::TaskOwner::Runtime
+                                }
+                                severian_ast::TaskOwner::Inferred => {
+                                    severian_hir::TaskOwner::Inferred
+                                }
+                            },
+                            locked: *locked,
+                        },
+                        span: ast.span,
+                    });
+                }
                 // A task owns the complete result of its call, including a
                 // fallible result envelope. Error propagation happens when
                 // the task is awaited, not before the call is spawned.
@@ -10777,6 +10819,36 @@ mod tests {
             })))
         ));
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn async_unit_class_updates_lower_as_spawned_mutations() {
+        let (program, _) = analyze_source(
+            "class Counter:\n    value: int\n    def increment():\n        value += 1\ndef main():\n    counter := Counter(0)\n    task = async counter.increment() with self and lock\n    await task\n",
+        );
+        let module = &program.modules[0];
+        module
+            .bindings
+            .iter()
+            .find(|binding| {
+                matches!(
+                    binding.value.kind,
+                    ExpressionKind::AsyncFieldUpdate { locked: true, .. }
+                )
+            })
+            .expect("async method produces a task binding");
+        let mir = severian_mir::build(&program).unwrap();
+        let main = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        assert!(main.body.as_ref().unwrap().blocks.iter().any(|block| {
+            matches!(
+                block.terminator,
+                severian_mir::Terminator::SpawnFieldUpdate { locked: true, .. }
+            )
+        }));
     }
 
     #[test]
