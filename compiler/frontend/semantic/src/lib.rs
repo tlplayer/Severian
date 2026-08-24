@@ -569,6 +569,7 @@ struct ClassInstance {
     ty: TypeId,
     name: String,
     fields: Vec<HirClassFieldDeclaration>,
+    source_fields: Vec<severian_ast::PropertyDeclaration>,
     constructors: Vec<severian_ast::FunctionDeclaration>,
     methods: Vec<severian_ast::FunctionDeclaration>,
 }
@@ -633,6 +634,7 @@ impl Analyzer<'_> {
                 ty,
                 name: declaration.name.clone(),
                 fields: Vec::new(),
+                source_fields: Vec::new(),
                 constructors: Vec::new(),
                 methods: Vec::new(),
             };
@@ -695,6 +697,7 @@ impl Analyzer<'_> {
                     ty,
                     name: declaration.name.clone(),
                     fields: fields.clone(),
+                    source_fields: Vec::new(),
                     constructors: Vec::new(),
                     methods: Vec::new(),
                 },
@@ -705,6 +708,7 @@ impl Analyzer<'_> {
                     ty,
                     name: declaration.name.clone(),
                     fields: fields.clone(),
+                    source_fields: Vec::new(),
                     constructors: Vec::new(),
                     methods: Vec::new(),
                 },
@@ -763,6 +767,7 @@ impl Analyzer<'_> {
                 ty: package_class.ty,
                 name: package_class.declaration.name.clone(),
                 fields: fields.clone(),
+                source_fields: package_class.declaration.fields.clone(),
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
             };
@@ -1265,10 +1270,12 @@ impl Analyzer<'_> {
                         Some(*span),
                     ));
                 };
+                let value = self.expression(value, Some(declaration.ty))?;
+                let value = self.validate_field_value(&instance, index, value, *span)?;
                 Ok(Statement::FieldSet {
                     binding,
                     field: index as u32,
-                    value: self.expression(value, Some(declaration.ty))?,
+                    value,
                 })
             }
             AstStatement::Expression(expression) => {
@@ -1285,8 +1292,14 @@ impl Analyzer<'_> {
                             .types
                             .resolve_name("bool")
                             .expect("bootstrap defines bool");
+                        let action = match self.class_method_update(&argument.value)? {
+                            Some(statement) => statement,
+                            None => Statement::Expression(self.expression(&argument.value, None)?),
+                        };
                         return Ok(Statement::ExpectThrow {
-                            expression: self.expression(&argument.value, None)?,
+                            body: Block {
+                                statements: vec![action],
+                            },
                             boolean_type,
                             span: expression.span,
                         });
@@ -1763,6 +1776,11 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Map(_) => Err(Diagnostic::new(
+                "E000204",
+                "map literals are currently accepted only by an object's `set` operation",
+                Some(ast.span),
+            )),
             AstExpressionKind::Async {
                 expression,
                 owner,
@@ -2285,6 +2303,24 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let [argument] = arguments.as_slice() {
+                    let runtime_type = match callable_path(callee).as_deref() {
+                        Some("runtime_string") => self.types.resolve_name("string"),
+                        Some("runtime_int") => self.types.resolve_name("int"),
+                        _ => None,
+                    };
+                    if let Some(runtime_type) = runtime_type {
+                        if expected.is_some_and(|expected| {
+                            !self.types.assignable(runtime_type, expected)
+                        }) {
+                            return Err(semantic_error(
+                                "runtime value does not satisfy the expected type".into(),
+                                ast.span,
+                            ));
+                        }
+                        return self.expression(&argument.value, Some(runtime_type));
+                    }
+                }
                 if arguments.len() == 1 {
                     if let Some(name) = callable_path(callee) {
                         if let Some(target) = self.types.resolve_name(&name) {
@@ -2914,6 +2950,11 @@ impl Analyzer<'_> {
                 .map(|(argument, field)| self.expression(&argument.value, Some(field.ty)))
                 .collect::<Result<Vec<_>, _>>()?
         };
+        let fields = fields
+            .into_iter()
+            .enumerate()
+            .map(|(field, value)| self.validate_field_value(&instance, field, value, span))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Expression {
             id: self.next_id(),
             type_id: instance.ty,
@@ -3000,6 +3041,11 @@ impl Analyzer<'_> {
                 span,
             ));
         }
+        let fields = fields
+            .into_iter()
+            .enumerate()
+            .map(|(field, value)| self.validate_field_value(&instance, field, value, span))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Expression {
             id: self.next_id(),
             type_id: instance.ty,
@@ -3090,6 +3136,7 @@ impl Analyzer<'_> {
             ty,
             name: name.to_owned(),
             fields: fields.clone(),
+            source_fields: declaration.fields.clone(),
             constructors: declaration.constructors.clone(),
             methods: declaration.methods.clone(),
         };
@@ -3652,6 +3699,266 @@ impl Analyzer<'_> {
         }
     }
 
+    fn string_expression(
+        &mut self,
+        value: impl Into<String>,
+        span: severian_source::Span,
+    ) -> Expression {
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        Expression {
+            id: self.next_id(),
+            type_id: string,
+            kind: ExpressionKind::Literal(LiteralValue::String(value.into())),
+            span,
+        }
+    }
+
+    fn throw_expression(
+        &mut self,
+        message: impl Into<String>,
+        result: TypeId,
+        span: severian_source::Span,
+    ) -> Expression {
+        let error = self.string_expression(message, span);
+        Expression {
+            id: self.next_id(),
+            type_id: result,
+            kind: ExpressionKind::Throw(Box::new(error)),
+            span,
+        }
+    }
+
+    fn field_condition(
+        &mut self,
+        mut key: Expression,
+        field: &str,
+        span: severian_source::Span,
+    ) -> Expression {
+        key.id = self.next_id();
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let literal = self.string_expression(field, span);
+        Expression {
+            id: self.next_id(),
+            type_id: boolean,
+            kind: ExpressionKind::Binary {
+                operator: BinaryOperator::Equal,
+                left: Box::new(key),
+                right: Box::new(literal),
+            },
+            span,
+        }
+    }
+
+    fn validate_field_value(
+        &mut self,
+        instance: &ClassInstance,
+        field: usize,
+        value: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let Some(predicate) = instance
+            .source_fields
+            .get(field)
+            .and_then(|field| field.constraint.as_ref())
+        else {
+            return Ok(value);
+        };
+        let field_name = &instance.fields[field].name;
+        let previous = self.value_substitutions.insert(field_name.clone(), value.clone());
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let condition = self.expression(predicate, Some(boolean));
+        if let Some(previous) = previous {
+            self.value_substitutions
+                .insert(field_name.clone(), previous);
+        } else {
+            self.value_substitutions.remove(field_name);
+        }
+        let condition = condition?;
+        let fallback = self.throw_expression(
+            format!("constraint failed for `{}.{field_name}`", instance.name),
+            value.type_id,
+            span,
+        );
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: value.type_id,
+            kind: ExpressionKind::Fallback {
+                condition: Box::new(condition),
+                value: Box::new(value),
+                fallback: Box::new(fallback),
+            },
+            span,
+        })
+    }
+
+    fn object_set_entry(
+        &mut self,
+        binding: BindingId,
+        instance: &ClassInstance,
+        key_ast: &AstExpression,
+        value_ast: &AstExpression,
+        commit: bool,
+        enforce_constraint: bool,
+        span: severian_source::Span,
+    ) -> Result<Statement, Diagnostic> {
+        let writable = instance
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| !field.name.starts_with('_'))
+            .collect::<Vec<_>>();
+        let lower_action = |analyzer: &mut Self,
+                            field: usize,
+                            declaration: &HirClassFieldDeclaration|
+         -> Result<Statement, Diagnostic> {
+            let value = analyzer.expression(value_ast, Some(declaration.ty))?;
+            let value = if enforce_constraint {
+                analyzer.validate_field_value(instance, field, value, span)?
+            } else {
+                value
+            };
+            Ok(if commit {
+                Statement::FieldSet {
+                    binding,
+                    field: field as u32,
+                    value,
+                }
+            } else {
+                Statement::Expression(value)
+            })
+        };
+
+        if let Some(field_name) = string_literal(key_ast) {
+            let Some((field, declaration)) = writable
+                .iter()
+                .copied()
+                .find(|(_, field)| field.name == field_name)
+            else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("class `{}` has no writable field `{field_name}`", instance.name),
+                    Some(key_ast.span),
+                )
+                .with_help("use the name of a public writable field declared by this class"));
+            };
+            return lower_action(self, field, declaration);
+        }
+
+        let Some((_, first)) = writable.first().copied() else {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("class `{}` has no dynamically writable fields", instance.name),
+                Some(span),
+            ));
+        };
+        if writable.iter().any(|(_, field)| field.ty != first.ty) {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!(
+                    "dynamic `set` on class `{}` is ambiguous because its public fields have different types",
+                    instance.name
+                ),
+                Some(span),
+            )
+            .with_help("use a literal field name or fields with one common value type"));
+        }
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let key = self.expression(key_ast, Some(string))?;
+        let unit = self
+            .types
+            .resolve_name("unit")
+            .expect("bootstrap defines unit");
+        let mut selected = Statement::Expression(self.throw_expression(
+            format!("unknown field on `{}`", instance.name),
+            unit,
+            span,
+        ));
+        for (field, declaration) in writable.into_iter().rev() {
+            let condition = self.field_condition(key.clone(), &declaration.name, span);
+            let action = lower_action(self, field, declaration)?;
+            selected = Statement::If {
+                condition,
+                then_block: Block {
+                    statements: vec![action],
+                },
+                else_block: Block {
+                    statements: vec![selected],
+                },
+            };
+        }
+        Ok(selected)
+    }
+
+    fn object_set(
+        &mut self,
+        binding: BindingId,
+        instance: &ClassInstance,
+        arguments: &[severian_ast::CallArgument],
+        span: severian_source::Span,
+    ) -> Result<Statement, Diagnostic> {
+        match arguments {
+            [key, value] if key.name.is_none() && value.name.is_none() => self.object_set_entry(
+                binding,
+                instance,
+                &key.value,
+                &value.value,
+                true,
+                true,
+                span,
+            ),
+            [updates] if updates.name.is_none() => {
+                let AstExpressionKind::Map(entries) = &updates.value.kind else {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "object `set` expects `(field, value)` or one map literal",
+                        Some(span),
+                    ));
+                };
+                let mut statements = Vec::with_capacity(entries.len() * 2);
+                for entry in entries {
+                    statements.push(self.object_set_entry(
+                        binding,
+                        instance,
+                        &entry.key,
+                        &entry.value,
+                        false,
+                        true,
+                        entry.span,
+                    )?);
+                }
+                for entry in entries {
+                    statements.push(self.object_set_entry(
+                        binding,
+                        instance,
+                        &entry.key,
+                        &entry.value,
+                        true,
+                        false,
+                        entry.span,
+                    )?);
+                }
+                Ok(Statement::Sequence(Block { statements }))
+            }
+            _ => Err(Diagnostic::new(
+                "E000206",
+                "object `set` expects `(field, value)` or one map literal",
+                Some(span),
+            )),
+        }
+    }
+
     fn ensure_runtime_function(
         &mut self,
         symbol: &str,
@@ -3796,6 +4103,110 @@ impl Analyzer<'_> {
                 Some(callee.span),
             )
             .with_help("call a public class method instead"));
+        }
+        if name == "get" {
+            let [argument] = arguments else {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    "object `get` expects exactly one field name",
+                    Some(span),
+                ));
+            };
+            if let Some(field_name) = string_literal(&argument.value) {
+                let Some((field, declaration)) = instance
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, field)| field.name == field_name && !field.name.starts_with("__"))
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("class `{}` has no readable field `{field_name}`", instance.name),
+                        Some(argument.value.span),
+                    )
+                    .with_help("use the name of a public field declared by this class"));
+                };
+                if expected.is_some_and(|expected| !self.types.assignable(declaration.ty, expected)) {
+                    return Err(semantic_error(
+                        "dynamic field result does not satisfy the expected type".into(),
+                        span,
+                    ));
+                }
+                return Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: declaration.ty,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(object),
+                        index: field as u32,
+                    },
+                    span,
+                }));
+            }
+            let readable = instance
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(_, field)| !field.name.starts_with("__"))
+                .collect::<Vec<_>>();
+            let Some((_, first)) = readable.first().copied() else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("class `{}` has no dynamically readable fields", instance.name),
+                    Some(span),
+                ));
+            };
+            if readable.iter().any(|(_, field)| field.ty != first.ty) {
+                return Err(Diagnostic::new(
+                    "E000204",
+                    format!(
+                        "dynamic `get` on class `{}` is ambiguous because its public fields have different types",
+                        instance.name
+                    ),
+                    Some(span),
+                )
+                .with_help("use a literal field name or fields with one common result type"));
+            }
+            if expected.is_some_and(|expected| !self.types.assignable(first.ty, expected)) {
+                return Err(semantic_error(
+                    "dynamic field result does not satisfy the expected type".into(),
+                    span,
+                ));
+            }
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let key = self.expression(&argument.value, Some(string))?;
+            let mut selected = self.throw_expression(
+                format!("unknown field on `{}`", instance.name),
+                first.ty,
+                span,
+            );
+            for (field, declaration) in readable.into_iter().rev() {
+                let condition = self.field_condition(key.clone(), &declaration.name, span);
+                let mut branch_object = object.clone();
+                branch_object.id = self.next_id();
+                let value = Expression {
+                    id: self.next_id(),
+                    type_id: declaration.ty,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(branch_object),
+                        index: field as u32,
+                    },
+                    span,
+                };
+                selected = Expression {
+                    id: self.next_id(),
+                    type_id: first.ty,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(value),
+                        fallback: Box::new(selected),
+                    },
+                    span,
+                };
+            }
+            return Ok(Some(selected));
         }
         let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
             return Err(Diagnostic::new(
@@ -3999,6 +4410,14 @@ impl Analyzer<'_> {
                 Some(callee.span),
             )
             .with_help("call a public class method instead"));
+        }
+        if name == "set" {
+            return self
+                .object_set(binding, &instance, arguments, expression.span)
+                .map(Some);
+        }
+        if name == "get" {
+            return Ok(None);
         }
         let Some(mut method) = instance
             .methods
@@ -5508,5 +5927,21 @@ mod tests {
         let general = conversion_rank(&context.types, resolve("bf16"), resolve("f32")).unwrap();
         assert!(exact < widening);
         assert!(widening < general);
+    }
+
+    #[test]
+    fn dynamic_field_operations_lower_with_constraints_and_catchable_failures() {
+        let (program, _) = analyze_source(
+            "class Point:\n    x: int {0 <= x <= 100}\n    y: int {0 <= y <= 100}\n\ndef main():\n    point := Point(3, 4)\n    axis := runtime_string(\"x\")\n    point.set(axis, 10)\n    point.set({\"x\": 20, \"y\": 30})\n    observed := point.get(axis)\n    throws(point.set(\"x\", runtime_int(200)) -> ConstraintError)\n",
+        );
+        severian_mir::build(&program).unwrap();
+        let body = program.modules[0].functions[0].body.as_ref().unwrap();
+        assert!(body.statements.iter().any(|statement| {
+            matches!(statement, Statement::If { .. } | Statement::Sequence(_))
+        }));
+        assert!(body
+            .statements
+            .iter()
+            .any(|statement| matches!(statement, Statement::ExpectThrow { .. })));
     }
 }

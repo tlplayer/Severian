@@ -7,6 +7,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
     let mut cursor = 0usize;
     let mut line_start = true;
     let mut indents = vec![0usize];
+    let mut delimiter_depth = 0usize;
     let mut tokens = Vec::new();
 
     while cursor < bytes.len() {
@@ -31,29 +32,31 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 line_start = true;
                 continue;
             }
-            let width: usize = source.text[start..cursor]
-                .chars()
-                .map(|character| if character == '\t' { 4 } else { 1 })
-                .sum();
-            match width.cmp(indents.last().expect("indent stack is nonempty")) {
-                std::cmp::Ordering::Greater => {
-                    indents.push(width);
-                    tokens.push(token(source, TokenKind::Indent, start, cursor));
-                }
-                std::cmp::Ordering::Less => {
-                    while width < *indents.last().expect("indent stack is nonempty") {
-                        indents.pop();
-                        tokens.push(token(source, TokenKind::Dedent, start, cursor));
+            if delimiter_depth == 0 {
+                let width: usize = source.text[start..cursor]
+                    .chars()
+                    .map(|character| if character == '\t' { 4 } else { 1 })
+                    .sum();
+                match width.cmp(indents.last().expect("indent stack is nonempty")) {
+                    std::cmp::Ordering::Greater => {
+                        indents.push(width);
+                        tokens.push(token(source, TokenKind::Indent, start, cursor));
                     }
-                    if width != *indents.last().expect("indent stack is nonempty") {
-                        return Err(Diagnostic::new(
-                            "E000102",
-                            "inconsistent indentation",
-                            Some(Span::new(source.id, start as u32, cursor as u32)),
-                        ));
+                    std::cmp::Ordering::Less => {
+                        while width < *indents.last().expect("indent stack is nonempty") {
+                            indents.pop();
+                            tokens.push(token(source, TokenKind::Dedent, start, cursor));
+                        }
+                        if width != *indents.last().expect("indent stack is nonempty") {
+                            return Err(Diagnostic::new(
+                                "E000102",
+                                "inconsistent indentation",
+                                Some(Span::new(source.id, start as u32, cursor as u32)),
+                            ));
+                        }
                     }
+                    std::cmp::Ordering::Equal => {}
                 }
-                std::cmp::Ordering::Equal => {}
             }
             line_start = false;
         }
@@ -95,10 +98,25 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 cursor += 2;
                 TokenKind::QuestionEqual
             }
-            b'(' => one(&mut cursor, TokenKind::LeftParen),
-            b')' => one(&mut cursor, TokenKind::RightParen),
-            b'[' => one(&mut cursor, TokenKind::LeftBracket),
-            b']' => one(&mut cursor, TokenKind::RightBracket),
+            b'(' => {
+                delimiter_depth += 1;
+                one(&mut cursor, TokenKind::LeftParen)
+            }
+            b')' => {
+                delimiter_depth = delimiter_depth.saturating_sub(1);
+                one(&mut cursor, TokenKind::RightParen)
+            }
+            b'[' => {
+                delimiter_depth += 1;
+                one(&mut cursor, TokenKind::LeftBracket)
+            }
+            b']' => {
+                delimiter_depth = delimiter_depth.saturating_sub(1);
+                one(&mut cursor, TokenKind::RightBracket)
+            }
+            // Braces also delimit indentation-sensitive declaration and
+            // function contracts. Parentheses/brackets suppress layout for a
+            // nested map literal without erasing that brace-block structure.
             b'{' => one(&mut cursor, TokenKind::LeftBrace),
             b'}' => one(&mut cursor, TokenKind::RightBrace),
             b'|' => one(&mut cursor, TokenKind::Pipe),

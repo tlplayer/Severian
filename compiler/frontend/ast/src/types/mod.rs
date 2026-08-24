@@ -180,6 +180,8 @@ pub struct PropertyDeclaration {
     pub name: String,
     pub annotation: TypeAnnotation,
     pub default: Option<Expression>,
+    /// A predicate that every value stored in this property must satisfy.
+    pub constraint: Option<Expression>,
     pub span: Span,
 }
 

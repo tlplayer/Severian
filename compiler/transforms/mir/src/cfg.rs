@@ -577,7 +577,7 @@ impl BodyBuilder {
                 });
             }
             severian_hir::Statement::ExpectThrow {
-                expression,
+                body,
                 boolean_type,
                 span,
             } => {
@@ -585,7 +585,7 @@ impl BodyBuilder {
                 let completed = self.block();
                 let join = self.block();
                 self.catch_targets.push(caught);
-                self.expression(expression);
+                self.lower_statements(&body.statements, module);
                 self.catch_targets.pop();
                 if self.open(self.current) {
                     self.terminate(Terminator::Goto(completed, Vec::new()));
@@ -610,8 +610,8 @@ impl BodyBuilder {
                     message: None,
                     origin: AssertionOrigin {
                         statement_start: span.start,
-                        condition_start: expression.span.start,
-                        condition_end: expression.span.end,
+                        condition_start: span.start,
+                        condition_end: span.end,
                         location: None,
                     },
                 });

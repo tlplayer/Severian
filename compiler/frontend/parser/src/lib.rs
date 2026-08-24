@@ -527,4 +527,44 @@ output = f"""module {{
             }
         ));
     }
+
+    #[test]
+    fn parses_field_constraints_maps_chained_comparisons_and_typed_throws() {
+        let source = SourceFile::virtual_source(
+            "dynamic-fields.sev",
+            "class Point:\n    x: int {0 <= x <= 100}\n    y: int\n\ntest:\n    point := Point(1, 2)\n    point.set({\n        \"x\": 20,\n        \"y\": 30,\n    })\n    throws(point.get(\"z\") -> FieldError)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Class(class) = &module.items[0] else {
+            panic!("expected class")
+        };
+        let constraint = class.fields[0].constraint.as_ref().unwrap();
+        assert!(matches!(
+            constraint.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::And,
+                ..
+            }
+        ));
+        let severian_ast::Item::Test(test) = &module.items[1] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Expression(set) = &test.body[1] else {
+            panic!("expected set call")
+        };
+        let severian_ast::ExpressionKind::Call { arguments, .. } = &set.kind else {
+            panic!("expected call")
+        };
+        assert!(matches!(arguments[0].value.kind, severian_ast::ExpressionKind::Map(_)));
+        let severian_ast::Statement::Expression(expectation) = &test.body[2] else {
+            panic!("expected throws call")
+        };
+        let severian_ast::ExpressionKind::Call { arguments, .. } = &expectation.kind else {
+            panic!("expected call")
+        };
+        assert_eq!(
+            arguments[0].expected_error.as_ref().unwrap().simple_name(),
+            Some("FieldError")
+        );
+    }
 }

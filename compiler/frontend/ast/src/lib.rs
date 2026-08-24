@@ -5,7 +5,8 @@ mod statement;
 mod types;
 
 pub use expression::{
-    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, TaskOwner, UnaryOperator,
+    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, MapEntry, TaskOwner,
+    UnaryOperator,
 };
 pub use statement::{Binding, MatchCase, Statement};
 pub use types::{

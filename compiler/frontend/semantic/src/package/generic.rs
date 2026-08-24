@@ -162,6 +162,13 @@ fn validate_generic_expression(
             }
             Ok(None)
         }
+        Expression::Map(entries) => {
+            for entry in entries {
+                validate_generic_expression(&entry.key, names, function, index, types)?;
+                validate_generic_expression(&entry.value, names, function, index, types)?;
+            }
+            Ok(None)
+        }
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
         }
@@ -1057,6 +1064,26 @@ fn visit_expression_for_specializations(
                 visit_expression_for_specializations(
                     module,
                     value,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+        }
+        severian_ast::ExpressionKind::Map(entries) => {
+            for entry in entries {
+                visit_expression_for_specializations(
+                    module,
+                    &entry.key,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_expression_for_specializations(
+                    module,
+                    &entry.value,
                     None,
                     names,
                     index,

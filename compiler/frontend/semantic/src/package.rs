@@ -320,6 +320,7 @@ fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
                         name: "__tag".into(),
                         annotation: TypeAnnotation::named("int", Vec::new(), declaration.span),
                         default: None,
+                        constraint: None,
                         span: declaration.span,
                     }];
                     for variant in &declaration.variants {
@@ -996,8 +997,8 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
                     remap_expression_bindings(message, offset);
                 }
             }
-            Statement::ExpectThrow { expression, .. } => {
-                remap_expression_bindings(expression, offset);
+            Statement::ExpectThrow { body, .. } => {
+                remap_block_bindings(body, offset);
             }
             Statement::If {
                 condition,

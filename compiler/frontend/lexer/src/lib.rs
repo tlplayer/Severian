@@ -167,4 +167,27 @@ mod tests {
             token.kind == TokenKind::FormattedString("module {{\n{body}}}\n".into())
         }));
     }
+
+    #[test]
+    fn multiline_delimiters_do_not_change_the_layout_stack() {
+        let source = SourceFile::virtual_source(
+            "layout.sev",
+            "def update():\n    apply({\n        \"x\": 1,\n        \"y\": 2,\n    })\nnext = 3\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| token.kind == TokenKind::Indent)
+                .count(),
+            1
+        );
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| token.kind == TokenKind::Dedent)
+                .count(),
+            1
+        );
+    }
 }

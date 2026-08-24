@@ -63,6 +63,15 @@ pub struct Expression {
 pub struct CallArgument {
     pub name: Option<String>,
     pub value: Expression,
+    /// The error shape expected by `throws(value -> ErrorType)`.
+    pub expected_error: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapEntry {
+    pub key: Expression,
+    pub value: Expression,
     pub span: Span,
 }
 
@@ -70,6 +79,7 @@ pub struct CallArgument {
 pub enum ExpressionKind {
     Literal(Literal),
     List(Vec<Expression>),
+    Map(Vec<MapEntry>),
     Tuple(Vec<Expression>),
     Name(String),
     Member {

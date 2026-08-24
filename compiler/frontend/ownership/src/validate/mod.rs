@@ -94,7 +94,13 @@ fn validate_statement(
             }
             Ok(())
         }
-        Statement::ExpectThrow { expression, .. } => validate_expression(expression, declared),
+        Statement::ExpectThrow { body, .. } => {
+            let mut body_declared = declared.clone();
+            for statement in &body.statements {
+                validate_statement(statement, bindings, &mut body_declared)?;
+            }
+            Ok(())
+        }
         Statement::If {
             condition,
             then_block,

@@ -171,7 +171,7 @@ fn verify_body(
         changed = false;
         for block in &body.blocks {
             let mut state = incoming[block.id.0 as usize].clone();
-            transfer(body, globals, block, &mut state, calls, context)?;
+            transfer_definitions(block, &mut state);
             for successor in successors(&block.terminator) {
                 let target = &mut incoming[successor.0 as usize];
                 let next = target.intersection(&state).copied().collect();
@@ -182,7 +182,48 @@ fn verify_body(
             }
         }
     }
+    for block in &body.blocks {
+        let mut state = incoming[block.id.0 as usize].clone();
+        transfer(body, globals, block, &mut state, calls, context)?;
+    }
     Ok(())
+}
+
+fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
+    for statement in &block.statements {
+        match statement {
+            CfgStatement::Assign(place, _) => {
+                if let Some(local) = place.local_id() {
+                    state.insert(local);
+                }
+            }
+            CfgStatement::Drop(place) => {
+                if let Some(local) = place.local_id() {
+                    state.remove(&local);
+                }
+            }
+            CfgStatement::StorageDead(local) => {
+                state.remove(local);
+            }
+            CfgStatement::Operation { results, .. } => {
+                for result in results {
+                    if let Some(local) = result.local_id() {
+                        state.insert(local);
+                    }
+                }
+            }
+            CfgStatement::StorageLive(_) | CfgStatement::Assert { .. } | CfgStatement::Coverage(_) => {}
+        }
+    }
+    if let Terminator::Call {
+        destination: Some(destination),
+        ..
+    } = &block.terminator
+    {
+        if let Some(local) = destination.local_id() {
+            state.insert(local);
+        }
+    }
 }
 
 fn verify_targets(

@@ -1,5 +1,29 @@
+'''
+Objects expose generic get() and set() operations to avoid getX()/setX()
+methods for every field.
+
+Field constraints may return Errors directly or delegate to functions.
+Builders use the same set() path, so construction and later mutation obey
+the same validation rules.
+
+Tests use:
+    assert(...)      hard requirement
+    expect(...)      record failure and continue
+    throws(...)      expected Error
+    mock(...)        test-scoped function behavior
+'''
+
+
 def invalid_age(age: int) -> Error:
     return Error(f"invalid age: {age}")
+
+
+def restricted_account() -> bool:
+    return false
+
+
+def foo(value: int) -> int:
+    return value
 
 
 class User:
@@ -20,6 +44,10 @@ class User:
     }
 
 
+def calculate(value: int) -> int:
+    return foo(value) * 2
+
+
 def main():
     user := User()
         .set(name, "Alice")
@@ -29,18 +57,170 @@ def main():
     print(user.age)
 
 
-```
-# construction
-user := User {
-    name: "Alice",
-    age: 36,
-}
+test:
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
 
-# builder
-user := User()
-    .set(name, "Alice")
-    .set(age, 36)
+    assert(user.name == "Alice")
+    assert(user.age == 36)
 
-# mutation
-user.set(age, 37)
-```
+    # expect() records failures without terminating the test immediately.
+    expect(user.get("name") == "Alice")
+    expect(user.get("age") == 36)
+
+
+test:
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
+
+    # Dynamic updates go through the same constraints.
+    user.set("age", 40)
+
+    assert(user.age == 40)
+
+
+test:
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
+
+    # Invalid runtime values throw the Error produced by the constraint.
+    age := runtime_int(-1)
+
+    throws(
+        user.set("age", age)
+        -> Error
+    )
+
+    # Failed updates do not modify the existing value.
+    assert(user.age == 36)
+
+
+test:
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
+
+    age := runtime_int(200)
+
+    throws(
+        user.set("age", age)
+        -> Error
+    )
+
+    assert(user.age == 36)
+
+
+test:
+    # Mock one exact invocation.
+    #
+    # foo(0) returns 10.
+    # Any other call to foo is an error so the test cannot accidentally
+    # depend on behavior that was not specified.
+    mock(
+        foo(0) -> 10
+        else throw Error("unexpected foo call")
+    )
+
+    assert(foo(0) == 10)
+    expect(calculate(0) == 20)
+
+    throws(
+        foo(1)
+        -> Error
+    )
+
+
+test:
+    # Multiple cases can belong to one mock.
+    mock(
+        foo(0) -> 10,
+        foo(1) -> 20,
+        foo(2) -> 30,
+        else throw Error("unexpected foo argument")
+    )
+
+    expect(foo(0) == 10)
+    expect(foo(1) == 20)
+    expect(foo(2) == 30)
+
+    throws(
+        foo(3)
+        -> Error
+    )
+
+
+test:
+    # Mocking also makes constraint dependencies deterministic.
+    mock(
+        restricted_account() -> true
+        else throw Error("unexpected restricted_account call")
+    )
+
+    user := User()
+        .set(name, "Alice")
+
+    age := runtime_int(16)
+
+    throws(
+        user.set("age", age)
+        -> Error
+    )
+
+
+test:
+    # Same input is valid when the external condition changes.
+    mock(
+        restricted_account() -> false
+        else throw Error("unexpected restricted_account call")
+    )
+
+    user := User()
+        .set(name, "Alice")
+        .set(age, 16)
+
+    assert(user.age == 16)
+
+
+test:
+    # Group updates remain atomic.
+    user := User()
+        .set(name, "Alice")
+        .set(age, 36)
+
+    age := runtime_int(200)
+
+    throws(
+        user.set({
+            "name": "Bob",
+            "age": age,
+        })
+        -> Error
+    )
+
+    assert(user.name == "Alice")
+    assert(user.age == 36)
+
+
+test with compiler:
+    reject:
+        user := User()
+        user.get("does_not_exist")
+
+
+test with compiler:
+    reject:
+        user := User()
+        user.set("does_not_exist", 10)
+
+
+test with compiler:
+    reject:
+        user := User()
+        user.set("age", "thirty six")
+
+
+test with integ:
+    main()

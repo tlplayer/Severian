@@ -453,7 +453,29 @@ impl Parser<'_> {
             if self.at_identifier("pass") {
                 self.next();
             } else {
-                statements.push(self.block_statement()?);
+                let statement = self.block_statement()?;
+                if owner == "test" && self.take(&TokenKind::Colon).is_some() {
+                    statements.push(statement);
+                    let mut lookahead = self.cursor;
+                    while self
+                        .tokens
+                        .get(lookahead)
+                        .is_some_and(|token| token.kind == TokenKind::Newline)
+                    {
+                        lookahead += 1;
+                    }
+                    if self
+                        .tokens
+                        .get(lookahead)
+                        .is_some_and(|token| token.kind == TokenKind::Indent)
+                    {
+                        let (checks, _) = self.indented_block("test step")?;
+                        statements.extend(checks);
+                    }
+                    self.separators();
+                    continue;
+                }
+                statements.push(statement);
             }
             if !compound && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
                 return Err(self.error(&format!("expected a newline after {owner} statement")));
@@ -898,6 +920,7 @@ impl Parser<'_> {
                             name: field_name,
                             annotation,
                             default: None,
+                            constraint: None,
                             span: Span::new(field_start.source, field_start.start, end),
                         });
                         if self.take(&TokenKind::Comma).is_none() {
@@ -1160,13 +1183,29 @@ impl Parser<'_> {
         } else {
             None
         };
-        let end = default
+        let constraint = if self.take(&TokenKind::LeftBrace).is_some() {
+            self.line_breaks();
+            let predicate = self.expression(0)?;
+            self.line_breaks();
+            self.expect(
+                &TokenKind::RightBrace,
+                "expected `}` after property constraint",
+            )?;
+            Some(predicate)
+        } else {
+            None
+        };
+        let end = constraint
             .as_ref()
-            .map_or(annotation.span.end, |expression| expression.span.end);
+            .map_or_else(
+                || default.as_ref().map_or(annotation.span.end, |value| value.span.end),
+                |predicate| predicate.span.end,
+            );
         Ok(PropertyDeclaration {
             name,
             annotation,
             default,
+            constraint,
             span: Span::new(start.source, start.start, end),
         })
     }
@@ -1433,6 +1472,7 @@ impl Parser<'_> {
 
     fn expression(&mut self, minimum_precedence: u8) -> Result<Expression, Diagnostic> {
         let mut expression = self.unary()?;
+        let mut comparison_tail: Option<Expression> = None;
         loop {
             let negated_contains = self.at_identifier("not")
                 && self.tokens.get(self.cursor + 1).is_some_and(
@@ -1464,15 +1504,29 @@ impl Parser<'_> {
                 expression.span.start,
                 right.span.end,
             );
+            let comparison = is_comparison(operator);
+            let binary_left = comparison_tail
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| expression.clone());
             let combined = Expression {
                 kind: ExpressionKind::Binary {
                     operator,
-                    left: Box::new(expression),
-                    right: Box::new(right),
+                    left: Box::new(binary_left),
+                    right: Box::new(right.clone()),
                 },
                 span,
             };
-            expression = if negated_contains {
+            expression = if comparison_tail.is_some() && comparison {
+                Expression {
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::And,
+                        left: Box::new(expression),
+                        right: Box::new(combined),
+                    },
+                    span,
+                }
+            } else if negated_contains {
                 Expression {
                     kind: ExpressionKind::Unary {
                         operator: UnaryOperator::Not,
@@ -1483,6 +1537,7 @@ impl Parser<'_> {
             } else {
                 combined
             };
+            comparison_tail = comparison.then_some(right);
         }
         if minimum_precedence == 0 && self.at_identifier("else") {
             self.next();
@@ -1690,6 +1745,10 @@ impl Parser<'_> {
                     };
                 }
             } else if self.take(&TokenKind::LeftParen).is_some() {
+                let throws_call = matches!(
+                    &expression.kind,
+                    ExpressionKind::Name(name) if name == "throws"
+                );
                 self.line_breaks();
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {
@@ -1708,10 +1767,22 @@ impl Parser<'_> {
                             None
                         };
                         let value = self.expression(0)?;
+                        let expected_error = if throws_call
+                            && arguments.is_empty()
+                            && self.take(&TokenKind::Arrow).is_some()
+                        {
+                            Some(self.type_annotation()?)
+                        } else {
+                            None
+                        };
+                        let end = expected_error
+                            .as_ref()
+                            .map_or(value.span.end, |error| error.span.end);
                         arguments.push(CallArgument {
                             name,
-                            span: Span::new(start.source, start.start, value.span.end),
+                            span: Span::new(start.source, start.start, end),
                             value,
+                            expected_error,
                         });
                         self.line_breaks();
                         if self.take(&TokenKind::Comma).is_none() {
@@ -1818,6 +1889,38 @@ impl Parser<'_> {
                     .end;
                 return Ok(Expression {
                     kind: ExpressionKind::List(values),
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
+            }
+            TokenKind::LeftBrace => {
+                let mut entries = Vec::new();
+                self.line_breaks();
+                if !self.at(&TokenKind::RightBrace) {
+                    loop {
+                        let key = self.expression(0)?;
+                        self.expect(&TokenKind::Colon, "expected `:` after map key")?;
+                        let value = self.expression(0)?;
+                        entries.push(severian_ast::MapEntry {
+                            span: Span::new(key.span.source, key.span.start, value.span.end),
+                            key,
+                            value,
+                        });
+                        self.line_breaks();
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        self.line_breaks();
+                        if self.at(&TokenKind::RightBrace) {
+                            break;
+                        }
+                    }
+                }
+                let end = self
+                    .expect(&TokenKind::RightBrace, "expected `}` after map literal")?
+                    .span
+                    .end;
+                return Ok(Expression {
+                    kind: ExpressionKind::Map(entries),
                     span: Span::new(token.span.source, token.span.start, end),
                 });
             }
@@ -2056,6 +2159,7 @@ fn formatted_string_expression(value: &str, span: Span) -> Result<Expression, Di
                         arguments: vec![CallArgument {
                             name: None,
                             value,
+                            expected_error: None,
                             span,
                         }],
                     },
@@ -2208,12 +2312,29 @@ fn binary_operator(kind: &TokenKind) -> Option<BinaryOperator> {
     })
 }
 
+fn is_comparison(operator: BinaryOperator) -> bool {
+    matches!(
+        operator,
+        BinaryOperator::Equal
+            | BinaryOperator::Identity
+            | BinaryOperator::NotEqual
+            | BinaryOperator::Less
+            | BinaryOperator::LessEqual
+            | BinaryOperator::Greater
+            | BinaryOperator::GreaterEqual
+    )
+}
+
 fn expression_mentions(expression: &Expression, expected: &str) -> bool {
     match &expression.kind {
         ExpressionKind::Name(name) => name == expected,
         ExpressionKind::List(values) | ExpressionKind::Tuple(values) => values
             .iter()
             .any(|value| expression_mentions(value, expected)),
+        ExpressionKind::Map(entries) => entries.iter().any(|entry| {
+            expression_mentions(&entry.key, expected)
+                || expression_mentions(&entry.value, expected)
+        }),
         ExpressionKind::Member { object, .. } => expression_mentions(object, expected),
         ExpressionKind::Index { object, index } => {
             expression_mentions(object, expected) || expression_mentions(index, expected)
