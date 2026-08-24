@@ -36,6 +36,10 @@ pub enum Statement {
         span: Span,
     },
     Expression(Expression),
+    Defer {
+        expression: Expression,
+        span: Span,
+    },
     Return {
         value: Option<Expression>,
         span: Span,

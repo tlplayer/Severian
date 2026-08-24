@@ -17,6 +17,7 @@ def foo():
     defer print("third")
 test with integ:
     #lifo stack
+    foo()
     assert("""
     third
     second

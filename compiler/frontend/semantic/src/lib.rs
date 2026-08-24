@@ -497,13 +497,11 @@ pub(crate) fn analyze_with_package_functions(
         for contract in ast_function.contracts.iter().filter(|contract| !contract.deferred) {
             body.statements.push(analyzer.contract_assertion(contract)?);
         }
-        for statement in ast_body {
-            body.statements.push(analyzer.statement(
-                statement,
-                &mut module.bindings,
-                result_type,
-            )?);
-        }
+        body.statements.extend(
+            analyzer
+                .block(ast_body, &mut module.bindings, result_type)?
+                .statements,
+        );
         let deferred = ast_function
             .contracts
             .iter()
@@ -1611,6 +1609,7 @@ impl Analyzer<'_> {
                     ],
                 }))
             }
+            AstStatement::Defer { .. } => Ok(Statement::Sequence(Block::default())),
             AstStatement::Unsafe { body, .. } => {
                 self.unsafe_depth += 1;
                 let lowered = self.block(body, bindings, result_type);
@@ -2492,10 +2491,22 @@ impl Analyzer<'_> {
         result_type: TypeId,
     ) -> Result<Block, Diagnostic> {
         let mut block = Block::default();
+        let mut deferred = Vec::new();
         for statement in statements {
+            if let AstStatement::Defer { expression, .. } = statement {
+                deferred.push(Statement::Expression(self.expression(expression, None)?));
+                continue;
+            }
             block
                 .statements
                 .push(self.statement(statement, bindings, result_type)?);
+        }
+        deferred.reverse();
+        if !deferred.is_empty() {
+            insert_before_returns(&mut block, &deferred);
+            if block_flow(statements) == ControlFlow::FallsThrough {
+                block.statements.extend(deferred);
+            }
         }
         Ok(block)
     }
@@ -9028,6 +9039,7 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             AstStatement::Binding(_)
             | AstStatement::FieldAssignment { .. }
             | AstStatement::Expression(_)
+            | AstStatement::Defer { .. }
             | AstStatement::Assert { .. }
             | AstStatement::Unsafe { .. }
             | AstStatement::Try { .. }
@@ -9515,6 +9527,38 @@ mod tests {
             [Statement::Sequence(Block { statements })]
                 if matches!(statements.as_slice(), [Statement::Binding(_), Statement::Binding(_), Statement::If { .. }])
         ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn defer_actions_run_lifo_on_return() {
+        let (program, _) = analyze_source(
+            "def first():\n    pass\ndef second():\n    pass\ndef finish() -> int:\n    defer first()\n    defer second()\n    return 7\n",
+        );
+        let module = &program.modules[0];
+        let first = module.functions[0].definition;
+        let second = module.functions[1].definition;
+        let body = module.functions[2].body.as_ref().unwrap();
+        let called = body
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                let Statement::Expression(Expression {
+                    kind:
+                        ExpressionKind::Call {
+                            callee: severian_hir::Callee::Direct { function, .. },
+                            ..
+                        },
+                    ..
+                }) = statement
+                else {
+                    return None;
+                };
+                Some(*function)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(called, [second, first]);
+        assert!(matches!(body.statements.last(), Some(Statement::Return(_))));
         severian_mir::build(&program).unwrap();
     }
 

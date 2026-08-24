@@ -623,6 +623,22 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_defer_as_a_statement_in_function_bodies() {
+        let source = SourceFile::virtual_source(
+            "defer.sev",
+            "def finish():\n    defer print(\"later\")\n    print(\"now\")\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert!(matches!(
+            function.body.as_deref(),
+            Some([severian_ast::Statement::Defer { .. }, severian_ast::Statement::Expression(_)])
+        ));
+    }
+
+    #[test]
     fn reports_multiple_syntax_errors_from_one_source() {
         let source = SourceFile::virtual_source(
             "invalid.sev",

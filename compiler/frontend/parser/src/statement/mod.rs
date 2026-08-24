@@ -182,6 +182,7 @@ impl Parser<'_> {
                         module.items.push(Item::Expression(expression))
                     }
                     Statement::Return { .. }
+                    | Statement::Defer { .. }
                     | Statement::FieldAssignment { .. }
                     | Statement::Assert { .. }
                     | Statement::Unsafe { .. }
@@ -739,6 +740,14 @@ impl Parser<'_> {
             return Ok(Statement::Return {
                 value,
                 span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("defer") {
+            let start = self.next().span;
+            let expression = self.expression(0)?;
+            return Ok(Statement::Defer {
+                span: Span::new(start.source, start.start, expression.span.end),
+                expression,
             });
         }
         if self.at_identifier("assert") {

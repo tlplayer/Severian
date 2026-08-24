@@ -64,6 +64,7 @@ fn validate_generic_statements(
                 validate_generic_expression(value, names, function, index, types)?;
             }
             severian_ast::Statement::Expression(expression)
+            | severian_ast::Statement::Defer { expression, .. }
             | severian_ast::Statement::Return {
                 value: Some(expression),
                 ..
@@ -822,6 +823,16 @@ fn visit_statements_for_specializations(
                 )?;
             }
             severian_ast::Statement::Expression(expression) => {
+                visit_expression_for_specializations(
+                    module,
+                    expression,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+            severian_ast::Statement::Defer { expression, .. } => {
                 visit_expression_for_specializations(
                     module,
                     expression,
