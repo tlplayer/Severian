@@ -1,4 +1,5 @@
 trait File:
+    @file
     def read(path: string) -> string with 
     {
         (path) -> bool 
@@ -24,6 +25,6 @@ def main():
 
 test:
     lua_path = file.read("test.lua")
-    json_path = file.read("test.lua")
+    json_path = file.read("test.json")
     assert(lua_path == "lua")
     assert(json_path == "json")

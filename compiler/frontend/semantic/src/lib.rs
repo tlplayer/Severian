@@ -99,6 +99,7 @@ pub(crate) fn analyze_with_package_functions(
 ) -> Result<Program, Diagnostic> {
     validate_trait_implementations(ast)?;
     validate_class_declarations(ast)?;
+    let namespace_methods = collect_trait_namespace_methods(ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -125,6 +126,7 @@ pub(crate) fn analyze_with_package_functions(
         function_definitions: BTreeMap::new(),
         function_substitutions: BTreeMap::new(),
         function_specificity: BTreeMap::new(),
+        namespace_methods,
         signatures: BTreeMap::new(),
         classes: ast
             .items
@@ -567,6 +569,7 @@ struct Analyzer<'a> {
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     function_specificity: BTreeMap<FunctionId, u8>,
+    namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
@@ -583,6 +586,13 @@ struct Analyzer<'a> {
     runtime_functions: Vec<FunctionDeclaration>,
     runtime_definitions: BTreeMap<String, DefId>,
     next_class_type: u32,
+}
+
+#[derive(Debug, Clone)]
+struct NamespaceTraitMethod {
+    trait_name: String,
+    declaration: severian_ast::FunctionDeclaration,
+    implementations: Vec<(String, severian_ast::FunctionDeclaration)>,
 }
 
 #[derive(Debug, Clone)]
@@ -2607,6 +2617,11 @@ impl Analyzer<'_> {
                         ));
                     }
                 }
+                if let Some(call) =
+                    self.trait_namespace_call(callee, arguments, expected, ast.span)?
+                {
+                    return Ok(call);
+                }
                 if let Some(method) =
                     self.class_method_call(callee, arguments, expected, ast.span)?
                 {
@@ -2837,6 +2852,25 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
+                if *operator == AstBinaryOperator::Contains {
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    let needle = self.expression(left, Some(string))?;
+                    let haystack = self.expression(right, Some(string))?;
+                    let boolean = self
+                        .types
+                        .resolve_name("bool")
+                        .expect("bootstrap defines bool");
+                    return Ok(self.runtime_call(
+                        "__sev_string_contains",
+                        &[string, string],
+                        boolean,
+                        vec![haystack, needle],
+                        ast.span,
+                    ));
+                }
                 if *operator == AstBinaryOperator::Power {
                     let left = self.expression(left, None)?;
                     let name = self
@@ -4493,6 +4527,187 @@ impl Analyzer<'_> {
         definition
     }
 
+    fn trait_namespace_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let Some(path) = callable_path(callee) else {
+            return Ok(None);
+        };
+        if self.functions.contains_key(&path) {
+            return Ok(None);
+        }
+        let AstExpressionKind::Member { object, .. } = &callee.kind else {
+            return Ok(None);
+        };
+        if matches!(&object.kind, AstExpressionKind::Name(name) if self.names.contains_key(name)) {
+            return Ok(None);
+        }
+        let Some(namespace_method) = self.namespace_methods.get(&path).cloned() else {
+            return Ok(None);
+        };
+
+        let declaration = &namespace_method.declaration;
+        let result = self.resolve_source_type(&declaration.result)?;
+        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+            return Err(semantic_error(
+                "namespace method result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+
+        let mut ordered = vec![None; declaration.parameters.len()];
+        let mut positional = 0usize;
+        let mut named = false;
+        for argument in arguments {
+            let index = if let Some(argument_name) = &argument.name {
+                named = true;
+                declaration
+                    .parameters
+                    .iter()
+                    .position(|parameter| parameter.name == *argument_name)
+            } else if named {
+                None
+            } else {
+                let index = positional;
+                positional += 1;
+                (index < ordered.len()).then_some(index)
+            };
+            let Some(index) = index else {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    format!("call to `{path}` has incompatible arguments"),
+                    Some(span),
+                ));
+            };
+            if ordered[index].replace(argument.value.clone()).is_some() {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    format!("call to `{path}` supplies an argument more than once"),
+                    Some(argument.span),
+                ));
+            }
+        }
+        let ordered = ordered
+            .into_iter()
+            .zip(&declaration.parameters)
+            .map(|(argument, parameter)| argument.or_else(|| parameter.default.clone()))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000206",
+                    format!("call to `{path}` is missing a required argument"),
+                    Some(span),
+                )
+            })?;
+        let mut resolved_arguments = Vec::with_capacity(ordered.len());
+        for (argument, parameter) in ordered.iter().zip(&declaration.parameters) {
+            let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+            resolved_arguments.push(self.expression(argument, Some(parameter_type))?);
+        }
+
+        if namespace_method.implementations.is_empty() {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!(
+                    "namespace method `{path}` has no implementation of trait `{}`",
+                    namespace_method.trait_name
+                ),
+                Some(callee.span),
+            ));
+        }
+
+        let mut selected = self.throw_expression(
+            format!("no applicable implementation for `{path}`"),
+            result,
+            span,
+        );
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        for (class_name, implementation) in namespace_method.implementations.iter().rev() {
+            let previous = self.value_substitutions.clone();
+            let candidate = (|| {
+                for (parameter, value) in implementation.parameters.iter().zip(&resolved_arguments)
+                {
+                    self.value_substitutions
+                        .insert(parameter.name.clone(), value.clone());
+                }
+                let mut conditions = implementation
+                    .contracts
+                    .iter()
+                    .filter(|contract| !contract.deferred)
+                    .map(|contract| self.expression(&contract.condition, Some(boolean)))
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                let condition = if conditions.is_empty() {
+                    Expression {
+                        id: self.next_id(),
+                        type_id: boolean,
+                        kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+                        span: implementation.span,
+                    }
+                } else {
+                    let mut condition = conditions.remove(0);
+                    for next in conditions {
+                        condition = Expression {
+                            id: self.next_id(),
+                            type_id: boolean,
+                            kind: ExpressionKind::Binary {
+                                operator: BinaryOperator::And,
+                                left: Box::new(condition),
+                                right: Box::new(next),
+                            },
+                            span: implementation.span,
+                        };
+                    }
+                    condition
+                };
+                let body = implementation.body.as_ref().ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000211",
+                        format!(
+                            "implementation `{class_name}.{}` has no body",
+                            implementation.name
+                        ),
+                        Some(implementation.span),
+                    )
+                })?;
+                let [AstStatement::Return {
+                    value: Some(value), ..
+                }] = body.as_slice()
+                else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!(
+                            "namespace implementation `{class_name}.{}` must currently be a single return expression",
+                            implementation.name
+                        ),
+                        Some(implementation.span),
+                    ));
+                };
+                let value = self.expression(value, Some(result))?;
+                Ok((condition, value))
+            })();
+            self.value_substitutions = previous;
+            let (condition, value) = candidate?;
+            selected = Expression {
+                id: self.next_id(),
+                type_id: result,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(value),
+                    fallback: Box::new(selected),
+                },
+                span,
+            };
+        }
+        Ok(Some(selected))
+    }
+
     fn class_method_call(
         &mut self,
         callee: &AstExpression,
@@ -5316,6 +5531,62 @@ fn synthetic_trait_definition(module: &str, name: &str) -> DefId {
             "{module}.trait.{name}"
         )),
     }
+}
+
+fn collect_trait_namespace_methods(
+    ast: &severian_ast::Module,
+) -> Result<BTreeMap<String, NamespaceTraitMethod>, Diagnostic> {
+    let classes = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Class(declaration) => Some(declaration),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut methods = BTreeMap::new();
+    for declaration in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        for method in &declaration.methods {
+            for decorator in &method.decorators {
+                if !decorator.arguments.is_empty() {
+                    continue;
+                }
+                let path = format!("{}.{}", decorator.name, method.name);
+                let implementations = classes
+                    .iter()
+                    .filter(|class| {
+                        class.traits.iter().any(|implemented| {
+                            implemented.simple_name() == Some(declaration.name.as_str())
+                        })
+                    })
+                    .filter_map(|class| {
+                        class
+                            .methods
+                            .iter()
+                            .find(|candidate| candidate.name == method.name)
+                            .cloned()
+                            .map(|implementation| (class.name.clone(), implementation))
+                    })
+                    .collect();
+                let namespace_method = NamespaceTraitMethod {
+                    trait_name: declaration.name.clone(),
+                    declaration: method.clone(),
+                    implementations,
+                };
+                if methods.insert(path.clone(), namespace_method).is_some() {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("namespace member `{path}` is declared more than once"),
+                        Some(decorator.span),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(methods)
 }
 
 fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
@@ -6296,6 +6567,25 @@ mod tests {
             main.body.as_ref().unwrap().statements.as_slice(),
             [Statement::Binding(_), Statement::Sequence(Block { statements })]
                 if matches!(statements.as_slice(), [Statement::Expression(_)])
+        ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn trait_method_decorator_registers_a_constrained_namespace_call() {
+        let source = "trait File:\n    @file\n    def read(path: string) -> string with { (path) -> bool }\nclass LuaFile: File\n    def read(path: string) -> string with { \".lua\" in path }:\n        return \"lua\"\nclass JsonFile: File\n    def read(path: string) -> string with { \".json\" in path }:\n        return \"json\"\ndef selected() -> string:\n    return file.read(\"test.json\")\n";
+        let (program, _) = analyze_source(source);
+        let selected = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "selected")
+            .unwrap();
+        assert!(matches!(
+            selected.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Return(Some(Expression {
+                kind: ExpressionKind::Fallback { .. },
+                ..
+            }))]
         ));
         severian_mir::build(&program).unwrap();
     }
