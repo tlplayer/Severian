@@ -146,6 +146,7 @@ pub(crate) fn analyze_with_package_functions(
             .collect(),
         enums: BTreeMap::new(),
         enum_variants: BTreeMap::new(),
+        enum_binding_variants: BTreeMap::new(),
         class_instances: BTreeMap::new(),
         class_instances_by_type: BTreeMap::new(),
         list_types: BTreeMap::new(),
@@ -613,6 +614,8 @@ struct Analyzer<'a> {
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
     enum_variants: BTreeMap<String, (String, usize)>,
+    enum_binding_variants:
+        BTreeMap<severian_hir::VariableId, (String, String)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
@@ -728,6 +731,27 @@ impl Analyzer<'_> {
             .cloned()
             .collect::<Vec<_>>();
         for declaration in &declarations {
+            let variants = declaration
+                .variants
+                .iter()
+                .map(|variant| variant.name.as_str())
+                .collect::<BTreeSet<_>>();
+            for variant in &declaration.variants {
+                for transition in &variant.transitions {
+                    if !variants.contains(transition.as_str()) {
+                        return Err(Diagnostic::new(
+                            "E000213",
+                            format!(
+                                "enum variant `{}.{}` transitions to unknown variant `{transition}`",
+                                declaration.name, variant.name
+                            ),
+                            Some(variant.span),
+                        ));
+                    }
+                }
+            }
+        }
+        for declaration in &declarations {
             let ty = self
                 .class_instances
                 .get(&(declaration.name.clone(), Vec::new()))
@@ -828,6 +852,69 @@ impl Analyzer<'_> {
             });
         }
         Ok(())
+    }
+
+    fn enum_variant_expression(&self, expression: &AstExpression) -> Option<(String, String)> {
+        let path = match &expression.kind {
+            AstExpressionKind::Call { callee, .. } => callable_path(callee),
+            _ => callable_path(expression),
+        };
+        if let Some(path) = path {
+            if let Some((enum_name, ordinal)) = self.enum_variants.get(&path) {
+                let variant = self.enums[enum_name].variants[*ordinal].name.clone();
+                return Some((enum_name.clone(), variant));
+            }
+        }
+        if let AstExpressionKind::Name(name) = &expression.kind {
+            if let Some((_, variable, _)) = self.names.get(name) {
+                return self.enum_binding_variants.get(variable).cloned();
+            }
+        }
+        None
+    }
+
+    fn validate_enum_transition(
+        &self,
+        enum_name: &str,
+        from: &str,
+        to: &str,
+        span: severian_source::Span,
+    ) -> Result<(), Diagnostic> {
+        let instance = &self.enums[enum_name];
+        if !instance
+            .variants
+            .iter()
+            .any(|variant| !variant.transitions.is_empty())
+        {
+            return Ok(());
+        }
+        let variant = instance
+            .variants
+            .iter()
+            .find(|variant| variant.name == from)
+            .expect("known enum state names a declared variant");
+        if variant.transitions.iter().any(|allowed| allowed == to) {
+            return Ok(());
+        }
+        let allowed = if variant.transitions.is_empty() {
+            format!("`{enum_name}.{from}` is a terminal state")
+        } else {
+            format!(
+                "allowed next state(s): {}",
+                variant
+                    .transitions
+                    .iter()
+                    .map(|target| format!("`{enum_name}.{target}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        Err(Diagnostic::new(
+            "E000213",
+            format!("invalid enum transition `{enum_name}.{from} -> {enum_name}.{to}`"),
+            Some(span),
+        )
+        .with_help(allowed))
     }
 
     fn install_package_types(
@@ -989,6 +1076,23 @@ impl Analyzer<'_> {
                 Some(ast_binding.span),
             ));
         }
+        let next_enum_variant = self.enum_variant_expression(&ast_binding.value);
+        if is_update {
+            let variable = self.names[&ast_binding.name].1;
+            if let (Some((enum_name, from)), Some((next_enum, to))) = (
+                self.enum_binding_variants.get(&variable).cloned(),
+                next_enum_variant.as_ref(),
+            ) {
+                if enum_name == *next_enum {
+                    self.validate_enum_transition(
+                        &enum_name,
+                        &from,
+                        to,
+                        ast_binding.value.span,
+                    )?;
+                }
+            }
+        }
         let expected = ast_binding
             .annotation
             .as_ref()
@@ -1014,6 +1118,11 @@ impl Analyzer<'_> {
             self.mutable_variables.insert(variable);
         }
         let mutable = self.mutable_variables.contains(&variable);
+        if let Some(variant) = next_enum_variant {
+            self.enum_binding_variants.insert(variable, variant);
+        } else if is_update {
+            self.enum_binding_variants.remove(&variable);
+        }
         self.names
             .insert(ast_binding.name.clone(), (id, variable, type_id));
         bindings.push(Binding {
@@ -7626,6 +7735,29 @@ mod tests {
         let error = analyze(&ast, &context.types).unwrap_err();
         assert_eq!(error.code, "E000203");
         assert!(error.message.contains("immutable binding `constant`"));
+    }
+
+    #[test]
+    fn transition_aware_enums_accept_declared_edges_and_reject_missing_edges() {
+        analyze_source(
+            "enum Direction:\n    Left\n    Right\ndef unrestricted():\n    direction := Left\n    direction = Right\n",
+        );
+        analyze_source(
+            "enum Status:\n    Connecting -> Received | Failed\n    Received\n    Failed\ndef valid():\n    state := Connecting\n    state = Received\n",
+        );
+
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "invalid-transition.sev",
+            "enum Status:\n    Connecting -> Received | Failed\n    Received\n    Failed\ndef invalid():\n    state := Received\n    state = Connecting\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000213");
+        assert!(error
+            .message
+            .contains("Status.Received -> Status.Connecting"));
     }
 
     #[test]
