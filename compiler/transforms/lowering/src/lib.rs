@@ -123,13 +123,15 @@ pub fn lower(
                                 .collect::<Result<Vec<_>, LoweringError>>()?,
                             result: match method.result {
                                 severian_mir::TraitType::SelfType => {
-                                    severian_lir::TraitType::SelfType
-                                }
-                                severian_mir::TraitType::Concrete(ty) => {
-                                    severian_lir::TraitType::Concrete(context.lower_mir_type(ty)?)
-                                }
-                            },
-                        })
+                                        severian_lir::TraitType::SelfType
+                                    }
+                                    severian_mir::TraitType::Concrete(ty) => {
+                                        severian_lir::TraitType::Concrete(
+                                            context.lower_mir_type(ty)?,
+                                        )
+                                    }
+                                },
+                            })
                     })
                     .collect::<Result<Vec<_>, LoweringError>>()?,
             })
@@ -144,10 +146,9 @@ pub fn lower(
         traits,
         classes,
         storage_globals,
-        initializer_cfg: Some(initializer_cfg),
-    })
-}
-
+            initializer_cfg: Some(initializer_cfg),
+        })
+    }
 }
 
 pub use cfg_lowering_entry::lower;
@@ -199,9 +200,8 @@ impl CfgLowering<'_> {
             }
             let start = operations.len();
             let terminator = self.lower_terminator(body, &block.terminator, &mut operations)?;
-            operation_spans.extend(
-                std::iter::repeat(block.terminator_span).take(operations.len() - start),
-            );
+            operation_spans
+                .extend(std::iter::repeat(block.terminator_span).take(operations.len() - start));
             blocks.push(severian_lir::BasicBlock {
                 id: severian_lir::BlockId(block.id.0),
                 operations,
@@ -384,13 +384,12 @@ impl CfgLowering<'_> {
                     .map(|field| self.lower_operand(body, field, operations))
                     .collect::<Result<Vec<_>, _>>()?;
                 let result = self.new_value(self.lower_mir_type(*type_id)?);
-                let class = self
-                    .mir
-                    .classes
-                    .iter()
-                    .position(|class| class.id == *type_id)
-                    .ok_or(LoweringError::NotPrimitive(*type_id))?
-                    as u32;
+                let class =
+                    self.mir
+                        .classes
+                        .iter()
+                        .position(|class| class.id == *type_id)
+                        .ok_or(LoweringError::NotPrimitive(*type_id))? as u32;
                 operations.push(LirOperation::Aggregate {
                     class,
                     fields,
@@ -400,12 +399,9 @@ impl CfgLowering<'_> {
             }
             severian_mir::Rvalue::Await { task } => {
                 let task = self.lower_operand(body, task, operations)?;
-                let result_type = self
-                    .value_type(task)
-                    .task_result()
-                    .ok_or_else(|| LoweringError::UnsupportedCfgOperation(
-                        "await operand is not a task".into(),
-                    ))?;
+                let result_type = self.value_type(task).task_result().ok_or_else(|| {
+                    LoweringError::UnsupportedCfgOperation("await operand is not a task".into())
+                })?;
                 let result = self.new_value(result_type);
                 operations.push(LirOperation::Await { task, result });
                 Ok(result)
@@ -466,7 +462,9 @@ impl CfgLowering<'_> {
                     let value = self.lower_operand(body, argument, operations)?;
                     operations.push(LirOperation::Store {
                         place: severian_lir::Place {
-                            base: severian_lir::PlaceBase::Local(severian_lir::LocalId(parameter.0)),
+                            base: severian_lir::PlaceBase::Local(severian_lir::LocalId(
+                                parameter.0,
+                            )),
                             projection: Vec::new(),
                         },
                         value,
@@ -523,17 +521,14 @@ impl CfgLowering<'_> {
                     .iter()
                     .map(|argument| self.lower_operand(body, argument, operations))
                     .collect::<Result<Vec<_>, _>>()?;
-                let result_type = self
-                    .place_type(body, destination)?;
+                let result_type = self.place_type(body, destination)?;
                 let result = self.new_value(result_type);
                 operations.push(LirOperation::Spawn {
                     function,
                     arguments,
                     result,
                     owner: match owner {
-                        severian_mir::TaskOwner::SelfScope => {
-                            severian_lir::TaskOwner::SelfScope
-                        }
+                        severian_mir::TaskOwner::SelfScope => severian_lir::TaskOwner::SelfScope,
                         severian_mir::TaskOwner::Runtime => severian_lir::TaskOwner::Runtime,
                         severian_mir::TaskOwner::Inferred => severian_lir::TaskOwner::Inferred,
                     },
@@ -565,9 +560,9 @@ impl CfgLowering<'_> {
                         severian_mir::Case::Type(ty)
                             if self.lower_mir_type(*ty)? == self.value_type(discriminant) =>
                         {
-                            return Ok(severian_lir::Terminator::Goto(
-                                severian_lir::BlockId(target.0),
-                            ));
+                            return Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(
+                                target.0,
+                            )));
                         }
                         severian_mir::Case::Type(_) => {}
                         severian_mir::Case::Integer(value) => lowered_targets.push((
@@ -603,10 +598,7 @@ impl CfgLowering<'_> {
         }
     }
 
-    fn resolve_callee(
-        &self,
-        callee: &severian_mir::Callee,
-    ) -> Result<FunctionId, LoweringError> {
+    fn resolve_callee(&self, callee: &severian_mir::Callee) -> Result<FunctionId, LoweringError> {
         let (definition, substitution) = match callee {
             severian_mir::Callee::Direct {
                 function,
@@ -653,9 +645,7 @@ impl CfgLowering<'_> {
                     severian_mir::Projection::Index(local) => {
                         severian_lir::Projection::Index(severian_lir::LocalId(local.0))
                     }
-                    severian_mir::Projection::Dereference => {
-                        severian_lir::Projection::Dereference
-                    }
+                    severian_mir::Projection::Dereference => severian_lir::Projection::Dereference,
                     severian_mir::Projection::Downcast(variant) => {
                         severian_lir::Projection::Downcast(*variant)
                     }
@@ -670,17 +660,19 @@ impl CfgLowering<'_> {
         place: &severian_mir::Place,
     ) -> Result<LoweredType, LoweringError> {
         let mut ty = match place.base {
-            severian_mir::PlaceBase::Local(local) => body
-                .locals
-                .get(local.0 as usize)
-                .ok_or(LoweringError::UnknownLocal(local.0))?
-                .ty,
-            severian_mir::PlaceBase::Global(global) => self
-                .mir
-                .globals
-                .get(global.0 as usize)
-                .ok_or(LoweringError::UnknownGlobal(global.0))?
-                .ty,
+            severian_mir::PlaceBase::Local(local) => {
+                body.locals
+                    .get(local.0 as usize)
+                    .ok_or(LoweringError::UnknownLocal(local.0))?
+                    .ty
+            }
+            severian_mir::PlaceBase::Global(global) => {
+                self.mir
+                    .globals
+                    .get(global.0 as usize)
+                    .ok_or(LoweringError::UnknownGlobal(global.0))?
+                    .ty
+            }
         };
         for projection in &place.projection {
             if let severian_mir::Projection::Field(field) = projection {
@@ -707,7 +699,12 @@ impl CfgLowering<'_> {
     }
 
     fn lower_mir_type(&self, type_id: TypeId) -> Result<LoweredType, LoweringError> {
-        if let Some(id) = self.mir.classes.iter().position(|class| class.id == type_id) {
+        if let Some(id) = self
+            .mir
+            .classes
+            .iter()
+            .position(|class| class.id == type_id)
+        {
             Ok(LoweredType::Aggregate(id as u32))
         } else {
             lower_type(type_id, self.types, self.target)
@@ -751,12 +748,17 @@ fn task_locals(body: &severian_mir::CfgBody) -> BTreeSet<severian_mir::LocalId> 
             else {
                 continue;
             };
-            let (Some(destination), severian_mir::Operand::Copy(source) | severian_mir::Operand::Move(source)) =
-                (destination.local_id(), source)
+            let (
+                Some(destination),
+                severian_mir::Operand::Copy(source) | severian_mir::Operand::Move(source),
+            ) = (destination.local_id(), source)
             else {
                 continue;
             };
-            if source.local_id().is_some_and(|source| tasks.contains(&source)) {
+            if source
+                .local_id()
+                .is_some_and(|source| tasks.contains(&source))
+            {
                 changed |= tasks.insert(destination);
             }
         }
@@ -809,12 +811,10 @@ mod cfg_tests {
                     parameters: Vec::new(),
                     statements: Vec::new(),
                     statement_spans: Vec::new(),
-                    terminator: severian_mir::Terminator::Throw(
-                        severian_mir::Operand::Constant {
-                            value: LiteralValue::String("expected failure".into()),
-                            ty: string,
-                        },
-                    ),
+                    terminator: severian_mir::Terminator::Throw(severian_mir::Operand::Constant {
+                        value: LiteralValue::String("expected failure".into()),
+                        ty: string,
+                    }),
                     terminator_span: None,
                 }],
                 locals: Vec::new(),
@@ -1140,13 +1140,14 @@ fn lower_block(
                 result,
             } => LirOperation::Aggregate {
                 class: module
-                    .classes
-                    .iter()
-                    .position(|known| known.id == *class)
-                    .ok_or(LoweringError::NotPrimitive(*class))? as u32,
-                fields: fields.iter().map(|value| ValueId(value.0)).collect(),
-                result: ValueId(result.0),
-            },
+                        .classes
+                        .iter()
+                        .position(|known| known.id == *class)
+                        .ok_or(LoweringError::NotPrimitive(*class))?
+                        as u32,
+                    fields: fields.iter().map(|value| ValueId(value.0)).collect(),
+                    result: ValueId(result.0),
+                },
             MirOperation::FieldGet {
                 object,
                 field,
@@ -1807,8 +1808,7 @@ mod tests {
         assert!(!lir.initializer.operations.iter().any(|operation| matches!(
             operation,
             LirOperation::RuntimeCall { symbol, .. } if symbol == "__sev_string_release"
-        )));
+            )));
+        }
     }
-}
-
 }

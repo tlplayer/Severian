@@ -305,10 +305,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
                         |location| {
                             let mut failure = format!(
                                 "{}:{}:{}: assertion failed: {}",
-                                location.file,
-                                location.line,
-                                location.column,
-                                location.expression
+                                location.file, location.line, location.column, location.expression
                             );
                             if let Some(custom) = custom {
                                 failure.push_str(": ");
@@ -385,7 +382,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             .transpose()?
             .map(|ty| format!(" -> {ty}"))
             .unwrap_or_default();
-        output.push_str(&format!("  func.func private @{symbol}({inputs}){result}\n"));
+        output.push_str(&format!(
+            "  func.func private @{symbol}({inputs}){result}\n"
+        ));
     }
     let mut declared_external_symbols = BTreeSet::new();
     for function in module
@@ -404,13 +403,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     {
         render_cfg_function(&mut output, module, function)?;
     }
-    render_cfg_body_function(
-        &mut output,
-        module,
-        "__sev_init",
-        &[],
-        initializer,
-    )?;
+    render_cfg_body_function(&mut output, module, "__sev_init", &[], initializer)?;
     output.push_str("  func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {\n");
     output.push_str("    func.call @__sev_init() : () -> ()\n");
     if let Some(entry) = module.entry {
@@ -797,11 +790,9 @@ fn render_cfg_operation(
                     task.0
                 ));
             } else {
-                let result_type = value_type(module, *task)?
-                    .task_result()
-                    .ok_or_else(|| {
-                        MlirError::UnsupportedOperation("await operand is not a task".into())
-                    })?;
+                let result_type = value_type(module, *task)?.task_result().ok_or_else(|| {
+                    MlirError::UnsupportedOperation("await operand is not a task".into())
+                })?;
                 output.push_str(&format!(
                     "{indentation}%v{} = async.await %v{} : !async.value<{}>\n",
                     result.0,
@@ -814,7 +805,14 @@ fn render_cfg_operation(
             condition,
             message,
             location,
-        } => render_assert(output, module, *condition, *message, location.as_ref(), indent)?,
+        } => render_assert(
+            output,
+            module,
+            *condition,
+            *message,
+            location.as_ref(),
+            indent,
+        )?,
         unsupported => {
             return Err(MlirError::UnsupportedOperation(format!(
                 "CFG operation {unsupported:?}"
@@ -1071,18 +1069,10 @@ fn render_conversion(
                 bits: target_bits, ..
             },
         ) if target_bits < source_bits => "arith.trunci",
-        (LoweredType::Integer { signed: true, .. }, LoweredType::Float { .. }) => {
-            "arith.sitofp"
-        }
-        (LoweredType::Integer { signed: false, .. }, LoweredType::Float { .. }) => {
-            "arith.uitofp"
-        }
-        (LoweredType::Float { .. }, LoweredType::Integer { signed: true, .. }) => {
-            "arith.fptosi"
-        }
-        (LoweredType::Float { .. }, LoweredType::Integer { signed: false, .. }) => {
-            "arith.fptoui"
-        }
+        (LoweredType::Integer { signed: true, .. }, LoweredType::Float { .. }) => "arith.sitofp",
+        (LoweredType::Integer { signed: false, .. }, LoweredType::Float { .. }) => "arith.uitofp",
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: true, .. }) => "arith.fptosi",
+        (LoweredType::Float { .. }, LoweredType::Integer { signed: false, .. }) => "arith.fptoui",
         (
             LoweredType::Float {
                 format: source_format,
@@ -1183,10 +1173,7 @@ fn render_assert(
     Ok(())
 }
 
-fn binary_mnemonic(
-    operator: BinaryOperation,
-    ty: LoweredType,
-) -> Result<String, MlirError> {
+fn binary_mnemonic(operator: BinaryOperation, ty: LoweredType) -> Result<String, MlirError> {
     let floating = matches!(ty, LoweredType::Float { .. });
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     Ok(match operator {
@@ -1211,8 +1198,18 @@ fn binary_mnemonic(
         .into(),
         BinaryOperation::And => "arith.andi".into(),
         BinaryOperation::Or => "arith.ori".into(),
-        BinaryOperation::Equal => if floating { "arith.cmpf oeq," } else { "arith.cmpi eq," }.into(),
-        BinaryOperation::NotEqual => if floating { "arith.cmpf one," } else { "arith.cmpi ne," }.into(),
+        BinaryOperation::Equal => if floating {
+            "arith.cmpf oeq,"
+        } else {
+            "arith.cmpi eq,"
+        }
+        .into(),
+        BinaryOperation::NotEqual => if floating {
+            "arith.cmpf one,"
+        } else {
+            "arith.cmpi ne,"
+        }
+        .into(),
         BinaryOperation::Less => if floating {
             "arith.cmpf olt,"
         } else if signed {
@@ -1501,7 +1498,8 @@ fn render_block(
                     ));
                     output.push_str(&format!(
                         "{}async.yield %task_value{} : {result_type}\n",
-                        " ".repeat(indent + 2), result.0
+                        " ".repeat(indent + 2),
+                        result.0
                     ));
                     output.push_str(&format!("{indentation}}}\n"));
                 }
@@ -1631,13 +1629,7 @@ fn render_block(
                     ));
                 }
                 output.push_str(&format!("{indentation}scf.while : () -> () {{\n"));
-                render_block(
-                    output,
-                    module,
-                    condition_block,
-                    indent + 2,
-                    function_result,
-                )?;
+                render_block(output, module, condition_block, indent + 2, function_result)?;
                 output.push_str(&format!(
                     "{}scf.condition(%v{})\n",
                     " ".repeat(indent + 2),
@@ -1903,10 +1895,12 @@ fn value_type(module: &Module, id: ValueId) -> Result<LoweredType, MlirError> {
 }
 
 fn constant_string(module: &Module, id: ValueId) -> Option<&str> {
-    all_operations(module).into_iter().find_map(|operation| match operation {
-        Operation::Constant {
-            value: Constant::String(value),
-            result,
+    all_operations(module)
+        .into_iter()
+        .find_map(|operation| match operation {
+            Operation::Constant {
+                value: Constant::String(value),
+                result,
         } if *result == id => Some(value.as_str()),
         _ => None,
     })
@@ -2042,10 +2036,22 @@ mod tests {
         };
         let module = Module {
             values: vec![
-                severian_lir::Value { id: ValueId(0), ty: integer },
-                severian_lir::Value { id: ValueId(1), ty: integer },
-                severian_lir::Value { id: ValueId(2), ty: integer },
-                severian_lir::Value { id: ValueId(3), ty: integer },
+                severian_lir::Value {
+                    id: ValueId(0),
+                    ty: integer,
+                },
+                severian_lir::Value {
+                    id: ValueId(1),
+                    ty: integer,
+                },
+                severian_lir::Value {
+                    id: ValueId(2),
+                    ty: integer,
+                },
+                severian_lir::Value {
+                    id: ValueId(3),
+                    ty: integer,
+                },
             ],
             functions: vec![
                 Function {
@@ -2053,7 +2059,11 @@ mod tests {
                     name: "work".into(),
                     parameters: vec![ValueId(3)],
                     result: integer,
-                    body: Some(Block { operations: vec![Operation::Return { value: Some(ValueId(3)) }] }),
+                    body: Some(Block {
+                        operations: vec![Operation::Return {
+                            value: Some(ValueId(3)),
+                        }],
+                    }),
                     linkage: FunctionLinkage::Internal,
                     parameter_types: vec![integer],
                     cfg: None,
@@ -2065,7 +2075,10 @@ mod tests {
                     result: LoweredType::Unit,
                     body: Some(Block {
                         operations: vec![
-                            Operation::Constant { value: Constant::Integer("21".into()), result: ValueId(0) },
+                            Operation::Constant {
+                                value: Constant::Integer("21".into()),
+                                result: ValueId(0),
+                            },
                             Operation::Spawn {
                                 function: FunctionId(1),
                                 arguments: vec![ValueId(0)],
@@ -2073,7 +2086,10 @@ mod tests {
                                 owner: severian_lir::TaskOwner::SelfScope,
                                 locked: true,
                             },
-                            Operation::Await { task: ValueId(1), result: ValueId(2) },
+                            Operation::Await {
+                                task: ValueId(1),
+                                result: ValueId(2),
+                            },
                             Operation::Return { value: None },
                         ],
                     }),

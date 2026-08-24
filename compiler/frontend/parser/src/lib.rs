@@ -541,6 +541,42 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_source_first_selective_imports() {
+        let source = SourceFile::virtual_source("imports.sev", "from os import wait as pause\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Import(import) = &module.items[0] else {
+            panic!("expected import")
+        };
+        assert_eq!(import.source.as_deref(), Some("os"));
+        assert_eq!(import.alias.as_deref(), Some("pause"));
+        assert_eq!(
+            import.subject,
+            severian_ast::ImportSubject::Name("wait".into())
+        );
+    }
+
+    #[test]
+    fn parses_profile_test_timing_contracts() {
+        let source = SourceFile::virtual_source(
+            "profile.sev",
+            "test with profile with\n{\n    0.1s < time -> Error(\"too fast\")\n}:\n    assert(true)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        assert_eq!(test.modes, ["profile"]);
+        assert_eq!(test.contracts.len(), 1);
+        assert!(matches!(
+            test.contracts[0].condition.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::Less,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn match_cases_use_bindings_and_types_instead_of_magic_names() {
         let source = SourceFile::virtual_source(
             "match.sev",
@@ -634,7 +670,10 @@ output = f"""module {{
         };
         assert!(matches!(
             function.body.as_deref(),
-            Some([severian_ast::Statement::Defer { .. }, severian_ast::Statement::Expression(_)])
+            Some([
+                severian_ast::Statement::Defer { .. },
+                severian_ast::Statement::Expression(_)
+            ])
         ));
     }
 
@@ -703,7 +742,10 @@ output = f"""module {{
         let severian_ast::ExpressionKind::Call { arguments, .. } = &set.kind else {
             panic!("expected call")
         };
-        assert!(matches!(arguments[0].value.kind, severian_ast::ExpressionKind::Map(_)));
+        assert!(matches!(
+            arguments[0].value.kind,
+            severian_ast::ExpressionKind::Map(_)
+        ));
         let severian_ast::Statement::Expression(expectation) = &test.body[2] else {
             panic!("expected throws call")
         };
@@ -737,7 +779,10 @@ output = f"""module {{
         let severian_ast::Statement::Binding(builder) = &test.body[0] else {
             panic!("expected builder binding")
         };
-        assert!(matches!(builder.value.kind, severian_ast::ExpressionKind::Call { .. }));
+        assert!(matches!(
+            builder.value.kind,
+            severian_ast::ExpressionKind::Call { .. }
+        ));
         let severian_ast::Statement::Expression(mock) = &test.body[1] else {
             panic!("expected mock")
         };
@@ -769,7 +814,10 @@ output = f"""module {{
         };
         assert_eq!(class.traits[0].simple_name(), Some("StringOperator"));
         assert!(class.methods.is_empty());
-        assert_eq!(class.operators[0].operator, severian_ast::OperatorSyntax::Pipe);
+        assert_eq!(
+            class.operators[0].operator,
+            severian_ast::OperatorSyntax::Pipe
+        );
         assert_eq!(class.operators[0].body.len(), 1);
         let severian_ast::Item::Function(function) = &module.items[2] else {
             panic!("expected function")

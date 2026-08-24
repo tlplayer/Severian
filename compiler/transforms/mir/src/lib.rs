@@ -79,7 +79,7 @@ pub struct TestDeclaration {
     pub expectations: Vec<TestExpectation>,
 }
 
-pub use severian_hir::{TestExpectation, TestMode, TestStream};
+pub use severian_hir::{DurationComparison, TestExpectation, TestMode, TestStream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssertionOrigin {

@@ -4,6 +4,9 @@ class Metadata:
     is_directory: bool
     size: int
 
+@c(symbol = "__sev_os_wait")
+def wait(seconds: duration) -> unit
+
 @c(symbol = "__sev_os_make_directories")
 def make_directories(path: string) -> bool
 

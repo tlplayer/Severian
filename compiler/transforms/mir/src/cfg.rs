@@ -263,11 +263,7 @@ pub(crate) fn lower_program(
             }
         }
     }
-    let mut initializer = BodyBuilder::new(
-        unit,
-        global_bindings.clone(),
-        global_variables.clone(),
-    );
+    let mut initializer = BodyBuilder::new(unit, global_bindings.clone(), global_variables.clone());
     for module in &program.modules {
         initializer.expressions.clear();
         initializer.lower_statements(&module.initializer.statements, module);
@@ -856,7 +852,9 @@ impl BodyBuilder {
         }
         let result = Place::local(self.local(expression.type_id, false, false));
         self.push(Statement::StorageLive(
-            result.local_id().expect("expression results are local places"),
+            result
+                .local_id()
+                .expect("expression results are local places"),
         ));
         match &expression.kind {
             severian_hir::ExpressionKind::Aggregate { class, fields } => {
@@ -1055,11 +1053,9 @@ impl BodyBuilder {
                 function: *function,
                 substitution: substitution.clone(),
             },
-            HirCallee::FunctionValue(expression) => {
-                Callee::FunctionValue(Operand::Copy(
-                    self.expressions[&(self.current, *expression)].clone(),
-                ))
-            }
+            HirCallee::FunctionValue(expression) => Callee::FunctionValue(Operand::Copy(
+                self.expressions[&(self.current, *expression)].clone(),
+            )),
             HirCallee::Method {
                 implementation,
                 receiver,

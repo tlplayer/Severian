@@ -96,6 +96,7 @@ pub struct TypeDeclaration {
 pub struct TestDeclaration {
     pub name: Option<String>,
     pub modes: Vec<String>,
+    pub contracts: Vec<FunctionContract>,
     pub body: Vec<crate::Statement>,
     pub compiler_cases: Vec<CompilerTestCase>,
     pub span: Span,

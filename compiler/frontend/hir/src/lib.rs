@@ -131,11 +131,39 @@ pub enum TestStream {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestExpectation {
-    Contains { stream: TestStream, value: String },
-    Excludes { stream: TestStream, value: String },
-    Equals { stream: TestStream, value: String },
-    Panics { function: String, binding: String },
-    PanicMessage { binding: String, value: String },
+    Contains {
+        stream: TestStream,
+        value: String,
+    },
+    Excludes {
+        stream: TestStream,
+        value: String,
+    },
+    Equals {
+        stream: TestStream,
+        value: String,
+    },
+    Panics {
+        function: String,
+        binding: String,
+    },
+    PanicMessage {
+        binding: String,
+        value: String,
+    },
+    ProfileDuration {
+        comparison: DurationComparison,
+        threshold_nanos: u128,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurationComparison {
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

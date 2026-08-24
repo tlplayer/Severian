@@ -267,8 +267,14 @@ fn hooks_wrap_loop_returns_and_ownership_reaches_a_fixed_point() {
         .find(|function| function.name == "search")
         .unwrap();
     let body = search.body.as_ref().unwrap();
-    assert!(matches!(body.statements[0], severian_hir::Statement::Binding(_)));
-    assert!(matches!(body.statements[1], severian_hir::Statement::FieldSet { .. }));
+    assert!(matches!(
+        body.statements[0],
+        severian_hir::Statement::Binding(_)
+    ));
+    assert!(matches!(
+        body.statements[1],
+        severian_hir::Statement::FieldSet { .. }
+    ));
     let mut mir = severian_mir::build(&typed.hir).unwrap();
     severian_mir::run_required_pipeline(&mut mir, &universal).unwrap();
     std::fs::remove_dir_all(root).unwrap();

@@ -65,21 +65,18 @@ mod tests {
         let source =
             SourceFile::virtual_source("sizes.sev", "byte = 8B\nbinary = 4KiB\ndecimal = 2MB\n");
         let tokens = scan(&source).unwrap();
-        assert!(tokens
-            .iter()
-            .any(|token| token.kind == TokenKind::MeasuredNumber {
+        assert!(tokens.iter().any(|token| token.kind
+            == TokenKind::MeasuredNumber {
                 magnitude: "8".into(),
                 suffix: "B".into(),
             }));
-        assert!(tokens
-            .iter()
-            .any(|token| token.kind == TokenKind::MeasuredNumber {
+        assert!(tokens.iter().any(|token| token.kind
+            == TokenKind::MeasuredNumber {
                 magnitude: "4".into(),
                 suffix: "KiB".into(),
             }));
-        assert!(tokens
-            .iter()
-            .any(|token| token.kind == TokenKind::MeasuredNumber {
+        assert!(tokens.iter().any(|token| token.kind
+            == TokenKind::MeasuredNumber {
                 magnitude: "2".into(),
                 suffix: "MB".into(),
             }));

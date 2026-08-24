@@ -1,5 +1,5 @@
 use severian_driver::{Compiler, TestExecution};
-use severian_mir::{TestExpectation, TestMode, TestStream};
+use severian_mir::{DurationComparison, TestExpectation, TestMode, TestStream};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
@@ -114,10 +114,13 @@ pub(crate) fn run_with_coverage(
                 let result = execute(&artifact.path, coverage_file).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
-                let panic = test.expectations.iter().find_map(|expectation| match expectation {
-                    TestExpectation::Panics { function, binding } => {
-                        Some((function.as_str(), binding.as_str()))
-                    }
+                let panic = test
+                    .expectations
+                    .iter()
+                    .find_map(|expectation| match expectation {
+                        TestExpectation::Panics { function, binding } => {
+                            Some((function.as_str(), binding.as_str()))
+                        }
                     _ => None,
                 });
                 let expectation_failure = test.expectations.iter().find_map(|expectation| {
@@ -141,6 +144,7 @@ pub(crate) fn run_with_coverage(
                             }
                         }
                         TestExpectation::Panics { .. } => return None,
+                        TestExpectation::ProfileDuration { .. } => return None,
                     };
                     let matches = match expectation {
                         TestExpectation::Contains { .. } => actual.contains(expected),
@@ -148,6 +152,7 @@ pub(crate) fn run_with_coverage(
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
                         TestExpectation::PanicMessage { .. } => actual.contains(expected),
                         TestExpectation::Panics { .. } => unreachable!(),
+                        TestExpectation::ProfileDuration { .. } => unreachable!(),
                     };
                     (!matches).then(|| {
                         format!("captured stream did not {relation} {expected:?}; got {actual:?}")
@@ -212,15 +217,39 @@ pub(crate) fn run_with_coverage(
                 let result = execute(&artifact.path, coverage_file).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
-                if result.status.success() {
-                    println!(
-                        "test {} ... profile ({})",
-                        test.name,
-                        elapsed(started.elapsed())
-                    );
+                let measured = started.elapsed();
+                let timing_failure = test.expectations.iter().find_map(|expectation| {
+                    let TestExpectation::ProfileDuration {
+                        comparison,
+                        threshold_nanos,
+                        message,
+                    } = expectation
+                    else {
+                        return None;
+                    };
+                    let actual = measured.as_nanos();
+                    let satisfied = match comparison {
+                        DurationComparison::Less => actual < *threshold_nanos,
+                        DurationComparison::LessEqual => actual <= *threshold_nanos,
+                        DurationComparison::Greater => actual > *threshold_nanos,
+                        DurationComparison::GreaterEqual => actual >= *threshold_nanos,
+                    };
+                    (!satisfied).then(|| {
+                        format!(
+                            "{message}; measured {}, threshold {}ns",
+                            elapsed(measured),
+                            threshold_nanos
+                        )
+                    })
+                });
+                if result.status.success() && timing_failure.is_none() {
+                    println!("test {} ... profile ({})", test.name, elapsed(measured));
                     passed += 1;
                 } else {
                     println!("test {} ... FAILED", test.name);
+                    if let Some(message) = timing_failure {
+                        eprintln!("{message}");
+                    }
                     report_captured_output(&result);
                     failed += 1;
                 }

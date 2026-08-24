@@ -281,9 +281,7 @@ fn transfer_block(
                 let Some(local) = place.local_id() else {
                     continue;
                 };
-                if !state.initialized.remove(&local)
-                    || !state.consumed_resources.insert(local)
-                {
+                if !state.initialized.remove(&local) || !state.consumed_resources.insert(local) {
                     errors.insert(OwnershipError::DoubleDrop(local));
                 }
                 state
@@ -367,9 +365,7 @@ fn inspect_rvalue(
         Rvalue::Use(operand)
         | Rvalue::Unary { operand, .. }
         | Rvalue::Convert { operand, .. }
-        | Rvalue::Await { task: operand } => {
-            inspect_operand(operand, state, errors)
-        }
+        | Rvalue::Await { task: operand } => inspect_operand(operand, state, errors),
         Rvalue::Binary { left, right, .. } => {
             inspect_operand(left, state, errors);
             inspect_operand(right, state, errors);

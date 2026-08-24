@@ -2,10 +2,9 @@ use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
     ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
-    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, LoopGuard,
-    LoopGuardAction, MatchCase, Module,
-    OperatorDeclaration, OperatorImplementation, OperatorParameter, OperatorSyntax,
-    PropertyConstraint, PropertyDeclaration, Statement, TaskOwner, TestDeclaration,
+    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, LoopGuard, LoopGuardAction,
+    MatchCase, Module, OperatorDeclaration, OperatorImplementation, OperatorParameter,
+    OperatorSyntax, PropertyConstraint, PropertyDeclaration, Statement, TaskOwner, TestDeclaration,
     TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
@@ -158,7 +157,7 @@ impl Parser<'_> {
                 module.items.push(Item::Test(self.test_declaration()?));
                 self.separators();
                 continue;
-            } else if self.at_identifier("import") {
+            } else if self.at_identifier("import") || self.at_identifier("from") {
                 if !decorators.is_empty() {
                     return Err(self.error("decorators may only precede declarations"));
                 }
@@ -498,6 +497,7 @@ impl Parser<'_> {
             }
             _ => None,
         };
+        let (_, contracts) = self.function_contracts(&[])?;
         self.expect(&TokenKind::Colon, "expected `:` after test declaration")?;
         let (body, compiler_cases, end) = if modes.iter().any(|mode| mode == "compiler") {
             let (body, cases, end) = self.compiler_test_block()?;
@@ -509,6 +509,7 @@ impl Parser<'_> {
         Ok(TestDeclaration {
             name,
             modes,
+            contracts,
             body,
             compiler_cases,
             span: Span::new(start.source, start.start, end),
@@ -976,7 +977,42 @@ impl Parser<'_> {
     }
 
     fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
-        let start = self.next().span;
+        let keyword = self.next();
+        let start = keyword.span;
+        if matches!(&keyword.kind, TokenKind::Identifier(name) if name == "from") {
+            let (source, _) = self.identifier("expected an import source after `from`")?;
+            if !self.at_identifier("import") {
+                return Err(self.error("expected `import` after import source"));
+            }
+            self.next();
+            let subject_token = self.next();
+            let subject = match subject_token.kind {
+                TokenKind::Identifier(name) => ImportSubject::Name(name),
+                TokenKind::String(locator) => ImportSubject::Locator(locator),
+                _ => {
+                    return Err(Diagnostic::new(
+                        "E000118",
+                        "expected an import name or locator string",
+                        Some(subject_token.span),
+                    ))
+                }
+            };
+            let mut end = subject_token.span.end;
+            let alias = if self.at_identifier("as") {
+                self.next();
+                let (alias, span) = self.identifier("expected an import alias")?;
+                end = span.end;
+                Some(alias)
+            } else {
+                None
+            };
+            return Ok(ImportDeclaration {
+                subject,
+                source: Some(source),
+                alias,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         let subject_token = self.next();
         let subject = match subject_token.kind {
             TokenKind::Identifier(name) => ImportSubject::Name(name),
@@ -1431,10 +1467,12 @@ impl Parser<'_> {
             {
                 constraints.push(GenericConstraint::Predicate(condition));
             } else {
-            let end = failure.as_ref().map_or(condition.span.end, |value| value.span.end);
-            contracts.push(FunctionContract {
-                condition,
-                deferred,
+                let end = failure
+                    .as_ref()
+                    .map_or(condition.span.end, |value| value.span.end);
+                contracts.push(FunctionContract {
+                    condition,
+                    deferred,
                 failure,
                 span: Span::new(start.source, start.start, end),
             });
@@ -1451,7 +1489,10 @@ impl Parser<'_> {
         if multiline {
             self.expect(&TokenKind::Dedent, "expected end of function contracts")?;
         }
-        self.expect(&TokenKind::RightBrace, "expected `}` after function contracts")?;
+        self.expect(
+            &TokenKind::RightBrace,
+            "expected `}` after function contracts",
+        )?;
         Ok((constraints, contracts))
     }
 
@@ -1483,7 +1524,11 @@ impl Parser<'_> {
             Vec::new()
         };
         let end = constraints.last().map_or_else(
-            || default.as_ref().map_or(annotation.span.end, |value| value.span.end),
+            || {
+                default
+                    .as_ref()
+                    .map_or(annotation.span.end, |value| value.span.end)
+            },
             |constraint| constraint.span.end,
         );
         Ok(PropertyDeclaration {
@@ -1499,10 +1544,7 @@ impl Parser<'_> {
         let multiline = self.take(&TokenKind::Newline).is_some();
         while self.take(&TokenKind::Newline).is_some() {}
         if multiline {
-            self.expect(
-                &TokenKind::Indent,
-                "expected indented property constraints",
-            )?;
+            self.expect(&TokenKind::Indent, "expected indented property constraints")?;
             self.separators();
         }
         let mut constraints = Vec::new();
@@ -1810,26 +1852,20 @@ impl Parser<'_> {
             };
             let value = match operator {
                 None => right,
-                Some(operator) => {
-                    Expression {
-                        span: Span::new(object_span.source, object_span.start, right.span.end),
-                        kind: ExpressionKind::Binary {
-                            operator,
-                            left: Box::new(Expression {
-                                span: Span::new(
-                                    object_span.source,
-                                    object_span.start,
-                                    field_span.end,
-                                ),
-                                kind: ExpressionKind::Member {
-                                    object: Box::new(object_expression.clone()),
-                                    name: field.clone(),
+                Some(operator) => Expression {
+                    span: Span::new(object_span.source, object_span.start, right.span.end),
+                    kind: ExpressionKind::Binary {
+                        operator,
+                        left: Box::new(Expression {
+                            span: Span::new(object_span.source, object_span.start, field_span.end),
+                            kind: ExpressionKind::Member {
+                                object: Box::new(object_expression.clone()),
+                                name: field.clone(),
                                 },
-                            }),
-                            right: Box::new(right),
-                        },
-                    }
-                }
+                        }),
+                        right: Box::new(right),
+                    },
+                },
             };
             Ok(Statement::FieldAssignment {
                 object: object_expression,
@@ -1848,7 +1884,10 @@ impl Parser<'_> {
             }
             let mutable = self.take(&TokenKind::ColonEqual).is_some();
             if !mutable {
-                self.expect(&TokenKind::Equal, "expected `=` or `:=` after binding pattern")?;
+                self.expect(
+                    &TokenKind::Equal,
+                    "expected `=` or `:=` after binding pattern",
+                )?;
             }
             let value = self.expression(0)?;
             Ok(Statement::Destructure {
@@ -1936,9 +1975,10 @@ impl Parser<'_> {
             cursor += 1;
         }
         names > 1
-            && self.tokens.get(cursor).is_some_and(|token| {
-                matches!(token.kind, TokenKind::Equal | TokenKind::ColonEqual)
-            })
+            && self
+                .tokens
+                .get(cursor)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal | TokenKind::ColonEqual))
     }
 
     fn looks_like_prefix_typed_binding(&self) -> bool {
@@ -2370,7 +2410,10 @@ impl Parser<'_> {
             self.line_breaks();
         }
         let end = self
-            .expect(&TokenKind::RightParen, "expected `)` after mock declaration")?
+            .expect(
+                &TokenKind::RightParen,
+                "expected `)` after mock declaration",
+            )?
             .span
             .end;
         if cases.is_empty() {
@@ -2963,8 +3006,7 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
             .iter()
             .any(|value| expression_mentions(value, expected)),
         ExpressionKind::Map(entries) => entries.iter().any(|entry| {
-            expression_mentions(&entry.key, expected)
-                || expression_mentions(&entry.value, expected)
+            expression_mentions(&entry.key, expected) || expression_mentions(&entry.value, expected)
         }),
         ExpressionKind::Mock { cases, fallback } => {
             cases.iter().any(|case| {

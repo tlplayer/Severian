@@ -10,7 +10,7 @@ edition = "2026"
 type-safe = false
 # Optional package metadata used by registries and documentation.
 # description = ""
-# license = "MIT"
+# license = "Severian"
 # repository = "https://example.com/owner/project"
 
 [[bin]]

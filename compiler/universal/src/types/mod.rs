@@ -821,8 +821,7 @@ fn constraint_matches(
         TypeConstraint::Known(actual) => context.assignable(actual, candidate),
         TypeConstraint::Literal(kind) => context.primitive(candidate).is_some_and(|primitive| {
             primitive.category.literal_kind() == Some(kind)
-                || (kind == LiteralKind::Integer
-                    && primitive.category == PrimitiveCategory::Float)
+                || (kind == LiteralKind::Integer && primitive.category == PrimitiveCategory::Float)
         }),
     }
 }
@@ -848,12 +847,15 @@ fn constraint_conversion_cost(
         }
         TypeConstraint::Literal(kind) => {
             let primitive = context.primitive(candidate)?;
-            if context.defaults.get(&kind).is_some_and(|default| *default == candidate) {
+            if context
+                .defaults
+                .get(&kind)
+                .is_some_and(|default| *default == candidate)
+            {
                 Some(0)
             } else if primitive.category.literal_kind() == Some(kind) {
                 Some(1)
-            } else if kind == LiteralKind::Integer
-                && primitive.category == PrimitiveCategory::Float
+            } else if kind == LiteralKind::Integer && primitive.category == PrimitiveCategory::Float
             {
                 Some(100)
             } else {

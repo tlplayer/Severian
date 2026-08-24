@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include <errno.h>
 #include <math.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -58,6 +59,16 @@ double __sev_time_monotonic(void) {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0.0;
     return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
+}
+
+void __sev_os_wait(double seconds) {
+    if (!(seconds > 0.0)) return;
+    struct timespec remaining = {
+        .tv_sec = (time_t)seconds,
+        .tv_nsec = (long)((seconds - floor(seconds)) * 1000000000.0),
+    };
+    while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {
+    }
 }
 
 void __sev_throw(const char *error) {

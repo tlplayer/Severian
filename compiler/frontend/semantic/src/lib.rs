@@ -211,11 +211,7 @@ pub(crate) fn analyze_with_package_functions(
                             .cloned()
                             .unwrap_or_default(),
                         type_id,
-                        default: function
-                            .parameter_defaults
-                            .get(index)
-                            .cloned()
-                            .flatten(),
+                        default: function.parameter_defaults.get(index).cloned().flatten(),
                     })
                     .collect(),
                 result: function.result,
@@ -406,15 +402,26 @@ pub(crate) fn analyze_with_package_functions(
                 .collect::<Result<Vec<_>, _>>()?;
             let panic_binding = integration_panic_binding(&test.body);
             if modes.is_empty()
-                && test
-                    .body
-                    .iter()
-                    .any(|statement| {
-                        integration_expectation(statement, panic_binding.as_deref()).is_some()
-                    })
+                && test.body.iter().any(|statement| {
+                    integration_expectation(statement, panic_binding.as_deref()).is_some()
+                })
             {
                 modes.push(severian_hir::TestMode::Integration);
             }
+            let expectations = if test.contracts.is_empty() {
+                Vec::new()
+            } else if modes.contains(&severian_hir::TestMode::Profile) {
+                test.contracts
+                    .iter()
+                    .map(profile_duration_expectation)
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                return Err(Diagnostic::new(
+                    "E000217",
+                    "test timing contracts require the `profile` test mode",
+                    Some(test.span),
+                ));
+            };
             module.tests.push(severian_hir::TestDeclaration {
                 name: test
                     .name
@@ -422,7 +429,7 @@ pub(crate) fn analyze_with_package_functions(
                     .unwrap_or_else(|| format!("test {}", index + 1)),
                 modes,
                 function: id,
-                expectations: Vec::new(),
+                expectations,
             });
         }
     }
@@ -496,7 +503,11 @@ pub(crate) fn analyze_with_package_functions(
         let result_type = function.result.ty;
         let (mut body, hooks) =
             analyzer.lower_function_hooks(ast_function, &mut module.bindings, result_type)?;
-        for contract in ast_function.contracts.iter().filter(|contract| !contract.deferred) {
+        for contract in ast_function
+            .contracts
+            .iter()
+            .filter(|contract| !contract.deferred)
+        {
             body.statements.push(analyzer.contract_assertion(contract)?);
         }
         body.statements.extend(
@@ -572,9 +583,7 @@ pub(crate) fn analyze_with_package_functions(
                 let frame = Expression {
                     id: analyzer.next_id(),
                     type_id: string,
-                    kind: ExpressionKind::Literal(LiteralValue::String(
-                        ast_function.name.clone(),
-                    )),
+                    kind: ExpressionKind::Literal(LiteralValue::String(ast_function.name.clone())),
                     span: ast_function.span,
                 };
                 analyzer.runtime_call(
@@ -730,8 +739,7 @@ struct Analyzer<'a> {
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
     enum_variants: BTreeMap<String, (String, usize)>,
-    enum_binding_variants:
-        BTreeMap<severian_hir::VariableId, (String, String)>,
+    enum_binding_variants: BTreeMap<severian_hir::VariableId, (String, String)>,
     class_instances: BTreeMap<(String, Vec<TypeId>), ClassInstance>,
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
@@ -1154,7 +1162,8 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
-        if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
+        if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
+        {
             let parameters = parameters
                 .iter()
                 .map(|parameter| self.resolve_source_type(parameter))
@@ -1310,12 +1319,7 @@ impl Analyzer<'_> {
                 next_enum_variant.as_ref(),
             ) {
                 if enum_name == *next_enum {
-                    self.validate_enum_transition(
-                        &enum_name,
-                        &from,
-                        to,
-                        ast_binding.value.span,
-                    )?;
+                    self.validate_enum_transition(&enum_name, &from, to, ast_binding.value.span)?;
                 }
             }
         }
@@ -1325,12 +1329,11 @@ impl Analyzer<'_> {
             .map(|annotation| self.resolve_source_type(annotation))
             .transpose()?
             .or(update_type);
-        let (value, pending_lambda) = if let AstExpressionKind::Lambda { parameters, body } =
-            &ast_binding.value.kind
-        {
-            if is_update {
-                return Err(Diagnostic::new(
-                    "E000205",
+        let (value, pending_lambda) =
+            if let AstExpressionKind::Lambda { parameters, body } = &ast_binding.value.kind {
+                if is_update {
+                    return Err(Diagnostic::new(
+                        "E000205",
                     "lambda bindings cannot be reassigned",
                     Some(ast_binding.span),
                 ));
@@ -1343,12 +1346,13 @@ impl Analyzer<'_> {
             let value = self.expression(&ast_binding.value, expected);
             if ast_binding.preserve_error {
                 self.preserve_error_depth -= 1;
-            }
-            (value?, None)
-        };
-        let type_id = pending_lambda
-            .as_ref()
-            .map_or_else(|| expected.unwrap_or(value.type_id), |lambda| lambda.closure_type);
+                }
+                (value?, None)
+            };
+        let type_id = pending_lambda.as_ref().map_or_else(
+            || expected.unwrap_or(value.type_id),
+            |lambda| lambda.closure_type,
+        );
         if pending_lambda.is_none() && !self.types.assignable(value.type_id, type_id) {
             return Err(Diagnostic::new(
                 "E000205",
@@ -1707,10 +1711,8 @@ impl Analyzer<'_> {
                         Some(*span),
                     ));
                 }
-                self.names.insert(
-                    error_binding.clone(),
-                    (id, variable, fallible.error),
-                );
+                self.names
+                    .insert(error_binding.clone(), (id, variable, fallible.error));
                 let handler = self.block(body, bindings, result_type)?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
@@ -1848,8 +1850,8 @@ impl Analyzer<'_> {
                     }
                 }
                 let outer_names = guarded_outer_names.unwrap_or_else(|| self.names.clone());
-                let outer_declarations = guarded_outer_declarations
-                    .unwrap_or_else(|| self.declarations.clone());
+                let outer_declarations =
+                    guarded_outer_declarations.unwrap_or_else(|| self.declarations.clone());
                 self.loop_depth += 1;
                 let lowered = self.block(
                     if guards.is_empty() { body } else { &body[1..] },
@@ -1990,11 +1992,8 @@ impl Analyzer<'_> {
                     span: iterable.span,
                 };
 
-                let storage = self.collection_storage_expression(
-                    iterable_reference.clone(),
-                    0,
-                    *span,
-                );
+                let storage =
+                    self.collection_storage_expression(iterable_reference.clone(), 0, *span);
                 let storage_type = storage.type_id;
                 let length = self.runtime_call(
                     "__sev_list_len",
@@ -2055,10 +2054,8 @@ impl Analyzer<'_> {
                         preserve_error: false,
                         span: *span,
                     });
-                    self.names.insert(
-                        name.clone(),
-                        (loop_binding_id, loop_variable, element_type),
-                    );
+                    self.names
+                        .insert(name.clone(), (loop_binding_id, loop_variable, element_type));
                     self.declarations.insert(name);
                     loop_binding_ids.push(loop_binding_id);
                 }
@@ -3183,20 +3180,10 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("string")
                     .expect("bootstrap defines pointer-backed string");
-                let mut keys = self.runtime_call(
-                    "__sev_list_create",
-                    &[],
-                    storage_type,
-                    Vec::new(),
-                    ast.span,
-                );
-                let mut values = self.runtime_call(
-                    "__sev_list_create",
-                    &[],
-                    storage_type,
-                    Vec::new(),
-                    ast.span,
-                );
+                let mut keys =
+                    self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), ast.span);
+                let mut values =
+                    self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), ast.span);
                 let key_symbol = format!(
                     "__sev_list_append_{}",
                     self.list_runtime_suffix(key_type, ast.span)?
@@ -3252,14 +3239,22 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 }
-                let expression = self.expression(expression, expected)?;
+                // A task owns the complete result of its call, including a
+                // fallible result envelope. Error propagation happens when
+                // the task is awaited, not before the call is spawned.
+                self.preserve_error_depth += 1;
+                let lowered = self.expression(expression, expected);
+                self.preserve_error_depth -= 1;
+                let expression = lowered?;
                 Ok(Expression {
                     id: self.next_id(),
                     type_id: expression.type_id,
                     kind: ExpressionKind::Async {
                         expression: Box::new(expression),
                         owner: match owner {
-                            severian_ast::TaskOwner::SelfScope => severian_hir::TaskOwner::SelfScope,
+                            severian_ast::TaskOwner::SelfScope => {
+                                severian_hir::TaskOwner::SelfScope
+                            }
                             severian_ast::TaskOwner::Runtime => severian_hir::TaskOwner::Runtime,
                             severian_ast::TaskOwner::Inferred => severian_hir::TaskOwner::Inferred,
                         },
@@ -3269,7 +3264,10 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Await { expression } => {
-                let expression = self.expression(expression, expected)?;
+                // The surrounding expected type describes the awaited value,
+                // not the task handle (which may still carry a fallible
+                // envelope).
+                let expression = self.expression(expression, None)?;
                 if let Some(element) = self.channel_elements.get(&expression.type_id).copied() {
                     let storage = self.channel_storage_expression(expression, ast.span);
                     let storage_type = storage.type_id;
@@ -3282,12 +3280,18 @@ impl Analyzer<'_> {
                         ast.span,
                     ));
                 }
-                Ok(Expression {
+                let awaited = Expression {
                     id: self.next_id(),
                     type_id: expression.type_id,
                     kind: ExpressionKind::Await(Box::new(expression)),
                     span: ast.span,
-                })
+                };
+                if self.preserve_error_depth == 0 {
+                    if let Some(fallible) = self.fallible_types.get(&awaited.type_id).copied() {
+                        return Ok(self.unwrap_fallible_expression(awaited, fallible, ast.span));
+                    }
+                }
+                Ok(awaited)
             }
             AstExpressionKind::Fallback { value, fallback } => {
                 let value = self.expression(value, expected)?;
@@ -3876,8 +3880,7 @@ impl Analyzer<'_> {
                                 ast.span,
                             ));
                         }
-                        if let Some(element) =
-                            self.list_elements.get(&collection.type_id).copied()
+                        if let Some(element) = self.list_elements.get(&collection.type_id).copied()
                         {
                             let value = self.expression(&arguments[0].value, Some(element))?;
                             let suffix = self.list_runtime_suffix(element, ast.span)?;
@@ -3899,9 +3902,9 @@ impl Analyzer<'_> {
                     if name == "pop" && arguments.is_empty() {
                         let list = self.expression(object, None)?;
                         if let Some(element) = self.list_elements.get(&list.type_id).copied() {
-                            if expected.is_some_and(|expected| {
-                                !self.types.assignable(element, expected)
-                            }) {
+                            if expected
+                                .is_some_and(|expected| !self.types.assignable(element, expected))
+                            {
                                 return Err(semantic_error(
                                     "list element does not satisfy the expected type".into(),
                                     ast.span,
@@ -3981,9 +3984,9 @@ impl Analyzer<'_> {
                         _ => None,
                     };
                     if let Some(runtime_type) = runtime_type {
-                        if expected.is_some_and(|expected| {
-                            !self.types.assignable(runtime_type, expected)
-                        }) {
+                        if expected
+                            .is_some_and(|expected| !self.types.assignable(runtime_type, expected))
+                        {
                             return Err(semantic_error(
                                 "runtime value does not satisfy the expected type".into(),
                                 ast.span,
@@ -4028,10 +4031,8 @@ impl Analyzer<'_> {
                                 },
                                 span: ast.span,
                             };
-                            let fallback = self.expression(
-                                &arguments[0].value,
-                                Some(fallible.success),
-                            )?;
+                            let fallback =
+                                self.expression(&arguments[0].value, Some(fallible.success))?;
                             return Ok(Expression {
                                 id: self.next_id(),
                                 type_id: fallible.success,
@@ -4061,10 +4062,8 @@ impl Analyzer<'_> {
                         if let Some(operator) = primitive_method_operator(name) {
                             if let Ok(left) = self.expression(object, None) {
                                 if self.types.supports_binary(operator, left.type_id) {
-                                    let right = self.expression(
-                                        &arguments[0].value,
-                                        Some(left.type_id),
-                                    )?;
+                                    let right =
+                                        self.expression(&arguments[0].value, Some(left.type_id))?;
                                     let result = if matches!(
                                         operator,
                                         BinaryOperator::Equal
@@ -4108,7 +4107,8 @@ impl Analyzer<'_> {
                 if let AstExpressionKind::Member { object, name } = &callee.kind {
                     if name == "send" && arguments.len() == 1 {
                         let channel = self.expression(object, None)?;
-                        if let Some(element) = self.channel_elements.get(&channel.type_id).copied() {
+                        if let Some(element) = self.channel_elements.get(&channel.type_id).copied()
+                        {
                             let value = self.expression(&arguments[0].value, Some(element))?;
                             let storage = self.channel_storage_expression(channel, ast.span);
                             let storage_type = storage.type_id;
@@ -4372,11 +4372,9 @@ impl Analyzer<'_> {
                     let resolved = ordered
                         .iter()
                         .zip(&signature.parameters)
-                        .map(|(argument, parameter)| {
-                            match self.prepare(argument) {
-                                Ok(prepared) => self.finish(prepared, parameter.type_id),
-                                Err(_) => self.expression(argument, Some(parameter.type_id)),
-                            }
+                        .map(|(argument, parameter)| match self.prepare(argument) {
+                            Ok(prepared) => self.finish(prepared, parameter.type_id),
+                            Err(_) => self.expression(argument, Some(parameter.type_id)),
                         })
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
@@ -4618,7 +4616,10 @@ impl Analyzer<'_> {
                         ast.span,
                     );
                 }
-                if matches!(operator, AstBinaryOperator::Equal | AstBinaryOperator::NotEqual) {
+                if matches!(
+                    operator,
+                    AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
+                ) {
                     if let AstExpressionKind::Name(type_name) = &right.kind {
                         let target = self
                             .class_instances
@@ -4658,8 +4659,7 @@ impl Analyzer<'_> {
                             .or_else(|| self.types.resolve_name(type_name));
                         if let Some(target) = target {
                             let left = self.expression(left, None)?;
-                            if let Some(fallible) =
-                                self.fallible_types.get(&left.type_id).copied()
+                            if let Some(fallible) = self.fallible_types.get(&left.type_id).copied()
                             {
                                 let boolean = self
                                     .types
@@ -4769,10 +4769,7 @@ impl Analyzer<'_> {
                         ));
                     }
                     if matches!(name, Some("int" | "i64")) {
-                        if matches!(
-                            right.kind,
-                            AstExpressionKind::Literal(AstLiteral::Float(_))
-                        ) {
+                        if matches!(right.kind, AstExpressionKind::Literal(AstLiteral::Float(_))) {
                             let float = self
                                 .types
                                 .resolve_name("float")
@@ -4804,7 +4801,10 @@ impl Analyzer<'_> {
                         | AstBinaryOperator::Identity
                 ) {
                     let resolved_left = self.expression(left, None)?;
-                    if matches!(operator, AstBinaryOperator::Equal | AstBinaryOperator::NotEqual) {
+                    if matches!(
+                        operator,
+                        AstBinaryOperator::Equal | AstBinaryOperator::NotEqual
+                    ) {
                         if let Some(fallible) =
                             self.fallible_types.get(&resolved_left.type_id).copied()
                         {
@@ -5120,7 +5120,9 @@ impl Analyzer<'_> {
             }
             if self.types.resolve_name("string") == Some(expression.type_id)
                 && matches!(
-                    self.types.definition(expected).map(|definition| definition.name.as_str()),
+                    self.types
+                        .definition(expected)
+                        .map(|definition| definition.name.as_str()),
                     Some("float" | "f64")
                 )
             {
@@ -5135,7 +5137,8 @@ impl Analyzer<'_> {
                 ));
             }
         }
-        let numeric = self.numeric_primitive(expression.type_id) && self.numeric_primitive(expected);
+        let numeric =
+            self.numeric_primitive(expression.type_id) && self.numeric_primitive(expected);
         if !numeric {
             if !explicit && self.types.assignable(expression.type_id, expected) {
                 return Ok(expression);
@@ -5245,7 +5248,10 @@ impl Analyzer<'_> {
             else {
                 return Err(Diagnostic::new(
                     "E000211",
-                    format!("class `{}` has no writable field `{field_name}`", instance.name),
+                    format!(
+                        "class `{}` has no writable field `{field_name}`",
+                        instance.name
+                    ),
                     Some(key.span),
                 ));
             };
@@ -5280,9 +5286,8 @@ impl Analyzer<'_> {
             .iter()
             .find(|constructor| constructor.parameters.len() == arguments.len())
             .cloned();
-        let implicit_defaults = constructor.is_none()
-            && arguments.is_empty()
-            && !instance.fields.is_empty();
+        let implicit_defaults =
+            constructor.is_none() && arguments.is_empty() && !instance.fields.is_empty();
         let fields = if let Some(constructor) = constructor {
             self.class_constructor_values(&instance, &constructor, arguments, span)?
         } else if !instance.constructors.is_empty() {
@@ -5836,13 +5841,8 @@ impl Analyzer<'_> {
                 span,
             });
         }
-        selected.ok_or_else(|| {
-            Diagnostic::new(
-                "E000204",
-                "cannot convert an empty union",
-                Some(span),
-            )
-        })
+        selected
+            .ok_or_else(|| Diagnostic::new("E000204", "cannot convert an empty union", Some(span)))
     }
 
     fn channel_constructor(
@@ -6389,15 +6389,14 @@ impl Analyzer<'_> {
                 vec![value],
                 span,
             )),
-            Some("float" | "f64" | "duration" | "data_rate" | "frequency") => {
-                Ok(self.runtime_call(
+            Some("float" | "f64" | "duration" | "data_rate" | "frequency") => Ok(self
+                .runtime_call(
                     "__sev_string_from_float",
                     &[value.type_id],
                     string,
                     vec![value],
                     span,
-                ))
-            }
+                )),
             Some("bool") => Ok(self.runtime_call(
                 "__sev_string_from_bool",
                 &[value.type_id],
@@ -6489,7 +6488,10 @@ impl Analyzer<'_> {
                             matches!(definition.name.as_str(), "int" | "i64" | "usize")
                         })
                     })
-            }) => Ok("pair_i64"),
+            }) =>
+            {
+                Ok("pair_i64")
+            }
             _ => Err(Diagnostic::new(
                 "E000211",
                 "native list lowering does not yet support this element representation",
@@ -6628,7 +6630,9 @@ impl Analyzer<'_> {
             return Ok(value);
         }
         let field_name = &instance.fields[field].name;
-        let previous = self.value_substitutions.insert(field_name.clone(), value.clone());
+        let previous = self
+            .value_substitutions
+            .insert(field_name.clone(), value.clone());
         let boolean = self
             .types
             .resolve_name("bool")
@@ -6654,9 +6658,7 @@ impl Analyzer<'_> {
                                 .resolve_name("string")
                                 .expect("bootstrap defines string");
                             self.expression(message, Some(string))?
-                        } else if let Some(inlined) =
-                            self.inline_source_call(failure, None)?
-                        {
+                        } else if let Some(inlined) = self.inline_source_call(failure, None)? {
                             inlined
                         } else {
                             self.expression(failure, None)?
@@ -6832,9 +6834,9 @@ impl Analyzer<'_> {
                 Some(span),
             ));
         }
-        if expected.is_some_and(|expected| {
-            !self.types.assignable(callable.signature.result, expected)
-        }) {
+        if expected
+            .is_some_and(|expected| !self.types.assignable(callable.signature.result, expected))
+        {
             return Err(semantic_error(
                 "callable result does not satisfy the expected type".into(),
                 span,
@@ -7046,19 +7048,22 @@ impl Analyzer<'_> {
                     span: case.span,
                 });
             }
-            let condition = comparisons.into_iter().reduce(|left, right| Expression {
-                id: self.next_id(),
-                type_id: boolean,
-                kind: ExpressionKind::Binary {
+            let condition = comparisons
+                .into_iter()
+                .reduce(|left, right| Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
                     operator: BinaryOperator::And,
                     left: Box::new(left),
-                    right: Box::new(right),
-                },
-                span: case.span,
-            }).unwrap_or_else(|| Expression {
-                id: self.next_id(),
-                type_id: boolean,
-                kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+                        right: Box::new(right),
+                    },
+                    span: case.span,
+                })
+                .unwrap_or_else(|| Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
                 span: case.span,
             });
             let value = self.expression(&case.result, Some(result_type))?;
@@ -7121,7 +7126,10 @@ impl Analyzer<'_> {
             else {
                 return Err(Diagnostic::new(
                     "E000211",
-                    format!("class `{}` has no writable field `{field_name}`", instance.name),
+                    format!(
+                        "class `{}` has no writable field `{field_name}`",
+                        instance.name
+                    ),
                     Some(key_ast.span),
                 )
                 .with_help("use the name of a public writable field declared by this class"));
@@ -7132,7 +7140,10 @@ impl Analyzer<'_> {
         let Some((_, first)) = writable.first().copied() else {
             return Err(Diagnostic::new(
                 "E000211",
-                format!("class `{}` has no dynamically writable fields", instance.name),
+                format!(
+                    "class `{}` has no dynamically writable fields",
+                    instance.name
+                ),
                 Some(span),
             ));
         };
@@ -7509,7 +7520,8 @@ impl Analyzer<'_> {
                     Some(span),
                 )
             })?;
-        let [left_parameter, right_parameter] = namespace_operator.declaration.parameters.as_slice()
+        let [left_parameter, right_parameter] =
+            namespace_operator.declaration.parameters.as_slice()
         else {
             return Err(Diagnostic::new(
                 "E000206",
@@ -7727,20 +7739,23 @@ impl Analyzer<'_> {
                 ));
             };
             if let Some(field_name) = string_literal(&argument.value) {
-                let Some((field, declaration)) = instance
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .find(|(_, field)| field.name == field_name && !field.name.starts_with("__"))
+                let Some((field, declaration)) =
+                    instance.fields.iter().enumerate().find(|(_, field)| {
+                        field.name == field_name && !field.name.starts_with("__")
+                    })
                 else {
                     return Err(Diagnostic::new(
                         "E000211",
-                        format!("class `{}` has no readable field `{field_name}`", instance.name),
+                        format!(
+                            "class `{}` has no readable field `{field_name}`",
+                            instance.name
+                        ),
                         Some(argument.value.span),
                     )
                     .with_help("use the name of a public field declared by this class"));
                 };
-                if expected.is_some_and(|expected| !self.types.assignable(declaration.ty, expected)) {
+                if expected.is_some_and(|expected| !self.types.assignable(declaration.ty, expected))
+                {
                     return Err(semantic_error(
                         "dynamic field result does not satisfy the expected type".into(),
                         span,
@@ -7765,7 +7780,10 @@ impl Analyzer<'_> {
             let Some((_, first)) = readable.first().copied() else {
                 return Err(Diagnostic::new(
                     "E000211",
-                    format!("class `{}` has no dynamically readable fields", instance.name),
+                    format!(
+                        "class `{}` has no dynamically readable fields",
+                        instance.name
+                    ),
                     Some(span),
                 ));
             };
@@ -8067,11 +8085,7 @@ impl Analyzer<'_> {
             };
             let delegate = match body.as_slice() {
                 [AstStatement::Expression(AstExpression {
-                    kind:
-                        AstExpressionKind::Call {
-                            callee,
-                            arguments,
-                        },
+                    kind: AstExpressionKind::Call { callee, arguments },
                     ..
                 })] if arguments.is_empty() => match &callee.kind {
                     AstExpressionKind::Name(delegate) => Some(delegate.as_str()),
@@ -8099,7 +8113,10 @@ impl Analyzer<'_> {
             };
             method = next;
         }
-        let body = method.body.as_ref().expect("delegated methods retain bodies");
+        let body = method
+            .body
+            .as_ref()
+            .expect("delegated methods retain bodies");
         if !body.is_empty()
             && body.iter().all(|statement| {
                 matches!(statement, AstStatement::Binding(assignment)
@@ -8135,9 +8152,7 @@ impl Analyzer<'_> {
                     .collect::<Result<Vec<_>, Diagnostic>>()
             })();
             self.value_substitutions = previous;
-            return resolved.map(|statements| {
-                Some(Statement::Sequence(Block { statements }))
-            });
+            return resolved.map(|statements| Some(Statement::Sequence(Block { statements })));
         }
         if let Some(field_name) = body.iter().find_map(|statement| {
             let AstStatement::Expression(expression) = statement else {
@@ -8302,9 +8317,7 @@ impl Analyzer<'_> {
                         .collect::<Result<Vec<_>, Diagnostic>>()
                 })();
                 self.value_substitutions = previous;
-                return resolved.map(|statements| {
-                    Some(Statement::Sequence(Block { statements }))
-                });
+                return resolved.map(|statements| Some(Statement::Sequence(Block { statements })));
             }
             return Err(Diagnostic::new(
                 "E000211",
@@ -8404,9 +8417,7 @@ pub(crate) fn function_type_id(parameters: &[TypeId], result: TypeId) -> TypeId 
     TypeId(0x1000_0000 | (hash & 0x0fff_ffff))
 }
 
-fn contract_failure_expression(
-    failure: Option<&AstExpression>,
-) -> Option<&AstExpression> {
+fn contract_failure_expression(failure: Option<&AstExpression>) -> Option<&AstExpression> {
     let failure = failure?;
     if let AstExpressionKind::Call { callee, arguments } = &failure.kind {
         if callable_path(callee).as_deref() == Some("Error") {
@@ -8421,7 +8432,11 @@ fn insert_before_returns(block: &mut Block, assertions: &[Statement]) {
     for mut statement in std::mem::take(&mut block.statements) {
         match &mut statement {
             Statement::Sequence(nested) => insert_before_returns(nested, assertions),
-            Statement::If { then_block, else_block, .. } => {
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 insert_before_returns(then_block, assertions);
                 insert_before_returns(else_block, assertions);
             }
@@ -8785,10 +8800,7 @@ fn collect_trait_namespace_operators(
                     declaration: operator.clone(),
                     implementations,
                 };
-                if operators
-                    .insert(path.clone(), namespace_operator)
-                    .is_some()
-                {
+                if operators.insert(path.clone(), namespace_operator).is_some() {
                     return Err(Diagnostic::new(
                         "E000203",
                         format!("namespace operator `{path}` is declared more than once"),
@@ -8966,9 +8978,7 @@ fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnos
     Ok(())
 }
 
-fn validate_hook_context(
-    function: &severian_ast::FunctionDeclaration,
-) -> Result<(), Diagnostic> {
+fn validate_hook_context(function: &severian_ast::FunctionDeclaration) -> Result<(), Diagnostic> {
     let Some(hook) = &function.hook else {
         return Ok(());
     };
@@ -9396,7 +9406,10 @@ fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
-    if matches!(annotation.kind, severian_ast::TypeAnnotationKind::Function { .. }) {
+    if matches!(
+        annotation.kind,
+        severian_ast::TypeAnnotationKind::Function { .. }
+    ) {
         return Err(Diagnostic::new(
             "E000204",
             "function types require semantic structural resolution",
@@ -9530,6 +9543,117 @@ fn test_mode(
             format!("unknown test runner `{name}`"),
             Some(span),
         )),
+    }
+}
+
+fn profile_duration_expectation(
+    contract: &severian_ast::FunctionContract,
+) -> Result<severian_hir::TestExpectation, Diagnostic> {
+    let AstExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &contract.condition.kind
+    else {
+        return Err(Diagnostic::new(
+            "E000217",
+            "a profile contract must compare `time` with a duration literal",
+            Some(contract.condition.span),
+        ));
+    };
+    let left_is_time = matches!(&left.kind, AstExpressionKind::Name(name) if name == "time");
+    let right_is_time = matches!(&right.kind, AstExpressionKind::Name(name) if name == "time");
+    let (literal, comparison) = match (left_is_time, right_is_time) {
+        (true, false) => (right.as_ref(), profile_comparison(*operator)),
+        (false, true) => (
+            left.as_ref(),
+            profile_comparison(*operator).map(reverse_comparison),
+        ),
+        _ => {
+            return Err(Diagnostic::new(
+                "E000217",
+                "a profile contract must compare exactly one `time` value",
+                Some(contract.condition.span),
+            ))
+        }
+    };
+    let comparison = comparison.ok_or_else(|| {
+        Diagnostic::new(
+            "E000217",
+            "profile timing contracts support `<`, `<=`, `>`, and `>=`",
+            Some(contract.condition.span),
+        )
+    })?;
+    let AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix }) = &literal.kind
+    else {
+        return Err(Diagnostic::new(
+            "E000217",
+            "a profile timing threshold must be a duration literal",
+            Some(literal.span),
+        ));
+    };
+    let multiplier = match suffix.as_str() {
+        "ns" => 1.0,
+        "us" => 1_000.0,
+        "ms" => 1_000_000.0,
+        "s" => 1_000_000_000.0,
+        "min" => 60_000_000_000.0,
+        "hr" => 3_600_000_000_000.0,
+        "day" => 86_400_000_000_000.0,
+        _ => {
+            return Err(Diagnostic::new(
+                "E000217",
+                "a profile timing threshold must use a time unit",
+                Some(literal.span),
+            ))
+        }
+    };
+    let threshold_nanos = magnitude
+        .parse::<f64>()
+        .ok()
+        .map(|value| (value * multiplier).round())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value as u128)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                "E000217",
+                "invalid profile duration threshold",
+                Some(literal.span),
+            )
+        })?;
+    let message = contract_failure_expression(contract.failure.as_ref())
+        .and_then(string_literal)
+        .unwrap_or("profile timing contract failed")
+        .to_owned();
+    Ok(severian_hir::TestExpectation::ProfileDuration {
+        comparison,
+        threshold_nanos,
+        message,
+    })
+}
+
+fn profile_comparison(operator: AstBinaryOperator) -> Option<severian_hir::DurationComparison> {
+    Some(match operator {
+        AstBinaryOperator::Less => severian_hir::DurationComparison::Less,
+        AstBinaryOperator::LessEqual => severian_hir::DurationComparison::LessEqual,
+        AstBinaryOperator::Greater => severian_hir::DurationComparison::Greater,
+        AstBinaryOperator::GreaterEqual => severian_hir::DurationComparison::GreaterEqual,
+        _ => return None,
+    })
+}
+
+fn reverse_comparison(
+    comparison: severian_hir::DurationComparison,
+) -> severian_hir::DurationComparison {
+    match comparison {
+        severian_hir::DurationComparison::Less => severian_hir::DurationComparison::Greater,
+        severian_hir::DurationComparison::LessEqual => {
+            severian_hir::DurationComparison::GreaterEqual
+        }
+        severian_hir::DurationComparison::Greater => severian_hir::DurationComparison::Less,
+        severian_hir::DurationComparison::GreaterEqual => {
+            severian_hir::DurationComparison::LessEqual
+        }
     }
 }
 
@@ -9761,10 +9885,11 @@ fn measured_literal(
             Some(span),
         )
     })?;
-    let canonical = match suffix {
-        "b" => magnitude / 8.0,
-        "B" => magnitude,
-        "KB" => magnitude * 1_000.0,
+    let canonical =
+        match suffix {
+            "b" => magnitude / 8.0,
+            "B" => magnitude,
+            "KB" => magnitude * 1_000.0,
         "MB" => magnitude * 1_000_000.0,
         "GB" => magnitude * 1_000_000_000.0,
         "TB" => magnitude * 1_000_000_000_000.0,
@@ -9787,18 +9912,18 @@ fn measured_literal(
         "C" => magnitude,
         "F" => (magnitude - 32.0) * 5.0 / 9.0,
         "K" => magnitude - 273.15,
-        "mV" => magnitude / 1_000.0,
-        "V" | "A" | "W" => magnitude,
-        "mA" => magnitude / 1_000.0,
-        _ => {
-            return Err(Diagnostic::new(
+            "mV" => magnitude / 1_000.0,
+            "V" | "A" | "W" => magnitude,
+            "mA" => magnitude / 1_000.0,
+            _ => return Err(Diagnostic::new(
                 "E000203",
                 format!("unknown numeric unit suffix `{suffix}`"),
                 Some(span),
             )
-            .with_help("use a declared unit suffix or separate the number and identifier with whitespace"))
-        }
-    };
+            .with_help(
+                "use a declared unit suffix or separate the number and identifier with whitespace",
+            )),
+        };
     let type_name = measured_type_name(suffix).expect("every normalized suffix has a dimension");
     if !canonical.is_finite() {
         return Err(Diagnostic::new(
@@ -9816,9 +9941,7 @@ fn measured_literal(
 
 fn measured_type_name(suffix: &str) -> Option<&'static str> {
     Some(match suffix {
-        "b" | "B" | "KB" | "MB" | "GB" | "TB" | "KiB" | "MiB" | "GiB" | "TiB" => {
-            "data_size"
-        }
+        "b" | "B" | "KB" | "MB" | "GB" | "TB" | "KiB" | "MiB" | "GiB" | "TiB" => "data_size",
         "pct" => "percentage",
         "ns" | "us" | "ms" | "s" | "min" | "hr" | "day" => "duration",
         "Hz" | "kHz" | "MHz" | "GHz" => "frequency",
@@ -10345,6 +10468,63 @@ mod tests {
     }
 
     #[test]
+    fn profile_test_contracts_become_duration_expectations() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "profile-contract.sev",
+            "test with profile with\n{\n    0.1s < time -> Error(\"too fast\")\n}:\n    assert(true)\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "profile_contract",
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            program.modules[0].tests[0].expectations,
+            [severian_hir::TestExpectation::ProfileDuration {
+                comparison: severian_hir::DurationComparison::Greater,
+                threshold_nanos: 100_000_000,
+                message: "too fast".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn fallible_async_calls_propagate_errors_when_awaited() {
+        let (program, _) = analyze_source(
+            "def fetch() -> bool | Error:\n    return true\n\ndef run() -> bool:\n    task = async fetch() with self\n    return await task\n",
+        );
+        let module = &program.modules[0];
+        let task = module
+            .bindings
+            .iter()
+            .find(|binding| matches!(binding.value.kind, ExpressionKind::Async { .. }))
+            .expect("task binding");
+        let ExpressionKind::Async { expression, .. } = &task.value.kind else {
+            unreachable!()
+        };
+        assert!(matches!(expression.kind, ExpressionKind::Call { .. }));
+        let run = module
+            .functions
+            .iter()
+            .find(|function| function.name == "run")
+            .unwrap();
+        assert!(matches!(
+            run.body.as_ref().unwrap().statements.last(),
+            Some(Statement::Return(Some(Expression {
+                kind: ExpressionKind::Fallback { .. },
+                ..
+            })))
+        ));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
     fn compiler_tests_allow_shared_setup_but_reject_named_diagnostics() {
         let context = severian_bootstrap::load().unwrap();
         let setup = SourceFile::virtual_source(
@@ -10491,14 +10671,18 @@ mod tests {
             .unwrap();
         let union = to_float.parameters[0].contract.ty;
         assert!(module.classes.iter().any(|class| {
-            class.id == union
-                && class.fields.len() == 4
-                && class.fields[0].name == "__tag"
+            class.id == union && class.fields.len() == 4 && class.fields[0].name == "__tag"
         }));
-        assert!(to_float.body.as_ref().unwrap().statements.iter().any(|statement| {
-            matches!(
-                statement,
-                Statement::Return(Some(Expression {
+        assert!(to_float
+            .body
+            .as_ref()
+            .unwrap()
+            .statements
+            .iter()
+            .any(|statement| {
+                matches!(
+                    statement,
+                    Statement::Return(Some(Expression {
                     kind: ExpressionKind::Fallback { .. },
                     ..
                 }))
@@ -10531,7 +10715,10 @@ mod tests {
             .iter()
             .find(|function| function.name == "apply")
             .unwrap();
-        assert!(apply.body.is_none(), "higher-order body should be specialized");
+        assert!(
+            apply.body.is_none(),
+            "higher-order body should be specialized"
+        );
         assert!(module
             .classes
             .iter()
@@ -10583,10 +10770,7 @@ mod tests {
     #[test]
     fn mixed_integer_comparisons_do_not_coerce_distinct_unit_dimensions() {
         let context = severian_bootstrap::load().unwrap();
-        let source = SourceFile::virtual_source(
-            "units.sev",
-            "test:\n    assert(10ms < 20MB)\n",
-        );
+        let source = SourceFile::virtual_source("units.sev", "test:\n    assert(10ms < 20MB)\n");
         let tokens = severian_lexer::scan(&source).unwrap();
         let ast = severian_parser::parse(&tokens).unwrap();
         let error = analyze_with_context(
@@ -10652,9 +10836,13 @@ mod tests {
             .iter()
             .find(|function| function.id == test_id)
             .unwrap();
-        assert!(test.body.as_ref().unwrap().statements.iter().any(|statement| {
-            matches!(statement, Statement::Assert { .. })
-        }));
+        assert!(test
+            .body
+            .as_ref()
+            .unwrap()
+            .statements
+            .iter()
+            .any(|statement| { matches!(statement, Statement::Assert { .. }) }));
     }
 
     #[test]
@@ -10663,10 +10851,13 @@ mod tests {
             "def fail() -> Error:\n    throw Error(\"origin\")\n\ndef inner() -> int | Error:\n    fail()\n    return 1\n\ndef outer() -> int | Error:\n    value = inner()\n    return value + 1\n\ndef main():\n    try:\n        outer()\n    catch error:\n        message = error.message\n        stack = error.call_stack\n",
         );
         let mir = severian_mir::build(&program).unwrap();
-        assert!(mir.functions.iter().all(|function| function
-            .body
-            .as_ref()
-            .is_none_or(|body| body.blocks.iter().all(|block| {
+        assert!(mir
+            .functions
+            .iter()
+            .all(|function| function
+                .body
+                .as_ref()
+                .is_none_or(|body| body.blocks.iter().all(|block| {
                 !matches!(block.terminator, severian_mir::Terminator::Throw(_))
             }))));
     }

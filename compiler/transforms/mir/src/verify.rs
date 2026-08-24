@@ -101,10 +101,7 @@ pub fn verify(module: &Module, context: &UniversalContext) -> Result<(), VerifyE
         .map(|function| {
             (
                 (function.definition, function.substitution.clone()),
-                (
-                    function.parameters.clone(),
-                    function.result,
-                ),
+                (function.parameters.clone(), function.result),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -158,7 +155,11 @@ fn verify_body(
     // remove locals. Beginning at the empty set validates loop bodies before
     // their preheaders have propagated and produces false use-before-definition
     // failures on backedges and call continuation blocks.
-    let all_locals = body.locals.iter().map(|local| local.id).collect::<BTreeSet<_>>();
+    let all_locals = body
+        .locals
+        .iter()
+        .map(|local| local.id)
+        .collect::<BTreeSet<_>>();
     let mut incoming = vec![all_locals; body.blocks.len()];
     incoming[body.entry.0 as usize] = body
         .locals
@@ -212,7 +213,9 @@ fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
                     }
                 }
             }
-            CfgStatement::StorageLive(_) | CfgStatement::Assert { .. } | CfgStatement::Coverage(_) => {}
+            CfgStatement::StorageLive(_)
+            | CfgStatement::Assert { .. }
+            | CfgStatement::Coverage(_) => {}
         }
     }
     let destination = match &block.terminator {
@@ -460,11 +463,7 @@ fn use_operand(
     Ok(())
 }
 
-fn verify_place(
-    body: &CfgBody,
-    globals: &[GlobalDecl],
-    place: &Place,
-) -> Result<(), VerifyError> {
+fn verify_place(body: &CfgBody, globals: &[GlobalDecl], place: &Place) -> Result<(), VerifyError> {
     match place.base {
         PlaceBase::Local(local) if local.0 as usize >= body.locals.len() => {
             Err(VerifyError::InvalidLocal(local.0))
@@ -541,9 +540,7 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
             match callee {
                 Callee::FunctionValue(operand) => operands.push(operand),
                 Callee::Method { receiver, .. } => operands.push(receiver),
-                Callee::Direct { .. }
-                | Callee::Constructor { .. }
-                | Callee::Intrinsic(_) => {}
+                Callee::Direct { .. } | Callee::Constructor { .. } | Callee::Intrinsic(_) => {}
             }
             operands
         }

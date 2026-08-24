@@ -59,7 +59,11 @@ fn validate_generic_statements(
                     names.insert(binding.name.clone(), parameter);
                 }
             }
-            severian_ast::Statement::Destructure { names: bound, value, .. } => {
+            severian_ast::Statement::Destructure {
+                names: bound,
+                value,
+                ..
+            } => {
                 validate_generic_expression(value, names, function, index, types)?;
                 for name in bound {
                     names.remove(name);
@@ -98,13 +102,7 @@ fn validate_generic_statements(
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
                 let mut catch_names = names.clone();
                 catch_names.remove(catch_binding);
-                validate_generic_statements(
-                    catch_body,
-                    &mut catch_names,
-                    function,
-                    index,
-                    types,
-                )?;
+                validate_generic_statements(catch_body, &mut catch_names, function, index, types)?;
             }
             severian_ast::Statement::FallibleElse {
                 value,
@@ -115,13 +113,7 @@ fn validate_generic_statements(
                 validate_generic_expression(value, names, function, index, types)?;
                 let mut handler_names = names.clone();
                 handler_names.remove(error_binding);
-                validate_generic_statements(
-                    body,
-                    &mut handler_names,
-                    function,
-                    index,
-                    types,
-                )?;
+                validate_generic_statements(body, &mut handler_names, function, index, types)?;
             }
             severian_ast::Statement::If {
                 condition,
@@ -274,8 +266,7 @@ fn validate_generic_expression(
         }
         Expression::Fallback { value, fallback } => {
             let value = validate_generic_expression(value, names, function, index, types)?;
-            let fallback =
-                validate_generic_expression(fallback, names, function, index, types)?;
+            let fallback = validate_generic_expression(fallback, names, function, index, types)?;
             Ok(value.or(fallback))
         }
         Expression::Throw { error } => {
@@ -528,16 +519,9 @@ pub(super) fn collect_generic_specializations(
                             index,
                             &mut specializations,
                         )?;
-                        if let Some(ty) =
-                            expected.or_else(|| {
-                                expression_type_name(
-                                    module.id,
-                                    &binding.value,
-                                    &globals,
-                                    index,
-                                )
-                            })
-                        {
+                        if let Some(ty) = expected.or_else(|| {
+                            expression_type_name(module.id, &binding.value, &globals, index)
+                        }) {
                             globals.insert(binding.name.clone(), ty);
                         }
                     }
@@ -630,12 +614,7 @@ fn validate_specializations(
                 let satisfied = types
                     .resolve_name(actual_name)
                     .is_some_and(|actual| satisfies_bound(actual, bound_name, index, types))
-                    || source_class_satisfies_bound(
-                        actual_name,
-                        bound_name,
-                        module_graph,
-                        index,
-                    );
+                    || source_class_satisfies_bound(actual_name, bound_name, module_graph, index);
                 if satisfied {
                     continue;
                 }
@@ -666,16 +645,9 @@ fn source_class_satisfies_bound(
             };
             class.name == actual_name
                 && class.traits.iter().any(|implemented| {
-                    implemented
-                        .simple_name()
-                        .is_some_and(|name| {
-                            source_trait_extends(
-                                name,
-                                bound_name,
-                                index,
-                                &mut BTreeSet::new(),
-                            )
-                        })
+                    implemented.simple_name().is_some_and(|name| {
+                        source_trait_extends(name, bound_name, index, &mut BTreeSet::new())
+                    })
                 })
         })
     })
@@ -780,10 +752,7 @@ fn trait_is_structurally_satisfied(
                 .is_some_and(|operator| types.supports_binary(operator, actual))
                 || (method.name == "zero"
                     && method.parameters.is_empty()
-                    && types.supports_binary(
-                        severian_universal::BinaryOperator::Add,
-                        actual,
-                    ))
+                    && types.supports_binary(severian_universal::BinaryOperator::Add, actual))
                 || (method.name == "hash"
                     && method.parameters.is_empty()
                     && types.primitive(actual).is_some())
@@ -814,13 +783,17 @@ fn visit_statements_for_specializations(
                     index,
                     specializations,
                 )?;
-                if let Some(ty) = expected.or_else(|| {
-                    expression_type_name(module, &binding.value, names, index)
-                }) {
+                if let Some(ty) =
+                    expected.or_else(|| expression_type_name(module, &binding.value, names, index))
+                {
                     names.insert(binding.name.clone(), ty);
                 }
             }
-            severian_ast::Statement::Destructure { names: bound, value, .. } => {
+            severian_ast::Statement::Destructure {
+                names: bound,
+                value,
+                ..
+            } => {
                 visit_expression_for_specializations(
                     module,
                     value,

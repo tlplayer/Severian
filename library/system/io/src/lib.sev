@@ -1,6 +1,13 @@
 # Bootstrap implementation of the system IO boundary. The selected IO provider
 # owns this native declaration; core and the compiler only see `io.print` as an
 # ordinary function identity.
+class IOError: Error
+    message: string
+
+    def IOError(value: string):
+        message := value
+
+
 @c(symbol = "__sev_print_string")
 def print(value: string) -> i32
 

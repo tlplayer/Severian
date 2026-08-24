@@ -207,11 +207,10 @@ pub fn analyze_package_with_context(
                 } else {
                     specialize_signature(original, &binding.substitution)
                 };
-                let substitution =
-                    universal_substitution(
-                        original,
-                        &binding.substitution,
-                        &universal.types,
+                let substitution = universal_substitution(
+                    original,
+                    &binding.substitution,
+                    &universal.types,
                         definition.module,
                         &package_classes,
                     )?;
@@ -375,11 +374,8 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
                     suffix += 1;
                     parameter = format!("{base}_{suffix}");
                 }
-                function.parameters[ordinal].annotation = TypeAnnotation::named(
-                    parameter.clone(),
-                    Vec::new(),
-                    bound.span,
-                );
+                function.parameters[ordinal].annotation =
+                    TypeAnnotation::named(parameter.clone(), Vec::new(), bound.span);
                 function.type_parameters.push(parameter.clone());
                 function.constraints.push(GenericConstraint::Parameter {
                     parameter,
@@ -660,7 +656,9 @@ fn resolve_collection_type(
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
     if let Some(("list", [element])) = annotation.named_parts() {
-        return Ok(crate::list_type_id(resolve_collection_type(types, element)?));
+        return Ok(crate::list_type_id(resolve_collection_type(
+            types, element,
+        )?));
     }
     if let Some(("tuple", elements)) = annotation.named_parts() {
         let elements = elements
@@ -1096,7 +1094,11 @@ fn type_key(annotation: &TypeAnnotation) -> String {
         }
         TypeAnnotationKind::Function { parameters, result } => format!(
             "({})->{}",
-            parameters.iter().map(type_key).collect::<Vec<_>>().join(","),
+            parameters
+                .iter()
+                .map(type_key)
+                .collect::<Vec<_>>()
+                .join(","),
             type_key(result)
         ),
     }

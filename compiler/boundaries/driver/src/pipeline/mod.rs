@@ -434,10 +434,14 @@ impl Compiler {
                     });
                 }
                 let selected_function =
-                    test.expectations.iter().find_map(|expectation| match expectation {
-                        severian_mir::TestExpectation::Panics { function, .. } => Some(function),
-                        _ => None,
-                    });
+                    test.expectations
+                        .iter()
+                        .find_map(|expectation| match expectation {
+                            severian_mir::TestExpectation::Panics { function, .. } => {
+                                Some(function)
+                            }
+                            _ => None,
+                        });
                 let selected_id = if let Some(name) = selected_function {
                     mir.functions
                         .iter()
@@ -502,15 +506,15 @@ impl Compiler {
                     ast.items.extend(case.items.clone());
                     let mut body = test.body.clone();
                     body.extend(case.body.clone());
-                    ast.items.push(severian_ast::Item::Test(
-                        severian_ast::TestDeclaration {
+                    ast.items
+                        .push(severian_ast::Item::Test(severian_ast::TestDeclaration {
                             name: Some("compiler case".into()),
                             modes: Vec::new(),
+                            contracts: Vec::new(),
                             body,
                             compiler_cases: Vec::new(),
                             span: case.span,
-                        },
-                    ));
+                        }));
                     let result = self.check_ast_to_mir(&ast, CompileMode::Test, "compiler_case");
                     let matched = match case.expectation {
                         severian_ast::CompilerExpectation::Accept => result.is_ok(),
@@ -633,12 +637,8 @@ impl Compiler {
         source: &Path,
     ) -> Result<severian_modules::ModuleGraph, CompileError> {
         let packages = self.standard_package_graph(source)?;
-        severian_modules::resolve_with_packages_and_max_errors(
-            source,
-            &packages,
-            self.max_errors,
-        )
-        .map_err(CompileError::Diagnostic)
+        severian_modules::resolve_with_packages_and_max_errors(source, &packages, self.max_errors)
+            .map_err(CompileError::Diagnostic)
     }
 
     fn standard_package_graph(
@@ -767,13 +767,14 @@ fn attach_block_assertion_locations(body: &mut severian_mir::CfgBody, source: &S
             match statement {
             CfgStatement::Coverage(point) => {
                 let before = source
-                    .text
-                    .get(..usize::try_from(point.span_start).unwrap_or(0))
-                    .unwrap_or("");
-                let line = u32::try_from(before.bytes().filter(|byte| *byte == b'\n').count() + 1)
-                    .unwrap_or(u32::MAX);
-                let kind = match point.kind {
-                    severian_mir::CoverageKind::Line => "line",
+                        .text
+                        .get(..usize::try_from(point.span_start).unwrap_or(0))
+                        .unwrap_or("");
+                    let line =
+                        u32::try_from(before.bytes().filter(|byte| *byte == b'\n').count() + 1)
+                            .unwrap_or(u32::MAX);
+                    let kind = match point.kind {
+                        severian_mir::CoverageKind::Line => "line",
                     severian_mir::CoverageKind::Branch => "branch",
                 };
                 let file = source.path.display().to_string();
