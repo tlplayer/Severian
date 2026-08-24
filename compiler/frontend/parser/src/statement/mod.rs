@@ -3,8 +3,8 @@ use severian_ast::{
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
     ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint, ImportDeclaration,
     ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration, OperatorParameter,
-    OperatorSyntax, PropertyDeclaration, Statement, TestDeclaration, TraitDeclaration,
-    TaskOwner, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    OperatorSyntax, PropertyConstraint, PropertyDeclaration, Statement, TestDeclaration,
+    TraitDeclaration, TaskOwner, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -16,7 +16,13 @@ pub fn parse(tokens: &[Token]) -> Result<Module, Diagnostic> {
 
 pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Module, Diagnostic> {
     let max_errors = max_errors.max(1);
-    let first = match (Parser { tokens, cursor: 0 }).module() {
+    let first = match (Parser {
+        tokens,
+        cursor: 0,
+        continuation_indents: 0,
+    })
+    .module()
+    {
         Ok(module) => return Ok(module),
         Err(diagnostic) => diagnostic,
     };
@@ -33,6 +39,7 @@ pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Modu
         match (Parser {
             tokens: &recovered,
             cursor: 0,
+            continuation_indents: 0,
         })
         .module()
         {
@@ -98,6 +105,7 @@ fn suppress_diagnostic_line(tokens: &mut Vec<Token>, span: Span) -> bool {
 struct Parser<'a> {
     tokens: &'a [Token],
     cursor: usize,
+    continuation_indents: usize,
 }
 
 impl Parser<'_> {
@@ -192,7 +200,7 @@ impl Parser<'_> {
             {
                 return Err(self.error("expected a newline or comma after declaration"));
             }
-            self.separators();
+            self.statement_separators();
         }
         Ok(module)
     }
@@ -423,7 +431,7 @@ impl Parser<'_> {
                     return Err(self.error("expected a newline after compiler test assertion"));
                 }
             }
-            self.separators();
+            self.statement_separators();
         }
         let end = self
             .expect(&TokenKind::Dedent, "expected end of compiler test body")?
@@ -472,7 +480,7 @@ impl Parser<'_> {
                         let (checks, _) = self.indented_block("test step")?;
                         statements.extend(checks);
                     }
-                    self.separators();
+                    self.statement_separators();
                     continue;
                 }
                 statements.push(statement);
@@ -480,7 +488,7 @@ impl Parser<'_> {
             if !compound && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
                 return Err(self.error(&format!("expected a newline after {owner} statement")));
             }
-            self.separators();
+            self.statement_separators();
         }
         let end = self
             .expect(&TokenKind::Dedent, &format!("expected end of {owner} body"))?
@@ -920,7 +928,7 @@ impl Parser<'_> {
                             name: field_name,
                             annotation,
                             default: None,
-                            constraint: None,
+                            constraints: Vec::new(),
                             span: Span::new(field_start.source, field_start.start, end),
                         });
                         if self.take(&TokenKind::Comma).is_none() {
@@ -1183,31 +1191,92 @@ impl Parser<'_> {
         } else {
             None
         };
-        let constraint = if self.take(&TokenKind::LeftBrace).is_some() {
-            self.line_breaks();
-            let predicate = self.expression(0)?;
-            self.line_breaks();
-            self.expect(
-                &TokenKind::RightBrace,
-                "expected `}` after property constraint",
-            )?;
-            Some(predicate)
+        let constraints = if self.take(&TokenKind::LeftBrace).is_some() {
+            self.property_constraints()?
         } else {
-            None
+            Vec::new()
         };
-        let end = constraint
-            .as_ref()
-            .map_or_else(
-                || default.as_ref().map_or(annotation.span.end, |value| value.span.end),
-                |predicate| predicate.span.end,
-            );
+        let end = constraints.last().map_or_else(
+            || default.as_ref().map_or(annotation.span.end, |value| value.span.end),
+            |constraint| constraint.span.end,
+        );
         Ok(PropertyDeclaration {
             name,
             annotation,
             default,
-            constraint,
+            constraints,
             span: Span::new(start.source, start.start, end),
         })
+    }
+
+    fn property_constraints(&mut self) -> Result<Vec<PropertyConstraint>, Diagnostic> {
+        let multiline = self.take(&TokenKind::Newline).is_some();
+        while self.take(&TokenKind::Newline).is_some() {}
+        if multiline {
+            self.expect(
+                &TokenKind::Indent,
+                "expected indented property constraints",
+            )?;
+            self.separators();
+        }
+        let mut constraints = Vec::new();
+        while !self.at(&TokenKind::RightBrace)
+            && !self.at(&TokenKind::Dedent)
+            && !self.at(&TokenKind::Eof)
+        {
+            let start = self.peek().span;
+            let condition = self.expression(0)?;
+            let mut continuation = false;
+            if !self.at(&TokenKind::Arrow) && self.at(&TokenKind::Newline) {
+                let mut lookahead = self.cursor;
+                while self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Newline)
+                {
+                    lookahead += 1;
+                }
+                continuation = self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Indent)
+                    && self
+                        .tokens
+                        .get(lookahead + 1)
+                        .is_some_and(|token| token.kind == TokenKind::Arrow);
+                if continuation {
+                    while self.take(&TokenKind::Newline).is_some() {}
+                    self.expect(&TokenKind::Indent, "expected indented constraint failure")?;
+                }
+            }
+            let failure = if self.take(&TokenKind::Arrow).is_some() {
+                Some(self.expression(0)?)
+            } else {
+                None
+            };
+            let end = failure
+                .as_ref()
+                .map_or(condition.span.end, |failure| failure.span.end);
+            constraints.push(PropertyConstraint {
+                condition,
+                failure,
+                span: Span::new(start.source, start.start, end),
+            });
+            self.take(&TokenKind::Comma);
+            self.separators();
+            if continuation {
+                self.expect(&TokenKind::Dedent, "expected end of constraint failure")?;
+                self.separators();
+            }
+        }
+        if multiline {
+            self.expect(&TokenKind::Dedent, "expected end of property constraints")?;
+        }
+        self.expect(
+            &TokenKind::RightBrace,
+            "expected `}` after property constraints",
+        )?;
+        Ok(constraints)
     }
 
     fn looks_like_member_property(&self) -> bool {
@@ -1461,6 +1530,7 @@ impl Parser<'_> {
         let mut trial = Parser {
             tokens: self.tokens,
             cursor: self.cursor,
+            continuation_indents: self.continuation_indents,
         };
         trial.type_annotation().is_ok()
             && matches!(trial.peek().kind, TokenKind::Identifier(_))
@@ -1505,10 +1575,14 @@ impl Parser<'_> {
                 right.span.end,
             );
             let comparison = is_comparison(operator);
-            let binary_left = comparison_tail
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| expression.clone());
+            let binary_left = if comparison {
+                comparison_tail
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| expression.clone())
+            } else {
+                expression.clone()
+            };
             let combined = Expression {
                 kind: ExpressionKind::Binary {
                     operator,
@@ -1654,6 +1728,31 @@ impl Parser<'_> {
     fn postfix(&mut self) -> Result<Expression, Diagnostic> {
         let mut expression = self.primary()?;
         loop {
+            if self.at(&TokenKind::Newline) {
+                let mut lookahead = self.cursor;
+                while self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Newline)
+                {
+                    lookahead += 1;
+                }
+                let indented = self
+                    .tokens
+                    .get(lookahead)
+                    .is_some_and(|token| token.kind == TokenKind::Indent);
+                let member = self
+                    .tokens
+                    .get(lookahead + usize::from(indented))
+                    .is_some_and(|token| token.kind == TokenKind::Dot);
+                if member && (indented || self.continuation_indents > 0) {
+                    while self.take(&TokenKind::Newline).is_some() {}
+                    if indented {
+                        self.next();
+                        self.continuation_indents += 1;
+                    }
+                }
+            }
             if self.take(&TokenKind::Dot).is_some() {
                 let (name, member_span) = self.identifier("expected a member name after `.`")?;
                 let expression_span = expression.span;
@@ -1749,6 +1848,22 @@ impl Parser<'_> {
                     &expression.kind,
                     ExpressionKind::Name(name) if name == "throws"
                 );
+                let mock_call = matches!(
+                    &expression.kind,
+                    ExpressionKind::Name(name) if name == "mock"
+                );
+                if mock_call {
+                    let start = expression.span;
+                    let (cases, fallback, end) = self.mock_cases()?;
+                    expression = Expression {
+                        kind: ExpressionKind::Mock {
+                            cases,
+                            fallback: Box::new(fallback),
+                        },
+                        span: Span::new(start.source, start.start, end),
+                    };
+                    continue;
+                }
                 self.line_breaks();
                 let mut arguments = Vec::new();
                 if !self.at(&TokenKind::RightParen) {
@@ -1767,11 +1882,14 @@ impl Parser<'_> {
                             None
                         };
                         let value = self.expression(0)?;
+                        if throws_call && arguments.is_empty() {
+                            self.line_breaks();
+                        }
                         let expected_error = if throws_call
                             && arguments.is_empty()
                             && self.take(&TokenKind::Arrow).is_some()
                         {
-                            Some(self.type_annotation()?)
+                            Some(self.expression(0)?)
                         } else {
                             None
                         };
@@ -1811,6 +1929,39 @@ impl Parser<'_> {
             }
         }
         Ok(expression)
+    }
+
+    fn mock_cases(&mut self) -> Result<(Vec<severian_ast::MockCase>, Expression, u32), Diagnostic> {
+        self.line_breaks();
+        let mut cases = Vec::new();
+        let fallback;
+        loop {
+            if self.at_identifier("else") {
+                self.next();
+                fallback = self.expression(0)?;
+                self.line_breaks();
+                break;
+            }
+            let call = self.expression(0)?;
+            self.expect(&TokenKind::Arrow, "expected `->` after mocked call")?;
+            let result = self.expression(0)?;
+            cases.push(severian_ast::MockCase {
+                span: Span::new(call.span.source, call.span.start, result.span.end),
+                call,
+                result,
+            });
+            self.line_breaks();
+            self.take(&TokenKind::Comma);
+            self.line_breaks();
+        }
+        let end = self
+            .expect(&TokenKind::RightParen, "expected `)` after mock declaration")?
+            .span
+            .end;
+        if cases.is_empty() {
+            return Err(self.error("a mock requires at least one call case"));
+        }
+        Ok((cases, fallback, end))
     }
 
     fn type_application_follows(&self) -> bool {
@@ -2065,6 +2216,14 @@ impl Parser<'_> {
         }
     }
 
+    fn statement_separators(&mut self) {
+        self.separators();
+        while self.continuation_indents > 0 && self.take(&TokenKind::Dedent).is_some() {
+            self.continuation_indents -= 1;
+            self.separators();
+        }
+    }
+
     fn line_breaks(&mut self) {
         while self.at(&TokenKind::Newline)
             || self.at(&TokenKind::Indent)
@@ -2254,6 +2413,7 @@ fn parse_interpolation(source: &str, outer_span: Span) -> Result<Expression, Dia
     let mut parser = Parser {
         tokens: &tokens,
         cursor: 0,
+        continuation_indents: 0,
     };
     let expression = parser.expression(0)?;
     if !parser.at(&TokenKind::Eof) {
@@ -2335,6 +2495,12 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
             expression_mentions(&entry.key, expected)
                 || expression_mentions(&entry.value, expected)
         }),
+        ExpressionKind::Mock { cases, fallback } => {
+            cases.iter().any(|case| {
+                expression_mentions(&case.call, expected)
+                    || expression_mentions(&case.result, expected)
+            }) || expression_mentions(fallback, expected)
+        }
         ExpressionKind::Member { object, .. } => expression_mentions(object, expected),
         ExpressionKind::Index { object, index } => {
             expression_mentions(object, expected) || expression_mentions(index, expected)

@@ -538,7 +538,7 @@ output = f"""module {{
         let severian_ast::Item::Class(class) = &module.items[0] else {
             panic!("expected class")
         };
-        let constraint = class.fields[0].constraint.as_ref().unwrap();
+        let constraint = &class.fields[0].constraints[0].condition;
         assert!(matches!(
             constraint.kind,
             severian_ast::ExpressionKind::Binary {
@@ -562,9 +562,40 @@ output = f"""module {{
         let severian_ast::ExpressionKind::Call { arguments, .. } = &expectation.kind else {
             panic!("expected call")
         };
-        assert_eq!(
-            arguments[0].expected_error.as_ref().unwrap().simple_name(),
-            Some("FieldError")
+        assert!(matches!(
+            arguments[0].expected_error.as_ref().unwrap().kind,
+            severian_ast::ExpressionKind::Name(ref name) if name == "FieldError"
+        ));
+    }
+
+    #[test]
+    fn parses_ordered_property_failures_builder_continuations_and_mock_cases() {
+        let source = SourceFile::virtual_source(
+            "builders.sev",
+            "class User:\n    age: int {\n        age < 0\n            -> Error(\"negative\"),\n        age > 130\n            -> invalid_age(age),\n    }\n\ntest:\n    user := User()\n        .set(age, 36)\n    mock(\n        foo(0) -> 10,\n        foo(1) -> 20,\n        else throw Error(\"unexpected\")\n    )\n    throws(foo(2) -> Error(\"unexpected\"))\n",
         );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Class(class) = &module.items[0] else {
+            panic!("expected class")
+        };
+        assert_eq!(class.fields[0].constraints.len(), 2);
+        assert!(class.fields[0]
+            .constraints
+            .iter()
+            .all(|constraint| constraint.failure.is_some()));
+        let severian_ast::Item::Test(test) = &module.items[1] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Binding(builder) = &test.body[0] else {
+            panic!("expected builder binding")
+        };
+        assert!(matches!(builder.value.kind, severian_ast::ExpressionKind::Call { .. }));
+        let severian_ast::Statement::Expression(mock) = &test.body[1] else {
+            panic!("expected mock")
+        };
+        assert!(matches!(
+            mock.kind,
+            severian_ast::ExpressionKind::Mock { ref cases, .. } if cases.len() == 2
+        ));
     }
 }

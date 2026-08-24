@@ -320,7 +320,7 @@ fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
                         name: "__tag".into(),
                         annotation: TypeAnnotation::named("int", Vec::new(), declaration.span),
                         default: None,
-                        constraint: None,
+                        constraints: Vec::new(),
                         span: declaration.span,
                     }];
                     for variant in &declaration.variants {

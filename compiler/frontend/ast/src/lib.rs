@@ -5,16 +5,16 @@ mod statement;
 mod types;
 
 pub use expression::{
-    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, MapEntry, TaskOwner,
-    UnaryOperator,
+    BinaryOperator, CallArgument, Expression, ExpressionKind, Literal, MapEntry, MockCase,
+    TaskOwner, UnaryOperator,
 };
 pub use statement::{Binding, MatchCase, Statement};
 pub use types::{
     ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, EnumDeclaration, EnumVariant, FunctionContract, FunctionDeclaration, FunctionParameter,
     GenericConstraint, ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorParameter,
-    OperatorSyntax, PropertyDeclaration, TestDeclaration, TraitDeclaration, TypeAnnotation,
-    TypeAnnotationKind, TypeDeclaration,
+    OperatorSyntax, PropertyConstraint, PropertyDeclaration, TestDeclaration, TraitDeclaration,
+    TypeAnnotation, TypeAnnotationKind, TypeDeclaration,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

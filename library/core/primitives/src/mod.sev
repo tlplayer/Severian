@@ -8,6 +8,7 @@ import "none.sev" as absence
 import "unit.sev" as unit_value
 import "args.sev" as program_arguments
 import "measured.sev" as measured_values
+import "error.sev" as errors
 
 
 # The compiler discovers primitive declarations by this composed trait. The

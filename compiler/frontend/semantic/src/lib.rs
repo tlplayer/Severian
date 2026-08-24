@@ -106,6 +106,22 @@ pub(crate) fn analyze_with_package_functions(
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
         functions: BTreeMap::new(),
+        source_functions: ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Function(function) => Some(function.clone()),
+                _ => None,
+            })
+            .fold(BTreeMap::new(), |mut functions, function| {
+                functions
+                    .entry(function.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(function);
+                functions
+            }),
+        mocks: BTreeMap::new(),
+        mock_inline_stack: BTreeSet::new(),
         function_definitions: BTreeMap::new(),
         function_substitutions: BTreeMap::new(),
         function_specificity: BTreeMap::new(),
@@ -393,6 +409,7 @@ pub(crate) fn analyze_with_package_functions(
         };
         analyzer.names = globals.clone();
         analyzer.declarations.clear();
+        analyzer.mocks.clear();
         for parameter in &function.parameters {
             let type_id = parameter.contract.ty;
             if !analyzer.declarations.insert(parameter.name.clone()) {
@@ -480,6 +497,7 @@ pub(crate) fn analyze_with_package_functions(
         {
             analyzer.names = globals.clone();
             analyzer.declarations.clear();
+            analyzer.mocks.clear();
             let unit = types.resolve_name("unit").expect("bootstrap defines unit");
             let mut body = Block::default();
             if module.tests[offset]
@@ -543,6 +561,9 @@ struct Analyzer<'a> {
     loop_depth: usize,
     unsafe_depth: usize,
     functions: BTreeMap<String, Vec<FunctionId>>,
+    source_functions: BTreeMap<String, Vec<severian_ast::FunctionDeclaration>>,
+    mocks: BTreeMap<String, ActiveMock>,
+    mock_inline_stack: BTreeSet<String>,
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     function_specificity: BTreeMap<FunctionId, u8>,
@@ -593,6 +614,12 @@ struct SignatureParameter {
     name: String,
     type_id: TypeId,
     default: Option<AstExpression>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveMock {
+    cases: Vec<severian_ast::MockCase>,
+    fallback: AstExpression,
 }
 
 enum Prepared {
@@ -1279,7 +1306,57 @@ impl Analyzer<'_> {
                 })
             }
             AstStatement::Expression(expression) => {
+                if let AstExpressionKind::Mock { cases, fallback } = &expression.kind {
+                    let Some(name) = cases.first().and_then(|case| match &case.call.kind {
+                        AstExpressionKind::Call { callee, .. } => callable_path(callee),
+                        _ => None,
+                    }) else {
+                        return Err(Diagnostic::new(
+                            "E000217",
+                            "mock cases must contain function calls",
+                            Some(expression.span),
+                        ));
+                    };
+                    if cases.iter().any(|case| {
+                        !matches!(&case.call.kind,
+                            AstExpressionKind::Call { callee, .. }
+                                if callable_path(callee).as_deref() == Some(name.as_str()))
+                    }) {
+                        return Err(Diagnostic::new(
+                            "E000217",
+                            "all cases in one mock must target the same function",
+                            Some(expression.span),
+                        ));
+                    }
+                    self.mocks.insert(
+                        name,
+                        ActiveMock {
+                            cases: cases.clone(),
+                            fallback: fallback.as_ref().clone(),
+                        },
+                    );
+                    return Ok(Statement::Sequence(Block::default()));
+                }
                 if let AstExpressionKind::Call { callee, arguments } = &expression.kind {
+                    if callable_path(callee).as_deref() == Some("expect") {
+                        let [argument] = arguments.as_slice() else {
+                            return Err(Diagnostic::new(
+                                "E000217",
+                                "`expect` requires exactly one condition",
+                                Some(expression.span),
+                            ));
+                        };
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(Statement::Assert {
+                            condition: self.expression(&argument.value, Some(boolean))?,
+                            message: None,
+                            span: expression.span,
+                            condition_span: argument.value.span,
+                        });
+                    }
                     if callable_path(callee).as_deref() == Some("throws") {
                         let [argument] = arguments.as_slice() else {
                             return Err(Diagnostic::new(
@@ -1776,6 +1853,11 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Mock { .. } => Err(Diagnostic::new(
+                "E000217",
+                "`mock` declarations are only valid as test statements",
+                Some(ast.span),
+            )),
             AstExpressionKind::Map(_) => Err(Diagnostic::new(
                 "E000204",
                 "map literals are currently accepted only by an object's `set` operation",
@@ -2303,6 +2385,41 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(builder) = self.class_builder_expression(ast, expected)? {
+                    return Ok(builder);
+                }
+                if callable_path(callee).as_deref() == Some("Error") {
+                    let [argument] = arguments.as_slice() else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`Error` expects exactly one message",
+                            Some(ast.span),
+                        ));
+                    };
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    let error_type = self
+                        .types
+                        .resolve_name("Error")
+                        .expect("bootstrap defines Error");
+                    let message = self.expression(&argument.value, Some(string))?;
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: error_type,
+                        kind: message.kind,
+                        span: ast.span,
+                    });
+                }
+                if let Some(mocked) = self.mocked_call(ast, expected)? {
+                    return Ok(mocked);
+                }
+                if !self.mocks.is_empty() {
+                    if let Some(inlined) = self.inline_source_call(ast, expected)? {
+                        return Ok(inlined);
+                    }
+                }
                 if let [argument] = arguments.as_slice() {
                     let runtime_type = match callable_path(callee).as_deref() {
                         Some("runtime_string") => self.types.resolve_name("string"),
@@ -2413,7 +2530,9 @@ impl Analyzer<'_> {
                         return self.class_constructor(class, &[], arguments, expected, ast.span);
                     }
                 }
-                if callable_path(callee).as_deref() == Some("size") && arguments.len() == 1 {
+                if matches!(callable_path(callee).as_deref(), Some("size" | "len"))
+                    && arguments.len() == 1
+                {
                     let value = self.expression(&arguments[0].value, None)?;
                     if self.list_elements.contains_key(&value.type_id) {
                         let storage = self.list_storage_expression(value, ast.span);
@@ -2427,6 +2546,23 @@ impl Analyzer<'_> {
                             &[storage_type],
                             result,
                             vec![storage],
+                            ast.span,
+                        ));
+                    }
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    if value.type_id == string {
+                        let result = self
+                            .types
+                            .resolve_name("usize")
+                            .expect("bootstrap defines usize");
+                        return Ok(self.runtime_call(
+                            "__sev_string_length",
+                            &[string],
+                            result,
+                            vec![value],
                             ast.span,
                         ));
                     }
@@ -2896,6 +3032,80 @@ impl Analyzer<'_> {
         }
     }
 
+    fn class_builder_expression(
+        &mut self,
+        ast: &AstExpression,
+        expected: Option<TypeId>,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let mut current = ast;
+        let mut updates = Vec::new();
+        loop {
+            let AstExpressionKind::Call { callee, arguments } = &current.kind else {
+                break;
+            };
+            let AstExpressionKind::Member { object, name } = &callee.kind else {
+                break;
+            };
+            if name != "set" || arguments.len() != 2 {
+                break;
+            }
+            updates.push((arguments[0].value.clone(), arguments[1].value.clone()));
+            current = object;
+        }
+        if updates.is_empty() {
+            return Ok(None);
+        }
+        let AstExpressionKind::Call { callee, .. } = &current.kind else {
+            return Ok(None);
+        };
+        let AstExpressionKind::Name(class_name) = &callee.kind else {
+            return Ok(None);
+        };
+        if !self.classes.contains_key(class_name) {
+            return Ok(None);
+        }
+        let object = self.expression(current, expected)?;
+        let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
+            return Ok(None);
+        };
+        let ExpressionKind::Aggregate { class, mut fields } = object.kind else {
+            return Ok(None);
+        };
+        for (key, value) in updates.into_iter().rev() {
+            let field_name = match &key.kind {
+                AstExpressionKind::Name(name) => name.as_str(),
+                AstExpressionKind::Literal(AstLiteral::String(name)) => name.as_str(),
+                _ => {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "builder field names must be identifiers or string literals",
+                        Some(key.span),
+                    ))
+                }
+            };
+            let Some((field, declaration)) = instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == field_name && !field.name.starts_with('_'))
+            else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("class `{}` has no writable field `{field_name}`", instance.name),
+                    Some(key.span),
+                ));
+            };
+            let value = self.expression(&value, Some(declaration.ty))?;
+            fields[field] = self.validate_field_value(&instance, field, value, ast.span)?;
+        }
+        Ok(Some(Expression {
+            id: self.next_id(),
+            type_id: instance.ty,
+            kind: ExpressionKind::Aggregate { class, fields },
+            span: ast.span,
+        }))
+    }
+
     fn class_constructor(
         &mut self,
         class: &str,
@@ -2916,6 +3126,9 @@ impl Analyzer<'_> {
             .iter()
             .find(|constructor| constructor.parameters.len() == arguments.len())
             .cloned();
+        let implicit_defaults = constructor.is_none()
+            && arguments.is_empty()
+            && !instance.fields.is_empty();
         let fields = if let Some(constructor) = constructor {
             self.class_constructor_values(&instance, &constructor, arguments, span)?
         } else if !instance.constructors.is_empty() {
@@ -2950,11 +3163,15 @@ impl Analyzer<'_> {
                 .map(|(argument, field)| self.expression(&argument.value, Some(field.ty)))
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let fields = fields
-            .into_iter()
-            .enumerate()
-            .map(|(field, value)| self.validate_field_value(&instance, field, value, span))
-            .collect::<Result<Vec<_>, _>>()?;
+        let fields = if implicit_defaults {
+            fields
+        } else {
+            fields
+                .into_iter()
+                .enumerate()
+                .map(|(field, value)| self.validate_field_value(&instance, field, value, span))
+                .collect::<Result<Vec<_>, _>>()?
+        };
         Ok(Expression {
             id: self.next_id(),
             type_id: instance.ty,
@@ -3762,42 +3979,259 @@ impl Analyzer<'_> {
         value: Expression,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let Some(predicate) = instance
-            .source_fields
-            .get(field)
-            .and_then(|field| field.constraint.as_ref())
-        else {
+        let Some(source_field) = instance.source_fields.get(field) else {
             return Ok(value);
         };
+        if source_field.constraints.is_empty() {
+            return Ok(value);
+        }
         let field_name = &instance.fields[field].name;
         let previous = self.value_substitutions.insert(field_name.clone(), value.clone());
         let boolean = self
             .types
             .resolve_name("bool")
             .expect("bootstrap defines bool");
-        let condition = self.expression(predicate, Some(boolean));
+        let lowered = source_field
+            .constraints
+            .iter()
+            .map(|constraint| {
+                let condition = self.expression(&constraint.condition, Some(boolean))?;
+                let failure = match constraint.failure.as_ref() {
+                    Some(failure) => {
+                        let error_message = match &failure.kind {
+                            AstExpressionKind::Call { callee, arguments }
+                                if callable_path(callee).as_deref() == Some("Error") =>
+                            {
+                                arguments.first().map(|argument| &argument.value)
+                            }
+                            _ => None,
+                        };
+                        let error = if let Some(message) = error_message {
+                            let string = self
+                                .types
+                                .resolve_name("string")
+                                .expect("bootstrap defines string");
+                            self.expression(message, Some(string))?
+                        } else if let Some(inlined) =
+                            self.inline_source_call(failure, None)?
+                        {
+                            inlined
+                        } else {
+                            self.expression(failure, None)?
+                        };
+                        Some(error)
+                    }
+                    None => None,
+                };
+                Ok((condition, failure, constraint.span))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>();
         if let Some(previous) = previous {
             self.value_substitutions
                 .insert(field_name.clone(), previous);
         } else {
             self.value_substitutions.remove(field_name);
         }
-        let condition = condition?;
-        let fallback = self.throw_expression(
-            format!("constraint failed for `{}.{field_name}`", instance.name),
-            value.type_id,
-            span,
-        );
-        Ok(Expression {
-            id: self.next_id(),
-            type_id: value.type_id,
-            kind: ExpressionKind::Fallback {
-                condition: Box::new(condition),
-                value: Box::new(value),
-                fallback: Box::new(fallback),
-            },
-            span,
-        })
+        let mut validated = value;
+        for (condition, failure, constraint_span) in lowered?.into_iter().rev() {
+            let rejects = failure.is_some();
+            let condition = if rejects {
+                Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Unary {
+                        operator: severian_universal::UnaryOperator::Not,
+                        operand: Box::new(condition),
+                    },
+                    span: constraint_span,
+                }
+            } else {
+                condition
+            };
+            let error = failure.unwrap_or_else(|| {
+                self.string_expression(
+                    format!("constraint failed for `{}.{field_name}`", instance.name),
+                    constraint_span,
+                )
+            });
+            let fallback = Expression {
+                id: self.next_id(),
+                type_id: validated.type_id,
+                kind: ExpressionKind::Throw(Box::new(error)),
+                span: constraint_span,
+            };
+            validated = Expression {
+                id: self.next_id(),
+                type_id: validated.type_id,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(validated),
+                    fallback: Box::new(fallback),
+                },
+                span,
+            };
+        }
+        Ok(validated)
+    }
+
+    fn inline_source_call(
+        &mut self,
+        ast: &AstExpression,
+        expected: Option<TypeId>,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let AstExpressionKind::Call { callee, arguments } = &ast.kind else {
+            return Ok(None);
+        };
+        let Some(name) = callable_path(callee) else {
+            return Ok(None);
+        };
+        if self.mock_inline_stack.contains(&name) {
+            return Ok(None);
+        }
+        let Some(function) = self.source_functions.get(&name).and_then(|functions| {
+            let matches = functions
+                .iter()
+                .filter(|function| function.parameters.len() == arguments.len())
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then(|| matches[0].clone())
+        }) else {
+            return Ok(None);
+        };
+        let Some(body) = function.body.as_ref() else {
+            return Ok(None);
+        };
+        let [AstStatement::Return {
+            value: Some(returned),
+            ..
+        }] = body.as_slice()
+        else {
+            return Ok(None);
+        };
+        if arguments.iter().any(|argument| argument.name.is_some()) {
+            return Ok(None);
+        }
+        let result = self.resolve_source_type(&function.result)?;
+        if expected.is_some_and(|expected| !self.types.assignable(result, expected)) {
+            return Ok(None);
+        }
+        let mut resolved = Vec::with_capacity(arguments.len());
+        for (argument, parameter) in arguments.iter().zip(&function.parameters) {
+            let ty = self.resolve_source_type(&parameter.annotation)?;
+            resolved.push((parameter.name.clone(), self.expression(&argument.value, Some(ty))?));
+        }
+        let previous = self.value_substitutions.clone();
+        for (parameter, value) in resolved {
+            self.value_substitutions.insert(parameter, value);
+        }
+        self.mock_inline_stack.insert(name.clone());
+        let lowered = self.expression(returned, Some(result));
+        self.mock_inline_stack.remove(&name);
+        self.value_substitutions = previous;
+        lowered.map(Some)
+    }
+
+    fn mocked_call(
+        &mut self,
+        ast: &AstExpression,
+        expected: Option<TypeId>,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let AstExpressionKind::Call { callee, arguments } = &ast.kind else {
+            return Ok(None);
+        };
+        let Some(name) = callable_path(callee) else {
+            return Ok(None);
+        };
+        let Some(mock) = self.mocks.get(&name).cloned() else {
+            return Ok(None);
+        };
+        let Some(function) = self.source_functions.get(&name).and_then(|functions| {
+            let matches = functions
+                .iter()
+                .filter(|function| function.parameters.len() == arguments.len())
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then(|| matches[0].clone())
+        }) else {
+            return Err(Diagnostic::new(
+                "E000217",
+                format!("mock target `{name}` has no unique declaration"),
+                Some(ast.span),
+            ));
+        };
+        let result_type = self.resolve_source_type(&function.result)?;
+        if expected.is_some_and(|expected| !self.types.assignable(result_type, expected)) {
+            return Ok(None);
+        }
+        let mut parameter_types = Vec::with_capacity(function.parameters.len());
+        for parameter in &function.parameters {
+            parameter_types.push(self.resolve_source_type(&parameter.annotation)?);
+        }
+        let actual = arguments
+            .iter()
+            .zip(&parameter_types)
+            .map(|(argument, ty)| self.expression(&argument.value, Some(*ty)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut selected = self.expression(&mock.fallback, Some(result_type))?;
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        for case in mock.cases.into_iter().rev() {
+            let AstExpressionKind::Call {
+                arguments: patterns,
+                ..
+            } = &case.call.kind
+            else {
+                unreachable!("mock installation validates call cases")
+            };
+            if patterns.len() != actual.len() {
+                return Err(Diagnostic::new(
+                    "E000217",
+                    format!("mock case for `{name}` has the wrong argument count"),
+                    Some(case.span),
+                ));
+            }
+            let mut comparisons = Vec::with_capacity(patterns.len());
+            for ((value, pattern), ty) in actual.iter().zip(patterns).zip(&parameter_types) {
+                let pattern = self.expression(&pattern.value, Some(*ty))?;
+                comparisons.push(Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Binary {
+                        operator: BinaryOperator::Equal,
+                        left: Box::new(value.clone()),
+                        right: Box::new(pattern),
+                    },
+                    span: case.span,
+                });
+            }
+            let condition = comparisons.into_iter().reduce(|left, right| Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span: case.span,
+            }).unwrap_or_else(|| Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+                span: case.span,
+            });
+            let value = self.expression(&case.result, Some(result_type))?;
+            selected = Expression {
+                id: self.next_id(),
+                type_id: result_type,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(value),
+                    fallback: Box::new(selected),
+                },
+                span: ast.span,
+            };
+        }
+        Ok(Some(selected))
     }
 
     fn object_set_entry(
@@ -5943,5 +6377,29 @@ mod tests {
             .statements
             .iter()
             .any(|statement| matches!(statement, Statement::ExpectThrow { .. })));
+    }
+
+    #[test]
+    fn builders_ordered_constraints_and_mocks_lower_to_executable_control_flow() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "builders.sev",
+            "def foo(value: int) -> int:\n    return value\ndef calculate(value: int) -> int:\n    return foo(value) * 2\nclass User:\n    age: int {\n        age < 0 -> Error(\"negative\"),\n        age > 130 -> Error(\"old\"),\n    }\ntest:\n    mock(\n        foo(0) -> 10\n        else throw Error(\"unexpected\")\n    )\n    user := User().set(age, 36)\n    expect(calculate(0) == 20)\n    throws(foo(1) -> Error)\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "builders",
+            },
+        )
+        .unwrap();
+        severian_mir::build(&program).unwrap();
+        let test = program.modules[0].functions.last().unwrap();
+        assert!(test.body.as_ref().unwrap().statements.iter().any(|statement| {
+            matches!(statement, Statement::Assert { .. })
+        }));
     }
 }

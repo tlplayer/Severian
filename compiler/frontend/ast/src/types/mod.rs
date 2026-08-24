@@ -176,12 +176,21 @@ pub enum OperatorSyntax {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyConstraint {
+    pub condition: Expression,
+    /// Present for rejection rules (`invalid -> error`). Absent predicates
+    /// are invariants that must evaluate to true.
+    pub failure: Option<Expression>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyDeclaration {
     pub name: String,
     pub annotation: TypeAnnotation,
     pub default: Option<Expression>,
-    /// A predicate that every value stored in this property must satisfy.
-    pub constraint: Option<Expression>,
+    /// Ordered validation rules applied whenever a value is stored.
+    pub constraints: Vec<PropertyConstraint>,
     pub span: Span,
 }
 

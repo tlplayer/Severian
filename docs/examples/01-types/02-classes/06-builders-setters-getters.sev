@@ -148,7 +148,7 @@ test:
 
     throws(
         foo(3)
-        -> Error
+        -> Error("unexpected call field")
     )
 
 

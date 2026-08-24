@@ -169,6 +169,14 @@ fn validate_generic_expression(
             }
             Ok(None)
         }
+        Expression::Mock { cases, fallback } => {
+            for case in cases {
+                validate_generic_expression(&case.call, names, function, index, types)?;
+                validate_generic_expression(&case.result, names, function, index, types)?;
+            }
+            validate_generic_expression(fallback, names, function, index, types)?;
+            Ok(None)
+        }
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
         }
@@ -1090,6 +1098,34 @@ fn visit_expression_for_specializations(
                     specializations,
                 )?;
             }
+        }
+        severian_ast::ExpressionKind::Mock { cases, fallback } => {
+            for case in cases {
+                visit_expression_for_specializations(
+                    module,
+                    &case.call,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_expression_for_specializations(
+                    module,
+                    &case.result,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+            visit_expression_for_specializations(
+                module,
+                fallback,
+                None,
+                names,
+                index,
+                specializations,
+            )?;
         }
         severian_ast::ExpressionKind::Literal(_) | severian_ast::ExpressionKind::Name(_) => {}
     }

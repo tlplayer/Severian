@@ -32,6 +32,10 @@ pub const SOURCES: &[PrimitiveSource] = &[
         source: include_str!("../../src/floats.sev"),
     },
     PrimitiveSource {
+        path: "src/error.sev",
+        source: include_str!("../../src/error.sev"),
+    },
+    PrimitiveSource {
         path: "src/integers.sev",
         source: include_str!("../../src/integers.sev"),
     },

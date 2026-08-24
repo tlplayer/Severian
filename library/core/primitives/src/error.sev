@@ -1,0 +1,4 @@
+trait Error: Primitive:
+    property category: string = "text"
+    property representation: string = "string"
+
