@@ -98,6 +98,9 @@ def search(items: list[int], item: int) -> int:
 
     throw Error("Failed to find item in items")
 
+@monitor
+def composed_hook():
+    print("doing stuff")
 
 def main():
     items = [10, 20, 30]
@@ -107,9 +110,11 @@ def main():
 
 test with integ:
     result = search([10, 20, 30], 10)
+    print(("tuple:", result))
     assert(result == 10)
-    assert("timer start:" in stdout)
-    assert("timer duration:" in stdout)
+    assert("timer start: search" in stdout)
+    assert("timer duration: " in stdout)
+    assert("(tuple:,10)" in stdout)
 
 
 test:

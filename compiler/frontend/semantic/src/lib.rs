@@ -2852,26 +2852,54 @@ impl Analyzer<'_> {
                     && !arguments.is_empty()
                     && arguments.iter().all(|argument| argument.name.is_none())
                 {
-                    let value = if arguments.len() == 1 {
-                        self.expression(&arguments[0].value, None)?
-                    } else {
-                        let fields = arguments
+                    if arguments.len() > 1 {
+                        let values = arguments
                             .iter()
                             .map(|argument| self.expression(&argument.value, None))
                             .collect::<Result<Vec<_>, Diagnostic>>()?;
-                        let element_types =
-                            fields.iter().map(|field| field.type_id).collect::<Vec<_>>();
-                        let tuple_type = self.instantiate_tuple_type(&element_types);
-                        Expression {
-                            id: self.next_id(),
-                            type_id: tuple_type,
-                            kind: ExpressionKind::Aggregate {
-                                class: tuple_type,
-                                fields,
-                            },
-                            span: ast.span,
+                        let string = self
+                            .types
+                            .resolve_name("string")
+                            .expect("bootstrap defines string");
+                        let mut values = values.into_iter();
+                        let first = values.next().expect("print has multiple arguments");
+                        let mut rendered = self.display_string(first, ast.span)?;
+                        for value in values {
+                            let space = Expression {
+                                id: self.next_id(),
+                                type_id: string,
+                                kind: ExpressionKind::Literal(LiteralValue::String(" ".into())),
+                                span: ast.span,
+                            };
+                            rendered = self.runtime_call(
+                                "__sev_string_concat",
+                                &[string, string],
+                                string,
+                                vec![rendered, space],
+                                ast.span,
+                            );
+                            let value = self.display_string(value, ast.span)?;
+                            rendered = self.runtime_call(
+                                "__sev_string_concat",
+                                &[string, string],
+                                string,
+                                vec![rendered, value],
+                                ast.span,
+                            );
                         }
-                    };
+                        let result = self
+                            .types
+                            .resolve_name("i32")
+                            .expect("bootstrap defines i32");
+                        return Ok(self.runtime_call(
+                            "__sev_print_string",
+                            &[string],
+                            result,
+                            vec![rendered],
+                            ast.span,
+                        ));
+                    }
+                    let value = self.expression(&arguments[0].value, None)?;
                     if self.tuple_elements.contains_key(&value.type_id) {
                         let rendered = self.tuple_string(value, ast.span)?;
                         let string = rendered.type_id;
@@ -4141,43 +4169,7 @@ impl Analyzer<'_> {
                 },
                 span,
             };
-            let name = self
-                .types
-                .definition(*element)
-                .map(|definition| definition.name.as_str());
-            let field = match name {
-                Some("string") => field,
-                Some("int" | "i64") => self.runtime_call(
-                    "__sev_string_from_int",
-                    &[*element],
-                    string,
-                    vec![field],
-                    span,
-                ),
-                Some("usize") => self.runtime_call(
-                    "__sev_string_from_usize",
-                    &[*element],
-                    string,
-                    vec![field],
-                    span,
-                ),
-                Some("float" | "f64" | "duration" | "data_rate" | "frequency") => {
-                    self.runtime_call(
-                        "__sev_string_from_float",
-                        &[*element],
-                        string,
-                        vec![field],
-                        span,
-                    )
-                }
-                _ => {
-                    return Err(Diagnostic::new(
-                        "E000211",
-                        "tuple display does not support this element type",
-                        Some(span),
-                    ))
-                }
-            };
+            let field = self.display_string(field, span)?;
             rendered = self.runtime_call(
                 "__sev_string_concat",
                 &[string, string],
@@ -4199,6 +4191,69 @@ impl Analyzer<'_> {
             vec![rendered, close],
             span,
         ))
+    }
+
+    fn display_string(
+        &mut self,
+        value: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        if self.tuple_elements.contains_key(&value.type_id) {
+            return self.tuple_string(value, span);
+        }
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let name = self
+            .types
+            .definition(value.type_id)
+            .map(|definition| definition.name.as_str());
+        match name {
+            Some("string") => Ok(value),
+            Some("int" | "i64") => Ok(self.runtime_call(
+                "__sev_string_from_int",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            )),
+            Some("usize") => Ok(self.runtime_call(
+                "__sev_string_from_usize",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            )),
+            Some("float" | "f64" | "duration" | "data_rate" | "frequency") => {
+                Ok(self.runtime_call(
+                    "__sev_string_from_float",
+                    &[value.type_id],
+                    string,
+                    vec![value],
+                    span,
+                ))
+            }
+            Some("bool") => Ok(self.runtime_call(
+                "__sev_string_from_bool",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            )),
+            Some("char") => Ok(self.runtime_call(
+                "__sev_string_from_char",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            )),
+            _ => Err(Diagnostic::new(
+                "E000211",
+                "print does not support this argument type",
+                Some(span),
+            )),
+        }
     }
 
     fn list_storage_expression(
