@@ -645,7 +645,7 @@ output = f"""module {{
     fn parses_trait_owned_pipe_operators_and_compiler_case_functions() {
         let source = SourceFile::virtual_source(
             "operators.sev",
-            "trait StringOperator:\n    @strings\n    operator |(left: string, right: string) -> string\nclass Strings:\n    trait StringOperator\n    operator |(left: string, right: string) -> string:\n        return left + right\n@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\ntest with compiler:\n    reject:\n        @strings(|)\n        @other(|)\n        def ambiguous(left: string, right: string) -> string:\n            return left | right\n",
+            "trait StringOperator:\n    @strings\n\n    operator |(left: string, right: string) -> string\nclass Strings:\n    trait StringOperator\n    operator |(left: string, right: string) -> string:\n        return left + right\n@strings(|)\ndef combine(left: string, right: string) -> string:\n    return left | right\ntest with compiler:\n    reject:\n        @strings(|)\n        @other(|)\n        def ambiguous(left: string, right: string) -> string:\n            return left | right\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let severian_ast::Item::Trait(trait_declaration) = &module.items[0] else {
@@ -656,7 +656,8 @@ output = f"""module {{
             trait_declaration.operators[0].operator,
             severian_ast::OperatorSyntax::Pipe
         );
-        assert_eq!(trait_declaration.operators[0].decorators[0].name, "strings");
+        assert_eq!(trait_declaration.namespaces[0].name, "strings");
+        assert!(trait_declaration.operators[0].decorators.is_empty());
         let severian_ast::Item::Class(class) = &module.items[1] else {
             panic!("expected class")
         };
@@ -687,7 +688,7 @@ output = f"""module {{
     }
 
     #[test]
-    fn separates_composed_hook_namespaces_from_trait_method_decorators() {
+    fn separates_trait_namespaces_from_member_decorators() {
         let source = SourceFile::virtual_source(
             "hooks.sev",
             "trait Monitor:\n    @monitor\n\n    @monitor_error\n    def monitor_error(context: HookContext) -> None with context\n\n    @monitor_time\n    def monitor_time(context: HookContext) -> None with context\n",
@@ -696,7 +697,7 @@ output = f"""module {{
         let severian_ast::Item::Trait(declaration) = &module.items[0] else {
             panic!("expected trait")
         };
-        assert_eq!(declaration.hook_namespaces[0].name, "monitor");
+        assert_eq!(declaration.namespaces[0].name, "monitor");
         assert_eq!(declaration.methods[0].decorators[0].name, "monitor_error");
         assert_eq!(declaration.methods[1].decorators[0].name, "monitor_time");
     }

@@ -6208,7 +6208,7 @@ fn collect_trait_namespace_methods(
             if method.hook.is_some() {
                 continue;
             }
-            for decorator in &method.decorators {
+            for decorator in declaration.namespaces.iter().chain(&method.decorators) {
                 if !decorator.arguments.is_empty() {
                     continue;
                 }
@@ -6320,21 +6320,14 @@ fn collect_trait_namespace_hooks(
             }
         }
 
-        for namespace in &declaration.hook_namespaces {
+        for namespace in &declaration.namespaces {
+            if members.is_empty() {
+                continue;
+            }
             if !namespace.arguments.is_empty() {
                 return Err(Diagnostic::new(
                     "E000218",
                     "composed hook namespace declarations do not take arguments",
-                    Some(namespace.span),
-                ));
-            }
-            if members.is_empty() {
-                return Err(Diagnostic::new(
-                    "E000218",
-                    format!(
-                        "composed hook namespace `@{}` has no hooks",
-                        namespace.name
-                    ),
                     Some(namespace.span),
                 ));
             }
@@ -6374,7 +6367,7 @@ fn collect_trait_namespace_operators(
         _ => None,
     }) {
         for operator in &declaration.operators {
-            for decorator in &operator.decorators {
+            for decorator in declaration.namespaces.iter().chain(&operator.decorators) {
                 if !decorator.arguments.is_empty() {
                     continue;
                 }

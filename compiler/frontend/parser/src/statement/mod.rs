@@ -929,7 +929,7 @@ impl Parser<'_> {
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
-        let mut hook_namespaces = Vec::new();
+        let mut namespaces = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let mut member_has_body = false;
@@ -945,7 +945,7 @@ impl Parser<'_> {
             } else if self.at_identifier("operator") {
                 operators.push(self.operator_declaration(member_decorators)?);
             } else if !member_decorators.is_empty() {
-                hook_namespaces.extend(member_decorators);
+                namespaces.extend(member_decorators);
             } else if self.at_identifier("property") {
                 properties.push(self.property()?);
             } else if self.at_identifier("pass") {
@@ -969,7 +969,7 @@ impl Parser<'_> {
             .span;
         Ok(TraitDeclaration {
             decorators,
-            hook_namespaces,
+            namespaces,
             name,
             type_parameters,
             constraints,

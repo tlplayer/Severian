@@ -238,8 +238,8 @@ pub struct OperatorImplementation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitDeclaration {
     pub decorators: Vec<Decorator>,
-    /// Standalone decorators in the trait body define composed hook namespaces.
-    pub hook_namespaces: Vec<Decorator>,
+    /// Standalone decorators in the trait body expose its semantic members.
+    pub namespaces: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
     pub constraints: Vec<GenericConstraint>,

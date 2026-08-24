@@ -17,8 +17,9 @@ expressions such as `async`, `await`, channel creation and sending, `view`,
 - Decorators such as `@math(X, *)` are recorded as a package path plus an
   explicit symbol pack; named policies such as `@tensor(backend = auto)` retain
   their key and value separately. Standalone decorators in trait bodies own
-  composed hook namespaces, while decorators attached to members name
-  individual hooks. Activation and provider resolution belong to HIR.
+  namespaces for the trait's semantic members; for hooks they compose all hook
+  members. Decorators attached to members expose individual members. Activation
+  and provider resolution belong to HIR.
 - Trait declarations retain paired `with(context)` and `without(context)`
   bodies as scoped semantic behavior. Function-header `with` entries remain
   expressions until semantic analysis distinguishes trait markers from Boolean

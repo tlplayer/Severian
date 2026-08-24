@@ -131,7 +131,7 @@ fn semantic_hook_decorators(module: &Module) -> BTreeSet<&str> {
     }) {
         hooks.extend(
             declaration
-                .hook_namespaces
+                .namespaces
                 .iter()
                 .map(|decorator| decorator.name.as_str()),
         );
