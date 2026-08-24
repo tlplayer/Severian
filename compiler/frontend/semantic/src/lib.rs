@@ -7961,7 +7961,7 @@ impl Analyzer<'_> {
                 span,
             )));
         }
-        if self.list_elements.contains_key(&object.type_id) {
+        if let Some(element) = self.list_elements.get(&object.type_id).copied() {
             let usize_type = self
                 .types
                 .resolve_name("usize")
@@ -7982,6 +7982,48 @@ impl Analyzer<'_> {
                     vec![storage],
                     span,
                 )));
+            }
+            if name == "sorted" {
+                if !arguments.is_empty() {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        "list method `sorted` expects no arguments",
+                        Some(span),
+                    ));
+                }
+                let list_type = object.type_id;
+                if expected.is_some_and(|expected| !self.types.assignable(list_type, expected)) {
+                    return Err(semantic_error(
+                        "method result does not satisfy the expected type".into(),
+                        span,
+                    ));
+                }
+                let suffix = self.list_runtime_suffix(element, span)?;
+                if !matches!(suffix, "i64" | "ptr") {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "list sorting currently supports numeric and string elements",
+                        Some(span),
+                    ));
+                }
+                let storage = self.list_storage_expression(object, span);
+                let storage_type = storage.type_id;
+                let sorted = self.runtime_call(
+                    &format!("__sev_list_sorted_{suffix}"),
+                    &[storage_type],
+                    storage_type,
+                    vec![storage],
+                    span,
+                );
+                return Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: list_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: list_type,
+                        fields: vec![sorted],
+                    },
+                    span,
+                }));
             }
         }
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
@@ -11121,6 +11163,24 @@ mod tests {
         let general = conversion_rank(&context.types, resolve("bf16"), resolve("f32")).unwrap();
         assert!(exact < widening);
         assert!(widening < general);
+    }
+
+    #[test]
+    fn sorted_lists_lower_to_representation_specific_runtime_calls() {
+        let (program, _) = analyze_source(
+            "strings = [\"beta\", \"alpha\"].sorted()\nnumbers = [3, 1, 2].sorted()\n",
+        );
+        let symbols = program.modules[0]
+            .functions
+            .iter()
+            .filter_map(|function| match &function.call_type {
+                severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
+                severian_hir::CallType::Severian => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_list_sorted_ptr"));
+        assert!(symbols.contains(&"__sev_list_sorted_i64"));
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

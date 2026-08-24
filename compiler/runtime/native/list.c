@@ -102,6 +102,37 @@ void *__sev_list_copy_ptr(void *storage) {
     return sev_list_copy(storage);
 }
 
+static int sev_list_compare_i64(const void *left, const void *right) {
+    int64_t left_value = (int64_t)*(const uintptr_t *)left;
+    int64_t right_value = (int64_t)*(const uintptr_t *)right;
+    return (left_value > right_value) - (left_value < right_value);
+}
+
+static int sev_list_compare_ptr(const void *left, const void *right) {
+    const char *left_value = (const char *)*(const uintptr_t *)left;
+    const char *right_value = (const char *)*(const uintptr_t *)right;
+    if (left_value == NULL || right_value == NULL) {
+        return (left_value != NULL) - (right_value != NULL);
+    }
+    return strcmp(left_value, right_value);
+}
+
+void *__sev_list_sorted_i64(void *storage) {
+    sev_list *copy = sev_list_copy(storage);
+    if (copy->length > 1) {
+        qsort(copy->values, copy->length, sizeof(uintptr_t), sev_list_compare_i64);
+    }
+    return copy;
+}
+
+void *__sev_list_sorted_ptr(void *storage) {
+    sev_list *copy = sev_list_copy(storage);
+    if (copy->length > 1) {
+        qsort(copy->values, copy->length, sizeof(uintptr_t), sev_list_compare_ptr);
+    }
+    return copy;
+}
+
 _Bool __sev_list_identity(void *left, void *right) {
     return left == right;
 }
