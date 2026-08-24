@@ -1,20 +1,128 @@
 '''
-To avoid having getX() setX() etc. which is a big reason for camelcases existence imo,
-we have the set, and get properties on objects. This allows Point.set("x",0)
+Objects expose generic get() and set() operations to avoid getX()/setX()
+methods for every field.
+
+get(name) dynamically reads a field.
+set(name, value) dynamically updates one field.
+set({...}) validates and updates multiple fields together.
+
+Statically-known invalid accesses are compiler errors.
+Runtime-invalid dynamic accesses throw errors.
 '''
 class Point:
-    x: int
-    y: int
+    x: int {0 <= x <= 100}
+    y: int {0 <= y <= 100}
+
 
 def main():
     point := Point(3, 4)
-    axis = "x"
 
-    print(point.get(axis))
+    # Static field access.
+    assert(point.x == 3)
+    assert(point.y == 4)
+
+    # Dynamic get/set.
+    axis := "x"
+
+    assert(point.get(axis) == 3)
+
     point.set(axis, 10)
-    print(point.x)
-    point.y = 20
-    print(point.y)
+
+    assert(point.x == 10)
+    assert(point.get(axis) == 10)
+
+    # Group update.
+    point.set({
+        "x": 20,
+        "y": 30,
+    })
+
+    assert(point.x == 20)
+    assert(point.y == 30)
+
+    # Computed group update.
+    x_axis := "x"
+    y_axis := "y"
+
+    point.set({
+        x_axis: 40,
+        y_axis: 50,
+    })
+
+    assert(point.get("x") == 40)
+    assert(point.get("y") == 50)
+
+
+test:
+    point := Point(3, 4)
+
+    point.set("x", 10):
+    assert(point.x == 10)
+    assert(point.get("x") == 10)
+
+    point.set({
+        "x": 20,
+        "y": 30,
+    }):
+        assert(point.x == 20)
+        assert(point.y == 30)
+
+
+test:
+    point := Point(3, 4)
+    axis := runtime_string("z")
+
+    # The compiler cannot know the runtime field name.
+    throws(point.get(axis) -> FieldError)
+    throws( point.set(axis, 10)  -> FieldError)
+
+
+    # Runtime values still obey field constraints.
+    value := runtime_int(200)
+
+    throws(point.set("x", value) -> ConstraintError)
+
+    # Group updates are atomic: no field changes if one update fails.
+    throws(point.set({
+            "x": 20,
+            "y": value,
+    }) -> ConstraintError)
+
+
+    assert(point.x == 3)
+    assert(point.y == 4)
+
+
+# A literal field name can be checked at compile time.
+test with compiler: 
+    reject:
+        point := Point(3, 4)
+        point.get("z")
+
+
+test with compiler: 
+    reject:
+        point := Point(3, 4)
+        point.set("z", 10)
+
+
+# A statically-known wrong field type is also rejected.
+test with compiler: 
+    reject:
+        point := Point(3, 4)
+        point.set("x", "ten")
+
+
+# Group updates get the same static checking.
+test with compiler: 
+    reject:
+        point := Point(3, 4)
+
+        point.set({
+        "x": 10,
+        "z": 20,
+    })
+
 
 test with integ:
-    
+    main()
