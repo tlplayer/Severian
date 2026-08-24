@@ -97,10 +97,15 @@ def search(items: list[int], item: int) -> int:
             return item
 
     throw Error("Failed to find item in items")
-
+# Includes all hooks by default
 @monitor
 def composed_hook():
     print("doing stuff")
+
+# Includes specific hooks, in order of args
+@monitor(monitor_error)
+def isolated_hook():
+    print("doing stuff while monitoring error")
 
 def main():
     items = [10, 20, 30]
@@ -118,10 +123,17 @@ test with integ:
 
 test with integ:
     result = composed_hook()
+    assert("start: composed_hook" in stdout)
     assert("timer start: composed_hook" in stdout)
     assert("doing stuff" in stdout)
     assert("timer duration: " in stdout)
 
+test with integ:
+    isolated_hook()
+    assert("start: isolated_hook" in stdout)
+    assert("timer start:" not in stdout)
+    assert("doing stuff while monitoring error" in stdout)
+    assert("timer duration: " not in stdout)
 
 test:
     result = search([10, 20, 30], 30)

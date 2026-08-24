@@ -687,6 +687,21 @@ output = f"""module {{
     }
 
     #[test]
+    fn separates_composed_hook_namespaces_from_trait_method_decorators() {
+        let source = SourceFile::virtual_source(
+            "hooks.sev",
+            "trait Monitor:\n    @monitor\n\n    @monitor_error\n    def monitor_error(context: HookContext) -> None with context\n\n    @monitor_time\n    def monitor_time(context: HookContext) -> None with context\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(declaration) = &module.items[0] else {
+            panic!("expected trait")
+        };
+        assert_eq!(declaration.hook_namespaces[0].name, "monitor");
+        assert_eq!(declaration.methods[0].decorators[0].name, "monitor_error");
+        assert_eq!(declaration.methods[1].decorators[0].name, "monitor_time");
+    }
+
+    #[test]
     fn symbolic_operators_are_not_function_names() {
         let source = SourceFile::virtual_source(
             "invalid-operator.sev",

@@ -695,6 +695,7 @@ pub fn emit_mlir_executable(
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
         &[
             "--verify-each",
+            "--canonicalize",
             "--async-to-async-runtime",
             "--async-runtime-ref-counting",
             "--async-runtime-ref-counting-opt",

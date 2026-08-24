@@ -279,7 +279,9 @@ impl Parser<'_> {
             if self.take(&TokenKind::Newline).is_none() {
                 break;
             }
-            while self.take(&TokenKind::Newline).is_some() {}
+            if self.at(&TokenKind::Newline) {
+                break;
+            }
         }
         Ok(decorators)
     }
@@ -927,6 +929,7 @@ impl Parser<'_> {
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
+        let mut hook_namespaces = Vec::new();
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let mut member_has_body = false;
@@ -942,7 +945,7 @@ impl Parser<'_> {
             } else if self.at_identifier("operator") {
                 operators.push(self.operator_declaration(member_decorators)?);
             } else if !member_decorators.is_empty() {
-                return Err(self.error("expected `def` or `operator` after trait member decorator"));
+                hook_namespaces.extend(member_decorators);
             } else if self.at_identifier("property") {
                 properties.push(self.property()?);
             } else if self.at_identifier("pass") {
@@ -966,6 +969,7 @@ impl Parser<'_> {
             .span;
         Ok(TraitDeclaration {
             decorators,
+            hook_namespaces,
             name,
             type_parameters,
             constraints,

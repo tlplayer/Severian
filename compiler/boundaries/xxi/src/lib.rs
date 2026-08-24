@@ -124,19 +124,28 @@ pub fn resolve(
 }
 
 fn semantic_hook_decorators(module: &Module) -> BTreeSet<&str> {
-    module
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::Trait(declaration) => Some(declaration),
-            _ => None,
-        })
-        .flat_map(|declaration| &declaration.methods)
-        .filter(|method| method.hook.is_some())
-        .flat_map(|method| &method.decorators)
-        .filter(|decorator| decorator.arguments.is_empty())
-        .map(|decorator| decorator.name.as_str())
-        .collect()
+    let mut hooks = BTreeSet::new();
+    for declaration in module.items.iter().filter_map(|item| match item {
+        Item::Trait(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        hooks.extend(
+            declaration
+                .hook_namespaces
+                .iter()
+                .map(|decorator| decorator.name.as_str()),
+        );
+        hooks.extend(
+            declaration
+                .methods
+                .iter()
+                .filter(|method| method.hook.is_some())
+                .flat_map(|method| &method.decorators)
+                .filter(|decorator| decorator.arguments.is_empty())
+                .map(|decorator| decorator.name.as_str()),
+        );
+    }
+    hooks
 }
 
 fn semantic_operator_declaration(declaration: &ExternalFunctionDeclaration) -> bool {
@@ -541,6 +550,19 @@ mod tests {
         let source = SourceFile::virtual_source(
             "hooks.sev",
             "trait Monitor:\n    @monitor_error\n    def monitor_error(context: HookContext) -> None with context\n\n@monitor_error\ndef search() -> int:\n    return 10\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.foreign.functions.is_empty());
+        assert!(resolved.plans.is_empty());
+    }
+
+    #[test]
+    fn composed_hook_namespaces_do_not_create_foreign_functions() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "hooks.sev",
+            "trait Monitor:\n    @monitor\n\n    @monitor_error\n    def monitor_error(context: HookContext) -> None with context\n\n@monitor(monitor_error)\ndef search() -> int:\n    return 10\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let resolved = resolve(&module, &context.types, &target()).unwrap();
