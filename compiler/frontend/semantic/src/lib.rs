@@ -162,8 +162,11 @@ pub(crate) fn analyze_with_package_functions(
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
         tuple_elements: BTreeMap::new(),
+        function_types: BTreeMap::new(),
         union_types: BTreeMap::new(),
         fallible_types: BTreeMap::new(),
+        callable_bindings: BTreeMap::new(),
+        callable_substitutions: BTreeMap::new(),
         error_types: BTreeSet::new(),
         preserve_error_depth: 0,
         lowered_classes: Vec::new(),
@@ -446,6 +449,15 @@ pub(crate) fn analyze_with_package_functions(
         let Some(ast_body) = &ast_function.body else {
             continue;
         };
+        if function
+            .parameters
+            .iter()
+            .any(|parameter| analyzer.function_types.contains_key(&parameter.contract.ty))
+        {
+            // Higher-order source functions are specialized at their call sites.
+            // Their unspecialized body has no concrete callable implementation.
+            continue;
+        }
         analyzer.names = globals.clone();
         analyzer.active_function_name = Some(ast_function.name.clone());
         analyzer.declarations.clear();
@@ -459,6 +471,7 @@ pub(crate) fn analyze_with_package_functions(
             }
         }
         analyzer.mocks.clear();
+        analyzer.callable_substitutions.clear();
         analyzer.active_operator_namespaces = operator_namespaces(&ast_function.decorators);
         for parameter in &function.parameters {
             let type_id = parameter.contract.ty;
@@ -633,6 +646,7 @@ pub(crate) fn analyze_with_package_functions(
             );
             analyzer.declarations.clear();
             analyzer.mocks.clear();
+            analyzer.callable_substitutions.clear();
             analyzer.active_operator_namespaces.clear();
             let unit = types.resolve_name("unit").expect("bootstrap defines unit");
             let mut body = Block::default();
@@ -728,8 +742,11 @@ struct Analyzer<'a> {
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
     tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
+    function_types: BTreeMap<TypeId, FunctionType>,
     union_types: BTreeMap<TypeId, Vec<TypeId>>,
     fallible_types: BTreeMap<TypeId, FallibleType>,
+    callable_bindings: BTreeMap<severian_hir::VariableId, CallableValue>,
+    callable_substitutions: BTreeMap<String, ResolvedCallable>,
     error_types: BTreeSet<TypeId>,
     preserve_error_depth: usize,
     lowered_classes: Vec<HirClassDeclaration>,
@@ -796,6 +813,37 @@ struct EnumInstance {
 struct FallibleType {
     success: TypeId,
     error: TypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionType {
+    parameters: Vec<TypeId>,
+    result: TypeId,
+}
+
+#[derive(Debug, Clone)]
+enum CallableValue {
+    Direct(FunctionId),
+    Lambda {
+        parameters: Vec<String>,
+        body: AstExpression,
+        closure: BindingId,
+        closure_type: TypeId,
+        captures: Vec<(String, TypeId)>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedCallable {
+    value: CallableValue,
+    signature: FunctionType,
+}
+
+struct PendingLambda {
+    parameters: Vec<String>,
+    body: AstExpression,
+    closure_type: TypeId,
+    captures: Vec<(String, TypeId)>,
 }
 
 #[derive(Debug, Clone)]
@@ -1104,6 +1152,14 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
+            let parameters = parameters
+                .iter()
+                .map(|parameter| self.resolve_source_type(parameter))
+                .collect::<Result<Vec<_>, _>>()?;
+            let result = self.resolve_source_type(result)?;
+            return Ok(self.instantiate_function_type(&parameters, result));
+        }
         if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
             let mut success = Vec::new();
             let mut errors = Vec::new();
@@ -1259,16 +1315,31 @@ impl Analyzer<'_> {
             .map(|annotation| self.resolve_source_type(annotation))
             .transpose()?
             .or(update_type);
-        if ast_binding.preserve_error {
-            self.preserve_error_depth += 1;
-        }
-        let value = self.expression(&ast_binding.value, expected);
-        if ast_binding.preserve_error {
-            self.preserve_error_depth -= 1;
-        }
-        let value = value?;
-        let type_id = expected.unwrap_or(value.type_id);
-        if !self.types.assignable(value.type_id, type_id) {
+        let (value, pending_lambda) = if let AstExpressionKind::Lambda { parameters, body } =
+            &ast_binding.value.kind
+        {
+            if is_update {
+                return Err(Diagnostic::new(
+                    "E000205",
+                    "lambda bindings cannot be reassigned",
+                    Some(ast_binding.span),
+                ));
+            }
+            self.lambda_binding_value(parameters, body, ast_binding.value.span)?
+        } else {
+            if ast_binding.preserve_error {
+                self.preserve_error_depth += 1;
+            }
+            let value = self.expression(&ast_binding.value, expected);
+            if ast_binding.preserve_error {
+                self.preserve_error_depth -= 1;
+            }
+            (value?, None)
+        };
+        let type_id = pending_lambda
+            .as_ref()
+            .map_or_else(|| expected.unwrap_or(value.type_id), |lambda| lambda.closure_type);
+        if pending_lambda.is_none() && !self.types.assignable(value.type_id, type_id) {
             return Err(Diagnostic::new(
                 "E000205",
                 "binding value is not assignable to its declared type",
@@ -1292,6 +1363,18 @@ impl Analyzer<'_> {
         }
         self.names
             .insert(ast_binding.name.clone(), (id, variable, type_id));
+        if let Some(lambda) = pending_lambda {
+            self.callable_bindings.insert(
+                variable,
+                CallableValue::Lambda {
+                    parameters: lambda.parameters,
+                    body: lambda.body,
+                    closure: id,
+                    closure_type: lambda.closure_type,
+                    captures: lambda.captures,
+                },
+            );
+        }
         bindings.push(Binding {
             id,
             variable,
@@ -1302,6 +1385,58 @@ impl Analyzer<'_> {
             span: ast_binding.span,
         });
         Ok(id)
+    }
+
+    fn lambda_binding_value(
+        &mut self,
+        parameters: &[String],
+        body: &AstExpression,
+        span: severian_source::Span,
+    ) -> Result<(Expression, Option<PendingLambda>), Diagnostic> {
+        let mut mentioned = BTreeSet::new();
+        collect_expression_names(body, &mut mentioned);
+        for parameter in parameters {
+            mentioned.remove(parameter);
+        }
+        let captures = mentioned
+            .into_iter()
+            .filter_map(|name| {
+                self.names
+                    .get(&name)
+                    .map(|(binding, _, ty)| (name, *binding, *ty))
+            })
+            .collect::<Vec<_>>();
+        let capture_types = captures
+            .iter()
+            .map(|(name, _, ty)| (name.clone(), *ty))
+            .collect::<Vec<_>>();
+        let closure_type = self.instantiate_lambda_type(&capture_types);
+        let fields = captures
+            .iter()
+            .map(|(_, binding, ty)| Expression {
+                id: self.next_id(),
+                type_id: *ty,
+                kind: ExpressionKind::Binding(*binding),
+                span,
+            })
+            .collect();
+        Ok((
+            Expression {
+                id: self.next_id(),
+                type_id: closure_type,
+                kind: ExpressionKind::Aggregate {
+                    class: closure_type,
+                    fields,
+                },
+                span,
+            },
+            Some(PendingLambda {
+                parameters: parameters.to_vec(),
+                body: body.clone(),
+                closure_type,
+                captures: capture_types,
+            }),
+        ))
     }
 
     fn statement(
@@ -2606,6 +2741,11 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Lambda { .. } => Err(Diagnostic::new(
+                "E000205",
+                "a lambda must be bound or passed to a function-typed parameter",
+                Some(ast.span),
+            )),
             AstExpressionKind::Mock { .. } => Err(Diagnostic::new(
                 "E000217",
                 "`mock` declarations are only valid as test statements",
@@ -3295,6 +3435,14 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(call) = self.callable_call(callee, arguments, expected, ast.span)? {
+                    return Ok(call);
+                }
+                if self.source_call_has_callable_parameter(ast) {
+                    if let Some(inlined) = self.inline_source_call(ast, expected)? {
+                        return Ok(inlined);
+                    }
+                }
                 if let Some(builder) = self.class_builder_expression(ast, expected)? {
                     return Ok(builder);
                 }
@@ -4868,6 +5016,51 @@ impl Analyzer<'_> {
         ty
     }
 
+    fn instantiate_function_type(&mut self, parameters: &[TypeId], result: TypeId) -> TypeId {
+        let ty = function_type_id(parameters, result);
+        if self.function_types.contains_key(&ty) {
+            return ty;
+        }
+        self.function_types.insert(
+            ty,
+            FunctionType {
+                parameters: parameters.to_vec(),
+                result,
+            },
+        );
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!(
+                "function[({}) -> type#{}]",
+                parameters
+                    .iter()
+                    .map(|parameter| format!("type#{}", parameter.0))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                result.0
+            ),
+            fields: Vec::new(),
+        });
+        ty
+    }
+
+    fn instantiate_lambda_type(&mut self, captures: &[(String, TypeId)]) -> TypeId {
+        let ty = TypeId(self.next_class_type);
+        self.next_class_type = self.next_class_type.saturating_sub(1);
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("lambda#{}", ty.0),
+            fields: captures
+                .iter()
+                .map(|(name, ty)| HirClassFieldDeclaration {
+                    name: name.clone(),
+                    ty: *ty,
+                })
+                .collect(),
+        });
+        ty
+    }
+
     fn union_expression(
         &mut self,
         union: TypeId,
@@ -5799,6 +5992,190 @@ impl Analyzer<'_> {
         Ok(validated)
     }
 
+    fn source_call_has_callable_parameter(&self, ast: &AstExpression) -> bool {
+        let AstExpressionKind::Call { callee, arguments } = &ast.kind else {
+            return false;
+        };
+        let Some(name) = callable_path(callee) else {
+            return false;
+        };
+        self.source_functions.get(&name).is_some_and(|functions| {
+            functions.iter().any(|function| {
+                function.parameters.len() == arguments.len()
+                    && function.parameters.iter().any(|parameter| {
+                        matches!(
+                            parameter.annotation.kind,
+                            severian_ast::TypeAnnotationKind::Function { .. }
+                        )
+                    })
+            })
+        })
+    }
+
+    fn function_annotation(
+        &mut self,
+        annotation: &TypeAnnotation,
+    ) -> Result<Option<FunctionType>, Diagnostic> {
+        let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
+        else {
+            return Ok(None);
+        };
+        let parameters = parameters
+            .iter()
+            .map(|parameter| self.resolve_source_type(parameter))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.resolve_source_type(result)?;
+        Ok(Some(FunctionType { parameters, result }))
+    }
+
+    fn resolve_callable_value(
+        &self,
+        ast: &AstExpression,
+        signature: &FunctionType,
+    ) -> Result<ResolvedCallable, Diagnostic> {
+        let AstExpressionKind::Name(name) = &ast.kind else {
+            return Err(Diagnostic::new(
+                "E000205",
+                "a callable argument must name a function or bound lambda",
+                Some(ast.span),
+            ));
+        };
+        if let Some(callable) = self.callable_substitutions.get(name) {
+            if callable.signature == *signature {
+                return Ok(callable.clone());
+            }
+        }
+        if let Some((_, variable, _)) = self.names.get(name) {
+            if let Some(value) = self.callable_bindings.get(variable) {
+                if matches!(value, CallableValue::Lambda { parameters, .. } if parameters.len() == signature.parameters.len())
+                {
+                    return Ok(ResolvedCallable {
+                        value: value.clone(),
+                        signature: signature.clone(),
+                    });
+                }
+            }
+        }
+        let matches = self
+            .functions
+            .get(name)
+            .into_iter()
+            .flatten()
+            .filter(|function| {
+                let candidate = &self.signatures[function];
+                candidate.parameters.len() == signature.parameters.len()
+                    && candidate
+                        .parameters
+                        .iter()
+                        .zip(&signature.parameters)
+                        .all(|(left, right)| left.type_id == *right)
+                    && candidate.result == signature.result
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let [function] = matches.as_slice() else {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("`{name}` has no unique declaration matching the callable type"),
+                Some(ast.span),
+            ));
+        };
+        Ok(ResolvedCallable {
+            value: CallableValue::Direct(*function),
+            signature: signature.clone(),
+        })
+    }
+
+    fn callable_call(
+        &mut self,
+        callee: &AstExpression,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let AstExpressionKind::Name(name) = &callee.kind else {
+            return Ok(None);
+        };
+        let Some(callable) = self.callable_substitutions.get(name).cloned() else {
+            return Ok(None);
+        };
+        if arguments.len() != callable.signature.parameters.len()
+            || arguments.iter().any(|argument| argument.name.is_some())
+        {
+            return Err(Diagnostic::new(
+                "E000206",
+                format!("callable `{name}` received the wrong arguments"),
+                Some(span),
+            ));
+        }
+        if expected.is_some_and(|expected| {
+            !self.types.assignable(callable.signature.result, expected)
+        }) {
+            return Err(semantic_error(
+                "callable result does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        let values = arguments
+            .iter()
+            .zip(&callable.signature.parameters)
+            .map(|(argument, ty)| self.expression(&argument.value, Some(*ty)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = match callable.value {
+            CallableValue::Direct(function) => Expression {
+                id: self.next_id(),
+                type_id: callable.signature.result,
+                kind: ExpressionKind::Call {
+                    callee: severian_hir::Callee::Direct {
+                        function: self.function_definitions[&function],
+                        substitution: self.function_substitutions[&function].clone(),
+                    },
+                    arguments: values,
+                },
+                span,
+            },
+            CallableValue::Lambda {
+                parameters,
+                body,
+                closure,
+                closure_type,
+                captures,
+            } => {
+                let previous_values = self.value_substitutions.clone();
+                let previous_callables = self.callable_substitutions.clone();
+                let closure = Expression {
+                    id: self.next_id(),
+                    type_id: closure_type,
+                    kind: ExpressionKind::Binding(closure),
+                    span,
+                };
+                for (index, (name, ty)) in captures.into_iter().enumerate() {
+                    let id = self.next_id();
+                    self.value_substitutions.insert(
+                        name,
+                        Expression {
+                            id,
+                            type_id: ty,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(closure.clone()),
+                                index: index as u32,
+                            },
+                            span,
+                        },
+                    );
+                }
+                for (parameter, value) in parameters.into_iter().zip(values) {
+                    self.value_substitutions.insert(parameter, value);
+                }
+                let result = self.expression(&body, Some(callable.signature.result));
+                self.value_substitutions = previous_values;
+                self.callable_substitutions = previous_callables;
+                result?
+            }
+        };
+        Ok(Some(result))
+    }
+
     fn inline_source_call(
         &mut self,
         ast: &AstExpression,
@@ -5840,18 +6217,34 @@ impl Analyzer<'_> {
             return Ok(None);
         }
         let mut resolved = Vec::with_capacity(arguments.len());
+        let mut resolved_callables = Vec::new();
         for (argument, parameter) in arguments.iter().zip(&function.parameters) {
-            let ty = self.resolve_source_type(&parameter.annotation)?;
-            resolved.push((parameter.name.clone(), self.expression(&argument.value, Some(ty))?));
+            if let Some(signature) = self.function_annotation(&parameter.annotation)? {
+                resolved_callables.push((
+                    parameter.name.clone(),
+                    self.resolve_callable_value(&argument.value, &signature)?,
+                ));
+            } else {
+                let ty = self.resolve_source_type(&parameter.annotation)?;
+                resolved.push((
+                    parameter.name.clone(),
+                    self.expression(&argument.value, Some(ty))?,
+                ));
+            }
         }
         let previous = self.value_substitutions.clone();
+        let previous_callables = self.callable_substitutions.clone();
         for (parameter, value) in resolved {
             self.value_substitutions.insert(parameter, value);
+        }
+        for (parameter, callable) in resolved_callables {
+            self.callable_substitutions.insert(parameter, callable);
         }
         self.mock_inline_stack.insert(name.clone());
         let lowered = self.expression(returned, Some(result));
         self.mock_inline_stack.remove(&name);
         self.value_substitutions = previous;
+        self.callable_substitutions = previous_callables;
         lowered.map(Some)
     }
 
@@ -7272,6 +7665,16 @@ pub(crate) fn union_type_id(members: &[TypeId]) -> TypeId {
     TypeId(0x2000_0000 | (hash & 0x1fff_ffff))
 }
 
+pub(crate) fn function_type_id(parameters: &[TypeId], result: TypeId) -> TypeId {
+    let hash = parameters
+        .iter()
+        .chain(std::iter::once(&result))
+        .fold(0x811c_9dc5u32, |hash, ty| {
+            (hash ^ ty.0).wrapping_mul(0x0100_0193)
+        });
+    TypeId(0x1000_0000 | (hash & 0x0fff_ffff))
+}
+
 fn contract_failure_expression(
     failure: Option<&AstExpression>,
 ) -> Option<&AstExpression> {
@@ -7886,6 +8289,23 @@ fn same_type_annotation(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
                     .zip(right)
                     .all(|(left, right)| same_type_annotation(left, right))
         }
+        (
+            severian_ast::TypeAnnotationKind::Function {
+                parameters: left_parameters,
+                result: left_result,
+            },
+            severian_ast::TypeAnnotationKind::Function {
+                parameters: right_parameters,
+                result: right_result,
+            },
+        ) => {
+            left_parameters.len() == right_parameters.len()
+                && left_parameters
+                    .iter()
+                    .zip(right_parameters)
+                    .all(|(left, right)| same_type_annotation(left, right))
+                && same_type_annotation(left_result, right_result)
+        }
         _ => false,
     }
 }
@@ -7897,6 +8317,82 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
             Some(format!("{}.{}", callable_path(object)?, name))
         }
         _ => None,
+    }
+}
+
+fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<String>) {
+    match &expression.kind {
+        AstExpressionKind::Name(name) => {
+            names.insert(name.clone());
+        }
+        AstExpressionKind::Lambda { parameters, body } => {
+            let mut nested = BTreeSet::new();
+            collect_expression_names(body, &mut nested);
+            for parameter in parameters {
+                nested.remove(parameter);
+            }
+            names.extend(nested);
+        }
+        AstExpressionKind::List(values) | AstExpressionKind::Tuple(values) => {
+            for value in values {
+                collect_expression_names(value, names);
+            }
+        }
+        AstExpressionKind::Map(entries) => {
+            for entry in entries {
+                collect_expression_names(&entry.key, names);
+                collect_expression_names(&entry.value, names);
+            }
+        }
+        AstExpressionKind::Mock { cases, fallback } => {
+            for case in cases {
+                collect_expression_names(&case.call, names);
+                collect_expression_names(&case.result, names);
+            }
+            collect_expression_names(fallback, names);
+        }
+        AstExpressionKind::Member { object, .. }
+        | AstExpressionKind::TypeApplication { callee: object, .. } => {
+            collect_expression_names(object, names);
+        }
+        AstExpressionKind::Index { object, index } => {
+            collect_expression_names(object, names);
+            collect_expression_names(index, names);
+        }
+        AstExpressionKind::Slice {
+            object,
+            start,
+            end,
+            step,
+        } => {
+            collect_expression_names(object, names);
+            for value in [start, end, step].into_iter().flatten() {
+                collect_expression_names(value, names);
+            }
+        }
+        AstExpressionKind::Call { callee, arguments } => {
+            collect_expression_names(callee, names);
+            for argument in arguments {
+                collect_expression_names(&argument.value, names);
+            }
+        }
+        AstExpressionKind::Async { expression, .. }
+        | AstExpressionKind::Await { expression }
+        | AstExpressionKind::Unary {
+            operand: expression,
+            ..
+        } => collect_expression_names(expression, names),
+        AstExpressionKind::Fallback { value, fallback }
+        | AstExpressionKind::Binary {
+            left: value,
+            right: fallback,
+            ..
+        } => {
+            collect_expression_names(value, names);
+            collect_expression_names(fallback, names);
+        }
+        AstExpressionKind::Throw { error } => collect_expression_names(error, names),
+        AstExpressionKind::Literal(_) => {}
     }
 }
 
@@ -8171,6 +8667,13 @@ fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
+    if matches!(annotation.kind, severian_ast::TypeAnnotationKind::Function { .. }) {
+        return Err(Diagnostic::new(
+            "E000204",
+            "function types require semantic structural resolution",
+            Some(annotation.span),
+        ));
+    }
     if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
         let mut concrete = members
             .iter()
@@ -9209,6 +9712,36 @@ mod tests {
         }));
         let float = context.types.resolve_name("float").unwrap();
         assert_eq!(to_float.result.ty, float);
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn callable_parameters_specialize_functions_and_lambdas_with_snapshot_captures() {
+        let source = "def add(a: int, b: int) -> int:\n    return a + b\ndef apply(op: (int, int) -> int, left: int, right: int) -> int:\n    return op(left, right)\ntest:\n    assert(apply(add, 20, 22) == 42)\n    offset := 3\n    operation = lambda value, unused: value + offset + unused\n    offset = 10\n    assert(apply(operation, 4, 0) == 7)\n";
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("lambda.sev", source);
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "lambda",
+            },
+        )
+        .unwrap();
+        let module = &program.modules[0];
+        let apply = module
+            .functions
+            .iter()
+            .find(|function| function.name == "apply")
+            .unwrap();
+        assert!(apply.body.is_none(), "higher-order body should be specialized");
+        assert!(module
+            .classes
+            .iter()
+            .any(|class| class.name.starts_with("lambda#") && class.fields.len() == 1));
         severian_mir::build(&program).unwrap();
     }
 

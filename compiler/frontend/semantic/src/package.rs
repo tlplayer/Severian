@@ -453,6 +453,14 @@ fn resolve_package_type(
     classes: &[PackageClass],
     lists: &[PackageList],
 ) -> Result<TypeId, Diagnostic> {
+    if let TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
+        let parameters = parameters
+            .iter()
+            .map(|parameter| resolve_package_type(types, parameter, module, classes, lists))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = resolve_package_type(types, result, module, classes, lists)?;
+        return Ok(crate::function_type_id(&parameters, result));
+    }
     if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
         let mut success = Vec::new();
         let mut errors = Vec::new();
@@ -1079,6 +1087,11 @@ fn type_key(annotation: &TypeAnnotation) -> String {
                 types.iter().map(type_key).collect::<Vec<_>>().join("|")
             )
         }
+        TypeAnnotationKind::Function { parameters, result } => format!(
+            "({})->{}",
+            parameters.iter().map(type_key).collect::<Vec<_>>().join(","),
+            type_key(result)
+        ),
     }
 }
 

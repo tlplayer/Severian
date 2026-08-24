@@ -344,6 +344,16 @@ fn substitute_type(
             },
             span: annotation.span,
         },
+        TypeAnnotationKind::Function { parameters, result } => TypeAnnotation {
+            kind: TypeAnnotationKind::Function {
+                parameters: parameters
+                    .iter()
+                    .map(|parameter| substitute_type(parameter, substitutions))
+                    .collect(),
+                result: Box::new(substitute_type(result, substitutions)),
+            },
+            span: annotation.span,
+        },
         TypeAnnotationKind::Union(members) => TypeAnnotation {
             kind: TypeAnnotationKind::Union(
                 members

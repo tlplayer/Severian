@@ -407,6 +407,31 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_function_types_and_lambda_expressions_distinctly() {
+        let source = SourceFile::virtual_source(
+            "callables.sev",
+            "def apply(op: (int, int) -> int, left: int, right: int) -> int:\n    return op(left, right)\noperation = lambda value, unused: value + unused\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert!(matches!(
+            &function.parameters[0].annotation.kind,
+            severian_ast::TypeAnnotationKind::Function { parameters, result }
+                if parameters.len() == 2 && result.simple_name() == Some("int")
+        ));
+        let severian_ast::Item::Binding(binding) = &module.items[1] else {
+            panic!("expected binding")
+        };
+        assert!(matches!(
+            &binding.value.kind,
+            severian_ast::ExpressionKind::Lambda { parameters, .. }
+                if parameters == &["value", "unused"]
+        ));
+    }
+
+    #[test]
     fn generic_bounds_and_with_constraints_share_one_ast() {
         let source = SourceFile::virtual_source(
             "constraints.sev",

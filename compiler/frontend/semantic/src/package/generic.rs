@@ -194,6 +194,14 @@ fn validate_generic_expression(
             validate_generic_expression(fallback, names, function, index, types)?;
             Ok(None)
         }
+        Expression::Lambda { parameters, body } => {
+            let mut lambda_names = names.clone();
+            for parameter in parameters {
+                lambda_names.remove(parameter);
+            }
+            validate_generic_expression(body, &lambda_names, function, index, types)?;
+            Ok(None)
+        }
         Expression::Member { object, .. } => {
             validate_generic_expression(object, names, function, index, types)
         }
@@ -1243,6 +1251,16 @@ fn visit_expression_for_specializations(
                 specializations,
             )?;
         }
+        severian_ast::ExpressionKind::Lambda { body, .. } => {
+            visit_expression_for_specializations(
+                module,
+                body,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+        }
         severian_ast::ExpressionKind::Literal(_) | severian_ast::ExpressionKind::Name(_) => {}
     }
     Ok(())
@@ -1456,6 +1474,13 @@ fn specialize_annotation(
                 .iter()
                 .map(|argument| specialize_annotation(argument, substitution))
                 .collect(),
+        },
+        TypeAnnotationKind::Function { parameters, result } => TypeAnnotationKind::Function {
+            parameters: parameters
+                .iter()
+                .map(|parameter| specialize_annotation(parameter, substitution))
+                .collect(),
+            result: Box::new(specialize_annotation(result, substitution)),
         },
         TypeAnnotationKind::Union(types) => TypeAnnotationKind::Union(
             types

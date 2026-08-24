@@ -92,6 +92,10 @@ pub enum ExpressionKind {
         cases: Vec<MockCase>,
         fallback: Box<Expression>,
     },
+    Lambda {
+        parameters: Vec<String>,
+        body: Box<Expression>,
+    },
     Tuple(Vec<Expression>),
     Name(String),
     Member {

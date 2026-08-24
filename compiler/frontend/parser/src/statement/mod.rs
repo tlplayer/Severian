@@ -2265,6 +2265,27 @@ impl Parser<'_> {
             TokenKind::Identifier(value) if value == "None" => {
                 ExpressionKind::Literal(Literal::None)
             }
+            TokenKind::Identifier(value) if value == "lambda" => {
+                let mut parameters = Vec::new();
+                if !self.at(&TokenKind::Colon) {
+                    loop {
+                        parameters.push(self.identifier("expected a lambda parameter")?.0);
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::Colon, "expected `:` after lambda parameters")?;
+                let body = self.expression(0)?;
+                let end = body.span.end;
+                return Ok(Expression {
+                    kind: ExpressionKind::Lambda {
+                        parameters,
+                        body: Box::new(body),
+                    },
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
+            }
             TokenKind::Identifier(name) => ExpressionKind::Name(name),
             TokenKind::LeftBracket => {
                 let mut values = Vec::new();
@@ -2425,6 +2446,17 @@ impl Parser<'_> {
                 }
             }
             let close = self.expect(&TokenKind::RightParen, "expected `)` after tuple type")?;
+            if self.take(&TokenKind::Arrow).is_some() {
+                let result = self.type_annotation()?;
+                let end = result.span.end;
+                return Ok(TypeAnnotation {
+                    kind: TypeAnnotationKind::Function {
+                        parameters: elements,
+                        result: Box::new(result),
+                    },
+                    span: Span::new(open.span.source, open.span.start, end),
+                });
+            }
             return Ok(TypeAnnotation::named(
                 "tuple",
                 elements,
@@ -2772,6 +2804,10 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
                 expression_mentions(&case.call, expected)
                     || expression_mentions(&case.result, expected)
             }) || expression_mentions(fallback, expected)
+        }
+        ExpressionKind::Lambda { parameters, body } => {
+            !parameters.iter().any(|parameter| parameter == expected)
+                && expression_mentions(body, expected)
         }
         ExpressionKind::Member { object, .. } => expression_mentions(object, expected),
         ExpressionKind::Index { object, index } => {

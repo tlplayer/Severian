@@ -139,6 +139,10 @@ pub enum TypeAnnotationKind {
         name: String,
         arguments: Vec<TypeAnnotation>,
     },
+    Function {
+        parameters: Vec<TypeAnnotation>,
+        result: Box<TypeAnnotation>,
+    },
     Union(Vec<TypeAnnotation>),
 }
 
@@ -163,7 +167,7 @@ impl TypeAnnotation {
     pub fn named_parts(&self) -> Option<(&str, &[Self])> {
         match &self.kind {
             TypeAnnotationKind::Named { name, arguments } => Some((name, arguments)),
-            TypeAnnotationKind::Union(_) => None,
+            TypeAnnotationKind::Function { .. } | TypeAnnotationKind::Union(_) => None,
         }
     }
 }
