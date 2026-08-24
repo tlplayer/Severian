@@ -32,6 +32,10 @@ const char *__sev_string_from_float(double value) {
     return sev_conversion_buffer;
 }
 
+double __sev_float_from_string(const char *value) {
+    return strtod(value, NULL);
+}
+
 const char *__sev_string_from_bool(_Bool value) {
     return value ? "true" : "false";
 }

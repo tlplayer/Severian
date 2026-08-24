@@ -240,7 +240,27 @@ pub fn analyze_package_with_context(
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     parameter_defaults: signature.parameter_defaults.clone(),
+                    parameter_unions: signature
+                        .parameters
+                        .iter()
+                        .map(|annotation| {
+                            resolve_package_union_members(
+                                &universal.types,
+                                annotation,
+                                definition.module,
+                                &package_classes,
+                                &package_lists,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
                     result: resolve_package_type(
+                        &universal.types,
+                        &signature.result,
+                        definition.module,
+                        &package_classes,
+                        &package_lists,
+                    )?,
+                    result_union: resolve_package_union_members(
                         &universal.types,
                         &signature.result,
                         definition.module,
@@ -442,15 +462,16 @@ fn resolve_package_type(
             }
             let ty = resolve_package_type(types, member, module, classes, lists)?;
             let source_error = member.simple_name().is_some_and(|name| {
-                classes.iter().any(|class| {
-                    class.module == module
-                        && class.declaration.name == name
-                        && class
-                            .declaration
-                            .traits
-                            .iter()
-                            .any(|implemented| implemented.simple_name() == Some("Error"))
-                })
+                name.ends_with("Error")
+                    || classes.iter().any(|class| {
+                        class.module == module
+                            && class.declaration.name == name
+                            && class
+                                .declaration
+                                .traits
+                                .iter()
+                                .any(|implemented| implemented.simple_name() == Some("Error"))
+                    })
             });
             if types.resolve_name("Error") == Some(ty) || source_error {
                 errors.push(ty);
@@ -465,8 +486,16 @@ fn resolve_package_type(
         if let ([success], [error]) = (success.as_slice(), errors.as_slice()) {
             return Ok(crate::fallible_type_id(*success, *error));
         }
-        if errors.is_empty() && success.len() == 1 {
-            return Ok(success[0]);
+        if errors.is_empty() {
+            return match success.as_slice() {
+                [success] => Ok(*success),
+                [_, _, ..] => Ok(crate::union_type_id(&success)),
+                [] => Err(Diagnostic::new(
+                    "E000204",
+                    "a union must contain at least one concrete type",
+                    Some(annotation.span),
+                )),
+            };
         }
         return Err(Diagnostic::new(
             "E000204",
@@ -501,6 +530,44 @@ fn resolve_package_type(
         }
     }
     crate::resolve_type_annotation(types, annotation)
+}
+
+fn resolve_package_union_members(
+    types: &severian_universal::TypeContext,
+    annotation: &TypeAnnotation,
+    module: ModuleId,
+    classes: &[PackageClass],
+    lists: &[PackageList],
+) -> Result<Option<Vec<TypeId>>, Diagnostic> {
+    let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind else {
+        return Ok(None);
+    };
+    let mut resolved = Vec::new();
+    for member in members {
+        if matches!(member.simple_name(), Some("None" | "absent")) {
+            continue;
+        }
+        let ty = resolve_package_type(types, member, module, classes, lists)?;
+        let source_error = member.simple_name().is_some_and(|name| {
+            name.ends_with("Error")
+                || classes.iter().any(|class| {
+                    class.module == module
+                        && class.declaration.name == name
+                        && class
+                            .declaration
+                            .traits
+                            .iter()
+                            .any(|implemented| implemented.simple_name() == Some("Error"))
+                })
+        });
+        if types.resolve_name("Error") == Some(ty) || source_error {
+            return Ok(None);
+        }
+        resolved.push(ty);
+    }
+    resolved.sort();
+    resolved.dedup();
+    Ok((resolved.len() > 1).then_some(resolved))
 }
 
 fn collect_package_lists(

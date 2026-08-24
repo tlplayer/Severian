@@ -64,6 +64,26 @@ fn package_signatures_preserve_named_parameters_and_defaults() {
 }
 
 #[test]
+fn imported_union_parameters_preserve_members_and_accept_injections() {
+    let root = temporary();
+    std::fs::write(
+        root.join("convert.sev"),
+        "def to_float(value: string | int | float) -> float:\n    return float(value)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"convert.sev\" as convert\ndef selected() -> float:\n    return convert.to_float(\"4.5\") + convert.to_float(4) + convert.to_float(4.5)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_classes_and_list_results_keep_package_wide_types() {
     let root = temporary();
     std::fs::write(

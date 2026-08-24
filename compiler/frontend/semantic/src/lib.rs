@@ -70,7 +70,9 @@ pub(crate) struct PackageFunction {
     pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeId>,
     pub parameter_defaults: Vec<Option<AstExpression>>,
+    pub parameter_unions: Vec<Option<Vec<TypeId>>>,
     pub result: TypeId,
+    pub result_union: Option<Vec<TypeId>>,
     pub specificity: u8,
 }
 
@@ -160,6 +162,7 @@ pub(crate) fn analyze_with_package_functions(
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
         tuple_elements: BTreeMap::new(),
+        union_types: BTreeMap::new(),
         fallible_types: BTreeMap::new(),
         error_types: BTreeSet::new(),
         preserve_error_depth: 0,
@@ -175,6 +178,14 @@ pub(crate) fn analyze_with_package_functions(
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
     analyzer.install_enums(ast)?;
     for function in visible_functions {
+        for members in function
+            .parameter_unions
+            .iter()
+            .chain(std::iter::once(&function.result_union))
+            .flatten()
+        {
+            analyzer.instantiate_union_type(members);
+        }
         analyzer
             .functions
             .entry(function.lookup.clone())
@@ -717,6 +728,7 @@ struct Analyzer<'a> {
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
     tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
+    union_types: BTreeMap<TypeId, Vec<TypeId>>,
     fallible_types: BTreeMap<TypeId, FallibleType>,
     error_types: BTreeSet<TypeId>,
     preserve_error_depth: usize,
@@ -882,10 +894,7 @@ impl Analyzer<'_> {
                 },
             );
         }
-        let integer = self
-            .types
-            .resolve_name("int")
-            .expect("bootstrap defines int");
+        let integer = self.tag_type();
         for declaration in declarations {
             let ty = self.enums[&declaration.name].ty;
             let mut fields = vec![HirClassFieldDeclaration {
@@ -1070,6 +1079,7 @@ impl Analyzer<'_> {
                 .traits
                 .iter()
                 .any(|implemented| implemented.simple_name() == Some("Error"))
+                || package_class.declaration.name.ends_with("Error")
             {
                 self.error_types.insert(package_class.ty);
             }
@@ -1115,8 +1125,16 @@ impl Analyzer<'_> {
             if let ([success], [error]) = (success.as_slice(), errors.as_slice()) {
                 return Ok(self.instantiate_fallible_type(*success, *error));
             }
-            if errors.is_empty() && success.len() == 1 {
-                return Ok(success[0]);
+            if errors.is_empty() {
+                return match success.as_slice() {
+                    [success] => Ok(*success),
+                    [_, _, ..] => Ok(self.instantiate_union_type(&success)),
+                    [] => Err(Diagnostic::new(
+                        "E000204",
+                        "a union must contain at least one concrete type",
+                        Some(annotation.span),
+                    )),
+                };
             }
             return Err(Diagnostic::new(
                 "E000204",
@@ -2056,10 +2074,7 @@ impl Analyzer<'_> {
             .find(|instance| instance.ty == subject.type_id)
             .cloned()
             .expect("caller selected an enum subject");
-        let integer = self
-            .types
-            .resolve_name("int")
-            .expect("bootstrap defines int");
+        let integer = self.tag_type();
         let boolean = self
             .types
             .resolve_name("bool")
@@ -3736,11 +3751,20 @@ impl Analyzer<'_> {
                             .iter()
                             .zip(&signature.parameters)
                             .map(|(argument, parameter)| {
-                                expression_conversion_rank(
-                                    self.types,
-                                    argument,
-                                    parameter.type_id,
-                                )
+                                if matches!(
+                                    argument.kind,
+                                    ExpressionKind::Aggregate { class, .. }
+                                        if class == parameter.type_id
+                                            && self.union_types.contains_key(&class)
+                                ) {
+                                    Some(ConversionRank::General)
+                                } else {
+                                    expression_conversion_rank(
+                                        self.types,
+                                        argument,
+                                        parameter.type_id,
+                                    )
+                                }
                             })
                             .collect::<Option<Vec<_>>>();
                         let Some(conversions) = conversions else {
@@ -4237,6 +4261,13 @@ impl Analyzer<'_> {
         })
     }
 
+    fn tag_type(&self) -> TypeId {
+        ["int", "u32", "i32", "u64", "i64", "usize"]
+            .into_iter()
+            .find_map(|name| self.types.resolve_name(name))
+            .expect("a runtime union requires an integer representation type")
+    }
+
     fn coerce(
         &mut self,
         expression: Expression,
@@ -4245,6 +4276,32 @@ impl Analyzer<'_> {
     ) -> Result<Expression, Diagnostic> {
         if expression.type_id == expected {
             return Ok(expression);
+        }
+        if let Some(members) = self.union_types.get(&expected).cloned() {
+            if !explicit && members.contains(&expression.type_id) {
+                return self.union_expression(expected, &members, expression);
+            }
+        }
+        if explicit {
+            if let Some(members) = self.union_types.get(&expression.type_id).cloned() {
+                return self.convert_union_expression(expression, &members, expected);
+            }
+            if self.types.resolve_name("string") == Some(expression.type_id)
+                && matches!(
+                    self.types.definition(expected).map(|definition| definition.name.as_str()),
+                    Some("float" | "f64")
+                )
+            {
+                let string = expression.type_id;
+                let span = expression.span;
+                return Ok(self.runtime_call(
+                    "__sev_float_from_string",
+                    &[string],
+                    expected,
+                    vec![expression],
+                    span,
+                ));
+            }
         }
         let numeric = self.numeric_primitive(expression.type_id) && self.numeric_primitive(expected);
         if !numeric {
@@ -4771,6 +4828,145 @@ impl Analyzer<'_> {
             ],
         });
         ty
+    }
+
+    fn instantiate_union_type(&mut self, members: &[TypeId]) -> TypeId {
+        let mut members = members.to_vec();
+        members.sort();
+        members.dedup();
+        let ty = union_type_id(&members);
+        if self.union_types.contains_key(&ty) {
+            return ty;
+        }
+        let integer = self.tag_type();
+        let mut fields = vec![HirClassFieldDeclaration {
+            name: "__tag".into(),
+            ty: integer,
+        }];
+        fields.extend(
+            members
+                .iter()
+                .enumerate()
+                .map(|(index, member)| HirClassFieldDeclaration {
+                    name: format!("__value_{index}"),
+                    ty: *member,
+                }),
+        );
+        self.union_types.insert(ty, members.clone());
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!(
+                "union[{}]",
+                members
+                    .iter()
+                    .map(|member| format!("type#{}", member.0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            fields,
+        });
+        ty
+    }
+
+    fn union_expression(
+        &mut self,
+        union: TypeId,
+        members: &[TypeId],
+        value: Expression,
+    ) -> Result<Expression, Diagnostic> {
+        let Some(tag) = members.iter().position(|member| *member == value.type_id) else {
+            return Err(semantic_error(
+                "expression does not satisfy the expected union type".into(),
+                value.span,
+            ));
+        };
+        let span = value.span;
+        let integer = self.tag_type();
+        let mut fields = vec![self.integer_expression(&tag.to_string(), integer, span)];
+        for (index, member) in members.iter().enumerate() {
+            if index == tag {
+                fields.push(value.clone());
+            } else {
+                fields.push(self.default_expression(*member, span)?);
+            }
+        }
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: union,
+            kind: ExpressionKind::Aggregate {
+                class: union,
+                fields,
+            },
+            span,
+        })
+    }
+
+    fn convert_union_expression(
+        &mut self,
+        union: Expression,
+        members: &[TypeId],
+        expected: TypeId,
+    ) -> Result<Expression, Diagnostic> {
+        let span = union.span;
+        let integer = self.tag_type();
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let mut selected = None;
+        for (index, member) in members.iter().copied().enumerate().rev() {
+            let field = Expression {
+                id: self.next_id(),
+                type_id: member,
+                kind: ExpressionKind::Field {
+                    object: Box::new(union.clone()),
+                    index: index as u32 + 1,
+                },
+                span,
+            };
+            let value = self.coerce(field, expected, true)?;
+            let Some(fallback) = selected else {
+                selected = Some(value);
+                continue;
+            };
+            let tag = Expression {
+                id: self.next_id(),
+                type_id: integer,
+                kind: ExpressionKind::Field {
+                    object: Box::new(union.clone()),
+                    index: 0,
+                },
+                span,
+            };
+            let ordinal = self.integer_expression(&index.to_string(), integer, span);
+            let condition = Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Equal,
+                    left: Box::new(tag),
+                    right: Box::new(ordinal),
+                },
+                span,
+            };
+            selected = Some(Expression {
+                id: self.next_id(),
+                type_id: expected,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(value),
+                    fallback: Box::new(fallback),
+                },
+                span,
+            });
+        }
+        selected.ok_or_else(|| {
+            Diagnostic::new(
+                "E000204",
+                "cannot convert an empty union",
+                Some(span),
+            )
+        })
     }
 
     fn channel_constructor(
@@ -7066,6 +7262,16 @@ pub(crate) fn fallible_type_id(success: TypeId, error: TypeId) -> TypeId {
     TypeId(0x4000_0000 | (hash & 0x3fff_ffff))
 }
 
+pub(crate) fn union_type_id(members: &[TypeId]) -> TypeId {
+    let mut members = members.to_vec();
+    members.sort();
+    members.dedup();
+    let hash = members.iter().fold(0x811c_9dc5u32, |hash, member| {
+        (hash ^ member.0).wrapping_mul(0x0100_0193)
+    });
+    TypeId(0x2000_0000 | (hash & 0x1fff_ffff))
+}
+
 fn contract_failure_expression(
     failure: Option<&AstExpression>,
 ) -> Option<&AstExpression> {
@@ -8974,6 +9180,64 @@ mod tests {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn ordinary_union_parameters_lower_to_tagged_values_and_dispatch_conversions() {
+        let source = "def to_float(value: string | int | float) -> float:\n    return float(value)\ndef selected() -> float:\n    return to_float(\"4.5\") + to_float(4) + to_float(4.5)\n";
+        let (program, context) = analyze_source(source);
+        let module = &program.modules[0];
+        let to_float = module
+            .functions
+            .iter()
+            .find(|function| function.name == "to_float")
+            .unwrap();
+        let union = to_float.parameters[0].contract.ty;
+        assert!(module.classes.iter().any(|class| {
+            class.id == union
+                && class.fields.len() == 4
+                && class.fields[0].name == "__tag"
+        }));
+        assert!(to_float.body.as_ref().unwrap().statements.iter().any(|statement| {
+            matches!(
+                statement,
+                Statement::Return(Some(Expression {
+                    kind: ExpressionKind::Fallback { .. },
+                    ..
+                }))
+            )
+        }));
+        let float = context.types.resolve_name("float").unwrap();
+        assert_eq!(to_float.result.ty, float);
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn concrete_overload_ranks_ahead_of_union_injection() {
+        let source = "def choose(value: int) -> int:\n    return 1\ndef choose(value: int | string) -> int:\n    return 2\ndef selected() -> int:\n    return choose(4)\n";
+        let (program, _) = analyze_source(source);
+        let module = &program.modules[0];
+        let concrete = module
+            .functions
+            .iter()
+            .find(|function| function.name == "choose")
+            .unwrap()
+            .definition;
+        let selected = module
+            .functions
+            .iter()
+            .find(|function| function.name == "selected")
+            .unwrap();
+        assert!(matches!(
+            selected.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Return(Some(Expression {
+                kind: ExpressionKind::Call {
+                    callee: severian_hir::Callee::Direct { function, .. },
+                    ..
+                },
+                ..
+            }))] if *function == concrete
+        ));
     }
 
     #[test]
