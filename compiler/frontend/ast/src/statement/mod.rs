@@ -56,6 +56,12 @@ pub enum Statement {
         catch_body: Vec<Statement>,
         span: Span,
     },
+    FallibleElse {
+        value: Expression,
+        error_binding: String,
+        body: Vec<Statement>,
+        span: Span,
+    },
     If {
         condition: Expression,
         then_block: Vec<Statement>,

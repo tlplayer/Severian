@@ -1507,6 +1507,110 @@ impl Analyzer<'_> {
                     span: *span,
                 })
             }
+            AstStatement::FallibleElse {
+                value,
+                error_binding,
+                body,
+                span,
+            } => {
+                self.preserve_error_depth += 1;
+                let result = self.expression(value, None);
+                self.preserve_error_depth -= 1;
+                let result = result?;
+                let Some(fallible) = self.fallible_types.get(&result.type_id).copied() else {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "`else error:` requires a fallible result",
+                        Some(value.span),
+                    ));
+                };
+                let result_binding = self.new_binding_id();
+                let result_variable = severian_hir::VariableId(result_binding.0);
+                bindings.push(Binding {
+                    id: result_binding,
+                    variable: result_variable,
+                    type_id: result.type_id,
+                    value: result,
+                    mutable: false,
+                    preserve_error: true,
+                    span: *span,
+                });
+                let result_value = Expression {
+                    id: self.next_id(),
+                    type_id: fallible_type_id(fallible.success, fallible.error),
+                    kind: ExpressionKind::Binding(result_binding),
+                    span: *span,
+                };
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let ok = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(result_value.clone()),
+                        index: 0,
+                    },
+                    span: *span,
+                };
+                let failed = Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Unary {
+                        operator: UnaryOperator::Not,
+                        operand: Box::new(ok),
+                    },
+                    span: *span,
+                };
+                let error = Expression {
+                    id: self.next_id(),
+                    type_id: fallible.error,
+                    kind: ExpressionKind::Field {
+                        object: Box::new(result_value),
+                        index: 2,
+                    },
+                    span: *span,
+                };
+                let id = self.new_binding_id();
+                let variable = severian_hir::VariableId(id.0);
+                bindings.push(Binding {
+                    id,
+                    variable,
+                    type_id: fallible.error,
+                    value: error,
+                    mutable: false,
+                    preserve_error: false,
+                    span: *span,
+                });
+                let outer_names = self.names.clone();
+                let outer_declarations = self.declarations.clone();
+                if !self.declarations.insert(error_binding.clone()) {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("binding `{error_binding}` is declared more than once"),
+                        Some(*span),
+                    ));
+                }
+                self.names.insert(
+                    error_binding.clone(),
+                    (id, variable, fallible.error),
+                );
+                let handler = self.block(body, bindings, result_type)?;
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                Ok(Statement::Sequence(Block {
+                    statements: vec![
+                        Statement::Binding(result_binding),
+                        Statement::Binding(id),
+                        Statement::If {
+                            condition: failed,
+                            then_block: handler,
+                            else_block: Block::default(),
+                        },
+                    ],
+                }))
+            }
             AstStatement::Unsafe { body, .. } => {
                 self.unsafe_depth += 1;
                 let lowered = self.block(body, bindings, result_type);
@@ -2663,15 +2767,47 @@ impl Analyzer<'_> {
             .types
             .resolve_name("bool")
             .expect("bootstrap defines bool");
+        let condition = self.expression(&contract.condition, Some(boolean))?;
+        if let Some(failure) = &contract.failure {
+            let error = self.expression(failure, None)?;
+            if self.is_error_type(error.type_id) {
+                let unit = self
+                    .types
+                    .resolve_name("unit")
+                    .expect("bootstrap defines unit");
+                let success = Expression {
+                    id: self.next_id(),
+                    type_id: unit,
+                    kind: ExpressionKind::Literal(LiteralValue::Unit),
+                    span: contract.span,
+                };
+                let failure = Expression {
+                    id: self.next_id(),
+                    type_id: unit,
+                    kind: ExpressionKind::Throw(Box::new(error)),
+                    span: contract.span,
+                };
+                return Ok(Statement::Expression(Expression {
+                    id: self.next_id(),
+                    type_id: unit,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(success),
+                        fallback: Box::new(failure),
+                    },
+                    span: contract.span,
+                }));
+            }
+        }
         let string = self
             .types
             .resolve_name("string")
             .expect("bootstrap defines string");
-        let message = contract_failure_expression(contract.failure.as_ref()).map(|message| {
-            self.expression(message, Some(string))
-        }).transpose()?;
+        let message = contract_failure_expression(contract.failure.as_ref())
+            .map(|message| self.expression(message, Some(string)))
+            .transpose()?;
         Ok(Statement::Assert {
-            condition: self.expression(&contract.condition, Some(boolean))?,
+            condition,
             message,
             span: contract.span,
             condition_span: contract.condition.span,
@@ -4086,6 +4222,37 @@ impl Analyzer<'_> {
                         expected,
                         ast.span,
                     );
+                }
+                if matches!(operator, AstBinaryOperator::Equal | AstBinaryOperator::NotEqual) {
+                    if let AstExpressionKind::Name(type_name) = &right.kind {
+                        let target = self
+                            .class_instances
+                            .get(&(type_name.clone(), Vec::new()))
+                            .map(|instance| instance.ty)
+                            .or_else(|| self.types.resolve_name(type_name));
+                        if let Some(target) = target.filter(|target| self.is_error_type(*target)) {
+                            let left = self.expression(left, None)?;
+                            if self.is_error_type(left.type_id) {
+                                let boolean = self
+                                    .types
+                                    .resolve_name("bool")
+                                    .expect("bootstrap defines bool");
+                                let equal = left.type_id == target;
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Literal(LiteralValue::Boolean(
+                                        if *operator == AstBinaryOperator::Equal {
+                                            equal
+                                        } else {
+                                            !equal
+                                        },
+                                    )),
+                                    span: ast.span,
+                                });
+                            }
+                        }
+                    }
                 }
                 if *operator == AstBinaryOperator::Identity {
                     if let AstExpressionKind::Name(type_name) = &right.kind {
@@ -8864,6 +9031,7 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             | AstStatement::Assert { .. }
             | AstStatement::Unsafe { .. }
             | AstStatement::Try { .. }
+            | AstStatement::FallibleElse { .. }
             | AstStatement::If { .. }
             | AstStatement::While { .. }
             | AstStatement::For { .. }
@@ -9296,13 +9464,13 @@ mod tests {
     }
 
     #[test]
-    fn function_contracts_become_entry_and_exit_assertions() {
+    fn function_contracts_lower_messages_to_assertions_and_errors_to_throws() {
         let (program, _) = analyze_source(
             "def bounded(value: int) -> int with { value >= 0, defer value <= 10 -> Error(\"too large\") }:\n    return value\n",
         );
         let body = program.modules[0].functions[0].body.as_ref().unwrap();
         assert!(matches!(body.statements[0], Statement::Assert { .. }));
-        assert!(matches!(body.statements[1], Statement::Assert { .. }));
+        assert!(matches!(body.statements[1], Statement::Expression(_)));
         assert!(matches!(body.statements[2], Statement::Return(_)));
         let mir = severian_mir::build(&program).unwrap();
         let statements = mir.functions[0]
@@ -9316,8 +9484,38 @@ mod tests {
             statements
                 .filter(|statement| matches!(statement, severian_mir::CfgStatement::Assert { .. }))
                 .count(),
-            2
+            1
         );
+    }
+
+    #[test]
+    fn fallible_else_binds_the_contract_error() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "fallible.sev",
+            "def divide(value: f64, divisor: f64) -> f64 | Error with { divisor != 0.0 -> Error(\"zero\") }:\n    return value / divisor\ntest:\n    divide(1, 0) else error:\n        assert(error == Error)\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "fallible",
+            },
+        )
+        .unwrap();
+        let test = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name.contains("test"))
+            .unwrap();
+        assert!(matches!(
+            test.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Sequence(Block { statements })]
+                if matches!(statements.as_slice(), [Statement::Binding(_), Statement::Binding(_), Statement::If { .. }])
+        ));
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

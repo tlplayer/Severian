@@ -186,6 +186,7 @@ impl Parser<'_> {
                     | Statement::Assert { .. }
                     | Statement::Unsafe { .. }
                     | Statement::Try { .. }
+                    | Statement::FallibleElse { .. }
                     | Statement::If { .. }
                     | Statement::While { .. }
                     | Statement::For { .. }
@@ -626,7 +627,6 @@ impl Parser<'_> {
             } else {
                 let statement = self.block_statement()?;
                 if owner == "test" && self.take(&TokenKind::Colon).is_some() {
-                    statements.push(statement);
                     let mut lookahead = self.cursor;
                     while self
                         .tokens
@@ -640,8 +640,32 @@ impl Parser<'_> {
                         .get(lookahead)
                         .is_some_and(|token| token.kind == TokenKind::Indent)
                     {
-                        let (checks, _) = self.indented_block("test step")?;
-                        statements.extend(checks);
+                        let (checks, end) = self.indented_block("test step")?;
+                        if let Statement::Expression(Expression {
+                            kind: ExpressionKind::Fallback { value, fallback },
+                            span,
+                        }) = statement
+                        {
+                            if let ExpressionKind::Name(error_binding) = fallback.kind {
+                                statements.push(Statement::FallibleElse {
+                                    value: *value,
+                                    error_binding,
+                                    body: checks,
+                                    span: Span::new(span.source, span.start, end),
+                                });
+                            } else {
+                                statements.push(Statement::Expression(Expression {
+                                    kind: ExpressionKind::Fallback { value, fallback },
+                                    span,
+                                }));
+                                statements.extend(checks);
+                            }
+                        } else {
+                            statements.push(statement);
+                            statements.extend(checks);
+                        }
+                    } else {
+                        statements.push(statement);
                     }
                     self.statement_separators();
                     continue;
@@ -809,7 +833,32 @@ impl Parser<'_> {
             let span = self.next().span;
             return Ok(Statement::Continue { span });
         }
-        self.statement()
+        let statement = self.statement()?;
+        if !self.at(&TokenKind::Colon) {
+            return Ok(statement);
+        }
+        match statement {
+            Statement::Expression(Expression {
+                kind: ExpressionKind::Fallback { value, fallback },
+                span,
+            }) => {
+                if let ExpressionKind::Name(error_binding) = &fallback.kind {
+                    self.next();
+                    let (body, end) = self.indented_block("fallible else")?;
+                    return Ok(Statement::FallibleElse {
+                        value: *value,
+                        error_binding: error_binding.clone(),
+                        body,
+                        span: Span::new(span.source, span.start, end),
+                    });
+                }
+                Ok(Statement::Expression(Expression {
+                    kind: ExpressionKind::Fallback { value, fallback },
+                    span,
+                }))
+            }
+            statement => Ok(statement),
+        }
     }
 
     fn match_statement(&mut self) -> Result<Statement, Diagnostic> {

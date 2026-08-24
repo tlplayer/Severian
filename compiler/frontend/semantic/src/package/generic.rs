@@ -99,6 +99,23 @@ fn validate_generic_statements(
                     types,
                 )?;
             }
+            severian_ast::Statement::FallibleElse {
+                value,
+                error_binding,
+                body,
+                ..
+            } => {
+                validate_generic_expression(value, names, function, index, types)?;
+                let mut handler_names = names.clone();
+                handler_names.remove(error_binding);
+                validate_generic_statements(
+                    body,
+                    &mut handler_names,
+                    function,
+                    index,
+                    types,
+                )?;
+            }
             severian_ast::Statement::If {
                 condition,
                 then_block,
@@ -873,6 +890,24 @@ fn visit_statements_for_specializations(
                 visit_statements_for_specializations(
                     module,
                     catch_body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+            }
+            severian_ast::Statement::FallibleElse { value, body, .. } => {
+                visit_expression_for_specializations(
+                    module,
+                    value,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                visit_statements_for_specializations(
+                    module,
+                    body,
                     result,
                     &mut names.clone(),
                     index,

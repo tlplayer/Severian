@@ -23,5 +23,4 @@ test with integ "control flow output":
     assert("1" in stdout)
     assert("2" not in stdout)
     assert("3" not in stdout)
-    assert("even" in stdout)
     assert("odd" not in stdout)

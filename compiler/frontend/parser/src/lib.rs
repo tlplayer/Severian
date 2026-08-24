@@ -603,6 +603,26 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_fallible_else_handler_as_one_scoped_statement() {
+        let source = SourceFile::virtual_source(
+            "fallible.sev",
+            "test:\n    divide(1, 0) else error:\n        assert(error == DivideError)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        assert!(matches!(
+            test.body.as_slice(),
+            [severian_ast::Statement::FallibleElse {
+                error_binding,
+                body,
+                ..
+            }] if error_binding == "error" && body.len() == 1
+        ));
+    }
+
+    #[test]
     fn reports_multiple_syntax_errors_from_one_source() {
         let source = SourceFile::virtual_source(
             "invalid.sev",

@@ -84,6 +84,28 @@ fn imported_union_parameters_preserve_members_and_accept_injections() {
 }
 
 #[test]
+fn custom_contract_errors_flow_into_fallible_else_handlers() {
+    let root = temporary();
+    std::fs::write(
+        root.join("fallible.sev"),
+        "class DivideError: Error\n    message: string\ndef divide(value: f64, divisor: f64) -> f64 | DivideError with { divisor != 0.0 -> DivideError(\"zero\") }:\n    return value / divisor\ntest:\n    divide(1, 0) else error:\n        assert(error == DivideError)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("fallible.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package_with_context(
+        &graph,
+        &universal,
+        PackageAnalysisContext {
+            test_package: Some(graph.modules[0].package),
+        },
+    )
+    .unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_classes_and_list_results_keep_package_wide_types() {
     let root = temporary();
     std::fs::write(
