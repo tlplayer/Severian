@@ -345,7 +345,7 @@ struct BodyBuilder {
     current: BlockId,
     bindings: BTreeMap<severian_hir::BindingId, Place>,
     variables: BTreeMap<severian_hir::VariableId, Place>,
-    expressions: BTreeMap<severian_hir::HirId, Place>,
+    expressions: BTreeMap<(BlockId, severian_hir::HirId), Place>,
     entry_parameters: Vec<LocalId>,
     loops: Vec<LoopTargets>,
     catch_targets: Vec<BlockId>,
@@ -758,7 +758,7 @@ impl BodyBuilder {
     }
 
     fn expression(&mut self, expression: &severian_hir::Expression) -> Place {
-        if let Some(place) = self.expressions.get(&expression.id) {
+        if let Some(place) = self.expressions.get(&(self.current, expression.id)) {
             return place.clone();
         }
         self.current_span = Some(expression.span);
@@ -790,7 +790,8 @@ impl BodyBuilder {
                 locked: *locked,
             });
             self.current = continuation;
-            self.expressions.insert(expression.id, result.clone());
+            self.expressions
+                .insert((self.current, expression.id), result.clone());
             return result;
         }
         if let severian_hir::ExpressionKind::Await(task) = &expression.kind {
@@ -800,7 +801,8 @@ impl BodyBuilder {
             ));
             let task = Operand::Copy(self.expression(task));
             self.push(Statement::Assign(result.clone(), Rvalue::Await { task }));
-            self.expressions.insert(expression.id, result.clone());
+            self.expressions
+                .insert((self.current, expression.id), result.clone());
             return result;
         }
         let result = Place::local(self.local(expression.type_id, false, false));
@@ -983,7 +985,8 @@ impl BodyBuilder {
                 ));
             }
         }
-        self.expressions.insert(expression.id, result.clone());
+        self.expressions
+            .insert((self.current, expression.id), result.clone());
         result
     }
 
@@ -997,7 +1000,9 @@ impl BodyBuilder {
                 substitution: substitution.clone(),
             },
             HirCallee::FunctionValue(expression) => {
-                Callee::FunctionValue(Operand::Copy(self.expressions[expression].clone()))
+                Callee::FunctionValue(Operand::Copy(
+                    self.expressions[&(self.current, *expression)].clone(),
+                ))
             }
             HirCallee::Method {
                 implementation,
@@ -1005,7 +1010,7 @@ impl BodyBuilder {
                 substitution,
             } => Callee::Method {
                 implementation: *implementation,
-                receiver: Operand::Copy(self.expressions[receiver].clone()),
+                receiver: Operand::Copy(self.expressions[&(self.current, *receiver)].clone()),
                 substitution: substitution.clone(),
             },
             HirCallee::Constructor { type_def, variant } => Callee::Constructor {

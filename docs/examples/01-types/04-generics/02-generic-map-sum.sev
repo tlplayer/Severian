@@ -1,6 +1,6 @@
 trait Number:
-    zero() -> Self
-    add(other: Self) -> Self
+    def zero() -> Self
+    def add(other: Self) -> Self
 
 def sum_values[K: Hash + Equal, V: Number](Vs: map[K, V]) -> V:
     total := V.zero()

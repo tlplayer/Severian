@@ -53,7 +53,7 @@ class HookContext: Context
     function: string
     args: tuple
     result: int | None
-    error: Error | None
+    error: string | None
     duration: duration
 
 
@@ -84,19 +84,17 @@ class Metric: Monitor
             print("timer start:", context.function)
 
         without context:
-            print("duration:", context.duration)
+            print("timer duration:", context.duration)
 
 
 # Hooks compose top to bottom.
 @monitor_time
 @monitor_error
 def search(items: list[int], item: int) -> int:
-    if items[0] == item:
-        return items[0]
-    if items[1] == item:
-        return items[1]
-    if items[2] == item:
-        return items[2]
+    for i in items:
+        print(i)
+        if i == item:
+            return item
 
     throw Error("Failed to find item in items")
 
@@ -107,9 +105,11 @@ def main():
     print(result)
 
 
-test:
+test with integ:
     result = search([10, 20, 30], 10)
     assert(result == 10)
+    assert("timer start:" in stdout)
+    assert("timer duration:" in stdout)
 
 
 test:

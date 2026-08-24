@@ -189,6 +189,30 @@ fn uncalled_generic_declarations_are_indexed_without_forcing_a_body_instance() {
 }
 
 #[test]
+fn hooks_wrap_loop_returns_and_ownership_reaches_a_fixed_point() {
+    let root = temporary();
+    let source = root.join("hook-loop.sev");
+    std::fs::write(
+        &source,
+        "class HookContext:\n    function: string\n    result: int\n    error: string\ntrait Monitor:\n    @monitor\n    def monitor(context: HookContext) -> None with context\nclass Metric: Monitor\n    def monitor(context: HookContext) -> None with context:\n        with context:\n            print(\"enter\", context.function)\n        without context:\n            print(\"exit\", context.function)\n@monitor\ndef search(items: list[int], item: int) -> int:\n    for value in items:\n        if value == item:\n            return value\n    throw Error(\"missing\")\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    let search = typed.hir.modules[0]
+        .functions
+        .iter()
+        .find(|function| function.name == "search")
+        .unwrap();
+    let body = search.body.as_ref().unwrap();
+    assert!(matches!(body.statements[0], severian_hir::Statement::Binding(_)));
+    assert!(matches!(body.statements[1], severian_hir::Statement::FieldSet { .. }));
+    let mut mir = severian_mir::build(&typed.hir).unwrap();
+    severian_mir::run_required_pipeline(&mut mir, &universal).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn one_generic_definition_collects_multiple_ordered_instances() {
     let root = temporary();
     let source = root.join("instances.sev");

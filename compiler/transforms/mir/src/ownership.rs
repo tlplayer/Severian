@@ -168,8 +168,21 @@ fn solve(body: &CfgBody) -> OwnershipSolution {
             .collect(),
         ..OwnershipState::default()
     };
-    let mut inputs = BTreeMap::new();
-    let mut outputs = BTreeMap::new();
+    // Definite initialization is a must-property. Cyclic non-entry blocks
+    // therefore begin at the lattice top and monotonically lose locals as
+    // predecessor intersections become known. Starting them at the empty set
+    // lets loop backedges alternately add and remove initialization facts.
+    let initialized_top = body.locals.iter().map(|local| local.id).collect();
+    let top = OwnershipState {
+        initialized: initialized_top,
+        ..OwnershipState::default()
+    };
+    let mut inputs = reachable
+        .iter()
+        .copied()
+        .map(|block| (block, top.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut outputs = inputs.clone();
     inputs.insert(body.entry, entry);
     let mut queue = VecDeque::from_iter(reachable.iter().copied());
     let mut queued = reachable.clone();

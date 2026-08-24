@@ -101,6 +101,7 @@ pub(crate) fn analyze_with_package_functions(
     validate_class_declarations(ast)?;
     let namespace_methods = collect_trait_namespace_methods(ast)?;
     let namespace_operators = collect_trait_namespace_operators(ast)?;
+    let namespace_hooks = collect_trait_namespace_hooks(ast)?;
     let mut analyzer = Analyzer {
         types,
         names: BTreeMap::new(),
@@ -129,6 +130,7 @@ pub(crate) fn analyze_with_package_functions(
         function_specificity: BTreeMap::new(),
         namespace_methods,
         namespace_operators,
+        namespace_hooks,
         active_operator_namespaces: BTreeMap::new(),
         signatures: BTreeMap::new(),
         classes: ast
@@ -433,8 +435,9 @@ pub(crate) fn analyze_with_package_functions(
                 ),
             );
         }
-        let mut body = Block::default();
         let result_type = function.result.ty;
+        let (mut body, hooks) =
+            analyzer.lower_function_hooks(ast_function, &mut module.bindings, result_type)?;
         for contract in ast_function.contracts.iter().filter(|contract| !contract.deferred) {
             body.statements.push(analyzer.contract_assertion(contract)?);
         }
@@ -455,6 +458,22 @@ pub(crate) fn analyze_with_package_functions(
             insert_before_returns(&mut body, &deferred);
             if block_flow(ast_body) == ControlFlow::FallsThrough {
                 body.statements.extend(deferred);
+            }
+        }
+        if !hooks.is_empty() {
+            insert_hook_exits(&mut body, &hooks);
+            if block_flow(ast_body) == ControlFlow::FallsThrough {
+                for hook in hooks.iter().rev() {
+                    if let Some((field, duration)) = &hook.duration {
+                        body.statements.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field: *field,
+                            value: duration.clone(),
+                        });
+                    }
+                    body.statements
+                        .extend(hook.without_phase.statements.iter().cloned());
+                }
             }
         }
         if result_type != types.resolve_name("unit").expect("bootstrap defines unit")
@@ -575,6 +594,7 @@ struct Analyzer<'a> {
     function_specificity: BTreeMap<FunctionId, u8>,
     namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
     namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
+    namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
     active_operator_namespaces: BTreeMap<String, Vec<String>>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
@@ -606,6 +626,21 @@ struct NamespaceTraitOperator {
     trait_name: String,
     declaration: severian_ast::OperatorDeclaration,
     implementations: Vec<(String, severian_ast::OperatorImplementation)>,
+}
+
+#[derive(Debug, Clone)]
+struct NamespaceTraitHook {
+    trait_name: String,
+    implementations: Vec<(String, severian_ast::FunctionDeclaration)>,
+}
+
+#[derive(Debug, Clone)]
+struct LoweredHook {
+    context: BindingId,
+    result_field: Option<u32>,
+    error_field: Option<u32>,
+    duration: Option<(u32, Expression)>,
+    without_phase: Block,
 }
 
 #[derive(Debug, Clone)]
@@ -991,11 +1026,7 @@ impl Analyzer<'_> {
                         .statements
                         .push(Statement::Binding(self.binding(initializer, bindings)?));
                 }
-                let boolean = self
-                    .types
-                    .resolve_name("bool")
-                    .expect("bootstrap defines bool");
-                let condition = self.expression(condition, Some(boolean))?;
+                let condition = self.condition_expression(condition)?;
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
                 self.loop_depth += 1;
@@ -1476,11 +1507,7 @@ impl Analyzer<'_> {
                 else_block,
                 ..
             } => {
-                let boolean = self
-                    .types
-                    .resolve_name("bool")
-                    .expect("bootstrap defines bool");
-                let condition = self.expression(condition, Some(boolean))?;
+                let condition = self.condition_expression(condition)?;
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
                 let then_block = self.block(then_block, bindings, result_type)?;
@@ -1800,6 +1827,225 @@ impl Analyzer<'_> {
                 .push(self.statement(statement, bindings, result_type)?);
         }
         Ok(block)
+    }
+
+    fn condition_expression(
+        &mut self,
+        condition: &AstExpression,
+    ) -> Result<Expression, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        let string = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines string");
+        let value = self.expression(condition, None)?;
+        if value.type_id == boolean {
+            return Ok(value);
+        }
+        if value.type_id == string {
+            return Ok(self.runtime_call(
+                "__sev_string_is_present",
+                &[string],
+                boolean,
+                vec![value],
+                condition.span,
+            ));
+        }
+        self.coerce(value, boolean, false)
+    }
+
+    fn lower_function_hooks(
+        &mut self,
+        function: &severian_ast::FunctionDeclaration,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<(Block, Vec<LoweredHook>), Diagnostic> {
+        let mut entry = Block::default();
+        let mut lowered = Vec::new();
+        let unit = self
+            .types
+            .resolve_name("unit")
+            .expect("bootstrap defines unit");
+        for decorator in &function.decorators {
+            if !decorator.arguments.is_empty() {
+                continue;
+            }
+            let Some(hook) = self.namespace_hooks.get(&decorator.name).cloned() else {
+                continue;
+            };
+            let [(class_name, implementation)] = hook.implementations.as_slice() else {
+                let detail = if hook.implementations.is_empty() {
+                    "has no implementation"
+                } else {
+                    "has more than one implementation"
+                };
+                return Err(Diagnostic::new(
+                    "E000206",
+                    format!(
+                        "hook `@{}` from trait `{}` {detail}",
+                        decorator.name, hook.trait_name
+                    ),
+                    Some(decorator.span),
+                ));
+            };
+            let specification = implementation.hook.as_ref().ok_or_else(|| {
+                Diagnostic::new(
+                    "E000218",
+                    format!(
+                        "hook implementation `{class_name}.{}` lost its hook body",
+                        implementation.name
+                    ),
+                    Some(implementation.span),
+                )
+            })?;
+            let context_parameter = implementation
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == specification.context)
+                .expect("hook context validation ran before lowering");
+            let context_type = self.resolve_source_type(&context_parameter.annotation)?;
+            let instance = self
+                .class_instances_by_type
+                .get(&context_type)
+                .cloned()
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "E000204",
+                        "hook context must be a concrete class",
+                        Some(context_parameter.annotation.span),
+                    )
+                })?;
+            let fields = instance
+                .fields
+                .iter()
+                .map(|field| self.default_expression(field.ty, decorator.span))
+                .collect::<Result<Vec<_>, _>>()?;
+            let context = self.new_binding_id();
+            let variable = severian_hir::VariableId(context.0);
+            bindings.push(Binding {
+                id: context,
+                variable,
+                type_id: context_type,
+                value: Expression {
+                    id: self.next_id(),
+                    type_id: context_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: context_type,
+                        fields,
+                    },
+                    span: decorator.span,
+                },
+                mutable: true,
+                preserve_error: false,
+                span: decorator.span,
+            });
+            entry.statements.push(Statement::Binding(context));
+            if let Some((field, _)) = instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == "function")
+            {
+                entry.statements.push(Statement::FieldSet {
+                    binding: context,
+                    field: field as u32,
+                    value: self.string_expression(function.name.clone(), decorator.span),
+                });
+            }
+
+            let duration = instance
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == "duration")
+                .map(|(field, definition)| {
+                    let started = self.new_binding_id();
+                    let variable = severian_hir::VariableId(started.0);
+                    bindings.push(Binding {
+                        id: started,
+                        variable,
+                        type_id: definition.ty,
+                        value: self.runtime_call(
+                            "__sev_time_monotonic",
+                            &[],
+                            definition.ty,
+                            Vec::new(),
+                            decorator.span,
+                        ),
+                        mutable: false,
+                        preserve_error: false,
+                        span: decorator.span,
+                    });
+                    entry.statements.push(Statement::Binding(started));
+                    let started = Expression {
+                        id: self.next_id(),
+                        type_id: definition.ty,
+                        kind: ExpressionKind::Binding(started),
+                        span: decorator.span,
+                    };
+                    let finished = self.runtime_call(
+                        "__sev_time_monotonic",
+                        &[],
+                        definition.ty,
+                        Vec::new(),
+                        decorator.span,
+                    );
+                    let elapsed = Expression {
+                        id: self.next_id(),
+                        type_id: definition.ty,
+                        kind: ExpressionKind::Binary {
+                            operator: BinaryOperator::Subtract,
+                            left: Box::new(finished),
+                            right: Box::new(started),
+                        },
+                        span: decorator.span,
+                    };
+                    (field as u32, elapsed)
+                });
+
+            let outer_names = self.names.clone();
+            let outer_declarations = self.declarations.clone();
+            self.names.insert(
+                specification.context.clone(),
+                (context, variable, context_type),
+            );
+            self.declarations.insert(specification.context.clone());
+            let with_phase = self.block(&specification.with_phase, bindings, unit)?;
+            self.names.clone_from(&outer_names);
+            self.declarations.clone_from(&outer_declarations);
+
+            self.names.insert(
+                specification.context.clone(),
+                (context, variable, context_type),
+            );
+            self.declarations.insert(specification.context.clone());
+            let without_phase = self.block(&specification.without_phase, bindings, unit)?;
+            self.names = outer_names;
+            self.declarations = outer_declarations;
+
+            entry.statements.extend(with_phase.statements);
+            lowered.push(LoweredHook {
+                context,
+                result_field: instance
+                    .fields
+                    .iter()
+                    .position(|field| {
+                        field.name == "result" && self.types.assignable(result_type, field.ty)
+                    })
+                    .map(|field| field as u32),
+                error_field: instance
+                    .fields
+                    .iter()
+                    .position(|field| field.name == "error")
+                    .map(|field| field as u32),
+                duration,
+                without_phase,
+            });
+        }
+        Ok((entry, lowered))
     }
 
     fn contract_assertion(
@@ -3800,22 +4046,48 @@ impl Analyzer<'_> {
         if self.list_elements.contains_key(&type_id) {
             return self.empty_list_expression(type_id, span);
         }
-        let name = self
+        if let Some(elements) = self.tuple_elements.get(&type_id).cloned() {
+            let fields = elements
+                .into_iter()
+                .map(|element| self.default_expression(element, span))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id,
+                kind: ExpressionKind::Aggregate {
+                    class: type_id,
+                    fields,
+                },
+                span,
+            });
+        }
+        let literal = match self
             .types
-            .definition(type_id)
-            .map(|definition| definition.name.as_str());
-        let literal = match name {
-            Some("string") => LiteralValue::String(String::new()),
-            Some("float" | "f16" | "f32" | "f64" | "bf16") => LiteralValue::Float("0.0".into()),
-            Some("bool") => LiteralValue::Boolean(false),
-            Some("char") => LiteralValue::Character('\0'),
-            Some("None") => LiteralValue::None,
-            Some("unit") => LiteralValue::Unit,
-            Some(_) => LiteralValue::Integer("0".into()),
-            None => {
+            .primitive(type_id)
+            .map(|primitive| primitive.representation)
+        {
+            Some(severian_universal::PrimitiveRepresentation::String) => {
+                LiteralValue::String(String::new())
+            }
+            Some(severian_universal::PrimitiveRepresentation::Float { .. }) => {
+                LiteralValue::Float("0.0".into())
+            }
+            Some(severian_universal::PrimitiveRepresentation::Boolean) => {
+                LiteralValue::Boolean(false)
+            }
+            Some(severian_universal::PrimitiveRepresentation::Character) => {
+                LiteralValue::Character('\0')
+            }
+            Some(severian_universal::PrimitiveRepresentation::None) => LiteralValue::None,
+            Some(severian_universal::PrimitiveRepresentation::Unit) => LiteralValue::Unit,
+            Some(
+                severian_universal::PrimitiveRepresentation::Integer { .. }
+                | severian_universal::PrimitiveRepresentation::PointerInteger { .. },
+            ) => LiteralValue::Integer("0".into()),
+            _ => {
                 return Err(Diagnostic::new(
                     "E000221",
-                    "this enum payload type requires an explicit representation",
+                    "this value requires an explicit default representation",
                     Some(span),
                 ))
             }
@@ -3889,13 +4161,15 @@ impl Analyzer<'_> {
                     vec![field],
                     span,
                 ),
-                Some("float" | "f64") => self.runtime_call(
-                    "__sev_string_from_float",
-                    &[*element],
-                    string,
-                    vec![field],
-                    span,
-                ),
+                Some("float" | "f64" | "duration" | "data_rate" | "frequency") => {
+                    self.runtime_call(
+                        "__sev_string_from_float",
+                        &[*element],
+                        string,
+                        vec![field],
+                        span,
+                    )
+                }
                 _ => {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -5684,6 +5958,89 @@ fn insert_before_returns(block: &mut Block, assertions: &[Statement]) {
     block.statements = lowered;
 }
 
+fn insert_hook_exits(block: &mut Block, hooks: &[LoweredHook]) {
+    let mut lowered = Vec::new();
+    for mut statement in std::mem::take(&mut block.statements) {
+        match &mut statement {
+            Statement::Sequence(nested) => insert_hook_exits(nested, hooks),
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                insert_hook_exits(then_block, hooks);
+                insert_hook_exits(else_block, hooks);
+            }
+            Statement::While { body, .. } => insert_hook_exits(body, hooks),
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    insert_hook_exits(&mut arm.body, hooks);
+                }
+            }
+            Statement::Return(Some(value)) => {
+                for hook in hooks {
+                    if let Some(field) = hook.result_field {
+                        lowered.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field,
+                            value: value.clone(),
+                        });
+                    }
+                }
+                for hook in hooks.iter().rev() {
+                    if let Some((field, duration)) = &hook.duration {
+                        lowered.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field: *field,
+                            value: duration.clone(),
+                        });
+                    }
+                    lowered.extend(hook.without_phase.statements.iter().cloned());
+                }
+            }
+            Statement::Return(None) => {
+                for hook in hooks.iter().rev() {
+                    if let Some((field, duration)) = &hook.duration {
+                        lowered.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field: *field,
+                            value: duration.clone(),
+                        });
+                    }
+                    lowered.extend(hook.without_phase.statements.iter().cloned());
+                }
+            }
+            Statement::Expression(Expression {
+                kind: ExpressionKind::Throw(error),
+                ..
+            }) => {
+                for hook in hooks {
+                    if let Some(field) = hook.error_field {
+                        lowered.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field,
+                            value: error.as_ref().clone(),
+                        });
+                    }
+                }
+                for hook in hooks.iter().rev() {
+                    if let Some((field, duration)) = &hook.duration {
+                        lowered.push(Statement::FieldSet {
+                            binding: hook.context,
+                            field: *field,
+                            value: duration.clone(),
+                        });
+                    }
+                    lowered.extend(hook.without_phase.statements.iter().cloned());
+                }
+            }
+            _ => {}
+        }
+        lowered.push(statement);
+    }
+    block.statements = lowered;
+}
+
 fn synthetic_definition(
     module: &str,
     function: &severian_ast::FunctionDeclaration,
@@ -5786,6 +6143,66 @@ fn collect_trait_namespace_methods(
         }
     }
     Ok(methods)
+}
+
+fn collect_trait_namespace_hooks(
+    ast: &severian_ast::Module,
+) -> Result<BTreeMap<String, NamespaceTraitHook>, Diagnostic> {
+    let classes = ast
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            severian_ast::Item::Class(declaration) => Some(declaration),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut hooks = BTreeMap::new();
+    for declaration in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        for method in declaration
+            .methods
+            .iter()
+            .filter(|method| method.hook.is_some())
+        {
+            for decorator in &method.decorators {
+                if !decorator.arguments.is_empty() {
+                    continue;
+                }
+                let implementations = classes
+                    .iter()
+                    .filter(|class| {
+                        class.traits.iter().any(|implemented| {
+                            implemented.simple_name() == Some(declaration.name.as_str())
+                        })
+                    })
+                    .filter_map(|class| {
+                        class
+                            .methods
+                            .iter()
+                            .find(|candidate| {
+                                candidate.name == method.name && candidate.hook.is_some()
+                            })
+                            .cloned()
+                            .map(|implementation| (class.name.clone(), implementation))
+                    })
+                    .collect();
+                let hook = NamespaceTraitHook {
+                    trait_name: declaration.name.clone(),
+                    implementations,
+                };
+                if hooks.insert(decorator.name.clone(), hook).is_some() {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("hook decorator `@{}` is declared more than once", decorator.name),
+                        Some(decorator.span),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(hooks)
 }
 
 fn collect_trait_namespace_operators(

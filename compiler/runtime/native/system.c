@@ -4,10 +4,24 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
+
+double __sev_time_monotonic(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0.0;
+    return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
+}
+
+void __sev_throw(const char *error) {
+    fflush(stdout);
+    fprintf(stderr, "error: %s\n", error);
+    exit(EXIT_FAILURE);
+}
 
 int64_t __sev_process_run(const char *command) {
     int status = system(command);
