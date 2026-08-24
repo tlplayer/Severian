@@ -758,17 +758,39 @@ fn compiler_test_setup_and_class_visibility_are_checked_per_case() {
 }
 
 #[test]
-fn test_rejects_unimplemented_runner_modes_instead_of_passing_them_as_skipped() {
-    let root = temporary("unsupported-test-mode");
+fn property_runner_executes_a_deterministic_seed() {
+    let root = temporary("property-test-mode");
     let source = root.join("property.sev");
     fs::write(&source, "test with property:\n    assert(true)\n").unwrap();
     let output = sev().args(["test"]).arg(&source).output().unwrap();
-    assert!(!output.status.success());
+    assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        stdout.contains("FAILED (unsupported runner: property)"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("ok (seed 0)"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn timeout_and_soft_expectations_are_runner_enforced() {
+    let root = temporary("timeout-and-expect");
+    let passing = root.join("passing.sev");
+    fs::write(
+        &passing,
+        "test with timeout(100ms):\n    expect(true)\n    expect(true)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&passing).output().unwrap();
+    assert!(output.status.success());
+
+    let failing = root.join("failing.sev");
+    fs::write(
+        &failing,
+        "test:\n    expect(false)\n    expect(false)\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&failing).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.matches("expectation failed:").count(), 2, "{stderr}");
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -72,6 +72,22 @@ double __sev_time_monotonic(void) {
     return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
 }
 
+_Bool __sev_approximate_f64(double actual, double expected, double atol, double rtol) {
+    if (atol < 0.0 || rtol < 0.0) return 0;
+    double error = fabs(actual - expected);
+    double tolerance = atol + rtol * fabs(expected);
+    if (error <= tolerance) return 1;
+    fprintf(
+        stderr,
+        "approximate mismatch: actual=%.17g expected=%.17g error=%.17g tolerance=%.17g\n",
+        actual,
+        expected,
+        error,
+        tolerance
+    );
+    return 0;
+}
+
 void __sev_os_wait(double seconds) {
     if (!(seconds > 0.0)) return;
     struct timespec remaining = {

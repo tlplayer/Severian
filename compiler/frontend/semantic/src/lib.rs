@@ -228,6 +228,13 @@ pub(crate) fn analyze_with_package_functions(
             .insert(function.id, function.specificity);
     }
     let mut module = Module::default();
+    let mut expected_throw_functions = BTreeSet::new();
+    for test in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Test(test) => Some(test),
+        _ => None,
+    }) {
+        collect_expected_throw_functions(&test.body, &mut expected_throw_functions);
+    }
 
     for declaration in ast.items.iter().filter_map(|item| match item {
         severian_ast::Item::Trait(declaration) => Some(declaration),
@@ -299,7 +306,15 @@ pub(crate) fn analyze_with_package_functions(
                 contract: universal_boundary(type_id),
             });
         }
-        let result = analyzer.resolve_source_type(&ast_function.result)?;
+        let mut result = analyzer.resolve_source_type(&ast_function.result)?;
+        if expected_throw_functions.contains(&ast_function.name)
+            && !analyzer.fallible_types.contains_key(&result)
+            && !analyzer.is_error_type(result)
+        {
+            if let Some(error) = analyzer.inferred_thrown_error(ast_function)? {
+                result = analyzer.instantiate_fallible_type(result, error);
+            }
+        }
         let compile_route = if types.definition(result).is_some() {
             types
                 .compile_route(result)
@@ -543,14 +558,28 @@ pub(crate) fn analyze_with_package_functions(
                 }
             }
         }
-        if result_type != types.resolve_name("unit").expect("bootstrap defines unit")
-            && block_flow(ast_body) == ControlFlow::FallsThrough
-        {
+        let allows_fallthrough = result_type
+            == types.resolve_name("unit").expect("bootstrap defines unit")
+            || types
+                .definition(result_type)
+                .is_some_and(|definition| definition.name == "None");
+        let falls_through = block_flow(ast_body) == ControlFlow::FallsThrough;
+        if !allows_fallthrough && falls_through {
             return Err(Diagnostic::new(
                 "E000209",
                 "not every path in this function returns its declared result",
                 Some(ast_function.span),
             ));
+        }
+        if allows_fallthrough
+            && falls_through
+            && types
+                .definition(result_type)
+                .is_some_and(|definition| definition.name == "None")
+        {
+            body.statements.push(Statement::Return(Some(
+                analyzer.default_expression(result_type, ast_function.span)?,
+            )));
         }
         if let Some(fallible) = analyzer.fallible_types.get(&result_type).copied() {
             let catch_binding = analyzer.new_binding_id();
@@ -684,21 +713,64 @@ pub(crate) fn analyze_with_package_functions(
                 module.functions[source_function_count + offset].body = Some(body);
                 continue;
             }
+            if module.tests[offset].modes.iter().any(|mode| {
+                matches!(
+                    mode,
+                    severian_hir::TestMode::Model
+                        | severian_hir::TestMode::Differential
+                )
+            }) {
+                module.functions[source_function_count + offset].body = Some(body);
+                continue;
+            }
             let panic_binding = integration_panic_binding(&test.body);
-            for statement in &test.body {
-                if module.tests[offset]
-                    .modes
-                    .contains(&severian_hir::TestMode::Integration)
-                {
-                    if let Some(expectation) =
-                        integration_expectation(statement, panic_binding.as_deref())
-                    {
-                        module.tests[offset].expectations.push(expectation);
-                        continue;
-                    }
+            let case_values = if test.cases.is_empty() {
+                vec![Vec::new()]
+            } else {
+                test.cases.clone()
+            };
+            for values in case_values {
+                if values.len() != test.parameters.len() {
+                    return Err(Diagnostic::new(
+                        "E000217",
+                        format!(
+                            "parameterized test expects {} value(s) per case, received {}",
+                            test.parameters.len(),
+                            values.len()
+                        ),
+                        Some(test.span),
+                    ));
                 }
-                body.statements
-                    .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+                let previous_substitutions = analyzer.value_substitutions.clone();
+                for (parameter, value) in test.parameters.iter().zip(&values) {
+                    let value = analyzer.expression(value, None)?;
+                    analyzer.value_substitutions.insert(parameter.clone(), value);
+                }
+                for statement in &test.body {
+                    if module.tests[offset]
+                        .modes
+                        .contains(&severian_hir::TestMode::Profile)
+                    {
+                        if let Some(expectation) = profile_statement_expectation(statement)? {
+                            module.tests[offset].expectations.push(expectation);
+                            continue;
+                        }
+                    }
+                    if module.tests[offset]
+                        .modes
+                        .contains(&severian_hir::TestMode::Integration)
+                    {
+                        if let Some(expectation) =
+                            integration_expectation(statement, panic_binding.as_deref())
+                        {
+                            module.tests[offset].expectations.push(expectation);
+                            continue;
+                        }
+                    }
+                    body.statements
+                        .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+                }
+                analyzer.value_substitutions = previous_substitutions;
             }
             module.functions[source_function_count + offset].body = Some(body);
         }
@@ -890,6 +962,52 @@ impl Prepared {
 }
 
 impl Analyzer<'_> {
+    fn inferred_thrown_error(
+        &self,
+        function: &severian_ast::FunctionDeclaration,
+    ) -> Result<Option<TypeId>, Diagnostic> {
+        let Some(body) = function.body.as_deref() else {
+            return Ok(None);
+        };
+        let mut names = BTreeSet::new();
+        collect_thrown_error_names(body, &mut names);
+        let mut resolved = names
+            .iter()
+            .filter_map(|name| {
+                self.class_instances
+                    .get(&(name.clone(), Vec::new()))
+                    .map(|instance| instance.ty)
+                    .or_else(|| self.types.resolve_name(name))
+            })
+            .filter(|ty| self.is_error_type(*ty))
+            .collect::<BTreeSet<_>>();
+        if resolved.len() > 1 {
+            return Err(Diagnostic::new(
+                "E000204",
+                "implicit thrown-error inference requires one error type",
+                Some(function.span),
+            )
+            .with_help("declare an explicit fallible result union for multiple error types"));
+        }
+        Ok(resolved.pop_first())
+    }
+
+    fn call_thrown_error(&self, expression: &AstExpression) -> Option<TypeId> {
+        let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
+            return None;
+        };
+        let name = callable_path(callee)?;
+        self.functions.get(&name)?.iter().find_map(|function| {
+            let signature = self.signatures.get(function)?;
+            if signature.parameters.len() != arguments.len() {
+                return None;
+            }
+            self.fallible_types
+                .get(&signature.result)
+                .map(|fallible| fallible.error)
+        })
+    }
+
     fn install_enums(&mut self, ast: &severian_ast::Module) -> Result<(), Diagnostic> {
         let declarations = ast
             .items
@@ -1113,7 +1231,13 @@ impl Analyzer<'_> {
             if !package_class.declaration.type_parameters.is_empty() {
                 continue;
             }
-            let fields = package_class
+            let is_error = package_class
+                .declaration
+                .traits
+                .iter()
+                .any(|implemented| implemented.simple_name() == Some("Error"))
+                || package_class.declaration.name.ends_with("Error");
+            let mut fields = package_class
                 .declaration
                 .fields
                 .iter()
@@ -1124,6 +1248,15 @@ impl Analyzer<'_> {
                     })
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
+            if is_error && fields.is_empty() {
+                fields.push(HirClassFieldDeclaration {
+                    name: "__error".into(),
+                    ty: self
+                        .types
+                        .resolve_name("Error")
+                        .expect("bootstrap defines Error"),
+                });
+            }
             let instance = ClassInstance {
                 ty: package_class.ty,
                 name: package_class.declaration.name.clone(),
@@ -1132,13 +1265,7 @@ impl Analyzer<'_> {
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
             };
-            if package_class
-                .declaration
-                .traits
-                .iter()
-                .any(|implemented| implemented.simple_name() == Some("Error"))
-                || package_class.declaration.name.ends_with("Error")
-            {
+            if is_error {
                 self.error_types.insert(package_class.ty);
             }
             self.class_instances_by_type
@@ -2308,12 +2435,31 @@ impl Analyzer<'_> {
                             .types
                             .resolve_name("bool")
                             .expect("bootstrap defines bool");
-                        return Ok(Statement::Assert {
-                            condition: self.expression(&argument.value, Some(boolean))?,
-                            message: None,
-                            span: expression.span,
-                            condition_span: argument.value.span,
-                        });
+                        let condition = self.expression(&argument.value, Some(boolean))?;
+                        let string = self
+                            .types
+                            .resolve_name("string")
+                            .expect("bootstrap defines string");
+                        let message = self.string_expression(
+                            format!(
+                                "expectation failed in {}",
+                                self.active_function_name
+                                    .as_deref()
+                                    .unwrap_or("<test>")
+                            ),
+                            expression.span,
+                        );
+                        let unit = self
+                            .types
+                            .resolve_name("unit")
+                            .expect("bootstrap defines unit");
+                        return Ok(Statement::Expression(self.runtime_call(
+                            "__sev_expect",
+                            &[boolean, string],
+                            unit,
+                            vec![condition, message],
+                            expression.span,
+                        )));
                     }
                     if callable_path(callee).as_deref() == Some("throws") {
                         let [argument] = arguments.as_slice() else {
@@ -2327,6 +2473,63 @@ impl Analyzer<'_> {
                             .types
                             .resolve_name("bool")
                             .expect("bootstrap defines bool");
+                        if let Some(expected_error) = &argument.expected_error {
+                            let AstExpressionKind::Name(expected_name) = &expected_error.kind else {
+                                return Err(Diagnostic::new(
+                                    "E000217",
+                                    "`throws` expects an error type after `->`",
+                                    Some(expected_error.span),
+                                ));
+                            };
+                            let expected_type = self
+                                .class_instances
+                                .get(&(expected_name.clone(), Vec::new()))
+                                .map(|instance| instance.ty)
+                                .or_else(|| self.types.resolve_name(expected_name))
+                                .filter(|ty| self.is_error_type(*ty));
+                            if let (Some(expected_type), Some(actual_type)) =
+                                (expected_type, self.call_thrown_error(&argument.value))
+                            {
+                                let core_error = self
+                                    .types
+                                    .resolve_name("Error")
+                                    .expect("bootstrap defines Error");
+                                if expected_type != core_error && actual_type != expected_type {
+                                    let actual_name = self
+                                        .types
+                                        .definition(actual_type)
+                                        .map(|definition| definition.name.clone())
+                                        .or_else(|| {
+                                            self.class_instances_by_type
+                                                .get(&actual_type)
+                                                .map(|instance| instance.name.clone())
+                                        })
+                                        .unwrap_or_else(|| format!("type#{}", actual_type.0));
+                                    let condition = Expression {
+                                        id: self.next_id(),
+                                        type_id: boolean_type,
+                                        kind: ExpressionKind::Literal(LiteralValue::Boolean(false)),
+                                        span: expression.span,
+                                    };
+                                    let message = self.string_expression(
+                                        format!("expected `{expected_name}`, got `{actual_name}`"),
+                                        expression.span,
+                                    );
+                                    let string = message.type_id;
+                                    let unit = self
+                                        .types
+                                        .resolve_name("unit")
+                                        .expect("bootstrap defines unit");
+                                    return Ok(Statement::Expression(self.runtime_call(
+                                        "__sev_expect",
+                                        &[boolean_type, string],
+                                        unit,
+                                        vec![condition, message],
+                                        expression.span,
+                                    )));
+                                }
+                            }
+                        }
                         let action = match self.class_method_update(&argument.value)? {
                             Some(statement) => statement,
                             None => Statement::Expression(self.expression(&argument.value, None)?),
@@ -2406,20 +2609,73 @@ impl Analyzer<'_> {
                 })
             }
             AstStatement::If {
-                condition,
+                condition: condition_ast,
                 then_block,
                 else_block,
                 ..
             } => {
-                let condition = self.condition_expression(condition)?;
+                let condition = self.condition_expression(condition_ast)?;
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
+                let outer_substitutions = self.value_substitutions.clone();
+                if let AstExpressionKind::Binary {
+                    operator: AstBinaryOperator::Identity,
+                    left,
+                    right,
+                } = &condition_ast.kind
+                {
+                    if let (AstExpressionKind::Name(binding_name), AstExpressionKind::Name(type_name)) =
+                        (&left.kind, &right.kind)
+                    {
+                        if let Some((binding, _, binding_type)) = self.names.get(binding_name).copied()
+                        {
+                            if let Some(fallible) = self.fallible_types.get(&binding_type).copied() {
+                                let target = self
+                                    .class_instances
+                                    .get(&(type_name.clone(), Vec::new()))
+                                    .map(|instance| instance.ty)
+                                    .or_else(|| self.types.resolve_name(type_name));
+                                let field = if target == Some(fallible.success) {
+                                    Some((1, fallible.success))
+                                } else if target == Some(fallible.error) {
+                                    Some((2, fallible.error))
+                                } else {
+                                    None
+                                };
+                                if let Some((index, type_id)) = field {
+                                    let binding_id = self.next_id();
+                                    let field_id = self.next_id();
+                                    let narrowed = Expression {
+                                        id: field_id,
+                                        type_id,
+                                        kind: ExpressionKind::Field {
+                                            object: Box::new(Expression {
+                                                id: binding_id,
+                                                type_id: binding_type,
+                                                kind: ExpressionKind::Binding(binding),
+                                                span: left.span,
+                                            }),
+                                            index,
+                                        },
+                                        span: left.span,
+                                    };
+                                    self.value_substitutions.insert(
+                                        binding_name.clone(),
+                                        narrowed,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 let then_block = self.block(then_block, bindings, result_type)?;
                 self.names.clone_from(&outer_names);
                 self.declarations.clone_from(&outer_declarations);
+                self.value_substitutions.clone_from(&outer_substitutions);
                 let else_block = self.block(else_block, bindings, result_type)?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
+                self.value_substitutions = outer_substitutions;
                 Ok(Statement::If {
                     condition,
                     then_block,
@@ -4234,6 +4490,20 @@ impl Analyzer<'_> {
                         ast.span,
                     ));
                 }
+                if callable_path(callee).as_deref() == Some("approximate") {
+                    return self.approximate_call(arguments, expected, ast.span);
+                }
+                if callable_path(callee).as_deref() == Some("string") {
+                    let [argument] = arguments.as_slice() else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`string` expects exactly one value",
+                            Some(ast.span),
+                        ));
+                    };
+                    let value = self.expression(&argument.value, None)?;
+                    return self.display_string(value, ast.span);
+                }
                 if let Some(mocked) = self.mocked_call(ast, expected)? {
                     return Ok(mocked);
                 }
@@ -5553,7 +5823,35 @@ impl Analyzer<'_> {
             .cloned();
         let implicit_defaults =
             constructor.is_none() && arguments.is_empty() && !instance.fields.is_empty();
-        let fields = if let Some(constructor) = constructor {
+        let fields = if self.is_error_type(instance.ty)
+            && instance.fields.len() == 1
+            && instance.fields[0].name == "__error"
+            && instance.constructors.is_empty()
+            && arguments.len() == 1
+        {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let message = self.expression(&arguments[0].value, Some(string))?;
+            let function = self.string_expression(
+                self.active_function_name
+                    .clone()
+                    .unwrap_or_else(|| "<module>".into()),
+                span,
+            );
+            let error = self
+                .types
+                .resolve_name("Error")
+                .expect("bootstrap defines Error");
+            vec![self.runtime_call(
+                "__sev_error_create",
+                &[string, string],
+                error,
+                vec![message, function],
+                span,
+            )]
+        } else if let Some(constructor) = constructor {
             self.class_constructor_values(&instance, &constructor, arguments, span)?
         } else if !instance.constructors.is_empty() {
             return Err(Diagnostic::new(
@@ -6809,6 +7107,67 @@ impl Analyzer<'_> {
             },
             span,
         }
+    }
+
+    fn approximate_call(
+        &mut self,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let boolean = self
+            .types
+            .resolve_name("bool")
+            .expect("bootstrap defines bool");
+        if expected.is_some_and(|expected| !self.types.assignable(boolean, expected)) {
+            return Err(semantic_error(
+                "`approximate` does not satisfy the expected type".into(),
+                span,
+            ));
+        }
+        if !(2..=4).contains(&arguments.len()) {
+            return Err(Diagnostic::new(
+                "E000206",
+                "`approximate` expects actual, expected, and optional `atol`/`rtol` values",
+                Some(span),
+            ));
+        }
+        let default_float = self
+            .types
+            .resolve_name("f64")
+            .or_else(|| self.types.resolve_name("float"))
+            .expect("bootstrap defines a machine float");
+        let float = default_float;
+        let actual = self.expression(&arguments[0].value, None)?;
+        let actual = self.coerce(actual, float, true)?;
+        let expected_value = self.expression(&arguments[1].value, None)?;
+        let expected_value = self.coerce(expected_value, float, true)?;
+        let mut atol = self.default_expression(float, span)?;
+        let mut rtol = self.default_expression(float, span)?;
+        for (index, argument) in arguments.iter().enumerate().skip(2) {
+            let target = match argument.name.as_deref() {
+                Some("atol") => &mut atol,
+                Some("rtol") => &mut rtol,
+                Some(name) => {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("unknown `approximate` tolerance `{name}`"),
+                        Some(argument.span),
+                    ))
+                }
+                None if index == 2 => &mut atol,
+                None => &mut rtol,
+            };
+            let value = self.expression(&argument.value, None)?;
+            *target = self.coerce(value, float, true)?;
+        }
+        Ok(self.runtime_call(
+            "__sev_approximate_f64",
+            &[float, float, float, float],
+            boolean,
+            vec![actual, expected_value, atol, rtol],
+            span,
+        ))
     }
 
     fn integer_expression(
@@ -9366,6 +9725,124 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
     }
 }
 
+fn collect_thrown_error_names(statements: &[AstStatement], names: &mut BTreeSet<String>) {
+    for statement in statements {
+        match statement {
+            AstStatement::Expression(expression) => {
+                collect_thrown_error_name(expression, names);
+            }
+            AstStatement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                collect_thrown_error_names(then_block, names);
+                collect_thrown_error_names(else_block, names);
+            }
+            AstStatement::While { body, .. }
+            | AstStatement::For { body, .. }
+            | AstStatement::Unsafe { body, .. }
+            | AstStatement::FallibleElse { body, .. } => {
+                collect_thrown_error_names(body, names);
+            }
+            AstStatement::Try {
+                body, catch_body, ..
+            } => {
+                collect_thrown_error_names(body, names);
+                collect_thrown_error_names(catch_body, names);
+            }
+            AstStatement::Match { cases, .. } => {
+                for case in cases {
+                    collect_thrown_error_names(&case.body, names);
+                }
+            }
+            AstStatement::Select {
+                cases, error_body, ..
+            } => {
+                for case in cases {
+                    collect_thrown_error_names(&case.body, names);
+                }
+                collect_thrown_error_names(error_body, names);
+            }
+            AstStatement::Binding(_)
+            | AstStatement::Destructure { .. }
+            | AstStatement::FieldAssignment { .. }
+            | AstStatement::Defer { .. }
+            | AstStatement::Return { .. }
+            | AstStatement::Assert { .. }
+            | AstStatement::Break { .. }
+            | AstStatement::Continue { .. } => {}
+        }
+    }
+}
+
+fn collect_expected_throw_functions(statements: &[AstStatement], names: &mut BTreeSet<String>) {
+    for statement in statements {
+        match statement {
+            AstStatement::Expression(AstExpression {
+                kind: AstExpressionKind::Call { callee, arguments },
+                ..
+            }) if callable_path(callee).as_deref() == Some("throws") => {
+                if let [argument] = arguments.as_slice() {
+                    if let AstExpressionKind::Call { callee, .. } = &argument.value.kind {
+                        if let Some(name) = callable_path(callee) {
+                            names.insert(name);
+                        }
+                    }
+                }
+            }
+            AstStatement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                collect_expected_throw_functions(then_block, names);
+                collect_expected_throw_functions(else_block, names);
+            }
+            AstStatement::While { body, .. }
+            | AstStatement::For { body, .. }
+            | AstStatement::Unsafe { body, .. }
+            | AstStatement::FallibleElse { body, .. } => {
+                collect_expected_throw_functions(body, names);
+            }
+            AstStatement::Try {
+                body, catch_body, ..
+            } => {
+                collect_expected_throw_functions(body, names);
+                collect_expected_throw_functions(catch_body, names);
+            }
+            AstStatement::Match { cases, .. } => {
+                for case in cases {
+                    collect_expected_throw_functions(&case.body, names);
+                }
+            }
+            AstStatement::Select {
+                cases, error_body, ..
+            } => {
+                for case in cases {
+                    collect_expected_throw_functions(&case.body, names);
+                }
+                collect_expected_throw_functions(error_body, names);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_thrown_error_name(expression: &AstExpression, names: &mut BTreeSet<String>) {
+    let AstExpressionKind::Throw { error } = &expression.kind else {
+        return;
+    };
+    let name = match &error.kind {
+        AstExpressionKind::Call { callee, .. } => callable_path(callee),
+        AstExpressionKind::Name(name) => Some(name.clone()),
+        _ => None,
+    };
+    if let Some(name) = name {
+        names.insert(name);
+    }
+}
+
 fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<String>) {
     match &expression.kind {
         AstExpressionKind::Name(name) => {
@@ -9840,17 +10317,63 @@ fn test_mode(
 ) -> Result<severian_hir::TestMode, Diagnostic> {
     match name {
         "property" => Ok(severian_hir::TestMode::Property),
+        "cases" => Ok(severian_hir::TestMode::Cases),
+        "fuzz" => Ok(severian_hir::TestMode::Fuzz),
+        "model" => Ok(severian_hir::TestMode::Model),
+        "differential" => Ok(severian_hir::TestMode::Differential),
         "bench" | "benchmark" => Ok(severian_hir::TestMode::Benchmark),
         "chaos" => Ok(severian_hir::TestMode::Chaos),
         "profile" => Ok(severian_hir::TestMode::Profile),
         "compiler" => Ok(severian_hir::TestMode::Compiler),
         "integ" | "integration" => Ok(severian_hir::TestMode::Integration),
+        name if name.starts_with("timeout:") => {
+            let value = name.trim_start_matches("timeout:");
+            let split = value
+                .find(|character: char| character.is_ascii_alphabetic())
+                .ok_or_else(|| {
+                    Diagnostic::new("E000217", "invalid test timeout", Some(span))
+                })?;
+            let (magnitude, suffix) = value.split_at(split);
+            Ok(severian_hir::TestMode::Timeout(duration_nanos(
+                magnitude, suffix, span,
+            )?))
+        }
         _ => Err(Diagnostic::new(
             "E000213",
             format!("unknown test runner `{name}`"),
             Some(span),
         )),
     }
+}
+
+fn duration_nanos(
+    magnitude: &str,
+    suffix: &str,
+    span: severian_source::Span,
+) -> Result<u128, Diagnostic> {
+    let multiplier = match suffix {
+        "ns" => 1.0,
+        "us" => 1_000.0,
+        "ms" => 1_000_000.0,
+        "s" => 1_000_000_000.0,
+        "min" => 60_000_000_000.0,
+        "hr" => 3_600_000_000_000.0,
+        "day" => 86_400_000_000_000.0,
+        _ => {
+            return Err(Diagnostic::new(
+                "E000217",
+                "a timeout must use a time unit",
+                Some(span),
+            ))
+        }
+    };
+    magnitude
+        .parse::<f64>()
+        .ok()
+        .map(|value| (value * multiplier).round())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value as u128)
+        .ok_or_else(|| Diagnostic::new("E000217", "invalid timeout duration", Some(span)))
 }
 
 fn profile_duration_expectation(
@@ -9937,6 +10460,123 @@ fn profile_duration_expectation(
         threshold_nanos,
         message,
     })
+}
+
+fn profile_statement_expectation(
+    statement: &AstStatement,
+) -> Result<Option<severian_hir::TestExpectation>, Diagnostic> {
+    let AstStatement::Expression(AstExpression {
+        kind: AstExpressionKind::Call { callee, arguments },
+        ..
+    }) = statement
+    else {
+        return Ok(None);
+    };
+    if callable_path(callee).as_deref() != Some("expect") {
+        return Ok(None);
+    }
+    let [argument] = arguments.as_slice() else {
+        return Ok(None);
+    };
+    let AstExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &argument.value.kind
+    else {
+        return Ok(None);
+    };
+    let profile_field = |expression: &AstExpression| match &expression.kind {
+        AstExpressionKind::Member { object, name }
+            if matches!(&object.kind, AstExpressionKind::Name(root) if root == "profile") =>
+        {
+            Some(name.clone())
+        }
+        _ => None,
+    };
+    let (field, literal, comparison) = if let Some(field) = profile_field(left) {
+        (field, right.as_ref(), profile_comparison(*operator))
+    } else if let Some(field) = profile_field(right) {
+        (
+            field,
+            left.as_ref(),
+            profile_comparison(reverse_ast_comparison(*operator)),
+        )
+    } else {
+        return Ok(None);
+    };
+    let comparison = comparison.ok_or_else(|| {
+        Diagnostic::new(
+            "E000217",
+            "profile expectations support `<`, `<=`, `>`, and `>=`",
+            Some(argument.value.span),
+        )
+    })?;
+    let AstExpressionKind::Literal(AstLiteral::Measured { magnitude, suffix }) = &literal.kind
+    else {
+        return Err(Diagnostic::new(
+            "E000217",
+            "profile expectations require a measured literal",
+            Some(literal.span),
+        ));
+    };
+    match field.as_str() {
+        "time" => Ok(Some(severian_hir::TestExpectation::ProfileDuration {
+            comparison,
+            threshold_nanos: duration_nanos(magnitude, suffix, literal.span)?,
+            message: "profile time expectation failed".into(),
+        })),
+        "memory" => Ok(Some(severian_hir::TestExpectation::ProfileMemory {
+            comparison,
+            threshold_bytes: data_bytes(magnitude, suffix, literal.span)?,
+            message: "profile memory expectation failed".into(),
+        })),
+        _ => Err(Diagnostic::new(
+            "E000217",
+            format!("unknown profile measurement `{field}`"),
+            Some(argument.value.span),
+        )),
+    }
+}
+
+fn reverse_ast_comparison(operator: AstBinaryOperator) -> AstBinaryOperator {
+    match operator {
+        AstBinaryOperator::Less => AstBinaryOperator::Greater,
+        AstBinaryOperator::LessEqual => AstBinaryOperator::GreaterEqual,
+        AstBinaryOperator::Greater => AstBinaryOperator::Less,
+        AstBinaryOperator::GreaterEqual => AstBinaryOperator::LessEqual,
+        other => other,
+    }
+}
+
+fn data_bytes(
+    magnitude: &str,
+    suffix: &str,
+    span: severian_source::Span,
+) -> Result<u128, Diagnostic> {
+    let multiplier = match suffix {
+        "B" => 1.0,
+        "KB" => 1_000.0,
+        "MB" => 1_000_000.0,
+        "GB" => 1_000_000_000.0,
+        "KiB" => 1_024.0,
+        "MiB" => 1_048_576.0,
+        "GiB" => 1_073_741_824.0,
+        _ => {
+            return Err(Diagnostic::new(
+                "E000217",
+                "profile memory thresholds require a data unit",
+                Some(span),
+            ))
+        }
+    };
+    magnitude
+        .parse::<f64>()
+        .ok()
+        .map(|value| (value * multiplier).round())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value as u128)
+        .ok_or_else(|| Diagnostic::new("E000217", "invalid memory threshold", Some(span)))
 }
 
 fn profile_comparison(operator: AstBinaryOperator) -> Option<severian_hir::DurationComparison> {
@@ -11184,6 +11824,27 @@ mod tests {
     }
 
     #[test]
+    fn testing_predicates_scopes_and_generated_bindings_lower_to_mir() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "testing.sev",
+            "test with property:\n    value: int {-10 <= value <= 10}\n    when(value >= 0):\n        expect(approximate(float(value), 0.0, atol=10.0))\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "testing",
+            },
+        )
+        .unwrap();
+        assert_eq!(program.modules[0].tests[0].modes, [severian_hir::TestMode::Property]);
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
     fn dynamic_field_operations_lower_with_constraints_and_catchable_failures() {
         let (program, _) = analyze_source(
             "class Point:\n    x: int {0 <= x <= 100}\n    y: int {0 <= y <= 100}\n\ndef main():\n    point := Point(3, 4)\n    axis := runtime_string(\"x\")\n    point.set(axis, 10)\n    point.set({\"x\": 20, \"y\": 30})\n    observed := point.get(axis)\n    throws(point.set(\"x\", runtime_int(200)) -> ConstraintError)\n",
@@ -11229,7 +11890,11 @@ mod tests {
             .unwrap()
             .statements
             .iter()
-            .any(|statement| { matches!(statement, Statement::Assert { .. }) }));
+            .any(|statement| { matches!(statement, Statement::ExpectThrow { .. }) }));
+        assert!(program.modules[0]
+            .functions
+            .iter()
+            .any(|function| function.name == "__sev_expect"));
     }
 
     #[test]

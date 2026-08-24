@@ -579,6 +579,30 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_parameterized_deadline_and_generated_test_strategies() {
+        let source = SourceFile::virtual_source(
+            "strategies.sev",
+            "test add(a, b, expected) with cases\n{\n    (1, 2, 3),\n}:\n    when(a < expected):\n        expect(a + b == expected)\n\ntest with timeout(10ms):\n    assert(true)\n\ntest Set[int] with model:\n    always:\n        expect(true)\n\ntest compute with differential\n{\n    native,\n    xla,\n}:\n    expect(true)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let tests = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                severian_ast::Item::Test(test) => Some(test),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tests.len(), 4);
+        assert_eq!(tests[0].name.as_deref(), Some("add"));
+        assert_eq!(tests[0].parameters, ["a", "b", "expected"]);
+        assert_eq!(tests[0].cases.len(), 1);
+        assert_eq!(tests[1].modes, ["timeout:10ms"]);
+        assert_eq!(tests[2].modes, ["model"]);
+        assert_eq!(tests[3].modes, ["differential"]);
+    }
+
+    #[test]
     fn parses_source_first_selective_imports() {
         let source = SourceFile::virtual_source("imports.sev", "from os import wait as pause\n");
         let module = parse(&scan(&source).unwrap()).unwrap();

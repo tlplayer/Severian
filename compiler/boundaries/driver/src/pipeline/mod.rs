@@ -509,6 +509,8 @@ impl Compiler {
                     ast.items
                         .push(severian_ast::Item::Test(severian_ast::TestDeclaration {
                             name: Some("compiler case".into()),
+                            parameters: Vec::new(),
+                            cases: Vec::new(),
                             modes: Vec::new(),
                             contracts: Vec::new(),
                             body,
@@ -1048,7 +1050,12 @@ fn apply_external_calls_to_module(
                 .filter(|function| function.name == ast_function.name)
                 .nth(overload_ordinal)
         }
-        .ok_or_else(|| external_metadata_error("foreign definition has no typed HIR item"))?;
+        .ok_or_else(|| {
+            external_metadata_error(&format!(
+                "foreign definition `{}` has no typed HIR item",
+                ast_function.name
+            ))
+        })?;
         let declaration = &declaration.function;
         hir_function.call_type = severian_hir::CallType::External(severian_hir::ExternalCall {
             interface: severian_hir::InterfaceId("xxi".into()),

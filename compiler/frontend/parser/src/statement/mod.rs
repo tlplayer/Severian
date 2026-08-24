@@ -481,24 +481,126 @@ impl Parser<'_> {
 
     fn test_declaration(&mut self) -> Result<TestDeclaration, Diagnostic> {
         let start = self.next().span;
+        let mut name = None;
+        let mut parameters = Vec::new();
+        if matches!(self.peek().kind, TokenKind::Identifier(ref value) if value != "with") {
+            name = Some(self.identifier("expected a test name")?.0);
+            if self.take(&TokenKind::LeftBracket).is_some() {
+                if !self.at(&TokenKind::RightBracket) {
+                    loop {
+                        self.type_annotation()?;
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::RightBracket, "expected `]` after test subject")?;
+            }
+            if self.take(&TokenKind::LeftParen).is_some() {
+                if !self.at(&TokenKind::RightParen) {
+                    loop {
+                        parameters.push(self.identifier("expected a test parameter")?.0);
+                        if self.take(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::RightParen, "expected `)` after test parameters")?;
+            }
+        }
         let mut modes = Vec::new();
         if self.at_identifier("with") {
             self.next();
             loop {
-                modes.push(self.identifier("expected a test mode after `with`")?.0);
-                if !self.at_identifier("and") {
+                let (mut mode, mode_span) =
+                    self.identifier("expected a test mode after `with`")?;
+                if mode == "timeout" {
+                    self.expect(&TokenKind::LeftParen, "expected `(` after `timeout`")?;
+                    let deadline = self.expression(0)?;
+                    self.expect(&TokenKind::RightParen, "expected `)` after timeout deadline")?;
+                    let ExpressionKind::Literal(severian_ast::Literal::Measured {
+                        magnitude,
+                        suffix,
+                    }) = deadline.kind
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000112",
+                            "a test timeout requires a duration literal",
+                            Some(mode_span),
+                        ));
+                    };
+                    mode = format!("timeout:{magnitude}{suffix}");
+                }
+                modes.push(mode);
+                if self.at_identifier("and") || self.at(&TokenKind::Comma) {
+                    self.next();
+                } else {
                     break;
                 }
-                self.next();
             }
         }
-        let name = match self.peek().kind.clone() {
-            TokenKind::String(name) => {
-                self.next();
-                Some(name)
+        if let TokenKind::String(quoted) = self.peek().kind.clone() {
+            self.next();
+            name = Some(quoted);
+        }
+        let mut cases = Vec::new();
+        if modes.iter().any(|mode| mode == "cases") {
+            self.line_breaks();
+            self.expect(&TokenKind::LeftBrace, "expected `{` after `with cases`")?;
+            let multiline = self.take(&TokenKind::Newline).is_some();
+            while self.take(&TokenKind::Newline).is_some() {}
+            if multiline {
+                self.expect(&TokenKind::Indent, "expected indented test cases")?;
             }
-            _ => None,
-        };
+            self.separators();
+            while !self.at(&TokenKind::RightBrace)
+                && !self.at(&TokenKind::Dedent)
+                && !self.at(&TokenKind::Eof)
+            {
+                let value = self.expression(0)?;
+                let ExpressionKind::Tuple(values) = value.kind else {
+                    return Err(Diagnostic::new(
+                        "E000112",
+                        "each parameterized test case must be a tuple",
+                        Some(value.span),
+                    ));
+                };
+                cases.push(values);
+                self.take(&TokenKind::Comma);
+                self.separators();
+            }
+            if multiline {
+                self.expect(&TokenKind::Dedent, "expected end of test cases")?;
+            }
+            self.expect(&TokenKind::RightBrace, "expected `}` after test cases")?;
+        }
+        if modes.iter().any(|mode| mode == "differential") {
+            self.line_breaks();
+            self.expect(
+                &TokenKind::LeftBrace,
+                "expected `{` after `with differential`",
+            )?;
+            self.line_breaks();
+            if self.at(&TokenKind::Indent) {
+                self.next();
+            }
+            self.separators();
+            while !self.at(&TokenKind::RightBrace)
+                && !self.at(&TokenKind::Dedent)
+                && !self.at(&TokenKind::Eof)
+            {
+                self.identifier("expected a differential backend")?;
+                self.take(&TokenKind::Comma);
+                self.separators();
+            }
+            if self.at(&TokenKind::Dedent) {
+                self.next();
+            }
+            self.expect(
+                &TokenKind::RightBrace,
+                "expected `}` after differential backends",
+            )?;
+        }
         let (_, contracts) = self.function_contracts(&[])?;
         self.expect(&TokenKind::Colon, "expected `:` after test declaration")?;
         let (body, compiler_cases, end) = if modes.iter().any(|mode| mode == "compiler") {
@@ -510,6 +612,8 @@ impl Parser<'_> {
         };
         Ok(TestDeclaration {
             name,
+            parameters,
+            cases,
             modes,
             contracts,
             body,
@@ -623,6 +727,8 @@ impl Parser<'_> {
         self.separators();
         while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
             let compound = self.at_identifier("if")
+                || self.at_identifier("when")
+                || self.at_identifier("always")
                 || self.at_identifier("match")
                 || self.at_identifier("select")
                 || self.at_identifier("while")
@@ -772,6 +878,36 @@ impl Parser<'_> {
             return Ok(Statement::Assert {
                 condition,
                 message,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("when") {
+            let start = self.next().span;
+            let parenthesized = self.take(&TokenKind::LeftParen).is_some();
+            let condition = self.expression(0)?;
+            if parenthesized {
+                self.expect(&TokenKind::RightParen, "expected `)` after `when` condition")?;
+            }
+            self.expect(&TokenKind::Colon, "expected `:` after `when` condition")?;
+            let (then_block, end) = self.indented_block("when")?;
+            return Ok(Statement::If {
+                condition,
+                then_block,
+                else_block: Vec::new(),
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        if self.at_identifier("always") {
+            let start = self.next().span;
+            self.expect(&TokenKind::Colon, "expected `:` after `always`")?;
+            let (then_block, end) = self.indented_block("always")?;
+            return Ok(Statement::If {
+                condition: Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::Boolean(true)),
+                    span: start,
+                },
+                then_block,
+                else_block: Vec::new(),
                 span: Span::new(start.source, start.start, end),
             });
         }
@@ -1817,6 +1953,43 @@ impl Parser<'_> {
         } else {
             None
         };
+        if !inferred && annotation.is_some() && self.at(&TokenKind::LeftBrace) {
+            self.next();
+            self.property_constraints()?;
+        }
+        if !inferred
+            && annotation.is_some()
+            && (self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent))
+        {
+            let annotation = annotation.unwrap();
+            let value = match annotation.simple_name() {
+                Some("string") => Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::String(String::new())),
+                    span: annotation.span,
+                },
+                Some("float" | "f16" | "bf16" | "f32" | "f64" | "f128") => Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
+                    span: annotation.span,
+                },
+                Some("bool") => Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::Boolean(false)),
+                    span: annotation.span,
+                },
+                _ => Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::Integer("0".into())),
+                    span: annotation.span,
+                },
+            };
+            return Ok(Binding {
+                name,
+                annotation: Some(annotation),
+                span: Span::new(name_span.source, name_span.start, value.span.end),
+                value,
+                mutable: false,
+                update: false,
+                preserve_error: false,
+            });
+        }
         let preserve_error = !inferred && self.take(&TokenKind::QuestionEqual).is_some();
         if !inferred && !preserve_error {
             self.expect(
@@ -2472,13 +2645,43 @@ impl Parser<'_> {
     fn mock_cases(&mut self) -> Result<(Vec<severian_ast::MockCase>, Expression, u32), Diagnostic> {
         self.line_breaks();
         let mut cases = Vec::new();
-        let fallback;
-        loop {
+        let fallback = loop {
             if self.at_identifier("else") {
                 self.next();
-                fallback = self.expression(0)?;
+                let fallback = self.expression(0)?;
                 self.line_breaks();
-                break;
+                break fallback;
+            }
+            if self.at(&TokenKind::RightParen) {
+                let span = self.peek().span;
+                let message = Expression {
+                    kind: ExpressionKind::Literal(severian_ast::Literal::String(
+                        "unmatched mock call".into(),
+                    )),
+                    span,
+                };
+                let error_name = Expression {
+                    kind: ExpressionKind::Name("Error".into()),
+                    span,
+                };
+                let error = Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(error_name),
+                        arguments: vec![CallArgument {
+                            name: None,
+                            value: message,
+                            expected_error: None,
+                            span,
+                        }],
+                    },
+                    span,
+                };
+                break Expression {
+                    kind: ExpressionKind::Throw {
+                        error: Box::new(error),
+                    },
+                    span,
+                };
             }
             let call = self.expression(0)?;
             self.expect(&TokenKind::Arrow, "expected `->` after mocked call")?;
@@ -2491,7 +2694,7 @@ impl Parser<'_> {
             self.line_breaks();
             self.take(&TokenKind::Comma);
             self.line_breaks();
-        }
+        };
         let end = self
             .expect(
                 &TokenKind::RightParen,

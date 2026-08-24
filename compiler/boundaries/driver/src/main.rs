@@ -494,8 +494,12 @@ fn test(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("could not identify test invocation: {error}"))?
         .as_nanos();
-    let output_root = root
-        .join("target")
+    let output_base = if manifest.is_some() {
+        root.join("target")
+    } else {
+        std::env::temp_dir().join("severian-tests")
+    };
+    let output_root = output_base
         .join(target_directory(&config.target))
         .join(&config.profile)
         .join("tests")

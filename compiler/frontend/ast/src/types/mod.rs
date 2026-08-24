@@ -95,6 +95,8 @@ pub struct TypeDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestDeclaration {
     pub name: Option<String>,
+    pub parameters: Vec<String>,
+    pub cases: Vec<Vec<crate::Expression>>,
     pub modes: Vec<String>,
     pub contracts: Vec<FunctionContract>,
     pub body: Vec<crate::Statement>,

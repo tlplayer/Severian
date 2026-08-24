@@ -103,22 +103,32 @@ pub struct TestDeclaration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestMode {
     Property,
+    Cases,
+    Fuzz,
+    Model,
+    Differential,
     Benchmark,
     Chaos,
     Profile,
     Compiler,
     Integration,
+    Timeout(u128),
 }
 
 impl TestMode {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Property => "property",
+            Self::Cases => "cases",
+            Self::Fuzz => "fuzz",
+            Self::Model => "model",
+            Self::Differential => "differential",
             Self::Benchmark => "bench",
             Self::Chaos => "chaos",
             Self::Profile => "profile",
             Self::Compiler => "compiler",
             Self::Integration => "integ",
+            Self::Timeout(_) => "timeout",
         }
     }
 }
@@ -154,6 +164,11 @@ pub enum TestExpectation {
     ProfileDuration {
         comparison: DurationComparison,
         threshold_nanos: u128,
+        message: String,
+    },
+    ProfileMemory {
+        comparison: DurationComparison,
+        threshold_bytes: u128,
         message: String,
     },
 }

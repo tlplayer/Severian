@@ -83,6 +83,26 @@ mod tests {
     }
 
     #[test]
+    fn scans_scientific_notation_before_unit_suffixes() {
+        let source = SourceFile::virtual_source(
+            "scientific.sev",
+            "small = 1e-8\nlarge = 2.5E+10\nunit = 1eV\n",
+        );
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Float("1e-8".into())));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Float("2.5E+10".into())));
+        assert!(tokens.iter().any(|token| token.kind
+            == TokenKind::MeasuredNumber {
+                magnitude: "1".into(),
+                suffix: "eV".into(),
+            }));
+    }
+
+    #[test]
     fn scans_hexadecimal_literals_as_canonical_integers() {
         let source = SourceFile::virtual_source("hex.sev", "0xFF 0xFE00_0000");
         let tokens = scan(&source).unwrap();

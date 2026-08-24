@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 pub(crate) fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -14,7 +15,10 @@ pub(crate) fn collect_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Re
     {
         let path = entry.map_err(|error| error.to_string())?.path();
         if path.is_dir() {
-            if path.file_name().and_then(|name| name.to_str()) != Some("target") {
+            if !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("target" | "errors")
+            ) {
                 collect_sources(&path, output)?;
             }
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("sev") {
@@ -78,6 +82,7 @@ pub(crate) fn run_with_coverage(
 ) -> Result<(), String> {
     let mut passed = 0usize;
     let mut failed = 0usize;
+    let mut skipped = 0usize;
     for (source_index, source) in sources.iter().enumerate() {
         let directory = output_root.join(format!("source-{source_index}"));
         std::fs::create_dir_all(&directory)
@@ -96,6 +101,12 @@ pub(crate) fn run_with_coverage(
             passed += 1;
         }
         for test in tests {
+            let timeout = test.modes.iter().find_map(|mode| match mode {
+                TestMode::Timeout(nanos) => Some(Duration::from_nanos(
+                    u64::try_from(*nanos).unwrap_or(u64::MAX),
+                )),
+                _ => None,
+            });
             let artifact = match &test.execution {
                 TestExecution::Compiler { failure } => {
                     if let Some(message) = failure {
@@ -110,8 +121,27 @@ pub(crate) fn run_with_coverage(
                 }
                 TestExecution::Executable(artifact) => artifact,
             };
-            if test.modes == [TestMode::Integration] {
-                let result = execute(&artifact.path, coverage_file).map_err(|error| {
+            if test
+                .modes
+                .iter()
+                .any(|mode| matches!(mode, TestMode::Model | TestMode::Differential))
+            {
+                println!(
+                    "test {} ... skipped ({} runner is not configured)",
+                    test.name,
+                    test.modes
+                        .iter()
+                        .find(|mode| {
+                            matches!(mode, TestMode::Model | TestMode::Differential)
+                        })
+                        .map(|mode| mode.name())
+                        .unwrap_or("generated")
+                );
+                skipped += 1;
+                continue;
+            }
+            if test.modes.contains(&TestMode::Integration) {
+                let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
                 let panic = test
@@ -145,6 +175,7 @@ pub(crate) fn run_with_coverage(
                         }
                         TestExpectation::Panics { .. } => return None,
                         TestExpectation::ProfileDuration { .. } => return None,
+                        TestExpectation::ProfileMemory { .. } => return None,
                     };
                     let matches = match expectation {
                         TestExpectation::Contains { .. } => actual.contains(expected),
@@ -153,6 +184,7 @@ pub(crate) fn run_with_coverage(
                         TestExpectation::PanicMessage { .. } => actual.contains(expected),
                         TestExpectation::Panics { .. } => unreachable!(),
                         TestExpectation::ProfileDuration { .. } => unreachable!(),
+                        TestExpectation::ProfileMemory { .. } => unreachable!(),
                     };
                     (!matches).then(|| {
                         format!("captured stream did not {relation} {expected:?}; got {actual:?}")
@@ -163,7 +195,10 @@ pub(crate) fn run_with_coverage(
                 } else {
                     result.status.success()
                 };
-                if status_matches && expectation_failure.is_none() {
+                if status_matches
+                    && expectation_failure.is_none()
+                    && !has_soft_expectation_failures(&result)
+                {
                     println!("test {} ... ok", test.name);
                     passed += 1;
                 } else {
@@ -176,11 +211,11 @@ pub(crate) fn run_with_coverage(
                 }
                 continue;
             }
-            if test.modes == [TestMode::Benchmark] {
-                let warmup = execute(&artifact.path, coverage_file).map_err(|error| {
+            if test.modes.contains(&TestMode::Benchmark) {
+                let warmup = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
-                if !warmup.status.success() {
+                if !warmup.status.success() || has_soft_expectation_failures(&warmup) {
                     println!("test {} ... FAILED", test.name);
                     report_captured_output(&warmup);
                     failed += 1;
@@ -190,10 +225,10 @@ pub(crate) fn run_with_coverage(
                 let started = Instant::now();
                 let mut failure = None;
                 for _ in 0..iterations {
-                    let result = execute(&artifact.path, coverage_file).map_err(|error| {
+                    let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
                         format!("could not run {}: {error}", artifact.path.display())
                     })?;
-                    if !result.status.success() {
+                    if !result.status.success() || has_soft_expectation_failures(&result) {
                         failure = Some(result);
                         break;
                     }
@@ -212,37 +247,40 @@ pub(crate) fn run_with_coverage(
                 }
                 continue;
             }
-            if test.modes == [TestMode::Profile] {
+            if test.modes.contains(&TestMode::Profile) {
                 let started = Instant::now();
-                let result = execute(&artifact.path, coverage_file).map_err(|error| {
+                let result = execute(&artifact.path, coverage_file, timeout).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
                 let measured = started.elapsed();
                 let timing_failure = test.expectations.iter().find_map(|expectation| {
-                    let TestExpectation::ProfileDuration {
-                        comparison,
-                        threshold_nanos,
-                        message,
-                    } = expectation
-                    else {
-                        return None;
+                    let (comparison, actual, threshold, message, unit) = match expectation {
+                        TestExpectation::ProfileDuration {
+                            comparison,
+                            threshold_nanos,
+                            message,
+                        } => (comparison, measured.as_nanos(), threshold_nanos, message, "ns"),
+                        TestExpectation::ProfileMemory {
+                            comparison,
+                            threshold_bytes,
+                            message,
+                        } => (comparison, 0, threshold_bytes, message, "B"),
+                        _ => return None,
                     };
-                    let actual = measured.as_nanos();
                     let satisfied = match comparison {
-                        DurationComparison::Less => actual < *threshold_nanos,
-                        DurationComparison::LessEqual => actual <= *threshold_nanos,
-                        DurationComparison::Greater => actual > *threshold_nanos,
-                        DurationComparison::GreaterEqual => actual >= *threshold_nanos,
+                        DurationComparison::Less => actual < *threshold,
+                        DurationComparison::LessEqual => actual <= *threshold,
+                        DurationComparison::Greater => actual > *threshold,
+                        DurationComparison::GreaterEqual => actual >= *threshold,
                     };
                     (!satisfied).then(|| {
-                        format!(
-                            "{message}; measured {}, threshold {}ns",
-                            elapsed(measured),
-                            threshold_nanos
-                        )
+                        format!("{message}; measured {actual}{unit}, threshold {threshold}{unit}")
                     })
                 });
-                if result.status.success() && timing_failure.is_none() {
+                if result.status.success()
+                    && !has_soft_expectation_failures(&result)
+                    && timing_failure.is_none()
+                {
                     println!("test {} ... profile ({})", test.name, elapsed(measured));
                     passed += 1;
                 } else {
@@ -255,7 +293,21 @@ pub(crate) fn run_with_coverage(
                 }
                 continue;
             }
-            if !test.modes.is_empty() {
+            if test
+                .modes
+                .iter()
+                .any(|mode| {
+                    !matches!(
+                        mode,
+                        TestMode::Timeout(_)
+                            | TestMode::Property
+                            | TestMode::Fuzz
+                            | TestMode::Cases
+                            | TestMode::Model
+                            | TestMode::Differential
+                    )
+                })
+            {
                 println!(
                     "test {} ... FAILED (unsupported runner: {})",
                     test.name,
@@ -268,10 +320,26 @@ pub(crate) fn run_with_coverage(
                 failed += 1;
                 continue;
             }
-            let result = execute(&artifact.path, coverage_file)
+            let result = execute(&artifact.path, coverage_file, timeout)
                 .map_err(|error| format!("could not run {}: {error}", artifact.path.display()))?;
-            if result.status.success() {
-                println!("test {} ... ok", test.name);
+            if result.status.success() && !has_soft_expectation_failures(&result) {
+                if test
+                    .modes
+                    .iter()
+                    .any(|mode| {
+                        matches!(
+                            mode,
+                            TestMode::Property
+                                | TestMode::Fuzz
+                                | TestMode::Model
+                                | TestMode::Differential
+                        )
+                    })
+                {
+                    println!("test {} ... ok (seed 0)", test.name);
+                } else {
+                    println!("test {} ... ok", test.name);
+                }
                 passed += 1;
             } else {
                 println!("test {} ... FAILED", test.name);
@@ -280,7 +348,7 @@ pub(crate) fn run_with_coverage(
             }
         }
     }
-    println!("\ntest result: {passed} passed; {failed} failed; 0 skipped");
+    println!("\ntest result: {passed} passed; {failed} failed; {skipped} skipped");
     if failed == 0 {
         Ok(())
     } else {
@@ -288,12 +356,38 @@ pub(crate) fn run_with_coverage(
     }
 }
 
-fn execute(path: &Path, coverage_file: Option<&Path>) -> std::io::Result<Output> {
+fn has_soft_expectation_failures(output: &Output) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("expectation failed:")
+}
+
+fn execute(
+    path: &Path,
+    coverage_file: Option<&Path>,
+    timeout: Option<Duration>,
+) -> std::io::Result<Output> {
     let mut command = Command::new(path);
     if let Some(coverage_file) = coverage_file {
         command.env("SEV_COVERAGE_FILE", coverage_file);
     }
-    command.output()
+    let Some(timeout) = timeout else {
+        return command.output();
+    };
+    let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let started = Instant::now();
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if started.elapsed() >= timeout {
+            child.kill()?;
+            let mut output = child.wait_with_output()?;
+            output.stderr.extend_from_slice(
+                format!("test timed out after {}\n", elapsed(timeout)).as_bytes(),
+            );
+            return Ok(output);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn test_stream<'a>(stream: &TestStream, output: &'a Output) -> Cow<'a, str> {

@@ -10,6 +10,13 @@ void __sev_assert(_Bool condition, const char *message) {
     exit(1);
 }
 
+void __sev_expect(_Bool condition, const char *message) {
+    if (condition) return;
+    fputs("expectation failed: ", stderr);
+    fputs(message == NULL ? "condition was false" : message, stderr);
+    fputc('\n', stderr);
+}
+
 int32_t __sev_print_string(const char *value) {
     return puts(value);
 }

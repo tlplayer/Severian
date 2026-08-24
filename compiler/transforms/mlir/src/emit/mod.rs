@@ -2055,6 +2055,13 @@ fn constant_string(module: &Module, id: ValueId) -> Option<&str> {
 fn mlir_float_literal(value: &str) -> String {
     if let Some(fraction) = value.strip_prefix('.') {
         format!("0.{fraction}")
+    } else if let Some(exponent) = value.find(['e', 'E']) {
+        let (mantissa, exponent) = value.split_at(exponent);
+        if mantissa.contains('.') {
+            value.to_owned()
+        } else {
+            format!("{mantissa}.0{exponent}")
+        }
     } else {
         value.to_owned()
     }
@@ -2355,6 +2362,8 @@ mod tests {
     fn leading_dot_float_literals_are_normalized_for_mlir() {
         assert_eq!(mlir_float_literal(".5"), "0.5");
         assert_eq!(mlir_float_literal("1.5"), "1.5");
+        assert_eq!(mlir_float_literal("1e-8"), "1.0e-8");
+        assert_eq!(mlir_float_literal("2.5E+10"), "2.5E+10");
     }
 
     #[test]
