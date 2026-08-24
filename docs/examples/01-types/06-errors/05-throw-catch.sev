@@ -1,4 +1,4 @@
-class InvalidValue: Error:
+class InvalidValue: Error
     value: int
 
     def InvalidValue(input: int):
