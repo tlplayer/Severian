@@ -81,6 +81,7 @@ pub(crate) struct PackageClass {
     pub module: severian_modules::ModuleId,
     pub ty: TypeId,
     pub declaration: severian_ast::ClassDeclaration,
+    pub lookups: BTreeMap<severian_modules::ModuleId, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1243,6 +1244,43 @@ impl Analyzer<'_> {
             }
             self.next_class_type = self.next_class_type.min(list.ty.0.saturating_sub(1));
         }
+        // Install every visible class name before resolving fields so package
+        // annotations may refer forward and through an imported namespace.
+        for package_class in classes {
+            if !package_class.declaration.type_parameters.is_empty() {
+                continue;
+            }
+            let is_error = package_class
+                .declaration
+                .traits
+                .iter()
+                .any(|implemented| implemented.simple_name() == Some("Error"))
+                || package_class.declaration.name.ends_with("Error");
+            let placeholder = ClassInstance {
+                ty: package_class.ty,
+                name: package_class.declaration.name.clone(),
+                fields: Vec::new(),
+                source_fields: package_class.declaration.fields.clone(),
+                constructors: package_class.declaration.constructors.clone(),
+                methods: package_class.declaration.methods.clone(),
+            };
+            self.class_instances_by_type
+                .insert(package_class.ty, placeholder.clone());
+            if let Some(source_module) = source_module {
+                for lookup in package_class
+                    .lookups
+                    .get(&source_module)
+                    .into_iter()
+                    .flatten()
+                {
+                    self.class_instances
+                        .insert((lookup.clone(), Vec::new()), placeholder.clone());
+                }
+            }
+            if is_error {
+                self.error_types.insert(package_class.ty);
+            }
+        }
         for package_class in classes {
             if !package_class.declaration.type_parameters.is_empty() {
                 continue;
@@ -1281,16 +1319,20 @@ impl Analyzer<'_> {
                 constructors: package_class.declaration.constructors.clone(),
                 methods: package_class.declaration.methods.clone(),
             };
-            if is_error {
-                self.error_types.insert(package_class.ty);
-            }
             self.class_instances_by_type
                 .insert(package_class.ty, instance.clone());
+            if let Some(source_module) = source_module {
+                for lookup in package_class
+                    .lookups
+                    .get(&source_module)
+                    .into_iter()
+                    .flatten()
+                {
+                    self.class_instances
+                        .insert((lookup.clone(), Vec::new()), instance.clone());
+                }
+            }
             if source_module == Some(package_class.module) {
-                self.class_instances.insert(
-                    (package_class.declaration.name.clone(), Vec::new()),
-                    instance,
-                );
                 self.lowered_classes.push(HirClassDeclaration {
                     id: package_class.ty,
                     name: package_class.declaration.name.clone(),
@@ -3604,6 +3646,30 @@ impl Analyzer<'_> {
                     )?;
                 }
             }
+            AstExpressionKind::Conditional {
+                value,
+                condition,
+                fallback,
+            } => {
+                self.lower_expression_comprehensions(
+                    value,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                self.lower_expression_comprehensions(
+                    condition,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                self.lower_expression_comprehensions(
+                    fallback,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+            }
             AstExpressionKind::Fallback { value, fallback }
             | AstExpressionKind::Binary {
                 left: value,
@@ -4464,6 +4530,25 @@ impl Analyzer<'_> {
                     }
                 }
                 Ok(awaited)
+            }
+            AstExpressionKind::Conditional {
+                value,
+                condition,
+                fallback,
+            } => {
+                let condition = self.condition_expression(condition)?;
+                let value = self.expression(value, expected)?;
+                let fallback = self.expression(fallback, Some(value.type_id))?;
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: value.type_id,
+                    kind: ExpressionKind::Fallback {
+                        condition: Box::new(condition),
+                        value: Box::new(value),
+                        fallback: Box::new(fallback),
+                    },
+                    span: ast.span,
+                })
             }
             AstExpressionKind::Fallback { value, fallback } => {
                 let value = self.expression(value, expected)?;
@@ -5984,6 +6069,18 @@ impl Analyzer<'_> {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, arguments, expected, ast.span);
                     }
+                    if self
+                        .class_instances
+                        .contains_key(&(path.clone(), Vec::new()))
+                    {
+                        return self.class_constructor(
+                            &path,
+                            &[],
+                            arguments,
+                            expected,
+                            ast.span,
+                        );
+                    }
                 }
                 if let Some((class, type_arguments)) = class_application(callee) {
                     return self.class_constructor(
@@ -7222,7 +7319,15 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
-        let instance = self.instantiate_class(class, type_arguments, span)?;
+        let instance = if type_arguments.is_empty() {
+            self.class_instances
+                .get(&(class.to_owned(), Vec::new()))
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(|| self.instantiate_class(class, type_arguments, span))?
+        } else {
+            self.instantiate_class(class, type_arguments, span)?
+        };
         if expected.is_some_and(|expected| expected != instance.ty) {
             return Err(semantic_error(
                 "constructed class does not satisfy the expected type".into(),
@@ -11869,6 +11974,15 @@ fn substituted_expression(
                 argument.value = substituted_expression(&argument.value, substitutions);
             }
         }
+        AstExpressionKind::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            **value = substituted_expression(value, substitutions);
+            **condition = substituted_expression(condition, substitutions);
+            **fallback = substituted_expression(fallback, substitutions);
+        }
         AstExpressionKind::Fallback { value, fallback }
         | AstExpressionKind::Binary {
             left: value,
@@ -12153,6 +12267,15 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
             operand: expression,
             ..
         } => collect_expression_names(expression, names),
+        AstExpressionKind::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            collect_expression_names(value, names);
+            collect_expression_names(condition, names);
+            collect_expression_names(fallback, names);
+        }
         AstExpressionKind::Fallback { value, fallback }
         | AstExpressionKind::Binary {
             left: value,

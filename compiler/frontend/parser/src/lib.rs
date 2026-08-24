@@ -731,6 +731,34 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_conditional_expressions_and_qualified_types() {
+        let source = SourceFile::virtual_source(
+            "conditional.sev",
+            "def choose(value: package.Value, enabled: bool) -> package.Value:\n    return value if enabled else package.fallback()\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert_eq!(
+            function.parameters[0].annotation.simple_name(),
+            Some("package.Value")
+        );
+        assert_eq!(function.result.simple_name(), Some("package.Value"));
+        let severian_ast::Statement::Return {
+            value: Some(expression),
+            ..
+        } = &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected return")
+        };
+        assert!(matches!(
+            expression.kind,
+            severian_ast::ExpressionKind::Conditional { .. }
+        ));
+    }
+
+    #[test]
     fn parses_fallible_else_handler_as_one_scoped_statement() {
         let source = SourceFile::virtual_source(
             "fallible.sev",

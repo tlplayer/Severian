@@ -338,6 +338,16 @@ fn validate_generic_expression(
         Expression::Async { expression, .. } | Expression::Await { expression } => {
             validate_generic_expression(expression, names, function, index, types)
         }
+        Expression::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            let value = validate_generic_expression(value, names, function, index, types)?;
+            validate_generic_expression(condition, names, function, index, types)?;
+            let fallback = validate_generic_expression(fallback, names, function, index, types)?;
+            Ok(value.or(fallback))
+        }
         Expression::Fallback { value, fallback } => {
             let value = validate_generic_expression(value, names, function, index, types)?;
             let fallback = validate_generic_expression(fallback, names, function, index, types)?;
@@ -1269,6 +1279,36 @@ fn visit_expression_for_specializations(
             visit_expression_for_specializations(
                 module,
                 expression,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+        }
+        severian_ast::ExpressionKind::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            visit_expression_for_specializations(
+                module,
+                value,
+                expected,
+                names,
+                index,
+                specializations,
+            )?;
+            visit_expression_for_specializations(
+                module,
+                condition,
+                None,
+                names,
+                index,
+                specializations,
+            )?;
+            visit_expression_for_specializations(
+                module,
+                fallback,
                 expected,
                 names,
                 index,

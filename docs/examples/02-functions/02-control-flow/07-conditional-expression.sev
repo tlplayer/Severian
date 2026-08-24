@@ -1,0 +1,7 @@
+def label(value: int, plural: bool) -> string:
+    return "items" if plural else "item"
+
+
+test:
+    assert(label(1, false) == "item")
+    assert(label(2, true) == "items")

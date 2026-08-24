@@ -2550,7 +2550,32 @@ impl Parser<'_> {
             };
             comparison_tail = comparison.then_some(right);
         }
-        if minimum_precedence == 0 && self.at_identifier("else") {
+        if minimum_precedence == 0 && self.at_identifier("if") {
+            self.next();
+            let condition = self.expression(1)?;
+            if !self.at_identifier("else") {
+                return Err(Diagnostic::new(
+                    "E000112",
+                    "expected `else` after conditional expression condition",
+                    Some(self.peek().span),
+                ));
+            }
+            self.next();
+            let fallback = self.expression(0)?;
+            let span = Span::new(
+                expression.span.source,
+                expression.span.start,
+                fallback.span.end,
+            );
+            expression = Expression {
+                kind: ExpressionKind::Conditional {
+                    value: Box::new(expression),
+                    condition: Box::new(condition),
+                    fallback: Box::new(fallback),
+                },
+                span,
+            };
+        } else if minimum_precedence == 0 && self.at_identifier("else") {
             self.next();
             let fallback = self.expression(0)?;
             let span = Span::new(
@@ -3298,10 +3323,12 @@ impl Parser<'_> {
                 return Err(self.error("expected `in` after comprehension binding(s)"));
             }
             self.next();
-            let iterable = self.expression(0)?;
+            // `if` introduces the optional comprehension filter here, rather
+            // than a conditional expression belonging to the iterable.
+            let iterable = self.expression(1)?;
             let condition = if self.at_identifier("if") {
                 self.next();
-                Some(self.expression(0)?)
+                Some(self.expression(1)?)
             } else {
                 None
             };
@@ -3395,9 +3422,17 @@ impl Parser<'_> {
                 Span::new(open.span.source, open.span.start, close.span.end),
             ));
         }
-        let (name, start) = self.identifier("expected a type")?;
+        let (mut name, start) = self.identifier("expected a type")?;
+        let mut name_end = start.end;
+        while self.take(&TokenKind::Dot).is_some() {
+            let (member, member_span) =
+                self.identifier("expected a type name after `.`")?;
+            name.push('.');
+            name.push_str(&member);
+            name_end = member_span.end;
+        }
         let mut arguments = Vec::new();
-        let mut end = start.end;
+        let mut end = name_end;
         if self.take(&TokenKind::LeftBracket).is_some() {
             if !self.at(&TokenKind::RightBracket) {
                 loop {
@@ -3798,6 +3833,15 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
         }
         ExpressionKind::Async { expression, .. } | ExpressionKind::Await { expression } => {
             expression_mentions(expression, expected)
+        }
+        ExpressionKind::Conditional {
+            value,
+            condition,
+            fallback,
+        } => {
+            expression_mentions(value, expected)
+                || expression_mentions(condition, expected)
+                || expression_mentions(fallback, expected)
         }
         ExpressionKind::Fallback { value, fallback } => {
             expression_mentions(value, expected) || expression_mentions(fallback, expected)

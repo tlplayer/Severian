@@ -144,7 +144,7 @@ pub fn analyze_package_with_context(
     resolve_imports(module_graph, &mut index);
     validate_generic_bodies(module_graph, &index, &universal.types)?;
     let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
-    let package_classes = collect_package_classes(module_graph);
+    let package_classes = collect_package_classes(module_graph, &index);
     let package_lists = collect_package_lists(module_graph, &universal.types);
 
     let mut next_binding = 0u32;
@@ -388,8 +388,8 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
     lowered
 }
 
-fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
-    module_graph
+fn collect_package_classes(module_graph: &ModuleGraph, index: &ProgramIndex) -> Vec<PackageClass> {
+    let mut classes = module_graph
         .modules
         .iter()
         .flat_map(|module| {
@@ -434,8 +434,57 @@ fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
             module,
             ty: TypeId(u32::MAX.saturating_sub(ordinal as u32)),
             declaration,
+            lookups: BTreeMap::new(),
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for class in &mut classes {
+        for source in index.modules.keys().copied() {
+            let names = visible_class_names(source, class, index);
+            if !names.is_empty() {
+                class.lookups.insert(source, names);
+            }
+        }
+    }
+    classes
+}
+
+fn visible_class_names(
+    source: ModuleId,
+    class: &PackageClass,
+    index: &ProgramIndex,
+) -> Vec<String> {
+    let Some(scope) = index.modules.get(&source) else {
+        return Vec::new();
+    };
+    let matches_class = |resolution: &Resolution| {
+        resolution_definitions(resolution).into_iter().any(|definition| {
+            index.definitions.get(&definition).is_some_and(|definition| {
+                definition.module == class.module
+                    && definition.name == class.declaration.name
+                    && matches!(definition.kind, DefKind::Type)
+            })
+        })
+    };
+    let mut names = Vec::new();
+    for (binding, resolution) in &scope.scope.bindings {
+        match resolution {
+            Resolution::Module(target) if *target == class.module => {
+                if index
+                    .exports
+                    .get(target)
+                    .and_then(|exports| exports.get(&class.declaration.name))
+                    .is_some_and(&matches_class)
+                {
+                    names.push(format!("{binding}.{}", class.declaration.name));
+                }
+            }
+            resolution if matches_class(resolution) => names.push(binding.clone()),
+            _ => {}
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn resolve_package_type(
@@ -470,14 +519,12 @@ fn resolve_package_type(
             let ty = resolve_package_type(types, member, module, classes, lists)?;
             let source_error = member.simple_name().is_some_and(|name| {
                 name.ends_with("Error")
-                    || classes.iter().any(|class| {
-                        class.module == module
-                            && class.declaration.name == name
-                            && class
-                                .declaration
-                                .traits
-                                .iter()
-                                .any(|implemented| implemented.simple_name() == Some("Error"))
+                    || package_class_for_lookup(classes, module, name).is_some_and(|class| {
+                        class
+                            .declaration
+                            .traits
+                            .iter()
+                            .any(|implemented| implemented.simple_name() == Some("Error"))
                     })
             });
             if types.resolve_name("Error") == Some(ty) || source_error {
@@ -529,10 +576,7 @@ fn resolve_package_type(
         return Ok(crate::map_type_id(key, value));
     }
     if let Some(name) = annotation.simple_name() {
-        if let Some(class) = classes
-            .iter()
-            .find(|class| class.module == module && class.declaration.name == name)
-        {
+        if let Some(class) = package_class_for_lookup(classes, module, name) {
             return Ok(class.ty);
         }
     }
@@ -557,14 +601,12 @@ fn resolve_package_union_members(
         let ty = resolve_package_type(types, member, module, classes, lists)?;
         let source_error = member.simple_name().is_some_and(|name| {
             name.ends_with("Error")
-                || classes.iter().any(|class| {
-                    class.module == module
-                        && class.declaration.name == name
-                        && class
-                            .declaration
-                            .traits
-                            .iter()
-                            .any(|implemented| implemented.simple_name() == Some("Error"))
+                || package_class_for_lookup(classes, module, name).is_some_and(|class| {
+                    class
+                        .declaration
+                        .traits
+                        .iter()
+                        .any(|implemented| implemented.simple_name() == Some("Error"))
                 })
         });
         if types.resolve_name("Error") == Some(ty) || source_error {
@@ -575,6 +617,19 @@ fn resolve_package_union_members(
     resolved.sort();
     resolved.dedup();
     Ok((resolved.len() > 1).then_some(resolved))
+}
+
+fn package_class_for_lookup<'a>(
+    classes: &'a [PackageClass],
+    module: ModuleId,
+    name: &str,
+) -> Option<&'a PackageClass> {
+    classes.iter().find(|class| {
+        class
+            .lookups
+            .get(&module)
+            .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
+    })
 }
 
 fn collect_package_lists(

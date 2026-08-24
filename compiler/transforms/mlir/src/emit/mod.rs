@@ -111,7 +111,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
             Operation::Coverage { key } => Some(key),
             _ => None,
         })
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
 
     let mut output = String::new();
     for declaration in &module.classes {
@@ -234,7 +234,15 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         render_function_definition(&mut output, module, function)?;
     }
     output.push_str("  func.func @main() -> i32 {\n");
-    render_block(&mut output, module, &module.initializer, 4, None)?;
+    let mut coverage_ordinal = 0;
+    render_block(
+        &mut output,
+        module,
+        &module.initializer,
+        4,
+        None,
+        &mut coverage_ordinal,
+    )?;
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
         if !function.parameters.is_empty() {
@@ -584,11 +592,12 @@ fn render_cfg_operation(
     match operation {
         Operation::Coverage { key } => {
             let symbol = coverage_symbol(key);
+            let value = format!("{symbol}_bb{}_op{operation_index}", block.0);
             output.push_str(&format!(
-                "{indentation}%{symbol} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
+                "{indentation}%{value} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
             ));
             output.push_str(&format!(
-                "{indentation}func.call @__sev_coverage_hit(%{symbol}) : (!llvm.ptr) -> ()\n"
+                "{indentation}func.call @__sev_coverage_hit(%{value}) : (!llvm.ptr) -> ()\n"
             ));
         }
         Operation::Constant { value, result } => {
@@ -1376,17 +1385,20 @@ fn render_block(
     block: &Block,
     indent: usize,
     function_result: Option<LoweredType>,
+    coverage_ordinal: &mut usize,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
     for operation in &block.operations {
         match operation {
             Operation::Coverage { key } => {
                 let symbol = coverage_symbol(key);
+                let value = format!("{symbol}_{}", *coverage_ordinal);
+                *coverage_ordinal += 1;
                 output.push_str(&format!(
-                    "{indentation}%{symbol} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
+                    "{indentation}%{value} = llvm.mlir.addressof @{symbol} : !llvm.ptr\n"
                 ));
                 output.push_str(&format!(
-                    "{indentation}func.call @__sev_coverage_hit(%{symbol}) : (!llvm.ptr) -> ()\n"
+                    "{indentation}func.call @__sev_coverage_hit(%{value}) : (!llvm.ptr) -> ()\n"
                 ));
             }
             Operation::Constant { value, result } => {
@@ -1753,13 +1765,27 @@ fn render_block(
                     ));
                 }
                 output.push_str(&format!("{indentation}scf.if %v{} {{\n", condition.0));
-                render_block(output, module, then_block, indent + 2, function_result)?;
+                render_block(
+                    output,
+                    module,
+                    then_block,
+                    indent + 2,
+                    function_result,
+                    coverage_ordinal,
+                )?;
                 output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
                 if else_block.operations.is_empty() {
                     output.push_str(&format!("{indentation}}}\n"));
                 } else {
                     output.push_str(&format!("{indentation}}} else {{\n"));
-                    render_block(output, module, else_block, indent + 2, function_result)?;
+                    render_block(
+                        output,
+                        module,
+                        else_block,
+                        indent + 2,
+                        function_result,
+                        coverage_ordinal,
+                    )?;
                     output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
                     output.push_str(&format!("{indentation}}}\n"));
                 }
@@ -1775,14 +1801,28 @@ fn render_block(
                     ));
                 }
                 output.push_str(&format!("{indentation}scf.while : () -> () {{\n"));
-                render_block(output, module, condition_block, indent + 2, function_result)?;
+                render_block(
+                    output,
+                    module,
+                    condition_block,
+                    indent + 2,
+                    function_result,
+                    coverage_ordinal,
+                )?;
                 output.push_str(&format!(
                     "{}scf.condition(%v{})\n",
                     " ".repeat(indent + 2),
                     condition.0
                 ));
                 output.push_str(&format!("{indentation}}} do {{\n"));
-                render_block(output, module, body, indent + 2, function_result)?;
+                render_block(
+                    output,
+                    module,
+                    body,
+                    indent + 2,
+                    function_result,
+                    coverage_ordinal,
+                )?;
                 output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
                 output.push_str(&format!("{indentation}}}\n"));
             }
@@ -1894,7 +1934,15 @@ fn render_function_definition(
         function_symbol(function),
     ));
     let body = function.body.as_ref().expect("filtered source body");
-    render_block(output, module, body, 4, Some(function.result))?;
+    let mut coverage_ordinal = 0;
+    render_block(
+        output,
+        module,
+        body,
+        4,
+        Some(function.result),
+        &mut coverage_ordinal,
+    )?;
     if !block_terminates(body) {
         if function.result != LoweredType::Unit {
             return Err(MlirError::UnsupportedOperation(format!(
@@ -2179,6 +2227,25 @@ mod tests {
     #[test]
     fn strings_use_llvm_globals_without_changing_their_bytes() {
         assert_eq!(mlir_string("a\n\"b\\é"), "a\\0A\\22b\\5C\\C3\\A9");
+    }
+
+    #[test]
+    fn repeated_coverage_points_share_a_global_but_use_distinct_ssa_values() {
+        let key = "example.sev|statement|7|12|0";
+        let module = Module {
+            initializer: Block {
+                operations: vec![
+                    Operation::Coverage { key: key.into() },
+                    Operation::Coverage { key: key.into() },
+                ],
+            },
+            ..Module::default()
+        };
+        let rendered = render(&module).unwrap();
+        let symbol = coverage_symbol(key);
+        assert_eq!(rendered.matches(&format!("@{symbol}(\"")).count(), 1);
+        assert!(rendered.contains(&format!("%{symbol}_0 = llvm.mlir.addressof")));
+        assert!(rendered.contains(&format!("%{symbol}_1 = llvm.mlir.addressof")));
     }
 
     #[test]

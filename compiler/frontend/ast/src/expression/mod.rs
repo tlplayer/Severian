@@ -153,6 +153,11 @@ pub enum ExpressionKind {
     Await {
         expression: Box<Expression>,
     },
+    Conditional {
+        value: Box<Expression>,
+        condition: Box<Expression>,
+        fallback: Box<Expression>,
+    },
     Fallback {
         value: Box<Expression>,
         fallback: Box<Expression>,

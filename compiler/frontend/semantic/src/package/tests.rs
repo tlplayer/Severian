@@ -44,6 +44,26 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
 }
 
 #[test]
+fn qualified_imported_types_resolve_in_annotations_and_constructors() {
+    let root = temporary();
+    std::fs::write(
+        root.join("model.sev"),
+        "class Item:\n    value: i32\ndef make(value: i32) -> Item:\n    return Item(value)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"model.sev\" as model\ndef read(item: model.Item) -> i32:\n    return item.value\ndef build(value: i32) -> model.Item:\n    return model.Item(value)\ndef selected() -> i32:\n    return read(model.make(7))\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn package_signatures_preserve_named_parameters_and_defaults() {
     let root = temporary();
     std::fs::write(
