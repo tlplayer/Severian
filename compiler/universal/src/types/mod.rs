@@ -12,6 +12,7 @@ pub enum PrimitiveCategory {
     Character,
     Integer,
     Float,
+    Measured,
     Text,
     Bytes,
     Absence,
@@ -26,6 +27,7 @@ impl PrimitiveCategory {
             "character" => Ok(Self::Character),
             "integer" => Ok(Self::Integer),
             "float" => Ok(Self::Float),
+            "measured" => Ok(Self::Measured),
             "text" => Ok(Self::Text),
             "bytes" => Ok(Self::Bytes),
             "absence" => Ok(Self::Absence),
@@ -41,6 +43,7 @@ impl PrimitiveCategory {
             Self::Character => Some(LiteralKind::Character),
             Self::Integer => Some(LiteralKind::Integer),
             Self::Float => Some(LiteralKind::Float),
+            Self::Measured => None,
             Self::Text => Some(LiteralKind::String),
             Self::Bytes => Some(LiteralKind::Bytes),
             Self::Absence => Some(LiteralKind::None),
@@ -602,6 +605,11 @@ impl TypeContext {
         else {
             return false;
         };
+        if matches!(actual.category, PrimitiveCategory::Measured)
+            || matches!(expected.category, PrimitiveCategory::Measured)
+        {
+            return false;
+        }
         match (actual.representation, expected.representation) {
             (
                 PrimitiveRepresentation::Integer {

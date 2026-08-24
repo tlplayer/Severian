@@ -184,6 +184,25 @@ pub(crate) fn run_with_coverage(
                 }
                 continue;
             }
+            if test.modes == [TestMode::Profile] {
+                let started = Instant::now();
+                let result = execute(&artifact.path, coverage_file).map_err(|error| {
+                    format!("could not run {}: {error}", artifact.path.display())
+                })?;
+                if result.status.success() {
+                    println!(
+                        "test {} ... profile ({})",
+                        test.name,
+                        elapsed(started.elapsed())
+                    );
+                    passed += 1;
+                } else {
+                    println!("test {} ... FAILED", test.name);
+                    report_captured_output(&result);
+                    failed += 1;
+                }
+                continue;
+            }
             if !test.modes.is_empty() {
                 println!(
                     "test {} ... FAILED (unsupported runner: {})",
@@ -249,14 +268,15 @@ fn report_captured_output(output: &Output) {
 }
 
 fn duration(value: Duration) -> String {
+    format!("{}/iteration", elapsed(value))
+}
+
+fn elapsed(value: Duration) -> String {
     if value.as_secs() > 0 {
-        format!("{:.3}s/iteration", value.as_secs_f64())
+        format!("{:.3}s", value.as_secs_f64())
     } else if value.as_millis() > 0 {
-        format!("{:.3}ms/iteration", value.as_secs_f64() * 1_000.0)
+        format!("{:.3}ms", value.as_secs_f64() * 1_000.0)
     } else {
-        format!(
-            "{:.3}\u{00b5}s/iteration",
-            value.as_secs_f64() * 1_000_000.0
-        )
+        format!("{:.3}\u{00b5}s", value.as_secs_f64() * 1_000_000.0)
     }
 }

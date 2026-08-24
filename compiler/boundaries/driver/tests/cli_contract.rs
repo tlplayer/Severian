@@ -699,6 +699,25 @@ fn compound_assignment_executes_and_rejects_invalid_updates() {
 }
 
 #[test]
+fn compiler_test_setup_and_class_visibility_are_checked_per_case() {
+    let root = temporary("compiler-class-visibility");
+    let source = root.join("visibility.sev");
+    fs::write(
+        &source,
+        "class Counter:\n    _value: int\n    __secret: int\n    def Counter():\n        _value := 0\n        __secret := 1\n    def inc():\n        _value += 1\n\ntest with compiler:\n    counter := Counter()\n    reject:\n        counter._value += 1\n    reject:\n        counter.__secret\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn test_rejects_unimplemented_runner_modes_instead_of_passing_them_as_skipped() {
     let root = temporary("unsupported-test-mode");
     let source = root.join("property.sev");

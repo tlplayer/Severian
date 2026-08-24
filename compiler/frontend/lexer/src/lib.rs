@@ -61,19 +61,28 @@ mod tests {
     }
 
     #[test]
-    fn scans_data_size_literals_as_canonical_byte_counts() {
+    fn preserves_measured_number_magnitudes_and_suffixes() {
         let source =
             SourceFile::virtual_source("sizes.sev", "byte = 8B\nbinary = 4KiB\ndecimal = 2MB\n");
         let tokens = scan(&source).unwrap();
         assert!(tokens
             .iter()
-            .any(|token| token.kind == TokenKind::Integer("8".into())));
+            .any(|token| token.kind == TokenKind::MeasuredNumber {
+                magnitude: "8".into(),
+                suffix: "B".into(),
+            }));
         assert!(tokens
             .iter()
-            .any(|token| token.kind == TokenKind::Integer("4096".into())));
+            .any(|token| token.kind == TokenKind::MeasuredNumber {
+                magnitude: "4".into(),
+                suffix: "KiB".into(),
+            }));
         assert!(tokens
             .iter()
-            .any(|token| token.kind == TokenKind::Integer("2000000".into())));
+            .any(|token| token.kind == TokenKind::MeasuredNumber {
+                magnitude: "2".into(),
+                suffix: "MB".into(),
+            }));
     }
 
     #[test]

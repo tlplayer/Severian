@@ -6,7 +6,7 @@ use severian_universal::{
 };
 use std::fmt;
 
-pub const INTERFACE_VERSION: u16 = 1;
+pub const INTERFACE_VERSION: u16 = 2;
 
 /// Versioned package-interface DTO. It mirrors universal data for transport;
 /// it deliberately has no lookup, assignability, literal, or operator logic.
@@ -26,6 +26,7 @@ pub enum CategoryRecord {
     Character,
     Integer,
     Float,
+    Measured,
     Text,
     Bytes,
     Absence,
@@ -85,6 +86,7 @@ impl From<PrimitiveCategory> for CategoryRecord {
             PrimitiveCategory::Character => Self::Character,
             PrimitiveCategory::Integer => Self::Integer,
             PrimitiveCategory::Float => Self::Float,
+            PrimitiveCategory::Measured => Self::Measured,
             PrimitiveCategory::Text => Self::Text,
             PrimitiveCategory::Bytes => Self::Bytes,
             PrimitiveCategory::Absence => Self::Absence,
@@ -203,6 +205,7 @@ fn category_tag(category: CategoryRecord) -> u8 {
         CategoryRecord::Unit => 6,
         CategoryRecord::Arguments => 7,
         CategoryRecord::Character => 8,
+        CategoryRecord::Measured => 9,
     }
 }
 
@@ -217,6 +220,7 @@ fn decode_category(tag: u8) -> Result<CategoryRecord, InterfaceError> {
         6 => CategoryRecord::Unit,
         7 => CategoryRecord::Arguments,
         8 => CategoryRecord::Character,
+        9 => CategoryRecord::Measured,
         tag => return Err(InterfaceError::InvalidTag(tag)),
     })
 }

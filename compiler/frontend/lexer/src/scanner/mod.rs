@@ -83,7 +83,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 {
                     cursor += 1;
                 }
-                TokenKind::Float(source.text[start..cursor].replace('_', ""))
+                numeric_token(source, start, &mut cursor, true)
             }
             b'.' => one(&mut cursor, TokenKind::Dot),
             b':' if bytes.get(cursor + 1) == Some(&b'=') => {
@@ -338,7 +338,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 {
                     cursor += 1;
                 }
-                if bytes.get(cursor) == Some(&b'.')
+                let is_float = if bytes.get(cursor) == Some(&b'.')
                     && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)
                 {
                     cursor += 1;
@@ -349,13 +349,11 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                     {
                         cursor += 1;
                     }
-                    TokenKind::Float(source.text[start..cursor].replace('_', ""))
-                } else if let Some((end, value)) = data_size_literal(&source.text, start, cursor) {
-                    cursor = end;
-                    TokenKind::Integer(value)
+                    true
                 } else {
-                    TokenKind::Integer(source.text[start..cursor].replace('_', ""))
-                }
+                    false
+                };
+                numeric_token(source, start, &mut cursor, is_float)
             }
             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
                 cursor += 1;
@@ -384,32 +382,33 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
     Ok(tokens)
 }
 
-fn data_size_literal(source: &str, start: usize, suffix_start: usize) -> Option<(usize, String)> {
-    let remaining = source.get(suffix_start..)?;
-    let (suffix, scale) = [
-        ("KiB", 1024u128),
-        ("MiB", 1024u128.pow(2)),
-        ("GiB", 1024u128.pow(3)),
-        ("TiB", 1024u128.pow(4)),
-        ("KB", 1000u128),
-        ("MB", 1000u128.pow(2)),
-        ("GB", 1000u128.pow(3)),
-        ("TB", 1000u128.pow(4)),
-        ("B", 1u128),
-    ]
-    .into_iter()
-    .find(|(suffix, _)| remaining.starts_with(suffix))?;
-    let end = suffix_start + suffix.len();
-    if source
-        .as_bytes()
-        .get(end)
-        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-    {
-        return None;
+fn numeric_token(
+    source: &SourceFile,
+    start: usize,
+    cursor: &mut usize,
+    is_float: bool,
+) -> TokenKind {
+    let number_end = *cursor;
+    let bytes = source.text.as_bytes();
+    if bytes.get(*cursor).is_some_and(u8::is_ascii_alphabetic) {
+        *cursor += 1;
+        while bytes
+            .get(*cursor)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            *cursor += 1;
+        }
+        return TokenKind::MeasuredNumber {
+            magnitude: source.text[start..number_end].replace('_', ""),
+            suffix: source.text[number_end..*cursor].to_owned(),
+        };
     }
-    let magnitude = source.get(start..suffix_start)?.replace('_', "");
-    let value = magnitude.parse::<u128>().ok()?.checked_mul(scale)?;
-    Some((end, value.to_string()))
+    let value = source.text[start..number_end].replace('_', "");
+    if is_float {
+        TokenKind::Float(value)
+    } else {
+        TokenKind::Integer(value)
+    }
 }
 
 fn unescape_string(raw: &str) -> String {

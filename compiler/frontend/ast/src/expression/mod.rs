@@ -5,6 +5,7 @@ use severian_source::Span;
 pub enum Literal {
     Integer(String),
     Float(String),
+    Measured { magnitude: String, suffix: String },
     Boolean(bool),
     Character(char),
     String(String),

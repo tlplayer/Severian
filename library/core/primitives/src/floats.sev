@@ -21,6 +21,8 @@ trait float: Primitive + Floating[float]:
     property representation: string = "machine-float"
     property default_literal: bool = true
 
+    operator /(right: duration) -> frequency
+
 
 trait f16: Primitive + Floating[f16]:
     property category: string = "float"

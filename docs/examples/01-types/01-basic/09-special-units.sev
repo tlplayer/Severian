@@ -18,8 +18,9 @@ test "hex literals":
 
     mask := 0xFF00_FF00
     register := 0x0000_0001
-    register := memory.read[u32](address, endian=little)
-    register := memory.read[u32](address, endian=big)
+    # Typed memory reads can assign into the initialized register:
+    # register = memory.read[u32](address, endian=little)
+    # register = memory.read[u32](address, endian=big)
 
 
 
@@ -70,20 +71,21 @@ test "frequency":
 
 
 # Unit values work naturally in contracts.
-def process(data: bytes)
+def process(data: string) with
 {
-    defer bytes(data) < 64MiB -> exception("memory limit exceeded"),
+    defer data_size(size(data)) < 64MiB -> Error("memory limit exceeded"),
 }:
-    print(len(data))
+    print(size(data))
 
 
-test with profile "latency"
-{
-    defer time < 10ms -> exception("operation tocase too long"),
-}:
-    process(bytes())
+# Profile SLA syntax under consideration:
+# {
+#     defer time < 10ms -> Error("operation took too long"),
+# }
+test with profile "latency":
+    process("")
 
-from temperature import C, F, K
+# Temperature suffixes are dimensioned literals supplied by the prelude.
 
 test "temperature":
     gpu_idle := 42C
@@ -96,19 +98,18 @@ test "temperature":
     assert(273.15K == 0C)
 
 
-```
-Custom units can be created 
-trait Unit[Dimension]:
-    symbol: string
-    scale: f64
-    offset: f64 = 0.0
-
-class Volt: Unit
-    symbol: string = "V"
-    scale: f64
-    offset: f64
-```
-from electrical import V, mV, A, mA, W
+# Custom units can be created:
+#
+# trait Unit[Dimension]:
+#     symbol: string
+#     scale: f64
+#     offset: f64 = 0.0
+#
+# class Volt: Unit
+#     symbol: string = "V"
+#     scale: f64
+#     offset: f64
+# Electrical suffixes are dimensioned literals supplied by the prelude.
 
 core_voltage := 950mV
 power := 220W

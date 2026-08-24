@@ -486,13 +486,6 @@ pub(crate) fn analyze_with_package_functions(
                 .modes
                 .contains(&severian_hir::TestMode::Compiler)
             {
-                if !test.body.is_empty() {
-                    return Err(Diagnostic::new(
-                        "E000217",
-                        "compiler tests currently allow only `accept:` and `reject:` cases; diagnostic assertions are not implemented",
-                        Some(test.span),
-                    ));
-                }
                 if test.compiler_cases.is_empty() {
                     return Err(Diagnostic::new(
                         "E000217",
@@ -1186,6 +1179,14 @@ impl Analyzer<'_> {
                 value,
                 span,
             } => {
+                if field.starts_with('_') {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("field `{field}` cannot be written outside its class"),
+                        Some(*span),
+                    )
+                    .with_help("use a public method to update protected or private state"));
+                }
                 let AstExpressionKind::Name(object_name) = &object.kind else {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -1707,6 +1708,9 @@ impl Analyzer<'_> {
 
     fn prepare(&mut self, ast: &AstExpression) -> Result<Prepared, Diagnostic> {
         match &ast.kind {
+            AstExpressionKind::Literal(AstLiteral::Measured { .. }) => {
+                self.expression(ast, None).map(Prepared::Resolved)
+            }
             AstExpressionKind::Literal(value) => {
                 Ok(Prepared::Literal(universal_literal(value), ast.span))
             }
@@ -1878,6 +1882,22 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Literal(value) => {
+                if let AstLiteral::Measured { magnitude, suffix } = value {
+                    let (type_name, value) = measured_literal(magnitude, suffix, ast.span)?;
+                    let type_id = self.types.resolve_name(type_name).ok_or_else(|| {
+                        Diagnostic::new(
+                            "E000204",
+                            format!("the `{suffix}` unit type is unavailable"),
+                            Some(ast.span),
+                        )
+                    })?;
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id,
+                        kind: ExpressionKind::Literal(value),
+                        span: ast.span,
+                    });
+                }
                 let value = if matches!(value, AstLiteral::None)
                     && expected.is_some_and(|expected| {
                         self.types
@@ -2056,6 +2076,14 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
+                if name.starts_with("__") {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("field `{name}` is private to class `{}`", instance.name),
+                        Some(ast.span),
+                    )
+                    .with_help("access private state through a public class method"));
+                }
                 let Some((index, field)) = instance
                     .fields
                     .iter()
@@ -2767,6 +2795,7 @@ impl Analyzer<'_> {
                 primitive.category,
                 severian_universal::PrimitiveCategory::Integer
                     | severian_universal::PrimitiveCategory::Float
+                    | severian_universal::PrimitiveCategory::Measured
             )
         })
     }
@@ -3760,6 +3789,14 @@ impl Analyzer<'_> {
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);
         };
+        if name.starts_with("__") {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` is private to class `{}`", instance.name),
+                Some(callee.span),
+            )
+            .with_help("call a public class method instead"));
+        }
         let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
             return Err(Diagnostic::new(
                 "E000211",
@@ -3955,7 +3992,20 @@ impl Analyzer<'_> {
         let Some(instance) = self.class_instances_by_type.get(&ty).cloned() else {
             return Ok(None);
         };
-        let Some(method) = instance.methods.iter().find(|method| method.name == *name) else {
+        if name.starts_with("__") {
+            return Err(Diagnostic::new(
+                "E000211",
+                format!("method `{name}` is private to class `{}`", instance.name),
+                Some(callee.span),
+            )
+            .with_help("call a public class method instead"));
+        }
+        let Some(mut method) = instance
+            .methods
+            .iter()
+            .find(|method| method.name == *name)
+            .cloned()
+        else {
             return Err(Diagnostic::new(
                 "E000211",
                 format!("class `{}` has no method `{name}`", instance.name),
@@ -3973,13 +4023,89 @@ impl Analyzer<'_> {
                 Some(expression.span),
             ));
         }
-        let Some(body) = &method.body else {
-            return Err(Diagnostic::new(
-                "E000211",
-                format!("method `{name}` has no implementation"),
-                Some(method.span),
-            ));
-        };
+        let mut delegated = BTreeSet::from([method.name.clone()]);
+        loop {
+            let Some(body) = &method.body else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("method `{}` has no implementation", method.name),
+                    Some(method.span),
+                ));
+            };
+            let delegate = match body.as_slice() {
+                [AstStatement::Expression(AstExpression {
+                    kind:
+                        AstExpressionKind::Call {
+                            callee,
+                            arguments,
+                        },
+                    ..
+                })] if arguments.is_empty() => match &callee.kind {
+                    AstExpressionKind::Name(delegate) => Some(delegate.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(delegate) = delegate else {
+                break;
+            };
+            if !delegated.insert(delegate.to_owned()) {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("method delegation through `{delegate}` is recursive"),
+                    Some(method.span),
+                ));
+            }
+            let Some(next) = instance
+                .methods
+                .iter()
+                .find(|candidate| candidate.name == delegate && candidate.parameters.is_empty())
+                .cloned()
+            else {
+                break;
+            };
+            method = next;
+        }
+        let body = method.body.as_ref().expect("delegated methods retain bodies");
+        if !body.is_empty()
+            && body.iter().all(|statement| {
+                matches!(statement, AstStatement::Binding(assignment)
+                    if !assignment.update
+                        && instance.fields.iter().any(|field| field.name == assignment.name))
+            })
+        {
+            let previous = self.value_substitutions.clone();
+            let resolved = (|| {
+                for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                    let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                    let value = self.expression(&argument.value, Some(parameter_type))?;
+                    self.value_substitutions
+                        .insert(parameter.name.clone(), value);
+                }
+                body.iter()
+                    .map(|statement| {
+                        let AstStatement::Binding(assignment) = statement else {
+                            unreachable!("direct field assignment body was checked above")
+                        };
+                        let (field, declaration) = instance
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, field)| field.name == assignment.name)
+                            .expect("direct field assignment target was checked above");
+                        Ok(Statement::FieldSet {
+                            binding,
+                            field: field as u32,
+                            value: self.expression(&assignment.value, Some(declaration.ty))?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()
+            })();
+            self.value_substitutions = previous;
+            return resolved.map(|statements| {
+                Some(Statement::Sequence(Block { statements }))
+            });
+        }
         if let Some(field_name) = body.iter().find_map(|statement| {
             let AstStatement::Expression(expression) = statement else {
                 return None;
@@ -4808,6 +4934,9 @@ fn universal_literal(literal: &AstLiteral) -> LiteralValue {
     match literal {
         AstLiteral::Integer(value) => LiteralValue::Integer(value.clone()),
         AstLiteral::Float(value) => LiteralValue::Float(value.clone()),
+        AstLiteral::Measured { .. } => {
+            unreachable!("measured literals are resolved with their dimension")
+        }
         AstLiteral::Boolean(value) => LiteralValue::Boolean(*value),
         AstLiteral::Character(value) => LiteralValue::Character(*value),
         AstLiteral::String(value) => LiteralValue::String(value.clone()),
@@ -4815,6 +4944,87 @@ fn universal_literal(literal: &AstLiteral) -> LiteralValue {
         AstLiteral::None => LiteralValue::None,
         AstLiteral::Unit => LiteralValue::Unit,
     }
+}
+
+fn measured_literal(
+    magnitude: &str,
+    suffix: &str,
+    span: severian_source::Span,
+) -> Result<(&'static str, LiteralValue), Diagnostic> {
+    let magnitude = magnitude.parse::<f64>().map_err(|_| {
+        Diagnostic::new(
+            "E000203",
+            format!("invalid magnitude in `{magnitude}{suffix}`"),
+            Some(span),
+        )
+    })?;
+    let canonical = match suffix {
+        "b" => magnitude / 8.0,
+        "B" => magnitude,
+        "KB" => magnitude * 1_000.0,
+        "MB" => magnitude * 1_000_000.0,
+        "GB" => magnitude * 1_000_000_000.0,
+        "TB" => magnitude * 1_000_000_000_000.0,
+        "KiB" => magnitude * 1_024.0,
+        "MiB" => magnitude * 1_048_576.0,
+        "GiB" => magnitude * 1_073_741_824.0,
+        "TiB" => magnitude * 1_099_511_627_776.0,
+        "pct" => magnitude / 100.0,
+        "ns" => magnitude / 1_000_000_000.0,
+        "us" => magnitude / 1_000_000.0,
+        "ms" => magnitude / 1_000.0,
+        "s" => magnitude,
+        "min" => magnitude * 60.0,
+        "hr" => magnitude * 3_600.0,
+        "day" => magnitude * 86_400.0,
+        "Hz" => magnitude,
+        "kHz" => magnitude * 1_000.0,
+        "MHz" => magnitude * 1_000_000.0,
+        "GHz" => magnitude * 1_000_000_000.0,
+        "C" => magnitude,
+        "F" => (magnitude - 32.0) * 5.0 / 9.0,
+        "K" => magnitude - 273.15,
+        "mV" => magnitude / 1_000.0,
+        "V" | "A" | "W" => magnitude,
+        "mA" => magnitude / 1_000.0,
+        _ => {
+            return Err(Diagnostic::new(
+                "E000203",
+                format!("unknown numeric unit suffix `{suffix}`"),
+                Some(span),
+            )
+            .with_help("use a declared unit suffix or separate the number and identifier with whitespace"))
+        }
+    };
+    let type_name = measured_type_name(suffix).expect("every normalized suffix has a dimension");
+    if !canonical.is_finite() {
+        return Err(Diagnostic::new(
+            "E000203",
+            "measured literal is outside the supported numeric range",
+            Some(span),
+        ));
+    }
+    let mut spelling = canonical.to_string();
+    if !spelling.contains(['.', 'e', 'E']) {
+        spelling.push_str(".0");
+    }
+    Ok((type_name, LiteralValue::Float(spelling)))
+}
+
+fn measured_type_name(suffix: &str) -> Option<&'static str> {
+    Some(match suffix {
+        "b" | "B" | "KB" | "MB" | "GB" | "TB" | "KiB" | "MiB" | "GiB" | "TiB" => {
+            "data_size"
+        }
+        "pct" => "percentage",
+        "ns" | "us" | "ms" | "s" | "min" | "hr" | "day" => "duration",
+        "Hz" | "kHz" | "MHz" | "GHz" => "frequency",
+        "C" | "F" | "K" => "temperature",
+        "mV" | "V" => "voltage",
+        "mA" | "A" => "current",
+        "W" => "power",
+        _ => return None,
+    })
 }
 
 fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
@@ -5142,26 +5352,38 @@ mod tests {
     }
 
     #[test]
-    fn compiler_tests_reject_unimplemented_body_and_diagnostic_assertions() {
+    fn compiler_tests_allow_shared_setup_but_reject_named_diagnostics() {
         let context = severian_bootstrap::load().unwrap();
-        for source_text in [
-            "test with compiler:\n    assert(false)\n    reject:\n        missing()\n",
+        let setup = SourceFile::virtual_source(
+            "compiler-test.sev",
+            "test with compiler:\n    value := 1\n    reject:\n        missing()\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&setup).unwrap()).unwrap();
+        analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "package_compiler_test",
+            },
+        )
+        .unwrap();
+
+        let named = SourceFile::virtual_source(
+            "compiler-test.sev",
             "test with compiler:\n    reject error:\n        missing()\n",
-        ] {
-            let source = SourceFile::virtual_source("compiler-test.sev", source_text);
-            let tokens = severian_lexer::scan(&source).unwrap();
-            let ast = severian_parser::parse(&tokens).unwrap();
-            let error = analyze_with_context(
-                &ast,
-                &context.types,
-                AnalysisContext {
-                    mode: AnalysisMode::Test,
-                    module_name: "package_compiler_test",
-                },
-            )
-            .unwrap_err();
-            assert_eq!(error.code, "E000217");
-        }
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&named).unwrap()).unwrap();
+        let error = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "package_compiler_test",
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "E000217");
     }
 
     #[test]

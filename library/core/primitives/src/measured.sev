@@ -1,0 +1,76 @@
+# Dimensioned numeric values use an f64 physical representation while retaining
+# distinct source types. This prevents accidental arithmetic across dimensions.
+trait Measured[T]:
+    operator +() -> T
+    operator -() -> T
+    operator +(right: T) -> T
+    operator -(right: T) -> T
+    operator ==(right: T) -> bool
+    operator !=(right: T) -> bool
+    operator <(right: T) -> bool
+    operator <=(right: T) -> bool
+    operator >(right: T) -> bool
+    operator >=(right: T) -> bool
+
+
+trait data_size: Primitive + Measured[data_size]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+    operator /(right: data_size) -> float
+    operator /(right: duration) -> data_rate
+
+
+trait duration: Primitive + Measured[duration]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+    operator /(right: duration) -> float
+
+
+trait data_rate: Primitive + Measured[data_rate]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+
+trait frequency: Primitive + Measured[frequency]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+
+trait percentage: Primitive + Measured[percentage]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+    # Percentages are dimensionless and may be compared with their scalar ratio.
+    operator ==(right: float) -> bool
+    operator !=(right: float) -> bool
+
+
+trait temperature: Primitive + Measured[temperature]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+
+trait voltage: Primitive + Measured[voltage]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+
+trait current: Primitive + Measured[current]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64
+
+
+trait power: Primitive + Measured[power]:
+    property category: string = "measured"
+    property representation: string = "ieee-float"
+    property bits: int = 64

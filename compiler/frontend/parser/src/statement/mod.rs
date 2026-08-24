@@ -1294,7 +1294,7 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
-        if matches!(self.peek().kind, TokenKind::Identifier(_))
+        let field_assignment = matches!(self.peek().kind, TokenKind::Identifier(_))
             && self
                 .tokens
                 .get(self.cursor + 1)
@@ -1303,21 +1303,61 @@ impl Parser<'_> {
                 self.tokens.get(self.cursor + 2).map(|token| &token.kind),
                 Some(TokenKind::Identifier(_))
             )
-            && self
-                .tokens
-                .get(self.cursor + 3)
-                .is_some_and(|token| token.kind == TokenKind::Equal)
-        {
+            && self.tokens.get(self.cursor + 3).is_some_and(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Equal
+                        | TokenKind::PlusEqual
+                        | TokenKind::MinusEqual
+                        | TokenKind::StarEqual
+                        | TokenKind::SlashEqual
+                        | TokenKind::PercentEqual
+                )
+            });
+        if field_assignment {
             let (object, object_span) = self.identifier("expected an assignment object")?;
             self.next();
-            let (field, _) = self.identifier("expected an assigned field")?;
-            self.next();
-            let value = self.expression(0)?;
+            let (field, field_span) = self.identifier("expected an assigned field")?;
+            let assignment = self.next();
+            let right = self.expression(0)?;
+            let object_expression = Expression {
+                kind: ExpressionKind::Name(object),
+                span: object_span,
+            };
+            let operator = match assignment.kind {
+                TokenKind::Equal => None,
+                TokenKind::PlusEqual => Some(BinaryOperator::Add),
+                TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
+                TokenKind::StarEqual => Some(BinaryOperator::Multiply),
+                TokenKind::SlashEqual => Some(BinaryOperator::Divide),
+                TokenKind::PercentEqual => Some(BinaryOperator::Remainder),
+                _ => unreachable!("field assignment was matched above"),
+            };
+            let value = match operator {
+                None => right,
+                Some(operator) => {
+                    Expression {
+                        span: Span::new(object_span.source, object_span.start, right.span.end),
+                        kind: ExpressionKind::Binary {
+                            operator,
+                            left: Box::new(Expression {
+                                span: Span::new(
+                                    object_span.source,
+                                    object_span.start,
+                                    field_span.end,
+                                ),
+                                kind: ExpressionKind::Member {
+                                    object: Box::new(object_expression.clone()),
+                                    name: field.clone(),
+                                },
+                            }),
+                            right: Box::new(right),
+                        },
+                    }
+                }
+            };
             Ok(Statement::FieldAssignment {
-                object: Expression {
-                    kind: ExpressionKind::Name(object),
-                    span: object_span,
-                },
+                object: object_expression,
                 field,
                 span: Span::new(object_span.source, object_span.start, value.span.end),
                 value,
@@ -1718,7 +1758,10 @@ impl Parser<'_> {
                     }
                 }
                 TokenKind::Colon if depth == 1 => return false,
-                TokenKind::Integer(_) | TokenKind::Float(_) | TokenKind::String(_)
+                TokenKind::Integer(_)
+                | TokenKind::Float(_)
+                | TokenKind::MeasuredNumber { .. }
+                | TokenKind::String(_)
                     if depth == 1 =>
                 {
                     return false;
@@ -1735,6 +1778,9 @@ impl Parser<'_> {
         let kind = match token.kind {
             TokenKind::Integer(value) => ExpressionKind::Literal(Literal::Integer(value)),
             TokenKind::Float(value) => ExpressionKind::Literal(Literal::Float(value)),
+            TokenKind::MeasuredNumber { magnitude, suffix } => {
+                ExpressionKind::Literal(Literal::Measured { magnitude, suffix })
+            }
             TokenKind::Character(value) => ExpressionKind::Literal(Literal::Character(value)),
             TokenKind::String(value) => ExpressionKind::Literal(Literal::String(value)),
             TokenKind::FormattedString(value) => {

@@ -1128,6 +1128,9 @@ fn expression_type_name(
             match literal {
                 severian_ast::Literal::Integer(_) => "int",
                 severian_ast::Literal::Float(_) => "float",
+                severian_ast::Literal::Measured { suffix, .. } => {
+                    return crate::measured_type_name(suffix).map(str::to_owned)
+                }
                 severian_ast::Literal::Boolean(_) => "bool",
                 severian_ast::Literal::Character(_) => "char",
                 severian_ast::Literal::String(_) => "string",

@@ -479,28 +479,18 @@ impl Compiler {
                     let mut ast = severian_ast::Module {
                         items: declarations.clone(),
                     };
-                    for statement in &case.body {
-                        match statement {
-                            severian_ast::Statement::Binding(binding) => {
-                                ast.items.push(severian_ast::Item::Binding(binding.clone()));
-                            }
-                            severian_ast::Statement::Expression(expression) => {
-                                ast.items
-                                    .push(severian_ast::Item::Expression(expression.clone()));
-                            }
-                            _ => {
-                                failure = Some(
-                                    "compiler expectations currently accept declaration fragments only"
-                                        .into(),
-                                );
-                                break;
-                            }
-                        }
-                    }
-                    if failure.is_some() {
-                        break;
-                    }
-                    let result = self.check_ast_to_mir(&ast, CompileMode::Build, "compiler_case");
+                    let mut body = test.body.clone();
+                    body.extend(case.body.clone());
+                    ast.items.push(severian_ast::Item::Test(
+                        severian_ast::TestDeclaration {
+                            name: Some("compiler case".into()),
+                            modes: Vec::new(),
+                            body,
+                            compiler_cases: Vec::new(),
+                            span: case.span,
+                        },
+                    ));
+                    let result = self.check_ast_to_mir(&ast, CompileMode::Test, "compiler_case");
                     let matched = match case.expectation {
                         severian_ast::CompilerExpectation::Accept => result.is_ok(),
                         severian_ast::CompilerExpectation::Reject => result.is_err(),

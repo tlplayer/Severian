@@ -502,4 +502,29 @@ output = f"""module {{
         assert!(rendered.contains("invalid.sev:2"), "{rendered}");
         assert!(rendered.contains("invalid.sev:3"), "{rendered}");
     }
+
+    #[test]
+    fn compound_field_assignment_preserves_the_field_read_and_update() {
+        let source = SourceFile::virtual_source(
+            "field-update.sev",
+            "def update(counter: Counter):\n    counter.value += 1\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::FieldAssignment { field, value, .. } =
+            &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected field assignment")
+        };
+        assert_eq!(field, "value");
+        assert!(matches!(
+            value.kind,
+            severian_ast::ExpressionKind::Binary {
+                operator: severian_ast::BinaryOperator::Add,
+                ..
+            }
+        ));
+    }
 }
