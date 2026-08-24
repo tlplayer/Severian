@@ -291,7 +291,7 @@ pub(crate) fn lower_program(
                 global_variables.clone(),
             );
             for parameter in &function.parameters {
-                let local = builder.local(parameter.contract.ty, false, true);
+                let local = builder.local(parameter.contract.ty, true, true);
                 let place = Place::local(local);
                 builder.bindings.insert(parameter.binding, place.clone());
                 builder

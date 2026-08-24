@@ -15,3 +15,10 @@ def transfer(
     destination += amount
 
     return (source, destination)
+
+
+test "transfer":
+    s, d = transfer(10,10,10)
+
+    assert(s == 0)
+    assert(d == 20)

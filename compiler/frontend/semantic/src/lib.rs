@@ -508,13 +508,11 @@ pub(crate) fn analyze_with_package_functions(
                     Some(ast_function.span),
                 ));
             }
+            let variable = severian_hir::VariableId(parameter.binding.0);
+            analyzer.mutable_variables.insert(variable);
             analyzer.names.insert(
                 parameter.name.clone(),
-                (
-                    parameter.binding,
-                    severian_hir::VariableId(parameter.binding.0),
-                    type_id,
-                ),
+                (parameter.binding, variable, type_id),
             );
         }
         let result_type = function.result.ty;
@@ -13350,6 +13348,32 @@ mod tests {
         assert_ne!(global, first_body_binding);
         assert_ne!(global, shadow);
         assert_eq!(shadow_use.kind, ExpressionKind::Binding(shadow));
+    }
+
+    #[test]
+    fn function_parameters_can_be_reassigned() {
+        let (program, _) = analyze_source(
+            "def transfer(source: i64, destination: i64, amount: i64) -> (i64, i64) with\n{\n    defer source + destination == original_total,\n}:\n    original_total = source + destination\n    source -= amount\n    destination += amount\n    return (source, destination)\n",
+        );
+        let module = &program.modules[0];
+        let function = &module.functions[0];
+        for parameter in &function.parameters[..2] {
+            let variable = severian_hir::VariableId(parameter.binding.0);
+            let update = module
+                .bindings
+                .iter()
+                .find(|binding| binding.variable == variable)
+                .expect("parameter reassignment produces a binding update");
+            assert!(update.mutable);
+        }
+
+        let mir = severian_mir::build(&program).unwrap();
+        let body = mir.functions[0].body.as_ref().unwrap();
+        assert!(body
+            .locals
+            .iter()
+            .filter(|local| local.argument)
+            .all(|local| local.mutable));
     }
 
     #[test]
