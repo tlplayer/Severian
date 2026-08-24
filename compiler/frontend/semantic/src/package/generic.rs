@@ -73,6 +73,16 @@ fn validate_generic_statements(
                 validate_generic_expression(object, names, function, index, types)?;
                 validate_generic_expression(value, names, function, index, types)?;
             }
+            severian_ast::Statement::IndexAssignment {
+                object,
+                index: offset,
+                value,
+                ..
+            } => {
+                validate_generic_expression(object, names, function, index, types)?;
+                validate_generic_expression(offset, names, function, index, types)?;
+                validate_generic_expression(value, names, function, index, types)?;
+            }
             severian_ast::Statement::Expression(expression)
             | severian_ast::Statement::Defer { expression, .. }
             | severian_ast::Statement::Return {
@@ -166,8 +176,22 @@ fn validate_generic_statements(
                     )?;
                 }
             }
-            severian_ast::Statement::For { iterable, body, .. } => {
+            severian_ast::Statement::For {
+                iterable,
+                initializer,
+                body,
+                ..
+            } => {
                 validate_generic_expression(iterable, names, function, index, types)?;
+                if let Some(initializer) = initializer {
+                    validate_generic_expression(
+                        &initializer.value,
+                        names,
+                        function,
+                        index,
+                        types,
+                    )?;
+                }
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
             }
             severian_ast::Statement::Break { .. } | severian_ast::Statement::Continue { .. } => {}
@@ -226,7 +250,7 @@ fn validate_generic_expression(
     match &expression.kind {
         Expression::Name(name) => Ok(names.get(name).cloned()),
         Expression::Literal(_) => Ok(None),
-        Expression::List(values) | Expression::Tuple(values) => {
+        Expression::List(values) | Expression::Set(values) | Expression::Tuple(values) => {
             for value in values {
                 validate_generic_expression(value, names, function, index, types)?;
             }
@@ -237,6 +261,28 @@ fn validate_generic_expression(
                 validate_generic_expression(&entry.key, names, function, index, types)?;
                 validate_generic_expression(&entry.value, names, function, index, types)?;
             }
+            Ok(None)
+        }
+        Expression::ListComprehension { value, clauses }
+        | Expression::SetComprehension { value, clauses } => {
+            for clause in clauses {
+                validate_generic_expression(&clause.iterable, names, function, index, types)?;
+                if let Some(condition) = &clause.condition {
+                    validate_generic_expression(condition, names, function, index, types)?;
+                }
+            }
+            validate_generic_expression(value, names, function, index, types)?;
+            Ok(None)
+        }
+        Expression::MapComprehension { key, value, clauses } => {
+            for clause in clauses {
+                validate_generic_expression(&clause.iterable, names, function, index, types)?;
+                if let Some(condition) = &clause.condition {
+                    validate_generic_expression(condition, names, function, index, types)?;
+                }
+            }
+            validate_generic_expression(key, names, function, index, types)?;
+            validate_generic_expression(value, names, function, index, types)?;
             Ok(None)
         }
         Expression::Mock { cases, fallback } => {
@@ -271,6 +317,7 @@ fn validate_generic_expression(
             start,
             end,
             step,
+            ..
         } => {
             let object = validate_generic_expression(object, names, function, index, types)?;
             for bound in [start, end, step].into_iter().flatten() {
@@ -851,6 +898,23 @@ fn visit_statements_for_specializations(
                     specializations,
                 )?;
             }
+            severian_ast::Statement::IndexAssignment {
+                object,
+                index: offset,
+                value,
+                ..
+            } => {
+                for expression in [object, offset, value] {
+                    visit_expression_for_specializations(
+                        module,
+                        expression,
+                        None,
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
+            }
             severian_ast::Statement::Expression(expression) => {
                 visit_expression_for_specializations(
                     module,
@@ -1029,7 +1093,12 @@ fn visit_statements_for_specializations(
                     specializations,
                 )?;
             }
-            severian_ast::Statement::For { iterable, body, .. } => {
+            severian_ast::Statement::For {
+                iterable,
+                initializer,
+                body,
+                ..
+            } => {
                 visit_expression_for_specializations(
                     module,
                     iterable,
@@ -1038,6 +1107,16 @@ fn visit_statements_for_specializations(
                     index,
                     specializations,
                 )?;
+                if let Some(initializer) = initializer {
+                    visit_expression_for_specializations(
+                        module,
+                        &initializer.value,
+                        None,
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
                 visit_statements_for_specializations(
                     module,
                     body,
@@ -1259,6 +1338,7 @@ fn visit_expression_for_specializations(
             start,
             end,
             step,
+            ..
         } => {
             visit_expression_for_specializations(
                 module,
@@ -1318,6 +1398,7 @@ fn visit_expression_for_specializations(
             )?;
         }
         severian_ast::ExpressionKind::List(values)
+        | severian_ast::ExpressionKind::Set(values)
         | severian_ast::ExpressionKind::Tuple(values) => {
             for value in values {
                 visit_expression_for_specializations(
@@ -1348,6 +1429,69 @@ fn visit_expression_for_specializations(
                     index,
                     specializations,
                 )?;
+            }
+        }
+        severian_ast::ExpressionKind::ListComprehension { value, clauses }
+        | severian_ast::ExpressionKind::SetComprehension { value, clauses } => {
+            visit_expression_for_specializations(
+                module,
+                value,
+                None,
+                names,
+                index,
+                specializations,
+            )?;
+            for clause in clauses {
+                visit_expression_for_specializations(
+                    module,
+                    &clause.iterable,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                if let Some(condition) = &clause.condition {
+                    visit_expression_for_specializations(
+                        module,
+                        condition,
+                        Some("bool"),
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
+            }
+        }
+        severian_ast::ExpressionKind::MapComprehension { key, value, clauses } => {
+            for expression in [key.as_ref(), value.as_ref()] {
+                visit_expression_for_specializations(
+                    module,
+                    expression,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+            }
+            for clause in clauses {
+                visit_expression_for_specializations(
+                    module,
+                    &clause.iterable,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                if let Some(condition) = &clause.condition {
+                    visit_expression_for_specializations(
+                        module,
+                        condition,
+                        Some("bool"),
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
             }
         }
         severian_ast::ExpressionKind::Mock { cases, fallback } => {

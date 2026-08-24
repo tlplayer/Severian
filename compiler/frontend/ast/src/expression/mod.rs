@@ -77,6 +77,14 @@ pub struct MapEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComprehensionClause {
+    pub bindings: Vec<String>,
+    pub iterable: Expression,
+    pub condition: Option<Expression>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockCase {
     pub call: Expression,
     pub result: Expression,
@@ -87,7 +95,21 @@ pub struct MockCase {
 pub enum ExpressionKind {
     Literal(Literal),
     List(Vec<Expression>),
+    Set(Vec<Expression>),
     Map(Vec<MapEntry>),
+    ListComprehension {
+        value: Box<Expression>,
+        clauses: Vec<ComprehensionClause>,
+    },
+    SetComprehension {
+        value: Box<Expression>,
+        clauses: Vec<ComprehensionClause>,
+    },
+    MapComprehension {
+        key: Box<Expression>,
+        value: Box<Expression>,
+        clauses: Vec<ComprehensionClause>,
+    },
     Mock {
         cases: Vec<MockCase>,
         fallback: Box<Expression>,
@@ -111,6 +133,8 @@ pub enum ExpressionKind {
         start: Option<Box<Expression>>,
         end: Option<Box<Expression>>,
         step: Option<Box<Expression>>,
+        start_exclusive: bool,
+        end_inclusive: bool,
     },
     TypeApplication {
         callee: Box<Expression>,

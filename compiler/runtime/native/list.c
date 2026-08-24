@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +17,17 @@ typedef struct {
 typedef struct {
     void *storage;
 } sev_list_value;
+
+typedef struct {
+    size_t length;
+} sev_owned_string;
+
+static char *sev_list_string_allocation(size_t length) {
+    sev_owned_string *allocation = malloc(sizeof(sev_owned_string) + length + 1);
+    if (allocation == NULL) abort();
+    allocation->length = length;
+    return (char *)(allocation + 1);
+}
 
 static void sev_list_reserve(sev_list *list) {
     if (list->length < list->capacity) return;
@@ -38,6 +50,52 @@ uintptr_t __sev_list_len(void *storage) {
     return list->length;
 }
 
+void *__sev_list_indices(void *storage) {
+    sev_list *source = storage;
+    sev_list *result = __sev_list_create();
+    for (size_t index = 0; index < source->length; ++index) {
+        sev_list_reserve(result);
+        result->values[result->length++] = (uintptr_t)index;
+    }
+    return result;
+}
+
+void *__sev_range(int64_t start, int64_t end, int64_t step) {
+    if (step == 0) abort();
+    sev_list *result = __sev_list_create();
+    if (step > 0) {
+        for (int64_t value = start; value < end; value += step) {
+            sev_list_reserve(result);
+            result->values[result->length++] = (uintptr_t)value;
+        }
+    } else {
+        for (int64_t value = start; value > end; value += step) {
+            sev_list_reserve(result);
+            result->values[result->length++] = (uintptr_t)value;
+        }
+    }
+    return result;
+}
+
+static sev_list *sev_list_zip_side(const sev_list *left, const sev_list *right, _Bool take_left) {
+    size_t length = left->length < right->length ? left->length : right->length;
+    const sev_list *source = take_left ? left : right;
+    sev_list *result = __sev_list_create();
+    for (size_t index = 0; index < length; ++index) {
+        sev_list_reserve(result);
+        result->values[result->length++] = source->values[index];
+    }
+    return result;
+}
+
+void *__sev_list_zip_left(void *left, void *right) {
+    return sev_list_zip_side(left, right, 1);
+}
+
+void *__sev_list_zip_right(void *left, void *right) {
+    return sev_list_zip_side(left, right, 0);
+}
+
 void __sev_list_push_i64(void *storage, int64_t value) {
     sev_list *list = storage;
     sev_list_reserve(list);
@@ -50,6 +108,12 @@ void __sev_list_push_ptr(void *storage, const char *value) {
     list->values[list->length++] = (uintptr_t)value;
 }
 
+void __sev_list_push_bool(void *storage, _Bool value) {
+    sev_list *list = storage;
+    sev_list_reserve(list);
+    list->values[list->length++] = (uintptr_t)value;
+}
+
 void *__sev_list_append_i64(void *storage, int64_t value) {
     __sev_list_push_i64(storage, value);
     return storage;
@@ -57,6 +121,11 @@ void *__sev_list_append_i64(void *storage, int64_t value) {
 
 void *__sev_list_append_ptr(void *storage, const char *value) {
     __sev_list_push_ptr(storage, value);
+    return storage;
+}
+
+void *__sev_list_append_bool(void *storage, _Bool value) {
+    __sev_list_push_bool(storage, value);
     return storage;
 }
 
@@ -133,6 +202,183 @@ void *__sev_list_sorted_ptr(void *storage) {
     return copy;
 }
 
+void *__sev_list_sorted_order_i64(void *storage, _Bool descending) {
+    sev_list *copy = __sev_list_sorted_i64(storage);
+    if (descending) {
+        for (size_t left = 0, right = copy->length == 0 ? 0 : copy->length - 1;
+             left < right; ++left, --right) {
+            uintptr_t value = copy->values[left];
+            copy->values[left] = copy->values[right];
+            copy->values[right] = value;
+        }
+    }
+    return copy;
+}
+
+void *__sev_list_sorted_order_ptr(void *storage, _Bool descending) {
+    sev_list *copy = __sev_list_sorted_ptr(storage);
+    if (descending) {
+        for (size_t left = 0, right = copy->length == 0 ? 0 : copy->length - 1;
+             left < right; ++left, --right) {
+            uintptr_t value = copy->values[left];
+            copy->values[left] = copy->values[right];
+            copy->values[right] = value;
+        }
+    }
+    return copy;
+}
+
+const char *__sev_list_string_i64(void *storage) {
+    sev_list *list = storage;
+    size_t capacity = 3 + list->length * 24;
+    char *result = sev_list_string_allocation(capacity);
+    size_t offset = 0;
+    result[offset++] = '[';
+    for (size_t index = 0; index < list->length; ++index) {
+        if (index != 0) {
+            result[offset++] = ',';
+            result[offset++] = ' ';
+        }
+        offset += (size_t)snprintf(
+            result + offset,
+            capacity + 1 - offset,
+            "%lld",
+            (long long)(int64_t)list->values[index]
+        );
+    }
+    result[offset++] = ']';
+    result[offset] = '\0';
+    return result;
+}
+
+const char *__sev_list_string_ptr(void *storage) {
+    sev_list *list = storage;
+    size_t capacity = 3;
+    for (size_t index = 0; index < list->length; ++index) {
+        const char *value = (const char *)list->values[index];
+        capacity += (value == NULL ? 4 : strlen(value)) + 2;
+    }
+    char *result = sev_list_string_allocation(capacity);
+    size_t offset = 0;
+    result[offset++] = '[';
+    for (size_t index = 0; index < list->length; ++index) {
+        if (index != 0) {
+            result[offset++] = ',';
+            result[offset++] = ' ';
+        }
+        const char *value = (const char *)list->values[index];
+        if (value == NULL) value = "None";
+        size_t length = strlen(value);
+        memcpy(result + offset, value, length);
+        offset += length;
+    }
+    result[offset++] = ']';
+    result[offset] = '\0';
+    return result;
+}
+
+int64_t __sev_list_minimum_i64(void *storage) {
+    sev_list *list = storage;
+    if (list->length == 0) return 0;
+    int64_t result = (int64_t)list->values[0];
+    for (size_t index = 1; index < list->length; ++index) {
+        int64_t value = (int64_t)list->values[index];
+        if (value < result) result = value;
+    }
+    return result;
+}
+
+int64_t __sev_list_maximum_i64(void *storage) {
+    sev_list *list = storage;
+    if (list->length == 0) return 0;
+    int64_t result = (int64_t)list->values[0];
+    for (size_t index = 1; index < list->length; ++index) {
+        int64_t value = (int64_t)list->values[index];
+        if (value > result) result = value;
+    }
+    return result;
+}
+
+int64_t __sev_list_sum_i64(void *storage) {
+    sev_list *list = storage;
+    int64_t result = 0;
+    for (size_t index = 0; index < list->length; ++index) {
+        result += (int64_t)list->values[index];
+    }
+    return result;
+}
+
+int64_t __sev_list_last_i64(void *storage) {
+    sev_list *list = storage;
+    return list->length == 0 ? 0 : (int64_t)list->values[list->length - 1];
+}
+
+static sev_list *sev_frequency_keys(const sev_list *source, _Bool pointers) {
+    sev_list *keys = __sev_list_create();
+    for (size_t index = 0; index < source->length; ++index) {
+        uintptr_t value = source->values[index];
+        _Bool found = 0;
+        for (size_t known = 0; known < keys->length; ++known) {
+            if (pointers) {
+                const char *left = (const char *)keys->values[known];
+                const char *right = (const char *)value;
+                found = left == right
+                    || (left != NULL && right != NULL && strcmp(left, right) == 0);
+            } else {
+                found = keys->values[known] == value;
+            }
+            if (found) break;
+        }
+        if (!found) {
+            sev_list_reserve(keys);
+            keys->values[keys->length++] = value;
+        }
+    }
+    return keys;
+}
+
+static sev_list *sev_frequency_values(const sev_list *source, _Bool pointers) {
+    sev_list *keys = sev_frequency_keys(source, pointers);
+    sev_list *values = __sev_list_create();
+    for (size_t key = 0; key < keys->length; ++key) {
+        int64_t count = 0;
+        for (size_t index = 0; index < source->length; ++index) {
+            if (pointers) {
+                const char *left = (const char *)keys->values[key];
+                const char *right = (const char *)source->values[index];
+                if (left == right
+                    || (left != NULL && right != NULL && strcmp(left, right) == 0)) ++count;
+            } else if (keys->values[key] == source->values[index]) {
+                ++count;
+            }
+        }
+        sev_list_reserve(values);
+        values->values[values->length++] = (uintptr_t)count;
+    }
+    return values;
+}
+
+void *__sev_list_frequency_keys_i64(void *storage) {
+    return sev_frequency_keys(storage, 0);
+}
+
+void *__sev_list_frequency_values_i64(void *storage) {
+    return sev_frequency_values(storage, 0);
+}
+
+void *__sev_list_frequency_keys_ptr(void *storage) {
+    return sev_frequency_keys(storage, 1);
+}
+
+void *__sev_list_frequency_values_ptr(void *storage) {
+    return sev_frequency_values(storage, 1);
+}
+
+const char *__sev_list_last_ptr(void *storage) {
+    sev_list *list = storage;
+    return list->length == 0 ? NULL : (const char *)list->values[list->length - 1];
+}
+
 _Bool __sev_list_identity(void *left, void *right) {
     return left == right;
 }
@@ -163,6 +409,51 @@ _Bool __sev_list_equal_ptr(void *left_storage, void *right_storage) {
     return 1;
 }
 
+_Bool __sev_list_equal_bool(void *left_storage, void *right_storage) {
+    return __sev_list_equal_i64(left_storage, right_storage);
+}
+
+_Bool __sev_list_contains_i64(void *storage, int64_t value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if ((int64_t)list->values[index] == value) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_contains_ptr(void *storage, const char *value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        const char *known = (const char *)list->values[index];
+        if (known == value || (known != NULL && value != NULL && strcmp(known, value) == 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+_Bool __sev_list_any(void *storage) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (list->values[index] != 0) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_all(void *storage) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (list->values[index] == 0) return 0;
+    }
+    return 1;
+}
+
+int64_t __sev_abs_i64(int64_t value) { return value < 0 ? -value : value; }
+int64_t __sev_min_i64(int64_t left, int64_t right) { return left < right ? left : right; }
+int64_t __sev_max_i64(int64_t left, int64_t right) { return left > right ? left : right; }
+int64_t __sev_div_i64(int64_t left, int64_t right) { return left / right; }
+int64_t __sev_mod_i64(int64_t left, int64_t right) { return left % right; }
+
 int64_t __sev_list_pop_i64(void *storage) {
     sev_list *list = storage;
     if (list->length == 0) return 0;
@@ -173,6 +464,12 @@ const char *__sev_list_pop_ptr(void *storage) {
     sev_list *list = storage;
     if (list->length == 0) return NULL;
     return (const char *)list->values[--list->length];
+}
+
+_Bool __sev_list_pop_bool(void *storage) {
+    sev_list *list = storage;
+    if (list->length == 0) return 0;
+    return (_Bool)list->values[--list->length];
 }
 
 sev_pair_i64 __sev_list_pop_pair_i64(void *storage) {
@@ -203,6 +500,22 @@ const char *__sev_list_get_ptr(void *storage, int64_t index) {
     return (const char *)list->values[index];
 }
 
+_Bool __sev_list_get_bool(void *storage, int64_t index) {
+    return (_Bool)__sev_list_get_i64(storage, index);
+}
+
+int64_t __sev_list_index_i64(void *storage, int64_t index) {
+    return __sev_list_get_i64(storage, index);
+}
+
+const char *__sev_list_index_ptr(void *storage, int64_t index) {
+    return __sev_list_get_ptr(storage, index);
+}
+
+_Bool __sev_list_index_bool(void *storage, int64_t index) {
+    return (_Bool)__sev_list_get_i64(storage, index);
+}
+
 sev_pair_i64 __sev_list_get_pair_i64(void *storage, int64_t index) {
     sev_pair_i64 empty = {0, 0};
     sev_pair_i64 *value = (sev_pair_i64 *)__sev_list_get_ptr(storage, index);
@@ -212,6 +525,435 @@ sev_pair_i64 __sev_list_get_pair_i64(void *storage, int64_t index) {
 sev_list_value __sev_list_get_list(void *storage, int64_t index) {
     sev_list_value result = {(void *)__sev_list_get_ptr(storage, index)};
     return result;
+}
+
+void *__sev_list_slice(
+    void *storage,
+    int64_t start,
+    int64_t end,
+    int64_t step,
+    _Bool has_start,
+    _Bool has_end,
+    _Bool start_exclusive,
+    _Bool end_inclusive
+) {
+    sev_list *source = storage;
+    sev_list *result = __sev_list_create();
+    int64_t length = (int64_t)source->length;
+    if (step == 0) abort();
+    if (!has_start) start = step > 0 ? 0 : length - 1;
+    else if (start < 0) start += length;
+    if (!has_end) end = step > 0 ? length : -1;
+    else if (end < 0) end += length;
+    if (start_exclusive) start += step > 0 ? 1 : -1;
+    if (end_inclusive) end += step > 0 ? 1 : -1;
+    if (step > 0) {
+        if (start < 0) start = 0;
+        if (start > length) start = length;
+        if (end < 0) end = 0;
+        if (end > length) end = length;
+        for (int64_t index = start; index < end; index += step) {
+            sev_list_reserve(result);
+            result->values[result->length++] = source->values[index];
+        }
+    } else {
+        if (start >= length) start = length - 1;
+        if (end >= length) end = length - 1;
+        for (int64_t index = start; index > end && index >= 0; index += step) {
+            sev_list_reserve(result);
+            result->values[result->length++] = source->values[index];
+        }
+    }
+    return result;
+}
+
+void __sev_list_set_i64(void *storage, int64_t index, int64_t value) {
+    sev_list *list = storage;
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return;
+    list->values[index] = (uintptr_t)value;
+}
+
+void __sev_list_set_ptr(void *storage, int64_t index, const char *value) {
+    sev_list *list = storage;
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return;
+    list->values[index] = (uintptr_t)value;
+}
+
+void __sev_list_set_bool(void *storage, int64_t index, _Bool value) {
+    __sev_list_set_i64(storage, index, (int64_t)value);
+}
+
+static void sev_list_insert_raw(sev_list *list, int64_t index, uintptr_t value) {
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0) index = 0;
+    if ((size_t)index > list->length) index = (int64_t)list->length;
+    sev_list_reserve(list);
+    memmove(
+        list->values + index + 1,
+        list->values + index,
+        (list->length - (size_t)index) * sizeof(uintptr_t)
+    );
+    list->values[index] = value;
+    ++list->length;
+}
+
+void __sev_list_appendleft_i64(void *storage, int64_t value) {
+    sev_list_insert_raw(storage, 0, (uintptr_t)value);
+}
+
+void __sev_list_appendleft_ptr(void *storage, const char *value) {
+    sev_list_insert_raw(storage, 0, (uintptr_t)value);
+}
+
+void __sev_list_extend(void *storage, void *other_storage) {
+    sev_list *list = storage;
+    sev_list *other = other_storage;
+    for (size_t index = 0; index < other->length; ++index) {
+        sev_list_reserve(list);
+        list->values[list->length++] = other->values[index];
+    }
+}
+
+static uintptr_t sev_list_pop_at_raw(sev_list *list, int64_t index) {
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return 0;
+    uintptr_t result = list->values[index];
+    memmove(
+        list->values + index,
+        list->values + index + 1,
+        (list->length - (size_t)index - 1) * sizeof(uintptr_t)
+    );
+    --list->length;
+    return result;
+}
+
+int64_t __sev_list_popleft_i64(void *storage) {
+    return (int64_t)sev_list_pop_at_raw(storage, 0);
+}
+
+const char *__sev_list_popleft_ptr(void *storage) {
+    return (const char *)sev_list_pop_at_raw(storage, 0);
+}
+
+int64_t __sev_list_pop_at_i64(void *storage, int64_t index) {
+    return (int64_t)sev_list_pop_at_raw(storage, index);
+}
+
+const char *__sev_list_pop_at_ptr(void *storage, int64_t index) {
+    return (const char *)sev_list_pop_at_raw(storage, index);
+}
+
+void __sev_list_insert_i64(void *storage, int64_t index, int64_t value) {
+    sev_list_insert_raw(storage, index, (uintptr_t)value);
+}
+
+void __sev_list_insert_ptr(void *storage, int64_t index, const char *value) {
+    sev_list_insert_raw(storage, index, (uintptr_t)value);
+}
+
+void __sev_list_remove_i64(void *storage, int64_t value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if ((int64_t)list->values[index] == value) {
+            (void)sev_list_pop_at_raw(list, (int64_t)index);
+            return;
+        }
+    }
+}
+
+void __sev_list_remove_ptr(void *storage, const char *value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        const char *known = (const char *)list->values[index];
+        if (known == value || (known != NULL && value != NULL && strcmp(known, value) == 0)) {
+            (void)sev_list_pop_at_raw(list, (int64_t)index);
+            return;
+        }
+    }
+}
+
+void __sev_list_heap_push_i64(void *storage, int64_t value) {
+    sev_list *heap = storage;
+    sev_list_reserve(heap);
+    size_t index = heap->length++;
+    while (index > 0) {
+        size_t parent = (index - 1) / 2;
+        if ((int64_t)heap->values[parent] <= value) break;
+        heap->values[index] = heap->values[parent];
+        index = parent;
+    }
+    heap->values[index] = (uintptr_t)value;
+}
+
+int64_t __sev_list_heap_pop_i64(void *storage) {
+    sev_list *heap = storage;
+    if (heap->length == 0) return 0;
+    int64_t result = (int64_t)heap->values[0];
+    uintptr_t tail = heap->values[--heap->length];
+    size_t index = 0;
+    while (index * 2 + 1 < heap->length) {
+        size_t child = index * 2 + 1;
+        if (child + 1 < heap->length
+            && (int64_t)heap->values[child + 1] < (int64_t)heap->values[child]) ++child;
+        if ((int64_t)tail <= (int64_t)heap->values[child]) break;
+        heap->values[index] = heap->values[child];
+        index = child;
+    }
+    if (heap->length != 0) heap->values[index] = tail;
+    return result;
+}
+
+void *__sev_set_append_i64(void *storage, int64_t value) {
+    sev_list *set = storage;
+    for (size_t index = 0; index < set->length; ++index) {
+        if ((int64_t)set->values[index] == value) return storage;
+    }
+    __sev_list_push_i64(storage, value);
+    return storage;
+}
+
+void __sev_set_add_i64(void *storage, int64_t value) {
+    (void)__sev_set_append_i64(storage, value);
+}
+
+_Bool __sev_set_contains_i64(void *storage, int64_t value) {
+    sev_list *set = storage;
+    for (size_t index = 0; index < set->length; ++index) {
+        if ((int64_t)set->values[index] == value) return 1;
+    }
+    return 0;
+}
+
+void *__sev_set_append_ptr(void *storage, const char *value) {
+    sev_list *set = storage;
+    for (size_t index = 0; index < set->length; ++index) {
+        const char *known = (const char *)set->values[index];
+        if (known == value || (known != NULL && value != NULL && strcmp(known, value) == 0)) {
+            return storage;
+        }
+    }
+    __sev_list_push_ptr(storage, value);
+    return storage;
+}
+
+void __sev_set_add_ptr(void *storage, const char *value) {
+    (void)__sev_set_append_ptr(storage, value);
+}
+
+_Bool __sev_set_contains_ptr(void *storage, const char *value) {
+    sev_list *set = storage;
+    for (size_t index = 0; index < set->length; ++index) {
+        const char *known = (const char *)set->values[index];
+        if (known == value || (known != NULL && value != NULL && strcmp(known, value) == 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+_Bool __sev_set_equal_i64(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    if (left->length != right->length) return 0;
+    for (size_t index = 0; index < left->length; ++index) {
+        if (!__sev_set_contains_i64(right, (int64_t)left->values[index])) return 0;
+    }
+    return 1;
+}
+
+_Bool __sev_set_equal_ptr(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    if (left->length != right->length) return 0;
+    for (size_t index = 0; index < left->length; ++index) {
+        if (!__sev_set_contains_ptr(right, (const char *)left->values[index])) return 0;
+    }
+    return 1;
+}
+
+void *__sev_set_union_i64(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    sev_list *result = sev_list_copy(left);
+    for (size_t index = 0; index < right->length; ++index) {
+        (void)__sev_set_append_i64(result, (int64_t)right->values[index]);
+    }
+    return result;
+}
+
+void *__sev_set_intersection_i64(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *result = __sev_list_create();
+    for (size_t index = 0; index < left->length; ++index) {
+        int64_t value = (int64_t)left->values[index];
+        if (__sev_set_contains_i64(right_storage, value)) {
+            (void)__sev_set_append_i64(result, value);
+        }
+    }
+    return result;
+}
+
+void *__sev_set_symmetric_difference_i64(void *left_storage, void *right_storage) {
+    sev_list *left = left_storage;
+    sev_list *right = right_storage;
+    sev_list *result = __sev_list_create();
+    for (size_t index = 0; index < left->length; ++index) {
+        int64_t value = (int64_t)left->values[index];
+        if (!__sev_set_contains_i64(right, value)) (void)__sev_set_append_i64(result, value);
+    }
+    for (size_t index = 0; index < right->length; ++index) {
+        int64_t value = (int64_t)right->values[index];
+        if (!__sev_set_contains_i64(left, value)) (void)__sev_set_append_i64(result, value);
+    }
+    return result;
+}
+
+int64_t __sev_map_get_i64_i64(void *keys_storage, void *values_storage, int64_t key) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        if ((int64_t)keys->values[index] == key) return (int64_t)values->values[index];
+    }
+    return 0;
+}
+
+const char *__sev_map_get_i64_ptr(void *keys_storage, void *values_storage, int64_t key) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        if ((int64_t)keys->values[index] == key) return (const char *)values->values[index];
+    }
+    return NULL;
+}
+
+int64_t __sev_map_get_ptr_i64(void *keys_storage, void *values_storage, const char *key) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            return (int64_t)values->values[index];
+        }
+    }
+    return 0;
+}
+
+const char *__sev_map_get_ptr_ptr(void *keys_storage, void *values_storage, const char *key) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            return (const char *)values->values[index];
+        }
+    }
+    return NULL;
+}
+
+void __sev_map_set_i64_i64(void *keys_storage, void *values_storage, int64_t key, int64_t value) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        if ((int64_t)keys->values[index] == key) {
+            values->values[index] = (uintptr_t)value;
+            return;
+        }
+    }
+    __sev_list_push_i64(keys, key);
+    __sev_list_push_i64(values, value);
+}
+
+void __sev_map_set_i64_ptr(void *keys_storage, void *values_storage, int64_t key, const char *value) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        if ((int64_t)keys->values[index] == key) {
+            values->values[index] = (uintptr_t)value;
+            return;
+        }
+    }
+    __sev_list_push_i64(keys, key);
+    __sev_list_push_ptr(values, value);
+}
+
+void __sev_map_set_ptr_i64(void *keys_storage, void *values_storage, const char *key, int64_t value) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            values->values[index] = (uintptr_t)value;
+            return;
+        }
+    }
+    __sev_list_push_ptr(keys, key);
+    __sev_list_push_i64(values, value);
+}
+
+void __sev_map_set_ptr_ptr(void *keys_storage, void *values_storage, const char *key, const char *value) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            values->values[index] = (uintptr_t)value;
+            return;
+        }
+    }
+    __sev_list_push_ptr(keys, key);
+    __sev_list_push_ptr(values, value);
+}
+
+int64_t __sev_map_get_default_i64_i64(
+    void *keys_storage,
+    void *values_storage,
+    int64_t key,
+    int64_t fallback
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        if ((int64_t)keys->values[index] == key) return (int64_t)values->values[index];
+    }
+    return fallback;
+}
+
+int64_t __sev_map_get_default_ptr_i64(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    int64_t fallback
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            return (int64_t)values->values[index];
+        }
+    }
+    return fallback;
+}
+
+int64_t __sev_map_set_default_ptr_i64(
+    void *keys_storage,
+    void *values_storage,
+    const char *key,
+    int64_t fallback
+) {
+    sev_list *keys = keys_storage;
+    sev_list *values = values_storage;
+    for (size_t index = 0; index < keys->length; ++index) {
+        const char *known = (const char *)keys->values[index];
+        if (known == key || (known != NULL && key != NULL && strcmp(known, key) == 0)) {
+            return (int64_t)values->values[index];
+        }
+    }
+    __sev_list_push_ptr(keys, key);
+    __sev_list_push_i64(values, fallback);
+    return fallback;
 }
 
 void __sev_set_add_pair_i64(void *storage, sev_pair_i64 value) {

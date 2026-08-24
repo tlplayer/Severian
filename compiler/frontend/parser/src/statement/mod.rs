@@ -186,6 +186,7 @@ impl Parser<'_> {
                     | Statement::Destructure { .. }
                     | Statement::Defer { .. }
                     | Statement::FieldAssignment { .. }
+                    | Statement::IndexAssignment { .. }
                     | Statement::Assert { .. }
                     | Statement::Unsafe { .. }
                     | Statement::Try { .. }
@@ -917,9 +918,7 @@ impl Parser<'_> {
             self.expect(&TokenKind::Colon, "expected `:` after condition")?;
             let (then_block, mut end) = self.indented_block("if")?;
             let else_block = if self.at_identifier("else") {
-                self.next();
-                self.expect(&TokenKind::Colon, "expected `:` after `else`")?;
-                let (body, block_end) = self.indented_block("else")?;
+                let (body, block_end) = self.else_clause()?;
                 end = block_end;
                 body
             } else {
@@ -971,12 +970,19 @@ impl Parser<'_> {
             }
             self.next();
             let iterable = self.expression(0)?;
+            let initializer = if self.at_identifier("with") {
+                self.next();
+                Some(self.binding()?)
+            } else {
+                None
+            };
             self.expect(&TokenKind::Colon, "expected `:` after for iterable")?;
             let (body, end) = self.indented_block("for")?;
             return Ok(Statement::For {
                 binding,
                 second_binding,
                 iterable,
+                initializer,
                 body,
                 span: Span::new(start.source, start.start, end),
             });
@@ -1021,6 +1027,32 @@ impl Parser<'_> {
             }
             statement => Ok(statement),
         }
+    }
+
+    fn else_clause(&mut self) -> Result<(Vec<Statement>, u32), Diagnostic> {
+        let start = self.next().span;
+        if self.take(&TokenKind::Colon).is_some() {
+            return self.indented_block("else");
+        }
+        let condition = self.expression(0)?;
+        self.expect(&TokenKind::Colon, "expected `:` after else condition")?;
+        let (then_block, mut end) = self.indented_block("else condition")?;
+        let else_block = if self.at_identifier("else") {
+            let (body, block_end) = self.else_clause()?;
+            end = block_end;
+            body
+        } else {
+            Vec::new()
+        };
+        Ok((
+            vec![Statement::If {
+                condition,
+                then_block,
+                else_block,
+                span: Span::new(start.source, start.start, end),
+            }],
+            end,
+        ))
     }
 
     fn match_statement(&mut self) -> Result<Statement, Diagnostic> {
@@ -2150,7 +2182,38 @@ impl Parser<'_> {
             Ok(Statement::Binding(self.binding()?))
         } else {
             let first = self.expression(0)?;
-            if matches!(first.kind, ExpressionKind::Await { .. })
+            let assignment = match self.peek().kind {
+                TokenKind::Equal => Some(None),
+                TokenKind::PlusEqual => Some(Some(BinaryOperator::Add)),
+                TokenKind::MinusEqual => Some(Some(BinaryOperator::Subtract)),
+                TokenKind::StarEqual => Some(Some(BinaryOperator::Multiply)),
+                TokenKind::SlashEqual => Some(Some(BinaryOperator::Divide)),
+                TokenKind::PercentEqual => Some(Some(BinaryOperator::Remainder)),
+                _ => None,
+            };
+            if let (ExpressionKind::Index { object, index }, Some(operator)) =
+                (first.kind.clone(), assignment)
+            {
+                self.next();
+                let right = self.expression(0)?;
+                let value = match operator {
+                    None => right,
+                    Some(operator) => Expression {
+                        span: Span::new(first.span.source, first.span.start, right.span.end),
+                        kind: ExpressionKind::Binary {
+                            operator,
+                            left: Box::new(first.clone()),
+                            right: Box::new(right),
+                        },
+                    },
+                };
+                Ok(Statement::IndexAssignment {
+                    object: *object,
+                    index: *index,
+                    span: Span::new(first.span.source, first.span.start, value.span.end),
+                    value,
+                })
+            } else if matches!(first.kind, ExpressionKind::Await { .. })
                 && self.take(&TokenKind::Comma).is_some()
             {
                 let start = first.span;
@@ -2511,34 +2574,7 @@ impl Parser<'_> {
                     Some(Box::new(self.expression(0)?))
                 };
                 if self.take(&TokenKind::Colon).is_some() {
-                    let end = if self.at(&TokenKind::Colon) || self.at(&TokenKind::RightBracket) {
-                        None
-                    } else {
-                        Some(Box::new(self.expression(0)?))
-                    };
-                    let step = if self.take(&TokenKind::Colon).is_some() {
-                        if self.at(&TokenKind::RightBracket) {
-                            None
-                        } else {
-                            Some(Box::new(self.expression(0)?))
-                        }
-                    } else {
-                        None
-                    };
-                    let end_span = self
-                        .expect(&TokenKind::RightBracket, "expected `]` after slice")?
-                        .span
-                        .end;
-                    let span = Span::new(expression.span.source, expression.span.start, end_span);
-                    expression = Expression {
-                        kind: ExpressionKind::Slice {
-                            object: Box::new(expression),
-                            start,
-                            end,
-                            step,
-                        },
-                        span,
-                    };
+                    expression = self.slice_postfix(expression, start, false)?;
                 } else {
                     let index = start.ok_or_else(|| self.error("expected an index expression"))?;
                     let end = self
@@ -2554,6 +2590,15 @@ impl Parser<'_> {
                         span,
                     };
                 }
+            } else if self.at(&TokenKind::LeftParen) && self.interval_slice_follows() {
+                self.next();
+                let start = if self.at(&TokenKind::Colon) {
+                    None
+                } else {
+                    Some(Box::new(self.expression(0)?))
+                };
+                self.expect(&TokenKind::Colon, "expected `:` in interval slice")?;
+                expression = self.slice_postfix(expression, start, true)?;
             } else if self.take(&TokenKind::LeftParen).is_some() {
                 let throws_call = matches!(
                     &expression.kind,
@@ -2739,6 +2784,73 @@ impl Parser<'_> {
         false
     }
 
+    fn interval_slice_follows(&self) -> bool {
+        let mut cursor = self.cursor + 1;
+        let mut nested = 0usize;
+        while let Some(token) = self.tokens.get(cursor) {
+            match token.kind {
+                TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => {
+                    nested += 1
+                }
+                TokenKind::RightParen | TokenKind::RightBracket if nested == 0 => return false,
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
+                    nested = nested.saturating_sub(1)
+                }
+                TokenKind::Colon if nested == 0 => return true,
+                TokenKind::Comma if nested == 0 => return false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        false
+    }
+
+    fn slice_postfix(
+        &mut self,
+        object: Expression,
+        start: Option<Box<Expression>>,
+        start_exclusive: bool,
+    ) -> Result<Expression, Diagnostic> {
+        let at_close = |parser: &Self| {
+            parser.at(&TokenKind::RightBracket) || parser.at(&TokenKind::RightParen)
+        };
+        let end = if self.at(&TokenKind::Colon) || at_close(self) {
+            None
+        } else {
+            Some(Box::new(self.expression(0)?))
+        };
+        let step = if self.take(&TokenKind::Colon).is_some() {
+            if at_close(self) {
+                None
+            } else {
+                Some(Box::new(self.expression(0)?))
+            }
+        } else {
+            None
+        };
+        let closing = self.next();
+        let end_inclusive = start_exclusive && closing.kind == TokenKind::RightBracket;
+        if !matches!(closing.kind, TokenKind::RightBracket | TokenKind::RightParen) {
+            return Err(Diagnostic::new(
+                "E000112",
+                "expected `]` or `)` after slice",
+                Some(closing.span),
+            ));
+        }
+        let span = Span::new(object.span.source, object.span.start, closing.span.end);
+        Ok(Expression {
+            kind: ExpressionKind::Slice {
+                object: Box::new(object),
+                start,
+                end,
+                step,
+                start_exclusive,
+                end_inclusive,
+            },
+            span,
+        })
+    }
+
     fn primary(&mut self) -> Result<Expression, Diagnostic> {
         let token = self.next();
         let kind = match token.kind {
@@ -2783,21 +2895,60 @@ impl Parser<'_> {
                 });
             }
             TokenKind::Identifier(name) => ExpressionKind::Name(name),
-            TokenKind::LeftBracket => {
-                let mut values = Vec::new();
-                self.line_breaks();
-                if !self.at(&TokenKind::RightBracket) {
+            TokenKind::Pipe => {
+                let mut parameters = Vec::new();
+                if !self.at(&TokenKind::Pipe) {
                     loop {
-                        values.push(self.expression(0)?);
-                        self.line_breaks();
+                        parameters.push(self.identifier("expected a lambda parameter")?.0);
                         if self.take(&TokenKind::Comma).is_none() {
                             break;
                         }
-                        self.line_breaks();
-                        if self.at(&TokenKind::RightBracket) {
-                            break;
-                        }
                     }
+                }
+                self.expect(&TokenKind::Pipe, "expected `|` after lambda parameters")?;
+                let body = self.expression(0)?;
+                let end = body.span.end;
+                return Ok(Expression {
+                    kind: ExpressionKind::Lambda {
+                        parameters,
+                        body: Box::new(body),
+                    },
+                    span: Span::new(token.span.source, token.span.start, end),
+                });
+            }
+            TokenKind::LeftBracket => {
+                self.line_breaks();
+                if self.at(&TokenKind::RightBracket) {
+                    let end = self.next().span.end;
+                    return Ok(Expression {
+                        kind: ExpressionKind::List(Vec::new()),
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
+                let first = self.expression(0)?;
+                if self.at_identifier("for") {
+                    let clauses = self.comprehension_clauses()?;
+                    let end = self
+                        .expect(&TokenKind::RightBracket, "expected `]` after comprehension")?
+                        .span
+                        .end;
+                    return Ok(Expression {
+                        kind: ExpressionKind::ListComprehension {
+                            value: Box::new(first),
+                            clauses,
+                        },
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
+                let mut values = vec![first];
+                self.line_breaks();
+                while self.take(&TokenKind::Comma).is_some() {
+                    self.line_breaks();
+                    if self.at(&TokenKind::RightBracket) {
+                        break;
+                    }
+                    values.push(self.expression(0)?);
+                    self.line_breaks();
                 }
                 let end = self
                     .expect(&TokenKind::RightBracket, "expected `]` after list literal")?
@@ -2809,10 +2960,47 @@ impl Parser<'_> {
                 });
             }
             TokenKind::LeftBrace => {
-                let mut entries = Vec::new();
                 self.line_breaks();
-                if !self.at(&TokenKind::RightBrace) {
-                    loop {
+                if self.at(&TokenKind::RightBrace) {
+                    let end = self.next().span.end;
+                    return Ok(Expression {
+                        kind: ExpressionKind::Map(Vec::new()),
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
+                let first = self.expression(0)?;
+                if self.take(&TokenKind::Colon).is_some() {
+                    let first_value = self.expression(0)?;
+                    if self.at_identifier("for") {
+                        let clauses = self.comprehension_clauses()?;
+                        let end = self
+                            .expect(&TokenKind::RightBrace, "expected `}` after comprehension")?
+                            .span
+                            .end;
+                        return Ok(Expression {
+                            kind: ExpressionKind::MapComprehension {
+                                key: Box::new(first),
+                                value: Box::new(first_value),
+                                clauses,
+                            },
+                            span: Span::new(token.span.source, token.span.start, end),
+                        });
+                    }
+                    let mut entries = vec![severian_ast::MapEntry {
+                        span: Span::new(
+                            first.span.source,
+                            first.span.start,
+                            first_value.span.end,
+                        ),
+                        key: first,
+                        value: first_value,
+                    }];
+                    self.line_breaks();
+                    while self.take(&TokenKind::Comma).is_some() {
+                        self.line_breaks();
+                        if self.at(&TokenKind::RightBrace) {
+                            break;
+                        }
                         let key = self.expression(0)?;
                         self.expect(&TokenKind::Colon, "expected `:` after map key")?;
                         let value = self.expression(0)?;
@@ -2822,21 +3010,46 @@ impl Parser<'_> {
                             value,
                         });
                         self.line_breaks();
-                        if self.take(&TokenKind::Comma).is_none() {
-                            break;
-                        }
-                        self.line_breaks();
-                        if self.at(&TokenKind::RightBrace) {
-                            break;
-                        }
                     }
+                    let end = self
+                        .expect(&TokenKind::RightBrace, "expected `}` after map literal")?
+                        .span
+                        .end;
+                    return Ok(Expression {
+                        kind: ExpressionKind::Map(entries),
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
+                if self.at_identifier("for") {
+                    let clauses = self.comprehension_clauses()?;
+                    let end = self
+                        .expect(&TokenKind::RightBrace, "expected `}` after comprehension")?
+                        .span
+                        .end;
+                    return Ok(Expression {
+                        kind: ExpressionKind::SetComprehension {
+                            value: Box::new(first),
+                            clauses,
+                        },
+                        span: Span::new(token.span.source, token.span.start, end),
+                    });
+                }
+                let mut values = vec![first];
+                self.line_breaks();
+                while self.take(&TokenKind::Comma).is_some() {
+                    self.line_breaks();
+                    if self.at(&TokenKind::RightBrace) {
+                        break;
+                    }
+                    values.push(self.expression(0)?);
+                    self.line_breaks();
                 }
                 let end = self
-                    .expect(&TokenKind::RightBrace, "expected `}` after map literal")?
+                    .expect(&TokenKind::RightBrace, "expected `}` after set literal")?
                     .span
                     .end;
                 return Ok(Expression {
-                    kind: ExpressionKind::Map(entries),
+                    kind: ExpressionKind::Set(values),
                     span: Span::new(token.span.source, token.span.start, end),
                 });
             }
@@ -2896,6 +3109,43 @@ impl Parser<'_> {
             kind,
             span: token.span,
         })
+    }
+
+    fn comprehension_clauses(
+        &mut self,
+    ) -> Result<Vec<severian_ast::ComprehensionClause>, Diagnostic> {
+        let mut clauses = Vec::new();
+        while self.at_identifier("for") {
+            let start = self.next().span;
+            let mut bindings = vec![self.identifier("expected a comprehension binding")?.0];
+            if self.take(&TokenKind::Comma).is_some() {
+                bindings.push(
+                    self.identifier("expected a comprehension binding after `,`")?
+                        .0,
+                );
+            }
+            if !self.at_identifier("in") {
+                return Err(self.error("expected `in` after comprehension binding(s)"));
+            }
+            self.next();
+            let iterable = self.expression(0)?;
+            let condition = if self.at_identifier("if") {
+                self.next();
+                Some(self.expression(0)?)
+            } else {
+                None
+            };
+            let end = condition
+                .as_ref()
+                .map_or(iterable.span.end, |condition| condition.span.end);
+            clauses.push(severian_ast::ComprehensionClause {
+                bindings,
+                iterable,
+                condition,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
+        Ok(clauses)
     }
 
     fn type_annotation(&mut self) -> Result<TypeAnnotation, Diagnostic> {
@@ -3288,12 +3538,34 @@ fn is_comparison(operator: BinaryOperator) -> bool {
 fn expression_mentions(expression: &Expression, expected: &str) -> bool {
     match &expression.kind {
         ExpressionKind::Name(name) => name == expected,
-        ExpressionKind::List(values) | ExpressionKind::Tuple(values) => values
+        ExpressionKind::List(values) | ExpressionKind::Set(values) | ExpressionKind::Tuple(values) => values
             .iter()
             .any(|value| expression_mentions(value, expected)),
         ExpressionKind::Map(entries) => entries.iter().any(|entry| {
             expression_mentions(&entry.key, expected) || expression_mentions(&entry.value, expected)
         }),
+        ExpressionKind::ListComprehension { value, clauses }
+        | ExpressionKind::SetComprehension { value, clauses } => {
+            expression_mentions(value, expected)
+                || clauses.iter().any(|clause| {
+                    expression_mentions(&clause.iterable, expected)
+                        || clause
+                            .condition
+                            .as_ref()
+                            .is_some_and(|condition| expression_mentions(condition, expected))
+                })
+        }
+        ExpressionKind::MapComprehension { key, value, clauses } => {
+            expression_mentions(key, expected)
+                || expression_mentions(value, expected)
+                || clauses.iter().any(|clause| {
+                    expression_mentions(&clause.iterable, expected)
+                        || clause
+                            .condition
+                            .as_ref()
+                            .is_some_and(|condition| expression_mentions(condition, expected))
+                })
+        }
         ExpressionKind::Mock { cases, fallback } => {
             cases.iter().any(|case| {
                 expression_mentions(&case.call, expected)
@@ -3313,6 +3585,7 @@ fn expression_mentions(expression: &Expression, expected: &str) -> bool {
             start,
             end,
             step,
+            ..
         } => {
             expression_mentions(object, expected)
                 || [start, end, step]

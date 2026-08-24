@@ -62,6 +62,12 @@ pub enum Statement {
         value: Expression,
         span: Span,
     },
+    IndexAssignment {
+        object: Expression,
+        index: Expression,
+        value: Expression,
+        span: Span,
+    },
     Expression(Expression),
     Defer {
         expression: Expression,
@@ -110,6 +116,7 @@ pub enum Statement {
         binding: String,
         second_binding: Option<String>,
         iterable: Expression,
+        initializer: Option<Binding>,
         body: Vec<Statement>,
         span: Span,
     },

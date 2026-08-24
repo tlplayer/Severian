@@ -698,8 +698,10 @@ impl BodyBuilder {
                     line: None,
                 }));
                 self.lower_statements(&then_block.statements, module);
+                let mut reaches_join = false;
                 if self.open(self.current) {
                     self.terminate(Terminator::Goto(join, Vec::new()));
+                    reaches_join = true;
                 }
                 self.bindings.clone_from(&bindings);
                 self.current = else_id;
@@ -714,9 +716,13 @@ impl BodyBuilder {
                 self.lower_statements(&else_block.statements, module);
                 if self.open(self.current) {
                     self.terminate(Terminator::Goto(join, Vec::new()));
+                    reaches_join = true;
                 }
                 self.bindings = bindings;
                 self.current = join;
+                if !reaches_join {
+                    self.terminate(Terminator::Unreachable);
+                }
             }
             severian_hir::Statement::While {
                 condition, body, ..

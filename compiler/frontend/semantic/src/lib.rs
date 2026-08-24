@@ -159,6 +159,7 @@ pub(crate) fn analyze_with_package_functions(
         map_types: BTreeMap::new(),
         map_elements: BTreeMap::new(),
         set_type: None,
+        set_element: None,
         channel_types: BTreeMap::new(),
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
@@ -176,6 +177,7 @@ pub(crate) fn analyze_with_package_functions(
         runtime_definitions: BTreeMap::new(),
         next_hir: 0,
         next_binding: 0,
+        next_comprehension: 0,
         loop_depth: 0,
         unsafe_depth: 0,
         next_class_type: u32::MAX,
@@ -767,8 +769,18 @@ pub(crate) fn analyze_with_package_functions(
                             continue;
                         }
                     }
-                    body.statements
-                        .push(analyzer.statement(statement, &mut module.bindings, unit)?);
+                    let mut statement = statement.clone();
+                    let preludes = analyzer.lower_statement_comprehensions(
+                        &mut statement,
+                        &mut module.bindings,
+                        unit,
+                    )?;
+                    body.statements.extend(preludes);
+                    body.statements.push(analyzer.statement(
+                        &statement,
+                        &mut module.bindings,
+                        unit,
+                    )?);
                 }
                 analyzer.value_substitutions = previous_substitutions;
             }
@@ -793,6 +805,7 @@ struct Analyzer<'a> {
     active_type_aliases: BTreeMap<String, TypeId>,
     next_hir: u32,
     next_binding: u32,
+    next_comprehension: u32,
     loop_depth: usize,
     unsafe_depth: usize,
     functions: BTreeMap<String, Vec<FunctionId>>,
@@ -819,6 +832,7 @@ struct Analyzer<'a> {
     map_types: BTreeMap<(TypeId, TypeId), TypeId>,
     map_elements: BTreeMap<TypeId, (TypeId, TypeId)>,
     set_type: Option<TypeId>,
+    set_element: Option<TypeId>,
     channel_types: BTreeMap<TypeId, TypeId>,
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
@@ -2002,9 +2016,15 @@ impl Analyzer<'_> {
                 binding,
                 second_binding,
                 iterable,
+                initializer,
                 body,
                 span,
             } => {
+                let initializer_statement = initializer
+                    .as_ref()
+                    .map(|initializer| self.binding(initializer, bindings))
+                    .transpose()?
+                    .map(Statement::Binding);
                 if let Some(values) = static_range_values(iterable) {
                     if second_binding.is_some() {
                         return Err(Diagnostic::new(
@@ -2014,6 +2034,9 @@ impl Analyzer<'_> {
                         ));
                     }
                     let mut sequence = Block::default();
+                    if let Some(initializer) = initializer_statement.clone() {
+                        sequence.statements.push(initializer);
+                    }
                     for value in values {
                         let mut environment = BTreeMap::from([(binding.clone(), value)]);
                         let (specialized, control) = specialize_loop_body(body, &mut environment);
@@ -2229,8 +2252,7 @@ impl Analyzer<'_> {
                 increment_before_continue(&mut loop_body, &increment);
                 loop_body.statements.push(increment);
 
-                Ok(Statement::Sequence(Block {
-                    statements: vec![
+                let mut statements = vec![
                         Statement::Binding(iterable_id),
                         Statement::Binding(index_id),
                         Statement::While {
@@ -2238,8 +2260,11 @@ impl Analyzer<'_> {
                             body: loop_body,
                             span: *span,
                         },
-                    ],
-                }))
+                    ];
+                if let Some(initializer) = initializer_statement {
+                    statements.insert(0, initializer);
+                }
+                Ok(Statement::Sequence(Block { statements }))
             }
             AstStatement::Break { span } => {
                 if self.loop_depth == 0 {
@@ -2372,6 +2397,67 @@ impl Analyzer<'_> {
                     field: index as u32,
                     value,
                 })
+            }
+            AstStatement::IndexAssignment {
+                object,
+                index,
+                value,
+                span,
+            } => {
+                let collection = self.expression(object, None)?;
+                let unit = self
+                    .types
+                    .resolve_name("unit")
+                    .expect("bootstrap defines unit");
+                if let Some(element) = self.list_elements.get(&collection.type_id).copied() {
+                    let index = self.expression(index, None)?;
+                    let index_name = self
+                        .types
+                        .definition(index.type_id)
+                        .map(|definition| definition.name.as_str());
+                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "list indices must be integers",
+                            Some(index.span),
+                        ));
+                    }
+                    let value = self.expression(value, Some(element))?;
+                    let storage = self.list_storage_expression(collection, *span);
+                    let storage_type = storage.type_id;
+                    let suffix = self.list_runtime_suffix(element, *span)?;
+                    return Ok(Statement::Expression(self.runtime_call(
+                        &format!("__sev_list_set_{suffix}"),
+                        &[storage_type, index.type_id, element],
+                        unit,
+                        vec![storage, index, value],
+                        *span,
+                    )));
+                }
+                if let Some((key_type, value_type)) =
+                    self.map_elements.get(&collection.type_id).copied()
+                {
+                    let key = self.expression(index, Some(key_type))?;
+                    let value = self.expression(value, Some(value_type))?;
+                    let keys =
+                        self.collection_storage_expression(collection.clone(), 0, *span);
+                    let values = self.collection_storage_expression(collection, 1, *span);
+                    let storage_type = keys.type_id;
+                    let key_suffix = self.list_runtime_suffix(key_type, *span)?;
+                    let value_suffix = self.list_runtime_suffix(value_type, *span)?;
+                    return Ok(Statement::Expression(self.runtime_call(
+                        &format!("__sev_map_set_{key_suffix}_{value_suffix}"),
+                        &[storage_type, storage_type, key_type, value_type],
+                        unit,
+                        vec![keys, values, key, value],
+                        *span,
+                    )));
+                }
+                Err(Diagnostic::new(
+                    "E000211",
+                    "indexed assignment is implemented for lists and maps",
+                    Some(*span),
+                ))
             }
             AstStatement::Expression(expression) => {
                 if let AstExpressionKind::Throw { error } = &expression.kind {
@@ -3207,9 +3293,13 @@ impl Analyzer<'_> {
                 deferred.push(Statement::Expression(self.expression(expression, None)?));
                 continue;
             }
+            let mut statement = statement.clone();
+            let preludes =
+                self.lower_statement_comprehensions(&mut statement, bindings, result_type)?;
+            block.statements.extend(preludes);
             block
                 .statements
-                .push(self.statement(statement, bindings, result_type)?);
+                .push(self.statement(&statement, bindings, result_type)?);
         }
         deferred.reverse();
         if !deferred.is_empty() {
@@ -3219,6 +3309,420 @@ impl Analyzer<'_> {
             }
         }
         Ok(block)
+    }
+
+    fn lower_statement_comprehensions(
+        &mut self,
+        statement: &mut AstStatement,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Vec<Statement>, Diagnostic> {
+        let mut preludes = Vec::new();
+        match statement {
+            AstStatement::Binding(binding) => self.lower_expression_comprehensions(
+                &mut binding.value,
+                bindings,
+                result_type,
+                &mut preludes,
+            )?,
+            AstStatement::Destructure { value, .. }
+            | AstStatement::Expression(value)
+            | AstStatement::Defer {
+                expression: value, ..
+            }
+            | AstStatement::FallibleElse { value, .. } => self
+                .lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?,
+            AstStatement::Return {
+                value: Some(value), ..
+            } => self.lower_expression_comprehensions(
+                value,
+                bindings,
+                result_type,
+                &mut preludes,
+            )?,
+            AstStatement::Assert {
+                condition, message, ..
+            } => {
+                self.lower_expression_comprehensions(
+                    condition,
+                    bindings,
+                    result_type,
+                    &mut preludes,
+                )?;
+                if let Some(message) = message {
+                    self.lower_expression_comprehensions(
+                        message,
+                        bindings,
+                        result_type,
+                        &mut preludes,
+                    )?;
+                }
+            }
+            AstStatement::IndexAssignment {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                for expression in [object, index, value] {
+                    self.lower_expression_comprehensions(
+                        expression,
+                        bindings,
+                        result_type,
+                        &mut preludes,
+                    )?;
+                }
+            }
+            AstStatement::FieldAssignment { object, value, .. } => {
+                self.lower_expression_comprehensions(
+                    object,
+                    bindings,
+                    result_type,
+                    &mut preludes,
+                )?;
+                self.lower_expression_comprehensions(
+                    value,
+                    bindings,
+                    result_type,
+                    &mut preludes,
+                )?;
+            }
+            _ => {}
+        }
+        Ok(preludes)
+    }
+
+    fn lower_expression_comprehensions(
+        &mut self,
+        expression: &mut AstExpression,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+        preludes: &mut Vec<Statement>,
+    ) -> Result<(), Diagnostic> {
+        if matches!(
+            expression.kind,
+            AstExpressionKind::ListComprehension { .. }
+                | AstExpressionKind::SetComprehension { .. }
+                | AstExpressionKind::MapComprehension { .. }
+        ) {
+            let (name, mut statements) =
+                self.lower_comprehension(expression.clone(), bindings, result_type)?;
+            preludes.append(&mut statements);
+            expression.kind = AstExpressionKind::Name(name);
+            return Ok(());
+        }
+        match &mut expression.kind {
+            AstExpressionKind::List(values)
+            | AstExpressionKind::Set(values)
+            | AstExpressionKind::Tuple(values) => {
+                for value in values {
+                    self.lower_expression_comprehensions(
+                        value,
+                        bindings,
+                        result_type,
+                        preludes,
+                    )?;
+                }
+            }
+            AstExpressionKind::Map(entries) => {
+                for entry in entries {
+                    self.lower_expression_comprehensions(
+                        &mut entry.key,
+                        bindings,
+                        result_type,
+                        preludes,
+                    )?;
+                    self.lower_expression_comprehensions(
+                        &mut entry.value,
+                        bindings,
+                        result_type,
+                        preludes,
+                    )?;
+                }
+            }
+            AstExpressionKind::Member { object, .. }
+            | AstExpressionKind::TypeApplication { callee: object, .. }
+            | AstExpressionKind::Async {
+                expression: object, ..
+            }
+            | AstExpressionKind::Await { expression: object }
+            | AstExpressionKind::Throw { error: object }
+            | AstExpressionKind::Unary {
+                operand: object, ..
+            } => self.lower_expression_comprehensions(
+                object,
+                bindings,
+                result_type,
+                preludes,
+            )?,
+            AstExpressionKind::Index { object, index } => {
+                self.lower_expression_comprehensions(
+                    object,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                self.lower_expression_comprehensions(
+                    index,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+            }
+            AstExpressionKind::Slice {
+                object,
+                start,
+                end,
+                step,
+                ..
+            } => {
+                self.lower_expression_comprehensions(
+                    object,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                for bound in [start, end, step].into_iter().flatten() {
+                    self.lower_expression_comprehensions(
+                        bound,
+                        bindings,
+                        result_type,
+                        preludes,
+                    )?;
+                }
+            }
+            AstExpressionKind::Call { callee, arguments } => {
+                self.lower_expression_comprehensions(
+                    callee,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                for argument in arguments {
+                    self.lower_expression_comprehensions(
+                        &mut argument.value,
+                        bindings,
+                        result_type,
+                        preludes,
+                    )?;
+                }
+            }
+            AstExpressionKind::Fallback { value, fallback }
+            | AstExpressionKind::Binary {
+                left: value,
+                right: fallback,
+                ..
+            } => {
+                self.lower_expression_comprehensions(
+                    value,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+                self.lower_expression_comprehensions(
+                    fallback,
+                    bindings,
+                    result_type,
+                    preludes,
+                )?;
+            }
+            AstExpressionKind::Lambda { body, .. } => self.lower_expression_comprehensions(
+                body,
+                bindings,
+                result_type,
+                preludes,
+            )?,
+            AstExpressionKind::Mock { .. }
+            | AstExpressionKind::Literal(_)
+            | AstExpressionKind::Name(_)
+            | AstExpressionKind::ListComprehension { .. }
+            | AstExpressionKind::SetComprehension { .. }
+            | AstExpressionKind::MapComprehension { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn lower_comprehension(
+        &mut self,
+        comprehension: AstExpression,
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<(String, Vec<Statement>), Diagnostic> {
+        let span = comprehension.span;
+        let (kind, first, second, clauses) = match comprehension.kind {
+            AstExpressionKind::ListComprehension { value, clauses } => {
+                ("list", *value, None, clauses)
+            }
+            AstExpressionKind::SetComprehension { value, clauses } => {
+                ("set", *value, None, clauses)
+            }
+            AstExpressionKind::MapComprehension {
+                key,
+                value,
+                clauses,
+            } => ("map", *key, Some(*value), clauses),
+            _ => unreachable!("comprehension lowering requires a comprehension"),
+        };
+        if clauses.is_empty() {
+            return Err(Diagnostic::new(
+                "E000211",
+                "a comprehension requires at least one `for` clause",
+                Some(span),
+            ));
+        }
+
+        let outer_names = self.names.clone();
+        let outer_declarations = self.declarations.clone();
+        let inferred = (|| {
+            for clause in &clauses {
+                let iterable = self.expression(&clause.iterable, None)?;
+                let element_types = if let Some(element) =
+                    self.list_elements.get(&iterable.type_id).copied()
+                {
+                    vec![element]
+                } else if let Some((key, value)) =
+                    self.map_elements.get(&iterable.type_id).copied()
+                {
+                    vec![key, value]
+                } else {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "comprehension iteration requires a list or map",
+                        Some(clause.iterable.span),
+                    ));
+                };
+                if element_types.len() != clause.bindings.len() {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "comprehension binding count does not match its iterable",
+                        Some(clause.span),
+                    ));
+                }
+                for (name, ty) in clause.bindings.iter().zip(element_types) {
+                    let id = self.new_binding_id();
+                    self.names
+                        .insert(name.clone(), (id, severian_hir::VariableId(id.0), ty));
+                    self.declarations.insert(name.clone());
+                }
+            }
+            let first_type = self.expression(&first, None)?.type_id;
+            let second_type = second
+                .as_ref()
+                .map(|value| self.expression(value, None).map(|value| value.type_id))
+                .transpose()?;
+            Ok::<_, Diagnostic>((first_type, second_type))
+        })();
+        self.names = outer_names;
+        self.declarations = outer_declarations;
+        let (first_type, second_type) = inferred?;
+
+        let name = format!("__comprehension_{}", self.next_comprehension);
+        self.next_comprehension += 1;
+        let (collection_type, initial) = match kind {
+            "list" => {
+                let ty = self.instantiate_list_type(first_type);
+                (ty, self.empty_list_expression(ty, span)?)
+            }
+            "set" => {
+                let value = self.empty_set_expression(Some(first_type), span)?;
+                (value.type_id, value)
+            }
+            "map" => {
+                let value_type = second_type.expect("map comprehension has a value");
+                let ty = self.instantiate_map_type(first_type, value_type);
+                let storage_type = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines pointer-backed string");
+                let keys =
+                    self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+                let values =
+                    self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+                (
+                    ty,
+                    Expression {
+                        id: self.next_id(),
+                        type_id: ty,
+                        kind: ExpressionKind::Aggregate {
+                            class: ty,
+                            fields: vec![keys, values],
+                        },
+                        span,
+                    },
+                )
+            }
+            _ => unreachable!(),
+        };
+        let id = self.new_binding_id();
+        let variable = severian_hir::VariableId(id.0);
+        self.names
+            .insert(name.clone(), (id, variable, collection_type));
+        self.declarations.insert(name.clone());
+        self.mutable_variables.insert(variable);
+        bindings.push(Binding {
+            id,
+            variable,
+            type_id: collection_type,
+            value: initial,
+            mutable: true,
+            preserve_error: false,
+            span,
+        });
+
+        let result_name = AstExpression {
+            kind: AstExpressionKind::Name(name.clone()),
+            span,
+        };
+        let mut body = match kind {
+            "list" | "set" => {
+                let operation = if kind == "list" { "append" } else { "add" };
+                vec![AstStatement::Expression(AstExpression {
+                    kind: AstExpressionKind::Call {
+                        callee: Box::new(AstExpression {
+                            kind: AstExpressionKind::Member {
+                                object: Box::new(result_name.clone()),
+                                name: operation.into(),
+                            },
+                            span,
+                        }),
+                        arguments: vec![severian_ast::CallArgument {
+                            name: None,
+                            value: first,
+                            expected_error: None,
+                            span,
+                        }],
+                    },
+                    span,
+                })]
+            }
+            "map" => vec![AstStatement::IndexAssignment {
+                object: result_name,
+                index: first,
+                value: second.expect("map comprehension has a value"),
+                span,
+            }],
+            _ => unreachable!(),
+        };
+        for clause in clauses.into_iter().rev() {
+            if let Some(condition) = clause.condition {
+                body = vec![AstStatement::If {
+                    condition,
+                    then_block: body,
+                    else_block: Vec::new(),
+                    span: clause.span,
+                }];
+            }
+            body = vec![AstStatement::For {
+                binding: clause.bindings[0].clone(),
+                second_binding: clause.bindings.get(1).cloned(),
+                iterable: clause.iterable,
+                initializer: None,
+                body,
+                span: clause.span,
+            }];
+        }
+        let loop_statement = self.statement(&body[0], bindings, result_type)?;
+        Ok((name, vec![Statement::Binding(id), loop_statement]))
     }
 
     fn condition_expression(
@@ -3634,6 +4138,56 @@ impl Analyzer<'_> {
                 "`mock` declarations are only valid as test statements",
                 Some(ast.span),
             )),
+            AstExpressionKind::Set(values) => {
+                let Some(first) = values.first() else {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "an empty set must be written as `set()`",
+                        Some(ast.span),
+                    ));
+                };
+                let element = self.expression(first, None)?.type_id;
+                let set = self.empty_set_expression(Some(element), ast.span)?;
+                let set_type = set.type_id;
+                if expected.is_some_and(|expected| expected != set_type) {
+                    return Err(semantic_error(
+                        "set literal does not satisfy the expected type".into(),
+                        ast.span,
+                    ));
+                }
+                let storage_type = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines pointer-backed string");
+                let suffix = self.list_runtime_suffix(element, ast.span)?;
+                let mut storage = self.collection_storage_expression(set, 0, ast.span);
+                for value in values {
+                    let value = self.expression(value, Some(element))?;
+                    storage = self.runtime_call(
+                        &format!("__sev_set_append_{suffix}"),
+                        &[storage_type, element],
+                        storage_type,
+                        vec![storage, value],
+                        ast.span,
+                    );
+                }
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: set_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: set_type,
+                        fields: vec![storage],
+                    },
+                    span: ast.span,
+                })
+            }
+            AstExpressionKind::ListComprehension { .. }
+            | AstExpressionKind::SetComprehension { .. }
+            | AstExpressionKind::MapComprehension { .. } => Err(Diagnostic::new(
+                "E000211",
+                "collection comprehensions require statement-level lowering",
+                Some(ast.span),
+            )),
             AstExpressionKind::Map(entries) => {
                 if entries.is_empty()
                     && expected.is_none_or(|ty| !self.map_elements.contains_key(&ty))
@@ -3920,19 +4474,16 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::List(values) => {
-                if values.is_empty()
-                    && expected.is_none_or(|ty| !self.list_elements.contains_key(&ty))
-                {
-                    return Err(Diagnostic::new(
-                        "E000204",
-                        "a list literal requires an expected `list[T]` type",
-                        Some(ast.span),
-                    ));
-                }
                 let (list_type, element) = if let Some(list_type) =
                     expected.filter(|ty| self.list_elements.contains_key(ty))
                 {
                     (list_type, self.list_elements[&list_type])
+                } else if values.is_empty() {
+                    let element = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    (self.instantiate_list_type(element), element)
                 } else {
                     let first = self.expression(&values[0], None)?;
                     let element = first.type_id;
@@ -4202,6 +4753,24 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Index { object, index } => {
                 let object = self.expression(object, None)?;
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                if object.type_id == string {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let index = self.expression(index, Some(integer))?;
+                    return Ok(self.runtime_call(
+                        "__sev_string_index",
+                        &[string, integer],
+                        string,
+                        vec![object, index],
+                        ast.span,
+                    ));
+                }
                 if let Some(elements) = self.tuple_elements.get(&object.type_id).cloned() {
                     let index_span = index.span;
                     let AstExpressionKind::Literal(AstLiteral::Integer(index)) = &index.kind else {
@@ -4230,6 +4799,31 @@ impl Analyzer<'_> {
                         },
                         span: ast.span,
                     });
+                }
+                if let Some((key_type, value_type)) =
+                    self.map_elements.get(&object.type_id).copied()
+                {
+                    if expected
+                        .is_some_and(|expected| !self.types.assignable(value_type, expected))
+                    {
+                        return Err(semantic_error(
+                            "map value does not satisfy the expected type".into(),
+                            ast.span,
+                        ));
+                    }
+                    let key = self.expression(index, Some(key_type))?;
+                    let keys = self.collection_storage_expression(object.clone(), 0, ast.span);
+                    let values = self.collection_storage_expression(object, 1, ast.span);
+                    let storage_type = keys.type_id;
+                    let key_suffix = self.list_runtime_suffix(key_type, ast.span)?;
+                    let value_suffix = self.list_runtime_suffix(value_type, ast.span)?;
+                    return Ok(self.runtime_call(
+                        &format!("__sev_map_get_{key_suffix}_{value_suffix}"),
+                        &[storage_type, storage_type, key_type],
+                        value_type,
+                        vec![keys, values, key],
+                        ast.span,
+                    ));
                 }
                 let Some(element) = self.list_elements.get(&object.type_id).copied() else {
                     return Err(Diagnostic::new(
@@ -4260,7 +4854,7 @@ impl Analyzer<'_> {
                 let storage_type = storage.type_id;
                 let suffix = self.list_runtime_suffix(element, ast.span)?;
                 Ok(self.runtime_call(
-                    &format!("__sev_list_get_{suffix}"),
+                    &format!("__sev_list_index_{suffix}"),
                     &[storage_type, index.type_id],
                     element,
                     vec![storage, index],
@@ -4272,6 +4866,8 @@ impl Analyzer<'_> {
                 start,
                 end,
                 step,
+                start_exclusive,
+                end_inclusive,
             } => {
                 let object_value = self.expression(object, None)?;
                 if let Some(elements) = self.tuple_elements.get(&object_value.type_id).cloned() {
@@ -4325,39 +4921,91 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("int")
                     .expect("bootstrap defines int");
-                if object_value.type_id != string {
+                let list_element = self.list_elements.get(&object_value.type_id).copied();
+                if object_value.type_id != string && list_element.is_none() {
                     return Err(Diagnostic::new(
                         "E000211",
                         "slicing is not implemented for this type",
                         Some(ast.span),
                     ));
                 }
-                let object = object_value;
-                if expected.is_some_and(|expected| !self.types.assignable(string, expected)) {
+                let result_type = object_value.type_id;
+                if expected
+                    .is_some_and(|expected| !self.types.assignable(result_type, expected))
+                {
                     return Err(semantic_error(
                         "slice result does not satisfy the expected type".into(),
                         ast.span,
                     ));
                 }
-                let start = match start {
+                let start_value = match start {
                     Some(start) => self.expression(start, Some(integer))?,
                     None => self.integer_expression("0", integer, ast.span),
                 };
-                let end = match end {
+                let end_value = match end {
                     Some(end) => self.expression(end, Some(integer))?,
-                    None => self.integer_expression("9223372036854775807", integer, ast.span),
+                    None => self.integer_expression("0", integer, ast.span),
                 };
                 let step = match step {
                     Some(step) => self.expression(step, Some(integer))?,
                     None => self.integer_expression("1", integer, ast.span),
                 };
-                Ok(self.runtime_call(
-                    "__sev_string_slice",
-                    &[string, integer, integer, integer],
-                    string,
-                    vec![object, start, end, step],
+                let boolean = self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool");
+                let mut flag = |value| Expression {
+                    id: self.next_id(),
+                    type_id: boolean,
+                    kind: ExpressionKind::Literal(LiteralValue::Boolean(value)),
+                    span: ast.span,
+                };
+                let flags = vec![
+                    flag(start.is_some()),
+                    flag(end.is_some()),
+                    flag(*start_exclusive),
+                    flag(*end_inclusive),
+                ];
+                let (symbol, receiver) = if list_element.is_some() {
+                    (
+                        "__sev_list_slice",
+                        self.list_storage_expression(object_value, ast.span),
+                    )
+                } else {
+                    ("__sev_string_slice_ex", object_value)
+                };
+                let receiver_type = receiver.type_id;
+                let mut arguments = vec![receiver, start_value, end_value, step];
+                arguments.extend(flags);
+                let sliced = self.runtime_call(
+                    symbol,
+                    &[
+                        receiver_type,
+                        integer,
+                        integer,
+                        integer,
+                        boolean,
+                        boolean,
+                        boolean,
+                        boolean,
+                    ],
+                    receiver_type,
+                    arguments,
                     ast.span,
-                ))
+                );
+                if list_element.is_some() {
+                    Ok(Expression {
+                        id: self.next_id(),
+                        type_id: result_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: result_type,
+                            fields: vec![sliced],
+                        },
+                        span: ast.span,
+                    })
+                } else {
+                    Ok(sliced)
+                }
             }
             AstExpressionKind::TypeApplication { callee, arguments } => {
                 if matches!(&callee.kind, AstExpressionKind::Name(name) if matches!(name.as_str(), "channel" | "Channel"))
@@ -4372,10 +5020,266 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if matches!(callable_path(callee).as_deref(), Some("any" | "all"))
+                    && arguments.len() == 1
+                {
+                    let boolean = self
+                        .types
+                        .resolve_name("bool")
+                        .expect("bootstrap defines bool");
+                    let list_type = self.instantiate_list_type(boolean);
+                    let collection =
+                        self.expression(&arguments[0].value, Some(list_type))?;
+                    if self.list_elements.get(&collection.type_id).copied() != Some(boolean) {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`any` and `all` expect a list of bool values",
+                            Some(ast.span),
+                        ));
+                    }
+                    let storage = self.list_storage_expression(collection, ast.span);
+                    let storage_type = storage.type_id;
+                    let name = callable_path(callee).expect("matched callable name");
+                    return Ok(self.runtime_call(
+                        &format!("__sev_list_{name}"),
+                        &[storage_type],
+                        boolean,
+                        vec![storage],
+                        ast.span,
+                    ));
+                }
+                if callable_path(callee).as_deref() == Some("abs") && arguments.len() == 1 {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let value = self.expression(&arguments[0].value, Some(integer))?;
+                    return Ok(self.runtime_call(
+                        "__sev_abs_i64",
+                        &[integer],
+                        integer,
+                        vec![value],
+                        ast.span,
+                    ));
+                }
+                if matches!(callable_path(callee).as_deref(), Some("min" | "max"))
+                    && arguments.len() == 2
+                {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let left = self.expression(&arguments[0].value, Some(integer))?;
+                    let right = self.expression(&arguments[1].value, Some(integer))?;
+                    let name = callable_path(callee).expect("matched callable name");
+                    return Ok(self.runtime_call(
+                        &format!("__sev_{name}_i64"),
+                        &[integer, integer],
+                        integer,
+                        vec![left, right],
+                        ast.span,
+                    ));
+                }
+                if callable_path(callee).as_deref() == Some("divmod") && arguments.len() == 2 {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let left = self.expression(&arguments[0].value, Some(integer))?;
+                    let right = self.expression(&arguments[1].value, Some(integer))?;
+                    let quotient = self.runtime_call(
+                        "__sev_div_i64",
+                        &[integer, integer],
+                        integer,
+                        vec![left.clone(), right.clone()],
+                        ast.span,
+                    );
+                    let remainder = self.runtime_call(
+                        "__sev_mod_i64",
+                        &[integer, integer],
+                        integer,
+                        vec![left, right],
+                        ast.span,
+                    );
+                    let tuple_type = self.instantiate_tuple_type(&[integer, integer]);
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: tuple_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: tuple_type,
+                            fields: vec![quotient, remainder],
+                        },
+                        span: ast.span,
+                    });
+                }
+                if callable_path(callee).as_deref() == Some("range")
+                    && (1..=3).contains(&arguments.len())
+                    && arguments.iter().all(|argument| argument.name.is_none())
+                {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let mut values = arguments
+                        .iter()
+                        .map(|argument| self.expression(&argument.value, Some(integer)))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?;
+                    let (start, end, step) = match values.len() {
+                        1 => (
+                            self.integer_expression("0", integer, ast.span),
+                            values.remove(0),
+                            self.integer_expression("1", integer, ast.span),
+                        ),
+                        2 => (
+                            values.remove(0),
+                            values.remove(0),
+                            self.integer_expression("1", integer, ast.span),
+                        ),
+                        3 => (values.remove(0), values.remove(0), values.remove(0)),
+                        _ => unreachable!(),
+                    };
+                    let storage_type = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines pointer-backed string");
+                    let storage = self.runtime_call(
+                        "__sev_range",
+                        &[integer, integer, integer],
+                        storage_type,
+                        vec![start, end, step],
+                        ast.span,
+                    );
+                    let result_type = self.instantiate_list_type(integer);
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: result_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: result_type,
+                            fields: vec![storage],
+                        },
+                        span: ast.span,
+                    });
+                }
+                if callable_path(callee).as_deref() == Some("indices")
+                    && arguments.len() == 1
+                    && arguments[0].name.is_none()
+                {
+                    let collection = self.expression(&arguments[0].value, None)?;
+                    if !self.list_elements.contains_key(&collection.type_id) {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`indices` expects a list",
+                            Some(ast.span),
+                        ));
+                    }
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let result_type = self.instantiate_list_type(integer);
+                    let storage = self.list_storage_expression(collection, ast.span);
+                    let storage_type = storage.type_id;
+                    let indices = self.runtime_call(
+                        "__sev_list_indices",
+                        &[storage_type],
+                        storage_type,
+                        vec![storage],
+                        ast.span,
+                    );
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: result_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: result_type,
+                            fields: vec![indices],
+                        },
+                        span: ast.span,
+                    });
+                }
+                if callable_path(callee).as_deref() == Some("enumerate")
+                    && arguments.len() == 1
+                    && arguments[0].name.is_none()
+                {
+                    let collection = self.expression(&arguments[0].value, None)?;
+                    let Some(element) = self.list_elements.get(&collection.type_id).copied()
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`enumerate` expects a list",
+                            Some(ast.span),
+                        ));
+                    };
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let map_type = self.instantiate_map_type(integer, element);
+                    let values = self.list_storage_expression(collection, ast.span);
+                    let storage_type = values.type_id;
+                    let keys = self.runtime_call(
+                        "__sev_list_indices",
+                        &[storage_type],
+                        storage_type,
+                        vec![values.clone()],
+                        ast.span,
+                    );
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: map_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: map_type,
+                            fields: vec![keys, values],
+                        },
+                        span: ast.span,
+                    });
+                }
+                if callable_path(callee).as_deref() == Some("zip")
+                    && arguments.len() == 2
+                    && arguments.iter().all(|argument| argument.name.is_none())
+                {
+                    let left = self.expression(&arguments[0].value, None)?;
+                    let right = self.expression(&arguments[1].value, None)?;
+                    let Some(left_element) = self.list_elements.get(&left.type_id).copied() else {
+                        return Err(Diagnostic::new("E000206", "`zip` expects lists", Some(ast.span)));
+                    };
+                    let Some(right_element) = self.list_elements.get(&right.type_id).copied() else {
+                        return Err(Diagnostic::new("E000206", "`zip` expects lists", Some(ast.span)));
+                    };
+                    let map_type = self.instantiate_map_type(left_element, right_element);
+                    let left = self.list_storage_expression(left, ast.span);
+                    let right = self.list_storage_expression(right, ast.span);
+                    let storage_type = left.type_id;
+                    let keys = self.runtime_call(
+                        "__sev_list_zip_left",
+                        &[storage_type, storage_type],
+                        storage_type,
+                        vec![left.clone(), right.clone()],
+                        ast.span,
+                    );
+                    let values = self.runtime_call(
+                        "__sev_list_zip_right",
+                        &[storage_type, storage_type],
+                        storage_type,
+                        vec![left, right],
+                        ast.span,
+                    );
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: map_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: map_type,
+                            fields: vec![keys, values],
+                        },
+                        span: ast.span,
+                    });
+                }
                 if matches!(&callee.kind, AstExpressionKind::Name(name) if name == "set")
                     && arguments.is_empty()
                 {
-                    return self.empty_set_expression(ast.span);
+                    let element = expected.and_then(|expected| {
+                        (self.set_type == Some(expected)).then_some(self.set_element).flatten()
+                    });
+                    return self.empty_set_expression(element, ast.span);
                 }
                 if let AstExpressionKind::Member { object, name } = &callee.kind {
                     if matches!(name.as_str(), "add" | "append")
@@ -4439,6 +5343,112 @@ impl Analyzer<'_> {
                                 &[storage_type],
                                 element,
                                 vec![storage],
+                                ast.span,
+                            ));
+                        }
+                    }
+                    if matches!(
+                        name.as_str(),
+                        "appendleft" | "extend" | "popleft" | "insert" | "remove"
+                            | "heap_push" | "heap_pop"
+                    ) {
+                        let list = self.expression(object, None)?;
+                        if let Some(element) = self.list_elements.get(&list.type_id).copied() {
+                            let suffix = self.list_runtime_suffix(element, ast.span)?;
+                            let storage = self.list_storage_expression(list, ast.span);
+                            let storage_type = storage.type_id;
+                            let integer = self
+                                .types
+                                .resolve_name("int")
+                                .expect("bootstrap defines int");
+                            let unit = self
+                                .types
+                                .resolve_name("unit")
+                                .expect("bootstrap defines unit");
+                            let (symbol, parameters, result, mut values) = match name.as_str() {
+                                "appendleft" | "heap_push" if arguments.len() == 1 => {
+                                    let value =
+                                        self.expression(&arguments[0].value, Some(element))?;
+                                    (
+                                        format!("__sev_list_{name}_{suffix}"),
+                                        vec![storage_type, element],
+                                        unit,
+                                        vec![storage, value],
+                                    )
+                                }
+                                "extend" if arguments.len() == 1 => {
+                                    let list_type = self.instantiate_list_type(element);
+                                    let other = self
+                                        .expression(&arguments[0].value, Some(list_type))?;
+                                    let other = self.list_storage_expression(other, ast.span);
+                                    (
+                                        "__sev_list_extend".into(),
+                                        vec![storage_type, storage_type],
+                                        unit,
+                                        vec![storage, other],
+                                    )
+                                }
+                                "popleft" | "heap_pop" if arguments.is_empty() => (
+                                    format!("__sev_list_{name}_{suffix}"),
+                                    vec![storage_type],
+                                    element,
+                                    vec![storage],
+                                ),
+                                "insert" if arguments.len() == 2 => {
+                                    let index =
+                                        self.expression(&arguments[0].value, Some(integer))?;
+                                    let value =
+                                        self.expression(&arguments[1].value, Some(element))?;
+                                    (
+                                        format!("__sev_list_insert_{suffix}"),
+                                        vec![storage_type, integer, element],
+                                        unit,
+                                        vec![storage, index, value],
+                                    )
+                                }
+                                "remove" if arguments.len() == 1 => {
+                                    let value =
+                                        self.expression(&arguments[0].value, Some(element))?;
+                                    (
+                                        format!("__sev_list_remove_{suffix}"),
+                                        vec![storage_type, element],
+                                        unit,
+                                        vec![storage, value],
+                                    )
+                                }
+                                _ => {
+                                    return Err(Diagnostic::new(
+                                        "E000206",
+                                        format!("list method `{name}` received incompatible arguments"),
+                                        Some(ast.span),
+                                    ));
+                                }
+                            };
+                            return Ok(self.runtime_call(
+                                &symbol,
+                                &parameters,
+                                result,
+                                std::mem::take(&mut values),
+                                ast.span,
+                            ));
+                        }
+                    }
+                    if name == "pop" && arguments.len() == 1 {
+                        let list = self.expression(object, None)?;
+                        if let Some(element) = self.list_elements.get(&list.type_id).copied() {
+                            let integer = self
+                                .types
+                                .resolve_name("int")
+                                .expect("bootstrap defines int");
+                            let index = self.expression(&arguments[0].value, Some(integer))?;
+                            let suffix = self.list_runtime_suffix(element, ast.span)?;
+                            let storage = self.list_storage_expression(list, ast.span);
+                            let storage_type = storage.type_id;
+                            return Ok(self.runtime_call(
+                                &format!("__sev_list_pop_at_{suffix}"),
+                                &[storage_type, integer],
+                                element,
+                                vec![storage, index],
                                 ast.span,
                             ));
                         }
@@ -4811,8 +5821,11 @@ impl Analyzer<'_> {
                         ));
                     }
                     let value = self.expression(&arguments[0].value, None)?;
-                    if self.tuple_elements.contains_key(&value.type_id) {
-                        let rendered = self.tuple_string(value, ast.span)?;
+                    if self.tuple_elements.contains_key(&value.type_id)
+                        || self.list_elements.contains_key(&value.type_id)
+                        || self.set_type == Some(value.type_id)
+                    {
+                        let rendered = self.display_string(value, ast.span)?;
                         let string = rendered.type_id;
                         let result = self
                             .types
@@ -5235,6 +6248,23 @@ impl Analyzer<'_> {
                 }
                 if *operator == AstBinaryOperator::Contains {
                     let haystack = self.expression(right, None)?;
+                    if let Some(element) = self.list_elements.get(&haystack.type_id).copied() {
+                        let needle = self.expression(left, Some(element))?;
+                        let suffix = self.list_runtime_suffix(element, ast.span)?;
+                        let storage = self.list_storage_expression(haystack, ast.span);
+                        let storage_type = storage.type_id;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(self.runtime_call(
+                            &format!("__sev_list_contains_{suffix}"),
+                            &[storage_type, element],
+                            boolean,
+                            vec![storage, needle],
+                            ast.span,
+                        ));
+                    }
                     if self.set_type == Some(haystack.type_id) {
                         let needle = self.expression(left, None)?;
                         let suffix = self.list_runtime_suffix(needle.type_id, ast.span)?;
@@ -5488,6 +6518,46 @@ impl Analyzer<'_> {
                         };
                         let comparison = self.runtime_call(
                             &symbol,
+                            &[storage_type, storage_type],
+                            boolean,
+                            vec![left_storage, right_storage],
+                            ast.span,
+                        );
+                        if *operator == AstBinaryOperator::NotEqual {
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Unary {
+                                    operator: UnaryOperator::Not,
+                                    operand: Box::new(comparison),
+                                },
+                                span: ast.span,
+                            });
+                        }
+                        return Ok(comparison);
+                    }
+                    if self.set_type == Some(resolved_left.type_id) {
+                        let set_type = resolved_left.type_id;
+                        let resolved_right = self.expression(right, Some(set_type))?;
+                        let left_storage =
+                            self.collection_storage_expression(resolved_left, 0, ast.span);
+                        let right_storage =
+                            self.collection_storage_expression(resolved_right, 0, ast.span);
+                        let storage_type = left_storage.type_id;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        let element = self.set_element.ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000211",
+                                "set element type is unknown",
+                                Some(ast.span),
+                            )
+                        })?;
+                        let suffix = self.list_runtime_suffix(element, ast.span)?;
+                        let comparison = self.runtime_call(
+                            &format!("__sev_set_equal_{suffix}"),
                             &[storage_type, storage_type],
                             boolean,
                             vec![left_storage, right_storage],
@@ -6578,6 +7648,7 @@ impl Analyzer<'_> {
 
     fn empty_set_expression(
         &mut self,
+        element: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
         let set_type = TypeId(0x07ff_fffe);
@@ -6595,6 +7666,16 @@ impl Analyzer<'_> {
                     ty: storage_type,
                 }],
             });
+        }
+        if let Some(element) = element {
+            if self.set_element.is_some_and(|known| known != element) {
+                return Err(Diagnostic::new(
+                    "E000204",
+                    "set element types must agree within a compilation unit",
+                    Some(span),
+                ));
+            }
+            self.set_element = Some(element);
         }
         let storage = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
         Ok(Expression {
@@ -6928,6 +8009,22 @@ impl Analyzer<'_> {
         if self.tuple_elements.contains_key(&value.type_id) {
             return self.tuple_string(value, span);
         }
+        if let Some(element) = self.list_elements.get(&value.type_id).copied() {
+            let storage = self.list_storage_expression(value, span);
+            let storage_type = storage.type_id;
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            let suffix = self.list_runtime_suffix(element, span)?;
+            return Ok(self.runtime_call(
+                &format!("__sev_list_string_{suffix}"),
+                &[storage_type],
+                string,
+                vec![storage],
+                span,
+            ));
+        }
         let string = self
             .types
             .resolve_name("string")
@@ -7042,6 +8139,7 @@ impl Analyzer<'_> {
             .map(|definition| definition.name.as_str());
         match name {
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
+            Some("bool") => Ok("bool"),
             Some("string") => Ok("ptr"),
             _ if self.list_elements.contains_key(&element) => Ok("list"),
             _ if self.tuple_elements.get(&element).is_some_and(|elements| {
@@ -7446,9 +8544,66 @@ impl Analyzer<'_> {
         let AstExpressionKind::Name(name) = &callee.kind else {
             return Ok(None);
         };
-        let Some(callable) = self.callable_substitutions.get(name).cloned() else {
+        let callable = self.callable_substitutions.get(name).cloned();
+        if callable.is_none() {
+            let lambda = self
+                .names
+                .get(name)
+                .and_then(|(_, variable, _)| self.callable_bindings.get(variable))
+                .cloned();
+            if let Some(CallableValue::Lambda {
+                parameters,
+                body,
+                closure,
+                closure_type,
+                captures,
+            }) = lambda
+            {
+                if parameters.len() != arguments.len()
+                    || arguments.iter().any(|argument| argument.name.is_some())
+                {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("callable `{name}` received the wrong arguments"),
+                        Some(span),
+                    ));
+                }
+                let values = arguments
+                    .iter()
+                    .map(|argument| self.expression(&argument.value, None))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let previous_values = self.value_substitutions.clone();
+                let closure = Expression {
+                    id: self.next_id(),
+                    type_id: closure_type,
+                    kind: ExpressionKind::Binding(closure),
+                    span,
+                };
+                for (index, (capture, ty)) in captures.into_iter().enumerate() {
+                    let id = self.next_id();
+                    self.value_substitutions.insert(
+                        capture,
+                        Expression {
+                            id,
+                            type_id: ty,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(closure.clone()),
+                                index: index as u32,
+                            },
+                            span,
+                        },
+                    );
+                }
+                for (parameter, value) in parameters.into_iter().zip(values) {
+                    self.value_substitutions.insert(parameter, value);
+                }
+                let result = self.expression(&body, expected);
+                self.value_substitutions = previous_values;
+                return result.map(Some);
+            }
             return Ok(None);
-        };
+        }
+        let callable = callable.expect("callable presence was checked");
         if arguments.len() != callable.signature.parameters.len()
             || arguments.iter().any(|argument| argument.name.is_some())
         {
@@ -8264,6 +9419,130 @@ impl Analyzer<'_> {
         if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
             return Ok(None);
         }
+        if matches!(name.as_str(), "map" | "filter" | "reduce") {
+            let AstExpressionKind::List(values) = &object.kind else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!("list method `{name}` currently requires a list literal"),
+                    Some(span),
+                ));
+            };
+            let Some(AstExpressionKind::Lambda { parameters, body }) =
+                arguments.first().map(|argument| &argument.value.kind)
+            else {
+                return Err(Diagnostic::new(
+                    "E000206",
+                    format!("list method `{name}` expects a lambda"),
+                    Some(span),
+                ));
+            };
+            match name.as_str() {
+                "map" if parameters.len() == 1 && arguments.len() == 1 => {
+                    let mapped = values
+                        .iter()
+                        .map(|value| {
+                            substituted_expression(
+                                body,
+                                &BTreeMap::from([(parameters[0].clone(), value.clone())]),
+                            )
+                        })
+                        .collect();
+                    return self
+                        .expression(
+                            &AstExpression {
+                                kind: AstExpressionKind::List(mapped),
+                                span,
+                            },
+                            expected,
+                        )
+                        .map(Some);
+                }
+                "filter" if parameters.len() == 1 && arguments.len() == 1 => {
+                    let mut filtered = Vec::new();
+                    for value in values {
+                        let condition = substituted_expression(
+                            body,
+                            &BTreeMap::from([(parameters[0].clone(), value.clone())]),
+                        );
+                        if constant_boolean_expression(&condition).ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000211",
+                                "literal-list filtering requires a compile-time predicate",
+                                Some(condition.span),
+                            )
+                        })? {
+                            filtered.push(value.clone());
+                        }
+                    }
+                    return self
+                        .expression(
+                            &AstExpression {
+                                kind: AstExpressionKind::List(filtered),
+                                span,
+                            },
+                            expected,
+                        )
+                        .map(Some);
+                }
+                "reduce" if parameters.len() == 2 && (1..=2).contains(&arguments.len()) => {
+                    let (mut total, remaining) = if let Some(initial) = arguments.get(1) {
+                        (initial.value.clone(), values.as_slice())
+                    } else {
+                        let Some((first, remaining)) = values.split_first() else {
+                            return Err(Diagnostic::new(
+                                "E000211",
+                                "reducing an empty list requires an initial value",
+                                Some(span),
+                            ));
+                        };
+                        (first.clone(), remaining)
+                    };
+                    for value in remaining {
+                        total = substituted_expression(
+                            body,
+                            &BTreeMap::from([
+                                (parameters[0].clone(), total),
+                                (parameters[1].clone(), value.clone()),
+                            ]),
+                        );
+                    }
+                    return self.expression(&total, expected).map(Some);
+                }
+                _ => {
+                    return Err(Diagnostic::new(
+                        "E000206",
+                        format!("list method `{name}` received incompatible arguments"),
+                        Some(span),
+                    ));
+                }
+            }
+        }
+        if name == "sorted"
+            && matches!(arguments.first().map(|argument| &argument.value.kind), Some(AstExpressionKind::Lambda { .. }))
+        {
+            let AstExpressionKind::List(values) = &object.kind else {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    "key-based sorting currently requires a list literal",
+                    Some(span),
+                ));
+            };
+            let mut values = values.clone();
+            if values.iter().all(|value| string_literal(value).is_some()) {
+                values.sort_by_key(|value| string_literal(value).map(str::chars).map(Iterator::count));
+                let descending = arguments.get(1).is_some_and(|argument| {
+                    matches!(argument.value.kind, AstExpressionKind::Literal(AstLiteral::Boolean(true)))
+                });
+                if descending {
+                    values.reverse();
+                }
+                let literal = AstExpression {
+                    kind: AstExpressionKind::List(values),
+                    span,
+                };
+                return self.expression(&literal, expected).map(Some);
+            }
+        }
         let object = self.expression(object, None)?;
         let string = self
             .types
@@ -8278,6 +9557,10 @@ impl Analyzer<'_> {
                 .types
                 .resolve_name("bool")
                 .expect("bootstrap defines bool");
+            let int_type = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
             let (symbol, parameters, result, resolved_arguments) = match name.as_str() {
                 "length" if arguments.is_empty() => (
                     "__sev_string_length",
@@ -8297,7 +9580,138 @@ impl Analyzer<'_> {
                         vec![object, needle],
                     )
                 }
-                "length" | "upper" | "contains" => {
+                "split" if arguments.len() == 1 && arguments[0].name.is_none() => {
+                    let separator = self.expression(&arguments[0].value, Some(string))?;
+                    let storage_type = string;
+                    let storage = self.runtime_call(
+                        "__sev_string_split",
+                        &[string, string],
+                        storage_type,
+                        vec![object, separator],
+                        span,
+                    );
+                    let list_type = self.instantiate_list_type(string);
+                    return Ok(Some(Expression {
+                        id: self.next_id(),
+                        type_id: list_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: list_type,
+                            fields: vec![storage],
+                        },
+                        span,
+                    }));
+                }
+                "strip" if arguments.is_empty() => {
+                    ("__sev_string_strip", vec![string], string, vec![object])
+                }
+                "lower" if arguments.is_empty() => {
+                    ("__sev_string_lower", vec![string], string, vec![object])
+                }
+                "replace" if arguments.len() == 2 => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    let replacement = self.expression(&arguments[1].value, Some(string))?;
+                    (
+                        "__sev_string_replace",
+                        vec![string, string, string],
+                        string,
+                        vec![object, needle, replacement],
+                    )
+                }
+                "starts_with" if arguments.len() == 1 => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    (
+                        "__sev_string_starts_with",
+                        vec![string, string],
+                        bool_type,
+                        vec![object, needle],
+                    )
+                }
+                "ends_with" if arguments.len() == 1 => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    (
+                        "__sev_string_ends_with",
+                        vec![string, string],
+                        bool_type,
+                        vec![object, needle],
+                    )
+                }
+                "find" if arguments.len() == 1 => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    (
+                        "__sev_string_find",
+                        vec![string, string],
+                        int_type,
+                        vec![object, needle],
+                    )
+                }
+                "count" if arguments.len() == 1 => {
+                    let needle = self.expression(&arguments[0].value, Some(string))?;
+                    (
+                        "__sev_string_count",
+                        vec![string, string],
+                        int_type,
+                        vec![object, needle],
+                    )
+                }
+                "characters" if arguments.is_empty() => {
+                    let storage = self.runtime_call(
+                        "__sev_string_characters",
+                        &[string],
+                        string,
+                        vec![object],
+                        span,
+                    );
+                    let list_type = self.instantiate_list_type(string);
+                    return Ok(Some(Expression {
+                        id: self.next_id(),
+                        type_id: list_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: list_type,
+                            fields: vec![storage],
+                        },
+                        span,
+                    }));
+                }
+                "frequencies" if arguments.is_empty() => {
+                    let integer = self
+                        .types
+                        .resolve_name("int")
+                        .expect("bootstrap defines int");
+                    let characters = self.runtime_call(
+                        "__sev_string_characters",
+                        &[string],
+                        string,
+                        vec![object],
+                        span,
+                    );
+                    let keys = self.runtime_call(
+                        "__sev_list_frequency_keys_ptr",
+                        &[string],
+                        string,
+                        vec![characters.clone()],
+                        span,
+                    );
+                    let values = self.runtime_call(
+                        "__sev_list_frequency_values_ptr",
+                        &[string],
+                        string,
+                        vec![characters],
+                        span,
+                    );
+                    let map_type = self.instantiate_map_type(string, integer);
+                    return Ok(Some(Expression {
+                        id: self.next_id(),
+                        type_id: map_type,
+                        kind: ExpressionKind::Aggregate {
+                            class: map_type,
+                            fields: vec![keys, values],
+                        },
+                        span,
+                    }));
+                }
+                "length" | "upper" | "contains" | "split" | "strip" | "lower"
+                | "replace" | "starts_with" | "ends_with" | "find" | "count"
+                | "characters" | "frequencies" => {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("string method `{name}` received incompatible arguments"),
@@ -8342,8 +9756,89 @@ impl Analyzer<'_> {
                     span,
                 )));
             }
+            if name == "join" && arguments.len() == 1 {
+                let string = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                if element != string {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        "list method `join` requires string elements",
+                        Some(span),
+                    ));
+                }
+                let separator = self.expression(&arguments[0].value, Some(string))?;
+                let storage = self.list_storage_expression(object, span);
+                let storage_type = storage.type_id;
+                return Ok(Some(self.runtime_call(
+                    "__sev_list_join",
+                    &[storage_type, string],
+                    string,
+                    vec![storage, separator],
+                    span,
+                )));
+            }
+            if matches!(name.as_str(), "minimum" | "maximum" | "sum" | "last")
+                && arguments.is_empty()
+            {
+                let suffix = self.list_runtime_suffix(element, span)?;
+                if name != "last" && suffix != "i64" {
+                    return Err(Diagnostic::new(
+                        "E000211",
+                        format!("list method `{name}` requires numeric elements"),
+                        Some(span),
+                    ));
+                }
+                let storage = self.list_storage_expression(object, span);
+                let storage_type = storage.type_id;
+                return Ok(Some(self.runtime_call(
+                    &format!("__sev_list_{name}_{suffix}"),
+                    &[storage_type],
+                    element,
+                    vec![storage],
+                    span,
+                )));
+            }
+            if name == "frequencies" && arguments.is_empty() {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let map_type = self.instantiate_map_type(element, integer);
+                let suffix = self.list_runtime_suffix(element, span)?;
+                let storage = self.list_storage_expression(object, span);
+                let storage_type = storage.type_id;
+                let keys = self.runtime_call(
+                    &format!("__sev_list_frequency_keys_{suffix}"),
+                    &[storage_type],
+                    storage_type,
+                    vec![storage.clone()],
+                    span,
+                );
+                let values = self.runtime_call(
+                    &format!("__sev_list_frequency_values_{suffix}"),
+                    &[storage_type],
+                    storage_type,
+                    vec![storage],
+                    span,
+                );
+                return Ok(Some(Expression {
+                    id: self.next_id(),
+                    type_id: map_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: map_type,
+                        fields: vec![keys, values],
+                    },
+                    span,
+                }));
+            }
             if name == "sorted" {
-                if !arguments.is_empty() {
+                if arguments.len() > 1
+                    || arguments
+                        .first()
+                        .is_some_and(|argument| !matches!(argument.value.kind, AstExpressionKind::Literal(AstLiteral::Boolean(_))))
+                {
                     return Err(Diagnostic::new(
                         "E000206",
                         "list method `sorted` expects no arguments",
@@ -8367,13 +9862,28 @@ impl Analyzer<'_> {
                 }
                 let storage = self.list_storage_expression(object, span);
                 let storage_type = storage.type_id;
-                let sorted = self.runtime_call(
-                    &format!("__sev_list_sorted_{suffix}"),
-                    &[storage_type],
-                    storage_type,
-                    vec![storage],
-                    span,
-                );
+                let sorted = if let Some(argument) = arguments.first() {
+                    let boolean = self
+                        .types
+                        .resolve_name("bool")
+                        .expect("bootstrap defines bool");
+                    let descending = self.expression(&argument.value, Some(boolean))?;
+                    self.runtime_call(
+                        &format!("__sev_list_sorted_order_{suffix}"),
+                        &[storage_type, boolean],
+                        storage_type,
+                        vec![storage, descending],
+                        span,
+                    )
+                } else {
+                    self.runtime_call(
+                        &format!("__sev_list_sorted_{suffix}"),
+                        &[storage_type],
+                        storage_type,
+                        vec![storage],
+                        span,
+                    )
+                };
                 return Ok(Some(Expression {
                     id: self.next_id(),
                     type_id: list_type,
@@ -8384,6 +9894,55 @@ impl Analyzer<'_> {
                     span,
                 }));
             }
+        }
+        if let Some((key_type, value_type)) = self.map_elements.get(&object.type_id).copied() {
+            if matches!(name.as_str(), "get" | "set_default") && arguments.len() == 2 {
+                let key = self.expression(&arguments[0].value, Some(key_type))?;
+                let fallback = self.expression(&arguments[1].value, Some(value_type))?;
+                let keys = self.collection_storage_expression(object.clone(), 0, span);
+                let values = self.collection_storage_expression(object, 1, span);
+                let storage_type = keys.type_id;
+                let key_suffix = self.list_runtime_suffix(key_type, span)?;
+                let value_suffix = self.list_runtime_suffix(value_type, span)?;
+                let operation = if name == "get" { "get_default" } else { "set_default" };
+                return Ok(Some(self.runtime_call(
+                    &format!("__sev_map_{operation}_{key_suffix}_{value_suffix}"),
+                    &[storage_type, storage_type, key_type, value_type],
+                    value_type,
+                    vec![keys, values, key, fallback],
+                    span,
+                )));
+            }
+        }
+        if self.set_type == Some(object.type_id)
+            && matches!(name.as_str(), "union" | "intersection" | "symmetric_difference")
+            && arguments.len() == 1
+        {
+            let other = self.expression(&arguments[0].value, Some(object.type_id))?;
+            let element = self.set_element.ok_or_else(|| {
+                Diagnostic::new("E000211", "set element type is unknown", Some(span))
+            })?;
+            let suffix = self.list_runtime_suffix(element, span)?;
+            let left = self.collection_storage_expression(object, 0, span);
+            let right = self.collection_storage_expression(other, 0, span);
+            let storage_type = left.type_id;
+            let storage = self.runtime_call(
+                &format!("__sev_set_{name}_{suffix}"),
+                &[storage_type, storage_type],
+                storage_type,
+                vec![left, right],
+                span,
+            );
+            let set_type = self.set_type.expect("set type was checked");
+            return Ok(Some(Expression {
+                id: self.next_id(),
+                type_id: set_type,
+                kind: ExpressionKind::Aggregate {
+                    class: set_type,
+                    fields: vec![storage],
+                },
+                span,
+            }));
         }
         let Some(instance) = self.class_instances_by_type.get(&object.type_id).cloned() else {
             return Ok(None);
@@ -9725,6 +11284,136 @@ fn callable_path(expression: &AstExpression) -> Option<String> {
     }
 }
 
+fn substituted_expression(
+    expression: &AstExpression,
+    substitutions: &BTreeMap<String, AstExpression>,
+) -> AstExpression {
+    let mut result = expression.clone();
+    match &mut result.kind {
+        AstExpressionKind::Name(name) => {
+            if let Some(value) = substitutions.get(name) {
+                return value.clone();
+            }
+        }
+        AstExpressionKind::List(values)
+        | AstExpressionKind::Set(values)
+        | AstExpressionKind::Tuple(values) => {
+            for value in values {
+                *value = substituted_expression(value, substitutions);
+            }
+        }
+        AstExpressionKind::Map(entries) => {
+            for entry in entries {
+                entry.key = substituted_expression(&entry.key, substitutions);
+                entry.value = substituted_expression(&entry.value, substitutions);
+            }
+        }
+        AstExpressionKind::Member { object, .. }
+        | AstExpressionKind::TypeApplication { callee: object, .. }
+        | AstExpressionKind::Async {
+            expression: object, ..
+        }
+        | AstExpressionKind::Await { expression: object }
+        | AstExpressionKind::Throw { error: object }
+        | AstExpressionKind::Unary {
+            operand: object, ..
+        } => **object = substituted_expression(object, substitutions),
+        AstExpressionKind::Index { object, index } => {
+            **object = substituted_expression(object, substitutions);
+            **index = substituted_expression(index, substitutions);
+        }
+        AstExpressionKind::Slice {
+            object,
+            start,
+            end,
+            step,
+            ..
+        } => {
+            **object = substituted_expression(object, substitutions);
+            for bound in [start, end, step].into_iter().flatten() {
+                **bound = substituted_expression(bound, substitutions);
+            }
+        }
+        AstExpressionKind::Call { callee, arguments } => {
+            **callee = substituted_expression(callee, substitutions);
+            for argument in arguments {
+                argument.value = substituted_expression(&argument.value, substitutions);
+            }
+        }
+        AstExpressionKind::Fallback { value, fallback }
+        | AstExpressionKind::Binary {
+            left: value,
+            right: fallback,
+            ..
+        } => {
+            **value = substituted_expression(value, substitutions);
+            **fallback = substituted_expression(fallback, substitutions);
+        }
+        AstExpressionKind::Literal(_)
+        | AstExpressionKind::Lambda { .. }
+        | AstExpressionKind::Mock { .. }
+        | AstExpressionKind::ListComprehension { .. }
+        | AstExpressionKind::SetComprehension { .. }
+        | AstExpressionKind::MapComprehension { .. } => {}
+    }
+    result
+}
+
+fn constant_integer_expression(expression: &AstExpression) -> Option<i64> {
+    match &expression.kind {
+        AstExpressionKind::Literal(AstLiteral::Integer(value)) => value.parse().ok(),
+        AstExpressionKind::Unary {
+            operator: AstUnaryOperator::Negative,
+            operand,
+        } => constant_integer_expression(operand)?.checked_neg(),
+        AstExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let left = constant_integer_expression(left)?;
+            let right = constant_integer_expression(right)?;
+            match operator {
+                AstBinaryOperator::Add => left.checked_add(right),
+                AstBinaryOperator::Subtract => left.checked_sub(right),
+                AstBinaryOperator::Multiply => left.checked_mul(right),
+                AstBinaryOperator::Divide => left.checked_div(right),
+                AstBinaryOperator::Remainder => left.checked_rem(right),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn constant_boolean_expression(expression: &AstExpression) -> Option<bool> {
+    match &expression.kind {
+        AstExpressionKind::Literal(AstLiteral::Boolean(value)) => Some(*value),
+        AstExpressionKind::Unary {
+            operator: AstUnaryOperator::Not,
+            operand,
+        } => constant_boolean_expression(operand).map(|value| !value),
+        AstExpressionKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let left = constant_integer_expression(left)?;
+            let right = constant_integer_expression(right)?;
+            Some(match operator {
+                AstBinaryOperator::Equal => left == right,
+                AstBinaryOperator::NotEqual => left != right,
+                AstBinaryOperator::Less => left < right,
+                AstBinaryOperator::LessEqual => left <= right,
+                AstBinaryOperator::Greater => left > right,
+                AstBinaryOperator::GreaterEqual => left >= right,
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn collect_thrown_error_names(statements: &[AstStatement], names: &mut BTreeSet<String>) {
     for statement in statements {
         match statement {
@@ -9767,6 +11456,7 @@ fn collect_thrown_error_names(statements: &[AstStatement], names: &mut BTreeSet<
             AstStatement::Binding(_)
             | AstStatement::Destructure { .. }
             | AstStatement::FieldAssignment { .. }
+            | AstStatement::IndexAssignment { .. }
             | AstStatement::Defer { .. }
             | AstStatement::Return { .. }
             | AstStatement::Assert { .. }
@@ -9856,7 +11546,9 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
             }
             names.extend(nested);
         }
-        AstExpressionKind::List(values) | AstExpressionKind::Tuple(values) => {
+        AstExpressionKind::List(values)
+        | AstExpressionKind::Set(values)
+        | AstExpressionKind::Tuple(values) => {
             for value in values {
                 collect_expression_names(value, names);
             }
@@ -9865,6 +11557,32 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
             for entry in entries {
                 collect_expression_names(&entry.key, names);
                 collect_expression_names(&entry.value, names);
+            }
+        }
+        AstExpressionKind::ListComprehension { value, clauses }
+        | AstExpressionKind::SetComprehension { value, clauses } => {
+            collect_expression_names(value, names);
+            for clause in clauses {
+                collect_expression_names(&clause.iterable, names);
+                if let Some(condition) = &clause.condition {
+                    collect_expression_names(condition, names);
+                }
+                for binding in &clause.bindings {
+                    names.remove(binding);
+                }
+            }
+        }
+        AstExpressionKind::MapComprehension { key, value, clauses } => {
+            collect_expression_names(key, names);
+            collect_expression_names(value, names);
+            for clause in clauses {
+                collect_expression_names(&clause.iterable, names);
+                if let Some(condition) = &clause.condition {
+                    collect_expression_names(condition, names);
+                }
+                for binding in &clause.bindings {
+                    names.remove(binding);
+                }
             }
         }
         AstExpressionKind::Mock { cases, fallback } => {
@@ -9887,6 +11605,7 @@ fn collect_expression_names(expression: &AstExpression, names: &mut BTreeSet<Str
             start,
             end,
             step,
+            ..
         } => {
             collect_expression_names(object, names);
             for value in [start, end, step].into_iter().flatten() {
@@ -10661,6 +12380,7 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             AstStatement::Binding(_)
             | AstStatement::Destructure { .. }
             | AstStatement::FieldAssignment { .. }
+            | AstStatement::IndexAssignment { .. }
             | AstStatement::Expression(_)
             | AstStatement::Defer { .. }
             | AstStatement::Assert { .. }
