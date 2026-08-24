@@ -719,6 +719,15 @@ fn trait_is_structurally_satisfied(
         && declaration.methods.iter().all(|method| {
             method_binary_syntax(&method.name)
                 .is_some_and(|operator| types.supports_binary(operator, actual))
+                || (method.name == "zero"
+                    && method.parameters.is_empty()
+                    && types.supports_binary(
+                        severian_universal::BinaryOperator::Add,
+                        actual,
+                    ))
+                || (method.name == "hash"
+                    && method.parameters.is_empty()
+                    && types.primitive(actual).is_some())
         })
 }
 
@@ -1242,13 +1251,54 @@ fn infer_substitution(
     parameters: &[String],
     substitution: &mut Substitution,
 ) {
-    if let Some(name) = pattern.simple_name() {
-        if parameters.iter().any(|parameter| parameter == name) {
-            substitution
-                .entry(name.to_owned())
-                .or_insert_with(|| actual.to_owned());
+    let Some((name, arguments)) = pattern.named_parts() else {
+        return;
+    };
+    if arguments.is_empty() && parameters.iter().any(|parameter| parameter == name) {
+        substitution
+            .entry(name.to_owned())
+            .or_insert_with(|| actual.to_owned());
+        return;
+    }
+    let Some((actual_name, actual_arguments)) = type_application_parts(actual) else {
+        return;
+    };
+    if name != actual_name || arguments.len() != actual_arguments.len() {
+        return;
+    }
+    for (pattern, actual) in arguments.iter().zip(actual_arguments) {
+        infer_substitution(pattern, actual, parameters, substitution);
+    }
+}
+
+fn type_application_parts(value: &str) -> Option<(&str, Vec<&str>)> {
+    let Some(open) = value.find('[') else {
+        return Some((value.trim(), Vec::new()));
+    };
+    if !value.ends_with(']') {
+        return None;
+    }
+    let name = value[..open].trim();
+    let contents = &value[open + 1..value.len() - 1];
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut arguments = Vec::new();
+    for (offset, character) in contents.char_indices() {
+        match character {
+            '[' => depth += 1,
+            ']' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                arguments.push(contents[start..offset].trim());
+                start = offset + character.len_utf8();
+            }
+            _ => {}
         }
     }
+    if depth != 0 {
+        return None;
+    }
+    arguments.push(contents[start..].trim());
+    Some((name, arguments))
 }
 
 fn expression_type_name(
@@ -1284,7 +1334,25 @@ fn expression_type_name(
                         .then(|| index.definitions[&definition].name.clone())
                 })
         }
-        severian_ast::ExpressionKind::List(_) | severian_ast::ExpressionKind::Tuple(_) => None,
+        severian_ast::ExpressionKind::List(values) => {
+            let element = values
+                .first()
+                .and_then(|value| expression_type_name(module, value, names, index))?;
+            Some(format!("list[{element}]"))
+        }
+        severian_ast::ExpressionKind::Tuple(values) => {
+            let elements = values
+                .iter()
+                .map(|value| expression_type_name(module, value, names, index))
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!("tuple[{}]", elements.join(", ")))
+        }
+        severian_ast::ExpressionKind::Map(entries) => {
+            let first = entries.first()?;
+            let key = expression_type_name(module, &first.key, names, index)?;
+            let value = expression_type_name(module, &first.value, names, index)?;
+            Some(format!("map[{key}, {value}]"))
+        }
         _ => None,
     }
 }
@@ -1311,7 +1379,6 @@ pub(super) fn specialize_function(
     substitution: &Substitution,
 ) -> severian_ast::FunctionDeclaration {
     let mut function = function.clone();
-    function.type_parameters.clear();
     for parameter in &mut function.parameters {
         parameter.annotation = specialize_annotation(&parameter.annotation, substitution);
     }

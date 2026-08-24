@@ -296,6 +296,25 @@ fn source_method_traits_authorize_operators_for_each_generic_instance() {
 }
 
 #[test]
+fn generic_map_literals_infer_nested_arguments_and_lower_pair_iteration() {
+    let root = temporary();
+    let source = root.join("map-sum.sev");
+    std::fs::write(
+        &source,
+        "trait Hash:\n    def hash() -> usize\ntrait Equal:\n    def equal(other: Self) -> bool\ntrait Number:\n    def zero() -> Self\n    def add(other: Self) -> Self\ndef sum_values[K: Hash + Equal, V: Number](values: map[K, V]) -> V:\n    total := V.zero()\n    for _, value in values:\n        total = total.add(value)\n    return total\ndef selected() -> int:\n    counts = {\"first\": 34, \"second\": 8}\n    return sum_values(counts)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    assert!(typed.hir.modules[0]
+        .classes
+        .iter()
+        .any(|class| class.name == "map[string, int]"));
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn trait_typed_parameters_specialize_to_source_classes() {
     let root = temporary();
     let source = root.join("drawable.sev");

@@ -1,3 +1,9 @@
+trait Hash:
+    def hash() -> usize
+
+trait Equal:
+    def equal(other: Self) -> bool
+
 trait Number:
     def zero() -> Self
     def add(other: Self) -> Self
@@ -13,3 +19,7 @@ def sum_values[K: Hash + Equal, V: Number](Vs: map[K, V]) -> V:
 def main():
     counts = {"first": 34, "second": 8}
     print(sum_values(counts))
+
+test:
+    counts = {"first": 34, "second": 8}
+    assert(sum_values(counts) == 42)

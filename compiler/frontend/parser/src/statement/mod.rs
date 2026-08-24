@@ -742,8 +742,13 @@ impl Parser<'_> {
         if self.at_identifier("for") {
             let start = self.next().span;
             let (binding, _) = self.identifier("expected a loop binding")?;
+            let second_binding = if self.take(&TokenKind::Comma).is_some() {
+                Some(self.identifier("expected a loop binding after `,`")?.0)
+            } else {
+                None
+            };
             if !self.at_identifier("in") {
-                return Err(self.error("expected `in` after loop binding"));
+                return Err(self.error("expected `in` after loop binding(s)"));
             }
             self.next();
             let iterable = self.expression(0)?;
@@ -751,6 +756,7 @@ impl Parser<'_> {
             let (body, end) = self.indented_block("for")?;
             return Ok(Statement::For {
                 binding,
+                second_binding,
                 iterable,
                 body,
                 span: Span::new(start.source, start.start, end),
@@ -1162,16 +1168,21 @@ impl Parser<'_> {
                     self.identifier("expected a generic parameter")?;
                 type_parameters.push(parameter.clone());
                 if self.take(&TokenKind::Colon).is_some() {
-                    let bound = self.type_annotation()?;
-                    constraints.push(GenericConstraint::Parameter {
-                        parameter,
-                        span: Span::new(
-                            parameter_span.source,
-                            parameter_span.start,
-                            bound.span.end,
-                        ),
-                        bound,
-                    });
+                    loop {
+                        let bound = self.type_annotation()?;
+                        constraints.push(GenericConstraint::Parameter {
+                            parameter: parameter.clone(),
+                            span: Span::new(
+                                parameter_span.source,
+                                parameter_span.start,
+                                bound.span.end,
+                            ),
+                            bound,
+                        });
+                        if self.take(&TokenKind::Plus).is_none() {
+                            break;
+                        }
+                    }
                 }
                 if self.take(&TokenKind::Comma).is_none() {
                     break;

@@ -408,6 +408,30 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_intersection_bounds_and_map_loop_bindings() {
+        let source = SourceFile::virtual_source(
+            "map-generic.sev",
+            "def collect[K: Hash + Equal, V: Number](values: map[K, V]):\n    for key, value in values:\n        pass\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert_eq!(function.constraints.len(), 3);
+        let body = function.body.as_ref().unwrap();
+        let severian_ast::Statement::For {
+            binding,
+            second_binding,
+            ..
+        } = &body[0]
+        else {
+            panic!("expected for statement")
+        };
+        assert_eq!(binding, "key");
+        assert_eq!(second_binding.as_deref(), Some("value"));
+    }
+
+    #[test]
     fn parses_decorated_boundary_declarations_as_normal_declarations() {
         let source = SourceFile::virtual_source(
             "ffi.sev",

@@ -442,6 +442,11 @@ fn resolve_package_type(
             return Ok(list.ty);
         }
     }
+    if let Some(("map", [key, value])) = annotation.named_parts() {
+        let key = resolve_package_type(types, key, module, classes, lists)?;
+        let value = resolve_package_type(types, value, module, classes, lists)?;
+        return Ok(crate::map_type_id(key, value));
+    }
     if let Some(name) = annotation.simple_name() {
         if let Some(class) = classes
             .iter()

@@ -63,6 +63,7 @@ pub enum Statement {
     },
     For {
         binding: String,
+        second_binding: Option<String>,
         iterable: Expression,
         body: Vec<Statement>,
         span: Span,

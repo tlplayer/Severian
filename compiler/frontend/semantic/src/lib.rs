@@ -108,6 +108,7 @@ pub(crate) fn analyze_with_package_functions(
         mutable_variables: BTreeSet::new(),
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
+        active_type_aliases: BTreeMap::new(),
         functions: BTreeMap::new(),
         source_functions: ast
             .items
@@ -149,6 +150,8 @@ pub(crate) fn analyze_with_package_functions(
         class_instances_by_type: BTreeMap::new(),
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
+        map_types: BTreeMap::new(),
+        map_elements: BTreeMap::new(),
         channel_types: BTreeMap::new(),
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
@@ -415,6 +418,15 @@ pub(crate) fn analyze_with_package_functions(
         };
         analyzer.names = globals.clone();
         analyzer.declarations.clear();
+        analyzer.active_type_aliases.clear();
+        for (index, name) in ast_function.type_parameters.iter().enumerate() {
+            if let Some(ty) = function
+                .substitution
+                .get(severian_universal::GenericParamId(index as u32))
+            {
+                analyzer.active_type_aliases.insert(name.clone(), ty);
+            }
+        }
         analyzer.mocks.clear();
         analyzer.active_operator_namespaces = operator_namespaces(&ast_function.decorators);
         for parameter in &function.parameters {
@@ -581,6 +593,7 @@ struct Analyzer<'a> {
     /// Names declared in the current lexical scope. `names` also contains
     /// readable parent bindings, which may be shadowed by this set.
     declarations: BTreeSet<String>,
+    active_type_aliases: BTreeMap<String, TypeId>,
     next_hir: u32,
     next_binding: u32,
     loop_depth: usize,
@@ -604,6 +617,8 @@ struct Analyzer<'a> {
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
+    map_types: BTreeMap<(TypeId, TypeId), TypeId>,
+    map_elements: BTreeMap<TypeId, (TypeId, TypeId)>,
     channel_types: BTreeMap<TypeId, TypeId>,
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
@@ -897,6 +912,11 @@ impl Analyzer<'_> {
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(self.instantiate_tuple_type(&elements));
         }
+        if let Some(("map", [key, value])) = annotation.named_parts() {
+            let key = resolve_type_annotation(self.types, key)?;
+            let value = resolve_type_annotation(self.types, value)?;
+            return Ok(self.instantiate_map_type(key, value));
+        }
         if let Some(name) = annotation.simple_name() {
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
                 return Ok(instance.ty);
@@ -1051,11 +1071,19 @@ impl Analyzer<'_> {
             }
             AstStatement::For {
                 binding,
+                second_binding,
                 iterable,
                 body,
                 span,
             } => {
                 if let Some(values) = static_range_values(iterable) {
+                    if second_binding.is_some() {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "range iteration provides one loop value",
+                            Some(*span),
+                        ));
+                    }
                     let mut sequence = Block::default();
                     for value in values {
                         let mut environment = BTreeMap::from([(binding.clone(), value)]);
@@ -1088,15 +1116,36 @@ impl Analyzer<'_> {
                 }
 
                 let iterable_value = self.expression(iterable, None)?;
-                let Some(element_type) = self.list_elements.get(&iterable_value.type_id).copied()
-                else {
+                let item_bindings = if let Some(element_type) =
+                    self.list_elements.get(&iterable_value.type_id).copied()
+                {
+                    if second_binding.is_some() {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "list iteration provides one loop value",
+                            Some(*span),
+                        ));
+                    }
+                    vec![(binding.clone(), element_type, 0)]
+                } else if let Some((key, value)) =
+                    self.map_elements.get(&iterable_value.type_id).copied()
+                {
+                    let Some(value_binding) = second_binding else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "map iteration requires `for key, value in map`",
+                            Some(*span),
+                        ));
+                    };
+                    vec![(binding.clone(), key, 0), (value_binding.clone(), value, 1)]
+                } else {
                     return Err(Diagnostic::new(
                         "E000211",
-                        "for iteration is currently implemented for lists and literal ranges",
+                        "for iteration is implemented for lists, maps, and literal ranges",
                         Some(*span),
                     ));
                 };
-                let list_type = iterable_value.type_id;
+                let iterable_type = iterable_value.type_id;
                 let usize_type = self
                     .types
                     .resolve_name("usize")
@@ -1110,7 +1159,7 @@ impl Analyzer<'_> {
                 bindings.push(Binding {
                     id: iterable_id,
                     variable: severian_hir::VariableId(iterable_id.0),
-                    type_id: list_type,
+                    type_id: iterable_type,
                     value: iterable_value,
                     mutable: false,
                     preserve_error: false,
@@ -1118,7 +1167,7 @@ impl Analyzer<'_> {
                 });
                 let iterable_reference = Expression {
                     id: self.next_id(),
-                    type_id: list_type,
+                    type_id: iterable_type,
                     kind: ExpressionKind::Binding(iterable_id),
                     span: iterable.span,
                 };
@@ -1141,7 +1190,11 @@ impl Analyzer<'_> {
                     span: iterable.span,
                 };
 
-                let storage = self.list_storage_expression(iterable_reference.clone(), *span);
+                let storage = self.collection_storage_expression(
+                    iterable_reference.clone(),
+                    0,
+                    *span,
+                );
                 let storage_type = storage.type_id;
                 let length = self.runtime_call(
                     "__sev_list_len",
@@ -1161,56 +1214,65 @@ impl Analyzer<'_> {
                     span: *span,
                 };
 
-                let suffix = self.list_runtime_suffix(element_type, *span)?;
-                let body_iterable_reference = Expression {
-                    id: self.next_id(),
-                    type_id: list_type,
-                    kind: ExpressionKind::Binding(iterable_id),
-                    span: iterable.span,
-                };
-                let body_index_reference = Expression {
-                    id: self.next_id(),
-                    type_id: usize_type,
-                    kind: ExpressionKind::Binding(index_id),
-                    span: iterable.span,
-                };
-                let storage = self.list_storage_expression(body_iterable_reference, *span);
-                let item = self.runtime_call(
-                    &format!("__sev_list_get_{suffix}"),
-                    &[storage_type, usize_type],
-                    element_type,
-                    vec![storage, body_index_reference],
-                    *span,
-                );
-                let loop_binding_id = self.new_binding_id();
-                let loop_variable = severian_hir::VariableId(loop_binding_id.0);
-                self.mutable_variables.insert(loop_variable);
-                bindings.push(Binding {
-                    id: loop_binding_id,
-                    variable: loop_variable,
-                    type_id: element_type,
-                    value: item,
-                    mutable: true,
-                    preserve_error: false,
-                    span: *span,
-                });
-
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
-                self.names.insert(
-                    binding.clone(),
-                    (loop_binding_id, loop_variable, element_type),
-                );
-                self.declarations.insert(binding.clone());
+                let mut loop_binding_ids = Vec::with_capacity(item_bindings.len());
+                for (name, element_type, storage_index) in item_bindings {
+                    let body_iterable_reference = Expression {
+                        id: self.next_id(),
+                        type_id: iterable_type,
+                        kind: ExpressionKind::Binding(iterable_id),
+                        span: iterable.span,
+                    };
+                    let body_index_reference = Expression {
+                        id: self.next_id(),
+                        type_id: usize_type,
+                        kind: ExpressionKind::Binding(index_id),
+                        span: iterable.span,
+                    };
+                    let storage = self.collection_storage_expression(
+                        body_iterable_reference,
+                        storage_index,
+                        *span,
+                    );
+                    let suffix = self.list_runtime_suffix(element_type, *span)?;
+                    let item = self.runtime_call(
+                        &format!("__sev_list_get_{suffix}"),
+                        &[storage_type, usize_type],
+                        element_type,
+                        vec![storage, body_index_reference],
+                        *span,
+                    );
+                    let loop_binding_id = self.new_binding_id();
+                    let loop_variable = severian_hir::VariableId(loop_binding_id.0);
+                    self.mutable_variables.insert(loop_variable);
+                    bindings.push(Binding {
+                        id: loop_binding_id,
+                        variable: loop_variable,
+                        type_id: element_type,
+                        value: item,
+                        mutable: true,
+                        preserve_error: false,
+                        span: *span,
+                    });
+                    self.names.insert(
+                        name.clone(),
+                        (loop_binding_id, loop_variable, element_type),
+                    );
+                    self.declarations.insert(name);
+                    loop_binding_ids.push(loop_binding_id);
+                }
                 self.loop_depth += 1;
                 let lowered = self.block(body, bindings, result_type);
                 self.loop_depth -= 1;
                 let mut loop_body = lowered?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
-                loop_body
-                    .statements
-                    .insert(0, Statement::Binding(loop_binding_id));
+                for loop_binding_id in loop_binding_ids.into_iter().rev() {
+                    loop_body
+                        .statements
+                        .insert(0, Statement::Binding(loop_binding_id));
+                }
 
                 let next_index_id = self.new_binding_id();
                 let one = self.integer_expression("1", usize_type, *span);
@@ -2186,11 +2248,81 @@ impl Analyzer<'_> {
                 "`mock` declarations are only valid as test statements",
                 Some(ast.span),
             )),
-            AstExpressionKind::Map(_) => Err(Diagnostic::new(
-                "E000204",
-                "map literals are currently accepted only by an object's `set` operation",
-                Some(ast.span),
-            )),
+            AstExpressionKind::Map(entries) => {
+                if entries.is_empty()
+                    && expected.is_none_or(|ty| !self.map_elements.contains_key(&ty))
+                {
+                    return Err(Diagnostic::new(
+                        "E000204",
+                        "an empty map literal requires an expected `map[K, V]` type",
+                        Some(ast.span),
+                    ));
+                }
+                let (map_type, key_type, value_type) = if let Some(map_type) =
+                    expected.filter(|ty| self.map_elements.contains_key(ty))
+                {
+                    let (key, value) = self.map_elements[&map_type];
+                    (map_type, key, value)
+                } else {
+                    let first = &entries[0];
+                    let key = self.expression(&first.key, None)?.type_id;
+                    let value = self.expression(&first.value, None)?.type_id;
+                    (self.instantiate_map_type(key, value), key, value)
+                };
+                let storage_type = self
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines pointer-backed string");
+                let mut keys = self.runtime_call(
+                    "__sev_list_create",
+                    &[],
+                    storage_type,
+                    Vec::new(),
+                    ast.span,
+                );
+                let mut values = self.runtime_call(
+                    "__sev_list_create",
+                    &[],
+                    storage_type,
+                    Vec::new(),
+                    ast.span,
+                );
+                let key_symbol = format!(
+                    "__sev_list_append_{}",
+                    self.list_runtime_suffix(key_type, ast.span)?
+                );
+                let value_symbol = format!(
+                    "__sev_list_append_{}",
+                    self.list_runtime_suffix(value_type, ast.span)?
+                );
+                for entry in entries {
+                    let key = self.expression(&entry.key, Some(key_type))?;
+                    let value = self.expression(&entry.value, Some(value_type))?;
+                    keys = self.runtime_call(
+                        &key_symbol,
+                        &[storage_type, key_type],
+                        storage_type,
+                        vec![keys, key],
+                        entry.span,
+                    );
+                    values = self.runtime_call(
+                        &value_symbol,
+                        &[storage_type, value_type],
+                        storage_type,
+                        vec![values, value],
+                        entry.span,
+                    );
+                }
+                Ok(Expression {
+                    id: self.next_id(),
+                    type_id: map_type,
+                    kind: ExpressionKind::Aggregate {
+                        class: map_type,
+                        fields: vec![keys, values],
+                    },
+                    span: ast.span,
+                })
+            }
             AstExpressionKind::Async {
                 expression,
                 owner,
@@ -2772,6 +2904,68 @@ impl Analyzer<'_> {
                             if self.numeric_primitive(target) {
                                 let operand = self.expression(&arguments[0].value, None)?;
                                 return self.coerce(operand, target, true);
+                            }
+                        }
+                    }
+                }
+                if let AstExpressionKind::Member { object, name } = &callee.kind {
+                    if name == "zero" && arguments.is_empty() {
+                        if let AstExpressionKind::Name(type_name) = &object.kind {
+                            if let Some(type_id) = self
+                                .types
+                                .resolve_name(type_name)
+                                .or_else(|| self.active_type_aliases.get(type_name).copied())
+                            {
+                                if self.numeric_primitive(type_id) {
+                                    return self.default_expression(type_id, ast.span);
+                                }
+                            }
+                        }
+                    }
+                    if arguments.len() == 1 && arguments[0].name.is_none() {
+                        if let Some(operator) = primitive_method_operator(name) {
+                            if let Ok(left) = self.expression(object, None) {
+                                if self.types.supports_binary(operator, left.type_id) {
+                                    let right = self.expression(
+                                        &arguments[0].value,
+                                        Some(left.type_id),
+                                    )?;
+                                    let result = if matches!(
+                                        operator,
+                                        BinaryOperator::Equal
+                                            | BinaryOperator::NotEqual
+                                            | BinaryOperator::Less
+                                            | BinaryOperator::LessEqual
+                                            | BinaryOperator::Greater
+                                            | BinaryOperator::GreaterEqual
+                                            | BinaryOperator::Contains
+                                    ) {
+                                        self.types
+                                            .resolve_name("bool")
+                                            .expect("bootstrap defines bool")
+                                    } else {
+                                        left.type_id
+                                    };
+                                    if expected.is_some_and(|expected| {
+                                        !self.types.assignable(result, expected)
+                                    }) {
+                                        return Err(semantic_error(
+                                            "method result does not satisfy the expected type"
+                                                .into(),
+                                            ast.span,
+                                        ));
+                                    }
+                                    return Ok(Expression {
+                                        id: self.next_id(),
+                                        type_id: result,
+                                        kind: ExpressionKind::Binary {
+                                            operator,
+                                            left: Box::new(left),
+                                            right: Box::new(right),
+                                        },
+                                        span: ast.span,
+                                    });
+                                }
                             }
                         }
                     }
@@ -3854,6 +4048,11 @@ impl Analyzer<'_> {
             let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
             return Ok(self.instantiate_list_type(element));
         }
+        if name == "map" && arguments.len() == 2 {
+            let key = self.resolve_instantiated_type(&arguments[0], substitution)?;
+            let value = self.resolve_instantiated_type(&arguments[1], substitution)?;
+            return Ok(self.instantiate_map_type(key, value));
+        }
         Err(Diagnostic::new(
             "E000204",
             format!("generic field type `{name}` is not yet supported"),
@@ -3885,6 +4084,40 @@ impl Analyzer<'_> {
                 name: "storage".into(),
                 ty: storage,
             }],
+        });
+        ty
+    }
+
+    fn instantiate_map_type(&mut self, key: TypeId, value: TypeId) -> TypeId {
+        if let Some(ty) = self.map_types.get(&(key, value)) {
+            return *ty;
+        }
+        let ty = map_type_id(key, value);
+        let storage = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let type_name = |id: TypeId| {
+            self.types
+                .definition(id)
+                .map(|definition| definition.name.clone())
+                .unwrap_or_else(|| format!("type#{}", id.0))
+        };
+        self.map_types.insert((key, value), ty);
+        self.map_elements.insert(ty, (key, value));
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: format!("map[{}, {}]", type_name(key), type_name(value)),
+            fields: vec![
+                HirClassFieldDeclaration {
+                    name: "keys".into(),
+                    ty: storage,
+                },
+                HirClassFieldDeclaration {
+                    name: "values".into(),
+                    ty: storage,
+                },
+            ],
         });
         ty
     }
@@ -4308,6 +4541,15 @@ impl Analyzer<'_> {
         list: Expression,
         span: severian_source::Span,
     ) -> Expression {
+        self.collection_storage_expression(list, 0, span)
+    }
+
+    fn collection_storage_expression(
+        &mut self,
+        collection: Expression,
+        index: u32,
+        span: severian_source::Span,
+    ) -> Expression {
         let storage_type = self
             .types
             .resolve_name("string")
@@ -4316,8 +4558,8 @@ impl Analyzer<'_> {
             id: self.next_id(),
             type_id: storage_type,
             kind: ExpressionKind::Field {
-                object: Box::new(list),
-                index: 0,
+                object: Box::new(collection),
+                index,
             },
             span,
         }
@@ -6025,6 +6267,16 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
     TypeId(0xc000_0000 | (hash & 0x3fff_ffff))
 }
 
+pub(crate) fn map_type_id(key: TypeId, value: TypeId) -> TypeId {
+    // Structural maps need the same identity during package signature
+    // collection and body analysis. Keep their stable IDs in a range separate
+    // from structural tuples.
+    let hash = [key, value].iter().fold(0x811c_9dc5u32, |hash, element| {
+        (hash ^ element.0).wrapping_mul(0x0100_0193)
+    });
+    TypeId(0x8000_0000 | (hash & 0x3fff_ffff))
+}
+
 fn contract_failure_expression(
     failure: Option<&AstExpression>,
 ) -> Option<&AstExpression> {
@@ -7307,6 +7559,25 @@ fn universal_binary(operator: AstBinaryOperator) -> BinaryOperator {
 
 fn semantic_error(message: String, span: severian_source::Span) -> Diagnostic {
     Diagnostic::new("E000202", message, Some(span))
+}
+
+fn primitive_method_operator(name: &str) -> Option<BinaryOperator> {
+    Some(match name {
+        "add" => BinaryOperator::Add,
+        "subtract" => BinaryOperator::Subtract,
+        "multiply" => BinaryOperator::Multiply,
+        "divide" => BinaryOperator::Divide,
+        "remainder" => BinaryOperator::Remainder,
+        "power" => BinaryOperator::Power,
+        "equal" => BinaryOperator::Equal,
+        "not_equal" => BinaryOperator::NotEqual,
+        "less_than" => BinaryOperator::Less,
+        "less_equal" => BinaryOperator::LessEqual,
+        "greater_than" => BinaryOperator::Greater,
+        "greater_equal" => BinaryOperator::GreaterEqual,
+        "contains" => BinaryOperator::Contains,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
