@@ -534,8 +534,27 @@ uint8_t __sev_pointer_index_u8(void *pointer, int64_t index) {
     return (uint8_t)((uintptr_t *)pointer)[index];
 }
 
+int64_t __sev_pointer_index_i64(void *pointer, int64_t index) {
+    return (int64_t)((uintptr_t *)pointer)[index];
+}
+
 void __sev_pointer_set_u8(void *pointer, int64_t index, uint8_t value) {
     ((uintptr_t *)pointer)[index] = (uintptr_t)value;
+}
+
+void __sev_pointer_set_i64(void *pointer, int64_t index, int64_t value) {
+    ((uintptr_t *)pointer)[index] = (uintptr_t)value;
+}
+
+void *__sev_allocate(int64_t count) {
+    if (count < 0 || (uint64_t)count > SIZE_MAX / sizeof(uintptr_t)) abort();
+    void *allocation = calloc((size_t)count, sizeof(uintptr_t));
+    if (allocation == NULL && count != 0) abort();
+    return allocation;
+}
+
+void __sev_free(void *pointer) {
+    free(pointer);
 }
 
 const char *__sev_list_index_ptr(void *storage, int64_t index) {

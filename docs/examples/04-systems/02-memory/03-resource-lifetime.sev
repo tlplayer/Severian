@@ -1,8 +1,8 @@
 class Resource:
     name: string
 
-    def Resource(name: string):
-        this.name := name
+    def Resource(name_param: string):
+        name := name_param
         print("open:", name)
 
     def drop():

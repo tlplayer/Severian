@@ -2692,10 +2692,23 @@ impl Analyzer<'_> {
                         });
                     }
                 }
-                match self.class_method_update(expression)? {
-                    Some(update) => Ok(update),
-                    None => Ok(Statement::Expression(self.expression(expression, None)?)),
+                let dropped = explicit_drop_receiver(expression).map(str::to_owned);
+                let lowered = match self.class_method_update(expression)? {
+                    Some(update) => update,
+                    None if dropped.is_some() => {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "`drop` requires a class value with a unit `drop()` method",
+                            Some(expression.span),
+                        ));
+                    }
+                    None => Statement::Expression(self.expression(expression, None)?),
+                };
+                if let Some(receiver) = dropped {
+                    self.names.remove(&receiver);
+                    self.declarations.remove(&receiver);
                 }
+                Ok(lowered)
             }
             AstStatement::Return { value, span } => {
                 let unit = self
@@ -5139,6 +5152,149 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let AstExpressionKind::TypeApplication {
+                    callee: application,
+                    arguments: type_arguments,
+                } = &callee.kind
+                {
+                    if let AstExpressionKind::Name(name) = &application.kind {
+                        if name == "allocate" {
+                            if self.unsafe_depth == 0 {
+                                return Err(Diagnostic::new(
+                                    "E000219",
+                                    "raw allocation requires an `unsafe` scope",
+                                    Some(ast.span),
+                                ));
+                            }
+                            let ([element], [count]) =
+                                (type_arguments.as_slice(), arguments.as_slice())
+                            else {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    "`allocate[T]` expects one type and one element count",
+                                    Some(ast.span),
+                                ));
+                            };
+                            if count.name.is_some() {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    "the allocation count must be positional",
+                                    Some(count.value.span),
+                                ));
+                            }
+                            let element = self.resolve_source_type(element)?;
+                            let pointer = self.instantiate_pointer_type(element);
+                            let usize_type = self
+                                .types
+                                .resolve_name("usize")
+                                .expect("bootstrap defines usize");
+                            let count = self.expression(&count.value, Some(usize_type))?;
+                            return Ok(self.runtime_call(
+                                "__sev_allocate",
+                                &[usize_type],
+                                pointer,
+                                vec![count],
+                                ast.span,
+                            ));
+                        }
+                        if matches!(name.as_str(), "bytes" | "alignment" | "offset") {
+                            let [queried] = type_arguments.as_slice() else {
+                                return Err(Diagnostic::new(
+                                    "E000206",
+                                    format!("`{name}[T]` expects exactly one type"),
+                                    Some(callee.span),
+                                ));
+                            };
+                            let queried = self.resolve_source_type(queried)?;
+                            let (size, alignment) = self.type_layout(queried, ast.span)?;
+                            let value = match name.as_str() {
+                                "bytes" | "alignment" if arguments.is_empty() => {
+                                    if name == "bytes" { size } else { alignment }
+                                }
+                                "offset" => {
+                                    let [field] = arguments.as_slice() else {
+                                        return Err(Diagnostic::new(
+                                            "E000206",
+                                            "`offset[T]` expects one field name",
+                                            Some(ast.span),
+                                        ));
+                                    };
+                                    let AstExpressionKind::Literal(AstLiteral::String(field)) =
+                                        &field.value.kind
+                                    else {
+                                        return Err(Diagnostic::new(
+                                            "E000206",
+                                            "`offset[T]` requires a string literal field name",
+                                            Some(field.value.span),
+                                        ));
+                                    };
+                                    self.type_field_offset(queried, field, ast.span)?
+                                }
+                                _ => {
+                                    return Err(Diagnostic::new(
+                                        "E000206",
+                                        format!("`{name}[T]()` does not accept value arguments"),
+                                        Some(ast.span),
+                                    ));
+                                }
+                            };
+                            let data_size = self
+                                .types
+                                .resolve_name("data_size")
+                                .expect("bootstrap defines data_size");
+                            return Ok(Expression {
+                                id: self.next_id(),
+                                type_id: data_size,
+                                kind: ExpressionKind::Literal(LiteralValue::Float(format!(
+                                    "{value}.0"
+                                ))),
+                                span: ast.span,
+                            });
+                        }
+                    }
+                }
+                if callable_path(callee).as_deref() == Some("free") {
+                    if self.unsafe_depth == 0 {
+                        return Err(Diagnostic::new(
+                            "E000219",
+                            "freeing raw memory requires an `unsafe` scope",
+                            Some(ast.span),
+                        ));
+                    }
+                    let [argument] = arguments.as_slice() else {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "`free` expects exactly one raw pointer",
+                            Some(ast.span),
+                        ));
+                    };
+                    if argument.name.is_some() {
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            "the pointer passed to `free` must be positional",
+                            Some(argument.value.span),
+                        ));
+                    }
+                    let pointer = self.expression(&argument.value, None)?;
+                    if !self.pointer_elements.contains_key(&pointer.type_id) {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            "`free` expects a raw pointer",
+                            Some(argument.value.span),
+                        ));
+                    }
+                    let unit = self
+                        .types
+                        .resolve_name("unit")
+                        .expect("bootstrap defines unit");
+                    return Ok(self.runtime_call(
+                        "__sev_free",
+                        &[pointer.type_id],
+                        unit,
+                        vec![pointer],
+                        ast.span,
+                    ));
+                }
                 if matches!(callable_path(callee).as_deref(), Some("any" | "all"))
                     && arguments.len() == 1
                 {
@@ -5944,6 +6100,10 @@ impl Analyzer<'_> {
                         || self.list_elements.contains_key(&value.type_id)
                         || self.set_type == Some(value.type_id)
                         || self.fallible_types.contains_key(&value.type_id)
+                        || self.types.primitive(value.type_id).is_some_and(|primitive| {
+                            primitive.category
+                                == severian_universal::PrimitiveCategory::Measured
+                        })
                     {
                         let rendered = self.display_string(value, ast.span)?;
                         let string = rendered.type_id;
@@ -8281,6 +8441,17 @@ impl Analyzer<'_> {
                 span,
             ));
         }
+        if self.types.primitive(value.type_id).is_some_and(|primitive| {
+            primitive.category == severian_universal::PrimitiveCategory::Measured
+        }) {
+            return Ok(self.runtime_call(
+                "__sev_string_from_float",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            ));
+        }
         match name {
             Some("string") => Ok(value),
             Some("int" | "i64") => Ok(self.runtime_call(
@@ -8408,6 +8579,111 @@ impl Analyzer<'_> {
                 Some(span),
             )),
         }
+    }
+
+    fn type_layout(
+        &self,
+        ty: TypeId,
+        span: severian_source::Span,
+    ) -> Result<(u64, u64), Diagnostic> {
+        self.type_layout_inner(ty, span, &mut BTreeSet::new())
+    }
+
+    fn type_layout_inner(
+        &self,
+        ty: TypeId,
+        span: severian_source::Span,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> Result<(u64, u64), Diagnostic> {
+        use severian_universal::{FloatFormat, IntegerWidth, PrimitiveRepresentation};
+
+        if self.pointer_elements.contains_key(&ty) {
+            return Ok((8, 8));
+        }
+        if let Some(primitive) = self.types.primitive(ty) {
+            let bytes = match primitive.representation {
+                PrimitiveRepresentation::Integer {
+                    bits: IntegerWidth::Fixed(bits),
+                    ..
+                } => u64::from(bits).div_ceil(8).max(1),
+                PrimitiveRepresentation::Integer {
+                    bits: IntegerWidth::Machine,
+                    ..
+                }
+                | PrimitiveRepresentation::PointerInteger { .. }
+                | PrimitiveRepresentation::Float {
+                    format: FloatFormat::Machine,
+                }
+                | PrimitiveRepresentation::String
+                | PrimitiveRepresentation::Bytes
+                | PrimitiveRepresentation::Arguments => 8,
+                PrimitiveRepresentation::Float {
+                    format: FloatFormat::Ieee(bits),
+                } => u64::from(bits).div_ceil(8).max(1),
+                PrimitiveRepresentation::Float {
+                    format: FloatFormat::BrainFloat16,
+                } => 2,
+                PrimitiveRepresentation::Boolean => 1,
+                PrimitiveRepresentation::Character => 4,
+                PrimitiveRepresentation::None | PrimitiveRepresentation::Unit => 0,
+            };
+            return Ok((bytes, bytes.max(1)));
+        }
+        let Some(class) = self.class_instances_by_type.get(&ty) else {
+            return Err(Diagnostic::new(
+                "E000204",
+                "layout is unavailable for this type",
+                Some(span),
+            ));
+        };
+        if !visiting.insert(ty) {
+            return Err(Diagnostic::new(
+                "E000204",
+                format!("class `{}` has a recursive inline layout", class.name),
+                Some(span),
+            ));
+        }
+        let mut size = 0u64;
+        let mut aggregate_alignment = 1u64;
+        for field in &class.fields {
+            let (field_size, field_alignment) =
+                self.type_layout_inner(field.ty, span, visiting)?;
+            aggregate_alignment = aggregate_alignment.max(field_alignment);
+            size = align_layout(size, field_alignment);
+            size = size.saturating_add(field_size);
+        }
+        visiting.remove(&ty);
+        Ok((align_layout(size, aggregate_alignment), aggregate_alignment))
+    }
+
+    fn type_field_offset(
+        &self,
+        ty: TypeId,
+        requested: &str,
+        span: severian_source::Span,
+    ) -> Result<u64, Diagnostic> {
+        let class = self.class_instances_by_type.get(&ty).ok_or_else(|| {
+            Diagnostic::new(
+                "E000204",
+                "field offsets are available only for class types",
+                Some(span),
+            )
+        })?;
+        let mut offset = 0u64;
+        let mut visiting = BTreeSet::new();
+        for field in &class.fields {
+            let (size, alignment) = self.type_layout_inner(field.ty, span, &mut visiting)?;
+            offset = align_layout(offset, alignment);
+            if field.name == requested {
+                return Ok(offset);
+            }
+            offset = offset.saturating_add(size);
+        }
+        Err(Diagnostic::new(
+            "E000211",
+            format!("class `{}` has no field `{requested}`", class.name),
+            Some(span),
+        ))
     }
 
     fn select_runtime_suffix(
@@ -12794,6 +13070,34 @@ fn universal_literal(literal: &AstLiteral) -> LiteralValue {
     }
 }
 
+fn explicit_drop_receiver(expression: &AstExpression) -> Option<&str> {
+    let AstExpressionKind::Call { callee, arguments } = &expression.kind else {
+        return None;
+    };
+    if !arguments.is_empty() {
+        return None;
+    }
+    let AstExpressionKind::Member { object, name } = &callee.kind else {
+        return None;
+    };
+    if name != "drop" {
+        return None;
+    }
+    let AstExpressionKind::Name(receiver) = &object.kind else {
+        return None;
+    };
+    Some(receiver)
+}
+
+fn align_layout(value: u64, alignment: u64) -> u64 {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        value
+    } else {
+        value.saturating_add(alignment - remainder)
+    }
+}
+
 fn measured_literal(
     magnitude: &str,
     suffix: &str,
@@ -13377,6 +13681,34 @@ mod tests {
         let error = analyze(&ast, &universal.types).unwrap_err();
         assert_eq!(error.code, "E000220");
         assert!(error.message.contains("shadows a field"));
+    }
+
+    #[test]
+    fn explicit_drop_consumes_a_resource() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "drop.sev",
+            "class Resource:\n    name: string\n    def Resource(name_param: string):\n        name := name_param\n    def drop():\n        \"closed\"\ndef invalid():\n    resource := Resource(\"temporary\")\n    drop resource\n    resource.name\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000201");
+        assert!(error.message.contains("resource"));
+    }
+
+    #[test]
+    fn raw_allocation_requires_an_unsafe_scope() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "allocation.sev",
+            "def invalid():\n    memory := allocate[int](4)\n",
+        );
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000219");
+        assert!(error.message.contains("raw allocation"));
     }
 
     #[test]

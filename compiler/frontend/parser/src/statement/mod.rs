@@ -2275,7 +2275,6 @@ impl Parser<'_> {
                 matches!(
                     token.kind,
                     TokenKind::Equal
-                        | TokenKind::ColonEqual
                         | TokenKind::PlusEqual
                         | TokenKind::MinusEqual
                         | TokenKind::StarEqual
@@ -2294,7 +2293,7 @@ impl Parser<'_> {
                 span: object_span,
             };
             let operator = match assignment.kind {
-                TokenKind::Equal | TokenKind::ColonEqual => None,
+                TokenKind::Equal => None,
                 TokenKind::PlusEqual => Some(BinaryOperator::Add),
                 TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
                 TokenKind::StarEqual => Some(BinaryOperator::Multiply),
