@@ -2560,19 +2560,39 @@ impl Analyzer<'_> {
                             .resolve_name("bool")
                             .expect("bootstrap defines bool");
                         if let Some(expected_error) = &argument.expected_error {
-                            let AstExpressionKind::Name(expected_name) = &expected_error.kind else {
-                                return Err(Diagnostic::new(
-                                    "E000217",
-                                    "`throws` expects an error type after `->`",
-                                    Some(expected_error.span),
-                                ));
+                            let (expected_name, is_error_value) = match &expected_error.kind {
+                                AstExpressionKind::Name(name) => (name.clone(), false),
+                                AstExpressionKind::Call { callee, .. } => {
+                                    let Some(name) = callable_path(callee) else {
+                                        return Err(Diagnostic::new(
+                                            "E000217",
+                                            "`throws` expects an error type or error value after `->`",
+                                            Some(expected_error.span),
+                                        ));
+                                    };
+                                    (name, true)
+                                }
+                                _ => {
+                                    return Err(Diagnostic::new(
+                                        "E000217",
+                                        "`throws` expects an error type or error value after `->`",
+                                        Some(expected_error.span),
+                                    ));
+                                }
                             };
                             let expected_type = self
                                 .class_instances
                                 .get(&(expected_name.clone(), Vec::new()))
                                 .map(|instance| instance.ty)
-                                .or_else(|| self.types.resolve_name(expected_name))
+                                .or_else(|| self.types.resolve_name(&expected_name))
                                 .filter(|ty| self.is_error_type(*ty));
+                            if is_error_value && expected_type.is_none() {
+                                return Err(Diagnostic::new(
+                                    "E000217",
+                                    "`throws` expects an error type or error value after `->`",
+                                    Some(expected_error.span),
+                                ));
+                            }
                             if let (Some(expected_type), Some(actual_type)) =
                                 (expected_type, self.call_thrown_error(&argument.value))
                             {
@@ -13585,7 +13605,7 @@ mod tests {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source(
             "builders.sev",
-            "def foo(value: int) -> int:\n    return value\ndef calculate(value: int) -> int:\n    return foo(value) * 2\nclass User:\n    age: int {\n        age < 0 -> Error(\"negative\"),\n        age > 130 -> Error(\"old\"),\n    }\ntest:\n    mock(\n        foo(0) -> 10\n        else throw Error(\"unexpected\")\n    )\n    user := User().set(age, 36)\n    expect(calculate(0) == 20)\n    throws(foo(1) -> Error)\n",
+            "def foo(value: int) -> int:\n    return value\ndef calculate(value: int) -> int:\n    return foo(value) * 2\nclass User:\n    age: int {\n        age < 0 -> Error(\"negative\"),\n        age > 130 -> Error(\"old\"),\n    }\ntest:\n    mock(\n        foo(0) -> 10\n        else throw Error(\"unexpected\")\n    )\n    user := User().set(age, 36)\n    expect(calculate(0) == 20)\n    throws(foo(1) -> Error)\n    throws(foo(2) -> Error(\"unexpected\"))\n",
         );
         let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
         let program = analyze_with_context(
