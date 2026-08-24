@@ -200,21 +200,20 @@ pub(crate) fn analyze_with_package_functions(
         severian_ast::Item::Trait(declaration) => Some(declaration),
         _ => None,
     }) {
-        let methods = declaration
-            .methods
-            .iter()
-            .map(|method| {
-                Ok(HirTraitMethodDeclaration {
-                    name: method.name.clone(),
-                    parameters: method
-                        .parameters
-                        .iter()
-                        .map(|parameter| resolve_trait_type(types, &parameter.annotation))
-                        .collect::<Result<Vec<_>, Diagnostic>>()?,
-                    result: resolve_trait_type(types, &method.result)?,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let mut methods = Vec::with_capacity(declaration.methods.len());
+        for method in &declaration.methods {
+            let parameters = method
+                .parameters
+                .iter()
+                .map(|parameter| analyzer.resolve_trait_type(&parameter.annotation))
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            let result = analyzer.resolve_trait_type(&method.result)?;
+            methods.push(HirTraitMethodDeclaration {
+                name: method.name.clone(),
+                parameters,
+                result,
+            });
+        }
         module.traits.push(HirTraitDeclaration {
             definition: synthetic_trait_definition(context.module_name, &declaration.name),
             name: declaration.name.clone(),
@@ -862,6 +861,18 @@ impl Analyzer<'_> {
             }
         }
         resolve_type_annotation(self.types, annotation)
+    }
+
+    fn resolve_trait_type(
+        &mut self,
+        annotation: &TypeAnnotation,
+    ) -> Result<HirTraitType, Diagnostic> {
+        if annotation.simple_name() == Some("Self") {
+            Ok(HirTraitType::SelfType)
+        } else {
+            self.resolve_source_type(annotation)
+                .map(HirTraitType::Concrete)
+        }
     }
 
     fn new_binding_id(&mut self) -> BindingId {
@@ -5735,6 +5746,9 @@ fn collect_trait_namespace_methods(
         _ => None,
     }) {
         for method in &declaration.methods {
+            if method.hook.is_some() {
+                continue;
+            }
             for decorator in &method.decorators {
                 if !decorator.arguments.is_empty() {
                     continue;
@@ -5888,6 +5902,16 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         Some(provided.span),
                     ));
                 }
+                if required.hook.is_some() != provided.hook.is_some() {
+                    return Err(Diagnostic::new(
+                        "E000218",
+                        format!(
+                            "method `{}.{}` does not match hook requirement from trait `{}`",
+                            class.name, provided.name, trait_name
+                        ),
+                        Some(provided.span),
+                    ));
+                }
             }
             for required in &contract.operators {
                 let Some(provided) = class
@@ -5931,6 +5955,18 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
 }
 
 fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnostic> {
+    for function in ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Function(declaration) => Some(declaration),
+        _ => None,
+    }) {
+        validate_hook_context(function)?;
+    }
+    for method in ast.items.iter().flat_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => declaration.methods.iter(),
+        _ => [].iter(),
+    }) {
+        validate_hook_context(method)?;
+    }
     for class in ast.items.iter().filter_map(|item| match item {
         severian_ast::Item::Class(declaration) => Some(declaration),
         _ => None,
@@ -5941,6 +5977,7 @@ fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnos
             .map(|field| field.name.as_str())
             .collect::<BTreeSet<_>>();
         for method in class.constructors.iter().chain(&class.methods) {
+            validate_hook_context(method)?;
             if let Some(parameter) = method
                 .parameters
                 .iter()
@@ -5974,6 +6011,29 @@ fn validate_class_declarations(ast: &severian_ast::Module) -> Result<(), Diagnos
         }
     }
     Ok(())
+}
+
+fn validate_hook_context(
+    function: &severian_ast::FunctionDeclaration,
+) -> Result<(), Diagnostic> {
+    let Some(hook) = &function.hook else {
+        return Ok(());
+    };
+    if function
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name == hook.context)
+    {
+        return Ok(());
+    }
+    Err(Diagnostic::new(
+        "E000218",
+        format!(
+            "hook context `{}` is not a parameter of `{}`",
+            hook.context, function.name
+        ),
+        Some(hook.span),
+    ))
 }
 
 fn same_type_annotation(left: &TypeAnnotation, right: &TypeAnnotation) -> bool {
@@ -6326,17 +6386,6 @@ fn resolve_type_annotation(
     })
 }
 
-fn resolve_trait_type(
-    types: &TypeContext,
-    annotation: &TypeAnnotation,
-) -> Result<HirTraitType, Diagnostic> {
-    if annotation.simple_name() == Some("Self") {
-        Ok(HirTraitType::SelfType)
-    } else {
-        resolve_type_annotation(types, annotation).map(HirTraitType::Concrete)
-    }
-}
-
 fn universal_boundary(type_id: TypeId) -> BoundaryType {
     BoundaryType {
         ty: type_id,
@@ -6447,6 +6496,10 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
     for statement in statements {
         let flow = match statement {
             AstStatement::Return { .. } => ControlFlow::Returns,
+            AstStatement::Expression(AstExpression {
+                kind: AstExpressionKind::Throw { .. },
+                ..
+            }) => ControlFlow::Returns,
             AstStatement::If {
                 then_block,
                 else_block,
@@ -6829,6 +6882,19 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn hook_context_must_name_a_function_parameter() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "invalid-hook.sev",
+            "def trace(value: string) with context:\n    with context:\n        print(value)\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000218");
+        assert!(error.message.contains("is not a parameter"));
     }
 
     #[test]

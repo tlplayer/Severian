@@ -2,10 +2,10 @@ use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
     ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
-    ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module, OperatorDeclaration,
-    OperatorImplementation, OperatorParameter, OperatorSyntax, PropertyConstraint,
-    PropertyDeclaration, Statement, TaskOwner, TestDeclaration, TraitDeclaration, TypeAnnotation,
-    TypeAnnotationKind, TypeDeclaration, UnaryOperator,
+    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module,
+    OperatorDeclaration, OperatorImplementation, OperatorParameter, OperatorSyntax,
+    PropertyConstraint, PropertyDeclaration, Statement, TaskOwner, TestDeclaration,
+    TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
 };
 use severian_diagnostics::Diagnostic;
 use severian_lexer::{scan, Token, TokenKind};
@@ -335,13 +335,32 @@ impl Parser<'_> {
         } else {
             TypeAnnotation::named("unit", vec![], close)
         };
-        let (additional_constraints, contracts) = self.function_contracts(&type_parameters)?;
+        let hook_context = self.function_hook_context()?;
+        let (additional_constraints, contracts) = if hook_context.is_some() {
+            (Vec::new(), Vec::new())
+        } else {
+            self.function_contracts(&type_parameters)?
+        };
         constraints.extend(additional_constraints);
-        let mut end = result.span.end;
+        let mut end = hook_context
+            .as_ref()
+            .map_or(result.span.end, |(_, span)| span.end);
+        let mut hook = hook_context.map(|(context, span)| HookSpecification {
+            context,
+            with_phase: Vec::new(),
+            without_phase: Vec::new(),
+            span,
+        });
         let body = if self.take(&TokenKind::Colon).is_some() {
-            let (statements, block_end) = self.indented_block("function")?;
-            end = block_end;
-            Some(statements)
+            if let Some(specification) = &mut hook {
+                let block_end = self.hook_body(specification)?;
+                end = block_end;
+                Some(Vec::new())
+            } else {
+                let (statements, block_end) = self.indented_block("function")?;
+                end = block_end;
+                Some(statements)
+            }
         } else {
             None
         };
@@ -351,11 +370,105 @@ impl Parser<'_> {
             type_parameters,
             constraints,
             contracts,
+            hook,
             parameters,
             span: Span::new(start.source, start.start, end),
             result,
             body,
         })
+    }
+
+    fn function_hook_context(&mut self) -> Result<Option<(String, Span)>, Diagnostic> {
+        if !self.at_identifier("with") {
+            return Ok(None);
+        }
+        let Some(Token {
+            kind: TokenKind::Identifier(_),
+            ..
+        }) = self.tokens.get(self.cursor + 1)
+        else {
+            return Ok(None);
+        };
+        let start = self.next().span;
+        let (context, context_span) = self.identifier("expected a hook context after `with`")?;
+        Ok(Some((
+            context,
+            Span::new(start.source, start.start, context_span.end),
+        )))
+    }
+
+    fn hook_body(&mut self, hook: &mut HookSpecification) -> Result<u32, Diagnostic> {
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after hook signature",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(&TokenKind::Indent, "expected an indented hook body")?;
+        self.separators();
+        let mut saw_with = false;
+        let mut saw_without = false;
+        while !self.at(&TokenKind::Dedent) && !self.at(&TokenKind::Eof) {
+            let is_with = self.at_identifier("with");
+            let is_without = self.at_identifier("without");
+            if !is_with && !is_without {
+                return Err(self.error("expected `with` or `without` hook phase"));
+            }
+            let phase = self.next().span;
+            let (context, context_span) =
+                self.identifier("expected the hook context after phase name")?;
+            if context != hook.context {
+                return Err(Diagnostic::new(
+                    "E000112",
+                    format!(
+                        "hook phase uses context `{context}`, expected `{}`",
+                        hook.context
+                    ),
+                    Some(context_span),
+                ));
+            }
+            self.expect(&TokenKind::Colon, "expected `:` after hook phase")?;
+            let (body, block_end) = self.indented_block(if is_with {
+                "with hook phase"
+            } else {
+                "without hook phase"
+            })?;
+            if is_with {
+                if saw_with {
+                    return Err(Diagnostic::new(
+                        "E000112",
+                        "a hook may only declare one `with` phase",
+                        Some(phase),
+                    ));
+                }
+                saw_with = true;
+                hook.with_phase = body;
+            } else {
+                if saw_without {
+                    return Err(Diagnostic::new(
+                        "E000112",
+                        "a hook may only declare one `without` phase",
+                        Some(phase),
+                    ));
+                }
+                saw_without = true;
+                hook.without_phase = body;
+            }
+            hook.span = Span::new(hook.span.source, hook.span.start, block_end);
+            self.separators();
+        }
+        let end = self
+            .expect(&TokenKind::Dedent, "expected end of hook body")?
+            .span
+            .end;
+        if !saw_with && !saw_without {
+            return Err(Diagnostic::new(
+                "E000112",
+                "a hook body requires a `with` or `without` phase",
+                Some(hook.span),
+            ));
+        }
+        hook.span = Span::new(hook.span.source, hook.span.start, end);
+        Ok(end)
     }
 
     fn test_declaration(&mut self) -> Result<TestDeclaration, Diagnostic> {

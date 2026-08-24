@@ -54,11 +54,23 @@ pub struct FunctionDeclaration {
     /// Executable entry and exit conditions, kept separate from generic
     /// constraints because they survive into runtime IR.
     pub contracts: Vec<FunctionContract>,
+    /// Structured interception implemented by this function. This is distinct
+    /// from contracts: `with context` names the hook context, while
+    /// `with { ... }` declares callable predicates.
+    pub hook: Option<HookSpecification>,
     pub parameters: Vec<FunctionParameter>,
     pub result: TypeAnnotation,
     /// `None` denotes an interface declaration. Source functions have an
     /// ordered body, including an explicitly empty body.
     pub body: Option<Vec<Statement>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookSpecification {
+    pub context: String,
+    pub with_phase: Vec<Statement>,
+    pub without_phase: Vec<Statement>,
     pub span: Span,
 }
 

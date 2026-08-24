@@ -204,6 +204,48 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_hook_signatures_and_structured_phases_separately_from_contracts() {
+        let source = SourceFile::virtual_source(
+            "hooks.sev",
+            "trait Monitor:\n    @monitor_error\n    def monitor_error(context: string) -> None with context\nclass Metric: Monitor\n    def monitor_error(context: string) -> None with context:\n        with context:\n            print(\"start\")\n        without context:\n            print(\"finish\")\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Trait(declaration) = &module.items[0] else {
+            panic!("expected trait")
+        };
+        let required = &declaration.methods[0];
+        assert!(required.contracts.is_empty());
+        let hook = required.hook.as_ref().expect("expected hook signature");
+        assert_eq!(hook.context, "context");
+        assert!(hook.with_phase.is_empty());
+        assert!(hook.without_phase.is_empty());
+
+        let severian_ast::Item::Class(declaration) = &module.items[1] else {
+            panic!("expected class")
+        };
+        let implementation = &declaration.methods[0];
+        assert!(implementation.contracts.is_empty());
+        let hook = implementation
+            .hook
+            .as_ref()
+            .expect("expected hook implementation");
+        assert_eq!(hook.with_phase.len(), 1);
+        assert_eq!(hook.without_phase.len(), 1);
+        assert_eq!(implementation.body.as_deref(), Some([].as_slice()));
+    }
+
+    #[test]
+    fn hook_phases_must_use_the_declared_context() {
+        let source = SourceFile::virtual_source(
+            "invalid-hook.sev",
+            "def trace(context: string) with context:\n    with other:\n        print(\"start\")\n",
+        );
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert_eq!(error.code, "E000112");
+        assert!(error.message.contains("expected `context`"));
+    }
+
+    #[test]
     fn parses_primitive_trait_contract() {
         let source = SourceFile::virtual_source(
             "i32.sev",

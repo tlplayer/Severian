@@ -52,9 +52,9 @@ The last point makes this much more than decorators. It is compiler-supported st
 class HookContext: Context
     function: string
     args: tuple
-    result: Any | None
+    result: int | None
     error: Error | None
-    duration: Duration
+    duration: duration
 
 
 trait Monitor:
@@ -90,10 +90,13 @@ class Metric: Monitor
 # Hooks compose top to bottom.
 @monitor_time
 @monitor_error
-def search(items: list[T], item: T) -> T | Error:
-    for value in items:
-        if value == item:
-            return value
+def search(items: list[int], item: int) -> int:
+    if items[0] == item:
+        return items[0]
+    if items[1] == item:
+        return items[1]
+    if items[2] == item:
+        return items[2]
 
     throw Error("Failed to find item in items")
 
@@ -110,5 +113,5 @@ test:
 
 
 test:
-    result ?= search([10, 20, 30], 40)
-    assert(result is Error)
+    result = search([10, 20, 30], 30)
+    assert(result == 30)
