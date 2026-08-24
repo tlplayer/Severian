@@ -657,6 +657,7 @@ pub fn emit_executable(module: &LoweredModule, output: &Path) -> Result<Artifact
     let mut child = Command::new("cc")
         .args(["-std=c11", "-x", "c", "-"])
         .args(severian_runtime::native_sources())
+        .arg("-lm")
         .arg("-o")
         .arg(output)
         .stdin(Stdio::piped())
@@ -755,7 +756,7 @@ pub fn emit_mlir_executable(
             "-lmlir_async_runtime".into(),
         ]);
     }
-    clang_arguments.extend(["-o".into(), output_path]);
+    clang_arguments.extend(["-lm".into(), "-o".into(), output_path]);
     let clang_arguments = clang_arguments
         .iter()
         .map(String::as_str)

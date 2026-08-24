@@ -2567,8 +2567,30 @@ impl Analyzer<'_> {
                         ));
                     }
                 }
-                if callable_path(callee).as_deref() == Some("print") && arguments.len() == 1 {
-                    let value = self.expression(&arguments[0].value, None)?;
+                if callable_path(callee).as_deref() == Some("print")
+                    && !arguments.is_empty()
+                    && arguments.iter().all(|argument| argument.name.is_none())
+                {
+                    let value = if arguments.len() == 1 {
+                        self.expression(&arguments[0].value, None)?
+                    } else {
+                        let fields = arguments
+                            .iter()
+                            .map(|argument| self.expression(&argument.value, None))
+                            .collect::<Result<Vec<_>, Diagnostic>>()?;
+                        let element_types =
+                            fields.iter().map(|field| field.type_id).collect::<Vec<_>>();
+                        let tuple_type = self.instantiate_tuple_type(&element_types);
+                        Expression {
+                            id: self.next_id(),
+                            type_id: tuple_type,
+                            kind: ExpressionKind::Aggregate {
+                                class: tuple_type,
+                                fields,
+                            },
+                            span: ast.span,
+                        }
+                    };
                     if self.tuple_elements.contains_key(&value.type_id) {
                         let rendered = self.tuple_string(value, ast.span)?;
                         let string = rendered.type_id;
@@ -2815,26 +2837,62 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
-                if *operator == AstBinaryOperator::Power
-                    && matches!(
-                        right.kind,
-                        AstExpressionKind::Literal(AstLiteral::Integer(_))
-                    )
-                {
+                if *operator == AstBinaryOperator::Power {
                     let left = self.expression(left, None)?;
                     let name = self
                         .types
                         .definition(left.type_id)
                         .map(|definition| definition.name.as_str());
                     if matches!(name, Some("float" | "f64")) {
-                        let integer = self
-                            .types
-                            .resolve_name("int")
-                            .expect("bootstrap defines int");
-                        let right = self.expression(right, Some(integer))?;
+                        if matches!(
+                            right.kind,
+                            AstExpressionKind::Literal(AstLiteral::Integer(_))
+                        ) {
+                            let integer = self
+                                .types
+                                .resolve_name("int")
+                                .expect("bootstrap defines int");
+                            let right = self.expression(right, Some(integer))?;
+                            return Ok(self.runtime_call(
+                                "__sev_pow_f64_i64",
+                                &[left.type_id, integer],
+                                left.type_id,
+                                vec![left, right],
+                                ast.span,
+                            ));
+                        }
+                        let right = self.expression(right, Some(left.type_id))?;
                         return Ok(self.runtime_call(
-                            "__sev_pow_f64_i64",
-                            &[left.type_id, integer],
+                            "__sev_pow_f64_f64",
+                            &[left.type_id, left.type_id],
+                            left.type_id,
+                            vec![left, right],
+                            ast.span,
+                        ));
+                    }
+                    if matches!(name, Some("int" | "i64")) {
+                        if matches!(
+                            right.kind,
+                            AstExpressionKind::Literal(AstLiteral::Float(_))
+                        ) {
+                            let float = self
+                                .types
+                                .resolve_name("float")
+                                .expect("bootstrap defines float");
+                            let left = self.coerce(left, float, false)?;
+                            let right = self.expression(right, Some(float))?;
+                            return Ok(self.runtime_call(
+                                "__sev_pow_f64_f64",
+                                &[float, float],
+                                float,
+                                vec![left, right],
+                                ast.span,
+                            ));
+                        }
+                        let right = self.expression(right, Some(left.type_id))?;
+                        return Ok(self.runtime_call(
+                            "__sev_pow_i64_i64",
+                            &[left.type_id, left.type_id],
                             left.type_id,
                             vec![left, right],
                             ast.span,
@@ -5044,7 +5102,7 @@ impl Analyzer<'_> {
                 expression.span,
             ))));
         }
-        let Some((field_name, operator, update_value)) = body.iter().find_map(|statement| {
+        let update = body.iter().find_map(|statement| {
             let severian_ast::Statement::Binding(update) = statement else {
                 return None;
             };
@@ -5063,10 +5121,72 @@ impl Analyzer<'_> {
                 return None;
             };
             (left == &update.name).then(|| (update.name.as_str(), *operator, right.as_ref()))
-        }) else {
+        });
+        let Some((field_name, operator, update_value)) = update else {
+            let unit = self
+                .types
+                .resolve_name("unit")
+                .expect("bootstrap defines unit");
+            let none = self
+                .types
+                .resolve_name("None")
+                .expect("bootstrap defines None");
+            let result = self.resolve_source_type(&method.result)?;
+            if result != unit && result != none {
+                // A value-returning method used as a statement is still an
+                // ordinary expression call. Let `class_method_call` lower it.
+                return Ok(None);
+            }
+            if body
+                .iter()
+                .all(|statement| matches!(statement, AstStatement::Expression(_)))
+            {
+                let previous = self.value_substitutions.clone();
+                let receiver = Expression {
+                    id: self.next_id(),
+                    type_id: ty,
+                    kind: ExpressionKind::Binding(binding),
+                    span: object.span,
+                };
+                for (field, declaration) in instance.fields.iter().enumerate() {
+                    let id = self.next_id();
+                    self.value_substitutions.insert(
+                        declaration.name.clone(),
+                        Expression {
+                            id,
+                            type_id: declaration.ty,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(receiver.clone()),
+                                index: field as u32,
+                            },
+                            span: object.span,
+                        },
+                    );
+                }
+                let resolved = (|| {
+                    for (parameter, argument) in method.parameters.iter().zip(arguments) {
+                        let parameter_type = self.resolve_source_type(&parameter.annotation)?;
+                        let value = self.expression(&argument.value, Some(parameter_type))?;
+                        self.value_substitutions
+                            .insert(parameter.name.clone(), value);
+                    }
+                    body.iter()
+                        .map(|statement| {
+                            let AstStatement::Expression(expression) = statement else {
+                                unreachable!("expression-only method body was checked above")
+                            };
+                            Ok(Statement::Expression(self.expression(expression, None)?))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()
+                })();
+                self.value_substitutions = previous;
+                return resolved.map(|statements| {
+                    Some(Statement::Sequence(Block { statements }))
+                });
+            }
             return Err(Diagnostic::new(
                 "E000211",
-                format!("method `{name}` is not a field-update method"),
+                format!("method `{name}` cannot be lowered as a unit method"),
                 Some(method.span),
             ));
         };
@@ -6125,6 +6245,21 @@ mod tests {
     }
 
     #[test]
+    fn power_expressions_lower_to_numeric_runtime_calls() {
+        let source = "def powers() -> float:\n    integer = 2 ** 2\n    root = integer ** .5\n    floating = 4.0 ** 2\n    return root + floating\n";
+        let (program, _) = analyze_source(source);
+        let names = program.modules[0]
+            .functions
+            .iter()
+            .map(|function| function.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(names.contains("__sev_pow_i64_i64"));
+        assert!(names.contains("__sev_pow_f64_f64"));
+        assert!(names.contains("__sev_pow_f64_i64"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
     fn generic_class_instances_keep_distinct_layouts_and_field_updates() {
         let source = "class Box[T]:\n    value: T\n    def addition(addition: T):\n        value += addition\ndef main():\n    ints := Box[int](10)\n    floats := Box[f64](2.5)\n    ints.addition(20)\n    floats.addition(4.5)\n    observed_int := ints.value\n    observed_float := floats.value\n";
         let (program, _) = analyze_source(source);
@@ -6146,6 +6281,23 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn no_value_class_methods_lower_expression_bodies() {
+        let source = "trait Drawable:\n    def draw() -> None\nclass Point: Drawable\n    x: float\n    y: float\n    def draw() -> None:\n        print(\"point\", x, y)\ndef main():\n    point = Point(3.0, 4.0)\n    point.draw()\n";
+        let (program, _) = analyze_source(source);
+        let main = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        assert!(matches!(
+            main.body.as_ref().unwrap().statements.as_slice(),
+            [Statement::Binding(_), Statement::Sequence(Block { statements })]
+                if matches!(statements.as_slice(), [Statement::Expression(_)])
+        ));
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

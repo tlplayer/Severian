@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include <math.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -86,4 +87,25 @@ double __sev_pow_f64_i64(double base, int64_t exponent) {
         remaining >>= 1u;
     }
     return reciprocal ? 1.0 / result : result;
+}
+
+double __sev_pow_f64_f64(double base, double exponent) {
+    return pow(base, exponent);
+}
+
+int64_t __sev_pow_i64_i64(int64_t base, int64_t exponent) {
+    if (exponent < 0) {
+        if (base == 1) return 1;
+        if (base == -1) return (exponent & 1) == 0 ? 1 : -1;
+        return 0;
+    }
+    uint64_t factor = (uint64_t)base;
+    uint64_t result = 1;
+    uint64_t remaining = (uint64_t)exponent;
+    while (remaining != 0) {
+        if ((remaining & 1u) != 0) result *= factor;
+        factor *= factor;
+        remaining >>= 1u;
+    }
+    return (int64_t)result;
 }

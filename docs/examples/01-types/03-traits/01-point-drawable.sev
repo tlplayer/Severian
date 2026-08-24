@@ -1,5 +1,6 @@
 trait Drawable:
-    def draw() -> float
+    def magnitude() -> float
+    def draw() -> None
 
 class Point: Drawable
     x: float
@@ -8,7 +9,7 @@ class Point: Drawable
     def magnitude() -> float:
         return (x*x + y*y) ** .5
 
-    def draw():
+    def draw() -> None:
         print("point", x, y)
 
 def main():
