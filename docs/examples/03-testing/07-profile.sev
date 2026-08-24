@@ -179,7 +179,7 @@ class Counter[T]:
         return ordered
 
 class LruCache[K, V]:
-    capacity: int with { capacity > 0 }
+    capacity: int { capacity > 0 }
     values: map[K, V]
     order: list[K]
 
@@ -314,7 +314,7 @@ test "deque compaction and LRU updates preserve logical state":
     cache.get("b") else error:
          assert(error.message == "cache key does not exist")
 
-    single_values: map[int, string] = {}
+    single_values: map[int, string] := {}
     single = LruCache[int, string](1, single_values, [])
     single.put(1, "one")
     single.put(2, "two")
@@ -395,7 +395,7 @@ test "collection accessors cover populated and empty states":
     cache.put("present", 1)
     assert(cache.length() == 1)
 
-test with profile "heap and deque remain bounded under sustained use" -> TestResult with
+test with profile "heap and deque remain bounded under sustained use" with
 {
     defer time < 1s,
     defer memory < 16mb,

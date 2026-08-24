@@ -1,5 +1,5 @@
 def reverse_twice(values: list[int]) -> list[int]:
-    return values.reversed().reversed()
+    return values[::-1][::-1]
 
 test with property "reverse twice preserves values":
     # The property runner replaces this representative input with generated lists

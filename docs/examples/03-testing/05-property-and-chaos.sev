@@ -1,6 +1,6 @@
-def first(values: list[int]) -> int | BoundsError:
+def first(values: list[int]) -> int | Error:
     if size(values) == 0:
-        return error(BoundsError(0))
+        throw Error("Size cannot be 0 and call first")
 
     return values[0]
 
@@ -14,5 +14,5 @@ test with property and chaos "first is safe for generated lists":
         case value:
             assert(value == values[0])
 
-        case _:
+        case error:
             assert(size(values) == 0)
