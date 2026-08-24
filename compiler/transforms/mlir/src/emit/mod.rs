@@ -503,6 +503,7 @@ fn render_cfg_body_function(
         format!(" -> {}", mlir_type(body.return_type)?)
     };
     output.push_str(&format!("  func.func @{symbol}({parameters}){result} {{\n"));
+    let mut task_locals = BTreeMap::new();
     for block in &body.blocks {
         if block.id != body.entry {
             output.push_str(&format!("  ^bb{}:\n", block.id.0));
@@ -516,6 +517,9 @@ fn render_cfg_body_function(
                 ));
             }
             for local in &body.locals {
+                if matches!(local.ty, LoweredType::Task(_)) {
+                    continue;
+                }
                 output.push_str(&format!(
                     "    %local{} = llvm.alloca %sev_one x {} : (i64) -> !llvm.ptr\n",
                     local.id.0,
@@ -544,6 +548,7 @@ fn render_cfg_body_function(
                 operation_index,
                 operation,
                 4,
+                &mut task_locals,
             )?;
         }
         render_cfg_terminator(output, module, &block.terminator, 4)?;
@@ -560,6 +565,7 @@ fn render_cfg_operation(
     operation_index: usize,
     operation: &Operation,
     indent: usize,
+    task_locals: &mut BTreeMap<severian_lir::LocalId, ValueId>,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
     match operation {
@@ -628,6 +634,22 @@ fn render_cfg_operation(
         }
         Operation::Load { place, result } => {
             let ty = value_type(module, *result)?;
+            if let severian_lir::PlaceBase::Local(local) = place.base {
+                if matches!(ty, LoweredType::Task(_)) {
+                    let source = task_locals.get(&local).copied().ok_or_else(|| {
+                        MlirError::UnsupportedOperation(format!(
+                            "task local {} is loaded before its spawn result is stored",
+                            local.0
+                        ))
+                    })?;
+                    let spelling = mlir_type(ty)?;
+                    output.push_str(&format!(
+                        "{indentation}%v{} = builtin.unrealized_conversion_cast %v{} : {spelling} to {spelling}\n",
+                        result.0, source.0
+                    ));
+                    return Ok(());
+                }
+            }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
                 let base_type = mlir_type(cfg_place_base_type(module, body, place)?)?;
                 output.push_str(&format!(
@@ -651,6 +673,12 @@ fn render_cfg_operation(
         }
         Operation::Store { place, value } => {
             let ty = value_type(module, *value)?;
+            if let severian_lir::PlaceBase::Local(local) = place.base {
+                if matches!(ty, LoweredType::Task(_)) {
+                    task_locals.insert(local, *value);
+                    return Ok(());
+                }
+            }
             if let [severian_lir::Projection::Field(field)] = place.projection.as_slice() {
                 let base_type = mlir_type(cfg_place_base_type(module, body, place)?)?;
                 let address = cfg_place_base_address(place);
@@ -744,7 +772,7 @@ fn render_cfg_operation(
             } else {
                 let result_type = mlir_type(target.result)?;
                 output.push_str(&format!(
-                    "{indentation}%task_token{}, %task{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
+                    "{indentation}%task_token{}, %v{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
                     result.0, result.0
                 ));
                 output.push_str(&format!(
@@ -765,15 +793,20 @@ fn render_cfg_operation(
             let ty = value_type(module, *result)?;
             if ty == LoweredType::Unit {
                 output.push_str(&format!(
-                    "{indentation}async.await %task{} : !async.token\n",
+                    "{indentation}async.await %v{} : !async.token\n",
                     task.0
                 ));
             } else {
+                let result_type = value_type(module, *task)?
+                    .task_result()
+                    .ok_or_else(|| {
+                        MlirError::UnsupportedOperation("await operand is not a task".into())
+                    })?;
                 output.push_str(&format!(
-                    "{indentation}%v{} = async.await %task{} : !async.value<{}>\n",
+                    "{indentation}%v{} = async.await %v{} : !async.value<{}>\n",
                     result.0,
                     task.0,
-                    mlir_type(ty)?
+                    mlir_type(result_type)?
                 ));
             }
         }
@@ -1902,12 +1935,24 @@ pub(crate) fn mlir_type(ty: LoweredType) -> Result<String, MlirError> {
         LoweredType::Float {
             format: LoweredFloatFormat::BrainFloat16,
         } => "bf16".into(),
+        unsupported @ LoweredType::Float { .. } => {
+            return Err(MlirError::UnsupportedType(unsupported))
+        }
         LoweredType::Boolean => "i1".into(),
         LoweredType::String | LoweredType::Bytes => "!llvm.ptr".into(),
         LoweredType::None | LoweredType::Unit => "i8".into(),
         LoweredType::Arguments => "!llvm.struct<(i32, !llvm.ptr)>".into(),
         LoweredType::Aggregate(id) => format!("!sev_class_{id}"),
-        unsupported => return Err(MlirError::UnsupportedType(unsupported)),
+        LoweredType::Task(_) => {
+            let result = ty
+                .task_result()
+                .expect("the task variant always has a result type");
+            if result == LoweredType::Unit {
+                "!async.token".into()
+            } else {
+                format!("!async.value<{}>", mlir_type(result)?)
+            }
+        }
     })
 }
 

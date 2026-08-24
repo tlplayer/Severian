@@ -328,11 +328,15 @@ fn transfer_block(
     for operand in terminator_operands(&block.terminator) {
         inspect_operand(operand, state, errors);
     }
-    if let Terminator::Call {
-        destination: Some(destination),
-        ..
-    } = &block.terminator
-    {
+    let destination = match &block.terminator {
+        Terminator::Call {
+            destination: Some(destination),
+            ..
+        }
+        | Terminator::Spawn { destination, .. } => Some(destination),
+        _ => None,
+    };
+    if let Some(destination) = destination {
         if let Some(local) = destination.local_id() {
             state.initialized.insert(local);
             state.moved.remove(&local);

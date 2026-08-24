@@ -215,11 +215,15 @@ fn transfer_definitions(block: &BasicBlock, state: &mut BTreeSet<LocalId>) {
             CfgStatement::StorageLive(_) | CfgStatement::Assert { .. } | CfgStatement::Coverage(_) => {}
         }
     }
-    if let Terminator::Call {
-        destination: Some(destination),
-        ..
-    } = &block.terminator
-    {
+    let destination = match &block.terminator {
+        Terminator::Call {
+            destination: Some(destination),
+            ..
+        }
+        | Terminator::Spawn { destination, .. } => Some(destination),
+        _ => None,
+    };
+    if let Some(destination) = destination {
         if let Some(local) = destination.local_id() {
             state.insert(local);
         }
@@ -389,6 +393,12 @@ fn transfer(
     } else {
         for operand in terminator_operands(&block.terminator) {
             use_operand(block.id.0, body, globals, operand, state)?;
+        }
+    }
+    if let Terminator::Spawn { destination, .. } = &block.terminator {
+        verify_place(body, globals, destination)?;
+        if let Some(local) = destination.local_id() {
+            state.insert(local);
         }
     }
     Ok(())

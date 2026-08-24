@@ -20,6 +20,54 @@ pub enum LoweredType {
     Unit,
     Arguments,
     Aggregate(u32),
+    Task(TaskValueType),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskValueType {
+    Integer { bits: u16, signed: bool },
+    Float { format: LoweredFloatFormat },
+    Boolean,
+    String,
+    Bytes,
+    None,
+    Unit,
+    Arguments,
+    Aggregate(u32),
+}
+
+impl LoweredType {
+    pub fn task(self) -> Option<Self> {
+        Some(Self::Task(match self {
+            Self::Integer { bits, signed } => TaskValueType::Integer { bits, signed },
+            Self::Float { format } => TaskValueType::Float { format },
+            Self::Boolean => TaskValueType::Boolean,
+            Self::String => TaskValueType::String,
+            Self::Bytes => TaskValueType::Bytes,
+            Self::None => TaskValueType::None,
+            Self::Unit => TaskValueType::Unit,
+            Self::Arguments => TaskValueType::Arguments,
+            Self::Aggregate(id) => TaskValueType::Aggregate(id),
+            Self::Task(_) => return None,
+        }))
+    }
+
+    pub fn task_result(self) -> Option<Self> {
+        let Self::Task(result) = self else {
+            return None;
+        };
+        Some(match result {
+            TaskValueType::Integer { bits, signed } => Self::Integer { bits, signed },
+            TaskValueType::Float { format } => Self::Float { format },
+            TaskValueType::Boolean => Self::Boolean,
+            TaskValueType::String => Self::String,
+            TaskValueType::Bytes => Self::Bytes,
+            TaskValueType::None => Self::None,
+            TaskValueType::Unit => Self::Unit,
+            TaskValueType::Arguments => Self::Arguments,
+            TaskValueType::Aggregate(id) => Self::Aggregate(id),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

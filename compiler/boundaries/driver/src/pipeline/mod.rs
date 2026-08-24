@@ -1118,6 +1118,22 @@ mod tests {
     }
 
     #[test]
+    fn stored_async_tasks_survive_cfg_verification_and_codegen() {
+        let root = temporary_package();
+        let source = root.join("async.sev");
+        std::fs::write(
+            &source,
+            "def work(value: int) -> int:\n    return value * 2\n\ndef main():\n    first = async work(10) with self\n    second = async work(21) with self\n    print(await first + await second)\n",
+        )
+        .unwrap();
+        Compiler::new(TargetSpec::host())
+            .unwrap()
+            .compile_file(&source, &root.join("program"))
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn bare_sources_receive_the_compiler_standard_package_set() {
         let root = temporary_package();
         let source = root.join("root.sev");

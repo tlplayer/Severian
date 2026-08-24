@@ -11,7 +11,7 @@ use severian_universal::{
     BinaryOperator, FloatFormat, IntegerWidth, LiteralValue, PrimitiveRepresentation, TypeContext,
     TypeId, UnaryOperator,
 };
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 mod cfg_lowering_entry {
 use super::*;
@@ -26,6 +26,7 @@ pub fn lower(
         types,
         target,
         values: Vec::new(),
+        task_locals: BTreeSet::new(),
     };
     let mut initializer_cfg = context.lower_cfg_body(&mir.initializer)?;
     initializer_cfg.return_type = LoweredType::Unit;
@@ -156,6 +157,7 @@ struct CfgLowering<'a> {
     types: &'a TypeContext,
     target: &'a TargetSpec,
     values: Vec<Value>,
+    task_locals: BTreeSet<severian_mir::LocalId>,
 }
 
 impl CfgLowering<'_> {
@@ -163,13 +165,20 @@ impl CfgLowering<'_> {
         &mut self,
         body: &severian_mir::CfgBody,
     ) -> Result<severian_lir::CfgBody, LoweringError> {
+        self.task_locals = task_locals(body);
         let locals = body
             .locals
             .iter()
             .map(|local| {
                 Ok(severian_lir::LocalDecl {
                     id: severian_lir::LocalId(local.id.0),
-                    ty: self.lower_mir_type(local.ty)?,
+                    ty: if self.task_locals.contains(&local.id) {
+                        self.lower_mir_type(local.ty)?
+                            .task()
+                            .expect("task results cannot themselves be tasks")
+                    } else {
+                        self.lower_mir_type(local.ty)?
+                    },
                     mutable: local.mutable,
                     argument: local.argument,
                     span: local.span,
@@ -391,7 +400,13 @@ impl CfgLowering<'_> {
             }
             severian_mir::Rvalue::Await { task } => {
                 let task = self.lower_operand(body, task, operations)?;
-                let result = self.new_value(self.value_type(task));
+                let result_type = self
+                    .value_type(task)
+                    .task_result()
+                    .ok_or_else(|| LoweringError::UnsupportedCfgOperation(
+                        "await operand is not a task".into(),
+                    ))?;
+                let result = self.new_value(result_type);
                 operations.push(LirOperation::Await { task, result });
                 Ok(result)
             }
@@ -508,7 +523,9 @@ impl CfgLowering<'_> {
                     .iter()
                     .map(|argument| self.lower_operand(body, argument, operations))
                     .collect::<Result<Vec<_>, _>>()?;
-                let result = self.new_value(self.place_type(body, destination)?);
+                let result_type = self
+                    .place_type(body, destination)?;
+                let result = self.new_value(result_type);
                 operations.push(LirOperation::Spawn {
                     function,
                     arguments,
@@ -677,7 +694,16 @@ impl CfgLowering<'_> {
                     .ty;
             }
         }
-        self.lower_mir_type(ty)
+        let lowered = self.lower_mir_type(ty)?;
+        if place.projection.is_empty()
+            && matches!(place.base, severian_mir::PlaceBase::Local(local) if self.task_locals.contains(&local))
+        {
+            Ok(lowered
+                .task()
+                .expect("task results cannot themselves be tasks"))
+        } else {
+            Ok(lowered)
+        }
     }
 
     fn lower_mir_type(&self, type_id: TypeId) -> Result<LoweredType, LoweringError> {
@@ -705,6 +731,37 @@ impl CfgLowering<'_> {
     fn value_type(&self, value: ValueId) -> LoweredType {
         self.values[value.0 as usize].ty
     }
+}
+
+fn task_locals(body: &severian_mir::CfgBody) -> BTreeSet<severian_mir::LocalId> {
+    let mut tasks = body
+        .blocks
+        .iter()
+        .filter_map(|block| match &block.terminator {
+            severian_mir::Terminator::Spawn { destination, .. } => destination.local_id(),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for statement in body.blocks.iter().flat_map(|block| &block.statements) {
+            let severian_mir::CfgStatement::Assign(destination, severian_mir::Rvalue::Use(source)) =
+                statement
+            else {
+                continue;
+            };
+            let (Some(destination), severian_mir::Operand::Copy(source) | severian_mir::Operand::Move(source)) =
+                (destination.local_id(), source)
+            else {
+                continue;
+            };
+            if source.local_id().is_some_and(|source| tasks.contains(&source)) {
+                changed |= tasks.insert(destination);
+            }
+        }
+    }
+    tasks
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
