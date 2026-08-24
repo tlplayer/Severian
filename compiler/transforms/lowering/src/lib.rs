@@ -786,6 +786,9 @@ impl CfgLowering<'_> {
     }
 
     fn lower_mir_type(&self, type_id: TypeId) -> Result<LoweredType, LoweringError> {
+        if severian_universal::is_raw_pointer_type(type_id) {
+            return Ok(LoweredType::Bytes);
+        }
         if let Some(id) = self
             .mir
             .classes

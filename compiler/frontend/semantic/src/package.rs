@@ -445,6 +445,13 @@ fn resolve_package_type(
     classes: &[PackageClass],
     lists: &[PackageList],
 ) -> Result<TypeId, Diagnostic> {
+    if let Some((
+        "borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable",
+        [inner],
+    )) = annotation.named_parts()
+    {
+        return resolve_package_type(types, inner, module, classes, lists);
+    }
     if let TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
         let parameters = parameters
             .iter()

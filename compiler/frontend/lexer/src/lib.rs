@@ -31,6 +31,15 @@ mod tests {
     }
 
     #[test]
+    fn scans_raw_address_operator() {
+        let source = SourceFile::virtual_source("pointer.sev", "pointer := &value\n");
+        let tokens = scan(&source).unwrap();
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Ampersand));
+    }
+
+    #[test]
     fn scans_indented_trait_members_and_typed_operators() {
         let source = SourceFile::virtual_source(
             "primitive.sev",

@@ -34,7 +34,7 @@ pub fn plan(module: &Module, types: &TypeContext) -> Result<CompilePlan, Compile
                 )
         }))
     {
-        if class_types.contains(&ty) {
+        if class_types.contains(&ty) || severian_universal::is_raw_pointer_type(ty) {
             continue;
         }
         if let CompileRoute::Compiler(compiler) = types
@@ -271,7 +271,9 @@ fn operation_route(
         let value = values
             .get(&value_id)
             .ok_or(CompileError::MissingValue(value_id.0))?;
-        if class_types.contains(&value.type_id) {
+        if class_types.contains(&value.type_id)
+            || severian_universal::is_raw_pointer_type(value.type_id)
+        {
             continue;
         }
         match types

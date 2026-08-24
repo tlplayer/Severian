@@ -156,6 +156,8 @@ pub(crate) fn analyze_with_package_functions(
         class_instances_by_type: BTreeMap::new(),
         list_types: BTreeMap::new(),
         list_elements: BTreeMap::new(),
+        pointer_types: BTreeMap::new(),
+        pointer_elements: BTreeMap::new(),
         map_types: BTreeMap::new(),
         map_elements: BTreeMap::new(),
         set_type: None,
@@ -827,6 +829,8 @@ struct Analyzer<'a> {
     class_instances_by_type: BTreeMap<TypeId, ClassInstance>,
     list_types: BTreeMap<TypeId, TypeId>,
     list_elements: BTreeMap<TypeId, TypeId>,
+    pointer_types: BTreeMap<TypeId, TypeId>,
+    pointer_elements: BTreeMap<TypeId, TypeId>,
     map_types: BTreeMap<(TypeId, TypeId), TypeId>,
     map_elements: BTreeMap<TypeId, (TypeId, TypeId)>,
     set_type: Option<TypeId>,
@@ -1301,6 +1305,13 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let Some((
+            "borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable",
+            [inner],
+        )) = annotation.named_parts()
+        {
+            return self.resolve_source_type(inner);
+        }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
         {
             let parameters = parameters
@@ -1361,6 +1372,10 @@ impl Analyzer<'_> {
             if let Some(list) = self.list_types.get(&element) {
                 return Ok(*list);
             }
+        }
+        if let Some(("pointer", [element])) = annotation.named_parts() {
+            let element = self.resolve_source_type(element)?;
+            return Ok(self.instantiate_pointer_type(element));
         }
         if let Some(("tuple", elements)) = annotation.named_parts() {
             let elements = elements
@@ -2407,6 +2422,36 @@ impl Analyzer<'_> {
                     .types
                     .resolve_name("unit")
                     .expect("bootstrap defines unit");
+                if let Some(element) = self.pointer_elements.get(&collection.type_id).copied() {
+                    if self.unsafe_depth == 0 {
+                        return Err(Diagnostic::new(
+                            "E000219",
+                            "raw pointer mutation requires an `unsafe` scope",
+                            Some(*span),
+                        ));
+                    }
+                    let index = self.expression(index, None)?;
+                    let index_name = self
+                        .types
+                        .definition(index.type_id)
+                        .map(|definition| definition.name.as_str());
+                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "pointer indices must be integers",
+                            Some(index.span),
+                        ));
+                    }
+                    let value = self.expression(value, Some(element))?;
+                    let suffix = self.list_runtime_suffix(element, *span)?;
+                    return Ok(Statement::Expression(self.runtime_call(
+                        &format!("__sev_pointer_set_{suffix}"),
+                        &[collection.type_id, index.type_id, element],
+                        unit,
+                        vec![collection, index, value],
+                        *span,
+                    )));
+                }
                 if let Some(element) = self.list_elements.get(&collection.type_id).copied() {
                     let index = self.expression(index, None)?;
                     let index_name = self
@@ -2667,6 +2712,27 @@ impl Analyzer<'_> {
                     }
                     Some(value) => {
                         if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
+                            if let AstExpressionKind::Call { callee, arguments } = &value.kind {
+                                if callable_path(callee).as_deref() == Some("error") {
+                                    let [argument] = arguments.as_slice() else {
+                                        return Err(Diagnostic::new(
+                                            "E000206",
+                                            "`error` expects exactly one error value",
+                                            Some(value.span),
+                                        ));
+                                    };
+                                    let error =
+                                        self.expression(&argument.value, Some(fallible.error))?;
+                                    return Ok(Statement::Return(Some(
+                                        self.fallible_error_expression(
+                                            result_type,
+                                            fallible,
+                                            error,
+                                            *span,
+                                        )?,
+                                    )));
+                                }
+                            }
                             let value = self.expression(value, Some(fallible.success))?;
                             Some(self.fallible_success_expression(
                                 result_type,
@@ -4771,6 +4837,41 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Index { object, index } => {
                 let object = self.expression(object, None)?;
+                if let Some(element) = self.pointer_elements.get(&object.type_id).copied() {
+                    if self.unsafe_depth == 0 {
+                        return Err(Diagnostic::new(
+                            "E000219",
+                            "raw pointer access requires an `unsafe` scope",
+                            Some(ast.span),
+                        ));
+                    }
+                    if expected.is_some_and(|expected| expected != element) {
+                        return Err(semantic_error(
+                            "pointed value does not satisfy the expected type".into(),
+                            ast.span,
+                        ));
+                    }
+                    let index = self.expression(index, None)?;
+                    let index_name = self
+                        .types
+                        .definition(index.type_id)
+                        .map(|definition| definition.name.as_str());
+                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "pointer indices must be integers",
+                            Some(index.span),
+                        ));
+                    }
+                    let suffix = self.list_runtime_suffix(element, ast.span)?;
+                    return Ok(self.runtime_call(
+                        &format!("__sev_pointer_index_{suffix}"),
+                        &[object.type_id, index.type_id],
+                        element,
+                        vec![object, index],
+                        ast.span,
+                    ));
+                }
                 let string = self
                     .types
                     .resolve_name("string")
@@ -5842,6 +5943,7 @@ impl Analyzer<'_> {
                     if self.tuple_elements.contains_key(&value.type_id)
                         || self.list_elements.contains_key(&value.type_id)
                         || self.set_type == Some(value.type_id)
+                        || self.fallible_types.contains_key(&value.type_id)
                     {
                         let rendered = self.display_string(value, ast.span)?;
                         let string = rendered.type_id;
@@ -5938,9 +6040,19 @@ impl Analyzer<'_> {
                     let resolved = ordered
                         .iter()
                         .zip(&signature.parameters)
-                        .map(|(argument, parameter)| match self.prepare(argument) {
-                            Ok(prepared) => self.finish(prepared, parameter.type_id),
-                            Err(_) => self.expression(argument, Some(parameter.type_id)),
+                        .map(|(argument, parameter)| {
+                            if matches!(
+                                argument.kind,
+                                AstExpressionKind::List(_)
+                                    | AstExpressionKind::Set(_)
+                                    | AstExpressionKind::Map(_)
+                            ) {
+                                return self.expression(argument, Some(parameter.type_id));
+                            }
+                            match self.prepare(argument) {
+                                Ok(prepared) => self.finish(prepared, parameter.type_id),
+                                Err(_) => self.expression(argument, Some(parameter.type_id)),
+                            }
                         })
                         .collect::<Result<Vec<_>, _>>();
                     if let Ok(arguments) = resolved {
@@ -6030,6 +6142,59 @@ impl Analyzer<'_> {
                 Ok(call)
             }
             AstExpressionKind::Unary { operator, operand } => {
+                if *operator == AstUnaryOperator::AddressOf {
+                    if self.unsafe_depth == 0 {
+                        return Err(Diagnostic::new(
+                            "E000219",
+                            "raw addresses require an `unsafe` scope",
+                            Some(ast.span),
+                        ));
+                    }
+                    let AstExpressionKind::Index { object, index } = &operand.kind else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "raw address-of currently requires an indexed list element",
+                            Some(operand.span),
+                        ));
+                    };
+                    let collection = self.expression(object, None)?;
+                    let Some(element) = self.list_elements.get(&collection.type_id).copied()
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "raw address-of requires a list element",
+                            Some(operand.span),
+                        ));
+                    };
+                    let pointer = self.instantiate_pointer_type(element);
+                    if expected.is_some_and(|expected| expected != pointer) {
+                        return Err(semantic_error(
+                            "raw address does not satisfy the expected pointer type".into(),
+                            ast.span,
+                        ));
+                    }
+                    let index = self.expression(index, None)?;
+                    let index_name = self
+                        .types
+                        .definition(index.type_id)
+                        .map(|definition| definition.name.as_str());
+                    if !matches!(index_name, Some("int" | "i64" | "usize")) {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "pointer offsets must be integers",
+                            Some(index.span),
+                        ));
+                    }
+                    let storage = self.list_storage_expression(collection, ast.span);
+                    let storage_type = storage.type_id;
+                    return Ok(self.runtime_call(
+                        "__sev_list_address",
+                        &[storage_type, index.type_id],
+                        pointer,
+                        vec![storage, index],
+                        ast.span,
+                    ));
+                }
                 if matches!(
                     operator,
                     AstUnaryOperator::Borrow | AstUnaryOperator::BorrowMut
@@ -7212,6 +7377,10 @@ impl Analyzer<'_> {
             let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
             return Ok(self.instantiate_list_type(element));
         }
+        if name == "pointer" && arguments.len() == 1 {
+            let element = self.resolve_instantiated_type(&arguments[0], substitution)?;
+            return Ok(self.instantiate_pointer_type(element));
+        }
         if name == "map" && arguments.len() == 2 {
             let key = self.resolve_instantiated_type(&arguments[0], substitution)?;
             let value = self.resolve_instantiated_type(&arguments[1], substitution)?;
@@ -7248,6 +7417,16 @@ impl Analyzer<'_> {
                 ty: storage,
             }],
         });
+        ty
+    }
+
+    fn instantiate_pointer_type(&mut self, element: TypeId) -> TypeId {
+        if let Some(ty) = self.pointer_types.get(&element) {
+            return *ty;
+        }
+        let ty = pointer_type_id(element);
+        self.pointer_types.insert(element, ty);
+        self.pointer_elements.insert(ty, element);
         ty
     }
 
@@ -8024,6 +8203,41 @@ impl Analyzer<'_> {
         value: Expression,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        if let Some(fallible) = self.fallible_types.get(&value.type_id).copied() {
+            let condition = Expression {
+                id: self.next_id(),
+                type_id: self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool"),
+                kind: ExpressionKind::Field {
+                    object: Box::new(value.clone()),
+                    index: 0,
+                },
+                span,
+            };
+            let success = Expression {
+                id: self.next_id(),
+                type_id: fallible.success,
+                kind: ExpressionKind::Field {
+                    object: Box::new(value),
+                    index: 1,
+                },
+                span,
+            };
+            let success = self.display_string(success, span)?;
+            let failure = self.string_expression("Error", span);
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id: success.type_id,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(success),
+                    fallback: Box::new(failure),
+                },
+                span,
+            });
+        }
         if self.tuple_elements.contains_key(&value.type_id) {
             return self.tuple_string(value, span);
         }
@@ -8051,6 +8265,22 @@ impl Analyzer<'_> {
             .types
             .definition(value.type_id)
             .map(|definition| definition.name.as_str());
+        if self.integer_primitive(value.type_id)
+            && !matches!(name, Some("int" | "i64" | "usize"))
+        {
+            let integer = self
+                .types
+                .resolve_name("int")
+                .expect("bootstrap defines int");
+            let value = self.coerce(value, integer, true)?;
+            return Ok(self.runtime_call(
+                "__sev_string_from_int",
+                &[integer],
+                string,
+                vec![value],
+                span,
+            ));
+        }
         match name {
             Some("string") => Ok(value),
             Some("int" | "i64") => Ok(self.runtime_call(
@@ -8157,6 +8387,7 @@ impl Analyzer<'_> {
             .map(|definition| definition.name.as_str());
         match name {
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
+            Some("u8") => Ok("u8"),
             Some("bool") => Ok("bool"),
             Some("string") => Ok("ptr"),
             _ if self.list_elements.contains_key(&element) => Ok("list"),
@@ -10618,7 +10849,11 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
 
 pub(crate) fn list_type_id(element: TypeId) -> TypeId {
     let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
-    TypeId(0x0800_0000 | (hash & 0x07ff_ffff))
+    TypeId(0x0c00_0000 | (hash & 0x03ff_ffff))
+}
+
+pub(crate) fn pointer_type_id(element: TypeId) -> TypeId {
+    severian_universal::raw_pointer_type_id(element)
 }
 
 pub(crate) fn map_type_id(key: TypeId, value: TypeId) -> TypeId {
@@ -12644,6 +12879,9 @@ fn universal_unary(operator: AstUnaryOperator) -> UnaryOperator {
         AstUnaryOperator::Positive => UnaryOperator::Positive,
         AstUnaryOperator::Negative => UnaryOperator::Negative,
         AstUnaryOperator::Not => UnaryOperator::Not,
+        AstUnaryOperator::AddressOf => {
+            unreachable!("raw address-of is lowered before universal resolution")
+        }
         AstUnaryOperator::Borrow | AstUnaryOperator::BorrowMut => {
             unreachable!("borrows are lowered before universal resolution")
         }

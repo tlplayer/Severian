@@ -35,3 +35,14 @@ pub enum CompileRoute {
     Standard,
     Compiler(CompilerId),
 }
+
+/// Stable identity for a source-level `*[T]`. Raw pointers are structural
+/// native values, not nominal classes and not entries in the primitive table.
+pub const fn raw_pointer_type_id(element: TypeId) -> TypeId {
+    let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
+    TypeId(0x0800_0000 | (hash & 0x03ff_ffff))
+}
+
+pub const fn is_raw_pointer_type(ty: TypeId) -> bool {
+    ty.0 & 0xfc00_0000 == 0x0800_0000
+}

@@ -10,6 +10,7 @@ pub enum TokenKind {
     String(String),
     FormattedString(String),
     At,
+    Ampersand,
     Colon,
     ColonEqual,
     QuestionEqual,

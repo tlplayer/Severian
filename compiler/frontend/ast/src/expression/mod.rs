@@ -21,6 +21,7 @@ pub enum UnaryOperator {
     Not,
     Borrow,
     BorrowMut,
+    AddressOf,
     Copy,
     Move,
 }

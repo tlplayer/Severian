@@ -480,6 +480,20 @@ mod tests {
     }
 
     #[test]
+    fn canonical_xxi_import_allows_c_declarations_without_a_provider() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "ffi.sev",
+            "import c from xxi\n@c(symbol = \"strlen\")\ndef c_strlen(text: borrowed[string]) -> usize\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let resolved = resolve(&module, &context.types, &target()).unwrap();
+        assert!(resolved.imports.is_empty());
+        assert_eq!(resolved.declarations.len(), 1);
+        assert_eq!(resolved.declarations[0].function.symbol.name.as_str(), "strlen");
+    }
+
+    #[test]
     fn rust_selects_the_rust_calling_convention() {
         let context = severian_bootstrap::load().unwrap();
         let source =

@@ -618,6 +618,36 @@ output = f"""module {{
     }
 
     #[test]
+    fn parses_raw_pointer_types_addresses_and_structured_throws() {
+        let source = SourceFile::virtual_source(
+            "pointers.sev",
+            "test:\n    values: list[u8] = [1]\n    unsafe:\n        pointer: *[u8] = &values[0]\n        assert(pointer[0] == 1)\n    throws(read()):\n        BoundsError(index):\n            assert(index == 1)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Test(test) = &module.items[0] else {
+            panic!("expected test")
+        };
+        let severian_ast::Statement::Unsafe { body, .. } = &test.body[1] else {
+            panic!("expected unsafe block")
+        };
+        let severian_ast::Statement::Binding(pointer) = &body[0] else {
+            panic!("expected pointer binding")
+        };
+        assert!(matches!(
+            pointer.annotation.as_ref().unwrap().named_parts(),
+            Some(("pointer", [_]))
+        ));
+        assert!(matches!(
+            pointer.value.kind,
+            severian_ast::ExpressionKind::Unary {
+                operator: severian_ast::UnaryOperator::AddressOf,
+                ..
+            }
+        ));
+        assert!(matches!(test.body[2], severian_ast::Statement::Try { .. }));
+    }
+
+    #[test]
     fn parses_profile_test_timing_contracts() {
         let source = SourceFile::virtual_source(
             "profile.sev",

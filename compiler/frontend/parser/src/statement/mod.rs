@@ -754,6 +754,11 @@ impl Parser<'_> {
                         .get(lookahead)
                         .is_some_and(|token| token.kind == TokenKind::Indent)
                     {
+                        if is_throws_call_statement(&statement) {
+                            statements.push(self.structured_throws_statement(statement)?);
+                            self.statement_separators();
+                            continue;
+                        }
                         let (checks, end) = self.indented_block("test step")?;
                         if let Statement::Expression(Expression {
                             kind: ExpressionKind::Fallback { value, fallback },
@@ -796,6 +801,108 @@ impl Parser<'_> {
             .span
             .end;
         Ok((statements, end))
+    }
+
+    fn structured_throws_statement(
+        &mut self,
+        statement: Statement,
+    ) -> Result<Statement, Diagnostic> {
+        let Statement::Expression(Expression {
+            kind:
+                ExpressionKind::Call {
+                    callee: _,
+                    arguments,
+                },
+            span,
+        }) = statement
+        else {
+            unreachable!("structured throws is selected from a throws call")
+        };
+        let [argument] = arguments.as_slice() else {
+            return Err(Diagnostic::new(
+                "E000217",
+                "`throws` requires exactly one expression",
+                Some(span),
+            ));
+        };
+
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after structured `throws`",
+        )?;
+        while self.take(&TokenKind::Newline).is_some() {}
+        self.expect(
+            &TokenKind::Indent,
+            "expected an indented error pattern after `throws`",
+        )?;
+        self.separators();
+
+        let pattern_start = self.peek().span;
+        let annotation = self.type_annotation()?;
+        self.expect(
+            &TokenKind::LeftParen,
+            "expected `(` after the expected error type",
+        )?;
+        let (field, field_span) = self.identifier("expected an error field binding")?;
+        self.expect(
+            &TokenKind::RightParen,
+            "expected `)` after the error field binding",
+        )?;
+        self.expect(
+            &TokenKind::Colon,
+            "expected `:` after the expected error pattern",
+        )?;
+        let (mut catch_body, catch_end) = self.indented_block("structured throws error")?;
+        self.separators();
+        self.expect(&TokenKind::Dedent, "expected end of structured `throws`")?;
+
+        let hidden = format!("__throws_error_{}", span.start);
+        catch_body.insert(
+            0,
+            Statement::Binding(severian_ast::Binding {
+                name: field.clone(),
+                annotation: None,
+                value: Expression {
+                    kind: ExpressionKind::Member {
+                        object: Box::new(Expression {
+                            kind: ExpressionKind::Name(hidden.clone()),
+                            span: field_span,
+                        }),
+                        name: field,
+                    },
+                    span: field_span,
+                },
+                mutable: false,
+                update: false,
+                preserve_error: false,
+                span: field_span,
+            }),
+        );
+
+        let failed_span = Span::new(span.source, span.start, argument.value.span.end);
+        let body = vec![
+            Statement::Expression(argument.value.clone()),
+            Statement::Assert {
+                condition: Expression {
+                    kind: ExpressionKind::Literal(Literal::Boolean(false)),
+                    span: failed_span,
+                },
+                message: Some(Expression {
+                    kind: ExpressionKind::Literal(Literal::String(
+                        "expected expression to throw".into(),
+                    )),
+                    span: failed_span,
+                }),
+                span: failed_span,
+            },
+        ];
+        Ok(Statement::Try {
+            body,
+            catch_binding: hidden,
+            catch_annotation: Some(annotation),
+            catch_body,
+            span: Span::new(pattern_start.source, span.start, catch_end),
+        })
     }
 
     fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
@@ -2469,6 +2576,7 @@ impl Parser<'_> {
             });
         }
         let operator = match &self.peek().kind {
+            TokenKind::Ampersand => Some(UnaryOperator::AddressOf),
             TokenKind::Plus => Some(UnaryOperator::Positive),
             TokenKind::Minus => Some(UnaryOperator::Negative),
             TokenKind::Bang => Some(UnaryOperator::Not),
@@ -3169,6 +3277,22 @@ impl Parser<'_> {
     }
 
     fn type_primary(&mut self) -> Result<TypeAnnotation, Diagnostic> {
+        if let Some(start) = self.take(&TokenKind::Star) {
+            self.expect(
+                &TokenKind::LeftBracket,
+                "expected `[` after `*` in pointer type",
+            )?;
+            let pointee = self.type_annotation()?;
+            let end = self
+                .expect(&TokenKind::RightBracket, "expected `]` after pointer type")?
+                .span
+                .end;
+            return Ok(TypeAnnotation::named(
+                "pointer",
+                vec![pointee],
+                Span::new(start.span.source, start.span.start, end),
+            ));
+        }
         if self.at_identifier("borrow") || self.at_identifier("move") {
             let start = self.next().span;
             if self.at_identifier("mut") {
@@ -3532,6 +3656,16 @@ fn is_comparison(operator: BinaryOperator) -> bool {
             | BinaryOperator::LessEqual
             | BinaryOperator::Greater
             | BinaryOperator::GreaterEqual
+    )
+}
+
+fn is_throws_call_statement(statement: &Statement) -> bool {
+    matches!(
+        statement,
+        Statement::Expression(Expression {
+            kind: ExpressionKind::Call { callee, .. },
+            ..
+        }) if matches!(callee.kind, ExpressionKind::Name(ref name) if name == "throws")
     )
 }
 

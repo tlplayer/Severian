@@ -102,6 +102,12 @@ void __sev_list_push_i64(void *storage, int64_t value) {
     list->values[list->length++] = (uintptr_t)value;
 }
 
+void __sev_list_push_u8(void *storage, uint8_t value) {
+    sev_list *list = storage;
+    sev_list_reserve(list);
+    list->values[list->length++] = (uintptr_t)value;
+}
+
 void __sev_list_push_ptr(void *storage, const char *value) {
     sev_list *list = storage;
     sev_list_reserve(list);
@@ -116,6 +122,11 @@ void __sev_list_push_bool(void *storage, _Bool value) {
 
 void *__sev_list_append_i64(void *storage, int64_t value) {
     __sev_list_push_i64(storage, value);
+    return storage;
+}
+
+void *__sev_list_append_u8(void *storage, uint8_t value) {
+    __sev_list_push_u8(storage, value);
     return storage;
 }
 
@@ -508,6 +519,25 @@ int64_t __sev_list_index_i64(void *storage, int64_t index) {
     return __sev_list_get_i64(storage, index);
 }
 
+uint8_t __sev_list_index_u8(void *storage, int64_t index) {
+    return (uint8_t)__sev_list_get_i64(storage, index);
+}
+
+void *__sev_list_address(void *storage, int64_t index) {
+    sev_list *list = storage;
+    if (index < 0) index += (int64_t)list->length;
+    if (index < 0 || (size_t)index >= list->length) return NULL;
+    return list->values + index;
+}
+
+uint8_t __sev_pointer_index_u8(void *pointer, int64_t index) {
+    return (uint8_t)((uintptr_t *)pointer)[index];
+}
+
+void __sev_pointer_set_u8(void *pointer, int64_t index, uint8_t value) {
+    ((uintptr_t *)pointer)[index] = (uintptr_t)value;
+}
+
 const char *__sev_list_index_ptr(void *storage, int64_t index) {
     return __sev_list_get_ptr(storage, index);
 }
@@ -580,6 +610,10 @@ void __sev_list_set_i64(void *storage, int64_t index, int64_t value) {
     if (index < 0) index += (int64_t)list->length;
     if (index < 0 || (size_t)index >= list->length) return;
     list->values[index] = (uintptr_t)value;
+}
+
+void __sev_list_set_u8(void *storage, int64_t index, uint8_t value) {
+    __sev_list_set_i64(storage, index, (int64_t)value);
 }
 
 void __sev_list_set_ptr(void *storage, int64_t index, const char *value) {

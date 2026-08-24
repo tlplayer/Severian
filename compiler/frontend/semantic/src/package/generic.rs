@@ -360,6 +360,7 @@ fn validate_generic_expression(
                     severian_ast::UnaryOperator::Not => severian_universal::UnaryOperator::Not,
                     severian_ast::UnaryOperator::Borrow
                     | severian_ast::UnaryOperator::BorrowMut
+                    | severian_ast::UnaryOperator::AddressOf
                     | severian_ast::UnaryOperator::Copy
                     | severian_ast::UnaryOperator::Move => return Ok(parameter.clone().into()),
                 };

@@ -259,6 +259,9 @@ fn source_import(
     import: &ImportDeclaration,
     packages: &PackageGraph,
 ) -> Result<Option<(PathBuf, PackageId)>, Diagnostic> {
+    if import.source.as_deref() == Some("xxi") {
+        return Ok(None);
+    }
     if let Some(package) = &import.source {
         return package_source(importer_package, import, package, packages).map(Some);
     }
@@ -389,6 +392,16 @@ mod tests {
         std::fs::write(root.join("root.sev"), "import io\n").unwrap();
         let error = resolve(&root.join("root.sev")).unwrap_err();
         assert_eq!(error.code, "E000124");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn xxi_interface_imports_are_not_package_dependencies() {
+        let root = temporary();
+        std::fs::write(root.join("root.sev"), "import c from xxi\n").unwrap();
+        let graph = resolve(&root.join("root.sev")).unwrap();
+        assert_eq!(graph.modules.len(), 1);
+        assert!(graph.modules[0].imports.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 

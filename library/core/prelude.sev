@@ -5,3 +5,10 @@ import panic from io
 import size from size
 import string from text
 import type from text
+
+
+class BoundsError: Error
+    index: int
+
+    def BoundsError(index_value: int):
+        index := index_value

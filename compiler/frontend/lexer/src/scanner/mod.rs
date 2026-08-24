@@ -77,6 +77,7 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
                 TokenKind::Newline
             }
             b'@' => one(&mut cursor, TokenKind::At),
+            b'&' => one(&mut cursor, TokenKind::Ampersand),
             b',' => one(&mut cursor, TokenKind::Comma),
             b'.' if bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit) => {
                 cursor += 1;
