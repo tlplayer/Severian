@@ -27,8 +27,27 @@ pub struct MatchCase {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopGuard {
+    pub condition: Expression,
+    pub action: LoopGuardAction,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopGuardAction {
+    Break,
+    Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Binding(Binding),
+    Destructure {
+        names: Vec<String>,
+        value: Expression,
+        mutable: bool,
+        span: Span,
+    },
     FieldAssignment {
         object: Expression,
         field: String,
@@ -75,6 +94,7 @@ pub enum Statement {
     While {
         condition: Expression,
         initializer: Option<Binding>,
+        guards: Vec<LoopGuard>,
         body: Vec<Statement>,
         span: Span,
     },

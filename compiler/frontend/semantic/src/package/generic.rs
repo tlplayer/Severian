@@ -59,6 +59,12 @@ fn validate_generic_statements(
                     names.insert(binding.name.clone(), parameter);
                 }
             }
+            severian_ast::Statement::Destructure { names: bound, value, .. } => {
+                validate_generic_expression(value, names, function, index, types)?;
+                for name in bound {
+                    names.remove(name);
+                }
+            }
             severian_ast::Statement::FieldAssignment { object, value, .. } => {
                 validate_generic_expression(object, names, function, index, types)?;
                 validate_generic_expression(value, names, function, index, types)?;
@@ -142,6 +148,7 @@ fn validate_generic_statements(
             severian_ast::Statement::While {
                 condition,
                 initializer,
+                guards,
                 body,
                 ..
             } => {
@@ -157,6 +164,15 @@ fn validate_generic_statements(
                 }
                 validate_generic_expression(condition, &loop_names, function, index, types)?;
                 validate_generic_statements(body, &mut loop_names, function, index, types)?;
+                for guard in guards {
+                    validate_generic_expression(
+                        &guard.condition,
+                        &loop_names,
+                        function,
+                        index,
+                        types,
+                    )?;
+                }
             }
             severian_ast::Statement::For { iterable, body, .. } => {
                 validate_generic_expression(iterable, names, function, index, types)?;
@@ -804,6 +820,19 @@ fn visit_statements_for_specializations(
                     names.insert(binding.name.clone(), ty);
                 }
             }
+            severian_ast::Statement::Destructure { names: bound, value, .. } => {
+                visit_expression_for_specializations(
+                    module,
+                    value,
+                    None,
+                    names,
+                    index,
+                    specializations,
+                )?;
+                for name in bound {
+                    names.remove(name);
+                }
+            }
             severian_ast::Statement::FieldAssignment { object, value, .. } => {
                 visit_expression_for_specializations(
                     module,
@@ -959,6 +988,7 @@ fn visit_statements_for_specializations(
             severian_ast::Statement::While {
                 condition,
                 initializer,
+                guards,
                 body,
                 ..
             } => {
@@ -980,6 +1010,16 @@ fn visit_statements_for_specializations(
                     index,
                     specializations,
                 )?;
+                for guard in guards {
+                    visit_expression_for_specializations(
+                        module,
+                        &guard.condition,
+                        Some("bool"),
+                        names,
+                        index,
+                        specializations,
+                    )?;
+                }
                 visit_statements_for_specializations(
                     module,
                     body,

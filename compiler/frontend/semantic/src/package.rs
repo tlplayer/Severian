@@ -145,11 +145,7 @@ pub fn analyze_package_with_context(
     validate_generic_bodies(module_graph, &index, &universal.types)?;
     let specializations = collect_generic_specializations(module_graph, &index, &universal.types)?;
     let package_classes = collect_package_classes(module_graph);
-    let package_lists = collect_package_lists(
-        module_graph,
-        &universal.types,
-        u32::try_from(package_classes.len()).unwrap_or(u32::MAX),
-    );
+    let package_lists = collect_package_lists(module_graph, &universal.types);
 
     let mut next_binding = 0u32;
     let mut hir = Program::default();
@@ -519,7 +515,7 @@ fn resolve_package_type(
         return Ok(crate::tuple_type_id(&elements));
     }
     if let Some(("list", [element])) = annotation.named_parts() {
-        let element = crate::resolve_type_annotation(types, element)?;
+        let element = resolve_package_type(types, element, module, classes, lists)?;
         if let Some(list) = lists.iter().find(|list| list.element == element) {
             return Ok(list.ty);
         }
@@ -581,7 +577,6 @@ fn resolve_package_union_members(
 fn collect_package_lists(
     module_graph: &ModuleGraph,
     types: &severian_universal::TypeContext,
-    class_count: u32,
 ) -> Vec<PackageList> {
     let mut uses = BTreeMap::<TypeId, ModuleId>::new();
     for module in &module_graph.modules {
@@ -617,14 +612,9 @@ fn collect_package_lists(
         }
     }
     uses.into_iter()
-        .enumerate()
-        .map(|(ordinal, (element, module))| PackageList {
+        .map(|(element, module)| PackageList {
             module,
-            ty: TypeId(
-                u32::MAX
-                    .saturating_sub(class_count)
-                    .saturating_sub(ordinal as u32),
-            ),
+            ty: crate::list_type_id(element),
             element,
         })
         .collect()
@@ -655,14 +645,31 @@ fn collect_list_elements(
     let Some((name, arguments)) = annotation.named_parts() else {
         return;
     };
-    if name == "list" && arguments.len() == 1 {
-        if let Ok(element) = crate::resolve_type_annotation(types, &arguments[0]) {
-            output.entry(element).or_insert(module);
-        }
-    }
     for argument in arguments {
         collect_list_elements(argument, types, module, output);
     }
+    if name == "list" && arguments.len() == 1 {
+        if let Ok(element) = resolve_collection_type(types, &arguments[0]) {
+            output.entry(element).or_insert(module);
+        }
+    }
+}
+
+fn resolve_collection_type(
+    types: &severian_universal::TypeContext,
+    annotation: &TypeAnnotation,
+) -> Result<TypeId, Diagnostic> {
+    if let Some(("list", [element])) = annotation.named_parts() {
+        return Ok(crate::list_type_id(resolve_collection_type(types, element)?));
+    }
+    if let Some(("tuple", elements)) = annotation.named_parts() {
+        let elements = elements
+            .iter()
+            .map(|element| resolve_collection_type(types, element))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(crate::tuple_type_id(&elements));
+    }
+    crate::resolve_type_annotation(types, annotation)
 }
 
 #[derive(Debug)]

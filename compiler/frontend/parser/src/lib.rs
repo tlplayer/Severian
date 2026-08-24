@@ -818,4 +818,29 @@ output = f"""module {{
         assert_eq!(error.code, "E000110");
         assert!(error.message.contains("function name"));
     }
+
+    #[test]
+    fn parses_deferred_loop_guards_and_tuple_destructuring() {
+        let source = SourceFile::virtual_source(
+            "guarded-loop.sev",
+            "def drain(queue: list[tuple[int, int]]):\n    while queue with\n    {\n        defer 0 <= i < 10 -> continue,\n        defer 0 <= j < 10 -> break,\n    }:\n        i, j := queue.pop()\n        print(i, j)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        let severian_ast::Statement::While { guards, body, .. } =
+            &function.body.as_ref().unwrap()[0]
+        else {
+            panic!("expected guarded while")
+        };
+        assert_eq!(guards.len(), 2);
+        assert_eq!(guards[0].action, severian_ast::LoopGuardAction::Continue);
+        assert_eq!(guards[1].action, severian_ast::LoopGuardAction::Break);
+        assert!(matches!(
+            &body[0],
+            severian_ast::Statement::Destructure { names, mutable: true, .. }
+                if names == &["i", "j"]
+        ));
+    }
 }

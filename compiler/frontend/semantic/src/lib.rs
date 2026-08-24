@@ -158,6 +158,7 @@ pub(crate) fn analyze_with_package_functions(
         list_elements: BTreeMap::new(),
         map_types: BTreeMap::new(),
         map_elements: BTreeMap::new(),
+        set_type: None,
         channel_types: BTreeMap::new(),
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
@@ -165,6 +166,7 @@ pub(crate) fn analyze_with_package_functions(
         function_types: BTreeMap::new(),
         union_types: BTreeMap::new(),
         fallible_types: BTreeMap::new(),
+        optional_types: BTreeSet::new(),
         callable_bindings: BTreeMap::new(),
         callable_substitutions: BTreeMap::new(),
         error_types: BTreeSet::new(),
@@ -736,6 +738,7 @@ struct Analyzer<'a> {
     list_elements: BTreeMap<TypeId, TypeId>,
     map_types: BTreeMap<(TypeId, TypeId), TypeId>,
     map_elements: BTreeMap<TypeId, (TypeId, TypeId)>,
+    set_type: Option<TypeId>,
     channel_types: BTreeMap<TypeId, TypeId>,
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
@@ -743,6 +746,7 @@ struct Analyzer<'a> {
     function_types: BTreeMap<TypeId, FunctionType>,
     union_types: BTreeMap<TypeId, Vec<TypeId>>,
     fallible_types: BTreeMap<TypeId, FallibleType>,
+    optional_types: BTreeSet<TypeId>,
     callable_bindings: BTreeMap<severian_hir::VariableId, CallableValue>,
     callable_substitutions: BTreeMap<String, ResolvedCallable>,
     error_types: BTreeSet<TypeId>,
@@ -1159,6 +1163,9 @@ impl Analyzer<'_> {
             return Ok(self.instantiate_function_type(&parameters, result));
         }
         if let severian_ast::TypeAnnotationKind::Union(members) = &annotation.kind {
+            let optional = members
+                .iter()
+                .any(|member| matches!(member.simple_name(), Some("None" | "absent")));
             let mut success = Vec::new();
             let mut errors = Vec::new();
             for member in members {
@@ -1181,7 +1188,12 @@ impl Analyzer<'_> {
             }
             if errors.is_empty() {
                 return match success.as_slice() {
-                    [success] => Ok(*success),
+                    [success] => {
+                        if optional {
+                            self.optional_types.insert(*success);
+                        }
+                        Ok(*success)
+                    }
                     [_, _, ..] => Ok(self.instantiate_union_type(&success)),
                     [] => Err(Diagnostic::new(
                         "E000204",
@@ -1197,7 +1209,7 @@ impl Analyzer<'_> {
             ));
         }
         if let Some(("list", [element])) = annotation.named_parts() {
-            let element = resolve_type_annotation(self.types, element)?;
+            let element = self.resolve_source_type(element)?;
             if let Some(list) = self.list_types.get(&element) {
                 return Ok(*list);
             }
@@ -1205,13 +1217,13 @@ impl Analyzer<'_> {
         if let Some(("tuple", elements)) = annotation.named_parts() {
             let elements = elements
                 .iter()
-                .map(|element| resolve_type_annotation(self.types, element))
+                .map(|element| self.resolve_source_type(element))
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(self.instantiate_tuple_type(&elements));
         }
         if let Some(("map", [key, value])) = annotation.named_parts() {
-            let key = resolve_type_annotation(self.types, key)?;
-            let value = resolve_type_annotation(self.types, value)?;
+            let key = self.resolve_source_type(key)?;
+            let value = self.resolve_source_type(value)?;
             return Ok(self.instantiate_map_type(key, value));
         }
         if let Some(name) = annotation.simple_name() {
@@ -1383,6 +1395,111 @@ impl Analyzer<'_> {
             span: ast_binding.span,
         });
         Ok(id)
+    }
+
+    fn lower_destructure_value(
+        &mut self,
+        names: &[String],
+        value: Expression,
+        mutable: bool,
+        span: severian_source::Span,
+        bindings: &mut Vec<Binding>,
+    ) -> Result<Statement, Diagnostic> {
+        let elements = self
+            .tuple_elements
+            .get(&value.type_id)
+            .cloned()
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "E000205",
+                    "a destructuring binding requires a tuple value",
+                    Some(span),
+                )
+            })?;
+        if elements.len() != names.len() {
+            return Err(Diagnostic::new(
+                "E000205",
+                format!(
+                    "tuple has {} element(s), but the binding pattern has {} name(s)",
+                    elements.len(),
+                    names.len()
+                ),
+                Some(span),
+            ));
+        }
+
+        let tuple_type = value.type_id;
+        let temporary = self.new_binding_id();
+        bindings.push(Binding {
+            id: temporary,
+            variable: severian_hir::VariableId(temporary.0),
+            type_id: value.type_id,
+            value,
+            mutable: false,
+            preserve_error: false,
+            span,
+        });
+        let mut statements = vec![Statement::Binding(temporary)];
+        for (index, (name, element)) in names.iter().zip(elements).enumerate() {
+            let existing = self.names.get(name).copied();
+            let (variable, is_update) = if let Some((_, variable, known_type)) = existing {
+                if !self.mutable_variables.contains(&variable) {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("cannot assign to immutable binding `{name}`"),
+                        Some(span),
+                    ));
+                }
+                if !self.types.assignable(element, known_type) {
+                    return Err(Diagnostic::new(
+                        "E000205",
+                        format!("tuple element is not assignable to binding `{name}`"),
+                        Some(span),
+                    ));
+                }
+                (variable, true)
+            } else {
+                if !self.declarations.insert(name.clone()) {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("binding `{name}` is already defined"),
+                        Some(span),
+                    ));
+                }
+                let variable = severian_hir::VariableId(self.next_binding);
+                if mutable {
+                    self.mutable_variables.insert(variable);
+                }
+                (variable, false)
+            };
+            let id = self.new_binding_id();
+            let field = Expression {
+                id: self.next_id(),
+                type_id: element,
+                kind: ExpressionKind::Field {
+                    object: Box::new(Expression {
+                        id: self.next_id(),
+                        type_id: tuple_type,
+                        kind: ExpressionKind::Binding(temporary),
+                        span,
+                    }),
+                    index: index as u32,
+                },
+                span,
+            };
+            bindings.push(Binding {
+                id,
+                variable,
+                type_id: element,
+                value: field,
+                mutable: mutable || is_update,
+                preserve_error: false,
+                span,
+            });
+            self.names.insert(name.clone(), (id, variable, element));
+            statements.push(Statement::Binding(id));
+        }
+        Ok(Statement::Sequence(Block { statements }))
     }
 
     fn lambda_binding_value(
@@ -1619,6 +1736,7 @@ impl Analyzer<'_> {
             AstStatement::While {
                 condition,
                 initializer,
+                guards,
                 body,
                 span,
             } => {
@@ -1629,12 +1747,119 @@ impl Analyzer<'_> {
                         .push(Statement::Binding(self.binding(initializer, bindings)?));
                 }
                 let condition = self.condition_expression(condition)?;
-                let outer_names = self.names.clone();
-                let outer_declarations = self.declarations.clone();
+                let mut guarded_prefix = Block::default();
+                let mut guarded_outer_names = None;
+                let mut guarded_outer_declarations = None;
+                if !guards.is_empty() {
+                    let Some(AstStatement::Destructure {
+                        names,
+                        value,
+                        mutable: _,
+                        span: binding_span,
+                    }) = body.first()
+                    else {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            "a guarded loop must begin by destructuring the value used by its guards",
+                            Some(*span),
+                        ));
+                    };
+                    let resolved = self.expression(value, None)?;
+                    let elements = self
+                        .tuple_elements
+                        .get(&resolved.type_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            Diagnostic::new(
+                                "E000205",
+                                "a destructuring binding requires a tuple value",
+                                Some(value.span),
+                            )
+                        })?;
+                    if elements.len() != names.len() {
+                        return Err(Diagnostic::new(
+                            "E000205",
+                            format!(
+                                "tuple has {} element(s), but the binding pattern has {} name(s)",
+                                elements.len(),
+                                names.len()
+                            ),
+                            Some(*binding_span),
+                        ));
+                    }
+                    for (name, element) in names.iter().zip(elements) {
+                        if !self.declarations.insert(name.clone()) {
+                            return Err(Diagnostic::new(
+                                "E000203",
+                                format!("binding `{name}` is already defined"),
+                                Some(*binding_span),
+                            ));
+                        }
+                        let id = self.new_binding_id();
+                        let variable = severian_hir::VariableId(id.0);
+                        self.mutable_variables.insert(variable);
+                        self.names.insert(name.clone(), (id, variable, element));
+                        bindings.push(Binding {
+                            id,
+                            variable,
+                            type_id: element,
+                            value: self.default_expression(element, *binding_span)?,
+                            mutable: true,
+                            preserve_error: false,
+                            span: *binding_span,
+                        });
+                        sequence.statements.push(Statement::Binding(id));
+                    }
+                    guarded_outer_names = Some(self.names.clone());
+                    guarded_outer_declarations = Some(self.declarations.clone());
+                    guarded_prefix.statements.push(self.lower_destructure_value(
+                        names,
+                        resolved,
+                        true,
+                        *binding_span,
+                        bindings,
+                    )?);
+                    for guard in guards {
+                        let satisfied = self.condition_expression(&guard.condition)?;
+                        let failed = Expression {
+                            id: self.next_id(),
+                            type_id: satisfied.type_id,
+                            kind: ExpressionKind::Unary {
+                                operator: UnaryOperator::Not,
+                                operand: Box::new(satisfied),
+                            },
+                            span: guard.span,
+                        };
+                        let action = match guard.action {
+                            severian_ast::LoopGuardAction::Continue => {
+                                Statement::Continue { span: guard.span }
+                            }
+                            severian_ast::LoopGuardAction::Break => {
+                                Statement::Break { span: guard.span }
+                            }
+                        };
+                        guarded_prefix.statements.push(Statement::If {
+                            condition: failed,
+                            then_block: Block {
+                                statements: vec![action],
+                            },
+                            else_block: Block::default(),
+                        });
+                    }
+                }
+                let outer_names = guarded_outer_names.unwrap_or_else(|| self.names.clone());
+                let outer_declarations = guarded_outer_declarations
+                    .unwrap_or_else(|| self.declarations.clone());
                 self.loop_depth += 1;
-                let lowered = self.block(body, bindings, result_type);
+                let lowered = self.block(
+                    if guards.is_empty() { body } else { &body[1..] },
+                    bindings,
+                    result_type,
+                );
                 self.loop_depth -= 1;
-                let body = lowered?;
+                let mut body = lowered?;
+                guarded_prefix.statements.append(&mut body.statements);
+                let body = guarded_prefix;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
                 sequence.statements.push(Statement::While {
@@ -1914,6 +2139,15 @@ impl Analyzer<'_> {
             }
             AstStatement::Binding(binding) => {
                 Ok(Statement::Binding(self.binding(binding, bindings)?))
+            }
+            AstStatement::Destructure {
+                names,
+                value,
+                mutable,
+                span,
+            } => {
+                let value = self.expression(value, None)?;
+                self.lower_destructure_value(names, value, *mutable, *span, bindings)
             }
             AstStatement::FieldAssignment {
                 object,
@@ -2536,6 +2770,32 @@ impl Analyzer<'_> {
                 condition.span,
             ));
         }
+        if self.list_elements.contains_key(&value.type_id) {
+            let storage = self.list_storage_expression(value, condition.span);
+            let storage_type = storage.type_id;
+            let usize_type = self
+                .types
+                .resolve_name("usize")
+                .expect("bootstrap defines usize");
+            let length = self.runtime_call(
+                "__sev_list_len",
+                &[storage_type],
+                usize_type,
+                vec![storage],
+                condition.span,
+            );
+            let zero = self.integer_expression("0", usize_type, condition.span);
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id: boolean,
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::NotEqual,
+                    left: Box::new(length),
+                    right: Box::new(zero),
+                },
+                span: condition.span,
+            });
+        }
         self.coerce(value, boolean, false)
     }
 
@@ -3087,6 +3347,11 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Literal(value) => {
+                if matches!(value, AstLiteral::None)
+                    && expected.is_some_and(|expected| self.optional_types.contains(&expected))
+                {
+                    return self.default_expression(expected.unwrap(), ast.span);
+                }
                 if let AstLiteral::Measured { magnitude, suffix } = value {
                     let (type_name, value) = measured_literal(magnitude, suffix, ast.span)?;
                     let type_id = self.types.resolve_name(type_name).ok_or_else(|| {
@@ -3582,6 +3847,79 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if matches!(&callee.kind, AstExpressionKind::Name(name) if name == "set")
+                    && arguments.is_empty()
+                {
+                    return self.empty_set_expression(ast.span);
+                }
+                if let AstExpressionKind::Member { object, name } = &callee.kind {
+                    if matches!(name.as_str(), "add" | "append")
+                        && arguments.len() == 1
+                        && arguments[0].name.is_none()
+                    {
+                        let collection = self.expression(object, None)?;
+                        if self.set_type == Some(collection.type_id) && name == "add" {
+                            let value = self.expression(&arguments[0].value, None)?;
+                            let suffix = self.list_runtime_suffix(value.type_id, ast.span)?;
+                            let storage =
+                                self.collection_storage_expression(collection, 0, ast.span);
+                            let storage_type = storage.type_id;
+                            let unit = self
+                                .types
+                                .resolve_name("unit")
+                                .expect("bootstrap defines unit");
+                            return Ok(self.runtime_call(
+                                &format!("__sev_set_add_{suffix}"),
+                                &[storage_type, value.type_id],
+                                unit,
+                                vec![storage, value],
+                                ast.span,
+                            ));
+                        }
+                        if let Some(element) =
+                            self.list_elements.get(&collection.type_id).copied()
+                        {
+                            let value = self.expression(&arguments[0].value, Some(element))?;
+                            let suffix = self.list_runtime_suffix(element, ast.span)?;
+                            let storage = self.list_storage_expression(collection, ast.span);
+                            let storage_type = storage.type_id;
+                            let unit = self
+                                .types
+                                .resolve_name("unit")
+                                .expect("bootstrap defines unit");
+                            return Ok(self.runtime_call(
+                                &format!("__sev_list_push_{suffix}"),
+                                &[storage_type, element],
+                                unit,
+                                vec![storage, value],
+                                ast.span,
+                            ));
+                        }
+                    }
+                    if name == "pop" && arguments.is_empty() {
+                        let list = self.expression(object, None)?;
+                        if let Some(element) = self.list_elements.get(&list.type_id).copied() {
+                            if expected.is_some_and(|expected| {
+                                !self.types.assignable(element, expected)
+                            }) {
+                                return Err(semantic_error(
+                                    "list element does not satisfy the expected type".into(),
+                                    ast.span,
+                                ));
+                            }
+                            let storage = self.list_storage_expression(list, ast.span);
+                            let storage_type = storage.type_id;
+                            let suffix = self.list_runtime_suffix(element, ast.span)?;
+                            return Ok(self.runtime_call(
+                                &format!("__sev_list_pop_{suffix}"),
+                                &[storage_type],
+                                element,
+                                vec![storage],
+                                ast.span,
+                            ));
+                        }
+                    }
+                }
                 if let Some(call) = self.callable_call(callee, arguments, expected, ast.span)? {
                     return Ok(call);
                 }
@@ -4220,6 +4558,52 @@ impl Analyzer<'_> {
                 left,
                 right,
             } => {
+                if matches!(
+                    operator,
+                    AstBinaryOperator::Less
+                        | AstBinaryOperator::LessEqual
+                        | AstBinaryOperator::Greater
+                        | AstBinaryOperator::GreaterEqual
+                ) {
+                    if let AstExpressionKind::Binary {
+                        operator: first_operator,
+                        left: first_left,
+                        right: middle,
+                    } = &left.kind
+                    {
+                        if matches!(
+                            first_operator,
+                            AstBinaryOperator::Less
+                                | AstBinaryOperator::LessEqual
+                                | AstBinaryOperator::Greater
+                                | AstBinaryOperator::GreaterEqual
+                        ) {
+                            let chained = AstExpression {
+                                kind: AstExpressionKind::Binary {
+                                    operator: AstBinaryOperator::And,
+                                    left: Box::new(AstExpression {
+                                        kind: AstExpressionKind::Binary {
+                                            operator: *first_operator,
+                                            left: first_left.clone(),
+                                            right: middle.clone(),
+                                        },
+                                        span: left.span,
+                                    }),
+                                    right: Box::new(AstExpression {
+                                        kind: AstExpressionKind::Binary {
+                                            operator: *operator,
+                                            left: middle.clone(),
+                                            right: right.clone(),
+                                        },
+                                        span: ast.span,
+                                    }),
+                                },
+                                span: ast.span,
+                            };
+                            return self.expression(&chained, expected);
+                        }
+                    }
+                }
                 let operator_spelling = ast_binary_spelling(*operator);
                 if *operator == AstBinaryOperator::Pipe
                     || self
@@ -4315,12 +4699,30 @@ impl Analyzer<'_> {
                     }
                 }
                 if *operator == AstBinaryOperator::Contains {
+                    let haystack = self.expression(right, None)?;
+                    if self.set_type == Some(haystack.type_id) {
+                        let needle = self.expression(left, None)?;
+                        let suffix = self.list_runtime_suffix(needle.type_id, ast.span)?;
+                        let storage = self.collection_storage_expression(haystack, 0, ast.span);
+                        let storage_type = storage.type_id;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(self.runtime_call(
+                            &format!("__sev_set_contains_{suffix}"),
+                            &[storage_type, needle.type_id],
+                            boolean,
+                            vec![storage, needle],
+                            ast.span,
+                        ));
+                    }
                     let string = self
                         .types
                         .resolve_name("string")
                         .expect("bootstrap defines string");
                     let needle = self.expression(left, Some(string))?;
-                    let haystack = self.expression(right, Some(string))?;
+                    let haystack = self.coerce(haystack, string, false)?;
                     let boolean = self
                         .types
                         .resolve_name("bool")
@@ -4462,6 +4864,74 @@ impl Analyzer<'_> {
                             }
                             return Ok(successful_equal);
                         }
+                        if let Some(elements) =
+                            self.tuple_elements.get(&resolved_left.type_id).cloned()
+                        {
+                            let resolved_right =
+                                self.expression(right, Some(resolved_left.type_id))?;
+                            let boolean = self
+                                .types
+                                .resolve_name("bool")
+                                .expect("bootstrap defines bool");
+                            let mut comparison = Expression {
+                                id: self.next_id(),
+                                type_id: boolean,
+                                kind: ExpressionKind::Literal(LiteralValue::Boolean(true)),
+                                span: ast.span,
+                            };
+                            for (index, element) in elements.into_iter().enumerate() {
+                                let left_field = Expression {
+                                    id: self.next_id(),
+                                    type_id: element,
+                                    kind: ExpressionKind::Field {
+                                        object: Box::new(resolved_left.clone()),
+                                        index: index as u32,
+                                    },
+                                    span: ast.span,
+                                };
+                                let right_field = Expression {
+                                    id: self.next_id(),
+                                    type_id: element,
+                                    kind: ExpressionKind::Field {
+                                        object: Box::new(resolved_right.clone()),
+                                        index: index as u32,
+                                    },
+                                    span: ast.span,
+                                };
+                                let equal = Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Binary {
+                                        operator: BinaryOperator::Equal,
+                                        left: Box::new(left_field),
+                                        right: Box::new(right_field),
+                                    },
+                                    span: ast.span,
+                                };
+                                comparison = Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Binary {
+                                        operator: BinaryOperator::And,
+                                        left: Box::new(comparison),
+                                        right: Box::new(equal),
+                                    },
+                                    span: ast.span,
+                                };
+                            }
+                            if *operator == AstBinaryOperator::NotEqual {
+                                return Ok(Expression {
+                                    id: self.next_id(),
+                                    type_id: boolean,
+                                    kind: ExpressionKind::Unary {
+                                        operator: UnaryOperator::Not,
+                                        operand: Box::new(comparison),
+                                    },
+                                    span: ast.span,
+                                });
+                            }
+                            return Ok(comparison);
+                        }
                     }
                     if let Some(element) = self.list_elements.get(&resolved_left.type_id).copied() {
                         let list_type = resolved_left.type_id;
@@ -4513,6 +4983,36 @@ impl Analyzer<'_> {
                                 operator: BinaryOperator::Equal,
                                 left: Box::new(resolved_left),
                                 right: Box::new(resolved_right),
+                            },
+                            span: ast.span,
+                        });
+                    }
+                }
+                if matches!(
+                    operator,
+                    AstBinaryOperator::Less
+                        | AstBinaryOperator::LessEqual
+                        | AstBinaryOperator::Greater
+                        | AstBinaryOperator::GreaterEqual
+                ) {
+                    let left_value = self.expression(left, None)?;
+                    let right_value = self.expression(right, None)?;
+                    if left_value.type_id != right_value.type_id
+                        && self.numeric_primitive(left_value.type_id)
+                        && self.numeric_primitive(right_value.type_id)
+                    {
+                        let right_value = self.coerce(right_value, left_value.type_id, true)?;
+                        let boolean = self
+                            .types
+                            .resolve_name("bool")
+                            .expect("bootstrap defines bool");
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: boolean,
+                            kind: ExpressionKind::Binary {
+                                operator: universal_binary(*operator),
+                                left: Box::new(left_value),
+                                right: Box::new(right_value),
                             },
                             span: ast.span,
                         });
@@ -5066,8 +5566,7 @@ impl Analyzer<'_> {
         if let Some(ty) = self.list_types.get(&element) {
             return *ty;
         }
-        let ty = TypeId(self.next_class_type);
-        self.next_class_type = self.next_class_type.saturating_sub(1);
+        let ty = list_type_id(element);
         let storage = self
             .types
             .resolve_name("string")
@@ -5502,6 +6001,38 @@ impl Analyzer<'_> {
             type_id: list_type,
             kind: ExpressionKind::Aggregate {
                 class: list_type,
+                fields: vec![storage],
+            },
+            span,
+        })
+    }
+
+    fn empty_set_expression(
+        &mut self,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let set_type = TypeId(0x07ff_fffe);
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        if self.set_type.is_none() {
+            self.set_type = Some(set_type);
+            self.lowered_classes.push(HirClassDeclaration {
+                id: set_type,
+                name: "set".into(),
+                fields: vec![HirClassFieldDeclaration {
+                    name: "storage".into(),
+                    ty: storage_type,
+                }],
+            });
+        }
+        let storage = self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: set_type,
+            kind: ExpressionKind::Aggregate {
+                class: set_type,
                 fields: vec![storage],
             },
             span,
@@ -5944,9 +6475,18 @@ impl Analyzer<'_> {
         match name {
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
             Some("string") => Ok("ptr"),
+            _ if self.list_elements.contains_key(&element) => Ok("list"),
+            _ if self.tuple_elements.get(&element).is_some_and(|elements| {
+                elements.len() == 2
+                    && elements.iter().all(|element| {
+                        self.types.definition(*element).is_some_and(|definition| {
+                            matches!(definition.name.as_str(), "int" | "i64" | "usize")
+                        })
+                    })
+            }) => Ok("pair_i64"),
             _ => Err(Diagnostic::new(
                 "E000211",
-                "native list lowering currently supports `int`, `i64`, `usize`, and `string` elements",
+                "native list lowering does not yet support this element representation",
                 Some(span),
             )),
         }
@@ -7814,6 +8354,11 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
     TypeId(0xc000_0000 | (hash & 0x3fff_ffff))
 }
 
+pub(crate) fn list_type_id(element: TypeId) -> TypeId {
+    let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
+    TypeId(0x0800_0000 | (hash & 0x07ff_ffff))
+}
+
 pub(crate) fn map_type_id(key: TypeId, value: TypeId) -> TypeId {
     // Structural maps need the same identity during package signature
     // collection and body analysis. Keep their stable IDs in a range separate
@@ -9037,6 +9582,7 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
                 ControlFlow::Returns
             }
             AstStatement::Binding(_)
+            | AstStatement::Destructure { .. }
             | AstStatement::FieldAssignment { .. }
             | AstStatement::Expression(_)
             | AstStatement::Defer { .. }

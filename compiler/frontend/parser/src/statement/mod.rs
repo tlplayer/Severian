@@ -2,7 +2,8 @@ use severian_ast::{
     BinaryOperator, Binding, CallArgument, ClassDeclaration, CompilerExpectation, CompilerTestCase,
     Decorator, DecoratorArgument, DecoratorValue, EnumDeclaration, EnumVariant, Expression,
     ExpressionKind, FunctionContract, FunctionDeclaration, FunctionParameter, GenericConstraint,
-    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, MatchCase, Module,
+    HookSpecification, ImportDeclaration, ImportSubject, Item, Literal, LoopGuard,
+    LoopGuardAction, MatchCase, Module,
     OperatorDeclaration, OperatorImplementation, OperatorParameter, OperatorSyntax,
     PropertyConstraint, PropertyDeclaration, Statement, TaskOwner, TestDeclaration,
     TraitDeclaration, TypeAnnotation, TypeAnnotationKind, TypeDeclaration, UnaryOperator,
@@ -182,6 +183,7 @@ impl Parser<'_> {
                         module.items.push(Item::Expression(expression))
                     }
                     Statement::Return { .. }
+                    | Statement::Destructure { .. }
                     | Statement::Defer { .. }
                     | Statement::FieldAssignment { .. }
                     | Statement::Assert { .. }
@@ -793,9 +795,16 @@ impl Parser<'_> {
         if self.at_identifier("while") {
             let start = self.next().span;
             let condition = self.expression(0)?;
+            let mut guards = Vec::new();
             let initializer = if self.at_identifier("with") {
                 self.next();
-                Some(self.binding()?)
+                while self.take(&TokenKind::Newline).is_some() {}
+                if self.at(&TokenKind::LeftBrace) {
+                    guards = self.loop_guards()?;
+                    None
+                } else {
+                    Some(self.binding()?)
+                }
             } else {
                 None
             };
@@ -804,6 +813,7 @@ impl Parser<'_> {
             return Ok(Statement::While {
                 condition,
                 initializer,
+                guards,
                 body,
                 span: Span::new(start.source, start.start, end),
             });
@@ -1707,6 +1717,57 @@ impl Parser<'_> {
         })
     }
 
+    fn loop_guards(&mut self) -> Result<Vec<LoopGuard>, Diagnostic> {
+        self.expect(&TokenKind::LeftBrace, "expected `{` after loop `with`")?;
+        let multiline = self.take(&TokenKind::Newline).is_some();
+        while self.take(&TokenKind::Newline).is_some() {}
+        if multiline {
+            self.expect(&TokenKind::Indent, "expected indented loop guards")?;
+            self.separators();
+        }
+        let mut guards = Vec::new();
+        while !self.at(&TokenKind::RightBrace)
+            && !self.at(&TokenKind::Dedent)
+            && !self.at(&TokenKind::Eof)
+        {
+            let start = self.peek().span;
+            if !self.at_identifier("defer") {
+                return Err(self.error("expected `defer` before loop guard"));
+            }
+            self.next();
+            let condition = self.expression(0)?;
+            self.expect(&TokenKind::Arrow, "expected `->` after loop guard")?;
+            let action_token = self.peek().clone();
+            let action = if self.at_identifier("continue") {
+                self.next();
+                LoopGuardAction::Continue
+            } else if self.at_identifier("break") {
+                self.next();
+                LoopGuardAction::Break
+            } else {
+                return Err(self.error("expected `continue` or `break` after loop guard"));
+            };
+            guards.push(LoopGuard {
+                condition,
+                action,
+                span: Span::new(start.source, start.start, action_token.span.end),
+            });
+            if self.take(&TokenKind::Comma).is_none()
+                && !self.at(&TokenKind::Newline)
+                && !self.at(&TokenKind::Dedent)
+                && !self.at(&TokenKind::RightBrace)
+            {
+                return Err(self.error("expected a comma or newline after loop guard"));
+            }
+            self.separators();
+        }
+        if multiline {
+            self.expect(&TokenKind::Dedent, "expected end of loop guards")?;
+        }
+        self.expect(&TokenKind::RightBrace, "expected `}` after loop guards")?;
+        Ok(guards)
+    }
+
     fn statement(&mut self) -> Result<Statement, Diagnostic> {
         let field_assignment = matches!(self.peek().kind, TokenKind::Identifier(_))
             && self
@@ -1776,6 +1837,26 @@ impl Parser<'_> {
                 span: Span::new(object_span.source, object_span.start, value.span.end),
                 value,
             })
+        } else if self.looks_like_destructuring_binding() {
+            let start = self.peek().span;
+            let mut names = Vec::new();
+            loop {
+                names.push(self.identifier("expected a binding name")?.0);
+                if self.take(&TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+            let mutable = self.take(&TokenKind::ColonEqual).is_some();
+            if !mutable {
+                self.expect(&TokenKind::Equal, "expected `=` or `:=` after binding pattern")?;
+            }
+            let value = self.expression(0)?;
+            Ok(Statement::Destructure {
+                names,
+                mutable,
+                span: Span::new(start.source, start.start, value.span.end),
+                value,
+            })
         } else if self.looks_like_binding() {
             Ok(Statement::Binding(self.binding()?))
         } else {
@@ -1830,6 +1911,34 @@ impl Parser<'_> {
                             | TokenKind::PercentEqual
                     )
                 }))
+    }
+
+    fn looks_like_destructuring_binding(&self) -> bool {
+        let mut cursor = self.cursor;
+        let mut names = 0;
+        loop {
+            if !self
+                .tokens
+                .get(cursor)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+            {
+                return false;
+            }
+            names += 1;
+            cursor += 1;
+            if !self
+                .tokens
+                .get(cursor)
+                .is_some_and(|token| token.kind == TokenKind::Comma)
+            {
+                break;
+            }
+            cursor += 1;
+        }
+        names > 1
+            && self.tokens.get(cursor).is_some_and(|token| {
+                matches!(token.kind, TokenKind::Equal | TokenKind::ColonEqual)
+            })
     }
 
     fn looks_like_prefix_typed_binding(&self) -> bool {
