@@ -66,6 +66,13 @@ void __sev_throw(const char *error) {
     exit(EXIT_FAILURE);
 }
 
+void __sev_panic(const char *message) {
+    fflush(stdout);
+    fprintf(stderr, "panic: %s\n", message == NULL ? "" : message);
+    fflush(stderr);
+    abort();
+}
+
 int64_t __sev_process_run(const char *command) {
     int status = system(command);
     if (status == -1) return -1;

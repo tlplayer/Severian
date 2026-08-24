@@ -1,6 +1,7 @@
 # The prelude only selects ordinary library declarations. System ownership and
 # foreign-provider details remain in the package that implements the function.
 import print from io
+import panic from io
 import size from size
 import string from text
 import type from text

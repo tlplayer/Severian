@@ -213,6 +213,27 @@ fn optional_fallback_and_throws_are_executable_test_control_flow() {
 }
 
 #[test]
+fn panic_tests_run_the_wrapped_function_in_an_isolated_process() {
+    let root = temporary("panic-wrapper");
+    let source = root.join("panic.sev");
+    fs::write(
+        &source,
+        "def safe(value: int) -> int:\n    if value <= 0:\n        panic(\"impossible\")\n    return value\n\ntest:\n    assert(safe(1) == 1)\n\ntest with integ:\n    throws(crash_wrapper -> error)\n    assert(error.message == \"compiler invariant violated\")\n\ndef crash():\n    panic(\"compiler invariant violated\")\n",
+    )
+    .unwrap();
+    let output = sev().args(["test"]).arg(&source).output().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("2 passed; 0 failed"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn fallible_error_subclasses_preserve_and_propagate_typed_results() {
     let root = temporary("typed-error-result");
     let source = root.join("typed-error-result.sev");

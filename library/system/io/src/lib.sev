@@ -57,3 +57,8 @@ def print(value: bool) -> i32
 
 @c(symbol = "__sev_print_char")
 def print(value: char) -> i32
+
+# Panic is a hosted diagnostic boundary. Unlike `throw`, it terminates the
+# process immediately and does not participate in structured error unwinding.
+@c(symbol = "__sev_panic")
+def panic(message: string) -> unit

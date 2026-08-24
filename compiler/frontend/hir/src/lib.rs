@@ -134,6 +134,8 @@ pub enum TestExpectation {
     Contains { stream: TestStream, value: String },
     Excludes { stream: TestStream, value: String },
     Equals { stream: TestStream, value: String },
+    Panics { function: String, binding: String },
+    PanicMessage { binding: String, value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

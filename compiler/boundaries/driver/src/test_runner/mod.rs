@@ -114,6 +114,12 @@ pub(crate) fn run_with_coverage(
                 let result = execute(&artifact.path, coverage_file).map_err(|error| {
                     format!("could not run {}: {error}", artifact.path.display())
                 })?;
+                let panic = test.expectations.iter().find_map(|expectation| match expectation {
+                    TestExpectation::Panics { function, binding } => {
+                        Some((function.as_str(), binding.as_str()))
+                    }
+                    _ => None,
+                });
                 let expectation_failure = test.expectations.iter().find_map(|expectation| {
                     let (actual, expected, relation) = match expectation {
                         TestExpectation::Contains { stream, value } => {
@@ -125,17 +131,34 @@ pub(crate) fn run_with_coverage(
                         TestExpectation::Equals { stream, value } => {
                             (test_stream(stream, &result), value, "equal")
                         }
+                        TestExpectation::PanicMessage { binding, value } => {
+                            if panic.is_some_and(|(_, panic_binding)| panic_binding == binding) {
+                                (String::from_utf8_lossy(&result.stderr), value, "contain")
+                            } else {
+                                return Some(format!(
+                                    "panic message references unknown capture `{binding}`"
+                                ));
+                            }
+                        }
+                        TestExpectation::Panics { .. } => return None,
                     };
                     let matches = match expectation {
                         TestExpectation::Contains { .. } => actual.contains(expected),
                         TestExpectation::Excludes { .. } => !actual.contains(expected),
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
+                        TestExpectation::PanicMessage { .. } => actual.contains(expected),
+                        TestExpectation::Panics { .. } => unreachable!(),
                     };
                     (!matches).then(|| {
                         format!("captured stream did not {relation} {expected:?}; got {actual:?}")
                     })
                 });
-                if result.status.success() && expectation_failure.is_none() {
+                let status_matches = if panic.is_some() {
+                    !result.status.success()
+                } else {
+                    result.status.success()
+                };
+                if status_matches && expectation_failure.is_none() {
                     println!("test {} ... ok", test.name);
                     passed += 1;
                 } else {

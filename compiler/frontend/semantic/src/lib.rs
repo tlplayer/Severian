@@ -377,11 +377,14 @@ pub(crate) fn analyze_with_package_functions(
                 .iter()
                 .map(|mode| test_mode(mode, test.span))
                 .collect::<Result<Vec<_>, _>>()?;
+            let panic_binding = integration_panic_binding(&test.body);
             if modes.is_empty()
                 && test
                     .body
                     .iter()
-                    .any(|statement| integration_expectation(statement).is_some())
+                    .any(|statement| {
+                        integration_expectation(statement, panic_binding.as_deref()).is_some()
+                    })
             {
                 modes.push(severian_hir::TestMode::Integration);
             }
@@ -636,12 +639,15 @@ pub(crate) fn analyze_with_package_functions(
                 module.functions[source_function_count + offset].body = Some(body);
                 continue;
             }
+            let panic_binding = integration_panic_binding(&test.body);
             for statement in &test.body {
                 if module.tests[offset]
                     .modes
                     .contains(&severian_hir::TestMode::Integration)
                 {
-                    if let Some(expectation) = integration_expectation(statement) {
+                    if let Some(expectation) =
+                        integration_expectation(statement, panic_binding.as_deref())
+                    {
                         module.tests[offset].expectations.push(expectation);
                         continue;
                     }
@@ -8152,7 +8158,47 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
     ControlFlow::FallsThrough
 }
 
-fn integration_expectation(statement: &AstStatement) -> Option<severian_hir::TestExpectation> {
+fn integration_panic_binding(statements: &[AstStatement]) -> Option<String> {
+    statements
+        .iter()
+        .find_map(integration_panic_capture)
+        .map(|(_, binding)| binding.to_owned())
+}
+
+fn integration_panic_capture(statement: &AstStatement) -> Option<(&str, &str)> {
+    let AstStatement::Expression(AstExpression {
+        kind: AstExpressionKind::Call { callee, arguments },
+        ..
+    }) = statement
+    else {
+        return None;
+    };
+    if callable_path(callee).as_deref() != Some("throws") {
+        return None;
+    }
+    let [argument] = arguments.as_slice() else {
+        return None;
+    };
+    let AstExpressionKind::Name(wrapper) = &argument.value.kind else {
+        return None;
+    };
+    let function = wrapper.strip_suffix("_wrapper")?;
+    let AstExpressionKind::Name(binding) = &argument.expected_error.as_ref()?.kind else {
+        return None;
+    };
+    Some((function, binding))
+}
+
+fn integration_expectation(
+    statement: &AstStatement,
+    panic_binding: Option<&str>,
+) -> Option<severian_hir::TestExpectation> {
+    if let Some((function, binding)) = integration_panic_capture(statement) {
+        return Some(severian_hir::TestExpectation::Panics {
+            function: function.to_owned(),
+            binding: binding.to_owned(),
+        });
+    }
     let AstStatement::Assert { condition, .. } = statement else {
         return None;
     };
@@ -8182,6 +8228,22 @@ fn integration_expectation(statement: &AstStatement) -> Option<severian_hir::Tes
     else {
         return None;
     };
+    if *operator == AstBinaryOperator::Equal {
+        if let AstExpressionKind::Member { object, name } = &left.kind {
+            if name == "message" {
+                if let (AstExpressionKind::Name(binding), Some(value)) =
+                    (&object.kind, string_literal(right))
+                {
+                    if panic_binding == Some(binding) {
+                        return Some(severian_hir::TestExpectation::PanicMessage {
+                            binding: binding.clone(),
+                            value: value.to_owned(),
+                        });
+                    }
+                }
+            }
+        }
+    }
     match operator {
         AstBinaryOperator::Contains => Some(severian_hir::TestExpectation::Contains {
             stream: test_stream(right)?,
@@ -8984,5 +9046,37 @@ mod tests {
             .is_none_or(|body| body.blocks.iter().all(|block| {
                 !matches!(block.terminator, severian_mir::Terminator::Throw(_))
             }))));
+    }
+
+    #[test]
+    fn integration_panic_wrappers_become_isolated_runner_expectations() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "panic.sev",
+            "def crash():\n    return\n\ntest with integ:\n    throws(crash_wrapper -> error)\n    assert(error.message == \"boom\")\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze_with_context(
+            &ast,
+            &context.types,
+            AnalysisContext {
+                mode: AnalysisMode::Test,
+                module_name: "panic",
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            program.modules[0].tests[0].expectations,
+            vec![
+                severian_hir::TestExpectation::Panics {
+                    function: "crash".into(),
+                    binding: "error".into(),
+                },
+                severian_hir::TestExpectation::PanicMessage {
+                    binding: "error".into(),
+                    value: "boom".into(),
+                },
+            ]
+        );
     }
 }

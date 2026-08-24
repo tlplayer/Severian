@@ -433,7 +433,27 @@ impl Compiler {
                         expectations: test.expectations.clone(),
                     });
                 }
-                let selected = select_test(&mir, test.function);
+                let selected_function =
+                    test.expectations.iter().find_map(|expectation| match expectation {
+                        severian_mir::TestExpectation::Panics { function, .. } => Some(function),
+                        _ => None,
+                    });
+                let selected_id = if let Some(name) = selected_function {
+                    mir.functions
+                        .iter()
+                        .find(|function| function.name == *name)
+                        .map(|function| function.id)
+                        .ok_or_else(|| {
+                            CompileError::Diagnostic(Diagnostic::new(
+                                "E000217",
+                                format!("panic test references unknown function `{name}`"),
+                                None,
+                            ))
+                        })?
+                } else {
+                    test.function
+                };
+                let selected = select_test(&mir, selected_id);
                 let artifact =
                     self.compile_mir(&selected, &output_directory.join(format!("test-{index}")))?;
                 Ok(CompiledTest {
