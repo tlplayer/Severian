@@ -4,6 +4,7 @@ enum Status:
     Received 
     Failed
 
-test "Connecting cannot go to Received":
+test with compiler "Connecting cannot go to Received":
     state := Received
-    throws(state := Connecting) 
+    reject:
+        state = Connecting 
