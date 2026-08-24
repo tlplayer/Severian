@@ -67,7 +67,9 @@ pub(crate) struct PackageFunction {
     pub definition: DefId,
     pub substitution: severian_universal::Substitution,
     pub type_parameters: Vec<severian_universal::GenericParamId>,
+    pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeId>,
+    pub parameter_defaults: Vec<Option<AstExpression>>,
     pub result: TypeId,
     pub specificity: u8,
 }
@@ -185,10 +187,19 @@ pub(crate) fn analyze_with_package_functions(
                     .parameters
                     .iter()
                     .copied()
-                    .map(|type_id| SignatureParameter {
-                        name: String::new(),
+                    .enumerate()
+                    .map(|(index, type_id)| SignatureParameter {
+                        name: function
+                            .parameter_names
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_default(),
                         type_id,
-                        default: None,
+                        default: function
+                            .parameter_defaults
+                            .get(index)
+                            .cloned()
+                            .flatten(),
                     })
                     .collect(),
                 result: function.result,
@@ -284,28 +295,28 @@ pub(crate) fn analyze_with_package_functions(
         } else {
             severian_universal::CompileRoute::Standard
         };
+        analyzer.signatures.insert(
+            id,
+            FunctionSignature {
+                parameters: ast_function
+                    .parameters
+                    .iter()
+                    .zip(parameter_types.iter().copied())
+                    .map(|(parameter, type_id)| SignatureParameter {
+                        name: parameter.name.clone(),
+                        type_id,
+                        default: parameter.default.clone(),
+                    })
+                    .collect(),
+                result,
+            },
+        );
         if own_function_ids.is_empty() {
             analyzer
                 .functions
                 .entry(ast_function.name.clone())
                 .or_default()
                 .push(id);
-            analyzer.signatures.insert(
-                id,
-                FunctionSignature {
-                    parameters: ast_function
-                        .parameters
-                        .iter()
-                        .zip(parameter_types.iter().copied())
-                        .map(|(parameter, type_id)| SignatureParameter {
-                            name: parameter.name.clone(),
-                            type_id,
-                            default: parameter.default.clone(),
-                        })
-                        .collect(),
-                    result,
-                },
-            );
             analyzer.function_definitions.insert(id, definition);
             analyzer
                 .function_substitutions

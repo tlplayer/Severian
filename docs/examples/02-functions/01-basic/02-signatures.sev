@@ -5,4 +5,4 @@ def describe(label: string, value: float) -> string:
     return label + ": " + string(value)
 
 def main():
-    print(describe("width", scale(12.0, factor = 2.0)))
+    print(describe("width", scale(value=12.0, factor = 2.0)))

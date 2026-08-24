@@ -30,7 +30,9 @@ pub struct SignatureId(pub u128);
 pub struct FunctionDecl {
     pub signature: SignatureId,
     pub type_parameters: Vec<String>,
+    pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeAnnotation>,
+    pub parameter_defaults: Vec<Option<severian_ast::Expression>>,
     pub result: TypeAnnotation,
     pub constraints: Vec<GenericConstraint>,
 }
@@ -223,6 +225,7 @@ pub fn analyze_package_with_context(
                     definition: binding.definition,
                     substitution,
                     type_parameters: Vec::new(),
+                    parameter_names: signature.parameter_names.clone(),
                     parameters: signature
                         .parameters
                         .iter()
@@ -236,6 +239,7 @@ pub fn analyze_package_with_context(
                             )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
+                    parameter_defaults: signature.parameter_defaults.clone(),
                     result: resolve_package_type(
                         &universal.types,
                         &signature.result,
@@ -731,10 +735,20 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         DefKind::Function(FunctionDecl {
                             signature: function_signature_id(function),
                             type_parameters: function.type_parameters.clone(),
+                            parameter_names: function
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.name.clone())
+                                .collect(),
                             parameters: function
                                 .parameters
                                 .iter()
                                 .map(|parameter| parameter.annotation.clone())
+                                .collect(),
+                            parameter_defaults: function
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.default.clone())
                                 .collect(),
                             result: function.result.clone(),
                             constraints: function.constraints.clone(),

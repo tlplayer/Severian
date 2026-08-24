@@ -44,6 +44,26 @@ fn qualified_imported_overloads_are_checked_in_the_package_namespace() {
 }
 
 #[test]
+fn package_signatures_preserve_named_parameters_and_defaults() {
+    let root = temporary();
+    std::fs::write(
+        root.join("math.sev"),
+        "def scale(value: float, factor: float = 2.0) -> float:\n    return value * factor\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("app.sev"),
+        "import \"math.sev\" as math\ndef local(value: float, factor: float = 3.0) -> float:\n    return value * factor\ndef selected() -> float:\n    first = local(value=4.0)\n    return math.scale(value=first)\n",
+    )
+    .unwrap();
+    let graph = severian_modules::resolve(&root.join("app.sev")).unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&graph, &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn imported_classes_and_list_results_keep_package_wide_types() {
     let root = temporary();
     std::fs::write(

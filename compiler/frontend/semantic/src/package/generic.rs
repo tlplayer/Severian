@@ -1430,11 +1430,13 @@ pub(super) fn specialize_signature(
     FunctionDecl {
         signature: function.signature,
         type_parameters: Vec::new(),
+        parameter_names: function.parameter_names.clone(),
         parameters: function
             .parameters
             .iter()
             .map(|annotation| specialize_annotation(annotation, substitution))
             .collect(),
+        parameter_defaults: function.parameter_defaults.clone(),
         result: specialize_annotation(&function.result, substitution),
         constraints: function.constraints.clone(),
     }
