@@ -49,6 +49,13 @@ pub enum Statement {
         body: Vec<Statement>,
         span: Span,
     },
+    Try {
+        body: Vec<Statement>,
+        catch_binding: String,
+        catch_annotation: Option<TypeAnnotation>,
+        catch_body: Vec<Statement>,
+        span: Span,
+    },
     If {
         condition: Expression,
         then_block: Vec<Statement>,

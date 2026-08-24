@@ -133,6 +133,7 @@ pub(crate) fn analyze_with_package_functions(
         namespace_operators,
         namespace_hooks,
         active_operator_namespaces: BTreeMap::new(),
+        active_function_name: None,
         signatures: BTreeMap::new(),
         classes: ast
             .items
@@ -421,6 +422,7 @@ pub(crate) fn analyze_with_package_functions(
             continue;
         };
         analyzer.names = globals.clone();
+        analyzer.active_function_name = Some(ast_function.name.clone());
         analyzer.declarations.clear();
         analyzer.active_type_aliases.clear();
         for (index, name) in ast_function.type_parameters.iter().enumerate() {
@@ -501,6 +503,69 @@ pub(crate) fn analyze_with_package_functions(
                 Some(ast_function.span),
             ));
         }
+        if let Some(fallible) = analyzer.fallible_types.get(&result_type).copied() {
+            let catch_binding = analyzer.new_binding_id();
+            let catch_variable = severian_hir::VariableId(catch_binding.0);
+            let catch_value = analyzer.default_expression(fallible.error, ast_function.span)?;
+            module.bindings.push(Binding {
+                id: catch_binding,
+                variable: catch_variable,
+                type_id: fallible.error,
+                value: catch_value,
+                mutable: false,
+                preserve_error: false,
+                span: ast_function.span,
+            });
+            let error = Expression {
+                id: analyzer.next_id(),
+                type_id: fallible.error,
+                kind: ExpressionKind::Binding(catch_binding),
+                span: ast_function.span,
+            };
+            let core_error = analyzer
+                .types
+                .resolve_name("Error")
+                .expect("bootstrap defines Error");
+            let error = if fallible.error == core_error {
+                let string = analyzer
+                    .types
+                    .resolve_name("string")
+                    .expect("bootstrap defines string");
+                let frame = Expression {
+                    id: analyzer.next_id(),
+                    type_id: string,
+                    kind: ExpressionKind::Literal(LiteralValue::String(
+                        ast_function.name.clone(),
+                    )),
+                    span: ast_function.span,
+                };
+                analyzer.runtime_call(
+                    "__sev_error_propagate",
+                    &[fallible.error, string],
+                    fallible.error,
+                    vec![error, frame],
+                    ast_function.span,
+                )
+            } else {
+                error
+            };
+            let propagated = analyzer.fallible_error_expression(
+                result_type,
+                fallible,
+                error,
+                ast_function.span,
+            )?;
+            body = Block {
+                statements: vec![Statement::Try {
+                    body,
+                    catch_binding,
+                    catch_body: Block {
+                        statements: vec![Statement::Return(Some(propagated))],
+                    },
+                    span: ast_function.span,
+                }],
+            };
+        }
         function.body = Some(body);
         if function.name == "main" {
             let arguments_type = types.resolve_name("args").expect("bootstrap defines args");
@@ -536,6 +601,11 @@ pub(crate) fn analyze_with_package_functions(
             .enumerate()
         {
             analyzer.names = globals.clone();
+            analyzer.active_function_name = Some(
+                test.name
+                    .clone()
+                    .unwrap_or_else(|| format!("test {}", offset + 1)),
+            );
             analyzer.declarations.clear();
             analyzer.mocks.clear();
             analyzer.active_operator_namespaces.clear();
@@ -613,6 +683,7 @@ struct Analyzer<'a> {
     namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
     namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
     active_operator_namespaces: BTreeMap<String, Vec<String>>,
+    active_function_name: Option<String>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
@@ -1205,6 +1276,67 @@ impl Analyzer<'_> {
         result_type: TypeId,
     ) -> Result<Statement, Diagnostic> {
         match statement {
+            AstStatement::Try {
+                body,
+                catch_binding,
+                catch_annotation,
+                catch_body,
+                span,
+            } => {
+                let error_type = catch_annotation
+                    .as_ref()
+                    .map(|annotation| self.resolve_source_type(annotation))
+                    .transpose()?
+                    .unwrap_or_else(|| {
+                        self.types
+                            .resolve_name("Error")
+                            .expect("bootstrap defines Error")
+                    });
+                if !self.is_error_type(error_type) {
+                    return Err(Diagnostic::new(
+                        "E000215",
+                        "a catch binding must have an error type",
+                        Some(*span),
+                    ));
+                }
+
+                let outer_names = self.names.clone();
+                let outer_declarations = self.declarations.clone();
+                let body = self.block(body, bindings, result_type)?;
+                self.names.clone_from(&outer_names);
+                self.declarations.clone_from(&outer_declarations);
+
+                let id = self.new_binding_id();
+                let variable = severian_hir::VariableId(id.0);
+                if !self.declarations.insert(catch_binding.clone()) {
+                    return Err(Diagnostic::new(
+                        "E000203",
+                        format!("binding `{catch_binding}` is declared more than once"),
+                        Some(*span),
+                    ));
+                }
+                self.names
+                    .insert(catch_binding.clone(), (id, variable, error_type));
+                let default = self.default_expression(error_type, *span)?;
+                bindings.push(Binding {
+                    id,
+                    variable,
+                    type_id: error_type,
+                    value: default,
+                    mutable: false,
+                    preserve_error: false,
+                    span: *span,
+                });
+                let catch_body = self.block(catch_body, bindings, result_type)?;
+                self.names = outer_names;
+                self.declarations = outer_declarations;
+                Ok(Statement::Try {
+                    body,
+                    catch_binding: id,
+                    catch_body,
+                    span: *span,
+                })
+            }
             AstStatement::Unsafe { body, .. } => {
                 self.unsafe_depth += 1;
                 let lowered = self.block(body, bindings, result_type);
@@ -1621,6 +1753,11 @@ impl Analyzer<'_> {
                             expression.span,
                         )?;
                         return Ok(Statement::Return(Some(result)));
+                    }
+                    if self.is_error_type(result_type) {
+                        return Ok(Statement::Return(Some(
+                            self.expression(error, Some(result_type))?,
+                        )));
                     }
                 }
                 if let AstExpressionKind::Mock { cases, fallback } = &expression.kind {
@@ -2610,19 +2747,14 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Throw { error } => {
-                let string = self
-                    .types
-                    .resolve_name("string")
-                    .expect("bootstrap defines string");
-                let error = match &error.kind {
-                    AstExpressionKind::Call { callee, arguments }
-                        if callable_path(callee).as_deref() == Some("Error")
-                            && arguments.len() == 1 =>
-                    {
-                        self.expression(&arguments[0].value, Some(string))?
-                    }
-                    _ => self.expression(error, None)?,
-                };
+                let error = self.expression(error, None)?;
+                if !self.is_error_type(error.type_id) {
+                    return Err(Diagnostic::new(
+                        "E000215",
+                        "only an error value may be thrown",
+                        Some(error.span),
+                    ));
+                }
                 let type_id = expected.unwrap_or_else(|| {
                     self.types
                         .resolve_name("unit")
@@ -2824,6 +2956,41 @@ impl Analyzer<'_> {
                 }
                 let object = self.expression(object, None)?;
                 if let Some(fallible) = self.fallible_types.get(&object.type_id).copied() {
+                    if self.types.resolve_name("Error") == Some(fallible.error)
+                        && (name == "message" || name == "call_stack")
+                    {
+                        let string = self
+                            .types
+                            .resolve_name("string")
+                            .expect("bootstrap defines string");
+                        if expected.is_some_and(|expected| expected != string) {
+                            return Err(semantic_error(
+                                "error property does not satisfy the expected type".into(),
+                                ast.span,
+                            ));
+                        }
+                        let error = Expression {
+                            id: self.next_id(),
+                            type_id: fallible.error,
+                            kind: ExpressionKind::Field {
+                                object: Box::new(object),
+                                index: 2,
+                            },
+                            span: ast.span,
+                        };
+                        let symbol = if name == "message" {
+                            "__sev_error_message"
+                        } else {
+                            "__sev_error_call_stack"
+                        };
+                        return Ok(self.runtime_call(
+                            symbol,
+                            &[fallible.error],
+                            string,
+                            vec![error],
+                            ast.span,
+                        ));
+                    }
                     if let Some(instance) = self.class_instances_by_type.get(&fallible.error) {
                         if let Some((index, field)) = instance
                             .fields
@@ -2852,6 +3019,33 @@ impl Analyzer<'_> {
                             });
                         }
                     }
+                }
+                if self.types.resolve_name("Error") == Some(object.type_id)
+                    && (name == "message" || name == "call_stack")
+                {
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    if expected.is_some_and(|expected| expected != string) {
+                        return Err(semantic_error(
+                            "error property does not satisfy the expected type".into(),
+                            ast.span,
+                        ));
+                    }
+                    let error_type = object.type_id;
+                    let symbol = if name == "message" {
+                        "__sev_error_message"
+                    } else {
+                        "__sev_error_call_stack"
+                    };
+                    return Ok(self.runtime_call(
+                        symbol,
+                        &[error_type],
+                        string,
+                        vec![object],
+                        ast.span,
+                    ));
                 }
                 let Some(instance) = self.class_instances_by_type.get(&object.type_id) else {
                     return Err(Diagnostic::new(
@@ -3089,12 +3283,23 @@ impl Analyzer<'_> {
                         .resolve_name("Error")
                         .expect("bootstrap defines Error");
                     let message = self.expression(&argument.value, Some(string))?;
-                    return Ok(Expression {
+                    let function = Expression {
                         id: self.next_id(),
-                        type_id: error_type,
-                        kind: message.kind,
+                        type_id: string,
+                        kind: ExpressionKind::Literal(LiteralValue::String(
+                            self.active_function_name
+                                .clone()
+                                .unwrap_or_else(|| "<module>".into()),
+                        )),
                         span: ast.span,
-                    });
+                    };
+                    return Ok(self.runtime_call(
+                        "__sev_error_create",
+                        &[string, string],
+                        error_type,
+                        vec![message, function],
+                        ast.span,
+                    ));
                 }
                 if let Some(mocked) = self.mocked_call(ast, expected)? {
                     return Ok(mocked);
@@ -3567,6 +3772,18 @@ impl Analyzer<'_> {
                     },
                     span: ast.span,
                 };
+                if self.is_error_type(*result) {
+                    let unit = self
+                        .types
+                        .resolve_name("unit")
+                        .expect("bootstrap defines unit");
+                    return Ok(Expression {
+                        id: self.next_id(),
+                        type_id: expected.unwrap_or(unit),
+                        kind: ExpressionKind::Throw(Box::new(call)),
+                        span: ast.span,
+                    });
+                }
                 if self.preserve_error_depth == 0 {
                     if let Some(fallible) = self.fallible_types.get(result).copied() {
                         return Ok(self.unwrap_fallible_expression(call, fallible, ast.span));
@@ -6854,6 +7071,12 @@ fn insert_before_returns(block: &mut Block, assertions: &[Statement]) {
                 insert_before_returns(else_block, assertions);
             }
             Statement::While { body, .. } => insert_before_returns(body, assertions),
+            Statement::Try {
+                body, catch_body, ..
+            } => {
+                insert_before_returns(body, assertions);
+                insert_before_returns(catch_body, assertions);
+            }
             Statement::Match { arms, .. } => {
                 for arm in arms {
                     insert_before_returns(&mut arm.body, assertions);
@@ -6881,6 +7104,12 @@ fn insert_hook_exits(block: &mut Block, hooks: &[LoweredHook]) {
                 insert_hook_exits(else_block, hooks);
             }
             Statement::While { body, .. } => insert_hook_exits(body, hooks),
+            Statement::Try {
+                body, catch_body, ..
+            } => {
+                insert_hook_exits(body, hooks);
+                insert_hook_exits(catch_body, hooks);
+            }
             Statement::Match { arms, .. } => {
                 for arm in arms {
                     insert_hook_exits(&mut arm.body, hooks);
@@ -7701,6 +7930,12 @@ fn increment_before_continue(block: &mut Block, increment: &Statement) {
                     increment_before_continue(&mut arm.body, increment);
                 }
             }
+            Statement::Try {
+                body, catch_body, ..
+            } => {
+                increment_before_continue(body, increment);
+                increment_before_continue(catch_body, increment);
+            }
             // A continue in a nested loop belongs to that nested loop.
             Statement::While { .. } => {}
             _ => {}
@@ -7890,11 +8125,19 @@ fn block_flow(statements: &[AstStatement]) -> ControlFlow {
             AstStatement::Unsafe { body, .. } if block_flow(body) == ControlFlow::Returns => {
                 ControlFlow::Returns
             }
+            AstStatement::Try {
+                body, catch_body, ..
+            } if block_flow(body) == ControlFlow::Returns
+                && block_flow(catch_body) == ControlFlow::Returns =>
+            {
+                ControlFlow::Returns
+            }
             AstStatement::Binding(_)
             | AstStatement::FieldAssignment { .. }
             | AstStatement::Expression(_)
             | AstStatement::Assert { .. }
             | AstStatement::Unsafe { .. }
+            | AstStatement::Try { .. }
             | AstStatement::If { .. }
             | AstStatement::While { .. }
             | AstStatement::For { .. }
@@ -8718,9 +8961,28 @@ mod tests {
         )
         .unwrap();
         severian_mir::build(&program).unwrap();
-        let test = program.modules[0].functions.last().unwrap();
+        let test_id = program.modules[0].tests[0].function;
+        let test = program.modules[0]
+            .functions
+            .iter()
+            .find(|function| function.id == test_id)
+            .unwrap();
         assert!(test.body.as_ref().unwrap().statements.iter().any(|statement| {
             matches!(statement, Statement::Assert { .. })
         }));
+    }
+
+    #[test]
+    fn try_catch_propagates_one_error_value_across_fallible_calls() {
+        let (program, _) = analyze_source(
+            "def fail() -> Error:\n    throw Error(\"origin\")\n\ndef inner() -> int | Error:\n    fail()\n    return 1\n\ndef outer() -> int | Error:\n    value = inner()\n    return value + 1\n\ndef main():\n    try:\n        outer()\n    catch error:\n        message = error.message\n        stack = error.call_stack\n",
+        );
+        let mir = severian_mir::build(&program).unwrap();
+        assert!(mir.functions.iter().all(|function| function
+            .body
+            .as_ref()
+            .is_none_or(|body| body.blocks.iter().all(|block| {
+                !matches!(block.terminator, severian_mir::Terminator::Throw(_))
+            }))));
     }
 }

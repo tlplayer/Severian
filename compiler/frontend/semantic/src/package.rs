@@ -1126,6 +1126,16 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
             Statement::ExpectThrow { body, .. } => {
                 remap_block_bindings(body, offset);
             }
+            Statement::Try {
+                body,
+                catch_binding,
+                catch_body,
+                ..
+            } => {
+                remap_block_bindings(body, offset);
+                catch_binding.0 += offset;
+                remap_block_bindings(catch_body, offset);
+            }
             Statement::If {
                 condition,
                 then_block,

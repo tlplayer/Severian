@@ -101,6 +101,23 @@ fn validate_statement(
             }
             Ok(())
         }
+        Statement::Try {
+            body,
+            catch_binding,
+            catch_body,
+            ..
+        } => {
+            let mut body_declared = declared.clone();
+            for statement in &body.statements {
+                validate_statement(statement, bindings, &mut body_declared)?;
+            }
+            let mut catch_declared = declared.clone();
+            catch_declared.insert(*catch_binding);
+            for statement in &catch_body.statements {
+                validate_statement(statement, bindings, &mut catch_declared)?;
+            }
+            Ok(())
+        }
         Statement::If {
             condition,
             then_block,

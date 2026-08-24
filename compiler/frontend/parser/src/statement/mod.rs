@@ -185,6 +185,7 @@ impl Parser<'_> {
                     | Statement::FieldAssignment { .. }
                     | Statement::Assert { .. }
                     | Statement::Unsafe { .. }
+                    | Statement::Try { .. }
                     | Statement::If { .. }
                     | Statement::While { .. }
                     | Statement::For { .. }
@@ -618,7 +619,8 @@ impl Parser<'_> {
                 || self.at_identifier("match")
                 || self.at_identifier("while")
                 || self.at_identifier("for")
-                || self.at_identifier("unsafe");
+                || self.at_identifier("unsafe")
+                || self.at_identifier("try");
             if self.at_identifier("pass") {
                 self.next();
             } else {
@@ -659,6 +661,40 @@ impl Parser<'_> {
     }
 
     fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.at_identifier("try") {
+            let start = self.next().span;
+            self.expect(&TokenKind::Colon, "expected `:` after `try`")?;
+            let (body, _) = self.indented_block("try")?;
+            if !self.at_identifier("catch") {
+                return Err(self.error("expected `catch` after `try` body"));
+            }
+            self.next();
+            let pattern_start = self.cursor;
+            let (first, _) = self.identifier("expected a catch binding or error type")?;
+            let (catch_binding, catch_annotation) = if self.take(&TokenKind::Colon).is_some() {
+                if self.at(&TokenKind::Newline) {
+                    (first, None)
+                } else {
+                    let annotation = self.type_annotation()?;
+                    self.expect(&TokenKind::Colon, "expected `:` after catch error type")?;
+                    (first, Some(annotation))
+                }
+            } else {
+                self.cursor = pattern_start;
+                let annotation = self.type_annotation()?;
+                let (binding, _) = self.identifier("expected a binding after catch error type")?;
+                self.expect(&TokenKind::Colon, "expected `:` after catch binding")?;
+                (binding, Some(annotation))
+            };
+            let (catch_body, end) = self.indented_block("catch")?;
+            return Ok(Statement::Try {
+                body,
+                catch_binding,
+                catch_annotation,
+                catch_body,
+                span: Span::new(start.source, start.start, end),
+            });
+        }
         if self.at_identifier("unsafe") {
             let start = self.next().span;
             self.expect(&TokenKind::Colon, "expected `:` after `unsafe`")?;

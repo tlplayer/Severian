@@ -67,6 +67,27 @@ mod tests {
     }
 
     #[test]
+    fn try_catch_preserves_the_error_binding() {
+        let source = SourceFile::virtual_source(
+            "catch.sev",
+            "def main():\n    try:\n        fail()\n    catch error:\n        print(error.message)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected a function")
+        };
+        let body = function.body.as_ref().unwrap();
+        assert!(matches!(
+            &body[0],
+            severian_ast::Statement::Try {
+                catch_binding,
+                catch_annotation: None,
+                ..
+            } if catch_binding == "error"
+        ));
+    }
+
+    #[test]
     fn invalid_expression_reports_a_label_note_and_help() {
         let source = SourceFile::virtual_source("invalid.sev", "value = .\n");
         let error = parse(&scan(&source).unwrap()).unwrap_err();

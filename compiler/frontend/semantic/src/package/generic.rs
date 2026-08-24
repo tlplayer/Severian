@@ -82,6 +82,23 @@ fn validate_generic_statements(
             severian_ast::Statement::Unsafe { body, .. } => {
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
             }
+            severian_ast::Statement::Try {
+                body,
+                catch_binding,
+                catch_body,
+                ..
+            } => {
+                validate_generic_statements(body, &mut names.clone(), function, index, types)?;
+                let mut catch_names = names.clone();
+                catch_names.remove(catch_binding);
+                validate_generic_statements(
+                    catch_body,
+                    &mut catch_names,
+                    function,
+                    index,
+                    types,
+                )?;
+            }
             severian_ast::Statement::If {
                 condition,
                 then_block,
@@ -828,6 +845,26 @@ fn visit_statements_for_specializations(
                 visit_statements_for_specializations(
                     module,
                     body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+            }
+            severian_ast::Statement::Try {
+                body, catch_body, ..
+            } => {
+                visit_statements_for_specializations(
+                    module,
+                    body,
+                    result,
+                    &mut names.clone(),
+                    index,
+                    specializations,
+                )?;
+                visit_statements_for_specializations(
+                    module,
+                    catch_body,
                     result,
                     &mut names.clone(),
                     index,

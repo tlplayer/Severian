@@ -348,7 +348,7 @@ struct BodyBuilder {
     expressions: BTreeMap<(BlockId, severian_hir::HirId), Place>,
     entry_parameters: Vec<LocalId>,
     loops: Vec<LoopTargets>,
-    catch_targets: Vec<BlockId>,
+    catch_targets: Vec<CatchTarget>,
     terminated: BTreeSet<BlockId>,
     current_span: Option<Span>,
 }
@@ -357,6 +357,12 @@ struct BodyBuilder {
 struct LoopTargets {
     break_target: BlockId,
     continue_target: BlockId,
+}
+
+#[derive(Debug, Clone)]
+enum CatchTarget {
+    Discard(BlockId),
+    Bind { block: BlockId, place: Place },
 }
 
 impl BodyBuilder {
@@ -473,6 +479,7 @@ impl BodyBuilder {
                 .map(|binding| binding.span),
             severian_hir::Statement::Assert { span, .. }
             | severian_hir::Statement::ExpectThrow { span, .. }
+            | severian_hir::Statement::Try { span, .. }
             | severian_hir::Statement::While { span, .. }
             | severian_hir::Statement::Break { span }
             | severian_hir::Statement::Continue { span } => Some(*span),
@@ -584,7 +591,7 @@ impl BodyBuilder {
                 let caught = self.block();
                 let completed = self.block();
                 let join = self.block();
-                self.catch_targets.push(caught);
+                self.catch_targets.push(CatchTarget::Discard(caught));
                 self.lower_statements(&body.statements, module);
                 self.catch_targets.pop();
                 if self.open(self.current) {
@@ -617,6 +624,48 @@ impl BodyBuilder {
                 });
                 self.terminate(Terminator::Goto(join, Vec::new()));
                 self.current = join;
+            }
+            severian_hir::Statement::Try {
+                body,
+                catch_binding,
+                catch_body,
+                ..
+            } => {
+                let binding = module
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.id == *catch_binding)
+                    .expect("typed HIR catch binding exists");
+                let local = self.local(binding.type_id, false, false);
+                let catch_place = Place::local(local);
+                self.push(Statement::StorageLive(local));
+                self.variables.insert(binding.variable, catch_place.clone());
+                self.bindings.insert(*catch_binding, catch_place.clone());
+
+                let caught = self.block();
+                let join = self.block();
+                self.catch_targets.push(CatchTarget::Bind {
+                    block: caught,
+                    place: catch_place,
+                });
+                self.lower_statements(&body.statements, module);
+                self.catch_targets.pop();
+                let mut reaches_join = false;
+                if self.open(self.current) {
+                    self.terminate(Terminator::Goto(join, Vec::new()));
+                    reaches_join = true;
+                }
+
+                self.current = caught;
+                self.lower_statements(&catch_body.statements, module);
+                if self.open(self.current) {
+                    self.terminate(Terminator::Goto(join, Vec::new()));
+                    reaches_join = true;
+                }
+                self.current = join;
+                if !reaches_join {
+                    self.terminate(Terminator::Unreachable);
+                }
             }
             severian_hir::Statement::If {
                 condition,
@@ -898,8 +947,15 @@ impl BodyBuilder {
             }
             severian_hir::ExpressionKind::Throw(error) => {
                 let error = Operand::Copy(self.expression(error));
-                if let Some(catch) = self.catch_targets.last().copied() {
-                    self.terminate(Terminator::Goto(catch, Vec::new()));
+                if let Some(catch) = self.catch_targets.last().cloned() {
+                    let block = match catch {
+                        CatchTarget::Discard(block) => block,
+                        CatchTarget::Bind { block, place } => {
+                            self.push(Statement::Assign(place, Rvalue::Use(error)));
+                            block
+                        }
+                    };
+                    self.terminate(Terminator::Goto(block, Vec::new()));
                 } else {
                     self.terminate(Terminator::Throw(error));
                 }

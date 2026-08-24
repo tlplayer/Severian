@@ -6,10 +6,53 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+typedef struct {
+    char *message;
+    char *call_stack;
+} SevError;
+
+static char *__sev_copy_text(const char *text) {
+    const char *source = text == NULL ? "" : text;
+    size_t size = strlen(source) + 1;
+    char *copy = malloc(size);
+    if (copy == NULL) abort();
+    memcpy(copy, source, size);
+    return copy;
+}
+
+const char *__sev_error_create(const char *message, const char *function) {
+    SevError *error = malloc(sizeof(SevError));
+    if (error == NULL) abort();
+    error->message = __sev_copy_text(message);
+    error->call_stack = __sev_copy_text(function);
+    return (const char *)error;
+}
+
+const char *__sev_error_propagate(const char *opaque, const char *function) {
+    SevError *error = (SevError *)opaque;
+    size_t current = strlen(error->call_stack);
+    size_t frame = strlen(function);
+    char *stack = realloc(error->call_stack, current + frame + 5);
+    if (stack == NULL) abort();
+    memcpy(stack + current, " -> ", 4);
+    memcpy(stack + current + 4, function, frame + 1);
+    error->call_stack = stack;
+    return opaque;
+}
+
+const char *__sev_error_message(const char *opaque) {
+    return ((const SevError *)opaque)->message;
+}
+
+const char *__sev_error_call_stack(const char *opaque) {
+    return ((const SevError *)opaque)->call_stack;
+}
 
 double __sev_time_monotonic(void) {
     struct timespec now;
@@ -19,7 +62,7 @@ double __sev_time_monotonic(void) {
 
 void __sev_throw(const char *error) {
     fflush(stdout);
-    fprintf(stderr, "error: %s\n", error);
+    fprintf(stderr, "error: %s\n", __sev_error_message(error));
     exit(EXIT_FAILURE);
 }
 

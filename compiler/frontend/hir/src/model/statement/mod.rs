@@ -45,6 +45,12 @@ pub enum Statement {
         boolean_type: TypeId,
         span: Span,
     },
+    Try {
+        body: Block,
+        catch_binding: BindingId,
+        catch_body: Block,
+        span: Span,
+    },
     If {
         condition: Expression,
         then_block: Block,
