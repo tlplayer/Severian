@@ -272,6 +272,43 @@ fn source_method_traits_authorize_operators_for_each_generic_instance() {
 }
 
 #[test]
+fn trait_typed_parameters_specialize_to_source_classes() {
+    let root = temporary();
+    let source = root.join("drawable.sev");
+    std::fs::write(
+        &source,
+        "trait Named:\n    def name() -> string\ntrait Drawable:\n    Named\n    def draw()\nclass Button: Drawable\n    label: string\n    def name() -> string:\n        return label\n    def draw():\n        pass\ndef render(item: Drawable):\n    observed = item.name()\n    item.draw()\ndef main():\n    button = Button(\"Save\")\n    render(button)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    let render = typed.index.definitions.values().find(|definition| {
+        definition.name == "render" && matches!(definition.kind, DefKind::Function(_))
+    });
+    let render = render.unwrap();
+    let instances = typed.hir.modules[0]
+        .functions
+        .iter()
+        .filter(|function| function.definition == render.id)
+        .collect::<Vec<_>>();
+    assert_eq!(instances.len(), 1);
+    assert!(!instances[0].substitution.0.is_empty());
+    severian_mir::build(&typed.hir).unwrap();
+
+    std::fs::write(
+        &source,
+        "trait Drawable:\n    def draw()\nclass Label:\n    text: string\ndef render(item: Drawable):\n    item.draw()\ndef main():\n    label = Label(\"Save\")\n    render(label)\n",
+    )
+    .unwrap();
+    let error =
+        analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap_err();
+    assert_eq!(error.code, "E000217");
+    assert!(error.message.contains("Label"));
+    assert!(error.message.contains("Drawable"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn concrete_overloads_rank_ahead_of_generic_fallbacks() {
     let root = temporary();
     let source = root.join("ranking.sev");

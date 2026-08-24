@@ -136,6 +136,8 @@ pub fn analyze_package_with_context(
     universal: &UniversalContext,
     context: PackageAnalysisContext,
 ) -> Result<TypedProgram, Diagnostic> {
+    let lowered_module_graph = lower_trait_typed_parameters(module_graph);
+    let module_graph = &lowered_module_graph;
     let mut index = collect_declarations(module_graph)?;
     resolve_imports(module_graph, &mut index);
     validate_generic_bodies(module_graph, &index, &universal.types)?;
@@ -208,7 +210,13 @@ pub fn analyze_package_with_context(
                     specialize_signature(original, &binding.substitution)
                 };
                 let substitution =
-                    universal_substitution(original, &binding.substitution, &universal.types)?;
+                    universal_substitution(
+                        original,
+                        &binding.substitution,
+                        &universal.types,
+                        definition.module,
+                        &package_classes,
+                    )?;
                 Ok(PackageFunction {
                     lookup: binding.lookup,
                     id: stable_instance_function_id(binding.definition, &binding.substitution),
@@ -306,6 +314,62 @@ pub fn analyze_package_with_context(
     }
 
     Ok(TypedProgram { index, hir })
+}
+
+fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
+    let trait_names = module_graph
+        .modules
+        .iter()
+        .flat_map(|module| &module.ast.items)
+        .filter_map(|item| match item {
+            Item::Trait(declaration) => Some(declaration.name.clone()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut lowered = module_graph.clone();
+    for module in &mut lowered.modules {
+        for function in module.ast.items.iter_mut().filter_map(|item| match item {
+            Item::Function(function) => Some(function),
+            _ => None,
+        }) {
+            let mut used = function
+                .type_parameters
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            for ordinal in 0..function.parameters.len() {
+                let bound = function.parameters[ordinal].annotation.clone();
+                let Some(bound_name) = bound.simple_name() else {
+                    continue;
+                };
+                if !trait_names.contains(bound_name) {
+                    continue;
+                }
+                let base = format!(
+                    "__sev_trait_{}_{}",
+                    function.parameters[ordinal].name, ordinal
+                );
+                let mut parameter = base.clone();
+                let mut suffix = 0usize;
+                while !used.insert(parameter.clone()) {
+                    suffix += 1;
+                    parameter = format!("{base}_{suffix}");
+                }
+                function.parameters[ordinal].annotation = TypeAnnotation::named(
+                    parameter.clone(),
+                    Vec::new(),
+                    bound.span,
+                );
+                function.type_parameters.push(parameter.clone());
+                function.constraints.push(GenericConstraint::Parameter {
+                    parameter,
+                    bound,
+                    span: function.parameters[ordinal].span,
+                });
+            }
+        }
+    }
+    lowered
 }
 
 fn collect_package_classes(module_graph: &ModuleGraph) -> Vec<PackageClass> {
@@ -917,6 +981,8 @@ fn universal_substitution(
     function: &FunctionDecl,
     substitution: &GenericSubstitution,
     types: &severian_universal::TypeContext,
+    module: ModuleId,
+    classes: &[PackageClass],
 ) -> Result<severian_universal::Substitution, Diagnostic> {
     let arguments = function
         .type_parameters
@@ -930,6 +996,19 @@ fn universal_substitution(
         .map(|(parameter, name)| {
             types
                 .resolve_name(name)
+                .or_else(|| {
+                    classes
+                        .iter()
+                        .find(|class| {
+                            class.module == module && class.declaration.name == name.as_str()
+                        })
+                        .or_else(|| {
+                            classes
+                                .iter()
+                                .find(|class| class.declaration.name == name.as_str())
+                        })
+                        .map(|class| class.ty)
+                })
                 .map(|ty| (parameter, ty))
                 .ok_or_else(|| Diagnostic::new("E000204", format!("unknown type `{name}`"), None))
         })

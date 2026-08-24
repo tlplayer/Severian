@@ -465,7 +465,14 @@ pub(super) fn collect_generic_specializations(
                             &mut specializations,
                         )?;
                         if let Some(ty) =
-                            expected.or_else(|| expression_type_name(&binding.value, &globals))
+                            expected.or_else(|| {
+                                expression_type_name(
+                                    module.id,
+                                    &binding.value,
+                                    &globals,
+                                    index,
+                                )
+                            })
                         {
                             globals.insert(binding.name.clone(), ty);
                         }
@@ -518,11 +525,12 @@ pub(super) fn collect_generic_specializations(
             break;
         }
     }
-    validate_specializations(index, types, &specializations)?;
+    validate_specializations(module_graph, index, types, &specializations)?;
     Ok(specializations)
 }
 
 fn validate_specializations(
+    module_graph: &ModuleGraph,
     index: &ProgramIndex,
     types: &severian_universal::TypeContext,
     specializations: &Specializations,
@@ -548,13 +556,6 @@ fn validate_specializations(
                 let Some(actual_name) = substitution.get(parameter) else {
                     continue;
                 };
-                let actual = types.resolve_name(actual_name).ok_or_else(|| {
-                    Diagnostic::new(
-                        "E000204",
-                        format!("unknown inferred generic type `{actual_name}`"),
-                        Some(*span),
-                    )
-                })?;
                 let Some((bound_name, _)) = bound.named_parts() else {
                     return Err(Diagnostic::new(
                         "E000217",
@@ -562,7 +563,16 @@ fn validate_specializations(
                         Some(bound.span),
                     ));
                 };
-                if satisfies_bound(actual, bound_name, index, types) {
+                let satisfied = types
+                    .resolve_name(actual_name)
+                    .is_some_and(|actual| satisfies_bound(actual, bound_name, index, types))
+                    || source_class_satisfies_bound(
+                        actual_name,
+                        bound_name,
+                        module_graph,
+                        index,
+                    );
+                if satisfied {
                     continue;
                 }
                 return Err(Diagnostic::new(
@@ -577,6 +587,56 @@ fn validate_specializations(
         }
     }
     Ok(())
+}
+
+fn source_class_satisfies_bound(
+    actual_name: &str,
+    bound_name: &str,
+    module_graph: &ModuleGraph,
+    index: &ProgramIndex,
+) -> bool {
+    module_graph.modules.iter().any(|module| {
+        module.ast.items.iter().any(|item| {
+            let Item::Class(class) = item else {
+                return false;
+            };
+            class.name == actual_name
+                && class.traits.iter().any(|implemented| {
+                    implemented
+                        .simple_name()
+                        .is_some_and(|name| {
+                            source_trait_extends(
+                                name,
+                                bound_name,
+                                index,
+                                &mut BTreeSet::new(),
+                            )
+                        })
+                })
+        })
+    })
+}
+
+fn source_trait_extends(
+    trait_name: &str,
+    bound_name: &str,
+    index: &ProgramIndex,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    if trait_name == bound_name {
+        return true;
+    }
+    if !visiting.insert(trait_name.to_owned()) {
+        return false;
+    }
+    index.definitions.values().any(|definition| {
+        definition.name == trait_name
+            && matches!(&definition.kind, DefKind::Trait(declaration) if declaration.bases.iter().any(|base| {
+                base.simple_name().is_some_and(|base| {
+                    source_trait_extends(base, bound_name, index, visiting)
+                })
+            }))
+    })
 }
 
 fn constraint_span(constraint: &severian_ast::GenericConstraint) -> severian_source::Span {
@@ -680,7 +740,9 @@ fn visit_statements_for_specializations(
                     index,
                     specializations,
                 )?;
-                if let Some(ty) = expected.or_else(|| expression_type_name(&binding.value, names)) {
+                if let Some(ty) = expected.or_else(|| {
+                    expression_type_name(module, &binding.value, names, index)
+                }) {
                     names.insert(binding.name.clone(), ty);
                 }
             }
@@ -901,7 +963,9 @@ fn visit_expression_for_specializations(
                         );
                     }
                     for (parameter, argument) in signature.parameters.iter().zip(arguments) {
-                        if let Some(actual) = expression_type_name(&argument.value, names) {
+                        if let Some(actual) =
+                            expression_type_name(module, &argument.value, names, index)
+                        {
                             infer_substitution(
                                 parameter,
                                 &actual,
@@ -1182,8 +1246,10 @@ fn infer_substitution(
 }
 
 fn expression_type_name(
+    module: ModuleId,
     expression: &severian_ast::Expression,
     names: &BTreeMap<String, String>,
+    index: &ProgramIndex,
 ) -> Option<String> {
     match &expression.kind {
         severian_ast::ExpressionKind::Name(name) => names.get(name).cloned(),
@@ -1203,6 +1269,15 @@ fn expression_type_name(
             }
             .to_owned(),
         ),
+        severian_ast::ExpressionKind::Call { callee, .. } => {
+            let path = ast_callable_path(callee)?;
+            resolve_path(module, &path, index)
+                .into_iter()
+                .find_map(|definition| {
+                    matches!(index.definitions[&definition].kind, DefKind::Type)
+                        .then(|| index.definitions[&definition].name.clone())
+                })
+        }
         severian_ast::ExpressionKind::List(_) | severian_ast::ExpressionKind::Tuple(_) => None,
         _ => None,
     }
