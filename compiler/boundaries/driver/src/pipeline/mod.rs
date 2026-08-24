@@ -1135,6 +1135,29 @@ mod tests {
     }
 
     #[test]
+    fn self_owned_unit_tasks_are_awaited_before_function_return() {
+        let root = temporary_package();
+        let source = root.join("structured.sev");
+        std::fs::write(
+            &source,
+            "def work():\n    pass\n\ndef main():\n    async work() with self and lock\n    async work() with self and lock\n",
+        )
+        .unwrap();
+        let mlir = Compiler::new(TargetSpec::host())
+            .unwrap()
+            .emit_file(&source, EmitStage::Mlir)
+            .unwrap();
+        assert_eq!(mlir.matches("async.execute").count(), 2);
+        assert_eq!(mlir.matches("async.await %task").count(), 2);
+        assert_eq!(mlir.matches("func.call @__sev_task_lock").count(), 2);
+        assert_eq!(mlir.matches("func.call @__sev_task_unlock").count(), 2);
+        let last_await = mlir.rfind("async.await %task").unwrap();
+        let function_return = mlir[last_await..].find("return").unwrap() + last_await;
+        assert!(last_await < function_return);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn bare_sources_receive_the_compiler_standard_package_set() {
         let root = temporary_package();
         let source = root.join("root.sev");

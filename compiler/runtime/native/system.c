@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,6 +18,16 @@ typedef struct {
     char *message;
     char *call_stack;
 } SevError;
+
+static pthread_mutex_t __sev_task_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void __sev_task_lock(void) {
+    if (pthread_mutex_lock(&__sev_task_mutex) != 0) abort();
+}
+
+void __sev_task_unlock(void) {
+    if (pthread_mutex_unlock(&__sev_task_mutex) != 0) abort();
+}
 
 static char *__sev_copy_text(const char *text) {
     const char *source = text == NULL ? "" : text;

@@ -167,6 +167,7 @@ impl CfgLowering<'_> {
         body: &severian_mir::CfgBody,
     ) -> Result<severian_lir::CfgBody, LoweringError> {
         self.task_locals = task_locals(body);
+        let mut scoped_spawns = Vec::new();
         let locals = body
             .locals
             .iter()
@@ -202,6 +203,20 @@ impl CfgLowering<'_> {
             let terminator = self.lower_terminator(body, &block.terminator, &mut operations)?;
             operation_spans
                 .extend(std::iter::repeat(block.terminator_span).take(operations.len() - start));
+            if !matches!(
+                &block.terminator,
+                severian_mir::Terminator::Spawn {
+                    owner: severian_mir::TaskOwner::Runtime,
+                    ..
+                }
+            ) {
+                if let Some(LirOperation::Spawn { result, .. }) = operations[start..]
+                    .iter()
+                    .find(|operation| matches!(operation, LirOperation::Spawn { .. }))
+                {
+                    scoped_spawns.push((block.id, *result));
+                }
+            }
             blocks.push(severian_lir::BasicBlock {
                 id: severian_lir::BlockId(block.id.0),
                 operations,
@@ -209,6 +224,40 @@ impl CfgLowering<'_> {
                 terminator,
                 terminator_span: block.terminator_span,
             });
+        }
+        let dominators = cfg_dominators(body);
+        let mut scoped_awaits = vec![Vec::new(); blocks.len()];
+        for (spawn, task) in scoped_spawns {
+            for source in &body.blocks {
+                if !dominators[source.id.0 as usize].contains(&spawn) {
+                    continue;
+                }
+                let successors = cfg_successors(&source.terminator);
+                let leaves_spawn_region = matches!(
+                    source.terminator,
+                    severian_mir::Terminator::Return(_) | severian_mir::Terminator::Throw(_)
+                ) || successors.iter().any(|successor| {
+                    !dominators[successor.0 as usize].contains(&spawn)
+                });
+                if leaves_spawn_region {
+                    scoped_awaits[source.id.0 as usize].push(task);
+                }
+            }
+        }
+        for (block, tasks) in blocks.iter_mut().zip(scoped_awaits) {
+            for task in tasks {
+                let result_type = self.value_type(task).task_result().ok_or_else(|| {
+                    LoweringError::UnsupportedCfgOperation(
+                        "scoped spawn result is not a task".into(),
+                    )
+                })?;
+                let result = self.new_value(result_type);
+                block.operations.push(LirOperation::Await {
+                    task,
+                    result,
+                });
+                block.operation_spans.push(block.terminator_span);
+            }
         }
         Ok(severian_lir::CfgBody {
             entry: severian_lir::BlockId(body.entry.0),
@@ -727,6 +776,82 @@ impl CfgLowering<'_> {
 
     fn value_type(&self, value: ValueId) -> LoweredType {
         self.values[value.0 as usize].ty
+    }
+}
+
+fn cfg_dominators(
+    body: &severian_mir::CfgBody,
+) -> Vec<BTreeSet<severian_mir::BlockId>> {
+    let all = body.blocks.iter().map(|block| block.id).collect::<BTreeSet<_>>();
+    let mut predecessors = vec![Vec::new(); body.blocks.len()];
+    for block in &body.blocks {
+        for successor in cfg_successors(&block.terminator) {
+            predecessors[successor.0 as usize].push(block.id);
+        }
+    }
+    let mut dominators = body
+        .blocks
+        .iter()
+        .map(|block| {
+            if block.id == body.entry {
+                BTreeSet::from([body.entry])
+            } else {
+                all.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    loop {
+        let mut changed = false;
+        for block in &body.blocks {
+            if block.id == body.entry {
+                continue;
+            }
+            let mut updated = if let Some((first, rest)) = predecessors[block.id.0 as usize]
+                .split_first()
+            {
+                let mut intersection = dominators[first.0 as usize].clone();
+                for predecessor in rest {
+                    intersection = intersection
+                        .intersection(&dominators[predecessor.0 as usize])
+                        .copied()
+                        .collect();
+                }
+                intersection
+            } else {
+                BTreeSet::new()
+            };
+            updated.insert(block.id);
+            if updated != dominators[block.id.0 as usize] {
+                dominators[block.id.0 as usize] = updated;
+                changed = true;
+            }
+        }
+        if !changed {
+            return dominators;
+        }
+    }
+}
+
+fn cfg_successors(terminator: &severian_mir::Terminator) -> Vec<severian_mir::BlockId> {
+    match terminator {
+        severian_mir::Terminator::Goto(target, _)
+        | severian_mir::Terminator::Call { target, .. }
+        | severian_mir::Terminator::Spawn { target, .. } => vec![*target],
+        severian_mir::Terminator::Branch {
+            then_block,
+            else_block,
+            ..
+        } => vec![*then_block, *else_block],
+        severian_mir::Terminator::Switch {
+            targets, fallback, ..
+        } => targets
+            .iter()
+            .map(|(_, target)| *target)
+            .chain(std::iter::once(*fallback))
+            .collect(),
+        severian_mir::Terminator::Return(_)
+        | severian_mir::Terminator::Throw(_)
+        | severian_mir::Terminator::Unreachable => Vec::new(),
     }
 }
 

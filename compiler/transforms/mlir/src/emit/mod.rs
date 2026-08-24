@@ -52,6 +52,9 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
     let mut artifact_signatures =
         BTreeMap::<ArtifactId, (Vec<LoweredType>, Vec<LoweredType>)>::new();
     let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
+    let uses_task_lock = all_operations(module).into_iter().any(|operation| {
+        matches!(operation, Operation::Spawn { locked: true, .. })
+    });
     for operation in all_operations(module) {
         match operation {
             Operation::ArtifactCall {
@@ -120,6 +123,10 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         ));
     }
     output.push_str("module {\n");
+    if uses_task_lock {
+        output.push_str("  func.func private @__sev_task_lock()\n");
+        output.push_str("  func.func private @__sev_task_unlock()\n");
+    }
     for declaration in &module.traits {
         output.push_str(&format!(
             "  // severian trait @{} [{:032x}:{:032x}:{:032x}] (compile-time only)\n",
@@ -249,6 +256,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     let mut runtime_signatures = BTreeMap::<String, (Vec<LoweredType>, Option<LoweredType>)>::new();
     let mut string_constants = BTreeMap::<ValueId, String>::new();
     let mut coverage = BTreeSet::new();
+    let mut uses_task_lock = false;
     for body in std::iter::once(initializer).chain(
         module
             .functions
@@ -258,6 +266,9 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         for block in &body.blocks {
             for operation in &block.operations {
                 match operation {
+                    Operation::Spawn { locked: true, .. } => {
+                        uses_task_lock = true;
+                    }
                     Operation::RuntimeCall {
                         symbol,
                         arguments,
@@ -334,6 +345,10 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         ));
     }
     output.push_str("module {\n");
+    if uses_task_lock {
+        output.push_str("  func.func private @__sev_task_lock()\n");
+        output.push_str("  func.func private @__sev_task_unlock()\n");
+    }
     for global in &module.storage_globals {
         output.push_str(&format!(
             "  llvm.mlir.global internal @__sev_global_{}() : {}\n",
@@ -755,11 +770,23 @@ fn render_cfg_operation(
                     "{indentation}%task{} = async.execute {attributes} {{\n",
                     result.0
                 ));
+                if *locked {
+                    output.push_str(&format!(
+                        "{}func.call @__sev_task_lock() : () -> ()\n",
+                        " ".repeat(indent + 2)
+                    ));
+                }
                 output.push_str(&format!(
                     "{}func.call @{}({arguments_text}) : ({argument_types}) -> ()\n",
                     " ".repeat(indent + 2),
                     function_symbol(target)
                 ));
+                if *locked {
+                    output.push_str(&format!(
+                        "{}func.call @__sev_task_unlock() : () -> ()\n",
+                        " ".repeat(indent + 2)
+                    ));
+                }
                 output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
                 output.push_str(&format!("{indentation}}}\n"));
             } else {
@@ -768,12 +795,24 @@ fn render_cfg_operation(
                     "{indentation}%task_token{}, %v{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
                     result.0, result.0
                 ));
+                if *locked {
+                    output.push_str(&format!(
+                        "{}func.call @__sev_task_lock() : () -> ()\n",
+                        " ".repeat(indent + 2)
+                    ));
+                }
                 output.push_str(&format!(
                     "{}%task_value{} = func.call @{}({arguments_text}) : ({argument_types}) -> {result_type}\n",
                     " ".repeat(indent + 2),
                     result.0,
                     function_symbol(target)
                 ));
+                if *locked {
+                    output.push_str(&format!(
+                        "{}func.call @__sev_task_unlock() : () -> ()\n",
+                        " ".repeat(indent + 2)
+                    ));
+                }
                 output.push_str(&format!(
                     "{}async.yield %task_value{} : {result_type}\n",
                     " ".repeat(indent + 2),
@@ -786,7 +825,7 @@ fn render_cfg_operation(
             let ty = value_type(module, *result)?;
             if ty == LoweredType::Unit {
                 output.push_str(&format!(
-                    "{indentation}async.await %v{} : !async.token\n",
+                    "{indentation}async.await %task{} : !async.token\n",
                     task.0
                 ));
             } else {
@@ -1477,11 +1516,23 @@ fn render_block(
                         "{indentation}%task{} = async.execute {attributes} {{\n",
                         result.0,
                     ));
+                    if *locked {
+                        output.push_str(&format!(
+                            "{}func.call @__sev_task_lock() : () -> ()\n",
+                            " ".repeat(indent + 2)
+                        ));
+                    }
                     output.push_str(&format!(
                         "{}func.call @{}({arguments_text}) : ({argument_types}) -> ()\n",
                         " ".repeat(indent + 2),
                         function_symbol(target),
                     ));
+                    if *locked {
+                        output.push_str(&format!(
+                            "{}func.call @__sev_task_unlock() : () -> ()\n",
+                            " ".repeat(indent + 2)
+                        ));
+                    }
                     output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
                     output.push_str(&format!("{indentation}}}\n"));
                 } else {
@@ -1490,12 +1541,24 @@ fn render_block(
                         "{indentation}%task_token{}, %task{} = async.execute -> !async.value<{result_type}> {attributes} {{\n",
                         result.0, result.0,
                     ));
+                    if *locked {
+                        output.push_str(&format!(
+                            "{}func.call @__sev_task_lock() : () -> ()\n",
+                            " ".repeat(indent + 2)
+                        ));
+                    }
                     output.push_str(&format!(
                         "{}%task_value{} = func.call @{}({arguments_text}) : ({argument_types}) -> {result_type}\n",
                         " ".repeat(indent + 2),
                         result.0,
                         function_symbol(target),
                     ));
+                    if *locked {
+                        output.push_str(&format!(
+                            "{}func.call @__sev_task_unlock() : () -> ()\n",
+                            " ".repeat(indent + 2)
+                        ));
+                    }
                     output.push_str(&format!(
                         "{}async.yield %task_value{} : {result_type}\n",
                         " ".repeat(indent + 2),
@@ -2105,6 +2168,8 @@ mod tests {
         assert!(rendered.contains("severian.task owner=self locked=true"));
         assert!(rendered.contains("async.execute"));
         assert!(rendered.contains("async.await"));
+        assert!(rendered.contains("func.call @__sev_task_lock()"));
+        assert!(rendered.contains("func.call @__sev_task_unlock()"));
     }
 
     #[test]
