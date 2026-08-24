@@ -527,6 +527,14 @@ sev_list_value __sev_list_get_list(void *storage, int64_t index) {
     return result;
 }
 
+sev_pair_i64 __sev_list_index_pair_i64(void *storage, int64_t index) {
+    return __sev_list_get_pair_i64(storage, index);
+}
+
+sev_list_value __sev_list_index_list(void *storage, int64_t index) {
+    return __sev_list_get_list(storage, index);
+}
+
 void *__sev_list_slice(
     void *storage,
     int64_t start,

@@ -13564,6 +13564,24 @@ mod tests {
     }
 
     #[test]
+    fn indexing_composite_lists_uses_runtime_symbols_for_each_representation() {
+        let (program, _) = analyze_source(
+            "nested = [[1, 2], [3, 4]]\nrow = nested[0]\npairs = [(1, 2), (3, 4)]\npair = pairs[0]\n",
+        );
+        let symbols = program.modules[0]
+            .functions
+            .iter()
+            .filter_map(|function| match &function.call_type {
+                severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
+                severian_hir::CallType::Severian => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_list_index_list"));
+        assert!(symbols.contains(&"__sev_list_index_pair_i64"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
     fn testing_predicates_scopes_and_generated_bindings_lower_to_mir() {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source(

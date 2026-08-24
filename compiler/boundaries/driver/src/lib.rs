@@ -159,6 +159,24 @@ mod tests {
     }
 
     #[test]
+    fn composite_list_indexing_links_and_runs() {
+        let source = SourceFile::virtual_source(
+            "composite-index.sev",
+            "nested = [[1, 2], [3, 4]]\nrow = nested[0]\npairs = [(1, 2), (3, 4)]\npair = pairs[0]\n",
+        );
+        let output = std::env::temp_dir().join(format!(
+            "severian-composite-index-{}",
+            std::process::id()
+        ));
+        let artifact = compile_source(&source, &output).unwrap();
+        assert!(std::process::Command::new(&artifact.path)
+            .status()
+            .unwrap()
+            .success());
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
     fn ordinary_compilation_validates_external_boundaries() {
         let source = SourceFile::virtual_source(
             "invalid-ffi.sev",
