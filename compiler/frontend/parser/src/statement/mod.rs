@@ -604,6 +604,10 @@ impl Parser<'_> {
         }
         let (_, contracts) = self.function_contracts(&[])?;
         self.expect(&TokenKind::Colon, "expected `:` after test declaration")?;
+        let has_compiler_cases = self.block_has_compiler_expectation();
+        if has_compiler_cases && !modes.iter().any(|mode| mode == "compiler") {
+            modes.push("compiler".into());
+        }
         let (body, compiler_cases, end) = if modes.iter().any(|mode| mode == "compiler") {
             let (body, cases, end) = self.compiler_test_block()?;
             (body, cases, end)
@@ -621,6 +625,45 @@ impl Parser<'_> {
             compiler_cases,
             span: Span::new(start.source, start.start, end),
         })
+    }
+
+    fn block_has_compiler_expectation(&self) -> bool {
+        let mut cursor = self.cursor;
+        let mut depth = 0usize;
+        while let Some(token) = self.tokens.get(cursor) {
+            match &token.kind {
+                TokenKind::Indent => depth += 1,
+                TokenKind::Dedent => {
+                    if depth == 1 {
+                        return false;
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                TokenKind::Identifier(name)
+                    if depth == 1 && matches!(name.as_str(), "accept" | "reject") =>
+                {
+                    let mut lookahead = cursor + 1;
+                    if self
+                        .tokens
+                        .get(lookahead)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Identifier(_)))
+                    {
+                        lookahead += 1;
+                    }
+                    if self
+                        .tokens
+                        .get(lookahead)
+                        .is_some_and(|token| token.kind == TokenKind::Colon)
+                    {
+                        return true;
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        false
     }
 
     fn compiler_test_block(
@@ -948,6 +991,25 @@ impl Parser<'_> {
                 body,
                 span: Span::new(start.source, start.start, end),
             });
+        }
+        if self.at_identifier("drop") {
+            let start = self.next().span;
+            let object = self.expression(0)?;
+            let end = object.span.end;
+            let callee = Expression {
+                span: Span::new(start.source, object.span.start, end),
+                kind: ExpressionKind::Member {
+                    object: Box::new(object),
+                    name: "drop".into(),
+                },
+            };
+            return Ok(Statement::Expression(Expression {
+                kind: ExpressionKind::Call {
+                    callee: Box::new(callee),
+                    arguments: Vec::new(),
+                },
+                span: Span::new(start.source, start.start, end),
+            }));
         }
         if self.at_identifier("return") {
             let start = self.next().span;
@@ -2213,6 +2275,7 @@ impl Parser<'_> {
                 matches!(
                     token.kind,
                     TokenKind::Equal
+                        | TokenKind::ColonEqual
                         | TokenKind::PlusEqual
                         | TokenKind::MinusEqual
                         | TokenKind::StarEqual
@@ -2231,7 +2294,7 @@ impl Parser<'_> {
                 span: object_span,
             };
             let operator = match assignment.kind {
-                TokenKind::Equal => None,
+                TokenKind::Equal | TokenKind::ColonEqual => None,
                 TokenKind::PlusEqual => Some(BinaryOperator::Add),
                 TokenKind::MinusEqual => Some(BinaryOperator::Subtract),
                 TokenKind::StarEqual => Some(BinaryOperator::Multiply),
