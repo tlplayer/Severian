@@ -141,6 +141,7 @@ pub(crate) fn analyze_with_package_functions(
         function_definitions: BTreeMap::new(),
         function_substitutions: BTreeMap::new(),
         function_specificity: BTreeMap::new(),
+        parameter_effects: BTreeMap::new(),
         namespace_methods,
         namespace_operators,
         namespace_hooks,
@@ -180,6 +181,7 @@ pub(crate) fn analyze_with_package_functions(
         fallible_types: BTreeMap::new(),
         optional_types: BTreeSet::new(),
         callable_bindings: BTreeMap::new(),
+        binding_values: BTreeMap::new(),
         callable_substitutions: BTreeMap::new(),
         error_types: BTreeSet::new(),
         preserve_error_depth: 0,
@@ -235,6 +237,10 @@ pub(crate) fn analyze_with_package_functions(
                     .collect(),
                 result: function.result,
             },
+        );
+        analyzer.parameter_effects.insert(
+            function.id,
+            vec![ParameterEffect::Shared; function.parameters.len()],
         );
         analyzer
             .function_definitions
@@ -356,6 +362,10 @@ pub(crate) fn analyze_with_package_functions(
                     .collect(),
                 result,
             },
+        );
+        analyzer.parameter_effects.insert(
+            id,
+            vec![ParameterEffect::Shared; ast_function.parameters.len()],
         );
         if own_function_ids.is_empty() {
             analyzer
@@ -659,6 +669,12 @@ pub(crate) fn analyze_with_package_functions(
                 }],
             };
         }
+        let effects = function
+            .parameters
+            .iter()
+            .map(|parameter| analyzer.inferred_parameter_effect(&body, parameter.binding))
+            .collect();
+        analyzer.parameter_effects.insert(function.id, effects);
         function.body = Some(body);
         if function.name == "main" {
             let arguments_type = types.resolve_name("args").expect("bootstrap defines args");
@@ -830,6 +846,7 @@ struct Analyzer<'a> {
     function_definitions: BTreeMap<FunctionId, DefId>,
     function_substitutions: BTreeMap<FunctionId, severian_universal::Substitution>,
     function_specificity: BTreeMap<FunctionId, u8>,
+    parameter_effects: BTreeMap<FunctionId, Vec<ParameterEffect>>,
     namespace_methods: BTreeMap<String, NamespaceTraitMethod>,
     namespace_operators: BTreeMap<String, NamespaceTraitOperator>,
     namespace_hooks: BTreeMap<String, NamespaceTraitHook>,
@@ -860,6 +877,7 @@ struct Analyzer<'a> {
     fallible_types: BTreeMap<TypeId, FallibleType>,
     optional_types: BTreeSet<TypeId>,
     callable_bindings: BTreeMap<severian_hir::VariableId, CallableValue>,
+    binding_values: BTreeMap<BindingId, Expression>,
     callable_substitutions: BTreeMap<String, ResolvedCallable>,
     error_types: BTreeSet<TypeId>,
     preserve_error_depth: usize,
@@ -951,6 +969,13 @@ enum CallableValue {
 struct ResolvedCallable {
     value: CallableValue,
     signature: FunctionType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ParameterEffect {
+    Shared,
+    Exclusive,
+    Move,
 }
 
 struct PendingLambda {
@@ -1622,6 +1647,7 @@ impl Analyzer<'_> {
                 },
             );
         }
+        self.binding_values.insert(id, value.clone());
         bindings.push(Binding {
             id,
             variable,
@@ -4271,6 +4297,218 @@ impl Analyzer<'_> {
         id
     }
 
+    fn apply_parameter_effects(
+        &mut self,
+        function: FunctionId,
+        arguments: Vec<Expression>,
+        span: severian_source::Span,
+    ) -> Vec<Expression> {
+        let effects = self
+            .parameter_effects
+            .get(&function)
+            .cloned()
+            .unwrap_or_else(|| vec![ParameterEffect::Shared; arguments.len()]);
+        arguments
+            .into_iter()
+            .zip(effects)
+            .map(|(argument, effect)| {
+                if matches!(
+                    argument.kind,
+                    ExpressionKind::Borrow { .. } | ExpressionKind::Move(_)
+                ) {
+                    return argument;
+                }
+                let type_id = argument.type_id;
+                Expression {
+                    id: self.next_id(),
+                    type_id,
+                    kind: match effect {
+                        ParameterEffect::Shared => ExpressionKind::Borrow {
+                            operand: Box::new(argument),
+                            exclusive: false,
+                        },
+                        ParameterEffect::Exclusive => ExpressionKind::Borrow {
+                            operand: Box::new(argument),
+                            exclusive: true,
+                        },
+                        ParameterEffect::Move => ExpressionKind::Move(Box::new(argument)),
+                    },
+                    span,
+                }
+            })
+            .collect()
+    }
+
+    fn inferred_parameter_effect(&self, body: &Block, parameter: BindingId) -> ParameterEffect {
+        body.statements.iter().fold(ParameterEffect::Shared, |effect, statement| {
+            effect.max(self.statement_parameter_effect(statement, parameter))
+        })
+    }
+
+    fn statement_parameter_effect(
+        &self,
+        statement: &Statement,
+        parameter: BindingId,
+    ) -> ParameterEffect {
+        match statement {
+            Statement::Sequence(block) => self.inferred_parameter_effect(block, parameter),
+            Statement::Binding(binding) => self
+                .active_binding_effect(*binding, parameter)
+                .unwrap_or(ParameterEffect::Shared),
+            Statement::FieldUpdate { binding, value, .. }
+            | Statement::FieldSet { binding, value, .. } => {
+                let direct = (*binding == parameter)
+                    .then_some(ParameterEffect::Exclusive)
+                    .unwrap_or(ParameterEffect::Shared);
+                direct.max(self.expression_parameter_effect(value, parameter))
+            }
+            Statement::Expression(expression) => {
+                self.expression_parameter_effect(expression, parameter)
+            }
+            Statement::Return(Some(expression)) => {
+                let returned = expression_is_binding(expression, parameter)
+                    .then_some(ParameterEffect::Move)
+                    .unwrap_or(ParameterEffect::Shared);
+                returned.max(self.expression_parameter_effect(expression, parameter))
+            }
+            Statement::Return(None) | Statement::Break { .. } | Statement::Continue { .. } => {
+                ParameterEffect::Shared
+            }
+            Statement::Assert {
+                condition, message, ..
+            } => {
+                let mut effect = self.expression_parameter_effect(condition, parameter);
+                if let Some(message) = message {
+                    effect = effect.max(self.expression_parameter_effect(message, parameter));
+                }
+                effect
+            }
+            Statement::ExpectThrow { body, .. } => self.inferred_parameter_effect(body, parameter),
+            Statement::Try {
+                body, catch_body, ..
+            } => self
+                .inferred_parameter_effect(body, parameter)
+                .max(self.inferred_parameter_effect(catch_body, parameter)),
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+            } => self
+                .expression_parameter_effect(condition, parameter)
+                .max(self.inferred_parameter_effect(then_block, parameter))
+                .max(self.inferred_parameter_effect(else_block, parameter)),
+            Statement::While {
+                condition, body, ..
+            } => self
+                .expression_parameter_effect(condition, parameter)
+                .max(self.inferred_parameter_effect(body, parameter)),
+            Statement::Match { subject, arms } => arms.iter().fold(
+                self.expression_parameter_effect(subject, parameter),
+                |effect, arm| effect.max(self.inferred_parameter_effect(&arm.body, parameter)),
+            ),
+        }
+    }
+
+    fn active_binding_effect(
+        &self,
+        binding: BindingId,
+        parameter: BindingId,
+    ) -> Option<ParameterEffect> {
+        self.binding_values
+            .get(&binding)
+            .map(|value| self.expression_parameter_effect(value, parameter))
+    }
+
+    fn expression_parameter_effect(
+        &self,
+        expression: &Expression,
+        parameter: BindingId,
+    ) -> ParameterEffect {
+        match &expression.kind {
+            ExpressionKind::Literal(_) | ExpressionKind::Binding(_) | ExpressionKind::Function(_) => {
+                ParameterEffect::Shared
+            }
+            ExpressionKind::Aggregate { fields, .. } => fields.iter().fold(
+                ParameterEffect::Shared,
+                |effect, field| effect.max(self.expression_parameter_effect(field, parameter)),
+            ),
+            ExpressionKind::Field { object, .. }
+            | ExpressionKind::Await(object)
+            | ExpressionKind::Throw(object)
+            | ExpressionKind::Convert { operand: object, .. }
+            | ExpressionKind::Unary { operand: object, .. } => {
+                self.expression_parameter_effect(object, parameter)
+            }
+            ExpressionKind::Call { callee, arguments } => {
+                let mut effect = arguments.iter().fold(
+                    ParameterEffect::Shared,
+                    |effect, argument| {
+                        effect.max(self.expression_parameter_effect(argument, parameter))
+                    },
+                );
+                if self.mutating_runtime_callee(callee)
+                    && arguments
+                        .iter()
+                        .any(|argument| expression_contains_binding(argument, parameter))
+                {
+                    effect = effect.max(ParameterEffect::Exclusive);
+                }
+                effect
+            }
+            ExpressionKind::Async { expression, .. } => {
+                self.expression_parameter_effect(expression, parameter)
+            }
+            ExpressionKind::AsyncFieldUpdate { binding, value, .. } => {
+                let direct = (*binding == parameter)
+                    .then_some(ParameterEffect::Exclusive)
+                    .unwrap_or(ParameterEffect::Shared);
+                direct.max(self.expression_parameter_effect(value, parameter))
+            }
+            ExpressionKind::Fallback {
+                condition,
+                value,
+                fallback,
+            } => self
+                .expression_parameter_effect(condition, parameter)
+                .max(self.expression_parameter_effect(value, parameter))
+                .max(self.expression_parameter_effect(fallback, parameter)),
+            ExpressionKind::Borrow { operand, exclusive } => {
+                let nested = self.expression_parameter_effect(operand, parameter);
+                if *exclusive && expression_contains_binding(operand, parameter) {
+                    nested.max(ParameterEffect::Exclusive)
+                } else {
+                    nested
+                }
+            }
+            ExpressionKind::Move(operand) => {
+                let nested = self.expression_parameter_effect(operand, parameter);
+                if expression_contains_binding(operand, parameter) {
+                    nested.max(ParameterEffect::Move)
+                } else {
+                    nested
+                }
+            }
+            ExpressionKind::Binary { left, right, .. } => self
+                .expression_parameter_effect(left, parameter)
+                .max(self.expression_parameter_effect(right, parameter)),
+        }
+    }
+
+    fn mutating_runtime_callee(&self, callee: &severian_hir::Callee) -> bool {
+        let severian_hir::Callee::Direct { function, .. } = callee else {
+            return false;
+        };
+        self.runtime_definitions.iter().any(|(symbol, definition)| {
+            definition == function
+                && (symbol == "__sev_list_clear"
+                    || symbol.contains("_push_")
+                    || symbol.contains("_pop_")
+                    || symbol.contains("_append_")
+                    || symbol.contains("_remove_")
+                    || symbol.contains("_insert_"))
+        })
+    }
+
     fn prepare(&mut self, ast: &AstExpression) -> Result<Prepared, Diagnostic> {
         match &ast.kind {
             AstExpressionKind::Literal(AstLiteral::Measured { .. }) => {
@@ -6440,6 +6678,8 @@ impl Analyzer<'_> {
                         Some(ast.span),
                     ));
                 };
+                let arguments =
+                    self.apply_parameter_effects(*function, (*arguments).clone(), ast.span);
                 let call = Expression {
                     id: self.next_id(),
                     type_id: *result,
@@ -6448,7 +6688,7 @@ impl Analyzer<'_> {
                             function: self.function_definitions[function],
                             substitution: self.function_substitutions[function].clone(),
                         },
-                        arguments: (*arguments).clone(),
+                        arguments,
                     },
                     span: ast.span,
                 };
@@ -13540,6 +13780,57 @@ fn explicit_drop_receiver(expression: &AstExpression) -> Option<&str> {
     Some(receiver)
 }
 
+fn expression_is_binding(expression: &Expression, binding: BindingId) -> bool {
+    matches!(expression.kind, ExpressionKind::Binding(candidate) if candidate == binding)
+}
+
+fn expression_contains_binding(expression: &Expression, binding: BindingId) -> bool {
+    match &expression.kind {
+        ExpressionKind::Binding(candidate) => *candidate == binding,
+        ExpressionKind::Literal(_) | ExpressionKind::Function(_) => false,
+        ExpressionKind::Aggregate { fields, .. } => fields
+            .iter()
+            .any(|field| expression_contains_binding(field, binding)),
+        ExpressionKind::Field { object, .. }
+        | ExpressionKind::Async {
+            expression: object, ..
+        }
+        | ExpressionKind::Await(object)
+        | ExpressionKind::Throw(object)
+        | ExpressionKind::Convert {
+            operand: object, ..
+        }
+        | ExpressionKind::Borrow {
+            operand: object, ..
+        }
+        | ExpressionKind::Move(object)
+        | ExpressionKind::Unary {
+            operand: object, ..
+        } => expression_contains_binding(object, binding),
+        ExpressionKind::Call { arguments, .. } => arguments
+            .iter()
+            .any(|argument| expression_contains_binding(argument, binding)),
+        ExpressionKind::AsyncFieldUpdate {
+            binding: candidate,
+            value,
+            ..
+        } => *candidate == binding || expression_contains_binding(value, binding),
+        ExpressionKind::Fallback {
+            condition,
+            value,
+            fallback,
+        } => {
+            expression_contains_binding(condition, binding)
+                || expression_contains_binding(value, binding)
+                || expression_contains_binding(fallback, binding)
+        }
+        ExpressionKind::Binary { left, right, .. } => {
+            expression_contains_binding(left, binding)
+                || expression_contains_binding(right, binding)
+        }
+    }
+}
+
 fn align_layout(value: u64, alignment: u64) -> u64 {
     let remainder = value % alignment;
     if remainder == 0 {
@@ -13706,6 +13997,71 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn source_parameter_effects_wrap_call_arguments() {
+        let (program, _) = analyze_source(
+            "def read(values: list[int]) -> usize:\n    return values.length()\n\ndef clear(values: list[int]):\n    values.clear()\n\ndef store(values: list[int]) -> list[int]:\n    return values\n\ndef main():\n    values := [1, 2, 3]\n    read(values)\n    clear(values)\n    stored := store(values)\n",
+        );
+        let module = &program.modules[0];
+        let definition = |name: &str| {
+            module
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap()
+                .definition
+        };
+        let main = module
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        let expressions = main
+            .body
+            .as_ref()
+            .unwrap()
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::Expression(expression) => Some(expression),
+                Statement::Binding(binding) => module
+                    .bindings
+                    .iter()
+                    .find(|candidate| candidate.id == *binding)
+                    .map(|binding| &binding.value),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let argument = |target| {
+            expressions.iter().find_map(|expression| {
+                let ExpressionKind::Call { callee, arguments } = &expression.kind else {
+                    return None;
+                };
+                matches!(callee, severian_hir::Callee::Direct { function, .. } if *function == target)
+                    .then(|| &arguments[0])
+            })
+        };
+
+        assert!(matches!(
+            argument(definition("read")).map(|argument| &argument.kind),
+            Some(ExpressionKind::Borrow {
+                exclusive: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            argument(definition("clear")).map(|argument| &argument.kind),
+            Some(ExpressionKind::Borrow {
+                exclusive: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            argument(definition("store")).map(|argument| &argument.kind),
+            Some(ExpressionKind::Move(_))
+        ));
     }
 
     #[test]

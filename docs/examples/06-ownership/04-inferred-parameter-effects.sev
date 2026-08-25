@@ -23,3 +23,19 @@ test:
     # Returning the value infers an ownership-carrying result.
     stored := store(values)
     assert(stored.length() == 0)
+
+
+test with compiler:
+    values := [1, 2, 3]
+    view := borrow values
+
+    reject:
+        clear(values)
+        assert(view.length() == 3)
+
+
+test with compiler:
+    reject:
+        values := [1, 2, 3]
+        stored := store(values)
+        assert(values.length() == 3)

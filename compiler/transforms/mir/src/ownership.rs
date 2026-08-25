@@ -494,6 +494,10 @@ fn add_loan(
     let (Some(local), Some(holder)) = (place.local_id(), holder.local_id()) else {
         return;
     };
+    if !state.initialized.contains(&local) || state.moved.contains(&local) {
+        errors.insert(OwnershipError::UseAfterMove(local));
+        return;
+    }
     if state.loans.iter().any(|loan| {
         loan.place.local_id() == Some(local)
             && (loan.kind == LoanKind::Exclusive || kind == LoanKind::Exclusive)
