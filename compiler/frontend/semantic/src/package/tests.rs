@@ -399,6 +399,25 @@ fn source_method_traits_authorize_operators_for_each_generic_instance() {
 }
 
 #[test]
+fn implicit_variadic_generics_specialize_from_test_calls() {
+    let root = temporary();
+    let source = root.join("variadic.sev");
+    std::fs::write(
+        &source,
+        "def print_values(values: T...):\n    for value in values:\n        print(value)\n\ntest with integ:\n    print_values(\"answer\", 42, true)\n",
+    )
+    .unwrap();
+    let universal = severian_bootstrap::load().unwrap();
+    let typed = analyze_package(&severian_modules::resolve(&source).unwrap(), &universal).unwrap();
+    severian_mir::build(&typed.hir).unwrap();
+    assert!(typed.hir.modules[0]
+        .functions
+        .iter()
+        .any(|function| function.name == "print_values"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn generic_map_literals_infer_nested_arguments_and_lower_pair_iteration() {
     let root = temporary();
     let source = root.join("map-sum.sev");

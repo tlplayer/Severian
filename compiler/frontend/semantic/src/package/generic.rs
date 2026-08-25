@@ -655,6 +655,17 @@ pub(super) fn collect_generic_specializations(
                             )?;
                         }
                     }
+                    Item::Test(test) => {
+                        let mut names = globals.clone();
+                        visit_statements_for_specializations(
+                            module.id,
+                            &test.body,
+                            None,
+                            &mut names,
+                            index,
+                            &mut specializations,
+                        )?;
+                    }
                     _ => {}
                 }
             }
@@ -1224,27 +1235,86 @@ fn visit_expression_for_specializations(
                     let DefKind::Function(signature) = &index.definitions[&definition].kind else {
                         continue;
                     };
+                    let variadic = signature
+                        .parameter_variadics
+                        .last()
+                        .copied()
+                        .unwrap_or(false);
+                    let fixed = signature.parameters.len() - usize::from(variadic);
                     if signature.type_parameters.is_empty()
-                        || signature.parameters.len() != arguments.len()
+                        || arguments.len() < fixed
+                        || (!variadic && arguments.len() != fixed)
                     {
                         continue;
                     }
                     let mut substitution = Substitution::new();
-                    if let Some(expected) = expected {
-                        infer_substitution(
-                            &signature.result,
-                            expected,
-                            &signature.type_parameters,
-                            &mut substitution,
-                        );
+                    if !variadic {
+                        if let Some(expected) = expected {
+                            infer_substitution(
+                                &signature.result,
+                                expected,
+                                &signature.type_parameters,
+                                &mut substitution,
+                            );
+                        }
                     }
-                    for (parameter, argument) in signature.parameters.iter().zip(arguments) {
+                    for (parameter, argument) in signature.parameters[..fixed].iter().zip(arguments)
+                    {
                         if let Some(actual) =
                             expression_type_name(module, &argument.value, names, index)
                         {
                             infer_substitution(
                                 parameter,
                                 &actual,
+                                &signature.type_parameters,
+                                &mut substitution,
+                            );
+                        }
+                    }
+                    if variadic {
+                        let parameter = &signature.parameters[fixed];
+                        for argument in &arguments[fixed..] {
+                            if let Some(mut actual) =
+                                expression_type_name(module, &argument.value, names, index)
+                            {
+                                if argument.spread {
+                                    actual = actual
+                                        .strip_prefix("list[")
+                                        .and_then(|actual| actual.strip_suffix(']'))
+                                        .unwrap_or(&actual)
+                                        .to_owned();
+                                }
+                                if let Some(name) = parameter.simple_name().filter(|name| {
+                                    signature
+                                        .type_parameters
+                                        .iter()
+                                        .any(|parameter| parameter == name)
+                                }) {
+                                    match substitution.get(name) {
+                                        Some(known) if known != &actual && known != "Any" => {
+                                            substitution.insert(name.to_owned(), "Any".into());
+                                        }
+                                        None => {
+                                            substitution.insert(name.to_owned(), actual);
+                                        }
+                                        _ => {}
+                                    }
+                                } else {
+                                    infer_substitution(
+                                        parameter,
+                                        &actual,
+                                        &signature.type_parameters,
+                                        &mut substitution,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    if variadic {
+                        if let Some(expected) = expected {
+                            infer_substitution(
+                                &signature.result,
+                                expected,
                                 &signature.type_parameters,
                                 &mut substitution,
                             );
@@ -1760,6 +1830,7 @@ pub(super) fn specialize_signature(
         signature: function.signature,
         type_parameters: Vec::new(),
         parameter_names: function.parameter_names.clone(),
+        parameter_variadics: function.parameter_variadics.clone(),
         parameters: function
             .parameters
             .iter()

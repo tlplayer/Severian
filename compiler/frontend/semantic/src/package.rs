@@ -32,6 +32,7 @@ pub struct FunctionDecl {
     pub type_parameters: Vec<String>,
     pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeAnnotation>,
+    pub parameter_variadics: Vec<bool>,
     pub parameter_defaults: Vec<Option<severian_ast::Expression>>,
     pub result: TypeAnnotation,
     pub constraints: Vec<GenericConstraint>,
@@ -224,6 +225,7 @@ pub fn analyze_package_with_context(
                     substitution,
                     type_parameters: Vec::new(),
                     parameter_names: signature.parameter_names.clone(),
+                    parameter_variadics: signature.parameter_variadics.clone(),
                     parameters: signature
                         .parameters
                         .iter()
@@ -512,6 +514,9 @@ fn resolve_package_type(
     )) = annotation.named_parts()
     {
         return resolve_package_type(types, inner, module, classes, lists);
+    }
+    if annotation.simple_name() == Some("Any") {
+        return Ok(crate::any_type_id());
     }
     if let TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
         let parameters = parameters
@@ -963,6 +968,11 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                                 .iter()
                                 .map(|parameter| parameter.default.clone())
                                 .collect(),
+                            parameter_variadics: function
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.variadic)
+                                .collect(),
                             result: function.result.clone(),
                             constraints: function.constraints.clone(),
                         }),
@@ -1223,7 +1233,13 @@ fn function_signature_id(function: &severian_ast::FunctionDeclaration) -> Signat
     let parameters = function
         .parameters
         .iter()
-        .map(|parameter| type_key(&parameter.annotation))
+        .map(|parameter| {
+            format!(
+                "{}{}",
+                type_key(&parameter.annotation),
+                if parameter.variadic { "..." } else { "" }
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     let generics = function.type_parameters.join(",");
@@ -1316,6 +1332,7 @@ fn universal_substitution(
         .map(|(parameter, name)| {
             types
                 .resolve_name(name)
+                .or_else(|| (name == "Any").then_some(crate::any_type_id()))
                 .or_else(|| {
                     classes
                         .iter()

@@ -66,6 +66,7 @@ pub struct Expression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallArgument {
     pub name: Option<String>,
+    pub spread: bool,
     pub value: Expression,
     /// The error shape expected by `throws(value -> ErrorType)`.
     pub expected_error: Option<Expression>,

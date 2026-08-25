@@ -80,6 +80,16 @@ pub fn scan(source: &SourceFile) -> Result<Vec<Token>, Diagnostic> {
             b'&' => one(&mut cursor, TokenKind::Ampersand),
             b'^' => one(&mut cursor, TokenKind::Caret),
             b',' => one(&mut cursor, TokenKind::Comma),
+            b'.' if bytes.get(cursor + 1) == Some(&b'.')
+                && bytes.get(cursor + 2) == Some(&b'.') =>
+            {
+                cursor += 3;
+                TokenKind::Ellipsis
+            }
+            b'.' if bytes.get(cursor + 1) == Some(&b'.') => {
+                cursor += 2;
+                TokenKind::Range
+            }
             b'.' if bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit) => {
                 cursor += 1;
                 while bytes

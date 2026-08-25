@@ -43,6 +43,8 @@ pub enum TokenKind {
     RightBrace,
     Pipe,
     Comma,
+    Ellipsis,
+    Range,
     Dot,
     Newline,
     Indent,

@@ -1,9 +1,11 @@
-def print_values(values:Any...):
+def print_values(values...):
     for value in values:
         print(value)
 
 
 
 test with integ "Multiple params to a single function":
+    x = 1
+    y = 2
     print_values("x =", x, "y =", y)
-    print_values(0..10)
+    print_values(...(0..10))

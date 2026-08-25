@@ -41,6 +41,7 @@ pub struct Decorator {
 pub struct FunctionParameter {
     pub name: String,
     pub annotation: TypeAnnotation,
+    pub variadic: bool,
     pub default: Option<Expression>,
     pub span: Span,
 }

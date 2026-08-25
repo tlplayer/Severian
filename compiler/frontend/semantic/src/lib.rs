@@ -69,6 +69,7 @@ pub(crate) struct PackageFunction {
     pub type_parameters: Vec<severian_universal::GenericParamId>,
     pub parameter_names: Vec<String>,
     pub parameters: Vec<TypeId>,
+    pub parameter_variadics: Vec<bool>,
     pub parameter_defaults: Vec<Option<AstExpression>>,
     pub parameter_unions: Vec<Option<Vec<TypeId>>>,
     pub result: TypeId,
@@ -181,6 +182,7 @@ pub(crate) fn analyze_with_package_functions(
         channel_elements: BTreeMap::new(),
         tuple_types: BTreeMap::new(),
         tuple_elements: BTreeMap::new(),
+        any_type: None,
         function_types: BTreeMap::new(),
         union_types: BTreeMap::new(),
         fallible_types: BTreeMap::new(),
@@ -223,24 +225,35 @@ pub(crate) fn analyze_with_package_functions(
             .entry(function.lookup.clone())
             .or_default()
             .push(function.id);
+        let mut signature_parameters = Vec::with_capacity(function.parameters.len());
+        for (index, element_type) in function.parameters.iter().copied().enumerate() {
+            if element_type == any_type_id() {
+                analyzer.ensure_any_type();
+            }
+            let variadic = function
+                .parameter_variadics
+                .get(index)
+                .copied()
+                .unwrap_or(false);
+            signature_parameters.push(SignatureParameter {
+                name: function
+                    .parameter_names
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_default(),
+                type_id: if variadic {
+                    analyzer.instantiate_list_type(element_type)
+                } else {
+                    element_type
+                },
+                variadic_element: variadic.then_some(element_type),
+                default: function.parameter_defaults.get(index).cloned().flatten(),
+            });
+        }
         analyzer.signatures.insert(
             function.id,
             FunctionSignature {
-                parameters: function
-                    .parameters
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .map(|(index, type_id)| SignatureParameter {
-                        name: function
-                            .parameter_names
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_default(),
-                        type_id,
-                        default: function.parameter_defaults.get(index).cloned().flatten(),
-                    })
-                    .collect(),
+                parameters: signature_parameters,
                 result: function.result,
             },
         );
@@ -327,9 +340,16 @@ pub(crate) fn analyze_with_package_functions(
         );
         let mut parameters = Vec::new();
         let mut parameter_types = Vec::new();
+        let mut parameter_elements = Vec::new();
         for parameter in &ast_function.parameters {
-            let type_id = analyzer.resolve_source_type(&parameter.annotation)?;
+            let element_type = analyzer.resolve_source_type(&parameter.annotation)?;
+            let type_id = if parameter.variadic {
+                analyzer.instantiate_list_type(element_type)
+            } else {
+                element_type
+            };
             let binding = analyzer.new_binding_id();
+            parameter_elements.push(element_type);
             parameter_types.push(type_id);
             parameters.push(FunctionParameter {
                 binding,
@@ -359,10 +379,16 @@ pub(crate) fn analyze_with_package_functions(
                 parameters: ast_function
                     .parameters
                     .iter()
-                    .zip(parameter_types.iter().copied())
-                    .map(|(parameter, type_id)| SignatureParameter {
+                    .zip(
+                        parameter_types
+                            .iter()
+                            .copied()
+                            .zip(parameter_elements.iter().copied()),
+                    )
+                    .map(|(parameter, (type_id, element_type))| SignatureParameter {
                         name: parameter.name.clone(),
                         type_id,
+                        variadic_element: parameter.variadic.then_some(element_type),
                         default: parameter.default.clone(),
                     })
                     .collect(),
@@ -993,6 +1019,7 @@ struct Analyzer<'a> {
     channel_elements: BTreeMap<TypeId, TypeId>,
     tuple_types: BTreeMap<Vec<TypeId>, TypeId>,
     tuple_elements: BTreeMap<TypeId, Vec<TypeId>>,
+    any_type: Option<TypeId>,
     function_types: BTreeMap<TypeId, FunctionType>,
     union_types: BTreeMap<TypeId, Vec<TypeId>>,
     fallible_types: BTreeMap<TypeId, FallibleType>,
@@ -1137,8 +1164,11 @@ struct FunctionSignature {
 struct SignatureParameter {
     name: String,
     type_id: TypeId,
+    variadic_element: Option<TypeId>,
     default: Option<AstExpression>,
 }
+
+type ResolvedArguments = (Vec<Expression>, Vec<ConversionRank>);
 
 #[derive(Debug, Clone)]
 struct ActiveMock {
@@ -1198,7 +1228,12 @@ impl Analyzer<'_> {
         let name = callable_path(callee)?;
         self.functions.get(&name)?.iter().find_map(|function| {
             let signature = self.signatures.get(function)?;
-            if signature.parameters.len() != arguments.len() {
+            let variadic = signature
+                .parameters
+                .last()
+                .is_some_and(|parameter| parameter.variadic_element.is_some());
+            let fixed = signature.parameters.len() - usize::from(variadic);
+            if arguments.len() < fixed || (!variadic && arguments.len() != fixed) {
                 return None;
             }
             self.fallible_types
@@ -1593,6 +1628,9 @@ impl Analyzer<'_> {
         )) = annotation.named_parts()
         {
             return self.resolve_source_type(inner);
+        }
+        if annotation.simple_name() == Some("Any") {
+            return Ok(self.ensure_any_type());
         }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
         {
@@ -4102,6 +4140,7 @@ impl Analyzer<'_> {
                         }),
                         arguments: vec![severian_ast::CallArgument {
                             name: None,
+                            spread: false,
                             value: first,
                             expected_error: None,
                             span,
@@ -6804,86 +6843,9 @@ impl Analyzer<'_> {
                     {
                         continue;
                     }
-                    let mut ordered = vec![None; signature.parameters.len()];
-                    let mut positional = 0usize;
-                    let mut named = false;
-                    let mut valid = true;
-                    for argument in arguments {
-                        let index = if let Some(argument_name) = &argument.name {
-                            named = true;
-                            signature
-                                .parameters
-                                .iter()
-                                .position(|parameter| parameter.name == *argument_name)
-                        } else if named {
-                            None
-                        } else {
-                            let index = positional;
-                            positional += 1;
-                            (index < ordered.len()).then_some(index)
-                        };
-                        let Some(index) = index else {
-                            valid = false;
-                            break;
-                        };
-                        if ordered[index].replace(&argument.value).is_some() {
-                            valid = false;
-                            break;
-                        }
-                    }
-                    if !valid {
-                        continue;
-                    }
-                    let ordered = ordered
-                        .into_iter()
-                        .zip(&signature.parameters)
-                        .map(|(argument, parameter)| argument.or(parameter.default.as_ref()))
-                        .collect::<Option<Vec<_>>>();
-                    let Some(ordered) = ordered else {
-                        continue;
-                    };
-                    let resolved = ordered
-                        .iter()
-                        .zip(&signature.parameters)
-                        .map(|(argument, parameter)| {
-                            if matches!(
-                                argument.kind,
-                                AstExpressionKind::List(_)
-                                    | AstExpressionKind::Set(_)
-                                    | AstExpressionKind::Map(_)
-                            ) {
-                                return self.expression(argument, Some(parameter.type_id));
-                            }
-                            match self.prepare(argument) {
-                                Ok(prepared) => self.finish(prepared, parameter.type_id),
-                                Err(_) => self.expression(argument, Some(parameter.type_id)),
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>();
-                    if let Ok(arguments) = resolved {
-                        let conversions = arguments
-                            .iter()
-                            .zip(&signature.parameters)
-                            .map(|(argument, parameter)| {
-                                if matches!(
-                                    argument.kind,
-                                    ExpressionKind::Aggregate { class, .. }
-                                        if class == parameter.type_id
-                                            && self.union_types.contains_key(&class)
-                                ) {
-                                    Some(ConversionRank::General)
-                                } else {
-                                    expression_conversion_rank(
-                                        self.types,
-                                        argument,
-                                        parameter.type_id,
-                                    )
-                                }
-                            })
-                            .collect::<Option<Vec<_>>>();
-                        let Some(conversions) = conversions else {
-                            continue;
-                        };
+                    if let Some((arguments, conversions)) =
+                        self.resolve_signature_arguments(&signature, arguments, ast.span)?
+                    {
                         matches.push((
                             conversions,
                             self.function_specificity[&function],
@@ -8274,6 +8236,30 @@ impl Analyzer<'_> {
         ty
     }
 
+    fn ensure_any_type(&mut self) -> TypeId {
+        if let Some(ty) = self.any_type {
+            return ty;
+        }
+        let ty = any_type_id();
+        let integer = self.tag_type();
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty,
+            name: "Any".into(),
+            fields: vec![
+                HirClassFieldDeclaration {
+                    name: "__tag".into(),
+                    ty: integer,
+                },
+                HirClassFieldDeclaration {
+                    name: "__payload".into(),
+                    ty: integer,
+                },
+            ],
+        });
+        self.any_type = Some(ty);
+        ty
+    }
+
     fn instantiate_pointer_type(&mut self, element: TypeId) -> TypeId {
         if let Some(ty) = self.pointer_types.get(&element) {
             return *ty;
@@ -9050,6 +9036,15 @@ impl Analyzer<'_> {
                 .next()
                 .expect("an enum conversion result contains at least one value"));
         }
+        self.resolved_list_expression(element, values, span)
+    }
+
+    fn resolved_list_expression(
+        &mut self,
+        element: TypeId,
+        values: Vec<Expression>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
         let list_type = self.instantiate_list_type(element);
         let storage_type = self
             .types
@@ -9359,6 +9354,19 @@ impl Analyzer<'_> {
         value: Expression,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        if self.any_type == Some(value.type_id) {
+            let string = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines string");
+            return Ok(self.runtime_call(
+                "__sev_any_string",
+                &[value.type_id],
+                string,
+                vec![value],
+                span,
+            ));
+        }
         if let Some(fallible) = self.fallible_types.get(&value.type_id).copied() {
             let condition = Expression {
                 id: self.next_id(),
@@ -9782,6 +9790,7 @@ impl Analyzer<'_> {
             .definition(element)
             .map(|definition| definition.name.as_str());
         match name {
+            _ if self.any_type == Some(element) => Ok("pair_i64"),
             Some("int") | Some("i64") | Some("usize") => Ok("i64"),
             Some("u8") => Ok("u8"),
             Some("bool") => Ok("bool"),
@@ -10537,6 +10546,236 @@ impl Analyzer<'_> {
             }
         };
         Ok(Some(result))
+    }
+
+    fn resolve_signature_arguments(
+        &mut self,
+        signature: &FunctionSignature,
+        arguments: &[severian_ast::CallArgument],
+        span: severian_source::Span,
+    ) -> Result<Option<ResolvedArguments>, Diagnostic> {
+        let variadic = signature
+            .parameters
+            .last()
+            .and_then(|parameter| parameter.variadic_element)
+            .map(|element| (signature.parameters.len() - 1, element));
+        let fixed = variadic.map_or(signature.parameters.len(), |(index, _)| index);
+        let mut ordered = vec![None; fixed];
+        let mut trailing = Vec::new();
+        let mut direct_variadic = None;
+        let mut positional = 0usize;
+        let mut named = false;
+        for argument in arguments {
+            if argument.spread {
+                if argument.name.is_some() || variadic.is_none() || direct_variadic.is_some() {
+                    return Ok(None);
+                }
+                trailing.push(argument);
+                continue;
+            }
+            if let Some(argument_name) = &argument.name {
+                named = true;
+                let Some(index) = signature
+                    .parameters
+                    .iter()
+                    .position(|parameter| parameter.name == *argument_name)
+                else {
+                    return Ok(None);
+                };
+                if index == fixed && variadic.is_some() {
+                    if direct_variadic.replace(argument).is_some() || !trailing.is_empty() {
+                        return Ok(None);
+                    }
+                } else if index >= fixed || ordered[index].replace(argument).is_some() {
+                    return Ok(None);
+                }
+                continue;
+            }
+            if named {
+                return Ok(None);
+            }
+            if positional < fixed {
+                if ordered[positional].replace(argument).is_some() {
+                    return Ok(None);
+                }
+                positional += 1;
+            } else if variadic.is_some() && direct_variadic.is_none() {
+                trailing.push(argument);
+            } else {
+                return Ok(None);
+            }
+        }
+        if direct_variadic.is_some() && !trailing.is_empty() {
+            return Ok(None);
+        }
+
+        let mut resolved = Vec::with_capacity(signature.parameters.len());
+        let mut conversions = Vec::with_capacity(arguments.len());
+        for (argument, parameter) in ordered.into_iter().zip(&signature.parameters[..fixed]) {
+            let Some(argument) = argument
+                .map(|argument| &argument.value)
+                .or(parameter.default.as_ref())
+            else {
+                return Ok(None);
+            };
+            let Some((value, conversion)) =
+                self.resolve_parameter_argument(argument, parameter.type_id)
+            else {
+                return Ok(None);
+            };
+            resolved.push(value);
+            conversions.push(conversion);
+        }
+
+        if let Some((index, element)) = variadic {
+            let parameter = &signature.parameters[index];
+            if let Some(argument) = direct_variadic {
+                let Some((value, conversion)) =
+                    self.resolve_parameter_argument(&argument.value, parameter.type_id)
+                else {
+                    return Ok(None);
+                };
+                resolved.push(value);
+                conversions.push(conversion);
+            } else if trailing.len() == 1 && trailing[0].spread {
+                if let Some((value, conversion)) =
+                    self.resolve_parameter_argument(&trailing[0].value, parameter.type_id)
+                {
+                    resolved.push(value);
+                    conversions.push(conversion);
+                } else if let Some(expanded) = static_range_values(&trailing[0].value) {
+                    let mut values = Vec::with_capacity(expanded.len());
+                    for value in expanded {
+                        let value = AstExpression {
+                            kind: AstExpressionKind::Literal(AstLiteral::Integer(
+                                value.to_string(),
+                            )),
+                            span: trailing[0].value.span,
+                        };
+                        let Some((value, _)) = self.resolve_parameter_argument(&value, element)
+                        else {
+                            return Ok(None);
+                        };
+                        values.push(value);
+                    }
+                    resolved.push(self.resolved_list_expression(element, values, span)?);
+                    conversions.push(ConversionRank::General);
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                if trailing.iter().any(|argument| argument.spread) {
+                    return Ok(None);
+                }
+                let mut values = Vec::with_capacity(trailing.len());
+                for argument in trailing {
+                    let Some((value, conversion)) =
+                        self.resolve_parameter_argument(&argument.value, element)
+                    else {
+                        return Ok(None);
+                    };
+                    values.push(value);
+                    conversions.push(conversion);
+                }
+                resolved.push(self.resolved_list_expression(element, values, span)?);
+            }
+        }
+        Ok(Some((resolved, conversions)))
+    }
+
+    fn resolve_parameter_argument(
+        &mut self,
+        argument: &AstExpression,
+        expected: TypeId,
+    ) -> Option<(Expression, ConversionRank)> {
+        if expected == any_type_id() {
+            let value = self.expression(argument, None).ok()?;
+            let exact = value.type_id == expected;
+            let value = self.box_any_value(value, argument.span).ok()?;
+            return Some((
+                value,
+                if exact {
+                    ConversionRank::Exact
+                } else {
+                    ConversionRank::General
+                },
+            ));
+        }
+        let value = if matches!(
+            argument.kind,
+            AstExpressionKind::List(_) | AstExpressionKind::Set(_) | AstExpressionKind::Map(_)
+        ) {
+            self.expression(argument, Some(expected)).ok()?
+        } else {
+            match self.prepare(argument) {
+                Ok(prepared) => self.finish(prepared, expected).ok()?,
+                Err(_) => self.expression(argument, Some(expected)).ok()?,
+            }
+        };
+        let conversion = if matches!(
+            value.kind,
+            ExpressionKind::Aggregate { class, .. }
+                if class == expected && self.union_types.contains_key(&class)
+        ) {
+            ConversionRank::General
+        } else {
+            expression_conversion_rank(self.types, &value, expected)?
+        };
+        Some((value, conversion))
+    }
+
+    fn box_any_value(
+        &mut self,
+        value: Expression,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        let any = self.ensure_any_type();
+        if value.type_id == any {
+            return Ok(value);
+        }
+        let name = self
+            .types
+            .definition(value.type_id)
+            .map(|definition| definition.name.as_str());
+        let (symbol, parameter, value) = match name {
+            Some("string") => ("__sev_any_from_string", value.type_id, value),
+            Some("bool") => ("__sev_any_from_bool", value.type_id, value),
+            Some("char") => ("__sev_any_from_char", value.type_id, value),
+            _ if self.integer_primitive(value.type_id) => {
+                let integer = self
+                    .types
+                    .resolve_name("int")
+                    .expect("bootstrap defines int");
+                let value = self.coerce(value, integer, true)?;
+                ("__sev_any_from_int", integer, value)
+            }
+            _ if self
+                .types
+                .primitive(value.type_id)
+                .is_some_and(|primitive| {
+                    matches!(
+                        primitive.category,
+                        severian_universal::PrimitiveCategory::Float
+                            | severian_universal::PrimitiveCategory::Measured
+                    )
+                }) =>
+            {
+                let float = self
+                    .types
+                    .resolve_name("float")
+                    .expect("bootstrap defines float");
+                let value = self.coerce(value, float, true)?;
+                ("__sev_any_from_float", float, value)
+            }
+            _ => {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    "`Any` does not yet support this value representation",
+                    Some(span),
+                ));
+            }
+        };
+        Ok(self.runtime_call(symbol, &[parameter], any, vec![value], span))
     }
 
     fn inline_source_call(
@@ -12675,6 +12914,10 @@ pub(crate) fn tuple_type_id(elements: &[TypeId]) -> TypeId {
 pub(crate) fn list_type_id(element: TypeId) -> TypeId {
     let hash = (0x811c_9dc5u32 ^ element.0).wrapping_mul(0x0100_0193);
     TypeId(0x0c00_0000 | (hash & 0x03ff_ffff))
+}
+
+pub(crate) const fn any_type_id() -> TypeId {
+    TypeId(0x07ff_fffd)
 }
 
 pub(crate) const fn set_type_id() -> TypeId {
@@ -16169,5 +16412,43 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn variadic_parameters_collect_values_and_forward_spreads() {
+        let (program, _) = analyze_source(
+            "def total(values: int...) -> int:\n    result := 0\n    for value in values:\n        result += value\n    return result\n\ndef forward(values: int...) -> int:\n    return total(...values)\n\nempty = total()\nanswer = total(1, 2, 3)\nforwarded = forward(...(0..5))\n",
+        );
+        let symbols = program.modules[0]
+            .functions
+            .iter()
+            .filter_map(|function| match &function.call_type {
+                severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
+                severian_hir::CallType::Severian => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_list_append_i64"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn any_variadics_box_heterogeneous_primitive_values() {
+        let (program, _) = analyze_source(
+            "def print_values(values: Any...):\n    for value in values:\n        print(value)\n\ndef invoke():\n    print_values(\"value\", 42, true)\n",
+        );
+        let symbols = program.modules[0]
+            .functions
+            .iter()
+            .filter_map(|function| match &function.call_type {
+                severian_hir::CallType::External(call) => Some(call.symbol.0.as_str()),
+                severian_hir::CallType::Severian => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_any_from_string"));
+        assert!(symbols.contains(&"__sev_any_from_int"));
+        assert!(symbols.contains(&"__sev_any_from_bool"));
+        assert!(symbols.contains(&"__sev_any_string"));
+        assert!(symbols.contains(&"__sev_list_append_pair_i64"));
+        severian_mir::build(&program).unwrap();
     }
 }

@@ -21,6 +21,71 @@ mod tests {
     }
 
     #[test]
+    fn parses_variadic_parameters_spreads_and_ranges() {
+        let source = SourceFile::virtual_source(
+            "variadic.sev",
+            "def forward(values: int...):\n    target(...values)\n    target(...(0..10))\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert!(function.parameters[0].variadic);
+        for statement in function.body.as_ref().unwrap() {
+            let severian_ast::Statement::Expression(expression) = statement else {
+                panic!("expected call")
+            };
+            let severian_ast::ExpressionKind::Call { arguments, .. } = &expression.kind else {
+                panic!("expected call")
+            };
+            assert!(arguments[0].spread);
+        }
+        let severian_ast::Statement::Expression(expression) = &function.body.as_ref().unwrap()[1]
+        else {
+            unreachable!()
+        };
+        let severian_ast::ExpressionKind::Call { arguments, .. } = &expression.kind else {
+            unreachable!()
+        };
+        assert!(matches!(
+            arguments[0].value.kind,
+            severian_ast::ExpressionKind::Call { ref callee, .. }
+                if matches!(callee.kind, severian_ast::ExpressionKind::Name(ref name) if name == "range")
+        ));
+    }
+
+    #[test]
+    fn rejects_parameters_after_a_variadic_parameter() {
+        let source = SourceFile::virtual_source(
+            "invalid-variadic.sev",
+            "def invalid(values: int..., tail: int):\n    return\n",
+        );
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert!(error
+            .message
+            .contains("variadic parameter must be the final"));
+    }
+
+    #[test]
+    fn untyped_variadics_infer_any_and_type_variables_are_implicit_generics() {
+        let source = SourceFile::virtual_source(
+            "inferred-variadic.sev",
+            "def dynamic(values...):\n    return\n\ndef generic(values: T...):\n    return\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(dynamic) = &module.items[0] else {
+            panic!("expected function")
+        };
+        assert!(dynamic.parameters[0].variadic);
+        assert_eq!(dynamic.parameters[0].annotation.simple_name(), Some("Any"));
+        let severian_ast::Item::Function(generic) = &module.items[1] else {
+            panic!("expected function")
+        };
+        assert_eq!(generic.type_parameters, ["T"]);
+        assert!(generic.parameters[0].variadic);
+    }
+
+    #[test]
     fn parses_plain_and_namespaced_extensions() {
         let source = SourceFile::virtual_source(
             "extensions.sev",

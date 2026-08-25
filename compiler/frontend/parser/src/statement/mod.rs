@@ -302,7 +302,7 @@ impl Parser<'_> {
     ) -> Result<FunctionDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a function name")?;
-        let (type_parameters, mut constraints) = self.type_parameters()?;
+        let (mut type_parameters, mut constraints) = self.type_parameters()?;
         self.expect(&TokenKind::LeftParen, "expected `(` after function name")?;
         self.line_breaks();
         let mut parameters = Vec::new();
@@ -310,15 +310,37 @@ impl Parser<'_> {
             loop {
                 let (parameter_name, parameter_span) =
                     self.identifier("expected a parameter name")?;
-                self.expect(&TokenKind::Colon, "expected `:` after parameter")?;
-                let annotation = self.type_annotation()?;
+                let (annotation, variadic) = if self.take(&TokenKind::Colon).is_some() {
+                    let annotation = self.type_annotation()?;
+                    let variadic = self.take(&TokenKind::Ellipsis).is_some();
+                    (annotation, variadic)
+                } else if let Some(ellipsis) = self.take(&TokenKind::Ellipsis) {
+                    (
+                        TypeAnnotation::named("Any", Vec::new(), ellipsis.span),
+                        true,
+                    )
+                } else {
+                    return Err(Diagnostic::new(
+                        "E000112",
+                        "expected `:` or `...` after parameter",
+                        Some(self.peek().span),
+                    ));
+                };
                 let default = if self.take(&TokenKind::Equal).is_some() {
                     Some(self.expression(0)?)
                 } else {
                     None
                 };
+                if variadic && default.is_some() {
+                    return Err(Diagnostic::new(
+                        "E000110",
+                        "a variadic parameter cannot have a default value",
+                        Some(parameter_span),
+                    ));
+                }
                 parameters.push(FunctionParameter {
                     name: parameter_name,
+                    variadic,
                     span: Span::new(
                         parameter_span.source,
                         parameter_span.start,
@@ -334,9 +356,28 @@ impl Parser<'_> {
                     break;
                 }
                 self.line_breaks();
+                if variadic && !self.at(&TokenKind::RightParen) {
+                    return Err(Diagnostic::new(
+                        "E000110",
+                        "a variadic parameter must be the final parameter",
+                        Some(parameter_span),
+                    ));
+                }
                 if self.at(&TokenKind::RightParen) {
                     break;
                 }
+            }
+        }
+        for parameter in &parameters {
+            let Some(name) = parameter.annotation.simple_name() else {
+                continue;
+            };
+            if parameter.variadic
+                && name.len() == 1
+                && name.as_bytes()[0].is_ascii_uppercase()
+                && !type_parameters.iter().any(|parameter| parameter == name)
+            {
+                type_parameters.push(name.to_owned());
             }
         }
         let close = self
@@ -2578,6 +2619,46 @@ impl Parser<'_> {
         let mut expression = self.unary()?;
         let mut comparison_tail: Option<Expression> = None;
         loop {
+            const RANGE_PRECEDENCE: u8 = 4;
+            if self.at(&TokenKind::Range) {
+                if RANGE_PRECEDENCE < minimum_precedence {
+                    break;
+                }
+                self.next();
+                let right = self.expression(RANGE_PRECEDENCE + 1)?;
+                let span = Span::new(
+                    expression.span.source,
+                    expression.span.start,
+                    right.span.end,
+                );
+                expression = Expression {
+                    kind: ExpressionKind::Call {
+                        callee: Box::new(Expression {
+                            kind: ExpressionKind::Name("range".into()),
+                            span,
+                        }),
+                        arguments: vec![
+                            CallArgument {
+                                name: None,
+                                spread: false,
+                                value: expression,
+                                expected_error: None,
+                                span,
+                            },
+                            CallArgument {
+                                name: None,
+                                spread: false,
+                                value: right,
+                                expected_error: None,
+                                span,
+                            },
+                        ],
+                    },
+                    span,
+                };
+                comparison_tail = None;
+                continue;
+            }
             let negated_contains = self.at_identifier("not")
                 && self.tokens.get(self.cursor + 1).is_some_and(
                     |token| matches!(&token.kind, TokenKind::Identifier(value) if value == "in"),
@@ -2917,7 +2998,9 @@ impl Parser<'_> {
                 if !self.at(&TokenKind::RightParen) {
                     loop {
                         let start = self.peek().span;
-                        let name = if matches!(self.peek().kind, TokenKind::Identifier(_))
+                        let spread = self.take(&TokenKind::Ellipsis).is_some();
+                        let name = if !spread
+                            && matches!(self.peek().kind, TokenKind::Identifier(_))
                             && self
                                 .tokens
                                 .get(self.cursor + 1)
@@ -2946,6 +3029,7 @@ impl Parser<'_> {
                             .map_or(value.span.end, |error| error.span.end);
                         arguments.push(CallArgument {
                             name,
+                            spread,
                             span: Span::new(start.source, start.start, end),
                             value,
                             expected_error,
@@ -3006,6 +3090,7 @@ impl Parser<'_> {
                         callee: Box::new(error_name),
                         arguments: vec![CallArgument {
                             name: None,
+                            spread: false,
                             value: message,
                             expected_error: None,
                             span,
@@ -3664,6 +3749,7 @@ fn formatted_string_expression(value: &str, span: Span) -> Result<Expression, Di
                         }),
                         arguments: vec![CallArgument {
                             name: None,
+                            spread: false,
                             value,
                             expected_error: None,
                             span,
