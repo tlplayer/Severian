@@ -1,0 +1,60 @@
+class DefId:
+    package: u128
+
+
+class TypeId:
+    index: u32
+
+
+class Substitution:
+    arguments: map[int, int]
+
+
+class TyInterner:
+    kinds: list[TypeId]
+
+
+class ImplDefinition:
+    defining_package: u128
+    trait_id: DefId
+    self_type: TypeId
+    substitution: Substitution
+
+
+enum ImplError:
+    Failed
+
+
+def register_impl(
+    implementations: borrow mut list[ImplDefinition],
+    interner: borrow TyInterner,
+    defining_package: u128,
+    trait_id: DefId,
+    self_type: TypeId,
+    substitution: move Substitution,
+) -> TypeId | ImplError:
+    implementations.append(ImplDefinition(defining_package, trait_id, self_type, move substitution))
+    return TypeId(u32(len(interner.kinds)))
+
+
+class Store:
+    implementations: list[ImplDefinition]
+
+    def Store():
+        implementations = []
+
+    def register(
+        interner: borrow TyInterner,
+        defining_package: u128,
+        trait_id: DefId,
+        self_type: TypeId,
+        substitution: move Substitution,
+    ) -> TypeId | ImplError:
+        return register_impl(borrow mut implementations, interner, defining_package, trait_id, self_type, move substitution)
+
+
+test:
+    store = Store()
+    interner = TyInterner([])
+    result = store.register(borrow interner, 1, DefId(1), TypeId(0), Substitution({}))
+    assert(len(store.implementations) == 1)

@@ -22,6 +22,29 @@ typedef struct {
     size_t length;
 } sev_owned_string;
 
+typedef struct {
+    size_t size;
+} sev_aggregate_box;
+
+void *__sev_aggregate_box(const void *value, int64_t size) {
+    if (size < 0 || (uint64_t)size > SIZE_MAX - sizeof(sev_aggregate_box)) abort();
+    sev_aggregate_box *box = malloc(sizeof(sev_aggregate_box) + (size_t)size);
+    if (box == NULL) abort();
+    box->size = (size_t)size;
+    void *payload = box + 1;
+    memcpy(payload, value, (size_t)size);
+    return payload;
+}
+
+static _Bool sev_aggregate_equal(const void *left, const void *right) {
+    if (left == right) return 1;
+    if (left == NULL || right == NULL) return 0;
+    const sev_aggregate_box *left_box = (const sev_aggregate_box *)left - 1;
+    const sev_aggregate_box *right_box = (const sev_aggregate_box *)right - 1;
+    return left_box->size == right_box->size
+        && memcmp(left, right, left_box->size) == 0;
+}
+
 static char *sev_list_string_allocation(size_t length) {
     sev_owned_string *allocation = malloc(sizeof(sev_owned_string) + length + 1);
     if (allocation == NULL) abort();
@@ -134,6 +157,10 @@ void __sev_list_push_ptr(void *storage, const char *value) {
     list->values[list->length++] = (uintptr_t)value;
 }
 
+void __sev_list_push_aggregate(void *storage, const void *value) {
+    __sev_list_push_ptr(storage, value);
+}
+
 void __sev_list_push_bool(void *storage, _Bool value) {
     sev_list *list = storage;
     sev_list_reserve(list);
@@ -156,6 +183,11 @@ void *__sev_list_append_u8(void *storage, uint8_t value) {
 }
 
 void *__sev_list_append_ptr(void *storage, const char *value) {
+    __sev_list_push_ptr(storage, value);
+    return storage;
+}
+
+void *__sev_list_append_aggregate(void *storage, const void *value) {
     __sev_list_push_ptr(storage, value);
     return storage;
 }
@@ -468,6 +500,14 @@ _Bool __sev_list_contains_ptr(void *storage, const char *value) {
     return 0;
 }
 
+_Bool __sev_list_contains_aggregate(void *storage, const void *value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (sev_aggregate_equal((const void *)list->values[index], value)) return 1;
+    }
+    return 0;
+}
+
 _Bool __sev_list_any(void *storage) {
     sev_list *list = storage;
     for (size_t index = 0; index < list->length; ++index) {
@@ -536,6 +576,10 @@ const char *__sev_list_get_ptr(void *storage, int64_t index) {
     return (const char *)list->values[index];
 }
 
+const void *__sev_list_get_aggregate(void *storage, int64_t index) {
+    return __sev_list_get_ptr(storage, index);
+}
+
 _Bool __sev_list_get_bool(void *storage, int64_t index) {
     return (_Bool)__sev_list_get_i64(storage, index);
 }
@@ -583,6 +627,10 @@ void __sev_free(void *pointer) {
 }
 
 const char *__sev_list_index_ptr(void *storage, int64_t index) {
+    return __sev_list_get_ptr(storage, index);
+}
+
+const void *__sev_list_index_aggregate(void *storage, int64_t index) {
     return __sev_list_get_ptr(storage, index);
 }
 
@@ -665,6 +713,10 @@ void __sev_list_set_ptr(void *storage, int64_t index, const char *value) {
     if (index < 0) index += (int64_t)list->length;
     if (index < 0 || (size_t)index >= list->length) return;
     list->values[index] = (uintptr_t)value;
+}
+
+void __sev_list_set_aggregate(void *storage, int64_t index, const void *value) {
+    __sev_list_set_ptr(storage, index, value);
 }
 
 void __sev_list_set_bool(void *storage, int64_t index, _Bool value) {
@@ -822,6 +874,23 @@ void *__sev_set_append_ptr(void *storage, const char *value) {
     }
     __sev_list_push_ptr(storage, value);
     return storage;
+}
+
+void *__sev_set_append_aggregate(void *storage, const void *value) {
+    sev_list *set = storage;
+    for (size_t index = 0; index < set->length; ++index) {
+        if (sev_aggregate_equal((const void *)set->values[index], value)) return storage;
+    }
+    __sev_list_push_ptr(storage, value);
+    return storage;
+}
+
+void __sev_set_add_aggregate(void *storage, const void *value) {
+    (void)__sev_set_append_aggregate(storage, value);
+}
+
+_Bool __sev_set_contains_aggregate(void *storage, const void *value) {
+    return __sev_list_contains_aggregate(storage, value);
 }
 
 void __sev_set_add_ptr(void *storage, const char *value) {

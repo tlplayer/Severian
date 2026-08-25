@@ -157,13 +157,24 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         }
     }
     let mut declared_external_symbols = BTreeSet::new();
+    let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
+        symbol.contains("_aggregate")
+            && (inputs.iter().any(|ty| matches!(ty, LoweredType::Aggregate(_)))
+                || result.is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
+    });
+    if uses_aggregate_runtime {
+        output.push_str("  func.func private @__sev_aggregate_box(!llvm.ptr, i64) -> !llvm.ptr\n");
+    }
     for (symbol, (inputs, result)) in runtime_signatures {
+        let aggregate_abi = symbol.contains("_aggregate");
         let inputs = inputs
             .into_iter()
+            .map(|ty| runtime_abi_type(ty, aggregate_abi))
             .map(mlir_type)
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let result = result
+            .map(|ty| runtime_abi_type(ty, aggregate_abi))
             .map(mlir_type)
             .transpose()?
             .map(|result| format!(" -> {result}"))
@@ -401,13 +412,24 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
             ));
         }
     }
+    let uses_aggregate_runtime = runtime_signatures.iter().any(|(symbol, (inputs, result))| {
+        symbol.contains("_aggregate")
+            && (inputs.iter().any(|ty| matches!(ty, LoweredType::Aggregate(_)))
+                || result.is_some_and(|ty| matches!(ty, LoweredType::Aggregate(_))))
+    });
+    if uses_aggregate_runtime {
+        output.push_str("  func.func private @__sev_aggregate_box(!llvm.ptr, i64) -> !llvm.ptr\n");
+    }
     for (symbol, (inputs, result)) in runtime_signatures {
+        let aggregate_abi = symbol.contains("_aggregate");
         let inputs = inputs
             .into_iter()
+            .map(|ty| runtime_abi_type(ty, aggregate_abi))
             .map(mlir_type)
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let result = result
+            .map(|ty| runtime_abi_type(ty, aggregate_abi))
             .map(mlir_type)
             .transpose()?
             .map(|ty| format!(" -> {ty}"))
@@ -1253,21 +1275,60 @@ fn render_runtime_call(
     indent: usize,
 ) -> Result<(), MlirError> {
     let indentation = " ".repeat(indent);
-    let arguments_text = arguments
-        .iter()
-        .map(|value| format!("%v{}", value.0))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let argument_types = arguments
-        .iter()
-        .map(|value| mlir_type(value_type(module, *value)?))
-        .collect::<Result<Vec<_>, MlirError>>()?
-        .join(", ");
+    let aggregate_abi = symbol.contains("_aggregate");
+    let tag = result
+        .or_else(|| arguments.first().copied())
+        .map_or(0, |value| value.0);
+    let mut argument_values = Vec::with_capacity(arguments.len());
+    let mut argument_types = Vec::with_capacity(arguments.len());
+    for (index, value) in arguments.iter().copied().enumerate() {
+        let ty = value_type(module, value)?;
+        if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
+            let spelling = mlir_type(ty)?;
+            let (size, _) = lowered_type_layout(module, ty, &mut BTreeSet::new())?;
+            output.push_str(&format!(
+                "{indentation}%runtime_box_one_{tag}_{index} = arith.constant 1 : i64\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}%runtime_box_slot_{tag}_{index} = llvm.alloca %runtime_box_one_{tag}_{index} x {spelling} : (i64) -> !llvm.ptr\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}llvm.store %v{}, %runtime_box_slot_{tag}_{index} : {spelling}, !llvm.ptr\n",
+                value.0
+            ));
+            output.push_str(&format!(
+                "{indentation}%runtime_box_size_{tag}_{index} = arith.constant {size} : i64\n"
+            ));
+            output.push_str(&format!(
+                "{indentation}%runtime_box_{tag}_{index} = func.call @__sev_aggregate_box(%runtime_box_slot_{tag}_{index}, %runtime_box_size_{tag}_{index}) : (!llvm.ptr, i64) -> !llvm.ptr\n"
+            ));
+            argument_values.push(format!("%runtime_box_{tag}_{index}"));
+            argument_types.push("!llvm.ptr".into());
+        } else {
+            argument_values.push(format!("%v{}", value.0));
+            argument_types.push(mlir_type(ty)?);
+        }
+    }
+    let arguments_text = argument_values.join(", ");
+    let argument_types = argument_types.join(", ");
     if let Some(result) = result {
+        let result_ty = value_type(module, result)?;
+        if aggregate_abi && matches!(result_ty, LoweredType::Aggregate(_)) {
+            let spelling = mlir_type(result_ty)?;
+            output.push_str(&format!(
+                "{indentation}%runtime_box_result_{} = func.call @{symbol}({arguments_text}) : ({argument_types}) -> !llvm.ptr\n",
+                result.0
+            ));
+            output.push_str(&format!(
+                "{indentation}%v{} = llvm.load %runtime_box_result_{} : !llvm.ptr -> {spelling}\n",
+                result.0, result.0
+            ));
+            return Ok(());
+        }
         output.push_str(&format!(
             "{indentation}%v{} = func.call @{symbol}({arguments_text}) : ({argument_types}) -> {}\n",
             result.0,
-            mlir_type(value_type(module, result)?)?
+            mlir_type(result_ty)?
         ));
     } else {
         output.push_str(&format!(
@@ -1275,6 +1336,57 @@ fn render_runtime_call(
         ));
     }
     Ok(())
+}
+
+fn runtime_abi_type(ty: LoweredType, aggregate_abi: bool) -> LoweredType {
+    if aggregate_abi && matches!(ty, LoweredType::Aggregate(_)) {
+        LoweredType::String
+    } else {
+        ty
+    }
+}
+
+fn lowered_type_layout(
+    module: &Module,
+    ty: LoweredType,
+    visiting: &mut BTreeSet<u32>,
+) -> Result<(u64, u64), MlirError> {
+    let scalar = match ty {
+        LoweredType::Integer { bits, .. } => Some(u64::from(bits).div_ceil(8).max(1)),
+        LoweredType::Float { format } => Some(u64::from(float_bits(format)).div_ceil(8).max(1)),
+        LoweredType::Boolean => Some(1),
+        LoweredType::String | LoweredType::Bytes => Some(8),
+        LoweredType::None | LoweredType::Unit => Some(1),
+        LoweredType::Arguments => return Ok((16, 8)),
+        LoweredType::Task(_) => return Ok((8, 8)),
+        LoweredType::Aggregate(_) => None,
+    };
+    if let Some(size) = scalar {
+        return Ok((size, size.min(8).max(1)));
+    }
+    let LoweredType::Aggregate(id) = ty else {
+        unreachable!("non-scalar layout is aggregate")
+    };
+    if !visiting.insert(id) {
+        return Err(MlirError::UnsupportedOperation(format!(
+            "aggregate class {id} has a recursive inline layout"
+        )));
+    }
+    let declaration = module
+        .classes
+        .iter()
+        .find(|declaration| declaration.id == id)
+        .ok_or_else(|| MlirError::UnsupportedOperation(format!("unknown aggregate class {id}")))?;
+    let mut size = 0u64;
+    let mut aggregate_alignment = 1u64;
+    for field in &declaration.fields {
+        let (field_size, alignment) = lowered_type_layout(module, field.ty, visiting)?;
+        aggregate_alignment = aggregate_alignment.max(alignment);
+        size = size.div_ceil(alignment) * alignment;
+        size = size.saturating_add(field_size);
+    }
+    visiting.remove(&id);
+    Ok((size.div_ceil(aggregate_alignment) * aggregate_alignment, aggregate_alignment))
 }
 
 fn render_assert(
@@ -1687,29 +1799,7 @@ fn render_block(
                 symbol,
                 arguments,
                 result,
-            } => {
-                let arguments_text = arguments
-                    .iter()
-                    .map(|value| format!("%v{}", value.0))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let argument_types = arguments
-                    .iter()
-                    .map(|value| mlir_type(value_type(module, *value)?))
-                    .collect::<Result<Vec<_>, MlirError>>()?
-                    .join(", ");
-                if let Some(result) = result {
-                    let result_type = mlir_type(value_type(module, *result)?)?;
-                    output.push_str(&format!(
-                        "{indentation}%v{} = func.call @{symbol}({arguments_text}) : ({argument_types}) -> {result_type}\n",
-                        result.0
-                    ));
-                } else {
-                    output.push_str(&format!(
-                        "{indentation}func.call @{symbol}({arguments_text}) : ({argument_types}) -> ()\n"
-                    ));
-                }
-            }
+            } => render_runtime_call(output, module, symbol, arguments, *result, indent)?,
             Operation::Return { value } => {
                 let expected = function_result.ok_or_else(|| {
                     MlirError::UnsupportedOperation(

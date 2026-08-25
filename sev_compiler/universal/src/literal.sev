@@ -61,4 +61,4 @@ test "literal spellings survive until type selection":
     assert(literal_spelling(integer) == "18446744073709551616")
     assert(literal_spelling(floating) == "1.25e-4")
     assert(literal_spelling(text) == "severian")
-    assert(literal_spelling(BooleanValue(true)) == None)
+    assert(literal_spelling(BooleanValue(true)) is None)

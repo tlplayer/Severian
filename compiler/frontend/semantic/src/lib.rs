@@ -8611,6 +8611,25 @@ impl Analyzer<'_> {
         if self.list_elements.contains_key(&type_id) {
             return self.empty_list_expression(type_id, span);
         }
+        if self.map_elements.contains_key(&type_id) {
+            let storage_type = self
+                .types
+                .resolve_name("string")
+                .expect("bootstrap defines pointer-backed string");
+            let keys =
+                self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+            let values =
+                self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+            return Ok(Expression {
+                id: self.next_id(),
+                type_id,
+                kind: ExpressionKind::Aggregate {
+                    class: type_id,
+                    fields: vec![keys, values],
+                },
+                span,
+            });
+        }
         if let Some(elements) = self.tuple_elements.get(&type_id).cloned() {
             let fields = elements
                 .into_iter()
@@ -9311,6 +9330,7 @@ impl Analyzer<'_> {
             {
                 Ok("pair_i64")
             }
+            _ if self.class_instances_by_type.contains_key(&element) => Ok("aggregate"),
             _ => Err(Diagnostic::new(
                 "E000211",
                 "native list lowering does not yet support this element representation",

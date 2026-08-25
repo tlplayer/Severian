@@ -233,7 +233,7 @@ class TypeContext:
     def fresh_infer() -> TypeId:
         return interner.fresh_infer()
 
-    def intern(kind: TyKind) -> TypeId:
+    def intern_type(kind: TyKind) -> TypeId:
         return interner.intern(kind)
 
     def parameter(id: GenericParamId) -> TypeId:
@@ -417,10 +417,10 @@ class TypeContextBuilder:
 
 test "compiler capabilities derive structurally and remain conservative for resources":
     types = TypeContext()
-    scalar = types.intern(Nominal(DefId(0, 0, DeclarationId(1)), Substitution({})))
-    point = types.intern(Nominal(DefId(0, 0, DeclarationId(2)), Substitution({})))
-    resource = types.intern(Resource(DefId(0, 0, DeclarationId(3)), Substitution({})))
-    file = types.intern(Nominal(DefId(0, 0, DeclarationId(4)), Substitution({})))
+    scalar = types.intern_type(Nominal(DefId(0, 0, DeclarationId(1)), Substitution({})))
+    point = types.intern_type(Nominal(DefId(0, 0, DeclarationId(2)), Substitution({})))
+    resource = types.intern_type(Resource(DefId(0, 0, DeclarationId(3)), Substitution({})))
+    file = types.intern_type(Nominal(DefId(0, 0, DeclarationId(4)), Substitution({})))
     types.grant_capability(scalar, Copy)
     types.grant_capability(scalar, Send)
     types.grant_capability(scalar, FfiSafe("C"))

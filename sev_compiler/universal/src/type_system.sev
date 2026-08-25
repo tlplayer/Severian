@@ -32,6 +32,16 @@ enum TyKind:
     Resource(definition: DefId, substitution: Substitution)
 
 
+def intern_ty_kind(kinds: borrow mut list[TyKind], kind: move TyKind) -> TypeId:
+    index := u32(0)
+    for known in kinds:
+        if known == kind:
+            return TypeId(index)
+        index += 1
+    kinds.append(move kind)
+    return TypeId(u32(len(kinds) - 1))
+
+
 class TyInterner:
     kinds: list[TyKind]
     next_infer: u32
@@ -41,13 +51,7 @@ class TyInterner:
         next_infer = 0
 
     def intern(kind: TyKind) -> TypeId:
-        index: u32 = 0
-        for known in kinds:
-            if known == kind:
-                return TypeId(index)
-            index += 1
-        kinds.append(kind)
-        return TypeId(u32(len(kinds) - 1))
+        return intern_ty_kind(borrow mut kinds, move kind)
 
     def kind(id: TypeId) -> TyKind | None:
         if id.index >= len(kinds):
@@ -57,10 +61,24 @@ class TyInterner:
     def fresh_infer() -> TypeId:
         variable = InferVarId(next_infer)
         next_infer += 1
-        return intern(Infer(variable))
+        candidate: TyKind = Infer(variable)
+        index := u32(0)
+        for known in kinds:
+            if known == candidate:
+                return TypeId(index)
+            index += 1
+        kinds.append(candidate)
+        return TypeId(u32(len(kinds) - 1))
 
     def parameter(parameter: GenericParamId) -> TypeId:
-        return intern(Parameter(parameter))
+        candidate: TyKind = Parameter(parameter)
+        index := u32(0)
+        for known in kinds:
+            if known == candidate:
+                return TypeId(index)
+            index += 1
+        kinds.append(candidate)
+        return TypeId(u32(len(kinds) - 1))
 
     def substitute(type_id: TypeId, replacements: Substitution) -> TypeId:
         known = kind(type_id)
@@ -73,24 +91,52 @@ class TyInterner:
                 arguments: map[int, int] = {}
                 for parameter, argument in known_arguments.arguments:
                     arguments[parameter] = int(substitute(TypeId(u32(argument)), replacements).index)
-                return intern(Nominal(definition, Substitution(arguments)))
+                candidate: TyKind = Nominal(definition, Substitution(arguments))
+                index := u32(0)
+                for existing in kinds:
+                    if existing == candidate:
+                        return TypeId(index)
+                    index += 1
+                kinds.append(candidate)
+                return TypeId(u32(len(kinds) - 1))
             case Resource:
                 known_arguments = substitution
                 arguments: map[int, int] = {}
                 for parameter, argument in known_arguments.arguments:
                     arguments[parameter] = int(substitute(TypeId(u32(argument)), replacements).index)
-                return intern(Resource(definition, Substitution(arguments)))
+                candidate: TyKind = Resource(definition, Substitution(arguments))
+                index := u32(0)
+                for existing in kinds:
+                    if existing == candidate:
+                        return TypeId(index)
+                    index += 1
+                kinds.append(candidate)
+                return TypeId(u32(len(kinds) - 1))
             case Function:
                 replaced_parameters: list[TypeId] = []
                 for parameter in signature.parameters:
                     replaced_parameters.append(substitute(parameter, replacements))
-                return intern(Function(Signature(replaced_parameters, substitute(signature.result, replacements))))
+                candidate: TyKind = Function(Signature(replaced_parameters, substitute(signature.result, replacements)))
+                index := u32(0)
+                for existing in kinds:
+                    if existing == candidate:
+                        return TypeId(index)
+                    index += 1
+                kinds.append(candidate)
+                return TypeId(u32(len(kinds) - 1))
             case Tuple:
                 known_elements = elements
                 replaced_elements: list[TypeId] = []
                 for element in known_elements:
                     replaced_elements.append(substitute(element, replacements))
-                return intern(Tuple(replaced_elements))
+                candidate: TyKind = Tuple(replaced_elements)
+                index := u32(0)
+                for existing in kinds:
+                    if existing == candidate:
+                        return TypeId(index)
+                    index += 1
+                kinds.append(candidate)
+                return TypeId(u32(len(kinds) - 1))
             case Union:
                 known_members = members
                 replaced_members: list[TypeId] = []
@@ -98,7 +144,14 @@ class TyInterner:
                     replaced_members.append(substitute(member, replacements))
                 return union(replaced_members)
             case Reference:
-                return intern(Reference(substitute(target, replacements), mutable, lifetime))
+                candidate: TyKind = Reference(substitute(target, replacements), mutable, lifetime)
+                index := u32(0)
+                for existing in kinds:
+                    if existing == candidate:
+                        return TypeId(index)
+                    index += 1
+                kinds.append(candidate)
+                return TypeId(u32(len(kinds) - 1))
             case _:
                 return type_id
 
@@ -118,7 +171,14 @@ class TyInterner:
         canonical = canonical.sorted(|type_id| type_id.index)
         if len(canonical) == 1:
             return canonical[0]
-        return intern(Union(canonical))
+        union_kind: TyKind = TyKind.Union(canonical)
+        index := u32(0)
+        for existing in kinds:
+            if existing == union_kind:
+                return TypeId(index)
+            index += 1
+        kinds.append(union_kind)
+        return TypeId(u32(len(kinds) - 1))
 
 
 class TraitRef:
@@ -184,7 +244,7 @@ class InferenceContext:
         constraints = []
         next_constraint = 0
 
-    def resolve(interner: TyInterner, type_id: TypeId) -> TypeId:
+    def resolve(interner: borrow TyInterner, type_id: TypeId) -> TypeId:
         known = interner.kind(type_id)
         match known:
             case Infer:
@@ -196,7 +256,7 @@ class InferenceContext:
                 return type_id
 
     def constrain_equal(
-        interner: TyInterner,
+        interner: borrow TyInterner,
         left: TypeId,
         right: TypeId,
         span: source.Span,
@@ -209,7 +269,7 @@ class InferenceContext:
         return unify(interner, left, right)
 
     def constrain_implements(
-        reference: TraitRef,
+        reference: move TraitRef,
         span: source.Span,
         reason: string,
         parent: ConstraintId | None = None,
@@ -219,7 +279,7 @@ class InferenceContext:
         constraints.append(Constraint(id, Implements(reference), span, reason, parent))
         return id
 
-    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+    def unify(interner: borrow TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
         left = resolve(interner, left)
         right = resolve(interner, right)
         if left == right:
@@ -234,47 +294,47 @@ class InferenceContext:
                 return bind(interner, variable, left)
         return error(Mismatch(left, right))
 
-    def bind(interner: TyInterner, variable: InferVarId, type_id: TypeId) -> unit | UnifyError:
+    def bind(interner: borrow TyInterner, target_variable: InferVarId, type_id: TypeId) -> unit | UnifyError:
         match interner.kind(type_id):
             case Infer:
-                if found == variable:
+                if variable == target_variable:
                     return unit
-        if occurs(interner, variable, type_id):
-            return error(Occurs(variable, type_id))
-        bindings[variable] = type_id
+        if occurs(interner, target_variable, type_id):
+            return error(Occurs(target_variable, type_id))
+        bindings[target_variable] = type_id
         return unit
 
-    def occurs(interner: TyInterner, variable: InferVarId, type_id: TypeId) -> bool:
+    def occurs(interner: borrow TyInterner, target_variable: InferVarId, type_id: TypeId) -> bool:
         known = interner.kind(type_id)
         match known:
             case Infer:
-                if found == variable:
+                if variable == target_variable:
                     return true
-                bound = bindings.get(found)
-                return false if bound == None else occurs(interner, variable, bound)
+                bound = bindings.get(variable)
+                return false if bound == None else occurs(interner, target_variable, bound)
             case Nominal:
                 for argument in substitution.values():
-                    if occurs(interner, variable, TypeId(u32(argument))):
+                    if occurs(interner, target_variable, TypeId(u32(argument))):
                         return true
             case Resource:
                 for argument in substitution.values():
-                    if occurs(interner, variable, TypeId(u32(argument))):
+                    if occurs(interner, target_variable, TypeId(u32(argument))):
                         return true
             case Function:
                 for parameter in signature.parameters:
-                    if occurs(interner, variable, parameter):
+                    if occurs(interner, target_variable, parameter):
                         return true
-                return occurs(interner, variable, signature.result)
+                return occurs(interner, target_variable, signature.result)
             case Tuple:
                 for element in elements:
-                    if occurs(interner, variable, element):
+                    if occurs(interner, target_variable, element):
                         return true
             case Union:
                 for member in members:
-                    if occurs(interner, variable, member):
+                    if occurs(interner, target_variable, member):
                         return true
             case Reference:
-                return occurs(interner, variable, target)
+                return occurs(interner, target_variable, target)
         return false
 
 
@@ -288,6 +348,37 @@ class ImplDefinition:
     trait_id: DefId
     self_type: TypeId
     substitution: Substitution
+
+
+def register_impl(
+    implementations: borrow mut list[ImplDefinition],
+    interner: borrow TyInterner,
+    defining_package: u128,
+    trait_id: DefId,
+    self_type: TypeId,
+    substitution: move Substitution,
+) -> ImplId | ImplError:
+    match interner.kind(self_type):
+        case Nominal:
+            if defining_package != trait_id.package and defining_package != definition.package:
+                return error(Orphan(defining_package, trait_id.package, definition.package))
+            for implementation in implementations:
+                if implementation.trait_id == trait_id and substitutions_overlap(interner, implementation.substitution, substitution) and types_overlap(interner, implementation.self_type, self_type):
+                    return error(Overlap(implementation.id))
+            id = ImplId(u32(len(implementations)))
+            implementations.append(ImplDefinition(id, defining_package, trait_id, self_type, move substitution))
+            return id
+        case Resource:
+            if defining_package != trait_id.package and defining_package != definition.package:
+                return error(Orphan(defining_package, trait_id.package, definition.package))
+            for implementation in implementations:
+                if implementation.trait_id == trait_id and substitutions_overlap(interner, implementation.substitution, substitution) and types_overlap(interner, implementation.self_type, self_type):
+                    return error(Overlap(implementation.id))
+            id = ImplId(u32(len(implementations)))
+            implementations.append(ImplDefinition(id, defining_package, trait_id, self_type, move substitution))
+            return id
+        case _:
+            return error(NonNominal(self_type))
 
 
 enum ImplSelection:
@@ -309,28 +400,13 @@ class ImplTable:
         implementations = []
 
     def register(
-        interner: TyInterner,
+        interner: borrow TyInterner,
         defining_package: u128,
         trait_id: DefId,
         self_type: TypeId,
-        substitution: Substitution,
+        substitution: move Substitution,
     ) -> ImplId | ImplError:
-        type_definition: DefId | None = None
-        match interner.kind(self_type):
-            case Nominal:
-                type_definition = definition
-            case Resource:
-                type_definition = definition
-        if type_definition == None:
-            return error(NonNominal(self_type))
-        if defining_package != trait_id.package and defining_package != type_definition.package:
-            return error(Orphan(defining_package, trait_id.package, type_definition.package))
-        for implementation in implementations:
-            if implementation.trait_id == trait_id and substitutions_overlap(interner, implementation.substitution, substitution) and types_overlap(interner, implementation.self_type, self_type):
-                return error(Overlap(implementation.id))
-        id = ImplId(u32(len(implementations)))
-        implementations.append(ImplDefinition(id, defining_package, trait_id, self_type, substitution))
-        return id
+        return register_impl(borrow mut implementations, borrow interner, defining_package, trait_id, self_type, move substitution)
 
     def select(reference: TraitRef) -> ImplSelection:
         matches: list[ImplId] = []
@@ -344,7 +420,7 @@ class ImplTable:
         return Ambiguous(matches)
 
 
-def substitutions_overlap(interner: TyInterner, left: Substitution, right: Substitution) -> bool:
+def substitutions_overlap(interner: borrow TyInterner, left: Substitution, right: Substitution) -> bool:
     if len(left.arguments) != len(right.arguments):
         return false
     right_arguments = right.arguments
@@ -357,7 +433,7 @@ def substitutions_overlap(interner: TyInterner, left: Substitution, right: Subst
     return true
 
 
-def types_overlap(interner: TyInterner, left: TypeId, right: TypeId) -> bool:
+def types_overlap(interner: borrow TyInterner, left: TypeId, right: TypeId) -> bool:
     if left == right:
         return true
     match interner.kind(left):
@@ -369,16 +445,19 @@ def types_overlap(interner: TyInterner, left: TypeId, right: TypeId) -> bool:
             return nominal_types_overlap(interner, definition, substitution, right)
         case Resource:
             return resource_types_overlap(interner, definition, substitution, right)
-    match interner.kind(right):
-        case Parameter:
-            return true
-        case Infer:
-            return true
+        case _:
+            match interner.kind(right):
+                case Parameter:
+                    return true
+                case Infer:
+                    return true
+                case _:
+                    return false
     return false
 
 
 def nominal_types_overlap(
-    interner: TyInterner,
+    interner: borrow TyInterner,
     left_definition: DefId,
     left_substitution: Substitution,
     right: TypeId,
@@ -386,11 +465,13 @@ def nominal_types_overlap(
     match interner.kind(right):
         case Nominal:
             return definition == left_definition and substitutions_overlap(interner, left_substitution, substitution)
+        case _:
+            return false
     return false
 
 
 def resource_types_overlap(
-    interner: TyInterner,
+    interner: borrow TyInterner,
     left_definition: DefId,
     left_substitution: Substitution,
     right: TypeId,
@@ -398,6 +479,8 @@ def resource_types_overlap(
     match interner.kind(right):
         case Resource:
             return definition == left_definition and substitutions_overlap(interner, left_substitution, substitution)
+        case _:
+            return false
     return false
 
 
@@ -417,7 +500,9 @@ test "occurs check rejects recursive inference bindings":
     inference = InferenceContext()
     match types.kind(variable):
         case Infer:
-            assert(inference.occurs(types, found, recursive))
+            assert(inference.occurs(borrow types, variable, recursive))
+        case _:
+            assert(false)
 
 
 test "constraints retain diagnostic provenance":
@@ -425,8 +510,9 @@ test "constraints retain diagnostic provenance":
     concrete = types.intern(Nominal(DefId(1, 0, DeclarationId(4)), Substitution({})))
     span = source.Span(source.SourceId(0), 10, 20)
     inference = InferenceContext()
-    parent = inference.constrain_implements(TraitRef(DefId(1, 0, DeclarationId(5)), concrete, Substitution({})), span, "required by generic declaration")
-    inference.constrain_equal(types, concrete, concrete, span, "inferred from call argument", parent)
+    parent = ConstraintId(0)
+    inference.constraints.append(Constraint(parent, Equal(concrete, concrete), span, "required by generic declaration", None))
+    inference.constraints.append(Constraint(ConstraintId(1), Equal(concrete, concrete), span, "inferred from call argument", parent))
     assert(len(inference.constraints) == 2)
     assert(inference.constraints[1].span == span)
     assert(inference.constraints[1].parent == parent)
@@ -438,13 +524,13 @@ test "implementation coherence enforces ownership and rejects overlap":
     trait_id = DefId(1, 0, DeclarationId(1))
     type_id = types.intern(Nominal(DefId(2, 0, DeclarationId(2)), Substitution({})))
     table = ImplTable()
-    match table.register(types, 3, trait_id, type_id, Substitution({})):
+    match table.register(borrow types, 3, trait_id, type_id, Substitution({})):
         case _id:
             assert(false)
         case error:
             assert(len(table.implementations) == 0)
-    first = table.register(types, 2, trait_id, type_id, Substitution({}))
-    match table.register(types, 1, trait_id, type_id, Substitution({})):
+    first = table.register(borrow types, 2, trait_id, type_id, Substitution({}))
+    match table.register(borrow types, 1, trait_id, type_id, Substitution({})):
         case _id:
             assert(false)
         case error:
@@ -463,10 +549,10 @@ test "coherence permits disjoint concrete instances but rejects blanket overlap"
     string_list = types.intern(Nominal(list_definition, Substitution({0: int(string.index)})))
     blanket_list = types.intern(Nominal(list_definition, Substitution({0: int(parameter.index)})))
     table = ImplTable()
-    table.register(types, 2, trait_id, integer_list, Substitution({}))
-    table.register(types, 2, trait_id, string_list, Substitution({}))
+    table.register(borrow types, 2, trait_id, integer_list, Substitution({}))
+    table.register(borrow types, 2, trait_id, string_list, Substitution({}))
     assert(len(table.implementations) == 2)
-    match table.register(types, 2, trait_id, blanket_list, Substitution({})):
+    match table.register(borrow types, 2, trait_id, blanket_list, Substitution({})):
         case _id:
             assert(false)
         case error:

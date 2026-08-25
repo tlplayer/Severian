@@ -3,7 +3,6 @@ import "ids.sev"
 import "literal.sev"
 import "operator.sev"
 import "operation_registry.sev"
-import "type_system.sev"
 import "types/mod.sev"
 
 enum CompileRoute:
