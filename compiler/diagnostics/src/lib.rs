@@ -14,11 +14,11 @@ pub struct Diagnostic {
     pub code: &'static str,
     pub message: String,
     pub span: Option<Span>,
-    pub labels: Vec<DiagnosticLabel>,
-    pub notes: Vec<String>,
+    pub labels: Box<Vec<DiagnosticLabel>>,
+    pub notes: Box<Vec<String>>,
     pub help: Option<String>,
-    pub sources: Vec<SourceFile>,
-    pub additional: Vec<Diagnostic>,
+    pub sources: Box<Vec<SourceFile>>,
+    pub additional: Box<Vec<Diagnostic>>,
 }
 
 impl Diagnostic {
@@ -27,11 +27,11 @@ impl Diagnostic {
             code,
             message: message.into(),
             span,
-            labels: Vec::new(),
-            notes: Vec::new(),
+            labels: Box::default(),
+            notes: Box::default(),
             help: None,
-            sources: Vec::new(),
-            additional: Vec::new(),
+            sources: Box::default(),
+            additional: Box::default(),
         }
     }
 
@@ -57,7 +57,7 @@ impl Diagnostic {
         if !self.sources.iter().any(|known| known.id == source.id) {
             self.sources.push(source.clone());
         }
-        for diagnostic in &mut self.additional {
+        for diagnostic in self.additional.iter_mut() {
             if !diagnostic.sources.iter().any(|known| known.id == source.id) {
                 diagnostic.sources.push(source.clone());
             }
@@ -70,7 +70,7 @@ impl Diagnostic {
             if !self.sources.iter().any(|known| known.id == source.id) {
                 self.sources.push(source.clone());
             }
-            for diagnostic in &mut self.additional {
+            for diagnostic in self.additional.iter_mut() {
                 if !diagnostic.sources.iter().any(|known| known.id == source.id) {
                     diagnostic.sources.push(source.clone());
                 }
@@ -125,13 +125,13 @@ impl fmt::Display for Diagnostic {
                 }
             }
         }
-        for note in &self.notes {
+        for note in self.notes.iter() {
             write!(formatter, "\n note: {note}")?;
         }
         if let Some(help) = &self.help {
             write!(formatter, "\n help: {help}")?;
         }
-        for diagnostic in &self.additional {
+        for diagnostic in self.additional.iter() {
             write!(formatter, "\n\n{diagnostic}")?;
         }
         Ok(())

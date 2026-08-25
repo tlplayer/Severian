@@ -377,8 +377,9 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
         Operation::Assign { target, value } => vec![*target, *value],
         Operation::Unary { operand, .. } => vec![*operand],
         Operation::Binary { left, right, .. } => vec![*left, *right],
-        Operation::Call { arguments, .. } => arguments.clone(),
-        Operation::Spawn { arguments, .. } => arguments.clone(),
+        Operation::Call { arguments, .. } | Operation::Spawn { arguments, .. } => {
+            arguments.clone()
+        }
         Operation::Await { task, .. } => vec![*task],
         Operation::Return { value } => value.iter().copied().collect(),
         Operation::Assert {
@@ -414,7 +415,11 @@ fn operation_inputs(operation: &Operation) -> Vec<ValueId> {
 
 fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
     match operation {
-        Operation::Coverage { .. } | Operation::Break | Operation::Continue => Vec::new(),
+        Operation::Coverage { .. }
+        | Operation::Break
+        | Operation::Continue
+        | Operation::Return { .. }
+        | Operation::Assert { .. } => Vec::new(),
         Operation::Constant { result, .. }
         | Operation::Unary { result, .. }
         | Operation::Binary { result, .. }
@@ -425,7 +430,6 @@ fn operation_outputs(operation: &Operation) -> Vec<ValueId> {
         | Operation::Spawn { result, .. }
         | Operation::Await { result, .. } => vec![*result],
         Operation::Assign { target, .. } => vec![*target],
-        Operation::Return { .. } | Operation::Assert { .. } => Vec::new(),
         Operation::If {
             then_block,
             else_block,

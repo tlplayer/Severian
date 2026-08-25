@@ -535,12 +535,13 @@ fn successors(terminator: &Terminator) -> Vec<crate::BlockId> {
 
 fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
     match terminator {
-        Terminator::Goto(_, arguments) => arguments.iter().collect(),
+        Terminator::Goto(_, arguments) | Terminator::Call { arguments, .. } => {
+            arguments.iter().collect()
+        }
         Terminator::Branch { condition, .. } => vec![condition],
         Terminator::Switch { discriminant, .. } => vec![discriminant],
         Terminator::Return(value) => value.iter().collect(),
-        Terminator::Throw(value) => vec![value],
-        Terminator::Call { arguments, .. } => arguments.iter().collect(),
+        Terminator::Throw(value) | Terminator::SpawnFieldUpdate { value, .. } => vec![value],
         Terminator::Spawn {
             callee, arguments, ..
         } => {
@@ -552,7 +553,6 @@ fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
             }
             operands
         }
-        Terminator::SpawnFieldUpdate { value, .. } => vec![value],
         Terminator::Unreachable => Vec::new(),
     }
 }

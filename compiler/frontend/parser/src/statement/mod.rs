@@ -31,10 +31,7 @@ pub fn parse_with_max_errors(tokens: &[Token], max_errors: usize) -> Result<Modu
     let mut diagnostics = vec![first];
     let mut recovered = tokens.to_vec();
     let mut omitted = false;
-    loop {
-        let Some(span) = diagnostics.last().and_then(|diagnostic| diagnostic.span) else {
-            break;
-        };
+    while let Some(span) = diagnostics.last().and_then(|diagnostic| diagnostic.span) {
         if !suppress_diagnostic_line(&mut recovered, span) {
             break;
         }
@@ -2159,37 +2156,37 @@ impl Parser<'_> {
             self.property_constraints()?;
         }
         if !inferred
-            && annotation.is_some()
             && (self.at(&TokenKind::Newline) || self.at(&TokenKind::Dedent))
         {
-            let annotation = annotation.unwrap();
-            let value = match annotation.simple_name() {
-                Some("string") => Expression {
-                    kind: ExpressionKind::Literal(severian_ast::Literal::String(String::new())),
-                    span: annotation.span,
-                },
-                Some("float" | "f16" | "bf16" | "f32" | "f64" | "f128") => Expression {
-                    kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
-                    span: annotation.span,
-                },
-                Some("bool") => Expression {
-                    kind: ExpressionKind::Literal(severian_ast::Literal::Boolean(false)),
-                    span: annotation.span,
-                },
-                _ => Expression {
-                    kind: ExpressionKind::Literal(severian_ast::Literal::Integer("0".into())),
-                    span: annotation.span,
-                },
-            };
-            return Ok(Binding {
-                name,
-                annotation: Some(annotation),
-                span: Span::new(name_span.source, name_span.start, value.span.end),
-                value,
-                mutable: false,
-                update: false,
-                preserve_error: false,
-            });
+            if let Some(annotation) = annotation.as_ref() {
+                let value = match annotation.simple_name() {
+                    Some("string") => Expression {
+                        kind: ExpressionKind::Literal(severian_ast::Literal::String(String::new())),
+                        span: annotation.span,
+                    },
+                    Some("float" | "f16" | "bf16" | "f32" | "f64" | "f128") => Expression {
+                        kind: ExpressionKind::Literal(severian_ast::Literal::Float("0.0".into())),
+                        span: annotation.span,
+                    },
+                    Some("bool") => Expression {
+                        kind: ExpressionKind::Literal(severian_ast::Literal::Boolean(false)),
+                        span: annotation.span,
+                    },
+                    _ => Expression {
+                        kind: ExpressionKind::Literal(severian_ast::Literal::Integer("0".into())),
+                        span: annotation.span,
+                    },
+                };
+                return Ok(Binding {
+                    name,
+                    annotation: Some(annotation.clone()),
+                    span: Span::new(name_span.source, name_span.start, value.span.end),
+                    value,
+                    mutable: false,
+                    update: false,
+                    preserve_error: false,
+                });
+            }
         }
         let preserve_error = !inferred && self.take(&TokenKind::QuestionEqual).is_some();
         if !inferred && !preserve_error {
@@ -2987,12 +2984,15 @@ impl Parser<'_> {
                 TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => {
                     nested += 1
                 }
-                TokenKind::RightParen | TokenKind::RightBracket if nested == 0 => return false,
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::Comma
+                    if nested == 0 =>
+                {
+                    return false
+                }
                 TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
                     nested = nested.saturating_sub(1)
                 }
                 TokenKind::Colon if nested == 0 => return true,
-                TokenKind::Comma if nested == 0 => return false,
                 _ => {}
             }
             cursor += 1;
@@ -3871,8 +3871,8 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::Less
         | BinaryOperator::LessEqual
         | BinaryOperator::Greater
-        | BinaryOperator::GreaterEqual => 3,
-        BinaryOperator::Contains => 3,
+        | BinaryOperator::GreaterEqual
+        | BinaryOperator::Contains => 3,
         BinaryOperator::Pipe => 4,
         BinaryOperator::BitwiseXor => 5,
         BinaryOperator::BitwiseAnd => 6,

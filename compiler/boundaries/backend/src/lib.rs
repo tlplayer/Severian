@@ -380,13 +380,11 @@ fn render_block(
             } => {
                 output.push_str(&format!("    if (v{}) {{\n", condition.0));
                 render_block(output, module, then_block)?;
-                if else_block.operations.is_empty() {
-                    output.push_str("    }\n");
-                } else {
+                if !else_block.operations.is_empty() {
                     output.push_str("    } else {\n");
                     render_block(output, module, else_block)?;
-                    output.push_str("    }\n");
                 }
+                output.push_str("    }\n");
             }
             Operation::While {
                 condition_block,
@@ -526,7 +524,9 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
         LoweredType::Integer {
             bits: 8,
             signed: false,
-        } => Ok("uint8_t"),
+        }
+        | LoweredType::None
+        | LoweredType::Unit => Ok("uint8_t"),
         LoweredType::Integer {
             bits: 16,
             signed: false,
@@ -551,7 +551,6 @@ fn c_type(ty: LoweredType) -> Result<&'static str, BackendError> {
         } => Ok("double"),
         LoweredType::Boolean => Ok("_Bool"),
         LoweredType::String => Ok("const char *"),
-        LoweredType::None | LoweredType::Unit => Ok("uint8_t"),
         LoweredType::Arguments => Ok("sev_args"),
         unsupported => Err(BackendError::UnsupportedType(unsupported)),
     }

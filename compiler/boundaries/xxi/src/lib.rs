@@ -359,8 +359,7 @@ fn language_abi(language: &ExternalLanguage) -> AbiSelection {
     match language {
         ExternalLanguage::C => AbiSelection::C,
         ExternalLanguage::Rust => AbiSelection::Rust,
-        ExternalLanguage::System => AbiSelection::System,
-        ExternalLanguage::Custom(_) => AbiSelection::System,
+        ExternalLanguage::System | ExternalLanguage::Custom(_) => AbiSelection::System,
     }
 }
 

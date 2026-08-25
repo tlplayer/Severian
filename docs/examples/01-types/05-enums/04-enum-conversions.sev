@@ -1,0 +1,14 @@
+enum TypeSymbols:
+    Add {"+", "+="}
+    Sub {"-", "-"}
+    #Multiple types are allowed but they funnel to one operation
+    Mult {"*", "*=",0}
+
+
+test "Conveting symbols to enums":
+    operations = ["+","-","*=","*",0]
+
+    for operation in operations:
+        TypeSymbol = TypeSymbols(operation)
+
+    throws(TypeSymbols("/") -> Error)

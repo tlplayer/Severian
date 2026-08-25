@@ -665,12 +665,11 @@ fn apply_statement_liveness(statement: &CfgStatement, live: &mut BTreeSet<LocalI
 
 fn apply_terminator_liveness(terminator: &Terminator, live: &mut BTreeSet<LocalId>) {
     match terminator {
-        Terminator::Call { destination, .. } => {
-            if let Some(destination) = destination {
-                define_place(destination, live);
-            }
+        Terminator::Call {
+            destination: Some(destination),
+            ..
         }
-        Terminator::Spawn { destination, .. }
+        | Terminator::Spawn { destination, .. }
         | Terminator::SpawnFieldUpdate { destination, .. } => define_place(destination, live),
         _ => {}
     }
@@ -720,6 +719,68 @@ fn define_place(place: &Place, live: &mut BTreeSet<LocalId>) {
         if let Some(local) = place.local_id() {
             live.remove(&local);
         }
+    }
+}
+
+fn successors(terminator: &Terminator) -> Vec<BlockId> {
+    match terminator {
+        Terminator::Goto(target, _) => vec![*target],
+        Terminator::Branch {
+            then_block,
+            else_block,
+            ..
+        } => vec![*then_block, *else_block],
+        Terminator::Switch {
+            targets, fallback, ..
+        } => targets
+            .iter()
+            .map(|(_, block)| *block)
+            .chain([*fallback])
+            .collect(),
+        Terminator::Call { target, unwind, .. } => {
+            [Some(*target), *unwind].into_iter().flatten().collect()
+        }
+        Terminator::Spawn { target, .. } | Terminator::SpawnFieldUpdate { target, .. } => {
+            vec![*target]
+        }
+        Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
+    }
+}
+
+fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
+    match terminator {
+        Terminator::Goto(_, arguments) => arguments.iter().collect(),
+        Terminator::Branch { condition, .. } => vec![condition],
+        Terminator::Switch { discriminant, .. } => vec![discriminant],
+        Terminator::Call {
+            callee, arguments, ..
+        } => {
+            let mut operands = arguments.iter().collect::<Vec<_>>();
+            match callee {
+                crate::Callee::FunctionValue(operand) => operands.push(operand),
+                crate::Callee::Method { receiver, .. } => operands.push(receiver),
+                crate::Callee::Direct { .. }
+                | crate::Callee::Constructor { .. }
+                | crate::Callee::Intrinsic(_) => {}
+            }
+            operands
+        }
+        Terminator::Spawn {
+            callee, arguments, ..
+        } => {
+            let mut operands = arguments.iter().collect::<Vec<_>>();
+            match callee {
+                crate::Callee::FunctionValue(operand) => operands.push(operand),
+                crate::Callee::Method { receiver, .. } => operands.push(receiver),
+                crate::Callee::Direct { .. }
+                | crate::Callee::Constructor { .. }
+                | crate::Callee::Intrinsic(_) => {}
+            }
+            operands
+        }
+        Terminator::SpawnFieldUpdate { value, .. } | Terminator::Throw(value) => vec![value],
+        Terminator::Return(value) => value.iter().collect(),
+        Terminator::Unreachable => Vec::new(),
     }
 }
 
@@ -912,68 +973,5 @@ mod tests {
 
         let (_, _, argument_errors, _) = solve(&body(true));
         assert!(argument_errors.is_empty(), "{argument_errors:?}");
-    }
-}
-
-fn successors(terminator: &Terminator) -> Vec<BlockId> {
-    match terminator {
-        Terminator::Goto(target, _) => vec![*target],
-        Terminator::Branch {
-            then_block,
-            else_block,
-            ..
-        } => vec![*then_block, *else_block],
-        Terminator::Switch {
-            targets, fallback, ..
-        } => targets
-            .iter()
-            .map(|(_, block)| *block)
-            .chain([*fallback])
-            .collect(),
-        Terminator::Call { target, unwind, .. } => {
-            [Some(*target), *unwind].into_iter().flatten().collect()
-        }
-        Terminator::Spawn { target, .. } | Terminator::SpawnFieldUpdate { target, .. } => {
-            vec![*target]
-        }
-        Terminator::Return(_) | Terminator::Throw(_) | Terminator::Unreachable => Vec::new(),
-    }
-}
-
-fn terminator_operands(terminator: &Terminator) -> Vec<&Operand> {
-    match terminator {
-        Terminator::Goto(_, arguments) => arguments.iter().collect(),
-        Terminator::Branch { condition, .. } => vec![condition],
-        Terminator::Switch { discriminant, .. } => vec![discriminant],
-        Terminator::Call {
-            callee, arguments, ..
-        } => {
-            let mut operands = arguments.iter().collect::<Vec<_>>();
-            match callee {
-                crate::Callee::FunctionValue(operand) => operands.push(operand),
-                crate::Callee::Method { receiver, .. } => operands.push(receiver),
-                crate::Callee::Direct { .. }
-                | crate::Callee::Constructor { .. }
-                | crate::Callee::Intrinsic(_) => {}
-            }
-            operands
-        }
-        Terminator::Spawn {
-            callee, arguments, ..
-        } => {
-            let mut operands = arguments.iter().collect::<Vec<_>>();
-            match callee {
-                crate::Callee::FunctionValue(operand) => operands.push(operand),
-                crate::Callee::Method { receiver, .. } => operands.push(receiver),
-                crate::Callee::Direct { .. }
-                | crate::Callee::Constructor { .. }
-                | crate::Callee::Intrinsic(_) => {}
-            }
-            operands
-        }
-        Terminator::SpawnFieldUpdate { value, .. } => vec![value],
-        Terminator::Return(value) => value.iter().collect(),
-        Terminator::Throw(value) => vec![value],
-        Terminator::Unreachable => Vec::new(),
     }
 }

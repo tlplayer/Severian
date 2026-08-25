@@ -43,12 +43,11 @@ impl PrimitiveCategory {
             Self::Character => Some(LiteralKind::Character),
             Self::Integer => Some(LiteralKind::Integer),
             Self::Float => Some(LiteralKind::Float),
-            Self::Measured => None,
+            Self::Measured | Self::Arguments => None,
             Self::Text => Some(LiteralKind::String),
             Self::Bytes => Some(LiteralKind::Bytes),
             Self::Absence => Some(LiteralKind::None),
             Self::Unit => Some(LiteralKind::Unit),
-            Self::Arguments => None,
         }
     }
 }

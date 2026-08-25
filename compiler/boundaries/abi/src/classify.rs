@@ -87,9 +87,8 @@ fn classify_aggregate(
     result: bool,
 ) -> PassMode {
     let direct_limit = match convention {
-        CallingConvention::Win64 => 8,
         CallingConvention::SysV64 | CallingConvention::Aapcs64 | CallingConvention::Rust => 16,
-        CallingConvention::C | CallingConvention::System => 8,
+        CallingConvention::Win64 | CallingConvention::C | CallingConvention::System => 8,
     };
     if layout.size > direct_limit
         || (convention == CallingConvention::Win64 && !matches!(layout.size, 1 | 2 | 4 | 8))

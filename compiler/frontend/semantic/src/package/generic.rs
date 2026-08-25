@@ -91,7 +91,9 @@ fn validate_generic_statements(
             } => {
                 validate_generic_expression(expression, names, function, index, types)?;
             }
-            severian_ast::Statement::Return { value: None, .. } => {}
+            severian_ast::Statement::Return { value: None, .. }
+            | severian_ast::Statement::Break { .. }
+            | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Assert {
                 condition, message, ..
             } => {
@@ -194,7 +196,6 @@ fn validate_generic_statements(
                 }
                 validate_generic_statements(body, &mut names.clone(), function, index, types)?;
             }
-            severian_ast::Statement::Break { .. } | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Match { subject, cases, .. } => {
                 validate_generic_expression(subject, names, function, index, types)?;
                 for case in cases {
@@ -932,17 +933,8 @@ fn visit_statements_for_specializations(
                     )?;
                 }
             }
-            severian_ast::Statement::Expression(expression) => {
-                visit_expression_for_specializations(
-                    module,
-                    expression,
-                    None,
-                    names,
-                    index,
-                    specializations,
-                )?;
-            }
-            severian_ast::Statement::Defer { expression, .. } => {
+            severian_ast::Statement::Expression(expression)
+            | severian_ast::Statement::Defer { expression, .. } => {
                 visit_expression_for_specializations(
                     module,
                     expression,
@@ -964,7 +956,9 @@ fn visit_statements_for_specializations(
                     specializations,
                 )?;
             }
-            severian_ast::Statement::Return { value: None, .. } => {}
+            severian_ast::Statement::Return { value: None, .. }
+            | severian_ast::Statement::Break { .. }
+            | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Assert {
                 condition, message, ..
             } => {
@@ -1143,7 +1137,6 @@ fn visit_statements_for_specializations(
                     specializations,
                 )?;
             }
-            severian_ast::Statement::Break { .. } | severian_ast::Statement::Continue { .. } => {}
             severian_ast::Statement::Match { subject, cases, .. } => {
                 visit_expression_for_specializations(
                     module,

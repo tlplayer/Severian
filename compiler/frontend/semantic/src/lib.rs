@@ -97,6 +97,7 @@ pub(crate) struct PackageConstant {
     pub value: AstExpression,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn analyze_with_package_functions(
     ast: &severian_ast::Module,
     types: &TypeContext,
@@ -3274,10 +3275,8 @@ impl Analyzer<'_> {
                         Some(case.span),
                     ));
                 }
-                catch_all = true;
-            } else {
-                catch_all = true;
             }
+            catch_all = true;
 
             self.names.clone_from(&outer_names);
             self.declarations.clone_from(&outer_declarations);
@@ -3552,16 +3551,11 @@ impl Analyzer<'_> {
             | AstStatement::Defer {
                 expression: value, ..
             }
-            | AstStatement::FallibleElse { value, .. } => self
-                .lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?,
-            AstStatement::Return {
+            | AstStatement::FallibleElse { value, .. }
+            | AstStatement::Return {
                 value: Some(value), ..
-            } => self.lower_expression_comprehensions(
-                value,
-                bindings,
-                result_type,
-                &mut preludes,
-            )?,
+            } => self
+                .lower_expression_comprehensions(value, bindings, result_type, &mut preludes)?,
             AstStatement::Assert {
                 condition, message, ..
             } => {
@@ -4377,18 +4371,22 @@ impl Analyzer<'_> {
                 .unwrap_or(ParameterEffect::Shared),
             Statement::FieldUpdate { binding, value, .. }
             | Statement::FieldSet { binding, value, .. } => {
-                let direct = (*binding == parameter)
-                    .then_some(ParameterEffect::Exclusive)
-                    .unwrap_or(ParameterEffect::Shared);
+                let direct = if *binding == parameter {
+                    ParameterEffect::Exclusive
+                } else {
+                    ParameterEffect::Shared
+                };
                 direct.max(self.expression_parameter_effect(value, parameter))
             }
             Statement::Expression(expression) => {
                 self.expression_parameter_effect(expression, parameter)
             }
             Statement::Return(Some(expression)) => {
-                let returned = expression_is_binding(expression, parameter)
-                    .then_some(ParameterEffect::Move)
-                    .unwrap_or(ParameterEffect::Shared);
+                let returned = if expression_is_binding(expression, parameter) {
+                    ParameterEffect::Move
+                } else {
+                    ParameterEffect::Shared
+                };
                 returned.max(self.expression_parameter_effect(expression, parameter))
             }
             Statement::Return(None) | Statement::Break { .. } | Statement::Continue { .. } => {
@@ -4479,9 +4477,11 @@ impl Analyzer<'_> {
                 self.expression_parameter_effect(expression, parameter)
             }
             ExpressionKind::AsyncFieldUpdate { binding, value, .. } => {
-                let direct = (*binding == parameter)
-                    .then_some(ParameterEffect::Exclusive)
-                    .unwrap_or(ParameterEffect::Shared);
+                let direct = if *binding == parameter {
+                    ParameterEffect::Exclusive
+                } else {
+                    ParameterEffect::Shared
+                };
                 direct.max(self.expression_parameter_effect(value, parameter))
             }
             ExpressionKind::Fallback {
@@ -6491,8 +6491,7 @@ impl Analyzer<'_> {
                 if callable_path(callee).as_deref() == Some("print")
                     && !arguments.is_empty()
                     && arguments.iter().all(|argument| argument.name.is_none())
-                {
-                    if arguments.len() > 1 {
+                    && arguments.len() > 1 {
                         let values = arguments
                             .iter()
                             .map(|argument| self.expression(&argument.value, None))
@@ -6539,7 +6538,6 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
-                }
                 if callable_path(callee).as_deref() == Some("print")
                     && arguments.len() == 1
                     && arguments[0].name.is_none()
@@ -7627,10 +7625,7 @@ impl Analyzer<'_> {
     ) -> Result<Option<Expression>, Diagnostic> {
         let mut current = ast;
         let mut updates = Vec::new();
-        loop {
-            let AstExpressionKind::Call { callee, arguments } = &current.kind else {
-                break;
-            };
+        while let AstExpressionKind::Call { callee, arguments } = &current.kind {
             let AstExpressionKind::Member { object, name } = &callee.kind else {
                 break;
             };
@@ -7661,8 +7656,8 @@ impl Analyzer<'_> {
         };
         for (key, value) in updates.into_iter().rev() {
             let field_name = match &key.kind {
-                AstExpressionKind::Name(name) => name.as_str(),
-                AstExpressionKind::Literal(AstLiteral::String(name)) => name.as_str(),
+                AstExpressionKind::Name(name)
+                | AstExpressionKind::Literal(AstLiteral::String(name)) => name.as_str(),
                 _ => {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -9350,6 +9345,9 @@ impl Analyzer<'_> {
                 PrimitiveRepresentation::Integer {
                     bits: IntegerWidth::Fixed(bits),
                     ..
+                }
+                | PrimitiveRepresentation::Float {
+                    format: FloatFormat::Ieee(bits),
                 } => u64::from(bits).div_ceil(8).max(1),
                 PrimitiveRepresentation::Integer {
                     bits: IntegerWidth::Machine,
@@ -9362,9 +9360,6 @@ impl Analyzer<'_> {
                 | PrimitiveRepresentation::String
                 | PrimitiveRepresentation::Bytes
                 | PrimitiveRepresentation::Arguments => 8,
-                PrimitiveRepresentation::Float {
-                    format: FloatFormat::Ieee(bits),
-                } => u64::from(bits).div_ceil(8).max(1),
                 PrimitiveRepresentation::Float {
                     format: FloatFormat::BrainFloat16,
                 } => 2,
@@ -10208,6 +10203,7 @@ impl Analyzer<'_> {
         Ok(Some(selected))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn object_set_entry(
         &mut self,
         binding: BindingId,
@@ -13299,8 +13295,6 @@ fn increment_before_continue(block: &mut Block, increment: &Statement) {
                 increment_before_continue(body, increment);
                 increment_before_continue(catch_body, increment);
             }
-            // A continue in a nested loop belongs to that nested loop.
-            Statement::While { .. } => {}
             _ => {}
         }
         block.statements.push(statement);
@@ -13400,8 +13394,8 @@ fn conversion_rank(
                 bits: severian_universal::IntegerWidth::Fixed(expected),
                 ..
             },
-        ) => Some(ConversionRank::Widening(expected - actual)),
-        (
+        )
+        | (
             severian_universal::PrimitiveRepresentation::Float {
                 format: severian_universal::FloatFormat::Ieee(actual),
             },
@@ -13746,8 +13740,8 @@ enum ControlFlow {
 fn block_flow(statements: &[AstStatement]) -> ControlFlow {
     for statement in statements {
         let flow = match statement {
-            AstStatement::Return { .. } => ControlFlow::Returns,
-            AstStatement::Expression(AstExpression {
+            AstStatement::Return { .. }
+            | AstStatement::Expression(AstExpression {
                 kind: AstExpressionKind::Throw { .. },
                 ..
             }) => ControlFlow::Returns,
@@ -14034,13 +14028,12 @@ fn measured_literal(
             Some(span),
         )
     })?;
-    let canonical =
-        match suffix {
-            "b" => magnitude / 8.0,
-            "B" => magnitude,
-            "KB" => magnitude * 1_000.0,
-        "MB" => magnitude * 1_000_000.0,
-        "GB" => magnitude * 1_000_000_000.0,
+    let canonical = match suffix {
+        "b" => magnitude / 8.0,
+        "B" | "s" | "Hz" | "C" | "V" | "A" | "W" => magnitude,
+        "KB" | "kHz" => magnitude * 1_000.0,
+        "MB" | "MHz" => magnitude * 1_000_000.0,
+        "GB" | "GHz" => magnitude * 1_000_000_000.0,
         "TB" => magnitude * 1_000_000_000_000.0,
         "KiB" => magnitude * 1_024.0,
         "MiB" => magnitude * 1_048_576.0,
@@ -14049,30 +14042,23 @@ fn measured_literal(
         "pct" => magnitude / 100.0,
         "ns" => magnitude / 1_000_000_000.0,
         "us" => magnitude / 1_000_000.0,
-        "ms" => magnitude / 1_000.0,
-        "s" => magnitude,
+        "ms" | "mV" | "mA" => magnitude / 1_000.0,
         "min" => magnitude * 60.0,
         "hr" => magnitude * 3_600.0,
         "day" => magnitude * 86_400.0,
-        "Hz" => magnitude,
-        "kHz" => magnitude * 1_000.0,
-        "MHz" => magnitude * 1_000_000.0,
-        "GHz" => magnitude * 1_000_000_000.0,
-        "C" => magnitude,
         "F" => (magnitude - 32.0) * 5.0 / 9.0,
         "K" => magnitude - 273.15,
-            "mV" => magnitude / 1_000.0,
-            "V" | "A" | "W" => magnitude,
-            "mA" => magnitude / 1_000.0,
-            _ => return Err(Diagnostic::new(
+        _ => {
+            return Err(Diagnostic::new(
                 "E000203",
                 format!("unknown numeric unit suffix `{suffix}`"),
                 Some(span),
             )
             .with_help(
                 "use a declared unit suffix or separate the number and identifier with whitespace",
-            )),
-        };
+            ));
+        }
+    };
     let type_name = measured_type_name(suffix).expect("every normalized suffix has a dimension");
     if !canonical.is_finite() {
         return Err(Diagnostic::new(

@@ -470,9 +470,8 @@ fn unescape_string(raw: &str) -> String {
             Some('t') => value.push('\t'),
             Some('0') => value.push('\0'),
             Some('"') => value.push('"'),
-            Some('\\') => value.push('\\'),
+            Some('\\') | None => value.push('\\'),
             Some(other) => value.push(other),
-            None => value.push('\\'),
         }
     }
     value

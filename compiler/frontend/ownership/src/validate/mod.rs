@@ -211,8 +211,8 @@ fn validate_expression(
         ExpressionKind::Throw(error) => validate_expression(error, declared),
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Borrow { operand, .. }
-        | ExpressionKind::Move(operand) => validate_expression(operand, declared),
-        ExpressionKind::Convert { operand, .. } => validate_expression(operand, declared),
+        | ExpressionKind::Move(operand)
+        | ExpressionKind::Convert { operand, .. } => validate_expression(operand, declared),
         ExpressionKind::Binary { left, right, .. } => {
             validate_expression(left, declared)?;
             validate_expression(right, declared)

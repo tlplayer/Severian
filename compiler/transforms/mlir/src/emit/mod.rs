@@ -603,6 +603,7 @@ fn render_cfg_body_function(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_cfg_operation(
     output: &mut String,
     module: &Module,
@@ -638,8 +639,7 @@ fn render_cfg_operation(
                     Constant::Integer(value) => value.clone(),
                     Constant::Float(value) => mlir_float_literal(value),
                     Constant::Boolean(true) => "1".into(),
-                    Constant::Boolean(false) => "0".into(),
-                    Constant::None | Constant::Unit => "0".into(),
+                    Constant::Boolean(false) | Constant::None | Constant::Unit => "0".into(),
                     Constant::Bytes(_) | Constant::String(_) => unreachable!(),
                 };
                 output.push_str(&format!(
@@ -827,7 +827,6 @@ fn render_cfg_operation(
                     ));
                 }
                 output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
-                output.push_str(&format!("{indentation}}}\n"));
             } else {
                 let result_type = mlir_type(target.result)?;
                 output.push_str(&format!(
@@ -857,8 +856,8 @@ fn render_cfg_operation(
                     " ".repeat(indent + 2),
                     result.0
                 ));
-                output.push_str(&format!("{indentation}}}\n"));
             }
+            output.push_str(&format!("{indentation}}}\n"));
         }
         Operation::SpawnFieldUpdate {
             place,
@@ -1354,15 +1353,14 @@ fn lowered_type_layout(
     let scalar = match ty {
         LoweredType::Integer { bits, .. } => Some(u64::from(bits).div_ceil(8).max(1)),
         LoweredType::Float { format } => Some(u64::from(float_bits(format)).div_ceil(8).max(1)),
-        LoweredType::Boolean => Some(1),
+        LoweredType::Boolean | LoweredType::None | LoweredType::Unit => Some(1),
         LoweredType::String | LoweredType::Bytes => Some(8),
-        LoweredType::None | LoweredType::Unit => Some(1),
         LoweredType::Arguments => return Ok((16, 8)),
         LoweredType::Task(_) => return Ok((8, 8)),
         LoweredType::Aggregate(_) => None,
     };
     if let Some(size) = scalar {
-        return Ok((size, size.min(8).max(1)));
+        return Ok((size, size.clamp(1, 8)));
     }
     let LoweredType::Aggregate(id) = ty else {
         unreachable!("non-scalar layout is aggregate")
@@ -1414,8 +1412,8 @@ fn binary_mnemonic(operator: BinaryOperation, ty: LoweredType) -> Result<String,
     let floating = matches!(ty, LoweredType::Float { .. });
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     Ok(match operator {
-        BinaryOperation::BitwiseOr => "arith.ori".into(),
-        BinaryOperation::BitwiseAnd => "arith.andi".into(),
+        BinaryOperation::BitwiseOr | BinaryOperation::Or => "arith.ori".into(),
+        BinaryOperation::BitwiseAnd | BinaryOperation::And => "arith.andi".into(),
         BinaryOperation::BitwiseXor => "arith.xori".into(),
         BinaryOperation::Add => if floating { "arith.addf" } else { "arith.addi" }.into(),
         BinaryOperation::Subtract => if floating { "arith.subf" } else { "arith.subi" }.into(),
@@ -1436,8 +1434,6 @@ fn binary_mnemonic(operator: BinaryOperation, ty: LoweredType) -> Result<String,
             "arith.remui"
         }
         .into(),
-        BinaryOperation::And => "arith.andi".into(),
-        BinaryOperation::Or => "arith.ori".into(),
         BinaryOperation::Equal => if floating {
             "arith.cmpf oeq,"
         } else {
@@ -1738,7 +1734,6 @@ fn render_block(
                         ));
                     }
                     output.push_str(&format!("{}async.yield\n", " ".repeat(indent + 2)));
-                    output.push_str(&format!("{indentation}}}\n"));
                 } else {
                     let result_type = mlir_type(value_type(module, *result)?)?;
                     output.push_str(&format!(
@@ -1768,8 +1763,8 @@ fn render_block(
                         " ".repeat(indent + 2),
                         result.0
                     ));
-                    output.push_str(&format!("{indentation}}}\n"));
                 }
+                output.push_str(&format!("{indentation}}}\n"));
             }
             Operation::SpawnFieldUpdate { .. } => {
                 return Err(MlirError::UnsupportedOperation(
@@ -1870,9 +1865,7 @@ fn render_block(
                     coverage_ordinal,
                 )?;
                 output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
-                if else_block.operations.is_empty() {
-                    output.push_str(&format!("{indentation}}}\n"));
-                } else {
+                if !else_block.operations.is_empty() {
                     output.push_str(&format!("{indentation}}} else {{\n"));
                     render_block(
                         output,
@@ -1883,8 +1876,8 @@ fn render_block(
                         coverage_ordinal,
                     )?;
                     output.push_str(&format!("{}scf.yield\n", " ".repeat(indent + 2)));
-                    output.push_str(&format!("{indentation}}}\n"));
                 }
+                output.push_str(&format!("{indentation}}}\n"));
             }
             Operation::While {
                 condition_block,
@@ -2140,7 +2133,6 @@ fn block_terminates(block: &Block) -> bool {
                 && block_terminates(then_block)
                 && block_terminates(else_block)
         }
-        Operation::While { .. } => false,
         _ => false,
     })
 }
@@ -2252,8 +2244,8 @@ fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static st
     let signed = matches!(ty, LoweredType::Integer { signed: true, .. });
     let integer = matches!(ty, LoweredType::Integer { .. } | LoweredType::Boolean);
     Ok(match (operator, float, integer) {
-        (BinaryOperation::BitwiseOr, false, true) => "arith.ori",
-        (BinaryOperation::BitwiseAnd, false, true) => "arith.andi",
+        (BinaryOperation::BitwiseOr | BinaryOperation::Or, false, true) => "arith.ori",
+        (BinaryOperation::BitwiseAnd | BinaryOperation::And, false, true) => "arith.andi",
         (BinaryOperation::BitwiseXor, false, true) => "arith.xori",
         (BinaryOperation::Add, false, true) => "arith.addi",
         (BinaryOperation::Subtract, false, true) => "arith.subi",
@@ -2272,8 +2264,6 @@ fn mlir_binary(operator: BinaryOperation, ty: LoweredType) -> Result<&'static st
         (BinaryOperation::Greater, false, true) => "arith.cmpi ugt,",
         (BinaryOperation::GreaterEqual, false, true) if signed => "arith.cmpi sge,",
         (BinaryOperation::GreaterEqual, false, true) => "arith.cmpi uge,",
-        (BinaryOperation::And, false, true) => "arith.andi",
-        (BinaryOperation::Or, false, true) => "arith.ori",
         (BinaryOperation::Add, true, false) => "arith.addf",
         (BinaryOperation::Subtract, true, false) => "arith.subf",
         (BinaryOperation::Multiply, true, false) => "arith.mulf",

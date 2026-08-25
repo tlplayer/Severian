@@ -173,18 +173,18 @@ pub(crate) fn run_with_coverage(
                                 ));
                             }
                         }
-                        TestExpectation::Panics { .. } => return None,
-                        TestExpectation::ProfileDuration { .. } => return None,
-                        TestExpectation::ProfileMemory { .. } => return None,
+                        TestExpectation::Panics { .. }
+                        | TestExpectation::ProfileDuration { .. }
+                        | TestExpectation::ProfileMemory { .. } => return None,
                     };
                     let matches = match expectation {
-                        TestExpectation::Contains { .. } => actual.contains(expected),
+                        TestExpectation::Contains { .. }
+                        | TestExpectation::PanicMessage { .. } => actual.contains(expected),
                         TestExpectation::Excludes { .. } => !actual.contains(expected),
                         TestExpectation::Equals { .. } => actual.as_ref() == expected,
-                        TestExpectation::PanicMessage { .. } => actual.contains(expected),
-                        TestExpectation::Panics { .. } => unreachable!(),
-                        TestExpectation::ProfileDuration { .. } => unreachable!(),
-                        TestExpectation::ProfileMemory { .. } => unreachable!(),
+                        TestExpectation::Panics { .. }
+                        | TestExpectation::ProfileDuration { .. }
+                        | TestExpectation::ProfileMemory { .. } => unreachable!(),
                     };
                     (!matches).then(|| {
                         format!("captured stream did not {relation} {expected:?}; got {actual:?}")

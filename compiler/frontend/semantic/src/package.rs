@@ -1361,18 +1361,15 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
         match statement {
             Statement::Sequence(block) => remap_block_bindings(block, offset),
             Statement::Binding(binding) => binding.0 += offset,
-            Statement::FieldUpdate { binding, value, .. } => {
-                binding.0 += offset;
-                remap_expression_bindings(value, offset);
-            }
-            Statement::FieldSet { binding, value, .. } => {
+            Statement::FieldUpdate { binding, value, .. }
+            | Statement::FieldSet { binding, value, .. } => {
                 binding.0 += offset;
                 remap_expression_bindings(value, offset);
             }
             Statement::Expression(expression) | Statement::Return(Some(expression)) => {
                 remap_expression_bindings(expression, offset)
             }
-            Statement::Return(None) => {}
+            Statement::Return(None) | Statement::Break { .. } | Statement::Continue { .. } => {}
             Statement::Assert {
                 condition, message, ..
             } => {
@@ -1409,7 +1406,6 @@ fn remap_block_bindings(block: &mut severian_hir::Block, offset: u32) {
                 remap_expression_bindings(condition, offset);
                 remap_block_bindings(body, offset);
             }
-            Statement::Break { .. } | Statement::Continue { .. } => {}
             Statement::Match { subject, arms } => {
                 remap_expression_bindings(subject, offset);
                 for arm in arms {

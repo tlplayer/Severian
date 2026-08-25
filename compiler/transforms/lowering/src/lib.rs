@@ -194,15 +194,15 @@ impl CfgLowering<'_> {
             for (index, statement) in block.statements.iter().enumerate() {
                 let start = operations.len();
                 self.lower_statement(body, statement, &mut operations)?;
-                operation_spans.extend(
-                    std::iter::repeat(block.statement_spans.get(index).copied().flatten())
-                        .take(operations.len() - start),
-                );
+                operation_spans.extend(std::iter::repeat_n(
+                    block.statement_spans.get(index).copied().flatten(),
+                    operations.len() - start,
+                ));
             }
             let start = operations.len();
             let terminator = self.lower_terminator(body, &block.terminator, &mut operations)?;
             operation_spans
-                .extend(std::iter::repeat(block.terminator_span).take(operations.len() - start));
+                .extend(std::iter::repeat_n(block.terminator_span, operations.len() - start));
             if !matches!(
                 &block.terminator,
                 severian_mir::Terminator::Spawn {
@@ -955,57 +955,6 @@ impl fmt::Display for LoweringError {
 
 impl std::error::Error for LoweringError {}
 
-#[cfg(test)]
-mod cfg_tests {
-    use super::*;
-    use severian_universal::{PrimitiveCategory, TypeContextBuilder};
-
-    #[test]
-    fn uncaught_throws_terminate_through_the_runtime() {
-        let mut types = TypeContextBuilder::new();
-        let string = types.register_declaration("core.string", "string").unwrap();
-        types
-            .define_primitive(
-                string,
-                PrimitiveCategory::Text,
-                PrimitiveRepresentation::String,
-                true,
-            )
-            .unwrap();
-        let types = types.build();
-        let mir = severian_mir::Module {
-            initializer: severian_mir::CfgBody {
-                entry: severian_mir::BlockId(0),
-                blocks: vec![severian_mir::BasicBlock {
-                    id: severian_mir::BlockId(0),
-                    parameters: Vec::new(),
-                    statements: Vec::new(),
-                    statement_spans: Vec::new(),
-                    terminator: severian_mir::Terminator::Throw(severian_mir::Operand::Constant {
-                        value: LiteralValue::String("expected failure".into()),
-                        ty: string,
-                    }),
-                    terminator_span: None,
-                }],
-                locals: Vec::new(),
-                return_type: string,
-            },
-            ..severian_mir::Module::default()
-        };
-        let lir = lower(&mir, &types, &TargetSpec::host()).unwrap();
-        let block = &lir.initializer_cfg.as_ref().unwrap().blocks[0];
-        assert!(matches!(
-            block.operations.last(),
-            Some(LirOperation::RuntimeCall {
-                symbol,
-                result: None,
-                ..
-            }) if symbol == "__sev_throw"
-        ));
-        assert_eq!(block.terminator, severian_lir::Terminator::Unreachable);
-    }
-}
-
 fn lower_constant(value: &LiteralValue) -> Constant {
     match value {
         LiteralValue::Integer(value) => Constant::Integer(value.clone()),
@@ -1086,6 +1035,57 @@ fn lower_type(
         PrimitiveRepresentation::Unit => LoweredType::Unit,
         PrimitiveRepresentation::Arguments => LoweredType::Arguments,
     })
+}
+
+#[cfg(test)]
+mod cfg_tests {
+    use super::*;
+    use severian_universal::{PrimitiveCategory, TypeContextBuilder};
+
+    #[test]
+    fn uncaught_throws_terminate_through_the_runtime() {
+        let mut types = TypeContextBuilder::new();
+        let string = types.register_declaration("core.string", "string").unwrap();
+        types
+            .define_primitive(
+                string,
+                PrimitiveCategory::Text,
+                PrimitiveRepresentation::String,
+                true,
+            )
+            .unwrap();
+        let types = types.build();
+        let mir = severian_mir::Module {
+            initializer: severian_mir::CfgBody {
+                entry: severian_mir::BlockId(0),
+                blocks: vec![severian_mir::BasicBlock {
+                    id: severian_mir::BlockId(0),
+                    parameters: Vec::new(),
+                    statements: Vec::new(),
+                    statement_spans: Vec::new(),
+                    terminator: severian_mir::Terminator::Throw(severian_mir::Operand::Constant {
+                        value: LiteralValue::String("expected failure".into()),
+                        ty: string,
+                    }),
+                    terminator_span: None,
+                }],
+                locals: Vec::new(),
+                return_type: string,
+            },
+            ..severian_mir::Module::default()
+        };
+        let lir = lower(&mir, &types, &TargetSpec::host()).unwrap();
+        let block = &lir.initializer_cfg.as_ref().unwrap().blocks[0];
+        assert!(matches!(
+            block.operations.last(),
+            Some(LirOperation::RuntimeCall {
+                symbol,
+                result: None,
+                ..
+            }) if symbol == "__sev_throw"
+        ));
+        assert_eq!(block.terminator, severian_lir::Terminator::Unreachable);
+    }
 }
 
 #[cfg(any())]

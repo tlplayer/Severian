@@ -1,0 +1,969 @@
+=== docs/examples/00-getting-started/01-hello.sev ===
+test hello output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/00-getting-started/02-variables.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/00-getting-started/03-printing.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/00-constants.sev ===
+test constant output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/01-primitives.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/01-basic/01-primitives.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/02-inference.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/01-basic/02-inference.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/03-conversion.sev ===
+test type conversion ... ok
+test Compiler rejects  ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/04-strings.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/05-tuples.sev ===
+test  ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/06-is.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/07-none-absent.sev ===
+test not name specified it is not provided ... ok
+test The user gave none as the name ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/08-optionals.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/01-basic/09-special-units.sev ===
+test data units ... ok
+test hex literals ... ok
+test percent literals ... ok
+test time units ... ok
+test unit conversion ... ok
+test derived units ... ok
+test frequency ... ok
+test latency ... profile (528.370µs)
+test temperature ... ok
+test test 10 ... ok
+
+test result: 10 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/01-inferred-field-mutation.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/02-read-write-fields.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/03-dynamic-field-access.sev ===
+test test 1 ... ok
+test test 2 ... ok
+test test 3 ... ok
+test test 4 ... ok
+test test 5 ... ok
+test test 6 ... ok
+test test 7 ... ok
+
+test result: 7 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/04-value-class-update.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/05-overloaded-constructors.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/02-classes/05-overloaded-constructors.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/02-classes/06-builders-setters-getters.sev ===
+test test 1 ... ok
+test test 2 ... ok
+test test 3 ... ok
+test test 4 ... ok
+test test 5 ... ok
+test test 6 ... ok
+test test 7 ... ok
+test test 8 ... ok
+test test 9 ... ok
+test test 10 ... ok
+test test 11 ... ok
+test test 12 ... ok
+test test 13 ... ok
+
+test result: 13 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/03-traits/01-point-drawable.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/03-traits/02-trait-composition.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/03-traits/03-trait-properties.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/03-traits/04-trait-operators.sev ===
+test same operator dispatches through different traits ... ok
+test string operator requires a trait namespace ... ok
+test operator trait namespace cannot be ambiguous ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/03-traits/05-trait-hook.sev ===
+test test 1 ... ok
+test test 2 ... ok
+test test 3 ... ok
+test test 4 ... ok
+
+test result: 4 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/04-generics/01-generic-numeric.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/04-generics/02-generic-map-sum.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/04-generics/03-custom-failure.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/04-generics/03-custom-failure.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/04-generics/04-boxed-generic.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/04-generics/04-boxed-generic.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/04-generics/05-stack-generic.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/01-types/04-generics/05-stack-generic.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/05-enums/01-enum-basics.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/05-enums/02-enum-payloads.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/05-enums/03-enum-transitions.sev ===
+test Connecting cannot go to Received ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/01-error-types.sev ===
+test test 1 ... ok
+test errors are part of the return type ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/02-propagation.sev ===
+test errors propagate through calls ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/03-capture-result.sev ===
+test normal assignment propagates ... ok
+test question assignment preserves success ... ok
+test question assignment preserves failure ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/04-defaults.sev ===
+test success ignores default ... ok
+test failure uses default ... ok
+test default consumes the error ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/05-results.sev ===
+test result is a preserved union ... ok
+test errors remain ordinary union members ... ok
+test a preserved error can propagate later ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/05-throw-catch.sev ===
+test catch handles an error ... ok
+test rethrow preserves the error ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/01-types/06-errors/06-panic.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/01-basic/01-basic-functions.sev ===
+test test 1 ... ok
+test function output ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/01-basic/02-signatures.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/01-basic/02-signatures.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/01-basic/03-union-parameters.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/01-basic/04-lambda-functions.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/01-while-initializer.sev ===
+test while output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/02-if-while-for.sev ===
+test control flow output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/03-continue-break.sev ===
+test control flow output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/04-checking-conditions.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/05-defer.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/06-while-continue-break.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/02-control-flow/07-conditional-expression.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/01-async-await.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/02-task-results.sev ===
+test test 1 ... profile (108.827ms)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/03-shared-state-shape.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/03-concurrency/03-shared-state-shape.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/04-unsafe-async-boundary.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/03-concurrency/04-unsafe-async-boundary.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/05-structured-completion.sev ===
+test Global should finalize at 5 by the end ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/06-task-cancellation.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/03-concurrency/06-task-cancellation.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/07-channel-send-receive.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/03-concurrency/07-channel-send-receive.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/08-channel-switch.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/03-concurrency/08-channel-switch.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/09-nested-task-tree.sev ===
+test nested task result ... ok
+test separate task trees ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/10-locked-shared-mutation.sev ===
+test locked fan out ... ok
+test lock scope ends after await ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/03-concurrency/11-buffered-fan-in.sev ===
+test two producers ... ok
+test integer channel ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/04-contracts/02-deferred-condition.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/04-contracts/05-multiple-contracts.sev ===
+test transfer ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/02-functions/04-contracts/05-watched-mutation.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/02-functions/04-contracts/05-watched-mutation.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/01-basics/01-ordinary-and-named.sev ===
+test test 1 ... ok
+test clamps both boundaries ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/01-basics/04-when.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/01-basics/05-mock.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/01-basics/06-approximate.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/01-basics/07-parameterized.sev ===
+test add ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/02-property.sev ===
+test reverse twice preserves values ... ok (seed 0)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/03-benchmark.sev ===
+test recursive fibonacci throughput ... bench (807.653µs/iteration)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/04-chaos.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/03-testing/02-with-tests/04-chaos.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/05-property-and-chaos.sev ===
+test first is safe for generated lists ... ok (seed 0)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/06-integration.sev ===
+test captures native output ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/07-profile.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/03-testing/02-with-tests/07-profile.sev ... FAILED (compile)
+E000217: a profile contract must compare exactly one `time` value
+ --> /home/tplayer/Documents/Severian/docs/examples/03-testing/02-with-tests/07-profile.sev:400:11
+     |
+ 400 |     defer memory < 16mb,
+     |           ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/03-testing/02-with-tests/08-compile.sev ===
+test checks accepted and rejected semantic fragments ... ok
+test rejects duplicate declarations ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/14-fuzz.sev ===
+test test 1 ... ok (seed 0)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/03-testing/02-with-tests/15-model.sev ===
+test test 1 ... skipped (model runner is not configured)
+
+test result: 0 passed; 0 failed; 1 skipped
+=== docs/examples/03-testing/02-with-tests/16-differential.sev ===
+test compute ... skipped (differential runner is not configured)
+
+test result: 0 passed; 0 failed; 1 skipped
+=== docs/examples/04-systems/01-unsafe/01-isolated-pointer.sev ===
+test in bounds ... ok
+test out of bounds ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/01-unsafe/02-ffi-boundary.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/01-unsafe/02-ffi-boundary.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/02-memory/01-allocation.sev ===
+test managed memory allocation ... ok
+test raw memory allocation ... ok
+test compiler rejects raw allocation from safe code ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/02-memory/02-memory-layout.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/02-memory/03-resource-lifetime.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/03-pointers/01-address-dereference.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/01-address-dereference.sev ... FAILED (compile)
+E000112: expected `=`, `?=`, or `:=` after binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/01-address-dereference.sev:5:25
+     |
+   5 |         pointer: *[int] := &value
+     |                         ^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/03-pointers/02-nullable-pointer.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/02-nullable-pointer.sev ... FAILED (compile)
+E000112: expected `=`, `?=`, or `:=` after binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/02-nullable-pointer.sev:3:32
+     |
+   3 |         pointer: *[int] | None := None
+     |                                ^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/03-pointers/03-pointer-arithmetic.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/03-pointer-arithmetic.sev ... FAILED (compile)
+E000202: no `+` operator accepts `TypeId(168592506)` and `integer literal`
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/03-pointer-arithmetic.sev:13:17
+     |
+  13 |         assert((pointer + 1)[0] == 20)
+     |                 ^^^^^^^^^^^ these operands have no compatible operator overload
+ note: left operand: `TypeId(168592506)`; right operand: `integer literal`
+ help: convert one operand explicitly or use operands with compatible types
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/03-pointers/04-pointer-cast.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/04-pointer-cast.sev ... FAILED (compile)
+E000112: expected `=`, `?=`, or `:=` after binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/04-pointer-cast.sev:2:16
+     |
+   2 |     value: u32 := 42
+     |                ^^
+
+E000112: expected `=`, `?=`, or `:=` after binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/04-pointer-cast.sev:5:33
+     |
+   5 |         integer_pointer: *[u32] := &value
+     |                                 ^^
+
+E000112: expected `=`, `?=`, or `:=` after binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/04-pointer-cast.sev:6:29
+     |
+   6 |         byte_pointer: *[u8] := [*[u8]](integer_pointer)
+     |                             ^^
+
+E000111: expected a literal or binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/03-pointers/04-pointer-cast.sev:9:29
+     |
+   9 |         assert(byte_pointer[] == 42)
+     |                             ^ an expression must start here
+ note: expressions may start with a literal, binding name, `(`, or list literal
+ help: check for a missing expression or an extra delimiter
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/04-ffi/01-c/src/main.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/04-ffi/01-c/src/main.sev ... FAILED (compile)
+clang failed: warning: overriding the module target triple with x86_64-unknown-linux [-Woverride-module]
+1 warning generated.
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--894b5d.o: in function `__sev_fn_37031171641269741902737901038825376983':
+LLVMDialectModule:(.text+0x2d): undefined reference to `example_add'
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--894b5d.o: in function `__sev_fn_115015263114043829113399095802431558319':
+LLVMDialectModule:(.text+0xad): undefined reference to `example_add'
+clang-21: error: linker command failed with exit code 1 (use -v to see invocation)
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/04-ffi/02-rust/src/main.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/04-ffi/02-rust/src/main.sev ... FAILED (compile)
+clang failed: warning: overriding the module target triple with x86_64-unknown-linux [-Woverride-module]
+1 warning generated.
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--36e148.o: in function `__sev_fn_37031171641269741902737901038825376983':
+LLVMDialectModule:(.text+0x2d): undefined reference to `example_multiply'
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--36e148.o: in function `__sev_fn_115015263114043829113399095802431558319':
+LLVMDialectModule:(.text+0x9d): undefined reference to `example_multiply'
+clang-21: error: linker command failed with exit code 1 (use -v to see invocation)
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/04-ffi/03-python/src/main.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/04-ffi/03-python/src/main.sev ... FAILED (compile)
+clang failed: warning: overriding the module target triple with x86_64-unknown-linux [-Woverride-module]
+1 warning generated.
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--72fe4a.o: in function `__sev_fn_37031171641269741902737901038825376983':
+LLVMDialectModule:(.text+0x35): undefined reference to `add'
+/usr/bin/x86_64-linux-gnu-ld.bfd: LLVMDialectModule:(.text+0x75): undefined reference to `greeting'
+/usr/bin/x86_64-linux-gnu-ld.bfd: /tmp/--72fe4a.o: in function `__sev_fn_115015263114043829113399095802431558319':
+LLVMDialectModule:(.text+0xd5): undefined reference to `add'
+/usr/bin/x86_64-linux-gnu-ld.bfd: LLVMDialectModule:(.text+0x129): undefined reference to `greeting'
+clang-21: error: linker command failed with exit code 1 (use -v to see invocation)
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/04-ffi/04-abi-types.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/04-ffi/05-struct-layout.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/05-platform/01-target-facts.sev ===
+test target facts are internally consistent ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/05-platform/02-capabilities.sev ===
+test capabilities are values rather than target-name branches ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/05-platform/03-layout.sev ===
+test layout comes from the selected target ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/06-process/01-spawn.sev ===
+test run waits for completion ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/06-process/02-spawn-wait.sev ===
+test run waits for completion ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/06-process/03-kill.sev ===
+test kill terminates a process ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/06-process/04-arguments.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/06-process/04-arguments.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/07-filesystem/01-paths.sev ===
+test path operations ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/07-filesystem/02-directories.sev ===
+test create and list directory ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/07-filesystem/03-metadata.sev ===
+test file metadata ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/07-filesystem/04-copy-move-remove.sev ===
+test copy move and remove ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/08-files/01-read-write.sev ===
+test text file round trip ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/08-files/02-binary.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/02-binary.sev ... FAILED (compile)
+E000112: expected a newline after test statement
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/02-binary.sev:10:10
+     |
+  10 |     with file.open(path) as fp:
+     |          ^^^^
+
+E000111: expected a literal or binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/02-binary.sev:11:1
+     |
+  11 |         data = file.read(fp, 4B)
+     | ^^^^^^^^ an expression must start here
+ note: expressions may start with a literal, binding name, `(`, or list literal
+ help: check for a missing expression or an extra delimiter
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/08-files/03-dispatch.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/03-dispatch.sev ... FAILED (compile)
+E000202: expression does not satisfy the expected type
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/03-dispatch.sev:20:17
+     |
+  20 |     assert(json["enabled"] == true)
+     |                 ^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/08-files/04-memory-map.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/04-memory-map.sev ... FAILED (compile)
+E000112: expected a newline after test statement
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/04-memory-map.sev:10:10
+     |
+  10 |     with file.map(path) as mapping:
+     |          ^^^^
+
+E000111: expected a literal or binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/08-files/04-memory-map.sev:11:1
+     |
+  11 |         assert(bytes(mapping) == 4B)
+     | ^^^^^^^^ an expression must start here
+ note: expressions may start with a literal, binding name, `(`, or list literal
+ help: check for a missing expression or an extra delimiter
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/08-files/05-locking.sev ===
+test file lock ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/09-io/01-reader-writer.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/01-reader-writer.sev ... FAILED (compile)
+E000204: unknown type `io.Reader`
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/01-reader-writer.sev:4:23
+     |
+   4 | def duplicate(source: io.Reader, destination: io.Writer) -> Unit[Data] | io.StreamError:
+     |                       ^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/09-io/02-memory-stream.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/02-memory-stream.sev ... FAILED (compile)
+E000201: unknown binding `io`
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/02-memory-stream.sev:5:14
+     |
+   5 |     stream = io.MemoryStream([10, 20, 30, 40])
+     |              ^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/09-io/03-seek.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/03-seek.sev ... FAILED (compile)
+E000201: unknown binding `io`
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/03-seek.sev:5:14
+     |
+   5 |     stream = io.MemoryStream([1, 2, 3, 4])
+     |              ^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/09-io/04-copy.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/04-copy.sev ... FAILED (compile)
+E000201: unknown binding `io`
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/04-copy.sev:5:14
+     |
+   5 |     source = io.MemoryStream([1, 2, 3, 4, 5])
+     |              ^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/09-io/05-standard-streams.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/09-io/05-standard-streams.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/10-network/01-tcp.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/01-tcp.sev ... FAILED (compile)
+E000124: package import `network` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/01-tcp.sev:1:1
+     |
+   1 | import network
+     | ^^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/10-network/02-udp.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/02-udp.sev ... FAILED (compile)
+E000124: package import `network` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/02-udp.sev:1:1
+     |
+   1 | import network
+     | ^^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/10-network/03-dns.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/03-dns.sev ... FAILED (compile)
+E000124: package import `network` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/03-dns.sev:1:1
+     |
+   1 | import network
+     | ^^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/10-network/04-http.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/04-http.sev ... FAILED (compile)
+E000124: package import `http` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/04-systems/10-network/04-http.sev:1:1
+     |
+   1 | import http
+     | ^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/04-systems/11-environment/01-read-variable.sev ===
+test missing variable uses fallback ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/04-systems/11-environment/02-process-environment.sev ===
+test environment variable lifecycle ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/05-building/src/lib.sev ===
+test library target imports a private module ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/05-building/src/main.sev ===
+test library target imports a private module ... ok
+test binary imports its library root ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/05-building/src/math.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/05-building/src/math.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/01-borrow-clone-move.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/02-owned-builder.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/03-shared-read-exclusive-write.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/04-inferred-parameter-effects.sev ===
+test test 1 ... ok
+test test 2 ... ok
+test test 3 ... ok
+
+test result: 3 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/05-drop.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/06-collections.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/07-classes.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/08-closures.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/09-async.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/10-channels.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/12-return-values.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/06-ownership/12-return-values.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/13-conditional-moves.sev ===
+test test 1 ... ok
+test test 2 ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/14-loop-ownership.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/06-ownership/15-compiler-rejections.sev ===
+test test 1 ... ok
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/07-collections/01-lists-tuples.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/07-collections/01-lists-tuples.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/07-collections/02-maps-sets.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/07-collections/02-maps-sets.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/07-collections/03-comprehension-style.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/07-collections/03-comprehension-style.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/07-collections/04-shape-stable-indexing.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/07-collections/04-shape-stable-indexing.sev ... ok (compile)
+
+test result: 1 passed; 0 failed; 0 skipped
+=== docs/examples/07-collections/05-expressive-collections.sev ===
+test string and reduction helpers ... ok
+test stack helpers ... ok
+test Python-style iteration and indexing ... ok
+test slices ranges and richer collections ... ok
+
+test result: 4 passed; 0 failed; 0 skipped
+=== docs/examples/08-numerics/00-decorator-symbol-pack.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/00-decorator-symbol-pack.sev ... FAILED (compile)
+E000112: expected a newline after function statement
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/00-decorator-symbol-pack.sev:6:17
+     |
+   6 |     return left X right
+     |                 ^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/01-numeric-types.sev ===
+test integer arithmetic ... ok
+test floating point arithmetic ... ok
+
+test result: 2 passed; 0 failed; 0 skipped
+=== docs/examples/08-numerics/02-promotion.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/02-promotion.sev ... FAILED (compile)
+E000202: no `+` operator accepts `float` and `f64`
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/02-promotion.sev:5:13
+     |
+   5 |     value = float(count) + ratio
+     |             ^^^^^^^^^^^^^^^^^^^^ these operands have no compatible operator overload
+ note: left operand: `float`; right operand: `f64`
+ help: convert one operand explicitly or use operands with compatible types
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/03-math.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/03-math.sev ... FAILED (compile)
+E000124: package import `math` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/03-math.sev:1:1
+     |
+   1 | import math
+     | ^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/04-vector.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/04-vector.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/04-vector.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/05-tensor.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/05-tensor.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/05-tensor.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/06-shapes.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/06-shapes.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/06-shapes.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/06-with-simd.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/06-with-simd.sev ... FAILED (compile)
+E000112: expected a newline after test statement
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/06-with-simd.sev:14:10
+     |
+  14 |     with self and simd:
+     |          ^^^^
+
+E000111: expected a literal or binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/06-with-simd.sev:15:1
+     |
+  15 |         result = async scale([1.0, 2.0, 3.0, 4.0], 2.0)
+     | ^^^^^^^^ an expression must start here
+ note: expressions may start with a literal, binding name, `(`, or list literal
+ help: check for a missing expression or an extra delimiter
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/07-with-gpu.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/07-with-gpu.sev ... FAILED (compile)
+E000110: expected a type
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/07-with-gpu.sev:6:34
+     |
+   6 |     for value in values with gpu:
+     |                                  ^
+
+E000111: expected a literal or binding name
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/07-with-gpu.sev:7:1
+     |
+   7 |         output.append(value * factor)
+     | ^^^^^^^^ an expression must start here
+ note: expressions may start with a literal, binding name, `(`, or list literal
+ help: check for a missing expression or an extra delimiter
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/08-indexing.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/08-indexing.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/08-indexing.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/09-broadcasting.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/09-broadcasting.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/09-broadcasting.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/10-reductions.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/10-reductions.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/10-reductions.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/11-matmul.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/11-matmul.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/11-matmul.sev:1:1
+     |
+   1 | from tensor import matmul
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/12-dtype-conversion.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/12-dtype-conversion.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/12-dtype-conversion.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/13-device.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/13-device.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/13-device.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
+=== docs/examples/08-numerics/14-transpose-permute.sev ===
+test /home/tplayer/Documents/Severian/docs/examples/08-numerics/14-transpose-permute.sev ... FAILED (compile)
+E000124: package import `tensor` has not been resolved
+ --> /home/tplayer/Documents/Severian/docs/examples/08-numerics/14-transpose-permute.sev:1:1
+     |
+   1 | import tensor
+     | ^^^^^^^^^^^^^
+
+test result: 0 passed; 1 failed; 0 skipped
+error: 1 test(s) failed
