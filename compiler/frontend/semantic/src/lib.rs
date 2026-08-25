@@ -6539,30 +6539,25 @@ impl Analyzer<'_> {
                             ast.span,
                         ));
                     }
+                }
+                if callable_path(callee).as_deref() == Some("print")
+                    && arguments.len() == 1
+                    && arguments[0].name.is_none()
+                {
                     let value = self.expression(&arguments[0].value, None)?;
-                    if self.tuple_elements.contains_key(&value.type_id)
-                        || self.list_elements.contains_key(&value.type_id)
-                        || self.set_type == Some(value.type_id)
-                        || self.fallible_types.contains_key(&value.type_id)
-                        || self.types.primitive(value.type_id).is_some_and(|primitive| {
-                            primitive.category
-                                == severian_universal::PrimitiveCategory::Measured
-                        })
-                    {
-                        let rendered = self.display_string(value, ast.span)?;
-                        let string = rendered.type_id;
-                        let result = self
-                            .types
-                            .resolve_name("i32")
-                            .expect("bootstrap defines i32");
-                        return Ok(self.runtime_call(
-                            "__sev_print_string",
-                            &[string],
-                            result,
-                            vec![rendered],
-                            ast.span,
-                        ));
-                    }
+                    let rendered = self.display_string(value, ast.span)?;
+                    let string = rendered.type_id;
+                    let result = self
+                        .types
+                        .resolve_name("i32")
+                        .expect("bootstrap defines i32");
+                    return Ok(self.runtime_call(
+                        "__sev_print_string",
+                        &[string],
+                        result,
+                        vec![rendered],
+                        ast.span,
+                    ));
                 }
                 if let Some(call) =
                     self.trait_namespace_call(callee, arguments, expected, ast.span)?
@@ -8945,9 +8940,7 @@ impl Analyzer<'_> {
             .types
             .definition(value.type_id)
             .map(|definition| definition.name.as_str());
-        if self.integer_primitive(value.type_id)
-            && !matches!(name, Some("int" | "i64" | "usize"))
-        {
+        if self.integer_primitive(value.type_id) && name != Some("usize") {
             let integer = self
                 .types
                 .resolve_name("int")
@@ -8962,11 +8955,20 @@ impl Analyzer<'_> {
             ));
         }
         if self.types.primitive(value.type_id).is_some_and(|primitive| {
-            primitive.category == severian_universal::PrimitiveCategory::Measured
+            matches!(
+                primitive.category,
+                severian_universal::PrimitiveCategory::Float
+                    | severian_universal::PrimitiveCategory::Measured
+            )
         }) {
+            let float = self
+                .types
+                .resolve_name("float")
+                .expect("bootstrap defines float");
+            let value = self.coerce(value, float, true)?;
             return Ok(self.runtime_call(
                 "__sev_string_from_float",
-                &[value.type_id],
+                &[float],
                 string,
                 vec![value],
                 span,
@@ -8974,13 +8976,6 @@ impl Analyzer<'_> {
         }
         match name {
             Some("string") => Ok(value),
-            Some("int" | "i64") => Ok(self.runtime_call(
-                "__sev_string_from_int",
-                &[value.type_id],
-                string,
-                vec![value],
-                span,
-            )),
             Some("usize") => Ok(self.runtime_call(
                 "__sev_string_from_usize",
                 &[value.type_id],
@@ -8988,14 +8983,6 @@ impl Analyzer<'_> {
                 vec![value],
                 span,
             )),
-            Some("float" | "f64" | "duration" | "data_rate" | "frequency") => Ok(self
-                .runtime_call(
-                    "__sev_string_from_float",
-                    &[value.type_id],
-                    string,
-                    vec![value],
-                    span,
-                )),
             Some("bool") => Ok(self.runtime_call(
                 "__sev_string_from_bool",
                 &[value.type_id],
@@ -14556,6 +14543,22 @@ mod tests {
         let (program, context) = analyze_source("a = 1 + 2\n");
         let int = context.types.resolve_name("int").unwrap();
         assert_eq!(program.modules[0].bindings[0].type_id, int);
+    }
+
+    #[test]
+    fn single_argument_primitive_prints_use_display_string() {
+        let (program, _) = analyze_source(
+            "def main():\n    count: i32 = 10\n    large: i64 = 1_000_000\n    ratio: f64 = 0.5\n    print(count)\n    print(large)\n    print(ratio)\n",
+        );
+        let names = program.modules[0]
+            .functions
+            .iter()
+            .map(|function| function.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(names.contains("__sev_string_from_int"));
+        assert!(names.contains("__sev_string_from_float"));
+        assert!(names.contains("__sev_print_string"));
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]
