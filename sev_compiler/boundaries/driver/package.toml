@@ -13,13 +13,11 @@ path = "src/main.sev"
 
 [dependencies]
 abi = { path = "../abi" }
-ast = { path = "../../frontend/ast" }
 backend = { path = "../backend" }
 bootstrap = { path = "../../bootstrap" }
 compile = { path = "../../compile" }
 diagnostics = { path = "../../diagnostics" }
 lexer = { path = "../../frontend/lexer" }
-hir = { path = "../../frontend/hir" }
 modules = { path = "../../frontend/modules" }
 lowering = { path = "../../transforms/lowering" }
 mir = { path = "../../transforms/mir" }

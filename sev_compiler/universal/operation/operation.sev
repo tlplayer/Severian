@@ -1,0 +1,11 @@
+enum Operation:
+    Coverage(point: CoveragePoint)
+    Constant(value: LiteralValue, result: ValueId)
+    Unary(operator: UnaryOperator, operand: ValueId, result: ValueId)
+    Binary(operator: BinaryOperator, left: ValueId, right: ValueId, result: ValueId)
+    Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    Return(value: ValueId | None)
+    Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
+    If(condition: ValueId, then_block: Block, else_block: Block)
+    Match(subject: ValueId, arms: list[MatchArm])
+    CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])

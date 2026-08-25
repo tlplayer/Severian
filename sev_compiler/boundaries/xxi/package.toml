@@ -9,6 +9,5 @@ path = "src/lib.sev"
 
 [dependencies]
 abi = { path = "../abi" }
-ast = { path = "../../frontend/ast" }
 ffi = { path = "../ffi" }
 universal = { path = "../../universal" }

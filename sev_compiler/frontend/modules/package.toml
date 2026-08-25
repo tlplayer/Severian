@@ -8,8 +8,8 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
-ast = { path = "../ast" }
 diagnostics = { path = "../../diagnostics" }
 lexer = { path = "../lexer" }
 parser = { path = "../parser" }
 source = { path = "../../source" }
+universal = { path = "../../universal" }

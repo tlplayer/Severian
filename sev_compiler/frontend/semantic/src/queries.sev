@@ -1,15 +1,10 @@
-import hir
 import modules
 import universal
 import "package.sev"
 
-class ScopeId:
-    module: modules.ModuleId
-
-
 enum QueryError:
-    UnknownModule(module: modules.ModuleId)
-    UnknownName(scope: ScopeId, name: string)
+    UnknownModule(module: universal.ModuleId)
+    UnknownName(scope: universal.ScopeId, name: string)
     Ambiguous(definitions: list[universal.DefId])
     NotFunction(definition: universal.DefId)
     MissingBody(definition: universal.DefId)
@@ -18,13 +13,13 @@ enum QueryError:
 class SemanticQueries:
     program: TypedProgram
 
-    def collect_declarations(module: modules.ModuleId) -> list[universal.DefId] | QueryError:
+    def collect_declarations(module: universal.ModuleId) -> list[universal.DefId] | QueryError:
         scope = program.index.modules.get(module)
         if scope == None:
             return error(UnknownModule(module))
         return scope.items
 
-    def resolve_name(scope: ScopeId, name: string) -> universal.DefId | QueryError:
+    def resolve_name(scope: universal.ScopeId, name: string) -> universal.DefId | QueryError:
         module = program.index.modules.get(scope.module)
         if module == None:
             return error(UnknownModule(scope.module))
@@ -37,7 +32,7 @@ class SemanticQueries:
             case Ambiguous: return error(Ambiguous(definitions))
             case Module: return error(UnknownName(scope, name))
 
-    def signature_of(definition: universal.DefId) -> FunctionDecl | QueryError:
+    def signature_of(definition: universal.DefId) -> universal.FunctionDeclaration | QueryError:
         item = program.index.definitions.get(definition)
         if item == None:
             return error(NotFunction(definition))
@@ -45,10 +40,9 @@ class SemanticQueries:
             case Function: return signature
         return error(NotFunction(definition))
 
-    def type_check(definition: universal.DefId) -> hir.FunctionDeclaration | QueryError:
+    def type_check(definition: universal.DefId) -> universal.FunctionDeclaration | QueryError:
         for module in program.hir_program.modules:
             for function in module.functions:
                 if function.definition == definition:
                     return function
         return error(MissingBody(definition))
-

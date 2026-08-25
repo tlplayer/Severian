@@ -1,0 +1,40 @@
+import source
+
+
+class Binding:
+    name: string
+    annotation: TypeAnnotation | None
+    value: Expression
+    update: bool
+    preserve_error: bool
+    span: source.Span
+    id: BindingId = BindingId(0)
+    type_id: TypeId = TypeId(0)
+
+
+class Block:
+    statements: list[Statement]
+    operations: list[Operation] = []
+    lowered_operations: list[LoweredOperation] = []
+
+
+class MatchArm:
+    body: Block
+    binding_name: string | None = None
+    annotation: TypeAnnotation | None = None
+    span: source.Span | None = None
+    binding: BindingId | None = None
+    type_id: TypeId | None = None
+
+
+enum Statement:
+    BindingStatement(binding: Binding)
+    ExpressionStatement(expression: Expression)
+    Return(value: Expression | None, span: source.Span)
+    Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
+    If(condition: Expression, then_block: Block, else_block: Block, span: source.Span)
+    Match(subject: Expression, arms: list[MatchArm], span: source.Span)
+
+
+def empty_block() -> Block:
+    return Block([])

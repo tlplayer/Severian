@@ -4,7 +4,7 @@ import universal
 import "error.sev"
 import "model.sev"
 
-def operation_inputs(operation: mir.Operation) -> list[universal.ValueId]:
+def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
         case Unary: return [operand]
         case Binary: return [left, right]
@@ -24,7 +24,7 @@ def operation_inputs(operation: mir.Operation) -> list[universal.ValueId]:
         else: return []
 
 
-def operation_outputs(operation: mir.Operation) -> list[universal.ValueId]:
+def operation_outputs(operation: universal.Operation) -> list[universal.ValueId]:
     match operation:
         case Constant: return [result]
         case Unary: return [result]
@@ -34,7 +34,7 @@ def operation_outputs(operation: mir.Operation) -> list[universal.ValueId]:
         else: return []
 
 
-def operation_route(operation: mir.Operation, values: map[universal.ValueId, mir.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
+def operation_route(operation: universal.Operation, values: map[universal.ValueId, universal.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
     match operation:
         case CompiledRegionCall: return error(PlannerGeneratedOperation(index))
         case Coverage: return universal.Standard
@@ -56,16 +56,16 @@ def operation_route(operation: mir.Operation, values: map[universal.ValueId, mir
     return error(ConflictingCompilers(index, compilers.values()))
 
 
-def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, operations: list[mir.Operation], values: map[universal.ValueId, mir.Value]) -> CompileRegion | CompileError:
+def build_region(id: universal.CompiledRegionId, compiler: universal.CompilerId, operations: list[universal.Operation], values: map[universal.ValueId, universal.Value]) -> CompileRegion | CompileError:
     produced: set[universal.ValueId] = set()
     for operation in operations:
         for output in operation_outputs(operation): produced.add(output)
-    inputs: list[mir.Value] = []
+    inputs: list[universal.Value] = []
     for operation in operations:
         for input in operation_inputs(operation):
             if input not in produced and not inputs.contains(values[input]):
                 inputs.append(values[input])
-    outputs: list[mir.Value] = []
+    outputs: list[universal.Value] = []
     for output in produced: outputs.append(values[output])
     effects = EffectSet(false, false, false)
     for operation in operations:
@@ -77,10 +77,10 @@ def build_region(id: artifact.CompiledRegionId, compiler: universal.CompilerId, 
     return CompileRegion(id, compiler, operations, inputs, outputs, effects)
 
 
-def plan_block(block: mir.Block, values: map[universal.ValueId, mir.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
+def plan_block(block: universal.Block, values: map[universal.ValueId, universal.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
     segments: list[PlanSegment] = []
-    current_standard: list[mir.Operation] = []
-    current_custom: list[mir.Operation] = []
+    current_standard: list[universal.Operation] = []
+    current_custom: list[universal.Operation] = []
     current_compiler: universal.CompilerId | None = None
 
     for index, operation in block.operations.enumerated():
@@ -88,7 +88,7 @@ def plan_block(block: mir.Block, values: map[universal.ValueId, mir.Value], type
         match route:
             case Standard:
                 if len(current_custom) > 0:
-                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+                    segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                     current_compiler = None
@@ -98,7 +98,7 @@ def plan_block(block: mir.Block, values: map[universal.ValueId, mir.Value], type
                     segments.append(Standard(StandardRegion(current_standard)))
                     current_standard = []
                 if current_compiler != None and current_compiler != compiler:
-                    segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+                    segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                 current_compiler = compiler
@@ -106,13 +106,13 @@ def plan_block(block: mir.Block, values: map[universal.ValueId, mir.Value], type
 
     if len(current_standard) > 0: segments.append(Standard(StandardRegion(current_standard)))
     if len(current_custom) > 0:
-        segments.append(Compiler(build_region(artifact.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+        segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
         next_region += 1
-    return (PlannedBlock(segments), next_region)
+    return (PlannedBlock(block, segments), next_region)
 
 
-def plan(module: mir.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
-    values: map[universal.ValueId, mir.Value] = {}
+def plan(module: universal.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
+    values: map[universal.ValueId, universal.Value] = {}
     for value in module.values: values[value.id] = value
     next_region: u32 = 0
     initializer_result = plan_block(module.initializer, values, types, next_region)
@@ -126,4 +126,3 @@ def plan(module: mir.Module, types: universal.TypeContext) -> CompilePlan | Comp
             next_region = planned[1]
         functions.append(PlannedFunction(function, body))
     return CompilePlan(module, initializer_result[0], functions, [])
-

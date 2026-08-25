@@ -1,3 +1,80 @@
+import source
+
+
+class BoundaryModifier:
+    name: string
+
+
+class FunctionParameter:
+    name: string
+    annotation: TypeAnnotation
+    default: Expression | absent
+    span: source.Span
+    binding: BindingId = BindingId(0)
+    type_id: TypeId = TypeId(0)
+    modifiers: list[BoundaryModifier] = []
+
+
+class ExternalCall:
+    interface: InterfaceId
+    symbol: SymbolId
+    provider: ProviderId | None
+    ffi: FfiId
+    abi: AbiId
+
+
+enum CallType:
+    Severian
+    External(call: ExternalCall)
+
+
 enum FunctionLinkage:
     Internal
     External(symbol: string)
+
+
+class FunctionDeclaration:
+    decorators: list[Decorator] = []
+    name: string = ""
+    type_parameters: list[string] = []
+    constraints: list[GenericConstraint] = []
+    parameters: list[FunctionParameter] = []
+    result: TypeAnnotation | None = None
+    body: Block | None = None
+    span: source.Span | None = None
+    id: FunctionId = FunctionId(0)
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    generic_parameters: list[GenericParamId] = []
+    parameter_types: list[TypeId] = []
+    result_type: TypeId = TypeId(0)
+    compile_route: CompileRoute = Standard
+    call_type: CallType = Severian
+    values: list[ValueId] = []
+    lowered_result: LoweredType = Unit
+    linkage: FunctionLinkage = Internal
+    binary_requirements: map[GenericParamId, set[BinaryOperator]] = {}
+    capability_requirements: map[GenericParamId, set[CompilerCapability]] = {}
+    constrained: bool = false
+    constraints_supported: bool = true
+    lookup: string | None = None
+    cfg: CfgBody | None = None
+
+
+def resolved_function(
+    generic_parameters: list[GenericParamId],
+    constrained: bool,
+    constraints_supported: bool,
+    binary_requirements: map[GenericParamId, set[BinaryOperator]],
+    capability_requirements: map[GenericParamId, set[CompilerCapability]],
+    parameter_types: list[TypeId],
+    result_type: TypeId,
+) -> FunctionDeclaration:
+    function = FunctionDeclaration()
+    function.generic_parameters = generic_parameters
+    function.constrained = constrained
+    function.constraints_supported = constraints_supported
+    function.binary_requirements = binary_requirements
+    function.capability_requirements = capability_requirements
+    function.parameter_types = parameter_types
+    function.result_type = result_type
+    return function

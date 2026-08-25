@@ -2,27 +2,27 @@ import "ids.sev"
 import "type_system.sev"
 import "types/mod.sev"
 
-class DialectId:
+class DialectId: StableId
     value: u128
 
 
-class OperationId:
+class OperationId: StableId
     value: u128
 
 
-class AttributeId:
+class AttributeId: StableId
     value: u128
 
 
-class BackendId:
+class BackendId: StableId
     value: u128
 
 
-class RuntimeId:
+class RuntimeId: StableId
     value: u128
 
 
-class ProviderId:
+class ProviderId: StableId
     value: u128
 
 

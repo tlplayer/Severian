@@ -1,15 +1,9 @@
-class CompiledRegionId:
-    index: u32
+import universal
 
 
-class ArtifactId:
-    index: u32
+def compiled_region_id(index: u32) -> universal.CompiledRegionId:
+    return universal.CompiledRegionId(index)
 
 
-def compiled_region_id(index: u32) -> CompiledRegionId:
-    return CompiledRegionId(index)
-
-
-def artifact_for_region(region: CompiledRegionId) -> ArtifactId:
-    return ArtifactId(region.index)
-
+def artifact_for_region(region: universal.CompiledRegionId) -> universal.ArtifactId:
+    return universal.ArtifactId(region.index)

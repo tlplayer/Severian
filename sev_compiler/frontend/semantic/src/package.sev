@@ -1,5 +1,3 @@
-import ast
-import hir
 import modules
 import universal
 
@@ -7,15 +5,8 @@ enum Visibility:
     Public
 
 
-class FunctionDecl:
-    type_parameters: list[string]
-    parameters: list[universal.TypeAnnotation]
-    result: universal.TypeAnnotation
-    constraints: list[ast.GenericConstraint]
-
-
 enum DefKind:
-    Function(signature: FunctionDecl)
+    Function(signature: universal.FunctionDeclaration)
     Type
     Trait
     Constant
@@ -25,14 +16,14 @@ enum DefKind:
 class Definition:
     id: universal.DefId
     name: string
-    module: modules.ModuleId
+    module: universal.ModuleId
     visibility: Visibility
     kind: DefKind
 
 
 enum Resolution:
     Def(definition: universal.DefId)
-    Module(module: modules.ModuleId)
+    Module(module: universal.ModuleId)
     OverloadSet(definitions: list[universal.DefId])
     Ambiguous(definitions: list[universal.DefId])
 
@@ -42,29 +33,29 @@ class Scope:
 
 
 class ModuleScope:
-    id: modules.ModuleId
-    package: modules.PackageId
+    id: universal.ModuleId
+    package: universal.PackageId
     items: list[universal.DefId]
     scope: Scope
 
 
 class ProgramIndex:
-    packages: map[modules.PackageId, list[modules.ModuleId]]
-    modules: map[modules.ModuleId, ModuleScope]
+    packages: map[universal.PackageId, list[universal.ModuleId]]
+    modules: map[universal.ModuleId, ModuleScope]
     definitions: map[universal.DefId, Definition]
-    exports: map[modules.ModuleId, map[string, Resolution]]
+    exports: map[universal.ModuleId, map[string, Resolution]]
 
 
 class TypedProgram:
     index: ProgramIndex
-    hir_program: hir.Program
+    hir_program: universal.Program
 
 
 class PackageAnalysisContext:
-    test_package: modules.PackageId | None
+    test_package: universal.PackageId | None
 
 
-def definition_id(package: modules.PackageId, module: modules.ModuleId, name: string, ordinal: int) -> universal.DefId:
+def definition_id(package: universal.PackageId, module: universal.ModuleId, name: string, ordinal: int) -> universal.DefId:
     declaration: u128 = module.value ^ u128(ordinal + 1)
     for character in name.characters():
         declaration = declaration * 1099511628211 ^ u128(int(character))
@@ -96,16 +87,13 @@ def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
         scope = Scope({})
         exports: map[string, Resolution] = {}
         ordinal = 0
-        for item in module.ast_module.items:
+        for item in module.items:
             name: string | None = None
             kind: DefKind | None = None
             match item:
                 case Function:
                     name = declaration.name
-                    parameters: list[universal.TypeAnnotation] = []
-                    for parameter in declaration.parameters:
-                        parameters.append(parameter.annotation)
-                    kind = DefKind.Function(FunctionDecl(declaration.type_parameters, parameters, declaration.result, declaration.constraints))
+                    kind = DefKind.Function(declaration)
                 case Type:
                     name = declaration.name
                     kind = DefKind.Type
@@ -134,14 +122,12 @@ def collect_declarations(graph: modules.ModuleGraph) -> ProgramIndex:
 def resolve_imports(graph: modules.ModuleGraph, index: ProgramIndex):
     for module in graph.modules:
         scope = index.modules[module.id].scope
-        import_index = 0
-        for item in module.ast_module.items:
+        for item in module.items:
             match item:
                 case Import:
-                    if import_index >= len(module.imports):
+                    if declaration.resolved_module == None:
                         continue
-                    imported = module.imports[import_index].module
-                    import_index += 1
+                    imported = declaration.resolved_module
                     match declaration.subject:
                         case Name:
                             alias = declaration.alias if declaration.alias != None else name
@@ -158,4 +144,4 @@ def resolve_imports(graph: modules.ModuleGraph, index: ProgramIndex):
 def analyze_package(graph: modules.ModuleGraph, context: universal.UniversalContext) -> TypedProgram:
     index = collect_declarations(graph)
     resolve_imports(graph, index)
-    return TypedProgram(index, hir.empty_program())
+    return TypedProgram(index, universal.empty_program())

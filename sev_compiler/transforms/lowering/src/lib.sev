@@ -1,4 +1,3 @@
-import lir
 import mir
 import target
 import universal
@@ -74,33 +73,33 @@ def lower_type(id: universal.TypeId, types: universal.TypeContext, target_spec: 
     return error(NotPrimitive(id))
 
 
-def lower_block(block: mir.Block, module: mir.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> lir.Block | LoweringError:
-    operations: list[lir.Operation] = []
+def lower_block(block: universal.Block, module: universal.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> universal.Block | LoweringError:
+    operations: list[universal.LoweredOperation] = []
     for operation in block.operations:
         match operation:
             case Coverage:
-                operations.append(lir.Coverage(point.key if point.key != None else string(point.span_start)))
+                operations.append(universal.LoweredCoverage(point.key if point.key != None else string(point.span_start)))
             case Constant:
-                operations.append(lir.ConstantValue(lower_constant(value), universal.ValueId(result.index)))
+                operations.append(universal.ConstantValue(lower_constant(value), universal.ValueId(result.index)))
             case Unary:
-                operations.append(lir.Unary(lower_unary(operator), universal.ValueId(operand.index), universal.ValueId(result.index)))
+                operations.append(universal.LoweredUnary(lower_unary(operator), universal.ValueId(operand.index), universal.ValueId(result.index)))
             case Binary:
-                operations.append(lir.Binary(lower_binary(operator), universal.ValueId(left.index), universal.ValueId(right.index), universal.ValueId(result.index)))
+                operations.append(universal.LoweredBinary(lower_binary(operator), universal.ValueId(left.index), universal.ValueId(right.index), universal.ValueId(result.index)))
             case Call:
                 arguments_lir: list[universal.ValueId] = []
                 for argument in arguments: arguments_lir.append(universal.ValueId(argument.index))
-                operations.append(lir.Call(universal.FunctionId(function.value), arguments_lir, universal.ValueId(result.index)))
+                operations.append(universal.LoweredCall(universal.FunctionId(function.value), arguments_lir, universal.ValueId(result.index)))
             case Return:
-                operations.append(lir.Return(universal.ValueId(value.index) if value != None else None))
+                operations.append(universal.LoweredReturn(universal.ValueId(value.index) if value != None else None))
             case Assert:
                 location: universal.AssertionLocation | None = None
                 if origin.location != None:
                     location = universal.AssertionLocation(origin.location.file, origin.location.line, origin.location.column, origin.location.expression)
-                operations.append(lir.Assert(universal.ValueId(condition.index), universal.ValueId(message.index) if message != None else None, location))
+                operations.append(universal.LoweredAssert(universal.ValueId(condition.index), universal.ValueId(message.index) if message != None else None, location))
             case If:
-                operations.append(lir.If(universal.ValueId(condition.index), lower_block(then_block, module, types, target_spec), lower_block(else_block, module, types, target_spec)))
+                operations.append(universal.LoweredIf(universal.ValueId(condition.index), lower_block(then_block, module, types, target_spec), lower_block(else_block, module, types, target_spec)))
             case Match:
-                selected: mir.MatchArm | None = None
+                selected: universal.MatchArm | None = None
                 subject_type = module.values[subject.index].type_id
                 for arm in arms:
                     if arm.type_id == subject_type or arm.type_id == None:
@@ -109,31 +108,26 @@ def lower_block(block: mir.Block, module: mir.Module, types: universal.TypeConte
                 if selected == None:
                     return error(NonExhaustiveMatch(subject_type))
                 nested = lower_block(selected.body, module, types, target_spec)
-                for nested_operation in nested.operations: operations.append(nested_operation)
+                for nested_operation in nested.lowered_operations: operations.append(nested_operation)
             case CompiledRegionCall:
                 inputs_lir: list[universal.ValueId] = []
                 outputs_lir: list[universal.ValueId] = []
                 for input in inputs: inputs_lir.append(universal.ValueId(input.index))
                 for output in outputs: outputs_lir.append(universal.ValueId(output.index))
-                operations.append(lir.ArtifactCall(artifact_id, inputs_lir, outputs_lir))
-    return lir.Block(operations)
+                operations.append(universal.ArtifactCall(artifact_id, inputs_lir, outputs_lir))
+    block.lowered_operations = operations
+    return block
 
 
-def lower(module: mir.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> lir.Module | LoweringError:
-    result = lir.empty_module()
+def lower(module: universal.Module, types: universal.TypeContext, target_spec: target.TargetSpec) -> universal.Module | LoweringError:
     for value in module.values:
-        result.values.append(universal.Value(universal.ValueId(value.id.index), lower_type(value.type_id, types, target_spec)))
-    result.initializer = lower_block(module.initializer, module, types, target_spec)
-    for global_value in module.globals:
-        result.globals.append(universal.ValueId(global_value.index))
+        value.lowered_type = lower_type(value.type_id, types, target_spec)
+    lower_block(module.initializer, module, types, target_spec)
     for function in module.functions:
-        parameters: list[universal.ValueId] = []
-        for parameter in function.parameters: parameters.append(universal.ValueId(parameter.index))
-        body: lir.Block | None = None
-        if function.body != None: body = lower_block(function.body, module, types, target_spec)
-        linkage = universal.Internal
+        if function.body != None:
+            lower_block(function.body, module, types, target_spec)
+        function.lowered_result = lower_type(function.result_type, types, target_spec)
+        function.linkage = universal.Internal
         match function.call_type:
-            case External: linkage = universal.External(call.symbol.value)
-        result.functions.append(lir.Function(universal.FunctionId(function.id.value), function.name, parameters, lower_type(function.result, types, target_spec), body, linkage))
-    if module.entry != None: result.entry = universal.FunctionId(module.entry.value)
-    return result
+            case External: function.linkage = universal.External(call.symbol.value)
+    return module

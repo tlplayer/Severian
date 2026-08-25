@@ -1,0 +1,19 @@
+class AssertionOrigin:
+    statement_start: u32
+    condition_start: u32
+    condition_end: u32
+    location: AssertionLocation | None
+
+
+enum CoverageKind:
+    Line
+    Branch
+
+
+class CoveragePoint:
+    span_start: u32
+    kind: CoverageKind
+    ordinal: u32
+    key: string | None
+    file: string | None
+    line: u32 | None

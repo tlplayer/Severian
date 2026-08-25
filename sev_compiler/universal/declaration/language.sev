@@ -1,0 +1,132 @@
+import source
+
+
+enum ImportSubject:
+    Name(name: string)
+    Locator(locator: string)
+
+
+class ImportDeclaration:
+    subject: ImportSubject
+    source_name: string | None
+    alias: string | None
+    span: source.Span
+    resolved_module: ModuleId | None = None
+
+
+enum DecoratorValue:
+    Name(value: string)
+    String(value: string)
+    Integer(value: string)
+    Boolean(value: bool)
+
+
+class DecoratorArgument:
+    name: string | None
+    value: DecoratorValue
+    span: source.Span
+
+
+class Decorator:
+    name: string
+    arguments: list[DecoratorArgument]
+    span: source.Span
+
+
+enum GenericConstraint:
+    Parameter(parameter: string, bound: TypeAnnotation, span: source.Span)
+    Predicate(expression: Expression)
+
+
+class TypeDeclaration:
+    decorators: list[Decorator]
+    name: string
+    type_parameters: list[string]
+    constraints: list[GenericConstraint]
+    definition: TypeAnnotation | None
+    span: source.Span
+    id: TypeId = TypeId(0)
+    interface: InterfaceId | None = None
+
+
+class PropertyDeclaration:
+    name: string
+    annotation: TypeAnnotation
+    default: Expression | None
+    span: source.Span
+
+
+class OperatorParameter:
+    name: string
+    annotation: TypeAnnotation
+    span: source.Span
+
+
+class OperatorDeclaration:
+    syntax: OperatorSyntax
+    parameters: list[OperatorParameter]
+    result: TypeAnnotation
+    span: source.Span
+
+
+class TraitDeclaration:
+    decorators: list[Decorator]
+    name: string
+    type_parameters: list[string]
+    constraints: list[GenericConstraint]
+    bases: list[TypeAnnotation]
+    properties: list[PropertyDeclaration]
+    operators: list[OperatorDeclaration]
+    span: source.Span
+
+
+enum CompilerExpectation:
+    Accept
+    Reject
+
+
+class CompilerTestCase:
+    expectation: CompilerExpectation
+    diagnostic_name: string | None
+    body: Block
+    span: source.Span
+
+
+enum TestMode:
+    Property
+    Benchmark
+    Chaos
+    Profile
+    Compiler
+    Integration
+
+
+enum TestStream:
+    Stdout
+    Stderr
+
+
+enum TestExpectation:
+    Contains(stream: TestStream, value: string)
+    Equals(stream: TestStream, value: string)
+
+
+class TestDeclaration:
+    name: string | None
+    source_modes: list[string]
+    body: Block
+    compiler_cases: list[CompilerTestCase]
+    span: source.Span
+    modes: list[TestMode] = []
+    function: FunctionId | None = None
+    expectations: list[TestExpectation] = []
+
+
+def test_mode_name(mode: TestMode) -> string:
+    match mode:
+        case Property: return "property"
+        case Benchmark: return "bench"
+        case Chaos: return "chaos"
+        case Profile: return "profile"
+        case Compiler: return "compiler"
+        case Integration: return "integ"

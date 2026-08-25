@@ -20,7 +20,7 @@ class LoweredParameter:
 
 class BoundaryPlan:
     provider: string | None
-    symbol: abi.Symbol
+    symbol: abi.AbiSymbol
     signature: abi.AbiSignature
     parameters: list[LoweredParameter]
     result_type: abi.AbiType
@@ -84,4 +84,3 @@ def lower_function(function: ForeignFunction, module: ForeignModule, types: univ
     result = lower_type_ref(function.result.type_ref, module, types, target, true)
     signature = abi.AbiSignature(convention(function.abi_selection), abi_parameters, result[0], function.variadic)
     return BoundaryPlan(function.provider, function.symbol, signature, parameters, result[0], result[1])
-

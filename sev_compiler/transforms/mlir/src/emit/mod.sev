@@ -1,5 +1,4 @@
 import artifact
-import lir
 import universal
 
 class MlirArtifact:
@@ -11,7 +10,7 @@ class MlirArtifact:
 enum MlirError:
     DialectNotAllowed(dialect: string, target: string)
     DuplicateSymbol(symbol: string)
-    ArtifactSignatureConflict(artifact_id: artifact.ArtifactId)
+    ArtifactSignatureConflict(artifact_id: universal.ArtifactId)
     EntryFunctionCount(count: int)
     EntryFunctionIsDeclaration
     InvalidValue(value: universal.ValueId)
@@ -39,13 +38,13 @@ def mlir_type(type_id: universal.LoweredType) -> string | MlirError:
         case Arguments: return "!llvm.ptr"
 
 
-def value_type(module: lir.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
+def value_type(module: universal.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
     if value.index >= len(module.values):
         return error(InvalidValue(value))
-    return module.values[value.index].type_id
+    return module.values[value.index].lowered_type
 
 
-def function_symbol(function: lir.Function) -> string:
+def function_symbol(function: universal.FunctionDeclaration) -> string:
     match function.linkage:
         case External: return symbol
     return "__sev_fn_" + string(function.id.value)
@@ -61,16 +60,16 @@ def render_constant(value: universal.Constant, type_id: universal.LoweredType) -
         else: return error(UnsupportedOperation("aggregate constants require the LLVM global route"))
 
 
-def render_block(module: lir.Module, block: lir.Block, indentation: string) -> string | MlirError:
+def render_block(module: universal.Module, block: universal.Block, indentation: string) -> string | MlirError:
     output = ""
-    for operation in block.operations:
+    for operation in block.lowered_operations:
         match operation:
-            case Coverage:
+            case LoweredCoverage:
                 output += indentation + "func.call @__sev_coverage_hit() : () -> ()\n"
             case ConstantValue:
                 type_id = value_type(module, result)
                 output += indentation + "%v" + string(result.index) + " = arith.constant " + render_constant(value, type_id) + " : " + mlir_type(type_id) + "\n"
-            case Unary:
+            case LoweredUnary:
                 type_id = value_type(module, result)
                 if operator == universal.Positive:
                     output += indentation + "%v" + string(result.index) + " = arith.addi %v" + string(operand.index) + ", %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
@@ -78,11 +77,11 @@ def render_block(module: lir.Module, block: lir.Block, indentation: string) -> s
                     output += indentation + "%v" + string(result.index) + " = arith.negi %v" + string(operand.index) + " : " + mlir_type(type_id) + "\n"
                 else:
                     output += indentation + "%v" + string(result.index) + " = arith.xori %v" + string(operand.index) + ", true : i1\n"
-            case Binary:
+            case LoweredBinary:
                 type_id = value_type(module, result)
                 mnemonic = binary_mnemonic(operator, type_id)
                 output += indentation + "%v" + string(result.index) + " = " + mnemonic + " %v" + string(left.index) + ", %v" + string(right.index) + " : " + mlir_type(value_type(module, left)) + "\n"
-            case Call:
+            case LoweredCall:
                 arguments_text: list[string] = []
                 argument_types: list[string] = []
                 for argument in arguments:
@@ -102,14 +101,14 @@ def render_block(module: lir.Module, block: lir.Block, indentation: string) -> s
                     prefix = "%v" + string(result.index) + " = "
                     result_text = mlir_type(value_type(module, result))
                 output += indentation + prefix + "func.call @" + symbol + "(" + arguments_text.join(", ") + ") : (" + argument_types.join(", ") + ") -> " + result_text + "\n"
-            case Return:
+            case LoweredReturn:
                 if value == None:
                     output += indentation + "return\n"
                 else:
                     output += indentation + "return %v" + string(value.index) + " : " + mlir_type(value_type(module, value)) + "\n"
-            case Assert:
+            case LoweredAssert:
                 output += indentation + "cf.assert %v" + string(condition.index) + ", \"assertion failed\"\n"
-            case If:
+            case LoweredIf:
                 output += indentation + "scf.if %v" + string(condition.index) + " {\n"
                 output += render_block(module, then_block, indentation + "  ")
                 output += indentation + "} else {\n"
@@ -134,13 +133,13 @@ def binary_mnemonic(operator: universal.BinaryOperation, type_id: universal.Lowe
     return "arith.cmpi"
 
 
-def render_function(module: lir.Module, function: lir.Function) -> string | MlirError:
+def render_function(module: universal.Module, function: universal.FunctionDeclaration) -> string | MlirError:
     parameters: list[string] = []
-    for parameter in function.parameters:
+    for parameter in function.values:
         parameters.append("%v" + string(parameter.index) + ": " + mlir_type(value_type(module, parameter)))
     result = ""
-    if function.result != universal.Unit:
-        result = " -> " + mlir_type(function.result)
+    if function.lowered_result != universal.Unit:
+        result = " -> " + mlir_type(function.lowered_result)
     symbol = function_symbol(function)
     if function.body == None:
         return "  func.func private @" + symbol + "(" + parameters.join(", ") + ")" + result + "\n"
@@ -150,7 +149,7 @@ def render_function(module: lir.Module, function: lir.Function) -> string | Mlir
     return output
 
 
-def render(module: lir.Module) -> string | MlirError:
+def render(module: universal.Module) -> string | MlirError:
     functions = ""
     for function in module.functions:
         functions += render_function(module, function)

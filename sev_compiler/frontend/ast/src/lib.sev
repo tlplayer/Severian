@@ -1,21 +1,4 @@
 import "expression/mod.sev"
 import "statement/mod.sev"
 import "types/mod.sev"
-
-class Module:
-    items: list[Item]
-
-
-enum Item:
-    Import(declaration: ImportDeclaration)
-    Trait(declaration: TraitDeclaration)
-    BindingItem(binding: Binding)
-    ExpressionItem(expression: Expression)
-    Function(declaration: FunctionDeclaration)
-    Type(declaration: TypeDeclaration)
-    Test(declaration: TestDeclaration)
-
-
-def empty_module() -> Module:
-    return Module([])
-
+import universal

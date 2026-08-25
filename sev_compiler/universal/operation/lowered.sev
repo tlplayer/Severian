@@ -1,0 +1,11 @@
+enum LoweredOperation:
+    LoweredCoverage(key: string)
+    ConstantValue(value: Constant, result: ValueId)
+    LoweredUnary(operator: UnaryOperation, operand: ValueId, result: ValueId)
+    LoweredBinary(operator: BinaryOperation, left: ValueId, right: ValueId, result: ValueId)
+    LoweredCall(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    RuntimeCall(symbol: string, arguments: list[ValueId], result: ValueId | None)
+    LoweredReturn(value: ValueId | None)
+    LoweredAssert(condition: ValueId, message: ValueId | None, location: AssertionLocation | None)
+    LoweredIf(condition: ValueId, then_block: Block, else_block: Block)
+    ArtifactCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])

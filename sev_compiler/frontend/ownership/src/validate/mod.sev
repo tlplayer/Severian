@@ -1,19 +1,19 @@
 import diagnostics
-import hir
+import universal
 
-def validate_expression(expression: hir.Expression, declared: set[hir.BindingId]) -> unit | diagnostics.Diagnostic:
+def validate_expression(expression: universal.Expression, declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
     match expression.kind:
-        case Literal:
+        case LiteralValue:
             return unit
-        case Function:
+        case FunctionReference:
             return unit
-        case Binding:
+        case BindingReference:
             if binding in declared:
                 return unit
             return error(diagnostics.Diagnostic("E000301", "value used before it is available", expression.span))
-        case Call:
+        case ResolvedCall:
             for argument in arguments:
-                validate_expression(argument, declared)
+                validate_expression(argument.value, declared)
         case Convert:
             validate_expression(operand, declared)
         case Unary:
@@ -24,10 +24,9 @@ def validate_expression(expression: hir.Expression, declared: set[hir.BindingId]
     return unit
 
 
-def validate_statement(statement: hir.Statement, bindings: map[hir.BindingId, hir.Binding], declared: set[hir.BindingId]) -> unit | diagnostics.Diagnostic:
+def validate_statement(statement: universal.Statement, bindings: map[universal.BindingId, universal.Binding], declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
     match statement:
         case BindingStatement:
-            binding = bindings[binding]
             validate_expression(binding.value, declared)
             declared.add(binding.id)
         case ExpressionStatement:
@@ -58,11 +57,11 @@ def validate_statement(statement: hir.Statement, bindings: map[hir.BindingId, hi
     return unit
 
 
-def validate_module(module: hir.Module) -> unit | diagnostics.Diagnostic:
-    bindings: map[hir.BindingId, hir.Binding] = {}
+def validate_module(module: universal.Module) -> unit | diagnostics.Diagnostic:
+    bindings: map[universal.BindingId, universal.Binding] = {}
     for binding in module.bindings:
         bindings[binding.id] = binding
-    declared: set[hir.BindingId] = set()
+    declared: set[universal.BindingId] = set()
     for statement in module.initializer.statements:
         validate_statement(statement, bindings, declared)
     globals = declared.copy()
@@ -75,4 +74,3 @@ def validate_module(module: hir.Module) -> unit | diagnostics.Diagnostic:
         for statement in function.body.statements:
             validate_statement(statement, bindings, declared)
     return unit
-

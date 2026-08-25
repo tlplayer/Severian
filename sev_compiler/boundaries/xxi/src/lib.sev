@@ -1,5 +1,4 @@
 import abi
-import ast
 import ffi
 import universal
 
@@ -88,7 +87,7 @@ def resolve_contract(annotation: universal.TypeAnnotation, foreign: ffi.ForeignM
     return error(UnknownType(string(current)))
 
 
-def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTarget) -> ResolvedExternalModule | XxiError:
+def resolve(module: universal.Module, types: universal.TypeContext, target: abi.AbiTarget) -> ResolvedExternalModule | XxiError:
     imports: list[ExternalImport] = []
     foreign = ffi.ForeignModule([], [])
     for item in module.items:
@@ -112,7 +111,7 @@ def resolve(module: ast.Module, types: universal.TypeContext, target: abi.AbiTar
                         contract = resolve_contract(parameter.annotation, foreign, types, false)
                         parameters.append(ffi.ForeignParameter(parameter.name, contract[0], contract[1]))
                     result = resolve_contract(declaration.result, foreign, types, true)[0]
-                    symbol = abi.Symbol(abi.SymbolName(declaration.name), abi.External, abi.Default, abi.Import, abi.Function)
+                    symbol = abi.AbiSymbol(universal.Symbol(universal.SymbolName(declaration.name), universal.Function), abi.External, abi.Default, abi.Import)
                     foreign.functions.append(ffi.ForeignFunction(declaration.name, None, symbol, parameters, result, language_abi(language), false))
     plans: list[ffi.BoundaryPlan] = []
     for function in foreign.functions:

@@ -1,11 +1,9 @@
 import abi
-import ast
 import backend
 import bootstrap
 import compile
 import diagnostics
 import lexer
-import hir
 import modules
 import lowering
 import mir
@@ -19,4 +17,3 @@ import universal
 import xxi
 import "config.sev"
 import "pipeline/mod.sev"
-

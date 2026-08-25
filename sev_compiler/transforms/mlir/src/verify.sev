@@ -1,10 +1,10 @@
 import artifact
-import lir
 import target
+import universal
 import "emit/mod.sev"
 
 class VerifiedMlirArtifact:
-    id: artifact.ArtifactId
+    id: universal.ArtifactId
     module: string
     target_triple: string
 
@@ -23,7 +23,7 @@ def verify_text(module: string, description: string) -> unit | MlirError:
     return unit
 
 
-def verify_artifact(id: artifact.ArtifactId, generated: MlirArtifact, target_spec: target.TargetSpec) -> VerifiedMlirArtifact | MlirError:
+def verify_artifact(id: universal.ArtifactId, generated: MlirArtifact, target_spec: target.TargetSpec) -> VerifiedMlirArtifact | MlirError:
     verify_text(generated.module, "artifact")
     return VerifiedMlirArtifact(id, generated.module, target_spec.triple)
 
@@ -31,7 +31,7 @@ def verify_artifact(id: artifact.ArtifactId, generated: MlirArtifact, target_spe
 def compose(normal: string, artifacts: list[VerifiedMlirArtifact], target_spec: target.TargetSpec) -> string | MlirError:
     verify_text(normal, "ordinary module")
     additions = ""
-    seen: set[artifact.ArtifactId] = set()
+    seen: set[universal.ArtifactId] = set()
     for generated in artifacts:
         if generated.target_triple != target_spec.triple:
             return error(TargetMismatch(generated.target_triple, target_spec.triple))
@@ -43,4 +43,3 @@ def compose(normal: string, artifacts: list[VerifiedMlirArtifact], target_spec: 
         additions += body + "\n"
     insertion = normal.rindex("}")
     return normal[:insertion] + additions + normal[insertion:]
-

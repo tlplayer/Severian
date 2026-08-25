@@ -1,26 +1,25 @@
-import hir
 import universal
 import "../cfg.sev"
 import "../model/operation/mod.sev"
 import "../model/value/mod.sev"
 
 class Builder:
-    module: Module
-    bindings: map[hir.BindingId, universal.ValueId]
+    module: universal.Module
+    bindings: map[universal.BindingId, universal.ValueId]
     function_ids: map[universal.DefId, universal.FunctionId]
 
     def value(type_id: universal.TypeId) -> universal.ValueId:
         id = universal.ValueId(u32(len(module.values)))
-        module.values.append(Value(id, type_id))
+        module.values.append(universal.Value(id, type_id))
         return id
 
-    def expression(expression: hir.Expression, block: Block) -> universal.ValueId:
+    def expression(expression: universal.Expression, block: universal.Block) -> universal.ValueId:
         match expression.kind:
-            case Literal:
+            case LiteralValue:
                 result = value(expression.type_id)
                 block.operations.append(Constant(value, result))
                 return result
-            case Binding:
+            case BindingReference:
                 return bindings[binding]
             case Convert:
                 return self.expression(operand, block)
@@ -35,29 +34,27 @@ class Builder:
                 result = value(expression.type_id)
                 block.operations.append(Binary(operator, left_value, right_value, result))
                 return result
-            case Call:
+            case ResolvedCall:
                 arguments_values: list[universal.ValueId] = []
                 for argument in arguments:
-                    arguments_values.append(self.expression(argument, block))
+                    arguments_values.append(self.expression(argument.value, block))
                 result = value(expression.type_id)
                 match callee:
                     case Direct:
                         block.operations.append(Call(function_ids[function], arguments_values, result))
                 return result
-            case Function:
+            case FunctionReference:
                 return value(expression.type_id)
 
-    def binding(binding: hir.Binding, block: Block):
+    def binding(binding: universal.Binding, block: universal.Block):
         result = expression(binding.value, block)
         bindings[binding.id] = result
-        module.bindings.append((binding.id, result))
+        module.binding_values.append((binding.id, result))
 
-    def statement(statement: hir.Statement, hir_module: hir.Module, block: Block):
+    def statement(statement: universal.Statement, hir_module: universal.Module, block: universal.Block):
         match statement:
             case BindingStatement:
-                for binding_value in hir_module.bindings:
-                    if binding_value.id == binding:
-                        self.binding(binding_value, block)
+                self.binding(binding, block)
             case ExpressionStatement:
                 self.expression(expression, block)
             case Return:
@@ -68,92 +65,83 @@ class Builder:
                 condition_value = self.expression(condition, block)
                 message_value: universal.ValueId | None = None
                 if message != None: message_value = self.expression(message, block)
-                origin = AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
+                origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
                 block.operations.append(Assert(condition_value, message_value, origin))
             case If:
                 condition_value = self.expression(condition, block)
-                then_mir = empty_block()
-                else_mir = empty_block()
+                then_mir = universal.empty_block()
+                else_mir = universal.empty_block()
                 for nested in then_block.statements: statement(nested, hir_module, then_mir)
                 for nested in else_block.statements: statement(nested, hir_module, else_mir)
                 block.operations.append(If(condition_value, then_mir, else_mir))
             case Match:
                 subject_value = self.expression(subject, block)
-                mir_arms: list[MatchArm] = []
+                mir_arms: list[universal.MatchArm] = []
                 for arm in arms:
-                    arm_body = empty_block()
+                    arm_body = universal.empty_block()
                     for nested in arm.body.statements: statement(nested, hir_module, arm_body)
-                    mir_arms.append(MatchArm(arm.type_id, arm_body))
+                    mir_arms.append(universal.MatchArm(arm_body, type_id = arm.type_id))
                 block.operations.append(Match(subject_value, mir_arms))
 
 
-def cfg_from_hir(body: hir.Block, hir_module: hir.Module, result_type: universal.TypeId, parameters: list[hir.FunctionParameter]) -> CfgBody:
-    cfg = CfgBody(BlockId(0), [BasicBlock(BlockId(0), [], [], Unreachable)], [], result_type)
-    bindings: map[hir.BindingId, Place] = {}
+def cfg_from_hir(body: universal.Block, hir_module: universal.Module, result_type: universal.TypeId, parameters: list[universal.FunctionParameter]) -> universal.CfgBody:
+    cfg = universal.CfgBody(universal.BlockId(0), [universal.BasicBlock(universal.BlockId(0), [], [], Unreachable)], [], result_type)
+    bindings: map[universal.BindingId, universal.Place] = {}
     for parameter in parameters:
-        local = LocalId(u32(len(cfg.locals)))
-        cfg.locals.append(LocalDecl(local, parameter.contract.type_id, false, true))
+        local = universal.LocalId(u32(len(cfg.locals)))
+        cfg.locals.append(universal.LocalDecl(local, parameter.type_id, false, true))
         cfg.blocks[0].parameters.append(local)
-        bindings[parameter.binding] = local_place(local)
+        bindings[parameter.binding] = universal.local_place(local)
     for statement in body.statements:
         match statement:
             case Return:
                 if value == None:
-                    cfg.blocks[0].terminator = Terminator.Return(None)
+                    cfg.blocks[0].terminator = universal.Terminator.Return(None)
                 else:
-                    local = LocalId(u32(len(cfg.locals)))
-                    cfg.locals.append(LocalDecl(local, value.type_id, false, false))
+                    local = universal.LocalId(u32(len(cfg.locals)))
+                    cfg.locals.append(universal.LocalDecl(local, value.type_id, false, false))
                     cfg.blocks[0].statements.append(StorageLive(local))
-                    cfg.blocks[0].terminator = Terminator.Return(Move(local_place(local)))
+                    cfg.blocks[0].terminator = universal.Terminator.Return(Move(universal.local_place(local)))
             case BindingStatement:
-                for binding_value in hir_module.bindings:
-                    if binding_value.id == binding:
-                        local = LocalId(u32(len(cfg.locals)))
-                        cfg.locals.append(LocalDecl(local, binding_value.type_id, true, false))
-                        cfg.blocks[0].statements.append(StorageLive(local))
-                        bindings[binding] = local_place(local)
+                local = universal.LocalId(u32(len(cfg.locals)))
+                cfg.locals.append(universal.LocalDecl(local, binding.type_id, true, false))
+                cfg.blocks[0].statements.append(StorageLive(local))
+                bindings[binding.id] = universal.local_place(local)
     if cfg.blocks[0].terminator == Unreachable:
-        cfg.blocks[0].terminator = Terminator.Return(None)
+        cfg.blocks[0].terminator = universal.Terminator.Return(None)
     return cfg
 
 
-def build(program: hir.Program) -> Module:
-    result = empty_module()
+def build(program: universal.Program) -> universal.Module:
     function_ids: map[universal.DefId, universal.FunctionId] = {}
     for hir_module in program.modules:
         for function in hir_module.functions:
             function_ids[function.definition] = function.id
-    builder = Builder(result, {}, function_ids)
-
     for hir_module in program.modules:
-        result.entry = hir_module.entry
-        for test in hir_module.tests:
-            result.tests.append(TestDeclaration(test.name, test.modes, test.function, test.expectations))
+        builder = Builder(hir_module, {}, function_ids)
+        hir_module.values = []
+        hir_module.binding_values = []
         for function in hir_module.functions:
             parameters: list[universal.ValueId] = []
             for parameter in function.parameters:
-                parameters.append(builder.value(parameter.contract.type_id))
-            cfg: CfgBody | None = None
+                parameters.append(builder.value(parameter.type_id))
+            function.values = parameters
             if function.body != None:
-                cfg = cfg_from_hir(function.body, hir_module, function.result.type_id, function.parameters)
-            result.functions.append(Function(function.id, function.definition, function.name, parameters, function.result.type_id, None, cfg, function.call_type))
+                function.cfg = cfg_from_hir(function.body, hir_module, function.result_type, function.parameters)
 
         for statement in hir_module.initializer.statements:
-            builder.statement(statement, hir_module, result.initializer)
-        result.globals = []
-        for pair in result.bindings:
-            result.globals.append(pair[1])
-        result.initializer_cfg = cfg_from_hir(hir_module.initializer, hir_module, universal.TypeId(0), [])
+            builder.statement(statement, hir_module, hir_module.initializer)
+        hir_module.globals = []
+        for pair in hir_module.binding_values:
+            hir_module.globals.append(pair[1])
+        hir_module.initializer_cfg = cfg_from_hir(hir_module.initializer, hir_module, universal.TypeId(0), [])
 
         global_bindings = builder.bindings.copy()
         index = 0
         for function in hir_module.functions:
             if function.body != None:
                 builder.bindings = global_bindings.copy()
-                body = empty_block()
                 for statement in function.body.statements:
-                    builder.statement(statement, hir_module, body)
-                result.functions[index].body = body
+                    builder.statement(statement, hir_module, function.body)
             index += 1
-    return result
-
+    return program.modules[-1]

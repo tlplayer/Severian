@@ -7,30 +7,30 @@ enum LoanKind:
 
 
 class Loan:
-    place: Place
+    place: universal.Place
     kind: LoanKind
-    block: BlockId
+    block: universal.BlockId
 
 
 enum OwnershipError:
-    UseAfterMove(local: LocalId)
-    DoubleMove(local: LocalId)
-    ConflictingLoan(local: LocalId)
-    EscapingBorrow(local: LocalId)
-    ResourceNotConsumed(local: LocalId)
-    DoubleDrop(local: LocalId)
+    UseAfterMove(local: universal.LocalId)
+    DoubleMove(local: universal.LocalId)
+    ConflictingLoan(local: universal.LocalId)
+    EscapingBorrow(local: universal.LocalId)
+    ResourceNotConsumed(local: universal.LocalId)
+    DoubleDrop(local: universal.LocalId)
 
 
 class OwnershipReport:
-    initialized: set[LocalId]
-    moved: set[LocalId]
+    initialized: set[universal.LocalId]
+    moved: set[universal.LocalId]
     loans: list[Loan]
-    escaped: set[LocalId]
-    consumed_resources: set[LocalId]
-    call_effects: map[BlockId, universal.EffectSet]
+    escaped: set[universal.LocalId]
+    consumed_resources: set[universal.LocalId]
+    call_effects: map[universal.BlockId, universal.EffectSet]
 
 
-def inspect_operand(operand: Operand, report: OwnershipReport, errors: list[OwnershipError]):
+def inspect_operand(operand: universal.Operand, report: OwnershipReport, errors: list[OwnershipError]):
     match operand:
         case Copy:
             if place.local not in report.initialized or place.local in report.moved:
@@ -43,7 +43,7 @@ def inspect_operand(operand: Operand, report: OwnershipReport, errors: list[Owne
             report.moved.add(place.local)
 
 
-def add_loan(place: Place, kind: LoanKind, block: BlockId, report: OwnershipReport, errors: list[OwnershipError]):
+def add_loan(place: universal.Place, kind: LoanKind, block: universal.BlockId, report: OwnershipReport, errors: list[OwnershipError]):
     for loan in report.loans:
         if loan.place.local == place.local and (loan.kind == Exclusive or kind == Exclusive):
             errors.append(ConflictingLoan(place.local))
@@ -51,7 +51,7 @@ def add_loan(place: Place, kind: LoanKind, block: BlockId, report: OwnershipRepo
     report.loans.append(Loan(place, kind, block))
 
 
-def inspect_rvalue(value: Rvalue, block: BlockId, report: OwnershipReport, errors: list[OwnershipError]):
+def inspect_rvalue(value: universal.Rvalue, block: universal.BlockId, report: OwnershipReport, errors: list[OwnershipError]):
     match value:
         case Use: inspect_operand(operand, report, errors)
         case Unary: inspect_operand(operand, report, errors)
@@ -66,7 +66,7 @@ def inspect_rvalue(value: Rvalue, block: BlockId, report: OwnershipReport, error
                 inspect_operand(field, report, errors)
 
 
-def analyze_ownership(body: CfgBody, types: universal.TypeContext) -> OwnershipReport | list[OwnershipError]:
+def analyze_ownership(body: universal.CfgBody, types: universal.TypeContext) -> OwnershipReport | list[OwnershipError]:
     report = OwnershipReport(set(), set(), [], set(), set(), {})
     errors: list[OwnershipError] = []
     for local in body.locals:
@@ -97,8 +97,8 @@ def analyze_ownership(body: CfgBody, types: universal.TypeContext) -> OwnershipR
     return report
 
 
-def elaborate_drops(body: CfgBody, types: universal.TypeContext):
-    resources: list[LocalId] = []
+def elaborate_drops(body: universal.CfgBody, types: universal.TypeContext):
+    resources: list[universal.LocalId] = []
     for local in body.locals:
         match types.kind(local.type_id):
             case Resource: resources.append(local.id)
@@ -106,8 +106,8 @@ def elaborate_drops(body: CfgBody, types: universal.TypeContext):
         match block.terminator:
             case Return:
                 for local in resources.reversed():
-                    block.statements.append(Drop(local_place(local)))
+                    block.statements.append(Drop(universal.local_place(local)))
             case Throw:
                 for local in resources.reversed():
-                    block.statements.append(Drop(local_place(local)))
+                    block.statements.append(Drop(universal.local_place(local)))
 

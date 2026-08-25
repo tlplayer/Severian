@@ -1,17 +1,1 @@
-import artifact
-import hir
 import universal
-import "../../cfg.sev"
-
-enum Operation:
-    Coverage(point: CoveragePoint)
-    Constant(value: universal.LiteralValue, result: universal.ValueId)
-    Unary(operator: universal.UnaryOperator, operand: universal.ValueId, result: universal.ValueId)
-    Binary(operator: universal.BinaryOperator, left: universal.ValueId, right: universal.ValueId, result: universal.ValueId)
-    Call(function: universal.FunctionId, arguments: list[universal.ValueId], result: universal.ValueId)
-    Return(value: universal.ValueId | None)
-    Assert(condition: universal.ValueId, message: universal.ValueId | None, origin: AssertionOrigin)
-    If(condition: universal.ValueId, then_block: Block, else_block: Block)
-    Match(subject: universal.ValueId, arms: list[MatchArm])
-    CompiledRegionCall(artifact_id: artifact.ArtifactId, inputs: list[universal.ValueId], outputs: list[universal.ValueId])
-

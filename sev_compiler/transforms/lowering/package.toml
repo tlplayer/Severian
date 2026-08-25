@@ -9,7 +9,6 @@ path = "src/lib.sev"
 
 [dependencies]
 artifact = { path = "../../artifact" }
-lir = { path = "../lir" }
 mir = { path = "../mir" }
 target = { path = "../../target" }
 universal = { path = "../../universal" }

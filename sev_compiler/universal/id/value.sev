@@ -1,2 +1,0 @@
-class ValueId:
-    index: u32

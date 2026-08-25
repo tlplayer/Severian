@@ -1,0 +1,42 @@
+import source
+
+
+class Expression:
+    kind: ExpressionKind
+    span: source.Span
+    id: HirId = HirId(0)
+    type_id: TypeId = TypeId(0)
+
+
+class CallArgument:
+    name: string | absent
+    value: Expression
+    span: source.Span
+
+
+enum ResolvedCallee:
+    Direct(function: DefId, substitution: Substitution)
+    FunctionValue(expression: Expression)
+    Method(implementation: DefId, receiver: Expression, substitution: Substitution)
+    Constructor(type_definition: DefId, variant: VariantId | None)
+    Intrinsic(operation: OpId)
+
+
+enum ExpressionKind:
+    LiteralValue(value: LiteralValue)
+    Name(name: string)
+    Member(object: Expression, name: string)
+    Call(callee: Expression, arguments: list[CallArgument])
+    BindingReference(binding: BindingId)
+    FunctionReference(definition: DefId)
+    ResolvedCall(callee: ResolvedCallee, arguments: list[CallArgument])
+    Convert(operand: Expression, conversion: ExpressionConversion)
+    Unary(operator: UnaryOperator, operand: Expression)
+    Binary(operator: BinaryOperator, left: Expression, right: Expression)
+
+
+def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:
+    expression.id = id
+    expression.type_id = type_id
+    expression.kind = kind
+    return expression

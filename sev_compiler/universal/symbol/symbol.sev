@@ -1,0 +1,14 @@
+class SymbolName:
+    value: string
+
+
+enum SymbolKind:
+    Function
+    Data
+    ThreadLocal
+
+
+class Symbol:
+    name: SymbolName
+    kind: SymbolKind
+    id: SymbolId | None = None

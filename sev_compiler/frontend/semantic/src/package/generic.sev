@@ -1,4 +1,3 @@
-import ast
 import universal
 import "../package.sev"
 
@@ -38,8 +37,8 @@ def substitute_annotation(annotation: universal.TypeAnnotation, substitution: ma
             return universal.TypeAnnotation(universal.Union(replaced), annotation.span)
 
 
-def specialize_signature(signature: FunctionDecl, substitution: map[string, string]) -> FunctionDecl:
-    parameters: list[universal.TypeAnnotation] = []
+def specialize_signature(signature: universal.FunctionDeclaration, substitution: map[string, string]) -> universal.FunctionDeclaration:
+    parameters: list[universal.FunctionParameter] = []
     for parameter in signature.parameters:
-        parameters.append(substitute_annotation(parameter, substitution))
-    return FunctionDecl([], parameters, substitute_annotation(signature.result, substitution), signature.constraints)
+        parameters.append(universal.FunctionParameter(parameter.name, substitute_annotation(parameter.annotation, substitution), parameter.default, parameter.span))
+    return universal.FunctionDeclaration(parameters = parameters, result = substitute_annotation(signature.result, substitution), constraints = signature.constraints)

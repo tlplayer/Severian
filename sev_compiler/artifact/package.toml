@@ -8,3 +8,4 @@ publish = false
 path = "src/lib.sev"
 
 [dependencies]
+universal = { path = "../universal" }

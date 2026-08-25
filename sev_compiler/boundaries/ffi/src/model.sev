@@ -57,7 +57,7 @@ def convention(selection: AbiSelection) -> abi.CallingConvention:
 class ForeignFunction:
     name: string
     provider: string | None
-    symbol: abi.Symbol
+    symbol: abi.AbiSymbol
     parameters: list[ForeignParameter]
     result: ValueContract
     abi_selection: AbiSelection
@@ -77,4 +77,3 @@ class ForeignModule:
         for declaration in types:
             if declaration.name == name: return declaration
         return None
-

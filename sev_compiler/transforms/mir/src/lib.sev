@@ -1,5 +1,4 @@
 import artifact
-import hir
 import universal
 import "cfg.sev"
 import "model/operation/mod.sev"
@@ -9,68 +8,7 @@ import "passes.sev"
 import "verify.sev"
 import "build/mod.sev"
 
-class AssertionOrigin:
-    statement_start: u32
-    condition_start: u32
-    condition_end: u32
-    location: universal.AssertionLocation | None
-
-
-enum CoverageKind:
-    Line
-    Branch
-
-
-class CoveragePoint:
-    span_start: u32
-    kind: CoverageKind
-    ordinal: u32
-    key: string | None
-    file: string | None
-    line: u32 | None
-
-
-class MatchArm:
-    type_id: universal.TypeId | None
-    body: Block
-
-
-class Block:
-    operations: list[Operation]
-
-
-class Function:
-    id: universal.FunctionId
-    definition: universal.DefId
-    name: string
-    parameters: list[universal.ValueId]
-    result: universal.TypeId
-    body: Block | None
-    cfg: CfgBody | None
-    call_type: hir.CallType
-
-
-class TestDeclaration:
-    name: string
-    modes: list[hir.TestMode]
-    function: universal.FunctionId
-    expectations: list[hir.TestExpectation]
-
-
-class Module:
-    values: list[Value]
-    bindings: list[tuple[hir.BindingId, universal.ValueId]]
-    globals: list[universal.ValueId]
-    initializer: Block
-    initializer_cfg: CfgBody
-    functions: list[Function]
-    entry: universal.FunctionId | None
-    tests: list[TestDeclaration]
-
-
-def empty_block() -> Block:
-    return Block([])
-
-
-def empty_module() -> Module:
-    return Module([], [], [], empty_block(), empty_cfg(universal.TypeId(0)), [], None, [])
+def empty_module() -> universal.Module:
+    result = universal.empty_module()
+    result.initializer_cfg = universal.empty_cfg(universal.TypeId(0))
+    return result

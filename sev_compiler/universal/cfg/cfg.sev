@@ -1,0 +1,92 @@
+class LocalDecl:
+    id: LocalId
+    type_id: TypeId
+    mutable: bool
+    argument: bool
+
+
+enum Projection:
+    Field(index: u32)
+    Index(local: LocalId)
+    Dereference
+    Downcast(variant: u32)
+
+
+class Place:
+    local: LocalId
+    projection: list[Projection]
+
+
+def local_place(local: LocalId) -> Place:
+    return Place(local, [])
+
+
+enum Operand:
+    Copy(place: Place)
+    Move(place: Place)
+    Constant(value: LiteralValue, type_id: TypeId)
+    Function(definition: DefId)
+
+
+enum Callee:
+    Direct(function: DefId, substitution: Substitution)
+    FunctionValue(operand: Operand)
+    Method(implementation: DefId, receiver: Operand, substitution: Substitution)
+    Constructor(type_definition: DefId, variant: VariantId | None)
+    Intrinsic(operation: OpId)
+
+
+enum Rvalue:
+    Use(operand: Operand)
+    Unary(operator: UnaryOperator, operand: Operand)
+    Binary(operator: BinaryOperator, left: Operand, right: Operand)
+    BorrowShared(place: Place)
+    BorrowExclusive(place: Place)
+    Convert(operand: Operand, conversion: ExpressionConversion)
+    Aggregate(type_id: TypeId, fields: list[Operand])
+
+
+enum CfgStatement:
+    Assign(place: Place, value: Rvalue)
+    Drop(place: Place)
+    StorageLive(local: LocalId)
+    StorageDead(local: LocalId)
+    Assert(condition: Operand, message: Operand | None)
+    Coverage(point: CoveragePoint)
+    Operation(id: OpId, operands: list[Operand], results: list[Place], attributes: map[AttributeId, AttrValue])
+
+
+enum SwitchCase:
+    Integer(value: i128)
+    Boolean(value: bool)
+    Variant(index: u32)
+    Type(type_id: TypeId)
+
+
+enum Terminator:
+    Goto(target: BlockId, arguments: list[Operand])
+    Branch(condition: Operand, then_block: BlockId, else_block: BlockId)
+    Switch(discriminant: Operand, targets: list[tuple[SwitchCase, BlockId]], fallback: BlockId)
+    Call(callee: Callee, arguments: list[Operand], destination: Place | None, target: BlockId, unwind: BlockId | None)
+    Return(value: Operand | None)
+    Throw(value: Operand)
+    Unreachable
+
+
+class BasicBlock:
+    id: BlockId
+    parameters: list[LocalId]
+    statements: list[CfgStatement]
+    terminator: Terminator
+
+
+class CfgBody:
+    entry: BlockId
+    blocks: list[BasicBlock]
+    locals: list[LocalDecl]
+    return_type: TypeId
+
+
+def empty_cfg(return_type: TypeId) -> CfgBody:
+    entry = BlockId(0)
+    return CfgBody(entry, [BasicBlock(entry, [], [], Return(None))], [], return_type)

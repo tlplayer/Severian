@@ -1,0 +1,42 @@
+import source
+
+
+enum Item:
+    Import(declaration: ImportDeclaration)
+    Trait(declaration: TraitDeclaration)
+    BindingItem(binding: Binding)
+    ExpressionItem(expression: Expression)
+    Function(declaration: FunctionDeclaration)
+    Type(declaration: TypeDeclaration)
+    Test(declaration: TestDeclaration)
+
+
+class Module:
+    items: list[Item]
+    id: ModuleId = ModuleId(0)
+    package: PackageId = PackageId(0)
+    path: string = ""
+    source_file: source.SourceFile | None = None
+    resolved_imports: list[ModuleId] = []
+    bindings: list[Binding] = []
+    initializer: Block = Block([])
+    initializer_cfg: CfgBody | None = None
+    functions: list[FunctionDeclaration] = []
+    entry: FunctionId | None = None
+    tests: list[TestDeclaration] = []
+    types: list[TypeDeclaration] = []
+    values: list[Value] = []
+    globals: list[ValueId] = []
+    binding_values: list[tuple[BindingId, ValueId]] = []
+
+
+class Program:
+    modules: list[Module]
+
+
+def empty_module() -> Module:
+    return Module([])
+
+
+def empty_program() -> Program:
+    return Program([])

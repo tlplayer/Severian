@@ -55,8 +55,8 @@ class AnalysisManager:
 
 trait Pass:
     metadata() -> PassMetadata
-    run_module(module: Module, analyses: AnalysisManager) -> unit | PassError
-    run_function(body: CfgBody, analyses: AnalysisManager) -> unit | PassError
+    run_module(module: universal.Module, analyses: AnalysisManager) -> unit | PassError
+    run_function(body: universal.CfgBody, analyses: AnalysisManager) -> unit | PassError
 
 
 class PassManager:
@@ -68,7 +68,7 @@ class PassManager:
     def add(pass: Pass):
         passes.append(pass)
 
-    def run(module: Module, stage: IrStage) -> IrStage | PassError:
+    def run(module: universal.Module, stage: IrStage) -> IrStage | PassError:
         analyses = AnalysisManager()
         for pass in passes:
             metadata = pass.metadata()
@@ -84,4 +84,3 @@ class PassManager:
             analyses.invalidate_except(metadata.preserved_analyses)
             stage = metadata.produced_stage
         return stage
-

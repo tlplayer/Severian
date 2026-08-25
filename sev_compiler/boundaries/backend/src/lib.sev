@@ -1,4 +1,3 @@
-import lir
 import runtime
 import universal
 
@@ -39,9 +38,9 @@ def c_type(type_id: universal.LoweredType) -> string | BackendError:
     return error(UnsupportedType(type_id))
 
 
-def value_type(module: lir.Module, value: universal.ValueId) -> universal.LoweredType | BackendError:
+def value_type(module: universal.Module, value: universal.ValueId) -> universal.LoweredType | BackendError:
     if value.index >= len(module.values): return error(InvalidValue(value))
-    return module.values[value.index].type_id
+    return module.values[value.index].lowered_type
 
 
 def c_literal(value: universal.Constant) -> string:
@@ -72,22 +71,22 @@ def binary_operator(operator: universal.BinaryOperation) -> string:
     return "+"
 
 
-def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
+def render_block(module: universal.Module, block: universal.Block) -> string | BackendError:
     output = ""
-    for operation in block.operations:
+    for operation in block.lowered_operations:
         match operation:
-            case Coverage:
+            case LoweredCoverage:
                 output += "    __sev_coverage_hit(\"" + key + "\");\n"
             case ConstantValue:
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + c_literal(value) + ";\n"
-            case Unary:
+            case LoweredUnary:
                 symbol = "+"
                 if operator == universal.Negative: symbol = "-"
                 elif operator == universal.Not: symbol = "!"
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + symbol + "v" + string(operand.index) + ";\n"
-            case Binary:
+            case LoweredBinary:
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = v" + string(left.index) + " " + binary_operator(operator) + " v" + string(right.index) + ";\n"
-            case Call:
+            case LoweredCall:
                 arguments_text: list[string] = []
                 for argument in arguments: arguments_text.append("v" + string(argument.index))
                 output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = __sev_fn_" + string(function.value) + "(" + arguments_text.join(", ") + ");\n"
@@ -98,13 +97,13 @@ def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
                     output += "    " + symbol + "(" + arguments_text.join(", ") + ");\n"
                 else:
                     output += "    " + c_type(value_type(module, result)) + " v" + string(result.index) + " = " + symbol + "(" + arguments_text.join(", ") + ");\n"
-            case Return:
+            case LoweredReturn:
                 output += "    return"
                 if value != None: output += " v" + string(value.index)
                 output += ";\n"
-            case Assert:
+            case LoweredAssert:
                 output += "    if (!v" + string(condition.index) + ") { fputs(\"assertion failed\\n\", stderr); exit(1); }\n"
-            case If:
+            case LoweredIf:
                 output += "    if (v" + string(condition.index) + ") {\n"
                 output += render_block(module, then_block)
                 output += "    } else {\n"
@@ -115,24 +114,24 @@ def render_block(module: lir.Module, block: lir.Block) -> string | BackendError:
     return output
 
 
-def render_c(module: lir.Module) -> string | BackendError:
+def render_c(module: universal.Module) -> string | BackendError:
     output = "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\ntypedef struct { int count; char **values; } sev_args;\nvoid __sev_coverage_hit(const char *key);\n"
     for function in module.functions:
         parameters: list[string] = []
-        for parameter in function.parameters:
+        for parameter in function.values:
             parameters.append(c_type(value_type(module, parameter)) + " v" + string(parameter.index))
-        output += "static " + c_type(function.result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ");\n"
+        output += "static " + c_type(function.lowered_result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ");\n"
     output += "static int __sev_init(void) {\n"
     output += render_block(module, module.initializer)
     output += "    return 0;\n}\n"
     for function in module.functions:
         if function.body == None: continue
         parameters: list[string] = []
-        for parameter in function.parameters:
+        for parameter in function.values:
             parameters.append(c_type(value_type(module, parameter)) + " v" + string(parameter.index))
-        output += "static " + c_type(function.result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
+        output += "static " + c_type(function.lowered_result) + " __sev_fn_" + string(function.id.value) + "(" + ("void" if len(parameters) == 0 else parameters.join(", ")) + ") {\n"
         output += render_block(module, function.body)
-        if function.result == universal.Unit: output += "    return;\n"
+        if function.lowered_result == universal.Unit: output += "    return;\n"
         output += "}\n"
     output += "int main(int argc, char **argv) { (void)argc; (void)argv; if (__sev_init()) return 1;"
     if module.entry != None: output += " __sev_fn_" + string(module.entry.value) + "();"
@@ -140,7 +139,7 @@ def render_c(module: lir.Module) -> string | BackendError:
     return output
 
 
-def emit_executable(module: lir.Module, output_path: string) -> Artifact | BackendError:
+def emit_executable(module: universal.Module, output_path: string) -> Artifact | BackendError:
     c_source = render_c(module)
     result = process.run(["cc", "-x", "c", "-", "-o", output_path] + runtime.native_sources(), input = c_source)
     if result.status != 0:

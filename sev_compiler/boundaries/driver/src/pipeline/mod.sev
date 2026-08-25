@@ -1,7 +1,6 @@
 import backend
 import bootstrap
 import compile
-import hir
 import lexer
 import lowering
 import mir
@@ -26,9 +25,9 @@ enum CompileError:
 
 class CompiledTest:
     name: string
-    modes: list[hir.TestMode]
+    modes: list[universal.TestMode]
     artifact: backend.Artifact
-    expectations: list[hir.TestExpectation]
+    expectations: list[universal.TestExpectation]
 
 
 enum TestExecution:
@@ -49,19 +48,19 @@ class Compiler:
     def register_compile_handler(id: universal.CompilerId, handler: compile.CompileHandler):
         return registry.register(id, handler)
 
-    def analyze_source(source_file: source.SourceFile) -> hir.Program | CompileError:
+    def analyze_source(source_file: source.SourceFile) -> universal.Program | CompileError:
         tokens = lexer.scan(source_file)
         module = parser.parse(tokens)
         program = semantic.analyze(module, context.types)
         ownership.validate(program)
         return program
 
-    def analyze_file(path: string) -> hir.Program | CompileError:
+    def analyze_file(path: string) -> universal.Program | CompileError:
         graph = modules.resolve(path)
-        combined = hir.empty_program()
+        combined = universal.empty_program()
         for resolved in graph.modules:
             program = semantic.analyze_with_context(
-                resolved.ast_module,
+                resolved,
                 context.types,
                 semantic.AnalysisContext(semantic.Build, resolved.path),
             )
@@ -70,7 +69,7 @@ class Compiler:
         ownership.validate(combined)
         return combined
 
-    def compile_mir_to_mlir(module: mir.Module) -> string | CompileError:
+    def compile_mir_to_mlir(module: universal.Module) -> string | CompileError:
         plan = compile.plan(module, context.types)
         artifacts = registry.compile(plan, compile.CompileContext(context.types, target_spec))
         resumed = plan.resumed_mir()

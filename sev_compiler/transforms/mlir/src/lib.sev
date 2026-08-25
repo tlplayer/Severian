@@ -1,5 +1,3 @@
-import lir
 import "emit/mod.sev"
 import "ffi.sev"
 import "verify.sev"
-

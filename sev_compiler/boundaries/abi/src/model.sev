@@ -1,3 +1,5 @@
+import universal
+
 enum CallingConvention:
     C
     System
@@ -59,10 +61,6 @@ enum AbiType:
     Opaque(name: string)
 
 
-class SymbolName:
-    value: string
-
-
 enum Linkage:
     Internal
     External
@@ -82,18 +80,11 @@ enum DllStorage:
     Export
 
 
-enum SymbolKind:
-    Function
-    Data
-    ThreadLocal
-
-
-class Symbol:
-    name: SymbolName
+class AbiSymbol:
+    symbol: universal.Symbol
     linkage: Linkage
     visibility: Visibility
     dll_storage: DllStorage
-    kind: SymbolKind
 
 
 def integer(bits: u16, signed: bool) -> AbiType:
@@ -106,4 +97,3 @@ def float_type(bits: u16) -> AbiType:
 
 def pointer_to(type_id: AbiType, mutable: bool) -> AbiType:
     return Pointer(type_id, mutable)
-

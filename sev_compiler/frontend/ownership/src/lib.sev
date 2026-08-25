@@ -1,8 +1,7 @@
-import hir
+import universal
 import "validate/mod.sev"
 
-def validate(program: hir.Program):
+def validate(program: universal.Program):
     for module in program.modules:
         validate_module(module)
     return unit
-

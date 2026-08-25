@@ -10,16 +10,16 @@ class EffectSet:
 
 
 class CompileRegion:
-    id: artifact.CompiledRegionId
+    id: universal.CompiledRegionId
     compiler: universal.CompilerId
-    operations: list[mir.Operation]
-    inputs: list[mir.Value]
-    outputs: list[mir.Value]
+    operations: list[universal.Operation]
+    inputs: list[universal.Value]
+    outputs: list[universal.Value]
     effects: EffectSet
 
 
 class StandardRegion:
-    operations: list[mir.Operation]
+    operations: list[universal.Operation]
 
 
 enum PlanSegment:
@@ -28,16 +28,17 @@ enum PlanSegment:
 
 
 class PlannedBlock:
+    source: universal.Block
     segments: list[PlanSegment]
 
 
 class PlannedFunction:
-    declaration: mir.Function
+    declaration: universal.FunctionDeclaration
     body: PlannedBlock | None
 
 
 class CompilePlan:
-    source: mir.Module
+    source: universal.Module
     initializer: PlannedBlock
     functions: list[PlannedFunction]
     nested_regions: list[CompileRegion]
@@ -55,7 +56,7 @@ class CompilePlan:
                         case Compiler: return true
         return false
 
-    def resumed_mir() -> mir.Module:
+    def resumed_mir() -> universal.Module:
         module = source
         module.initializer = resume_block(initializer)
         module.functions = []
@@ -72,8 +73,8 @@ class CompileContext:
     target_spec: target.TargetSpec
 
 
-def resume_block(block: PlannedBlock) -> mir.Block:
-    operations: list[mir.Operation] = []
+def resume_block(block: PlannedBlock) -> universal.Block:
+    operations: list[universal.Operation] = []
     for segment in block.segments:
         match segment:
             case Standard:
@@ -83,6 +84,6 @@ def resume_block(block: PlannedBlock) -> mir.Block:
                 outputs: list[universal.ValueId] = []
                 for value in region.inputs: inputs.append(value.id)
                 for value in region.outputs: outputs.append(value.id)
-                operations.append(mir.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
-    return mir.Block(operations)
-
+                operations.append(universal.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
+    block.source.operations = operations
+    return block.source

@@ -1,0 +1,75 @@
+trait IndexedId:
+    property index: u32
+
+
+trait StableId:
+    property value: u128
+
+
+trait NamedId:
+    property value: string
+
+
+class HirId: IndexedId
+    index: u32
+
+
+class BindingId: IndexedId
+    index: u32
+
+
+class VariantId: IndexedId
+    index: u32
+
+
+class ValueId: IndexedId
+    index: u32
+
+
+class BlockId: IndexedId
+    index: u32
+
+
+class LocalId: IndexedId
+    index: u32
+
+
+class ScopeId:
+    module: ModuleId
+
+
+class PackageId: IndexedId
+    index: u32
+
+
+class CompiledRegionId: IndexedId
+    index: u32
+
+
+class ArtifactId: IndexedId
+    index: u32
+
+
+class FunctionId: StableId
+    value: u128
+
+
+class ModuleId: StableId
+    value: u128
+
+
+class InterfaceId: NamedId
+    value: string
+
+
+class FfiId: NamedId
+    value: string
+
+
+class AbiId: NamedId
+    value: string
+
+
+class SymbolId: NamedId
+    value: string
+

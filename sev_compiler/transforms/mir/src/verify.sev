@@ -14,13 +14,13 @@ enum VerifyError:
     InvalidOwnershipState(block: u32, local: u32)
 
 
-def verify_place(body: CfgBody, place: Place) -> unit | VerifyError:
+def verify_place(body: universal.CfgBody, place: universal.Place) -> unit | VerifyError:
     if place.local.index >= len(body.locals):
         return error(InvalidLocal(place.local.index))
     return unit
 
 
-def use_operand(body: CfgBody, block: BlockId, operand: Operand, state: set[LocalId]) -> unit | VerifyError:
+def use_operand(body: universal.CfgBody, block: universal.BlockId, operand: universal.Operand, state: set[universal.LocalId]) -> unit | VerifyError:
     match operand:
         case Copy:
             verify_place(body, place)
@@ -34,22 +34,22 @@ def use_operand(body: CfgBody, block: BlockId, operand: Operand, state: set[Loca
     return unit
 
 
-def successors(terminator: Terminator) -> list[BlockId]:
+def successors(terminator: universal.Terminator) -> list[universal.BlockId]:
     match terminator:
         case Goto: return [target]
         case Branch: return [then_block, else_block]
         case Switch:
-            result: list[BlockId] = [fallback]
+            result: list[universal.BlockId] = [fallback]
             for target in targets: result.append(target[1])
             return result
         case Call:
-            result: list[BlockId] = [target]
+            result: list[universal.BlockId] = [target]
             if unwind != None: result.append(unwind)
             return result
         else: return []
 
 
-def verify_body(body: CfgBody) -> unit | VerifyError:
+def verify_body(body: universal.CfgBody) -> unit | VerifyError:
     if body.entry.index >= len(body.blocks):
         return error(InvalidBlock(body.entry.index))
     index: u32 = 0
@@ -66,7 +66,7 @@ def verify_body(body: CfgBody) -> unit | VerifyError:
                 return error(InvalidBlock(successor.index))
         index += 1
 
-    incoming: map[BlockId, set[LocalId]] = {}
+    incoming: map[universal.BlockId, set[universal.LocalId]] = {}
     incoming[body.entry] = set()
     for local in body.locals:
         if local.argument:
@@ -107,10 +107,9 @@ def verify_body(body: CfgBody) -> unit | VerifyError:
     return unit
 
 
-def verify(module: Module, types: universal.TypeContext) -> unit | VerifyError:
+def verify(module: universal.Module, types: universal.TypeContext) -> unit | VerifyError:
     verify_body(module.initializer_cfg)
     for function in module.functions:
         if function.cfg != None:
             verify_body(function.cfg)
     return unit
-

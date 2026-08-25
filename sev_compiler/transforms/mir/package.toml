@@ -9,5 +9,4 @@ path = "src/lib.sev"
 
 [dependencies]
 artifact = { path = "../../artifact" }
-hir = { path = "../../frontend/hir" }
 universal = { path = "../../universal" }

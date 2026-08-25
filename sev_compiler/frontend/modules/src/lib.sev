@@ -1,54 +1,32 @@
-import ast
 import lexer
 import parser
 import source
 import diagnostics
-
-class PackageId:
-    index: u32
-
-
-class ModuleId:
-    value: u128
-
-
-class ResolvedImport:
-    span: source.Span
-    module: ModuleId
-
-
-class ResolvedModule:
-    id: ModuleId
-    path: string
-    source_file: source.SourceFile
-    package: PackageId
-    ast_module: ast.Module
-    imports: list[ResolvedImport]
-
+import universal
 
 class ModuleGraph:
-    modules: list[ResolvedModule]
+    modules: list[universal.Module]
 
 
 class ResolvedPackage:
-    id: PackageId
+    id: universal.PackageId
     root: string
     library: string
-    dependencies: map[string, PackageId]
+    dependencies: map[string, universal.PackageId]
 
 
 class PackageGraph:
-    root: PackageId
-    packages: map[PackageId, ResolvedPackage]
+    root: universal.PackageId
+    packages: map[universal.PackageId, ResolvedPackage]
 
 
 class Resolver:
     packages: PackageGraph
-    parsed: map[string, ast.Module]
+    parsed: map[string, universal.Module]
     visiting: list[string]
     visited: set[string]
-    order: list[ResolvedModule]
-    module_ids: map[string, ModuleId]
+    order: list[universal.Module]
+    module_ids: map[string, universal.ModuleId]
     sources: source.SourceMap
 
     def Resolver(packages: PackageGraph):
@@ -60,7 +38,7 @@ class Resolver:
         module_ids = {}
         sources = source.SourceMap()
 
-    def visit(path: string, package: PackageId) -> unit | diagnostics.Diagnostic:
+    def visit(path: string, package: universal.PackageId) -> unit | diagnostics.Diagnostic:
         canonical = file.canonical(path)
         if canonical in visited:
             return unit
@@ -79,7 +57,10 @@ class Resolver:
         id = module_id(canonical, package)
         module_ids[canonical] = id
         visiting.append(canonical)
-        imports: list[ResolvedImport] = []
+        module.id = id
+        module.path = canonical
+        module.source_file = source_file
+        module.package = package
 
         for item in module.items:
             match item:
@@ -87,23 +68,24 @@ class Resolver:
                     dependency = source_import(canonical, package, declaration, packages)
                     if dependency != None:
                         visit(dependency[0], dependency[1])
-                        imports.append(ResolvedImport(declaration.span, module_ids[file.canonical(dependency[0])]))
+                        declaration.resolved_module = module_ids[file.canonical(dependency[0])]
+                        module.resolved_imports.append(declaration.resolved_module)
 
         visiting.pop()
         visited.add(canonical)
-        order.append(ResolvedModule(id, canonical, source_file, package, module, imports))
+        order.append(module)
         return unit
 
 
-def module_id(path: string, package: PackageId) -> ModuleId:
+def module_id(path: string, package: universal.PackageId) -> universal.ModuleId:
     hash: u128 = 14695981039346656037
     key = string(package.index) + ":" + path
     for character in key.characters():
         hash = (hash ^ u128(int(character))) * 1099511628211
-    return ModuleId(hash)
+    return universal.ModuleId(hash)
 
 
-def source_import(importer: string, package: PackageId, declaration: ast.ImportDeclaration, packages: PackageGraph) -> tuple[string, PackageId] | None | diagnostics.Diagnostic:
+def source_import(importer: string, package: universal.PackageId, declaration: universal.ImportDeclaration, packages: PackageGraph) -> tuple[string, universal.PackageId] | None | diagnostics.Diagnostic:
     if declaration.source_name != None:
         current = packages.packages.get(package)
         dependency_id = current.dependencies.get(declaration.source_name)
@@ -123,7 +105,7 @@ def source_import(importer: string, package: PackageId, declaration: ast.ImportD
             return (file.join(file.parent(importer), locator), package)
 
 
-def has_runtime_initializer(module: ast.Module) -> bool:
+def has_runtime_initializer(module: universal.Module) -> bool:
     for item in module.items:
         match item:
             case BindingItem: return true
@@ -138,6 +120,6 @@ def resolve_with_packages(root: string, packages: PackageGraph) -> ModuleGraph |
 
 
 def resolve(root: string) -> ModuleGraph | diagnostics.Diagnostic:
-    package = PackageId(0)
+    package = universal.PackageId(0)
     packages = PackageGraph(package, {package: ResolvedPackage(package, file.parent(root), root, {})})
     return resolve_with_packages(root, packages)

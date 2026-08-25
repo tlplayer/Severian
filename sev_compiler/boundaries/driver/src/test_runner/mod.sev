@@ -15,10 +15,10 @@ def execute_test(test: CompiledTest, arguments: list[string]) -> TestResult:
     for expectation in test.expectations:
         match expectation:
             case Contains:
-                stream_value = output.stdout if stream == hir.Stdout else output.stderr
+                stream_value = output.stdout if stream == universal.Stdout else output.stderr
                 passed = passed and stream_value.contains(value)
             case Equals:
-                stream_value = output.stdout if stream == hir.Stdout else output.stderr
+                stream_value = output.stdout if stream == universal.Stdout else output.stderr
                 passed = passed and stream_value == value
     return TestResult(test.name, passed, time.monotonic_milliseconds() - started, output.stdout, output.stderr)
 
@@ -35,4 +35,3 @@ def run_tests(tests: list[CompiledTest], arguments: list[string]) -> unit | stri
     if failures > 0:
         return error(string(failures) + " tests failed")
     return unit
-
