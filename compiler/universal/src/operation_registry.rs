@@ -204,3 +204,149 @@ impl OperationRegistry {
         self.interfaces.get(&id).map(Arc::as_ref)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LiteralKind, TypeContextBuilder, TypeId};
+
+    #[derive(Clone)]
+    struct TestInterface {
+        result: TypeId,
+        capabilities: Vec<LoweringCapability>,
+    }
+
+    impl OperationInterface for TestInterface {
+        fn infer_types(
+            &self,
+            operands: &[TyId],
+            _attributes: &Attrs,
+        ) -> Result<Vec<TyId>, OperationDiagnostic> {
+            if operands.is_empty() {
+                Err(OperationDiagnostic {
+                    operation: OpId::named("test", "add"),
+                    message: "an operand is required".into(),
+                })
+            } else {
+                Ok(vec![self.result])
+            }
+        }
+
+        fn verify(
+            &self,
+            operation: &RegisteredOperation,
+            _context: &IrContext<'_>,
+        ) -> Result<(), OperationDiagnostic> {
+            if operation.results == [self.result] {
+                Ok(())
+            } else {
+                Err(OperationDiagnostic {
+                    operation: operation.id,
+                    message: "unexpected result type".into(),
+                })
+            }
+        }
+
+        fn effects(&self, _operation: &RegisteredOperation) -> EffectSet {
+            EffectSet::READ.union(EffectSet::WRITE)
+        }
+
+        fn canonicalize(&self, operation: &RegisteredOperation) -> Option<CanonicalRewrite> {
+            operation.attributes.is_empty().then(|| CanonicalRewrite {
+                replacement: OpId::named("test", "canonical"),
+                attributes: Attrs::new(),
+            })
+        }
+
+        fn lowering_capabilities(&self) -> &[LoweringCapability] {
+            &self.capabilities
+        }
+    }
+
+    #[test]
+    fn stable_operation_identifiers_and_effect_sets_are_composable() {
+        const OPERATION: OpId = OpId::named("arith", "add");
+        assert_eq!(OPERATION.dialect, DialectId::from_name("arith"));
+        assert_eq!(OPERATION.operation, OperationId::from_name("add"));
+        assert_ne!(OPERATION.operation, OperationId::from_name("subtract"));
+        assert_ne!(AttributeId::from_name("type"), AttributeId::from_name("value"));
+        assert_ne!(BackendId::from_name("native"), BackendId::from_name("wasm"));
+        assert_ne!(RuntimeId::from_name("host"), RuntimeId::from_name("device"));
+        assert_ne!(ProviderId::from_name("cpu"), ProviderId::from_name("gpu"));
+
+        let effects = EffectSet::NONE
+            .union(EffectSet::READ)
+            .union(EffectSet::WRITE)
+            .union(EffectSet::ALLOCATE)
+            .union(EffectSet::FREE)
+            .union(EffectSet::THROW)
+            .union(EffectSet::IO);
+        for effect in [
+            EffectSet::READ,
+            EffectSet::WRITE,
+            EffectSet::ALLOCATE,
+            EffectSet::FREE,
+            EffectSet::THROW,
+            EffectSet::IO,
+        ] {
+            assert!(effects.contains(effect));
+        }
+        assert!(!EffectSet::READ.contains(EffectSet::WRITE));
+    }
+
+    #[test]
+    fn registry_rejects_duplicates_and_exposes_interface_behavior() {
+        let id = OpId::named("test", "add");
+        let capabilities = vec![
+            LoweringCapability::Standard,
+            LoweringCapability::Backend(BackendId::from_name("native")),
+            LoweringCapability::Runtime(RuntimeId::from_name("host")),
+            LoweringCapability::Provider(ProviderId::from_name("cpu")),
+        ];
+        let interface = TestInterface {
+            result: TypeId(7),
+            capabilities: capabilities.clone(),
+        };
+        let mut registry = OperationRegistry::default();
+        registry.register(id, interface.clone()).unwrap();
+        let duplicate = registry.register(id, interface).unwrap_err();
+        assert_eq!(duplicate.operation, id);
+        assert_eq!(duplicate.message, "operation interface is already registered");
+        assert!(registry.interface(OpId::named("missing", "operation")).is_none());
+        assert_eq!(format!("{registry:?}"), "OperationRegistry { interfaces: 1 }");
+
+        let interface = registry.interface(id).unwrap();
+        assert_eq!(interface.infer_types(&[TypeId(1)], &Attrs::new()).unwrap(), [TypeId(7)]);
+        assert!(interface.infer_types(&[], &Attrs::new()).is_err());
+        assert_eq!(interface.lowering_capabilities(), capabilities);
+
+        let mut types = TypeContextBuilder::new();
+        types.register_declaration("test.Value", "Value").unwrap();
+        let types = types.build();
+        let context = IrContext {
+            types: &types,
+            operations: &registry,
+        };
+        let operation = RegisteredOperation {
+            id,
+            operands: vec![TypeId(1)],
+            results: vec![TypeId(7)],
+            attributes: Attrs::new(),
+        };
+        interface.verify(&operation, &context).unwrap();
+        assert!(interface.effects(&operation).contains(EffectSet::READ));
+        assert_eq!(
+            interface.canonicalize(&operation).unwrap().replacement,
+            OpId::named("test", "canonical")
+        );
+
+        let mut invalid = operation.clone();
+        invalid.results = vec![TypeId(8)];
+        assert!(interface.verify(&invalid, &context).is_err());
+        invalid.attributes.insert(
+            AttributeId::from_name("literal"),
+            AttrValue::String(format!("{:?}", LiteralKind::Integer)),
+        );
+        assert_eq!(interface.canonicalize(&invalid), None);
+    }
+}

@@ -123,9 +123,33 @@ mod tests {
             ("|", BinaryOperator::BitwiseOr),
             ("&", BinaryOperator::BitwiseAnd),
             ("^", BinaryOperator::BitwiseXor),
+            ("+", BinaryOperator::Add),
+            ("-", BinaryOperator::Subtract),
+            ("*", BinaryOperator::Multiply),
+            ("/", BinaryOperator::Divide),
+            ("%", BinaryOperator::Remainder),
+            ("**", BinaryOperator::Power),
+            ("==", BinaryOperator::Equal),
+            ("!=", BinaryOperator::NotEqual),
+            ("<", BinaryOperator::Less),
+            ("<=", BinaryOperator::LessEqual),
+            (">", BinaryOperator::Greater),
+            (">=", BinaryOperator::GreaterEqual),
+            ("in", BinaryOperator::Contains),
+            ("and", BinaryOperator::And),
+            ("or", BinaryOperator::Or),
         ] {
             assert_eq!(BinaryOperator::from_spelling(spelling), Some(operator));
             assert_eq!(operator.to_string(), spelling);
         }
+        assert_eq!(BinaryOperator::from_spelling("??"), None);
+    }
+
+    #[test]
+    fn unary_spellings_are_total_for_declared_operators() {
+        assert_eq!(UnaryOperator::from_spelling("+"), Some(UnaryOperator::Positive));
+        assert_eq!(UnaryOperator::from_spelling("-"), Some(UnaryOperator::Negative));
+        assert_eq!(UnaryOperator::from_spelling("not"), Some(UnaryOperator::Not));
+        assert_eq!(UnaryOperator::from_spelling("!"), None);
     }
 }

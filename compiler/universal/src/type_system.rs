@@ -438,4 +438,245 @@ mod tests {
             .unwrap();
         assert_eq!(inference.resolve(&types, variable), concrete);
     }
+
+    #[test]
+    fn substitutions_are_canonical_and_queryable() {
+        let substitution = Substitution::new([
+            (GenericParamId(2), TypeId(20)),
+            (GenericParamId(0), TypeId(10)),
+            (GenericParamId(2), TypeId(99)),
+        ]);
+        assert_eq!(
+            substitution.0,
+            vec![
+                (GenericParamId(0), TypeId(10)),
+                (GenericParamId(2), TypeId(20)),
+            ]
+        );
+        assert_eq!(substitution.get(GenericParamId(0)), Some(TypeId(10)));
+        assert_eq!(substitution.get(GenericParamId(1)), None);
+        assert_eq!(substitution.values().collect::<Vec<_>>(), [TypeId(10), TypeId(20)]);
+    }
+
+    #[test]
+    fn interning_and_substitution_cover_every_structural_type() {
+        let mut types = TyInterner::default();
+        assert!(types.is_empty());
+        assert_eq!(types.kind(TypeId(99)), None);
+
+        let primitive = types.intern(TyKind::Primitive(PrimitiveId(
+            DeclarationId::from_path("core.i32"),
+        )));
+        assert_eq!(types.intern(types.kind(primitive).unwrap().clone()), primitive);
+        assert_eq!(types.len(), 1);
+
+        let parameter = types.parameter(GenericParamId(0));
+        let untouched_parameter = types.parameter(GenericParamId(1));
+        let inference = types.fresh_infer();
+        let def = definition("Box");
+        let arguments = Substitution::new([(GenericParamId(0), parameter)]);
+        let nominal = types.intern(TyKind::Nominal(def, arguments.clone()));
+        let resource = types.intern(TyKind::Resource(def, arguments));
+        let function = types.intern(TyKind::Function(Signature {
+            parameters: vec![parameter],
+            result: parameter,
+        }));
+        let tuple = types.intern(TyKind::Tuple(vec![parameter, primitive]));
+        let union = types.union([parameter, primitive]);
+        let reference = types.intern(TyKind::Reference {
+            target: parameter,
+            mutable: true,
+            lifetime: RegionId(3),
+        });
+        let substitution = Substitution::new([(GenericParamId(0), primitive)]);
+
+        assert_eq!(types.substitute(parameter, &substitution), primitive);
+        assert_eq!(
+            types.substitute(untouched_parameter, &substitution),
+            untouched_parameter
+        );
+        assert_eq!(types.substitute(primitive, &substitution), primitive);
+        assert_eq!(types.substitute(inference, &substitution), inference);
+        assert_eq!(types.substitute(TypeId(999), &substitution), TypeId(999));
+        for structural in [nominal, resource, function, tuple, union, reference] {
+            let substituted = types.substitute(structural, &substitution);
+            assert_ne!(substituted, structural);
+        }
+
+        let replaceable = types.intern(TyKind::Tuple(vec![]));
+        types.replace(replaceable, TyKind::Union(vec![]));
+        assert_eq!(types.kind(replaceable), Some(&TyKind::Union(vec![])));
+        assert_eq!(types.intern(TyKind::Union(vec![])), replaceable);
+    }
+
+    #[test]
+    fn inference_unifies_all_matching_structures_and_rejects_mismatches() {
+        let mut types = TyInterner::default();
+        let first = types.intern(TyKind::Primitive(PrimitiveId(
+            DeclarationId::from_path("First"),
+        )));
+        let second = types.intern(TyKind::Primitive(PrimitiveId(
+            DeclarationId::from_path("Second"),
+        )));
+        let mut inference = InferenceContext::default();
+        assert_eq!(inference.unify(&types, first, first), Ok(()));
+
+        let right_variable = types.fresh_infer();
+        inference.unify(&types, first, right_variable).unwrap();
+        assert_eq!(inference.resolve(&types, right_variable), first);
+
+        let tuple_variable = types.fresh_infer();
+        let left_tuple = types.intern(TyKind::Tuple(vec![tuple_variable]));
+        let right_tuple = types.intern(TyKind::Tuple(vec![first]));
+        inference.unify(&types, left_tuple, right_tuple).unwrap();
+
+        let union_variable = types.fresh_infer();
+        let left_union = types.intern(TyKind::Union(vec![union_variable]));
+        let right_union = types.intern(TyKind::Union(vec![first]));
+        inference.unify(&types, left_union, right_union).unwrap();
+
+        let function_variable = types.fresh_infer();
+        let left_function = types.intern(TyKind::Function(Signature {
+            parameters: vec![function_variable],
+            result: function_variable,
+        }));
+        let right_function = types.intern(TyKind::Function(Signature {
+            parameters: vec![second],
+            result: second,
+        }));
+        inference.unify(&types, left_function, right_function).unwrap();
+
+        let reference_variable = types.fresh_infer();
+        let left_reference = types.intern(TyKind::Reference {
+            target: reference_variable,
+            mutable: true,
+            lifetime: RegionId(1),
+        });
+        let right_reference = types.intern(TyKind::Reference {
+            target: first,
+            mutable: true,
+            lifetime: RegionId(1),
+        });
+        inference.unify(&types, left_reference, right_reference).unwrap();
+
+        for resource in [false, true] {
+            let variable = types.fresh_infer();
+            let arguments = Substitution::new([(GenericParamId(0), variable)]);
+            let concrete = Substitution::new([(GenericParamId(0), first)]);
+            let (left, right) = if resource {
+                (
+                    types.intern(TyKind::Resource(definition("Container"), arguments)),
+                    types.intern(TyKind::Resource(definition("Container"), concrete)),
+                )
+            } else {
+                (
+                    types.intern(TyKind::Nominal(definition("Container"), arguments)),
+                    types.intern(TyKind::Nominal(definition("Container"), concrete)),
+                )
+            };
+            inference.unify(&types, left, right).unwrap();
+        }
+
+        let short_tuple = types.intern(TyKind::Tuple(vec![]));
+        assert!(matches!(
+            inference.unify(&types, short_tuple, right_tuple),
+            Err(UnifyError::Mismatch(_, _))
+        ));
+        let short_function = types.intern(TyKind::Function(Signature {
+            parameters: vec![],
+            result: first,
+        }));
+        assert!(matches!(
+            inference.unify(&types, short_function, right_function),
+            Err(UnifyError::Mismatch(_, _))
+        ));
+        let immutable_reference = types.intern(TyKind::Reference {
+            target: first,
+            mutable: false,
+            lifetime: RegionId(1),
+        });
+        assert!(matches!(
+            inference.unify(&types, immutable_reference, right_reference),
+            Err(UnifyError::Mismatch(_, _))
+        ));
+        assert_eq!(
+            inference.unify(&types, TypeId(999), first),
+            Err(UnifyError::Unknown(TypeId(999)))
+        );
+        assert_eq!(
+            inference.unify(&types, first, TypeId(998)),
+            Err(UnifyError::Unknown(TypeId(998)))
+        );
+    }
+
+    #[test]
+    fn occurs_check_walks_every_recursive_shape_and_bound_variable() {
+        let mut types = TyInterner::default();
+        let variable = types.fresh_infer();
+        let TyKind::Infer(variable_id) = *types.kind(variable).unwrap() else {
+            panic!("fresh inference type");
+        };
+        let other = types.fresh_infer();
+        let primitive = types.intern(TyKind::Primitive(PrimitiveId(
+            DeclarationId::from_path("Value"),
+        )));
+        let def = definition("Recursive");
+        let substitution = Substitution::new([(GenericParamId(0), variable)]);
+        let structures = [
+            types.intern(TyKind::Nominal(def, substitution.clone())),
+            types.intern(TyKind::Resource(def, substitution)),
+            types.intern(TyKind::Function(Signature {
+                parameters: vec![primitive],
+                result: variable,
+            })),
+            types.intern(TyKind::Tuple(vec![variable])),
+            types.intern(TyKind::Union(vec![variable])),
+            types.intern(TyKind::Reference {
+                target: variable,
+                mutable: false,
+                lifetime: RegionId(0),
+            }),
+        ];
+        let bindings = BTreeMap::new();
+        for structure in structures {
+            assert!(occurs(&types, &bindings, variable_id, structure));
+        }
+        assert!(!occurs(&types, &bindings, variable_id, primitive));
+        assert!(!occurs(&types, &bindings, variable_id, TypeId(999)));
+
+        let TyKind::Infer(other_id) = *types.kind(other).unwrap() else {
+            panic!("fresh inference type");
+        };
+        let bindings = BTreeMap::from([(other_id, variable)]);
+        assert!(occurs(&types, &bindings, variable_id, other));
+
+        let tuple = types.intern(TyKind::Tuple(vec![variable]));
+        let mut inference = InferenceContext::default();
+        assert_eq!(
+            inference.unify(&types, variable, tuple),
+            Err(UnifyError::Occurs(variable_id, tuple))
+        );
+    }
+
+    #[test]
+    fn implementation_selection_reports_missing_unique_and_ambiguous_matches() {
+        let trait_id = definition("Display");
+        let self_ty = TypeId(4);
+        let obligation = TraitRef {
+            trait_id,
+            self_ty,
+            substitution: Substitution::default(),
+        };
+        let mut table = ImplTable::default();
+        assert_eq!(table.select(&obligation), ImplSelection::Missing);
+        let first = table.insert(trait_id, self_ty, Substitution::default());
+        assert_eq!(table.select(&obligation), ImplSelection::Selected(first));
+        let other = table.insert(definition("Other"), self_ty, Substitution::default());
+        assert_ne!(first, other);
+        let second = table.insert(trait_id, self_ty, Substitution::default());
+        assert_eq!(
+            table.select(&obligation),
+            ImplSelection::Ambiguous(vec![first, second])
+        );
+    }
 }

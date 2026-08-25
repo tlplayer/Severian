@@ -88,4 +88,14 @@ mod tests {
         assert_eq!(before, after);
         assert_ne!(before, unrelated);
     }
+
+    #[test]
+    fn identities_have_fixed_width_hexadecimal_display() {
+        let declaration = DeclarationId(0x2a);
+        assert_eq!(declaration.to_string(), "0000000000000000000000000000002a");
+
+        let compiler = CompilerId::from_declaration(declaration);
+        assert_eq!(compiler.declaration(), declaration);
+        assert_eq!(compiler.to_string(), declaration.to_string());
+    }
 }

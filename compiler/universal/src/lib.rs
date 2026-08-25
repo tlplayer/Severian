@@ -46,3 +46,19 @@ pub const fn raw_pointer_type_id(element: TypeId) -> TypeId {
 pub const fn is_raw_pointer_type(ty: TypeId) -> bool {
     ty.0 & 0xfc00_0000 == 0x0800_0000
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_pointer_ids_are_stable_distinct_and_recognizable() {
+        let first = raw_pointer_type_id(TypeId(1));
+        let same = raw_pointer_type_id(TypeId(1));
+        let second = raw_pointer_type_id(TypeId(2));
+        assert_eq!(first, same);
+        assert_ne!(first, second);
+        assert!(is_raw_pointer_type(first));
+        assert!(!is_raw_pointer_type(TypeId(1)));
+    }
+}
