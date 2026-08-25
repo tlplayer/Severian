@@ -20,6 +20,7 @@ test "Converting symbols to enums":
     #string on an enum with multiple enums either throws an error if no string def or returns a list of 
     #compatible symbols so TypeSymbols("*") returns ["*","*="] if int(TypeSymbols("*")) -> 0
     assert(["*","*="] == string(TypeSymbols("*")))
+    assert(0 == int(TypeSymbols("*")))
 
     throws(TypeSymbols("/") -> Error)
 

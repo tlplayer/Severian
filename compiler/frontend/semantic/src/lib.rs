@@ -6383,6 +6383,15 @@ impl Analyzer<'_> {
                         ));
                     };
                     let value = self.expression(&argument.value, None)?;
+                    let string = self
+                        .types
+                        .resolve_name("string")
+                        .expect("bootstrap defines string");
+                    if let Some(converted) =
+                        self.enum_accepted_conversion(value.clone(), string, ast.span)?
+                    {
+                        return Ok(converted);
+                    }
                     return self.display_string(value, ast.span);
                 }
                 if let Some(mocked) = self.mocked_call(ast, expected)? {
@@ -6416,6 +6425,13 @@ impl Analyzer<'_> {
                         if let Some(target) = self.types.resolve_name(&name) {
                             if self.numeric_primitive(target) {
                                 let operand = self.expression(&arguments[0].value, None)?;
+                                if let Some(converted) = self.enum_accepted_conversion(
+                                    operand.clone(),
+                                    target,
+                                    ast.span,
+                                )? {
+                                    return Ok(converted);
+                                }
                                 return self.coerce(operand, target, true);
                             }
                         }
@@ -8835,6 +8851,21 @@ impl Analyzer<'_> {
             ));
         }
 
+        if let AstExpressionKind::Literal(literal) = &argument.value.kind {
+            if let Some(variant) = instance
+                .variants
+                .iter()
+                .find(|variant| variant.accepted_values.contains(literal))
+            {
+                return self.enum_constructor(
+                    &format!("{enum_name}.{}", variant.name),
+                    &[],
+                    Some(instance.ty),
+                    span,
+                );
+            }
+        }
+
         let value = self.expression(&argument.value, None)?;
         let boolean = self
             .types
@@ -8888,6 +8919,164 @@ impl Analyzer<'_> {
             }
         }
         Ok(converted)
+    }
+
+    fn enum_accepted_conversion(
+        &mut self,
+        value: Expression,
+        target: TypeId,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        let Some(instance) = self
+            .enums
+            .values()
+            .find(|instance| instance.ty == value.type_id)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let mut accepted_by_variant = Vec::with_capacity(instance.variants.len());
+        for variant in &instance.variants {
+            let mut accepted = Vec::new();
+            for literal in &variant.accepted_values {
+                let source = AstExpression {
+                    kind: AstExpressionKind::Literal(literal.clone()),
+                    span,
+                };
+                if let Ok(candidate) = self.expression(&source, Some(target)) {
+                    if candidate.type_id == target {
+                        accepted.push(candidate);
+                    }
+                }
+            }
+            accepted_by_variant.push(accepted);
+        }
+        if accepted_by_variant.iter().all(Vec::is_empty) {
+            return Ok(None);
+        }
+
+        if let Some(ordinal) = known_enum_ordinal(&value) {
+            let accepted = std::mem::take(&mut accepted_by_variant[ordinal]);
+            if accepted.is_empty() {
+                return Err(Diagnostic::new(
+                    "E000211",
+                    format!(
+                        "enum variant `{}.{}` has no accepted value of the requested type",
+                        instance.name, instance.variants[ordinal].name
+                    ),
+                    Some(span),
+                ));
+            }
+            let multiple = accepted.len() > 1;
+            return self
+                .enum_accepted_result(accepted, target, multiple, span)
+                .map(Some);
+        }
+
+        let multiple = accepted_by_variant
+            .iter()
+            .any(|accepted| accepted.len() > 1);
+        let result_type = if multiple {
+            self.instantiate_list_type(target)
+        } else {
+            target
+        };
+        let error = self.core_error_expression(
+            format!(
+                "enum `{}` has no accepted value of the requested type",
+                instance.name
+            ),
+            span,
+        );
+        let mut converted = Expression {
+            id: self.next_id(),
+            type_id: result_type,
+            kind: ExpressionKind::Throw(Box::new(error)),
+            span,
+        };
+        let integer = self.tag_type();
+        for (ordinal, accepted) in accepted_by_variant.into_iter().enumerate().rev() {
+            if accepted.is_empty() {
+                continue;
+            }
+            let selected = self.enum_accepted_result(accepted, target, multiple, span)?;
+            let tag = Expression {
+                id: self.next_id(),
+                type_id: integer,
+                kind: ExpressionKind::Field {
+                    object: Box::new(value.clone()),
+                    index: 0,
+                },
+                span,
+            };
+            let ordinal = self.integer_expression(&ordinal.to_string(), integer, span);
+            let condition = Expression {
+                id: self.next_id(),
+                type_id: self
+                    .types
+                    .resolve_name("bool")
+                    .expect("bootstrap defines bool"),
+                kind: ExpressionKind::Binary {
+                    operator: BinaryOperator::Equal,
+                    left: Box::new(tag),
+                    right: Box::new(ordinal),
+                },
+                span,
+            };
+            converted = Expression {
+                id: self.next_id(),
+                type_id: result_type,
+                kind: ExpressionKind::Fallback {
+                    condition: Box::new(condition),
+                    value: Box::new(selected),
+                    fallback: Box::new(converted),
+                },
+                span,
+            };
+        }
+        Ok(Some(converted))
+    }
+
+    fn enum_accepted_result(
+        &mut self,
+        values: Vec<Expression>,
+        element: TypeId,
+        list: bool,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
+        if !list {
+            return Ok(values
+                .into_iter()
+                .next()
+                .expect("an enum conversion result contains at least one value"));
+        }
+        let list_type = self.instantiate_list_type(element);
+        let storage_type = self
+            .types
+            .resolve_name("string")
+            .expect("bootstrap defines pointer-backed string");
+        let suffix = self.list_runtime_suffix(element, span)?;
+        let symbol = format!("__sev_list_append_{suffix}");
+        let mut storage =
+            self.runtime_call("__sev_list_create", &[], storage_type, Vec::new(), span);
+        for value in values {
+            storage = self.runtime_call(
+                &symbol,
+                &[storage_type, element],
+                storage_type,
+                vec![storage, value],
+                span,
+            );
+        }
+        Ok(Expression {
+            id: self.next_id(),
+            type_id: list_type,
+            kind: ExpressionKind::Aggregate {
+                class: list_type,
+                fields: vec![storage],
+            },
+            span,
+        })
     }
 
     fn default_expression(
@@ -14500,6 +14689,16 @@ fn string_literal(expression: &AstExpression) -> Option<&str> {
     }
 }
 
+fn known_enum_ordinal(expression: &Expression) -> Option<usize> {
+    let ExpressionKind::Aggregate { fields, .. } = &expression.kind else {
+        return None;
+    };
+    let ExpressionKind::Literal(LiteralValue::Integer(ordinal)) = &fields.first()?.kind else {
+        return None;
+    };
+    ordinal.parse().ok()
+}
+
 fn universal_literal(literal: &AstLiteral) -> LiteralValue {
     match literal {
         AstLiteral::Integer(value) => LiteralValue::Integer(value.clone()),
@@ -14945,6 +15144,14 @@ mod tests {
     fn enum_accepted_values_lower_to_canonical_variants() {
         let (program, _) = analyze_source(
             "enum Symbol:\n    Add {\"+\", \"+=\"}\n    Multiply {\"*\", \"*=\", 0}\ndef main():\n    add := Symbol(\"+=\")\n    multiply := Symbol(0)\n    assert(add == Symbol.Add)\n    assert(multiply == Symbol.Multiply)\n",
+        );
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn enum_accepted_values_convert_back_by_requested_type() {
+        let (program, _) = analyze_source(
+            "enum Symbol:\n    Add {\"+\", \"+=\"}\n    Multiply {\"*\", \"*=\", 0}\ndef strings(symbol: Symbol) -> list[string]:\n    return string(symbol)\ndef number(symbol: Symbol) -> int:\n    return int(symbol)\ndef main():\n    symbol := Symbol(\"*\")\n    assert([\"*\", \"*=\"] == strings(symbol))\n    assert(0 == number(symbol))\n",
         );
         severian_mir::build(&program).unwrap();
     }
