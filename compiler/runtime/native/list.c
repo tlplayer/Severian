@@ -45,6 +45,26 @@ void *__sev_list_create(void) {
     return list;
 }
 
+void *__sev_string_bytes(const char *text) {
+    sev_list *result = __sev_list_create();
+    const unsigned char *cursor = (const unsigned char *)(text == NULL ? "" : text);
+    while (*cursor != 0) {
+        sev_list_reserve(result);
+        result->values[result->length++] = (uintptr_t)*cursor++;
+    }
+    return result;
+}
+
+double __sev_io_write_all(int64_t stream, void *storage) {
+    sev_list *bytes = storage;
+    FILE *output = stream == 2 ? stderr : stdout;
+    for (size_t index = 0; index < bytes->length; ++index) {
+        if (fputc((unsigned char)bytes->values[index], output) == EOF) return -1.0;
+    }
+    if (fflush(output) != 0) return -1.0;
+    return (double)bytes->length;
+}
+
 uintptr_t __sev_list_len(void *storage) {
     sev_list *list = storage;
     return list->length;

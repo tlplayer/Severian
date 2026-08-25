@@ -3,3 +3,15 @@ def write(path: string, contents: string) -> i32
 
 @c(symbol = "__sev_file_read_text")
 def read(path: string) -> string
+
+@c(symbol = "__sev_file_lock")
+def native_lock(path: string) -> int
+
+def lock(path: string) -> int | None:
+    handle = native_lock(path)
+    if handle < 0:
+        return None
+    return handle
+
+@c(symbol = "__sev_file_unlock")
+def unlock(lock: int) -> bool

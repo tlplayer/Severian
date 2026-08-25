@@ -8,12 +8,12 @@ provider rather than compiler or backend special cases.
 vector. Executable entry functions remain ordinary `main()` declarations and
 do not acquire a compiler-defined argument signature.
 
-Declarative applications use `cli.parse_process(command)`. Like Clippy-style
-command libraries, `cli` obtains the raw vector explicitly through
-`process.arguments()`, removes the executable name at the application boundary,
-and parses the remaining values against the command declaration. Tests call
-`cli.parse(command, values)` directly, so parsing never depends implicitly on
-ambient process state.
+Declarative applications use `cli.parse_process(command)`. The bootstrap CLI
+library obtains the raw vector explicitly through `process.arguments()`,
+removes the executable name at the application boundary, and exposes the
+remaining positional values. Options, subcommands, generated help, and
+structured parse errors are layered on this boundary once aggregate
+specification lists have a stable runtime representation.
 
 Spawning returns an owned `Child`. Waiting consumes or transitions that handle
 to a completed state; dropping a live child does not silently report success.

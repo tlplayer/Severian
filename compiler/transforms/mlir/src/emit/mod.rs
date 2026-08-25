@@ -127,6 +127,7 @@ pub fn render(module: &Module) -> Result<String, MlirError> {
         ));
     }
     output.push_str("module {\n");
+    output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");
@@ -358,6 +359,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
         ));
     }
     output.push_str("module {\n");
+    output.push_str("  func.func private @__sev_process_set_arguments(i32, !llvm.ptr)\n");
     if uses_task_lock {
         output.push_str("  func.func private @__sev_task_lock()\n");
         output.push_str("  func.func private @__sev_task_unlock()\n");
@@ -433,6 +435,7 @@ fn render_cfg_module(module: &Module) -> Result<String, MlirError> {
     }
     render_cfg_body_function(&mut output, module, "__sev_init", &[], initializer)?;
     output.push_str("  func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {\n");
+    output.push_str("    func.call @__sev_process_set_arguments(%argc, %argv) : (i32, !llvm.ptr) -> ()\n");
     output.push_str("    func.call @__sev_init() : () -> ()\n");
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;

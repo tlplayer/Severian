@@ -7,7 +7,7 @@ def main():
     error_output = io.stderr()
     arguments = process.arguments()
 
-    io.write_all(output, "stdout is an ordinary writer\n".bytes())?
+    io.write_all(output, "stdout is an ordinary writer\n".bytes())
 
     if size(arguments) > 0:
-        io.write_all(error_output, "arguments were supplied\n".bytes())?
+        io.write_all(error_output, "arguments were supplied\n".bytes())

@@ -9,7 +9,7 @@ test with integ "file lock":
 
     lock = file.lock(path)
 
-    assert(lock != None)
+    assert(lock >= 0)
 
     file.unlock(lock)
     os.remove(path)

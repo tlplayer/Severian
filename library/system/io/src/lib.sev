@@ -7,6 +7,22 @@ class IOError: Error
     def IOError(value: string):
         message := value
 
+class StreamError: Error
+    message: string
+
+    def StreamError(value: string):
+        message := value
+
+def stdout() -> int:
+    return 1
+
+def stderr() -> int:
+    return 2
+
+# `list[u8]` remains a source-level value. Semantic lowering passes its native
+# storage to the runtime writer rather than exposing that representation here.
+def write_all(writer: int, data: list[u8]) -> data_size
+
 
 @c(symbol = "__sev_print_string")
 def print(value: string) -> i32
@@ -25,9 +41,6 @@ def print(value: i8) -> i32
 
 @c(symbol = "__sev_print_i16")
 def print(value: i16) -> i32
-
-@c(symbol = "__sev_print_i64")
-def print(value: i64) -> i32
 
 @c(symbol = "__sev_print_i128")
 def print(value: i128) -> i32
@@ -55,9 +68,6 @@ def print(value: usize) -> i32
 
 @c(symbol = "__sev_print_f32")
 def print(value: f32) -> i32
-
-@c(symbol = "__sev_print_f64")
-def print(value: f64) -> i32
 
 @c(symbol = "__sev_print_bool")
 def print(value: bool) -> i32

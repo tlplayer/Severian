@@ -79,7 +79,7 @@ impl std::error::Error for BackendError {}
 
 pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
     let mut output = String::from(
-        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\n",
+        "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n\ntypedef struct { int count; char **values; } sev_args;\n\nvoid __sev_coverage_hit(const char *key);\nvoid __sev_process_set_arguments(int count, char **values);\n",
     );
     let mut runtime_signatures = BTreeMap::new();
     for operation in all_operations(module) {
@@ -201,7 +201,7 @@ pub fn render_c(module: &LoweredModule) -> Result<String, BackendError> {
         output.push_str("}\n\n");
     }
 
-    output.push_str("int main(int argc, char **argv) {\n    (void)argc;\n    (void)argv;\n    if (__sev_init() != 0) return 1;\n");
+    output.push_str("int main(int argc, char **argv) {\n    __sev_process_set_arguments(argc, argv);\n    if (__sev_init() != 0) return 1;\n");
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
         match function.parameters.as_slice() {

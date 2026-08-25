@@ -57,7 +57,7 @@ pub fn analyze_with_context(
     types: &TypeContext,
     context: AnalysisContext<'_>,
 ) -> Result<Program, Diagnostic> {
-    analyze_with_package_functions(ast, types, context, &[], &[], &[], &[], &[], None)
+    analyze_with_package_functions(ast, types, context, &[], &[], &[], &[], &[], &[], None)
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +91,12 @@ pub(crate) struct PackageList {
     pub element: TypeId,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PackageConstant {
+    pub lookup: String,
+    pub value: AstExpression,
+}
+
 pub(crate) fn analyze_with_package_functions(
     ast: &severian_ast::Module,
     types: &TypeContext,
@@ -100,6 +106,7 @@ pub(crate) fn analyze_with_package_functions(
     test_function_ids: &[FunctionId],
     package_classes: &[PackageClass],
     package_lists: &[PackageList],
+    package_constants: &[PackageConstant],
     source_module: Option<severian_modules::ModuleId>,
 ) -> Result<Program, Diagnostic> {
     validate_trait_implementations(ast)?;
@@ -161,6 +168,7 @@ pub(crate) fn analyze_with_package_functions(
         pointer_elements: BTreeMap::new(),
         map_types: BTreeMap::new(),
         map_elements: BTreeMap::new(),
+        platform_layout_types: BTreeMap::new(),
         set_type: None,
         set_element: None,
         channel_types: BTreeMap::new(),
@@ -187,6 +195,12 @@ pub(crate) fn analyze_with_package_functions(
     };
     analyzer.install_package_types(package_classes, package_lists, source_module)?;
     analyzer.install_enums(ast)?;
+    for constant in package_constants {
+        let value = analyzer.expression(&constant.value, None)?;
+        analyzer
+            .value_substitutions
+            .insert(constant.lookup.clone(), value);
+    }
     for function in visible_functions {
         for members in function
             .parameter_unions
@@ -834,6 +848,7 @@ struct Analyzer<'a> {
     pointer_elements: BTreeMap<TypeId, TypeId>,
     map_types: BTreeMap<(TypeId, TypeId), TypeId>,
     map_elements: BTreeMap<TypeId, (TypeId, TypeId)>,
+    platform_layout_types: BTreeMap<TypeId, TypeId>,
     set_type: Option<TypeId>,
     set_element: Option<TypeId>,
     channel_types: BTreeMap<TypeId, TypeId>,
@@ -1247,7 +1262,23 @@ impl Analyzer<'_> {
         // Install every visible class name before resolving fields so package
         // annotations may refer forward and through an imported namespace.
         for package_class in classes {
+            if source_module
+                .is_some_and(|module| !package_class.lookups.contains_key(&module))
+            {
+                continue;
+            }
             if !package_class.declaration.type_parameters.is_empty() {
+                if let Some(source_module) = source_module {
+                    for lookup in package_class
+                        .lookups
+                        .get(&source_module)
+                        .into_iter()
+                        .flatten()
+                    {
+                        self.classes
+                            .insert(lookup.clone(), package_class.declaration.clone());
+                    }
+                }
                 continue;
             }
             let is_error = package_class
@@ -1282,6 +1313,11 @@ impl Analyzer<'_> {
             }
         }
         for package_class in classes {
+            if source_module
+                .is_some_and(|module| !package_class.lookups.contains_key(&module))
+            {
+                continue;
+            }
             if !package_class.declaration.type_parameters.is_empty() {
                 continue;
             }
@@ -1414,6 +1450,7 @@ impl Analyzer<'_> {
             if let Some(list) = self.list_types.get(&element) {
                 return Ok(*list);
             }
+            return Ok(self.instantiate_list_type(element));
         }
         if let Some(("pointer", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
@@ -4795,6 +4832,19 @@ impl Analyzer<'_> {
                     if self.enum_variants.contains_key(&path) {
                         return self.enum_constructor(&path, &[], expected, ast.span);
                     }
+                    if let Some(mut value) = self.value_substitutions.get(&path).cloned() {
+                        if expected
+                            .is_some_and(|expected| !self.types.assignable(value.type_id, expected))
+                        {
+                            return Err(semantic_error(
+                                "package constant does not satisfy the expected type".into(),
+                                ast.span,
+                            ));
+                        }
+                        value.id = self.next_id();
+                        value.span = ast.span;
+                        return Ok(value);
+                    }
                 }
                 let object = self.expression(object, None)?;
                 if let Some(fallible) = self.fallible_types.get(&object.type_id).copied() {
@@ -5237,6 +5287,9 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(call) = self.system_surface_call(callee, arguments, ast.span)? {
+                    return Ok(call);
+                }
                 if let AstExpressionKind::TypeApplication {
                     callee: application,
                     arguments: type_arguments,
@@ -5711,7 +5764,9 @@ impl Analyzer<'_> {
                         name.as_str(),
                         "appendleft" | "extend" | "popleft" | "insert" | "remove"
                             | "heap_push" | "heap_pop"
-                    ) {
+                    ) && !callable_path(callee)
+                        .is_some_and(|path| self.functions.contains_key(&path))
+                    {
                         let list = self.expression(object, None)?;
                         if let Some(element) = self.list_elements.get(&list.type_id).copied() {
                             let suffix = self.list_runtime_suffix(element, ast.span)?;
@@ -7063,6 +7118,24 @@ impl Analyzer<'_> {
                         });
                     }
                 }
+                if *operator == AstBinaryOperator::Remainder {
+                    let left = self.expression(left, None)?;
+                    if self.types.primitive(left.type_id).is_some_and(|primitive| {
+                        primitive.category == severian_universal::PrimitiveCategory::Measured
+                    }) {
+                        let right = self.expression(right, Some(left.type_id))?;
+                        return Ok(Expression {
+                            id: self.next_id(),
+                            type_id: left.type_id,
+                            kind: ExpressionKind::Binary {
+                                operator: BinaryOperator::Remainder,
+                                left: Box::new(left),
+                                right: Box::new(right),
+                            },
+                            span: ast.span,
+                        });
+                    }
+                }
                 let operator = universal_binary(*operator);
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
@@ -7540,7 +7613,7 @@ impl Analyzer<'_> {
         }
         let concrete = arguments
             .iter()
-            .map(|argument| resolve_type_annotation(self.types, argument))
+            .map(|argument| self.resolve_source_type(argument))
             .collect::<Result<Vec<_>, _>>()?;
         self.instantiate_class_types(name, &concrete, span)
     }

@@ -18,9 +18,6 @@ def interface() -> cli.Command:
 
 def main():
     application = interface()
-    match cli.parse_process(application):
-        case matches:
-            for value in cli.values(matches, "values"):
-                print(value)
-        case error:
-            print(cli.render_error(error))
+    matches = cli.parse_process(application)
+    for value in cli.values(matches, "values"):
+        print(value)

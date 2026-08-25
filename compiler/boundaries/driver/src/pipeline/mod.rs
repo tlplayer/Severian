@@ -667,11 +667,13 @@ impl Compiler {
             .nth(3)
             .expect("the driver crate is nested below the repository root");
         let standard = [
+            ("cli", repository.join("library/system/cli")),
             ("environment", repository.join("library/system/environment")),
             ("file", repository.join("library/system/file")),
             ("io", repository.join("library/system/io")),
             ("os", repository.join("library/system/os")),
             ("path", repository.join("library/system/path")),
+            ("platform", repository.join("library/system/platform")),
             ("process", repository.join("library/system/process")),
         ];
         let mut next = packages
@@ -709,7 +711,9 @@ impl Compiler {
         }
         for package in packages.packages.values_mut() {
             for (name, id) in &standard_ids {
-                package.dependencies.entry(name.clone()).or_insert(*id);
+                if package.id != *id {
+                    package.dependencies.entry(name.clone()).or_insert(*id);
+                }
             }
         }
         Ok(packages)
@@ -923,13 +927,16 @@ fn with_core_prelude(
     let mut module = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
     module.items.retain(|item| match item {
         severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
-            function
+            !ast.items.iter().any(|item| {
+                matches!(item, severian_ast::Item::Function(existing)
+                    if existing.name == function.name && !existing.decorators.is_empty())
+            }) && function
                 .parameters
                 .iter()
                 .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
                 && boundary_type_is_available(&function.result, types)
         }
-        _ => true,
+        _ => false,
     });
 
     let size = SourceFile::virtual_source(

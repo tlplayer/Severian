@@ -1,6 +1,6 @@
 use crate::{
-    analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageClass, PackageFunction,
-    PackageList,
+    analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageClass, PackageConstant,
+    PackageFunction, PackageList,
 };
 use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
@@ -186,6 +186,8 @@ pub fn analyze_package_with_context(
             }
         }
         let mut visible = imported_function_bindings(source_module.id, &index, &specializations);
+        let package_constants =
+            imported_constant_bindings(source_module.id, module_graph, &index);
         visible.extend(
             own_instances
                 .iter()
@@ -309,6 +311,7 @@ pub fn analyze_package_with_context(
             &test_function_ids,
             &package_classes,
             &package_lists,
+            &package_constants,
             Some(source_module.id),
         )?
         .modules
@@ -569,6 +572,7 @@ fn resolve_package_type(
         if let Some(list) = lists.iter().find(|list| list.element == element) {
             return Ok(list.ty);
         }
+        return Ok(crate::list_type_id(element));
     }
     if let Some(("map", [key, value])) = annotation.named_parts() {
         let key = resolve_package_type(types, key, module, classes, lists)?;
@@ -795,6 +799,58 @@ fn imported_function_bindings(
         )
     });
     stubs
+}
+
+fn imported_constant_bindings(
+    module: ModuleId,
+    module_graph: &ModuleGraph,
+    index: &ProgramIndex,
+) -> Vec<PackageConstant> {
+    let scope = &index.modules[&module].scope;
+    let mut constants = Vec::new();
+    let mut add = |lookup: String, definition: DefId| {
+        let Some(item) = index.definitions.get(&definition) else {
+            return;
+        };
+        if !matches!(item.kind, DefKind::Constant) || item.module == module {
+            return;
+        }
+        let Some(source) = module_graph.modules.iter().find(|source| source.id == item.module)
+        else {
+            return;
+        };
+        let Some(binding) = source.ast.items.iter().find_map(|candidate| match candidate {
+            Item::Binding(binding) if binding.name == item.name => Some(binding),
+            _ => None,
+        }) else {
+            return;
+        };
+        constants.push(PackageConstant {
+            lookup,
+            value: binding.value.clone(),
+        });
+    };
+    for (name, resolution) in &scope.bindings {
+        match resolution {
+            Resolution::Module(target) => {
+                if let Some(exports) = index.exports.get(target) {
+                    for (export, resolution) in exports {
+                        for definition in resolution_definitions(resolution) {
+                            add(format!("{name}.{export}"), definition);
+                        }
+                    }
+                }
+            }
+            resolution => {
+                for definition in resolution_definitions(resolution) {
+                    add(name.clone(), definition);
+                }
+            }
+        }
+    }
+    constants.sort_by(|left, right| left.lookup.cmp(&right.lookup));
+    constants.dedup_by(|left, right| left.lookup == right.lookup);
+    constants
 }
 
 fn function_instances(

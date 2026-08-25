@@ -1,0 +1,51 @@
+# Stable namespace values. Package semantic analysis carries these immutable
+# literals into qualified references such as `platform.LittleEndian`.
+LittleEndian = "little"
+BigEndian = "big"
+Processes = "processes"
+ProcessPipes = "process-pipes"
+
+class Target:
+    pointer_bits: data_size
+    byte_order: string
+    architecture: string
+    operating_system: string
+    capabilities: list[string]
+
+class FieldLayout:
+    offset: data_size
+    alignment: data_size
+
+class Layout[T]:
+    size: data_size
+    alignment: data_size
+
+    # Compiler-resolved because the queried source type is retained by
+    # `Layout[T]`; this is reflection over target layout, not a runtime lookup.
+    def field(name: string) -> FieldLayout:
+        return FieldLayout(0B, 1B)
+
+@c(symbol = "__sev_platform_pointer_bits")
+def pointer_bits() -> data_size
+
+@c(symbol = "__sev_platform_byte_order")
+def byte_order() -> string
+
+@c(symbol = "__sev_platform_architecture")
+def architecture() -> string
+
+@c(symbol = "__sev_platform_operating_system")
+def operating_system() -> string
+
+def current() -> Target:
+    return Target(
+        pointer_bits(),
+        byte_order(),
+        architecture(),
+        operating_system(),
+        [Processes, ProcessPipes],
+    )
+
+# Lowered by semantic target-layout resolution. The declaration preserves an
+# ordinary package API while keeping type reflection out of the runtime ABI.
+def layout[T](target: Target) -> Layout[T]

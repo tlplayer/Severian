@@ -20,6 +20,24 @@ typedef struct {
 } SevError;
 
 static pthread_mutex_t __sev_task_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int __sev_argument_count = 0;
+static char **__sev_argument_values = NULL;
+
+void *__sev_list_create(void);
+void __sev_list_push_ptr(void *storage, const char *value);
+
+void __sev_process_set_arguments(int count, char **values) {
+    __sev_argument_count = count;
+    __sev_argument_values = values;
+}
+
+void *__sev_process_arguments(void) {
+    void *arguments = __sev_list_create();
+    for (int index = 0; index < __sev_argument_count; ++index) {
+        __sev_list_push_ptr(arguments, __sev_argument_values[index]);
+    }
+    return arguments;
+}
 
 void __sev_task_lock(void) {
     if (pthread_mutex_lock(&__sev_task_mutex) != 0) abort();
@@ -157,6 +175,41 @@ _Bool __sev_environment_set(const char *name, const char *value) {
 
 _Bool __sev_environment_remove(const char *name) {
     return unsetenv(name) == 0;
+}
+
+double __sev_platform_pointer_bits(void) {
+    return (double)sizeof(void *);
+}
+
+const char *__sev_platform_byte_order(void) {
+    const uint16_t value = 1;
+    return *(const uint8_t *)&value == 1 ? "little" : "big";
+}
+
+const char *__sev_platform_architecture(void) {
+#if defined(__x86_64__)
+    return "x86_64";
+#elif defined(__aarch64__)
+    return "aarch64";
+#elif defined(__i386__)
+    return "x86";
+#elif defined(__arm__)
+    return "arm";
+#else
+    return "unknown";
+#endif
+}
+
+const char *__sev_platform_operating_system(void) {
+#if defined(__linux__)
+    return "linux";
+#elif defined(__APPLE__)
+    return "macos";
+#elif defined(_WIN32)
+    return "windows";
+#else
+    return "unknown";
+#endif
 }
 
 const char *__sev_select_string(_Bool condition, const char *then_value, const char *else_value) {

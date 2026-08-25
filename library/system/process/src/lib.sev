@@ -9,3 +9,7 @@ def kill(process: int) -> bool
 
 @c(symbol = "__sev_process_wait")
 def wait(process: int) -> int
+
+# Materialized by the runtime from the process entry boundary. The semantic
+# layer lowers this list-valued native surface without exposing its storage.
+def arguments() -> list[string]

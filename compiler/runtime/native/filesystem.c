@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 enum { SEV_PATH_CAPACITY = 4096 };
 
@@ -73,9 +76,9 @@ _Bool __sev_os_is_file(const char *value) {
     return stat(value, &information) == 0 && S_ISREG(information.st_mode);
 }
 
-int64_t __sev_os_file_size(const char *value) {
+double __sev_os_file_size(const char *value) {
     struct stat information;
-    return stat(value, &information) == 0 ? (int64_t)information.st_size : -1;
+    return stat(value, &information) == 0 ? (double)information.st_size : -1.0;
 }
 
 _Bool __sev_os_make_directories(const char *value) {
@@ -119,5 +122,30 @@ _Bool __sev_os_copy(const char *source, const char *destination) {
         }
     }
     if (ferror(input) || fclose(input) != 0 || fclose(output) != 0) success = 0;
+    return success;
+}
+
+int32_t __sev_os_rename(const char *source, const char *destination) {
+    return rename(source, destination);
+}
+
+int32_t __sev_os_remove(const char *path) {
+    return remove(path);
+}
+
+int64_t __sev_file_lock(const char *path) {
+    int descriptor = open(path, O_RDWR | O_CREAT, 0666);
+    if (descriptor < 0) return -1;
+    if (flock(descriptor, LOCK_EX) != 0) {
+        close(descriptor);
+        return -1;
+    }
+    return descriptor;
+}
+
+_Bool __sev_file_unlock(int64_t descriptor) {
+    if (descriptor < 0) return 0;
+    _Bool success = flock((int)descriptor, LOCK_UN) == 0;
+    if (close((int)descriptor) != 0) success = 0;
     return success;
 }
