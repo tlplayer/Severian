@@ -10,3 +10,23 @@ trait Boolean: Primitive + Logical + Equatable + Bitwise
 # Target lowering is responsible for representing Bool as MLIR `i1`.
 class Bool: Boolean
     name: string = "bool"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    category: PrimitiveCategory = PrimitiveCategory.Boolean
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
+    default_literal: bool = true
+    constructors: set[Constructor] = {
+        Constructor(TypeRef("bool"), ConversionKind.Identity),
+    }
+
+    operator and(right: bool) -> bool:
+        return right if self else false
+
+    operator or(right: bool) -> bool:
+        return true if self else right
+
+    operator not() -> bool:
+        return false if self else true
+
+    operator ==(right: bool) -> bool:
+        return right if self else (false if right else true)

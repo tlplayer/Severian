@@ -5,7 +5,7 @@ enum Size:
     Pointer
     Dynamic
 
-trait Type: Conversion:
+trait Type: Conversion
     property name: string
     property size: Size
     property alignment: Size

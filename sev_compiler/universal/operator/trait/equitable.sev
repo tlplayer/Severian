@@ -1,3 +1,0 @@
-trait Equatable:
-    operator ==(right: Self) -> bool
-    operator !=(right: Self) -> bool
