@@ -3,22 +3,19 @@ import "primitive.sev"
 import "../type/type.sev"
 
 
-trait bool: Primitive:
-    property name: string = "bool"
-    property size: Size = Size.Fixed(1)
-    property alignment: Size = Size.Fixed(1)
+class bool: Primitive
+    name: string = "bool"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
 
-    property category: string = "boolean"
-    property representation: string = "boolean"
+    category: string = "boolean"
+    representation: string = "boolean"
 
     # `bits` is semantic width. Addressable storage is described by `size`.
-    property bits: int = 1
-    property signed: bool = false
-    property default_literal: bool = true
+    bits: int = 1
+    signed: bool = false
+    default_literal: bool = true
 
-    property constructors: set[Constructor] = {
-        Constructor(TypeRef("bool"), ConversionKind.Identity),
-    }
 
     operator and(right: bool) -> bool
     operator or(right: bool) -> bool

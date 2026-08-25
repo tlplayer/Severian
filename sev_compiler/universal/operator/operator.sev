@@ -1,0 +1,94 @@
+import "ids.sev"
+import "literal.sev"
+
+
+enum UnaryOperator:
+    Positive { "+" }
+
+    Negative { "-" }
+
+    Not { "!", "not" }
+
+    BitwiseNot { "~" }
+
+
+enum BinaryOperator:
+    # Arithmetic
+    Add { "+", "+=" }
+
+    Subtract { "-", "-=" }
+
+    Multiply { "*", "*=" }
+
+    Divide { "/", "/=" }
+
+    Remainder { "%", "%=" }
+
+    Power { "**", "**=" }
+
+
+    # Bitwise
+    BitwiseOr { "|", "|=" }
+
+    BitwiseAnd { "&", "&=" }
+
+    BitwiseXor { "^", "^=" }
+
+    ShiftLeft { "<<", "<<=" }
+
+    ShiftRight { ">>", ">>=" }
+
+
+    # Equality
+    Equal { "==" }
+
+    NotEqual { "!=" }
+
+
+    # Ordering
+    Less { "<" }
+
+    LessEqual { "<=" }
+
+    Greater { ">" }
+
+    GreaterEqual { ">=" }
+
+
+    # Membership
+    Contains { "in" }
+
+
+    # Logical
+    And { "and" }
+
+    Or { "or" }
+
+
+enum TypePattern:
+    # Must be this exact type.
+    Exact(type_id: TypeId)
+
+    # Result or operand must match the left operand type.
+    SameAsLeft
+
+    # Result or operand must match the right operand type.
+    SameAsRight
+
+
+enum TypeConstraint:
+    # Operand must already resolve to this type.
+    Known(type_id: TypeId)
+
+    # Operand may begin as an unresolved literal of this kind.
+    Literal(kind: LiteralKind)
+
+
+class OperatorSignature:
+    kind: BinaryOperator
+
+    left: TypePattern
+
+    right: TypePattern
+
+    result: TypePattern
