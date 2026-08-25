@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn a_new_float_family_member_needs_no_semantic_branch() {
-        const F128: &str = "trait f128: Primitive + Floating[f128]:\n    property category: string = \"float\"\n    property representation: string = \"ieee-float\"\n    property bits: int = 128\n";
+        const F128: &str = "trait f128: Primitive + Floating[f128]\n    property category: string = \"float\"\n    property representation: string = \"ieee-float\"\n    property bits: int = 128\n";
         let context = build_from_sources(
             severian_primitives::SOURCES
                 .iter()
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn core_compile_protocol_resolves_to_stable_universal_routes() {
-        const SPECIAL: &str = "trait TestCompiler: Compiler:\n    pass\n\ntrait TestIR[T]: CompileType[TestCompiler]:\n    pass\n";
+        const SPECIAL: &str = "trait TestCompiler: Compiler\n    pass\n\ntrait TestIR[T]: CompileType[TestCompiler]\n    pass\n";
         let context = build_from_packages(
             severian_compile_protocol::SOURCES
                 .iter()

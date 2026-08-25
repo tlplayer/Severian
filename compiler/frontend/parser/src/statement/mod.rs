@@ -1490,9 +1490,11 @@ impl Parser<'_> {
                     break;
                 }
             }
-            self.expect(&TokenKind::Colon, "expected `:` after base traits")?;
         }
-        self.expect(&TokenKind::Newline, "expected a newline after trait header")?;
+        self.expect(
+            &TokenKind::Newline,
+            "expected a newline after trait header; base traits do not take a trailing `:`",
+        )?;
         while self.take(&TokenKind::Newline).is_some() {}
         self.expect(&TokenKind::Indent, "expected an indented trait body")?;
         let mut properties = Vec::new();

@@ -390,7 +390,7 @@ output = f"""module {{
     fn parses_primitive_trait_contract() {
         let source = SourceFile::virtual_source(
             "i32.sev",
-            "trait i32: Primitive + Integer[i32]:\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
+            "trait i32: Primitive + Integer[i32]\n    property category: string = \"integer\"\n    operator +(right: i32) -> i32\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let declaration = module
@@ -485,10 +485,17 @@ output = f"""module {{
     }
 
     #[test]
+    fn composed_trait_header_rejects_a_terminal_colon() {
+        let source = SourceFile::virtual_source("invalid.sev", "trait Child: Parent:\n    pass\n");
+        let error = parse(&scan(&source).unwrap()).unwrap_err();
+        assert!(error.message.contains("do not take a trailing `:`"));
+    }
+
+    #[test]
     fn one_recursive_type_parser_serves_every_annotation_position() {
         let source = SourceFile::virtual_source(
             "types.sev",
-            "trait Example: Base[Tensor[f32]]:\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
+            "trait Example: Base[Tensor[f32]]\n    property value: list[Tensor[f16]]\n    operator +(right: F[int, string]) -> int | None\nx: list[Tensor[f16]] = 1\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         assert!(matches!(module.items[0], severian_ast::Item::Trait(_)));

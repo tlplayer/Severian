@@ -54,7 +54,7 @@ mod tests {
     fn scans_indented_trait_members_and_typed_operators() {
         let source = SourceFile::virtual_source(
             "primitive.sev",
-            "trait i32: Primitive:\n    property bits: int = 32\n    operator +(right: i32) -> i32\n",
+            "trait i32: Primitive\n    property bits: int = 32\n    operator +(right: i32) -> i32\n",
         );
         let tokens = scan(&source).unwrap();
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Indent));
