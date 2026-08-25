@@ -1,4 +1,0 @@
-[validation]
-source = "linked"
-line-coverage = 0
-branch-coverage = 0

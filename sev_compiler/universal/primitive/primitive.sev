@@ -1,9 +1,9 @@
-import "type.sev"
+import "../type/type.sev"
 
 # The compiler discovers primitive declarations by this composed trait. The
 # properties form the bootstrap protocol; they are data, not ordinary runtime
 # fields and are read before user semantic analysis starts.
-trait Primitive: Type:
+trait Primitive: Type
     property category: string
     property representation: string
     property bits: int = 0

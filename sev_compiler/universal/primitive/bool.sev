@@ -1,25 +1,9 @@
-import "../trait/conversion.sev"
 import "primitive.sev"
-import "../type/type.sev"
+import "logical.sev"
+import "equitable.sev"
 
 
-class bool: Primitive
+# The compiler-side model selected when a source value has type `bool`.
+# Target lowering is responsible for representing Bool as MLIR `i1`.
+class Bool: Primitive + Logical + Equatable
     name: string = "bool"
-    size: Size = Size.Fixed(1)
-    alignment: Size = Size.Fixed(1)
-
-    category: string = "boolean"
-    representation: string = "boolean"
-
-    # `bits` is semantic width. Addressable storage is described by `size`.
-    bits: int = 1
-    signed: bool = false
-    default_literal: bool = true
-
-
-    operator and(right: bool) -> bool
-    operator or(right: bool) -> bool
-    operator not() -> bool
-    operator !() -> bool
-    operator ==(right: bool) -> bool
-    operator !=(right: bool) -> bool
