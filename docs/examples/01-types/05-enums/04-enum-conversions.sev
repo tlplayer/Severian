@@ -1,7 +1,7 @@
 enum TypeSymbols:
     Add {"+", "+="}
     Sub {"-", "-"}
-    #Multiple types are allowed but they funnel to one operation
+    #Multiple types are allowed but they funnel to one enum, error if there is a conflict in symbol funneling 
     Mult {"*", "*=",0}
 
 
@@ -12,3 +12,10 @@ test "Conveting symbols to enums":
         TypeSymbol = TypeSymbols(operation)
 
     throws(TypeSymbols("/") -> Error)
+
+test with compiler "Enums cannot share the same symbol":
+    reject:
+        enum Fake:
+            A {"+"}
+            B {"+"}
+
