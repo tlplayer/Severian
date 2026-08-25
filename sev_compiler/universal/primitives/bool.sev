@@ -1,0 +1,28 @@
+import "../trait/conversion.sev"
+import "../trait/primitive.sev"
+import "../trait/type.sev"
+
+
+trait bool: Primitive:
+    property name: string = "bool"
+    property size: Size = Size.Fixed(1)
+    property alignment: Size = Size.Fixed(1)
+
+    property category: string = "boolean"
+    property representation: string = "boolean"
+
+    # `bits` is semantic width. Addressable storage is described by `size`.
+    property bits: int = 1
+    property signed: bool = false
+    property default_literal: bool = true
+
+    property constructors: set[Constructor] = {
+        Constructor(TypeRef("bool"), ConversionKind.Identity),
+    }
+
+    operator and(right: bool) -> bool
+    operator or(right: bool) -> bool
+    operator not() -> bool
+    operator !() -> bool
+    operator ==(right: bool) -> bool
+    operator !=(right: bool) -> bool

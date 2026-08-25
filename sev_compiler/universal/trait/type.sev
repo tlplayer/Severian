@@ -1,11 +1,11 @@
-from "conversion.sev" import 
+import "conversion.sev"
 
 enum Size:
     Fixed(bytes: u64)
     Pointer
     Dynamic
 
-trait Type: Conversion
+trait Type: Conversion:
     property name: string
     property size: Size
     property alignment: Size
