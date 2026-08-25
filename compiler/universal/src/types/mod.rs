@@ -1,6 +1,6 @@
 use crate::{
     BinaryOperator, CompileRoute, CompilerId, DeclarationId, DefId, GenericParamId, LiteralKind,
-    LiteralValue, OperatorSignature, PrimitiveId, Substitution, TyInterner, TyKind, TypeConstraint,
+    LiteralValue, OperatorSignature, PrimitiveId, Substitution, TyInterner, TypeKind, TypeConstraint,
     TypeId, TypePattern, UnaryOperator,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -294,7 +294,7 @@ impl TypeContext {
         if self.by_name.contains_key(&name) {
             return Err(TypeError::DuplicateName(name));
         }
-        let id = self.interner.intern(TyKind::Nominal(
+        let id = self.interner.intern(TypeKind::Nominal(
             DefId {
                 package: 0,
                 module: 0,
@@ -349,7 +349,7 @@ impl TypeContext {
             }
         }
         definition.kind = TypeDefinitionKind::Primitive(primitive);
-        self.interner.replace(type_id, TyKind::Primitive(id));
+        self.interner.replace(type_id, TypeKind::Primitive(id));
         self.by_primitive.insert(id, type_id);
         Ok(id)
     }
@@ -424,11 +424,11 @@ impl TypeContext {
         self.definitions.get(&id)
     }
 
-    pub fn kind(&self, id: TypeId) -> Option<&TyKind> {
+    pub fn kind(&self, id: TypeId) -> Option<&TypeKind> {
         self.interner.kind(id)
     }
 
-    pub fn intern(&mut self, kind: TyKind) -> TypeId {
+    pub fn intern(&mut self, kind: TypeKind) -> TypeId {
         self.interner.intern(kind)
     }
 
@@ -530,7 +530,7 @@ impl TypeContext {
                 .enumerate()
                 .map(|(index, ty)| (GenericParamId(index as u32), ty)),
         );
-        let id = self.interner.intern(TyKind::Nominal(
+        let id = self.interner.intern(TypeKind::Nominal(
             DefId {
                 package: 0,
                 module: 0,
@@ -561,14 +561,14 @@ impl TypeContext {
         let Some(definition) = self.definition(type_id) else {
             return match self.kind(type_id) {
                 Some(
-                    TyKind::Parameter(_)
-                    | TyKind::Infer(_)
-                    | TyKind::Function(_)
-                    | TyKind::Tuple(_)
-                    | TyKind::Union(_)
-                    | TyKind::Reference { .. },
+                    TypeKind::Parameter(_)
+                    | TypeKind::Infer(_)
+                    | TypeKind::Function(_)
+                    | TypeKind::Tuple(_)
+                    | TypeKind::Union(_)
+                    | TypeKind::Reference { .. },
                 ) => Ok(CompileRoute::Standard),
-                Some(TyKind::Primitive(_) | TyKind::Nominal(_, _) | TyKind::Resource(_, _))
+                Some(TypeKind::Primitive(_) | TypeKind::Nominal(_, _) | TypeKind::Resource(_, _))
                 | None => Err(TypeError::UnknownTypeId(type_id)),
             };
         };
@@ -591,12 +591,12 @@ impl TypeContext {
         if actual == expected {
             return true;
         }
-        if let Some(TyKind::Union(members)) = self.kind(expected) {
+        if let Some(TypeKind::Union(members)) = self.kind(expected) {
             return members
                 .iter()
                 .any(|member| self.assignable(actual, *member));
         }
-        if let Some(TyKind::Union(members)) = self.kind(actual) {
+        if let Some(TypeKind::Union(members)) = self.kind(actual) {
             return members
                 .iter()
                 .all(|member| self.assignable(*member, expected));
@@ -1090,6 +1090,6 @@ mod tests {
         assert_ne!(second, union);
         assert_eq!(types.definition(first).unwrap().name, "First");
         assert_eq!(types.definition(second).unwrap().name, "Second");
-        assert!(matches!(types.kind(union), Some(TyKind::Union(_))));
+        assert!(matches!(types.kind(union), Some(TypeKind::Union(_))));
     }
 }

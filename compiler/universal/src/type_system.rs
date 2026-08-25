@@ -31,7 +31,7 @@ pub struct Signature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TyKind {
+pub enum TypeKind {
     Primitive(PrimitiveId),
     Nominal(DefId, Substitution),
     Parameter(GenericParamId),
@@ -49,13 +49,13 @@ pub enum TyKind {
 
 #[derive(Debug, Clone, Default)]
 pub struct TyInterner {
-    kinds: Vec<TyKind>,
-    interned: BTreeMap<TyKind, TyId>,
+    kinds: Vec<TypeKind>,
+    interned: BTreeMap<TypeKind, TyId>,
     next_infer: u32,
 }
 
 impl TyInterner {
-    pub fn intern(&mut self, kind: TyKind) -> TyId {
+    pub fn intern(&mut self, kind: TypeKind) -> TyId {
         if let Some(id) = self.interned.get(&kind) {
             return *id;
         }
@@ -65,7 +65,7 @@ impl TyInterner {
         id
     }
 
-    pub fn kind(&self, id: TyId) -> Option<&TyKind> {
+    pub fn kind(&self, id: TyId) -> Option<&TypeKind> {
         self.kinds.get(id.0 as usize)
     }
 
@@ -80,18 +80,18 @@ impl TyInterner {
     pub fn fresh_infer(&mut self) -> TyId {
         let variable = InferVarId(self.next_infer);
         self.next_infer += 1;
-        self.intern(TyKind::Infer(variable))
+        self.intern(TypeKind::Infer(variable))
     }
 
     pub fn parameter(&mut self, parameter: GenericParamId) -> TyId {
-        self.intern(TyKind::Parameter(parameter))
+        self.intern(TypeKind::Parameter(parameter))
     }
 
     pub fn union(&mut self, members: impl IntoIterator<Item = TyId>) -> TyId {
         let mut canonical = BTreeSet::new();
         for member in members {
             match self.kind(member) {
-                Some(TyKind::Union(nested)) => canonical.extend(nested.iter().copied()),
+                Some(TypeKind::Union(nested)) => canonical.extend(nested.iter().copied()),
                 _ => {
                     canonical.insert(member);
                 }
@@ -100,10 +100,10 @@ impl TyInterner {
         if canonical.len() == 1 {
             return *canonical.first().expect("one canonical union member");
         }
-        self.intern(TyKind::Union(canonical.into_iter().collect()))
+        self.intern(TypeKind::Union(canonical.into_iter().collect()))
     }
 
-    pub(crate) fn replace(&mut self, id: TyId, kind: TyKind) {
+    pub(crate) fn replace(&mut self, id: TyId, kind: TypeKind) {
         let slot = self
             .kinds
             .get_mut(id.0 as usize)
@@ -118,56 +118,56 @@ impl TyInterner {
             return ty;
         };
         match kind {
-            TyKind::Parameter(parameter) => substitution.get(parameter).unwrap_or(ty),
-            TyKind::Primitive(_) | TyKind::Infer(_) => ty,
-            TyKind::Nominal(definition, arguments) => {
+            TypeKind::Parameter(parameter) => substitution.get(parameter).unwrap_or(ty),
+            TypeKind::Primitive(_) | TypeKind::Infer(_) => ty,
+            TypeKind::Nominal(definition, arguments) => {
                 let arguments = Substitution::new(
                     arguments
                         .0
                         .into_iter()
                         .map(|(parameter, ty)| (parameter, self.substitute(ty, substitution))),
                 );
-                self.intern(TyKind::Nominal(definition, arguments))
+                self.intern(TypeKind::Nominal(definition, arguments))
             }
-            TyKind::Resource(definition, arguments) => {
+            TypeKind::Resource(definition, arguments) => {
                 let arguments = Substitution::new(
                     arguments
                         .0
                         .into_iter()
                         .map(|(parameter, ty)| (parameter, self.substitute(ty, substitution))),
                 );
-                self.intern(TyKind::Resource(definition, arguments))
+                self.intern(TypeKind::Resource(definition, arguments))
             }
-            TyKind::Function(signature) => {
+            TypeKind::Function(signature) => {
                 let parameters = signature
                     .parameters
                     .into_iter()
                     .map(|parameter| self.substitute(parameter, substitution))
                     .collect();
                 let result = self.substitute(signature.result, substitution);
-                self.intern(TyKind::Function(Signature { parameters, result }))
+                self.intern(TypeKind::Function(Signature { parameters, result }))
             }
-            TyKind::Tuple(elements) => {
+            TypeKind::Tuple(elements) => {
                 let elements = elements
                     .into_iter()
                     .map(|element| self.substitute(element, substitution))
                     .collect();
-                self.intern(TyKind::Tuple(elements))
+                self.intern(TypeKind::Tuple(elements))
             }
-            TyKind::Union(members) => {
+            TypeKind::Union(members) => {
                 let members = members
                     .into_iter()
                     .map(|member| self.substitute(member, substitution))
                     .collect::<Vec<_>>();
                 self.union(members)
             }
-            TyKind::Reference {
+            TypeKind::Reference {
                 target,
                 mutable,
                 lifetime,
             } => {
                 let target = self.substitute(target, substitution);
-                self.intern(TyKind::Reference {
+                self.intern(TypeKind::Reference {
                     target,
                     mutable,
                     lifetime,
@@ -206,7 +206,7 @@ pub struct InferenceContext {
 impl InferenceContext {
     pub fn resolve(&self, interner: &TyInterner, ty: TyId) -> TyId {
         match interner.kind(ty) {
-            Some(TyKind::Infer(variable)) => self
+            Some(TypeKind::Infer(variable)) => self
                 .bindings
                 .get(variable)
                 .copied()
@@ -237,10 +237,10 @@ impl InferenceContext {
             return Ok(());
         }
         match (interner.kind(left), interner.kind(right)) {
-            (Some(TyKind::Infer(variable)), _) => self.bind(interner, *variable, right),
-            (_, Some(TyKind::Infer(variable))) => self.bind(interner, *variable, left),
-            (Some(TyKind::Tuple(left)), Some(TyKind::Tuple(right)))
-            | (Some(TyKind::Union(left)), Some(TyKind::Union(right)))
+            (Some(TypeKind::Infer(variable)), _) => self.bind(interner, *variable, right),
+            (_, Some(TypeKind::Infer(variable))) => self.bind(interner, *variable, left),
+            (Some(TypeKind::Tuple(left)), Some(TypeKind::Tuple(right)))
+            | (Some(TypeKind::Union(left)), Some(TypeKind::Union(right)))
                 if left.len() == right.len() =>
             {
                 for (left, right) in left.iter().zip(right) {
@@ -248,7 +248,7 @@ impl InferenceContext {
                 }
                 Ok(())
             }
-            (Some(TyKind::Function(left)), Some(TyKind::Function(right)))
+            (Some(TypeKind::Function(left)), Some(TypeKind::Function(right)))
                 if left.parameters.len() == right.parameters.len() =>
             {
                 for (left, right) in left.parameters.iter().zip(&right.parameters) {
@@ -257,12 +257,12 @@ impl InferenceContext {
                 self.unify(interner, left.result, right.result)
             }
             (
-                Some(TyKind::Reference {
+                Some(TypeKind::Reference {
                     target: left,
                     mutable: left_mutable,
                     lifetime: left_lifetime,
                 }),
-                Some(TyKind::Reference {
+                Some(TypeKind::Reference {
                     target: right,
                     mutable: right_mutable,
                     lifetime: right_lifetime,
@@ -270,10 +270,10 @@ impl InferenceContext {
             ) if left_mutable == right_mutable && left_lifetime == right_lifetime => {
                 self.unify(interner, *left, *right)
             }
-            (Some(TyKind::Nominal(left, left_args)), Some(TyKind::Nominal(right, right_args)))
+            (Some(TypeKind::Nominal(left, left_args)), Some(TypeKind::Nominal(right, right_args)))
             | (
-                Some(TyKind::Resource(left, left_args)),
-                Some(TyKind::Resource(right, right_args)),
+                Some(TypeKind::Resource(left, left_args)),
+                Some(TypeKind::Resource(right, right_args)),
             ) if left == right && left_args.0.len() == right_args.0.len() => {
                 for ((_, left), (_, right)) in left_args.0.iter().zip(&right_args.0) {
                     self.unify(interner, *left, *right)?;
@@ -295,7 +295,7 @@ impl InferenceContext {
         variable: InferVarId,
         ty: TyId,
     ) -> Result<(), UnifyError> {
-        if matches!(interner.kind(ty), Some(TyKind::Infer(found)) if *found == variable) {
+        if matches!(interner.kind(ty), Some(TypeKind::Infer(found)) if *found == variable) {
             return Ok(());
         }
         if occurs(interner, &self.bindings, variable, ty) {
@@ -313,28 +313,28 @@ fn occurs(
     ty: TyId,
 ) -> bool {
     match interner.kind(ty) {
-        Some(TyKind::Infer(found)) => {
+        Some(TypeKind::Infer(found)) => {
             *found == variable
                 || bindings
                     .get(found)
                     .is_some_and(|bound| occurs(interner, bindings, variable, *bound))
         }
-        Some(TyKind::Nominal(_, substitution)) | Some(TyKind::Resource(_, substitution)) => {
+        Some(TypeKind::Nominal(_, substitution)) | Some(TypeKind::Resource(_, substitution)) => {
             substitution
                 .values()
                 .any(|ty| occurs(interner, bindings, variable, ty))
         }
-        Some(TyKind::Function(signature)) => signature
+        Some(TypeKind::Function(signature)) => signature
             .parameters
             .iter()
             .copied()
             .chain([signature.result])
             .any(|ty| occurs(interner, bindings, variable, ty)),
-        Some(TyKind::Tuple(types)) | Some(TyKind::Union(types)) => types
+        Some(TypeKind::Tuple(types)) | Some(TypeKind::Union(types)) => types
             .iter()
             .any(|ty| occurs(interner, bindings, variable, *ty)),
-        Some(TyKind::Reference { target, .. }) => occurs(interner, bindings, variable, *target),
-        Some(TyKind::Primitive(_) | TyKind::Parameter(_)) | None => false,
+        Some(TypeKind::Reference { target, .. }) => occurs(interner, bindings, variable, *target),
+        Some(TypeKind::Primitive(_) | TypeKind::Parameter(_)) | None => false,
     }
 }
 
@@ -408,11 +408,11 @@ mod tests {
     #[test]
     fn unions_are_flattened_sorted_and_deduplicated() {
         let mut types = TyInterner::default();
-        let first = types.intern(TyKind::Nominal(
+        let first = types.intern(TypeKind::Nominal(
             definition("First"),
             Substitution::default(),
         ));
-        let second = types.intern(TyKind::Nominal(
+        let second = types.intern(TypeKind::Nominal(
             definition("Second"),
             Substitution::default(),
         ));
@@ -420,14 +420,14 @@ mod tests {
         assert_eq!(nested, types.union([first, nested, second]));
         assert_eq!(
             types.kind(nested),
-            Some(&TyKind::Union(vec![first, second]))
+            Some(&TypeKind::Union(vec![first, second]))
         );
     }
 
     #[test]
     fn inference_variables_unify_structurally() {
         let mut types = TyInterner::default();
-        let concrete = types.intern(TyKind::Nominal(
+        let concrete = types.intern(TypeKind::Nominal(
             definition("Value"),
             Substitution::default(),
         ));
@@ -464,7 +464,7 @@ mod tests {
         assert!(types.is_empty());
         assert_eq!(types.kind(TypeId(99)), None);
 
-        let primitive = types.intern(TyKind::Primitive(PrimitiveId(
+        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(
             DeclarationId::from_path("core.i32"),
         )));
         assert_eq!(types.intern(types.kind(primitive).unwrap().clone()), primitive);
@@ -475,15 +475,15 @@ mod tests {
         let inference = types.fresh_infer();
         let def = definition("Box");
         let arguments = Substitution::new([(GenericParamId(0), parameter)]);
-        let nominal = types.intern(TyKind::Nominal(def, arguments.clone()));
-        let resource = types.intern(TyKind::Resource(def, arguments));
-        let function = types.intern(TyKind::Function(Signature {
+        let nominal = types.intern(TypeKind::Nominal(def, arguments.clone()));
+        let resource = types.intern(TypeKind::Resource(def, arguments));
+        let function = types.intern(TypeKind::Function(Signature {
             parameters: vec![parameter],
             result: parameter,
         }));
-        let tuple = types.intern(TyKind::Tuple(vec![parameter, primitive]));
+        let tuple = types.intern(TypeKind::Tuple(vec![parameter, primitive]));
         let union = types.union([parameter, primitive]);
-        let reference = types.intern(TyKind::Reference {
+        let reference = types.intern(TypeKind::Reference {
             target: parameter,
             mutable: true,
             lifetime: RegionId(3),
@@ -503,19 +503,19 @@ mod tests {
             assert_ne!(substituted, structural);
         }
 
-        let replaceable = types.intern(TyKind::Tuple(vec![]));
-        types.replace(replaceable, TyKind::Union(vec![]));
-        assert_eq!(types.kind(replaceable), Some(&TyKind::Union(vec![])));
-        assert_eq!(types.intern(TyKind::Union(vec![])), replaceable);
+        let replaceable = types.intern(TypeKind::Tuple(vec![]));
+        types.replace(replaceable, TypeKind::Union(vec![]));
+        assert_eq!(types.kind(replaceable), Some(&TypeKind::Union(vec![])));
+        assert_eq!(types.intern(TypeKind::Union(vec![])), replaceable);
     }
 
     #[test]
     fn inference_unifies_all_matching_structures_and_rejects_mismatches() {
         let mut types = TyInterner::default();
-        let first = types.intern(TyKind::Primitive(PrimitiveId(
+        let first = types.intern(TypeKind::Primitive(PrimitiveId(
             DeclarationId::from_path("First"),
         )));
-        let second = types.intern(TyKind::Primitive(PrimitiveId(
+        let second = types.intern(TypeKind::Primitive(PrimitiveId(
             DeclarationId::from_path("Second"),
         )));
         let mut inference = InferenceContext::default();
@@ -526,33 +526,33 @@ mod tests {
         assert_eq!(inference.resolve(&types, right_variable), first);
 
         let tuple_variable = types.fresh_infer();
-        let left_tuple = types.intern(TyKind::Tuple(vec![tuple_variable]));
-        let right_tuple = types.intern(TyKind::Tuple(vec![first]));
+        let left_tuple = types.intern(TypeKind::Tuple(vec![tuple_variable]));
+        let right_tuple = types.intern(TypeKind::Tuple(vec![first]));
         inference.unify(&types, left_tuple, right_tuple).unwrap();
 
         let union_variable = types.fresh_infer();
-        let left_union = types.intern(TyKind::Union(vec![union_variable]));
-        let right_union = types.intern(TyKind::Union(vec![first]));
+        let left_union = types.intern(TypeKind::Union(vec![union_variable]));
+        let right_union = types.intern(TypeKind::Union(vec![first]));
         inference.unify(&types, left_union, right_union).unwrap();
 
         let function_variable = types.fresh_infer();
-        let left_function = types.intern(TyKind::Function(Signature {
+        let left_function = types.intern(TypeKind::Function(Signature {
             parameters: vec![function_variable],
             result: function_variable,
         }));
-        let right_function = types.intern(TyKind::Function(Signature {
+        let right_function = types.intern(TypeKind::Function(Signature {
             parameters: vec![second],
             result: second,
         }));
         inference.unify(&types, left_function, right_function).unwrap();
 
         let reference_variable = types.fresh_infer();
-        let left_reference = types.intern(TyKind::Reference {
+        let left_reference = types.intern(TypeKind::Reference {
             target: reference_variable,
             mutable: true,
             lifetime: RegionId(1),
         });
-        let right_reference = types.intern(TyKind::Reference {
+        let right_reference = types.intern(TypeKind::Reference {
             target: first,
             mutable: true,
             lifetime: RegionId(1),
@@ -565,24 +565,24 @@ mod tests {
             let concrete = Substitution::new([(GenericParamId(0), first)]);
             let (left, right) = if resource {
                 (
-                    types.intern(TyKind::Resource(definition("Container"), arguments)),
-                    types.intern(TyKind::Resource(definition("Container"), concrete)),
+                    types.intern(TypeKind::Resource(definition("Container"), arguments)),
+                    types.intern(TypeKind::Resource(definition("Container"), concrete)),
                 )
             } else {
                 (
-                    types.intern(TyKind::Nominal(definition("Container"), arguments)),
-                    types.intern(TyKind::Nominal(definition("Container"), concrete)),
+                    types.intern(TypeKind::Nominal(definition("Container"), arguments)),
+                    types.intern(TypeKind::Nominal(definition("Container"), concrete)),
                 )
             };
             inference.unify(&types, left, right).unwrap();
         }
 
-        let short_tuple = types.intern(TyKind::Tuple(vec![]));
+        let short_tuple = types.intern(TypeKind::Tuple(vec![]));
         assert!(matches!(
             inference.unify(&types, short_tuple, right_tuple),
             Err(UnifyError::Mismatch(_, _))
         ));
-        let short_function = types.intern(TyKind::Function(Signature {
+        let short_function = types.intern(TypeKind::Function(Signature {
             parameters: vec![],
             result: first,
         }));
@@ -590,7 +590,7 @@ mod tests {
             inference.unify(&types, short_function, right_function),
             Err(UnifyError::Mismatch(_, _))
         ));
-        let immutable_reference = types.intern(TyKind::Reference {
+        let immutable_reference = types.intern(TypeKind::Reference {
             target: first,
             mutable: false,
             lifetime: RegionId(1),
@@ -613,25 +613,25 @@ mod tests {
     fn occurs_check_walks_every_recursive_shape_and_bound_variable() {
         let mut types = TyInterner::default();
         let variable = types.fresh_infer();
-        let TyKind::Infer(variable_id) = *types.kind(variable).unwrap() else {
+        let TypeKind::Infer(variable_id) = *types.kind(variable).unwrap() else {
             panic!("fresh inference type");
         };
         let other = types.fresh_infer();
-        let primitive = types.intern(TyKind::Primitive(PrimitiveId(
+        let primitive = types.intern(TypeKind::Primitive(PrimitiveId(
             DeclarationId::from_path("Value"),
         )));
         let def = definition("Recursive");
         let substitution = Substitution::new([(GenericParamId(0), variable)]);
         let structures = [
-            types.intern(TyKind::Nominal(def, substitution.clone())),
-            types.intern(TyKind::Resource(def, substitution)),
-            types.intern(TyKind::Function(Signature {
+            types.intern(TypeKind::Nominal(def, substitution.clone())),
+            types.intern(TypeKind::Resource(def, substitution)),
+            types.intern(TypeKind::Function(Signature {
                 parameters: vec![primitive],
                 result: variable,
             })),
-            types.intern(TyKind::Tuple(vec![variable])),
-            types.intern(TyKind::Union(vec![variable])),
-            types.intern(TyKind::Reference {
+            types.intern(TypeKind::Tuple(vec![variable])),
+            types.intern(TypeKind::Union(vec![variable])),
+            types.intern(TypeKind::Reference {
                 target: variable,
                 mutable: false,
                 lifetime: RegionId(0),
@@ -644,13 +644,13 @@ mod tests {
         assert!(!occurs(&types, &bindings, variable_id, primitive));
         assert!(!occurs(&types, &bindings, variable_id, TypeId(999)));
 
-        let TyKind::Infer(other_id) = *types.kind(other).unwrap() else {
+        let TypeKind::Infer(other_id) = *types.kind(other).unwrap() else {
             panic!("fresh inference type");
         };
         let bindings = BTreeMap::from([(other_id, variable)]);
         assert!(occurs(&types, &bindings, variable_id, other));
 
-        let tuple = types.intern(TyKind::Tuple(vec![variable]));
+        let tuple = types.intern(TypeKind::Tuple(vec![variable]));
         let mut inference = InferenceContext::default();
         assert_eq!(
             inference.unify(&types, variable, tuple),

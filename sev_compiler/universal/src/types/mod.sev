@@ -227,13 +227,13 @@ class TypeContext:
             return None
         return definitions[id.index]
 
-    def kind(id: TypeId) -> TyKind | None:
+    def kind(id: TypeId) -> TypeKind | None:
         return interner.kind(id)
 
     def fresh_infer() -> TypeId:
         return interner.fresh_infer()
 
-    def intern_type(kind: TyKind) -> TypeId:
+    def intern_type(kind: TypeKind) -> TypeId:
         return interner.intern(kind)
 
     def parameter(id: GenericParamId) -> TypeId:

@@ -22,7 +22,7 @@ pub use operation_registry::{
 pub use operator::{BinaryOperator, OperatorSignature, TypeConstraint, TypePattern, UnaryOperator};
 pub use type_system::{
     Constraint, ImplDefinition, ImplId, ImplSelection, ImplTable, InferenceContext, Signature,
-    Substitution, TraitRef, TyInterner, TyKind, UnifyError,
+    Substitution, TraitRef, TyInterner, TypeKind, UnifyError,
 };
 pub use types::{
     FloatFormat, IntegerWidth, PrimitiveCategory, PrimitiveDefinition, PrimitiveRepresentation,

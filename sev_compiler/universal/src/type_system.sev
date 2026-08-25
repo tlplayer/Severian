@@ -20,7 +20,7 @@ class Signature:
     result: TypeId
 
 
-enum TyKind:
+enum TypeKind:
     Primitive(id: PrimitiveId)
     Nominal(definition: DefId, substitution: Substitution)
     Parameter(parameter: GenericParamId)
@@ -32,7 +32,7 @@ enum TyKind:
     Resource(definition: DefId, substitution: Substitution)
 
 
-def intern_ty_kind(kinds: borrow mut list[TyKind], kind: move TyKind) -> TypeId:
+def intern_ty_kind(kinds: borrow mut list[TypeKind], kind: move TypeKind) -> TypeId:
     index := u32(0)
     for known in kinds:
         if known == kind:
@@ -43,17 +43,17 @@ def intern_ty_kind(kinds: borrow mut list[TyKind], kind: move TyKind) -> TypeId:
 
 
 class TyInterner:
-    kinds: list[TyKind]
+    kinds: list[TypeKind]
     next_infer: u32
 
     def TyInterner():
         kinds = []
         next_infer = 0
 
-    def intern(kind: TyKind) -> TypeId:
+    def intern(kind: TypeKind) -> TypeId:
         return intern_ty_kind(borrow mut kinds, move kind)
 
-    def kind(id: TypeId) -> TyKind | None:
+    def kind(id: TypeId) -> TypeKind | None:
         if id.index >= len(kinds):
             return None
         return kinds[id.index]
@@ -61,7 +61,7 @@ class TyInterner:
     def fresh_infer() -> TypeId:
         variable = InferVarId(next_infer)
         next_infer += 1
-        candidate: TyKind = Infer(variable)
+        candidate: TypeKind = Infer(variable)
         index := u32(0)
         for known in kinds:
             if known == candidate:
@@ -71,7 +71,7 @@ class TyInterner:
         return TypeId(u32(len(kinds) - 1))
 
     def parameter(parameter: GenericParamId) -> TypeId:
-        candidate: TyKind = Parameter(parameter)
+        candidate: TypeKind = Parameter(parameter)
         index := u32(0)
         for known in kinds:
             if known == candidate:
@@ -91,7 +91,7 @@ class TyInterner:
                 arguments: map[int, int] = {}
                 for parameter, argument in known_arguments.arguments:
                     arguments[parameter] = int(substitute(TypeId(u32(argument)), replacements).index)
-                candidate: TyKind = Nominal(definition, Substitution(arguments))
+                candidate: TypeKind = Nominal(definition, Substitution(arguments))
                 index := u32(0)
                 for existing in kinds:
                     if existing == candidate:
@@ -104,7 +104,7 @@ class TyInterner:
                 arguments: map[int, int] = {}
                 for parameter, argument in known_arguments.arguments:
                     arguments[parameter] = int(substitute(TypeId(u32(argument)), replacements).index)
-                candidate: TyKind = Resource(definition, Substitution(arguments))
+                candidate: TypeKind = Resource(definition, Substitution(arguments))
                 index := u32(0)
                 for existing in kinds:
                     if existing == candidate:
@@ -116,7 +116,7 @@ class TyInterner:
                 replaced_parameters: list[TypeId] = []
                 for parameter in signature.parameters:
                     replaced_parameters.append(substitute(parameter, replacements))
-                candidate: TyKind = Function(Signature(replaced_parameters, substitute(signature.result, replacements)))
+                candidate: TypeKind = Function(Signature(replaced_parameters, substitute(signature.result, replacements)))
                 index := u32(0)
                 for existing in kinds:
                     if existing == candidate:
@@ -129,7 +129,7 @@ class TyInterner:
                 replaced_elements: list[TypeId] = []
                 for element in known_elements:
                     replaced_elements.append(substitute(element, replacements))
-                candidate: TyKind = Tuple(replaced_elements)
+                candidate: TypeKind = Tuple(replaced_elements)
                 index := u32(0)
                 for existing in kinds:
                     if existing == candidate:
@@ -144,7 +144,7 @@ class TyInterner:
                     replaced_members.append(substitute(member, replacements))
                 return union(replaced_members)
             case Reference:
-                candidate: TyKind = Reference(substitute(target, replacements), mutable, lifetime)
+                candidate: TypeKind = Reference(substitute(target, replacements), mutable, lifetime)
                 index := u32(0)
                 for existing in kinds:
                     if existing == candidate:
@@ -171,7 +171,7 @@ class TyInterner:
         canonical = canonical.sorted(|type_id| type_id.index)
         if len(canonical) == 1:
             return canonical[0]
-        union_kind: TyKind = TyKind.Union(canonical)
+        union_kind: TypeKind = TypeKind.Union(canonical)
         index := u32(0)
         for existing in kinds:
             if existing == union_kind:

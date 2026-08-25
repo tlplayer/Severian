@@ -1,5 +1,5 @@
 use crate::{BlockId, CfgBody, CfgStatement, LocalId, Operand, Place, Rvalue, Terminator};
-use severian_universal::{EffectSet, TyKind, TypeContext};
+use severian_universal::{EffectSet, TypeKind, TypeContext};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
@@ -551,7 +551,7 @@ fn inspect_operand(
 fn resource_locals(body: &CfgBody, types: &TypeContext) -> Vec<LocalId> {
     body.locals
         .iter()
-        .filter(|local| matches!(types.kind(local.ty), Some(TyKind::Resource(_, _))))
+        .filter(|local| matches!(types.kind(local.ty), Some(TypeKind::Resource(_, _))))
         .map(|local| local.id)
         .collect()
 }
