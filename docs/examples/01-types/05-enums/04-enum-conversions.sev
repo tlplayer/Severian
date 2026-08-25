@@ -3,6 +3,7 @@ enum TypeSymbols:
     Sub {"-", "-="}
     # Multiple types can funnel to one canonical enum variant.
     Mult {"*", "*=", 0}
+    Exponent {"**"}
 
 
 test "Converting symbols to enums":
@@ -16,6 +17,9 @@ test "Converting symbols to enums":
     assert(TypeSymbols("-=") == TypeSymbols.Sub)
     assert(TypeSymbols("*=") == TypeSymbols.Mult)
     assert(TypeSymbols(0) == TypeSymbols.Mult)
+    #string on an enum with multiple enums either throws an error if no string def or returns a list of 
+    #compatible symbols so TypeSymbols("*") returns ["*","*="] if int(TypeSymbols("*")) -> 0
+    assert(["*","*="] == string(TypeSymbols("*")))
 
     throws(TypeSymbols("/") -> Error)
 
