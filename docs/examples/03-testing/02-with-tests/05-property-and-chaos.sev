@@ -10,9 +10,8 @@ test with property and chaos "first is safe for generated lists":
     values = [10, 20, 30]
     result ?= first(values)
 
-    match result:
-        case value:
-            assert(value == values[0])
+    when result is int:
+        assert(result == values[0])
 
-        case error:
-            assert(size(values) == 0)
+    when result is Error:
+        assert(size(values) == 0)

@@ -1,4 +1,4 @@
-import tenso
+import tensor
 
 
 test "tensor slice":
